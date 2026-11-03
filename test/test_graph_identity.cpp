@@ -52,12 +52,25 @@ TEST_CASE("G3 planted negative identity controls fail closed") {
         validate_port_identities(
             std::array{PortHandle{1, 0, false, std::string("bad\0name", 8), PortKind::Audio}})
             .valid);
+    CHECK_FALSE(
+        validate_port_identities(
+            std::array{PortHandle{1, 0, false, std::string("\xC2\x85", 2), PortKind::Audio}})
+            .valid);
+    CHECK_FALSE(
+        validate_port_identities(
+            std::array{PortHandle{1, 0, false, std::string("\xE2\x80\x83", 3), PortKind::Audio}})
+            .valid);
     CHECK_FALSE(validate_port_identities(
                     std::array{PortHandle{1, 0, false, std::string("\xff", 1), PortKind::Audio}})
                     .valid);
     const auto decomposed = std::array{PortHandle{1, 0, false, "e\xCC\x81", PortKind::Audio}};
     const auto composed = std::array{PortHandle{1, 0, false, "\xC3\xA9", PortKind::Audio}};
     CHECK(port_identity_fingerprint(decomposed) == port_identity_fingerprint(composed));
+    const auto decomposed_macron =
+        std::array{PortHandle{1, 0, false, "a\xCC\x84", PortKind::Audio}};
+    const auto composed_macron = std::array{PortHandle{1, 0, false, "\xC4\x81", PortKind::Audio}};
+    CHECK(port_identity_fingerprint(decomposed_macron) ==
+          port_identity_fingerprint(composed_macron));
     const auto rename = diff_port_identities(original, renamed);
     REQUIRE(rename.valid);
     REQUIRE(rename.renamed.size() == 1);

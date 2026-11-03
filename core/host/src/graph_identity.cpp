@@ -1,10 +1,13 @@
 #include <pulp/host/graph_identity.hpp>
 
+#include "unicode_nfc_data.hpp"
+
 #include <algorithm>
-#include <array>
-#include <cctype>
+#include <cstddef>
+#include <iterator>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 namespace pulp::host {
 namespace {
@@ -73,29 +76,85 @@ void encode(std::uint32_t cp, std::string& out) {
     }
 }
 
-// Small, deterministic NFC composition table for the combining marks that
-// commonly occur in authored labels.  Unknown compositions remain valid UTF-8
-// and are compared byte-for-byte; they are never replaced lossy.
-std::uint32_t compose(std::uint32_t base, std::uint32_t mark) {
-    constexpr std::array<std::pair<std::uint32_t, std::uint32_t>, 21> table{{
-        {0x0061, 0x0301}, {0x0065, 0x0301}, {0x0069, 0x0301}, {0x006f, 0x0301}, {0x0075, 0x0301},
-        {0x0041, 0x0301}, {0x0045, 0x0301}, {0x0049, 0x0301}, {0x004f, 0x0301}, {0x0055, 0x0301},
-        {0x0061, 0x0308}, {0x0065, 0x0308}, {0x006f, 0x0308}, {0x0075, 0x0308}, {0x0041, 0x0308},
-        {0x0045, 0x0308}, {0x004f, 0x0308}, {0x0055, 0x0308}, {0x006e, 0x0303}, {0x0063, 0x0327},
-        {0x0061, 0x0300},
-    }};
-    constexpr std::array<std::uint32_t, 21> values{
-        {0x00e1, 0x00e9, 0x00ed, 0x00f3, 0x00fa, 0x00c1, 0x00c9, 0x00cd, 0x00d3, 0x00da, 0x00e4,
-         0x00eb, 0x00f6, 0x00fc, 0x00c4, 0x00cb, 0x00d6, 0x00dc, 0x00f1, 0x00e7, 0x00e0}};
-    for (std::size_t i = 0; i < table.size(); ++i)
-        if (table[i].first == base && table[i].second == mark)
-            return values[i];
-    return 0;
+std::uint8_t combining_class(std::uint32_t code_point) {
+    const auto* first = std::begin(unicode_nfc::kCombiningClasses);
+    const auto* last = std::end(unicode_nfc::kCombiningClasses);
+    const auto it = std::lower_bound(first, last, code_point,
+                                     [](const unicode_nfc::CombiningClass& entry,
+                                        std::uint32_t value) { return entry.code_point < value; });
+    return it != last && it->code_point == code_point ? it->value : 0;
+}
+
+bool control_character(std::uint32_t code_point) {
+    return code_point <= 0x001fu || (code_point >= 0x007fu && code_point <= 0x009fu);
+}
+
+bool whitespace_character(std::uint32_t code_point) {
+    return (code_point >= 0x0009u && code_point <= 0x000du) || code_point == 0x0020u ||
+           code_point == 0x0085u || code_point == 0x00a0u || code_point == 0x1680u ||
+           (code_point >= 0x2000u && code_point <= 0x200au) || code_point == 0x2028u ||
+           code_point == 0x2029u || code_point == 0x202fu || code_point == 0x205fu ||
+           code_point == 0x3000u;
+}
+
+constexpr std::uint32_t kHangulSBase = 0xac00u;
+constexpr std::uint32_t kHangulLBase = 0x1100u;
+constexpr std::uint32_t kHangulVBase = 0x1161u;
+constexpr std::uint32_t kHangulTBase = 0x11a7u;
+constexpr std::uint32_t kHangulLCount = 19u;
+constexpr std::uint32_t kHangulVCount = 21u;
+constexpr std::uint32_t kHangulTCount = 28u;
+constexpr std::uint32_t kHangulNCount = kHangulVCount * kHangulTCount;
+constexpr std::uint32_t kHangulSCount = kHangulLCount * kHangulNCount;
+
+void decompose(std::uint32_t code_point, std::vector<std::uint32_t>& output) {
+    if (code_point >= kHangulSBase && code_point < kHangulSBase + kHangulSCount) {
+        const auto index = code_point - kHangulSBase;
+        output.push_back(kHangulLBase + index / kHangulNCount);
+        output.push_back(kHangulVBase + (index % kHangulNCount) / kHangulTCount);
+        if (index % kHangulTCount != 0)
+            output.push_back(kHangulTBase + index % kHangulTCount);
+        return;
+    }
+
+    const auto* first = std::begin(unicode_nfc::kDecompositions);
+    const auto* last = std::end(unicode_nfc::kDecompositions);
+    const auto it = std::lower_bound(first, last, code_point,
+                                     [](const unicode_nfc::Decomposition& entry,
+                                        std::uint32_t value) { return entry.code_point < value; });
+    if (it == last || it->code_point != code_point) {
+        output.push_back(code_point);
+        return;
+    }
+    decompose(it->first, output);
+    if (it->has_second)
+        decompose(it->second, output);
+}
+
+std::uint32_t compose(std::uint32_t first, std::uint32_t second) {
+    if (first >= kHangulLBase && first < kHangulLBase + kHangulLCount && second >= kHangulVBase &&
+        second < kHangulVBase + kHangulVCount) {
+        return kHangulSBase + (first - kHangulLBase) * kHangulNCount +
+               (second - kHangulVBase) * kHangulTCount;
+    }
+    if (first >= kHangulSBase && first < kHangulSBase + kHangulSCount &&
+        (first - kHangulSBase) % kHangulTCount == 0 && second > kHangulTBase &&
+        second <= kHangulTBase + kHangulTCount - 1) {
+        return first + second - kHangulTBase;
+    }
+
+    const auto* first_entry = std::begin(unicode_nfc::kCompositions);
+    const auto* last_entry = std::end(unicode_nfc::kCompositions);
+    const auto it = std::lower_bound(first_entry, last_entry, std::pair{first, second},
+                                     [](const unicode_nfc::Composition& entry,
+                                        const std::pair<std::uint32_t, std::uint32_t>& value) {
+                                         return std::pair{entry.first, entry.second} < value;
+                                     });
+    return it != last_entry && it->first == first && it->second == second ? it->composite : 0;
 }
 
 bool normalize(std::string_view input, std::string& output, std::string& error) {
-    output.clear();
-    std::vector<std::uint32_t> cps;
+    std::vector<std::uint32_t> input_code_points;
     for (std::size_t i = 0; i < input.size();) {
         Scalar scalar;
         if (!decode(input, i, scalar)) {
@@ -106,24 +165,69 @@ bool normalize(std::string_view input, std::string& output, std::string& error) 
             error = "embedded NUL";
             return false;
         }
-        if (scalar.value < 0x20 || scalar.value == 0x7f) {
+        if (control_character(scalar.value)) {
             error = "control character";
             return false;
         }
-        cps.push_back(scalar.value);
+        input_code_points.push_back(scalar.value);
         i += scalar.bytes;
     }
-    for (std::size_t i = 0; i < cps.size(); ++i) {
-        if (i + 1 < cps.size()) {
-            if (const auto c = compose(cps[i], cps[i + 1]); c != 0) {
-                encode(c, output);
-                ++i;
+
+    std::vector<std::uint32_t> decomposed;
+    for (const auto code_point : input_code_points)
+        decompose(code_point, decomposed);
+
+    for (std::size_t segment = 0; segment < decomposed.size();) {
+        std::size_t end = segment + 1;
+        while (end < decomposed.size() && combining_class(decomposed[end]) != 0)
+            ++end;
+        std::stable_sort(decomposed.begin() + static_cast<std::ptrdiff_t>(segment),
+                         decomposed.begin() + static_cast<std::ptrdiff_t>(end),
+                         [](std::uint32_t lhs, std::uint32_t rhs) {
+                             return combining_class(lhs) < combining_class(rhs);
+                         });
+        segment = end;
+    }
+
+    std::vector<std::uint32_t> composed;
+    std::size_t starter = static_cast<std::size_t>(-1);
+    std::uint8_t last_class = 0;
+    for (const auto code_point : decomposed) {
+        const auto code_point_class = combining_class(code_point);
+        if (code_point_class == 0) {
+            starter = composed.size();
+            last_class = 0;
+            composed.push_back(code_point);
+            continue;
+        }
+        if (starter != static_cast<std::size_t>(-1) && last_class < code_point_class) {
+            if (const auto replacement = compose(composed[starter], code_point); replacement != 0) {
+                composed[starter] = replacement;
                 continue;
             }
         }
-        encode(cps[i], output);
+        composed.push_back(code_point);
+        last_class = code_point_class;
     }
+
+    output.clear();
+    for (const auto code_point : composed)
+        encode(code_point, output);
     return true;
+}
+
+bool whitespace_only(std::string_view input) {
+    bool saw_code_point = false;
+    for (std::size_t i = 0; i < input.size();) {
+        Scalar scalar;
+        if (!decode(input, i, scalar))
+            return false;
+        saw_code_point = true;
+        if (!whitespace_character(scalar.value))
+            return false;
+        i += scalar.bytes;
+    }
+    return saw_code_point;
 }
 
 struct CanonicalSet {
@@ -146,8 +250,7 @@ CanonicalSet canonical(std::span<const PortHandle> ports,
                  port.name, error});
             continue;
         }
-        if (name.empty() || std::all_of(name.begin(), name.end(),
-                                        [](unsigned char c) { return std::isspace(c) != 0; })) {
+        if (name.empty() || whitespace_only(name)) {
             result.report.issues.push_back({PortIdentityIssue::Code::EmptyName, name,
                                             "empty or whitespace-only authored name"});
             continue;
