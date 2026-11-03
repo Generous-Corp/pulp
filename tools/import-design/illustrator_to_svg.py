@@ -74,11 +74,31 @@ def _writable_destination(path: Path, label: str) -> Path:
     return path.resolve()
 
 
-def _private_temporary(directory: Path, stem: str, suffix: str) -> Path:
-    """Create a fresh file in ``directory`` that no other path can alias."""
-    fd, name = tempfile.mkstemp(prefix=f".{stem}.", suffix=suffix, dir=str(directory))
-    os.close(fd)
-    return Path(name)
+def _same_file(a: Path, b: Path) -> bool:
+    """Whether two paths name one file, including on a case-insensitive volume.
+
+    Resolved strings are not enough: macOS ``resolve()`` keeps the caller's
+    case, so ``ART.PDF`` and ``art.pdf`` differ as strings while naming one
+    file. Existing files are compared by identity. A destination that does not
+    exist yet is treated as the same file when its name matches
+    case-insensitively in the same directory, which is conservative on a
+    case-sensitive volume.
+    """
+    if a == b:
+        return True
+    try:
+        if os.path.samefile(a, b):
+            return True
+    except OSError:
+        pass
+    if a.name.casefold() != b.name.casefold():
+        return False
+    if a.parent == b.parent:
+        return True
+    try:
+        return os.path.samefile(a.parent, b.parent)
+    except OSError:
+        return False
 
 
 def _remove_if_present(path: Path) -> None:
@@ -174,7 +194,8 @@ def convert(
         source.with_suffix(".svg") if output is None else Path(output).expanduser(),
         "output",
     )
-    if output == source:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if _same_file(output, source):
         raise ConversionError(f"output must not overwrite the source: {output}")
     provenance = _writable_destination(
         Path(str(output) + ".provenance.json")
@@ -182,17 +203,19 @@ def convert(
         else Path(provenance).expanduser(),
         "provenance",
     )
-    if provenance in (source, output):
+    provenance.parent.mkdir(parents=True, exist_ok=True)
+    if _same_file(provenance, source) or _same_file(provenance, output):
         raise ConversionError(
             f"provenance must not overwrite the source or output: {provenance}")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    provenance.parent.mkdir(parents=True, exist_ok=True)
 
     tool = _converter()
     version = _version(tool)
     source_hash = sha256(source)
 
-    temporary = _private_temporary(output.parent, output.stem, ".svg")
+    # The converter writes into a fresh 0700 directory, so no other process can
+    # plant or swap the file it writes before it is moved into place.
+    workdir = Path(tempfile.mkdtemp(prefix=f".{output.stem}.", dir=str(output.parent)))
+    temporary = workdir / "converted.svg"
     try:
         # Restrict conversion to one artboard/page.  ``pdftocairo`` writes an
         # exact output path for SVG when one page is selected; ``-singlefile``
@@ -227,7 +250,7 @@ def convert(
             raise ConversionError("pdftocairo output is not a valid-looking SVG")
         os.replace(temporary, output)
     finally:
-        _remove_if_present(temporary)
+        shutil.rmtree(workdir, ignore_errors=True)
 
     receipt = {
         "schema": SCHEMA,
@@ -252,10 +275,14 @@ def convert(
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
     }
     # A fixed temporary name could be pre-planted as a symlink; mkstemp cannot.
-    temporary_receipt = _private_temporary(provenance.parent, provenance.name, ".tmp")
+    # Write through the descriptor mkstemp returns, so the bytes land in the file it
+    # created and not in whatever a path lookup finds later.
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{provenance.name}.", suffix=".tmp", dir=str(provenance.parent))
+    temporary_receipt = Path(temporary_name)
     try:
-        temporary_receipt.write_text(
-            json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
         os.replace(temporary_receipt, provenance)
     finally:
         _remove_if_present(temporary_receipt)
