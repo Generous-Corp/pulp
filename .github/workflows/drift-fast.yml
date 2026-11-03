@@ -47,7 +47,9 @@ jobs:
     # also list this workflow in its runner group's selected workflows
     # (tools/ci/verify_linux_runner_group.py), or the job is never assigned.
     runs-on: ${{ fromJSON(vars.PULP_DRIFT_FAST_RUNS_ON_JSON || '"ubuntu-latest"') }}
-    timeout-minutes: 20
+    # The job budget must exceed the cold bootstrap (up to 20 min), configure and
+    # the checks; GitHub reports a job-timeout kill as "cancelled".
+    timeout-minutes: 40
     env:
       PULP_BUILD_DIR: build-linux
     steps:
