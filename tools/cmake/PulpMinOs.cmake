@@ -169,14 +169,20 @@ function(_pulp_min_os_pin_windows)
   # Respect a _WIN32_WINNT the developer (or a toolchain file) already set, and
   # stay idempotent on a warm reconfigure — both show up as an existing match in
   # the flags. -D is accepted by MSVC (cl), clang-cl, and MinGW alike.
-  if(CMAKE_CXX_FLAGS MATCHES "_WIN32_WINNT")
-    return()
-  endif()
-
   set(_defs "-D_WIN32_WINNT=${_winnt} -DWINVER=${_winnt}")
-  set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS} ${_defs}"   CACHE STRING "Pulp min-OS: Windows API floor" FORCE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_defs}" CACHE STRING "Pulp min-OS: Windows API floor" FORCE)
-  message(STATUS "Pulp min-OS: Windows _WIN32_WINNT/WINVER pinned to ${_winnt} (min_os.json windows-x64 floor)")
+  foreach(_lang C CXX)
+    # A CXX-only consumer must not pre-seed C's flags either: it may enable C
+    # later. Pin each language only after its own compiler initialization.
+    if(NOT CMAKE_${_lang}_COMPILER_LOADED AND NOT CMAKE_SCRIPT_MODE_FILE)
+      continue()
+    endif()
+    if(CMAKE_${_lang}_FLAGS MATCHES "_WIN32_WINNT")
+      continue()
+    endif()
+    set(CMAKE_${_lang}_FLAGS "${CMAKE_${_lang}_FLAGS} ${_defs}"
+        CACHE STRING "Pulp min-OS: Windows API floor" FORCE)
+    message(STATUS "Pulp min-OS: Windows ${_lang} _WIN32_WINNT/WINVER pinned to ${_winnt} (min_os.json windows-x64 floor)")
+  endforeach()
 endfunction()
 
 function(_pulp_min_os_note_linux)
