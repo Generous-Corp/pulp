@@ -892,6 +892,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFindPluginval.cmake"
 
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUiAssets.cmake"
+    # Included by PulpUtils.cmake: pulp_add_plugin(... UI <package>).
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpEditorPackage.cmake"
     # Included by PulpUtils.cmake: pulp_add_js_bytecode().
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpJsBytecode.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstall.cmake"

@@ -5,22 +5,23 @@
 // not compile the `wasm/` directory. A WASM DSP module is headless: there is no
 // Pulp view layer (core/view -> canvas) and no ARA SDK.
 //
-// A plugin that does not override Processor::create_view() or
-// create_ara_document_controller() still carries those slots in its vtable, so
-// the base definitions must be linked. The real definitions live in format.cpp
-// and ara.cpp (the latter pulls the optional ARA SDK), neither of which belongs
-// in a headless DSP module. Both are compiled into pulp-format-core, which the
-// WASM lane does not link: PulpWclap.cmake and PulpWam.cmake compile the format
-// sources they need directly.
+// A plugin that does not override Processor::create_view(),
+// editor_factory(), or create_ara_document_controller() still carries those
+// slots in its vtable, so the base definitions must be linked. The native
+// definitions live in format.cpp and ara.cpp (the latter pulls the optional ARA
+// SDK), neither of which belongs in a headless DSP module. Both are compiled
+// into pulp-format-core, which the WASM lane does not link: PulpWclap.cmake and
+// PulpWam.cmake compile the format sources they need directly. The image-local
+// editor-package hook itself is supplied by editor_package.cpp in both lists.
 //
 // processor.hpp only forward-declares `pulp::view::View` and
-// `pulp::format::AraDocumentController`, and both methods only ever return
-// nullptr here. The minimal completions below give this TU its own definitions
-// of both types; that is sound because this TU is the ONLY one in the WASM link
-// that defines these symbols, so there is no ODR conflict. Do NOT add this file
-// to the native build, and do NOT link it alongside pulp-format-core (which
-// compiles format.cpp and ara.cpp, the native definitions of the same two
-// methods).
+// `pulp::format::AraDocumentController`, and the view and ARA methods only ever
+// return nullptr here. The minimal completions below give this TU its own
+// definitions of both types; that is sound because this TU is the ONLY one in
+// the WASM link that defines these symbols, so there is no ODR conflict. Do NOT
+// add this file to the native build, and do NOT link it alongside
+// pulp-format-core (which compiles format.cpp and ara.cpp, the native
+// definitions of these methods).
 //
 // On completeness, measured rather than assumed: DEFINING one of these methods
 // as `return nullptr;` does NOT require the type to be complete. The native
@@ -37,6 +38,7 @@
 // the definition. The completions here are kept because this TU stands in for
 // the whole view and ARA layers in a link that has neither, not because
 // returning nullptr would otherwise fail to compile.
+#include <pulp/format/editor_package.hpp>
 #include <pulp/format/processor.hpp>
 
 namespace pulp::view { class View {}; }
@@ -48,6 +50,10 @@ class AraDocumentController {};
 Processor::~Processor() = default;
 
 std::unique_ptr<view::View> Processor::create_view() { return nullptr; }
+
+EditorFactory* Processor::editor_factory() {
+    return plugin_editor_factory();
+}
 
 std::unique_ptr<AraDocumentController> Processor::create_ara_document_controller() {
     return nullptr;
