@@ -1106,6 +1106,10 @@ SOURCES given to target`. The audio widgets moving to `core/view/audio/` (the `p
 target) did this to `eq_curve_view.cpp` and the split `widgets/visualizers.cpp`. When you move a
 `core/view/**` file, grep `PulpWebUi.cmake` for its old path, and add any new include directory
 to `_PULP_WEBUI_INCLUDES` (here `core/view/audio/include`).
+A header that a listed view header includes counts too, even with no new TU. When the
+editor data plane moved to `core/dataplane`, `view.hpp` began including
+`<pulp/dataplane/fwd.hpp>`, and the web UI modules failed to compile with `file not found`
+until `core/dataplane/include` joined `_PULP_WEBUI_INCLUDES`.
 
 When you hit it: don't chase symbols one build at a time. Read the symbol's namespace, find the
 defining TU (`git grep -l 'Thing::method' -- core/.../src`), and **mirror what the native build
