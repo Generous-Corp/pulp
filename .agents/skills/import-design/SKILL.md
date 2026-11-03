@@ -400,6 +400,13 @@ Release archives take the helper from the build directory, not from `install()`:
 product matrix's `illustrator_import_floor` lacks it. A new file listed under
 `import-design/` in `release_product_matrix.json` needs the same staging.
 
+Every path the helper writes (the SVG and the receipt, explicit or default) goes
+through `_writable_destination`, which refuses a symlink on the path as given.
+Check before `resolve()`, never after: a resolved path is never a symlink, so a
+check placed after it cannot fire, which is how a symlinked `--provenance` was
+once written through to its target. Stage writes through `mkstemp`, never a
+fixed `.<name>.tmp`, which a pre-planted symlink can redirect.
+
 The installed `pulp-import-design` SDK runtime includes the browser-capture
 manifest plus the materialized JSX siblings
 `materialized_binding_contract.mjs`, `materialized_source_emitter.mjs`, and

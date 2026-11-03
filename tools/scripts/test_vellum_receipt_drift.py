@@ -579,6 +579,16 @@ class FrozenCliTests(unittest.TestCase):
             fixture.close()
 
 
+# Transferred-slice paths the owner unfroze in Pulp ahead of the re-export that
+# drops them. The ownership map's transferred slices are immutable (the freeze
+# check refuses any change to one), so an unfrozen path stays in its slice and
+# leaves only the pin. Each entry names the DECISIONS.md ruling that unfroze it.
+OWNER_UNFROZEN_PATHS = {
+    # "OWNER DECISION 2026-11-03: unfreeze value_source.hpp for the data-plane move"
+    "core/view/include/pulp/view/value_source.hpp",
+}
+
+
 class CommittedPinTests(unittest.TestCase):
     def test_committed_pin_and_receipt_are_consistent(self):
         pin = drift.parse_pin((REPO / drift.PIN_PATH).read_bytes())
@@ -596,7 +606,10 @@ class CommittedPinTests(unittest.TestCase):
             if item["state"] == "framework-authoritative-transferred"
             for path in item["paths"]
         })
-        self.assertEqual(list(pin.frozen_paths), transferred)
+        self.assertTrue(OWNER_UNFROZEN_PATHS <= set(transferred),
+                        "an owner-unfrozen path must still belong to a transferred slice")
+        self.assertEqual(list(pin.frozen_paths),
+                         [path for path in transferred if path not in OWNER_UNFROZEN_PATHS])
 
 
 if __name__ == "__main__":
