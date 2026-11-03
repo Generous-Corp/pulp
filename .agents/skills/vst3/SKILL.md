@@ -775,6 +775,25 @@ structural test enforces that every hosted adapter uses the factory. See the
 `view-bridge` skill for the lifecycle protocol and the rationale. Editing
 `vst3_plug_view.cpp` triggers `view-bridge`, not this skill.
 
+A processor whose `editor_factory()` is non-null (a `UI <package>` plug-in,
+or one that overrides it) gets a `ContractPlugView` instead
+(`vst3_contract_view.cpp`, compiled into `pulp-format-core`, view-free), and
+that check runs before `has_editor()`. Things to keep straight:
+
+- Each view owns its own `StateStoreParamPort`. `removed()` calls
+  `release_all()` before `Editor::detach()`, so a window closed mid-drag still
+  sends `endEdit`.
+- `terminate()` and the adapter's destructor call `owner_terminated()` on
+  every view the host still holds. The editor is invalidated and destroyed
+  there because its factory belongs to the processor about to be reset. Do not
+  move that call after `processor_.reset()`.
+- `onKeyDown` returns `kResultFalse` for a forwarded key, which is how Space
+  stays the host's transport key. Return `kResultTrue` only for `consumed`.
+- VST3 has no idle callback, and the adapter does not tick `Editor::idle()`.
+  A contract editor drives its own frame clock until a host timer is wired.
+- The scale is not negotiated: `IPlugViewContentScaleSupport` is not
+  implemented yet, so `EditorSize::scale` keeps the editor's own value.
+
 ## Gotchas
 
 ### Linux: export only `GetPluginFactory` / `ModuleEntry` / `ModuleExit`
