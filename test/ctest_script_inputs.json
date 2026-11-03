@@ -1494,6 +1494,21 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-editor-ui-package-au-host": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "PulpEditorUiA_AU",
+    "PulpEditorUiNone_AU"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/fixtures/editor_ui_package/editor_ui_package_au_host.mm"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-editor-ui-package-host": {
    "data": "none",
    "inputs": [],
@@ -2707,6 +2722,7 @@
   "pulp-test-au-plugin-state",
   "pulp-test-au-v2-cocoa-shipping",
   "pulp-test-au-v2-cocoa-ui",
+  "pulp-test-au-v2-contract-view",
   "pulp-test-au-v2-instrument-rt",
   "pulp-test-au-v2-param-display",
   "pulp-test-audio",
@@ -2891,6 +2907,7 @@
   "pulp-test-dspx07-projection",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
+  "pulp-test-editor-ui-package-au-host",
   "pulp-test-editor-ui-package-host",
   "pulp-test-embed-compress",
   "pulp-test-external-input",
