@@ -15,6 +15,12 @@
 //   onKeyDown / onKeyUp      -> Editor::offer_key() (forward = kResultFalse,
 //                               so Space stays the host's transport key)
 //   onFocus                  -> Editor::focus_changed()
+//   setContentScaleFactor    -> Editor::set_size() with the new scale
+//                               (IPlugViewContentScaleSupport)
+//   while attached           -> Editor::idle() from a paced main-thread tick
+//                               (MainThreadDispatcher::call_async_after),
+//                               started by attached() and stopped by removed(),
+//                               invalidation and destruction
 //   adapter terminate        -> Editor::invalidate(), then the editor is
 //                               destroyed before the processor that owns its
 //                               factory
@@ -29,6 +35,7 @@
 
 #include <pulp/format/editor_host.hpp>
 
+#include <pluginterfaces/gui/iplugviewcontentscalesupport.h>
 #include <public.sdk/source/common/pluginview.h>
 
 #include <functional>
@@ -42,8 +49,12 @@ namespace pulp::format::vst3 {
 
 class PulpVst3Processor;
 
-class ContractPlugView final : public Steinberg::CPluginView {
+class ContractPlugView final : public Steinberg::CPluginView,
+                               public Steinberg::IPlugViewContentScaleSupport {
   public:
+    /// Interval of the main-thread idle tick while attached (about 60 Hz).
+    static constexpr int kIdleIntervalMs = 16;
+
     using HostActionHandler = std::function<bool(const HostActionRequest&)>;
 
     /// A view over a new editor from `factory` in the editor role, or null
@@ -68,6 +79,15 @@ class ContractPlugView final : public Steinberg::CPluginView {
     Steinberg::tresult PLUGIN_API onFocus(Steinberg::TBool state) override;
     Steinberg::tresult PLUGIN_API canResize() override;
     Steinberg::tresult PLUGIN_API checkSizeConstraint(Steinberg::ViewRect* rect) override;
+
+    // IPlugViewContentScaleSupport
+    Steinberg::tresult PLUGIN_API setContentScaleFactor(ScaleFactor factor) override;
+
+    OBJ_METHODS(ContractPlugView, CPluginView)
+    DEFINE_INTERFACES
+    DEF_INTERFACE(IPlugViewContentScaleSupport)
+    END_DEFINE_INTERFACES(CPluginView)
+    REFCOUNT_METHODS(CPluginView)
 
     /// The adapter is terminating or being destroyed while the host still
     /// holds this view. Releases every open gesture, invalidates and destroys
@@ -98,6 +118,12 @@ class ContractPlugView final : public Steinberg::CPluginView {
                      HostActionHandler host_action);
     EditorSize current_size() const;
     Steinberg::tresult offer(const EditorKeyEvent& event);
+    // The idle tick: one live chain per attachment. A tick that runs after
+    // stop_idle() sees `running` false and neither ticks nor re-posts.
+    struct IdleState;
+    void start_idle();
+    void stop_idle();
+    static void schedule_idle(std::shared_ptr<IdleState> state);
 
     PulpVst3Processor* owner_;
     Processor* processor_;
@@ -107,6 +133,7 @@ class ContractPlugView final : public Steinberg::CPluginView {
     std::unique_ptr<Context> context_;
     std::unique_ptr<Editor> editor_;
     bool editor_attached_ = false;
+    std::shared_ptr<IdleState> idle_;
 };
 
 } // namespace pulp::format::vst3

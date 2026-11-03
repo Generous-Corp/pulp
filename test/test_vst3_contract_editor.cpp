@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/vst3_adapter.hpp>
@@ -16,6 +17,7 @@
 #include <pulp/state/store.hpp>
 
 #include <pluginterfaces/base/keycodes.h>
+#include <pluginterfaces/gui/iplugviewcontentscalesupport.h>
 #include <pluginterfaces/vst/ivsteditcontroller.h>
 #include <pluginterfaces/vst/ivsthostapplication.h>
 #include <public.sdk/source/common/pluginview.h>
@@ -49,6 +51,8 @@ struct EditorLog {
     std::vector<std::string> calls;
     void* parent_handle = nullptr;
     EditorContext* context = nullptr;
+    int idles = 0;
+    double last_scale = 0.0;
     int live = 0;
 
     bool saw(const std::string& call) const {
@@ -106,6 +110,7 @@ class RecordingEditor final : public Editor {
         if (size.width < 200 || size.height < 150)
             return false;
         size_ = size;
+        g_log.last_scale = size.scale;
         g_log.calls.push_back("set_size:" + std::to_string(size.width) + "x" +
                               std::to_string(size.height));
         return true;
@@ -129,6 +134,9 @@ class RecordingEditor final : public Editor {
         EditorSize adjusted = proposed;
         adjusted.height = proposed.width * 3 / 4;
         return adjusted;
+    }
+    void idle() override {
+        ++g_log.idles;
     }
     KeyDisposition offer_key(const EditorKeyEvent& event) override {
         if (event.key == EditorKey::space) {
@@ -698,4 +706,167 @@ TEST_CASE("every VST3 key and platform type maps to the contract",
     REQUIRE(ContractPlugView::parent_kind(Steinberg::kPlatformTypeX11EmbedWindowID) ==
             NativeParentKind::x11_window);
     REQUIRE(ContractPlugView::parent_kind(nullptr) == NativeParentKind::none);
+}
+
+namespace {
+
+// A main-thread backend whose posts wait in a queue until the test runs them,
+// so each idle tick is observable.
+class QueuedMainThread {
+  public:
+    QueuedMainThread() {
+        pulp::events::MainThreadDispatcher::Backend backend;
+        backend.post = [this](pulp::events::Task task) {
+            tasks_.push_back({std::move(task), 0});
+            return true;
+        };
+        backend.is_main_thread = [] { return true; };
+        backend.post_after = [this](pulp::events::Task task, int delay_ms) {
+            tasks_.push_back({std::move(task), delay_ms});
+            return true;
+        };
+        token_ = pulp::events::MainThreadDispatcher::register_backend(std::move(backend));
+    }
+    ~QueuedMainThread() {
+        pulp::events::MainThreadDispatcher::unregister_backend(token_);
+    }
+
+    /// Run the tasks queued so far (not the ones they queue). Returns how
+    /// many ran.
+    std::size_t run_pending() {
+        auto batch = std::move(tasks_);
+        tasks_.clear();
+        for (auto& queued : batch)
+            queued.task();
+        return batch.size();
+    }
+    std::size_t pending() const {
+        return tasks_.size();
+    }
+    int last_delay_ms() const {
+        return tasks_.empty() ? -1 : tasks_.back().delay_ms;
+    }
+
+  private:
+    struct Queued {
+        pulp::events::Task task;
+        int delay_ms;
+    };
+    std::vector<Queued> tasks_;
+    pulp::events::MainThreadDispatcher::Token token_ = 0;
+};
+
+} // namespace
+
+TEST_CASE("a VST3 contract editor ticks only while attached",
+          "[vst3][editor-host][vst3-contract][idle]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    HostApp host_app;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    // Registered after initialize() so it is the active backend.
+    QueuedMainThread main_thread;
+
+    auto* view = open_contract_view(processor);
+    main_thread.run_pending();
+    REQUIRE(main_thread.pending() == 0);
+    REQUIRE(g_log.idles == 0);
+
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    REQUIRE(main_thread.pending() == 1);
+    REQUIRE(main_thread.last_delay_ms() == ContractPlugView::kIdleIntervalMs);
+    for (int i = 0; i < 3; ++i)
+        REQUIRE(main_thread.run_pending() == 1);
+    REQUIRE(g_log.idles == 3);
+
+    // removed(): the queued tick runs, does not tick, and ends the chain.
+    REQUIRE(view->removed() == Steinberg::kResultOk);
+    main_thread.run_pending();
+    REQUIRE(g_log.idles == 3);
+    REQUIRE(main_thread.pending() == 0);
+
+    // Attached again, it ticks again.
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    main_thread.run_pending();
+    REQUIRE(g_log.idles == 4);
+
+    // Released without removed(): invalidated, and the queued tick neither
+    // ticks nor touches the destroyed view.
+    view->release();
+    REQUIRE(g_log.saw("invalidate"));
+    main_thread.run_pending();
+    REQUIRE(g_log.idles == 4);
+    REQUIRE(main_thread.pending() == 0);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("a VST3 contract editor never ticks after terminate",
+          "[vst3][editor-host][vst3-contract][idle]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    HostApp host_app;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    QueuedMainThread main_thread;
+
+    auto* view = open_contract_view(processor);
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    main_thread.run_pending();
+    REQUIRE(g_log.idles == 1);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    REQUIRE(g_log.saw("invalidate"));
+    main_thread.run_pending();
+    REQUIRE(g_log.idles == 1);
+    REQUIRE(main_thread.pending() == 0);
+
+    view->removed();
+    view->release();
+    main_thread.run_pending();
+    REQUIRE(g_log.idles == 1);
+}
+
+TEST_CASE("the host's content scale reaches the contract editor's size",
+          "[vst3][editor-host][vst3-contract][scale]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    HostApp host_app;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    auto* view = open_contract_view(processor);
+    Steinberg::FUnknownPtr<Steinberg::IPlugViewContentScaleSupport> scale_support(
+        static_cast<Steinberg::IPlugView*>(view));
+    REQUIRE(scale_support);
+
+    REQUIRE(scale_support->setContentScaleFactor(2.0f) == Steinberg::kResultTrue);
+    REQUIRE(g_log.last_scale == 2.0);
+    REQUIRE(g_log.saw("set_size:400x300"));
+
+    // A later host resize keeps the scale.
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    Steinberg::ViewRect resized(0, 0, 640, 480);
+    REQUIRE(view->onSize(&resized) == Steinberg::kResultTrue);
+    REQUIRE(g_log.saw("set_size:640x480"));
+    REQUIRE(g_log.last_scale == 2.0);
+
+    REQUIRE(scale_support->setContentScaleFactor(1.5f) == Steinberg::kResultTrue);
+    REQUIRE(g_log.last_scale == 1.5);
+    REQUIRE(scale_support->setContentScaleFactor(0.0f) == Steinberg::kResultFalse);
+    REQUIRE(g_log.last_scale == 1.5);
+
+    REQUIRE(view->removed() == Steinberg::kResultOk);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    // With the editor gone the host's scale has nowhere to go.
+    REQUIRE(scale_support->setContentScaleFactor(2.0f) == Steinberg::kResultFalse);
+    view->release();
 }

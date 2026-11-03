@@ -1,5 +1,6 @@
 #include <pulp/format/vst3_contract_view.hpp>
 
+#include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/runtime/log.hpp>
@@ -75,7 +76,46 @@ ContractPlugView::ContractPlugView(PulpVst3Processor& owner, Processor& processo
       context_(std::make_unique<Context>(*this, *port_, processor.editor_host_kind(),
                                          std::move(host_action))) {}
 
+struct ContractPlugView::IdleState {
+    ContractPlugView* view = nullptr;
+    bool running = false;
+};
+
+void ContractPlugView::start_idle() {
+    stop_idle();
+    idle_ = std::make_shared<IdleState>();
+    idle_->view = this;
+    idle_->running = true;
+    schedule_idle(idle_);
+}
+
+void ContractPlugView::stop_idle() {
+    if (idle_) {
+        idle_->running = false;
+        idle_->view = nullptr;
+        idle_.reset();
+    }
+}
+
+void ContractPlugView::schedule_idle(std::shared_ptr<IdleState> state) {
+    // Every step runs on the main thread, as do attached(), removed() and the
+    // view's destruction, so the flag needs no synchronization: a tick queued
+    // before stop_idle() sees it cleared and stops the chain.
+    events::MainThreadDispatcher::call_async_after(
+        [state] {
+            if (!state->running || state->view == nullptr)
+                return;
+            auto* view = state->view;
+            if (view->editor_ && view->editor_attached_)
+                view->editor_->idle();
+            if (state->running)
+                schedule_idle(state);
+        },
+        kIdleIntervalMs);
+}
+
 ContractPlugView::~ContractPlugView() {
+    stop_idle();
     // A host that releases the view without removed() has already torn down
     // the window it was attached to.
     if (editor_ && editor_attached_)
@@ -88,6 +128,7 @@ ContractPlugView::~ContractPlugView() {
 }
 
 void ContractPlugView::owner_terminated() {
+    stop_idle();
     if (port_)
         port_->release_all();
     if (editor_) {
@@ -137,10 +178,12 @@ tresult PLUGIN_API ContractPlugView::attached(void* parent, FIDString type) {
         return kResultFalse;
     }
     editor_attached_ = true;
+    start_idle();
     return CPluginView::attached(parent, type);
 }
 
 tresult PLUGIN_API ContractPlugView::removed() {
+    stop_idle();
     // Closing the window mid-drag must still balance every beginEdit.
     if (port_)
         port_->release_all();
@@ -277,6 +320,15 @@ tresult PLUGIN_API ContractPlugView::onSize(ViewRect* newSize) {
     if (!editor_->set_size(size))
         return kResultFalse;
     return CPluginView::onSize(newSize);
+}
+
+tresult PLUGIN_API ContractPlugView::setContentScaleFactor(ScaleFactor factor) {
+    if (!editor_ || !(factor > 0.0f))
+        return kResultFalse;
+    // The editor keeps the scale in its size, so a later onSize() carries it.
+    EditorSize size = current_size();
+    size.scale = static_cast<double>(factor);
+    return editor_->set_size(size) ? kResultTrue : kResultFalse;
 }
 
 tresult PLUGIN_API ContractPlugView::onFocus(TBool state) {
