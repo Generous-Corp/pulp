@@ -2263,6 +2263,59 @@ TEST_CASE("GraphSerializer resolves the canonical BuiltIn instrument round-trip"
     REQUIRE(restored.plugin_info.path.empty());
 }
 
+TEST_CASE("GraphSerializer never loads plugins when loading is disabled",
+          "[host][serializer][load-options]") {
+    const auto json = R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "plugin",
+      "name": "Built-in Instrument",
+      "num_input_ports": 0,
+      "num_output_ports": 2,
+      "plugin": {
+        "format": "builtin",
+        "unique_id": "pulp.instrument.basic",
+        "name": "Basic Instrument",
+        "manufacturer": "Pulp",
+        "version": "1.0.0",
+        "last_path": ""
+      }
+    },
+    {
+      "id": 2,
+      "type": "plugin",
+      "name": "Audio Unit",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "plugin": {
+        "format": "au",
+        "unique_id": "pulp.test.au",
+        "name": "Audio Unit",
+        "manufacturer": "PulpTest",
+        "version": "1.0.0",
+        "last_path": "/Library/Audio/Plug-Ins/Components/Test.component"
+      }
+    }
+  ],
+  "connections": []
+})";
+
+    SignalGraph graph;
+    GraphLoadOptions options;
+    options.load_plugins = false;
+    options.include_default_plugin_roots = false;
+    const auto result = GraphSerializer::from_json(graph, json, options);
+
+    REQUIRE(result.ok);
+    REQUIRE(missing_plugins_contain(result, "builtin:pulp.instrument.basic"));
+    REQUIRE(missing_plugins_contain(result, "au:pulp.test.au"));
+    REQUIRE(graph.nodes().size() == 2);
+    REQUIRE(graph.nodes()[0].plugin == nullptr);
+    REQUIRE(graph.nodes()[1].plugin == nullptr);
+}
+
 TEST_CASE("GraphSerializer reports a plugin state restore refusal",
           "[host][serializer][state][failure]") {
     PluginInfo info;

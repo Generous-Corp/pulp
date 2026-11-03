@@ -1,5 +1,7 @@
+#include "atomic_text_file.hpp"
 #include "cli_common.hpp"
-#include <cstdlib>
+
+#include <choc/text/choc_JSON.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -72,22 +74,27 @@ int cmd_graph(const std::vector<std::string>& args) {
                          "resolve all plugins first\n";
             return 1;
         }
-        const std::filesystem::path destination(path);
-        const auto temporary = destination.string() + ".tmp-" + std::to_string(std::rand());
-        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            std::cerr << "pulp graph: cannot write temporary output beside '" << path << "'\n";
+        const auto serialized = pulp::host::GraphSerializer::to_json(graph);
+        if (serialized.empty()) {
+            std::cerr << "pulp graph: cannot canonicalize graph because serialization failed\n";
             return 1;
         }
-        out << pulp::host::GraphSerializer::to_json(graph) << '\n';
-        if (!out)
+        try {
+            const auto parsed = choc::json::parse(serialized);
+            if (!parsed.isObject()) {
+                std::cerr << "pulp graph: cannot canonicalize graph because serialization was not "
+                             "an object\n";
+                return 1;
+            }
+        } catch (const std::exception& error) {
+            std::cerr << "pulp graph: cannot canonicalize graph because serialization was invalid: "
+                      << error.what() << '\n';
             return 1;
-        out.close();
-        std::error_code error;
-        std::filesystem::rename(temporary, destination, error);
-        if (error) {
-            std::filesystem::remove(temporary);
-            std::cerr << "pulp graph: cannot replace '" << path << "': " << error.message() << '\n';
+        }
+        std::string error;
+        if (!pulp::cli::write_text_file_atomically(std::filesystem::path(path), serialized + '\n',
+                                                   error)) {
+            std::cerr << "pulp graph: cannot replace '" << path << "': " << error << '\n';
             return 1;
         }
         return 0;
