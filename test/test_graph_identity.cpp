@@ -45,9 +45,16 @@ TEST_CASE("G3 planted negative identity controls fail closed") {
     const std::array renamed{PortHandle{1, 0, false, "gain", PortKind::Audio}};
     const std::array original{PortHandle{1, 0, false, "drive", PortKind::Audio}};
     CHECK(port_identity_fingerprint(original) != port_identity_fingerprint(renamed));
-    CHECK_FALSE(validate_port_identities(std::array{PortHandle{1, 0, false, "   ", PortKind::Audio}}).valid);
-    CHECK_FALSE(validate_port_identities(std::array{PortHandle{1, 0, false, std::string("bad\0name", 8), PortKind::Audio}}).valid);
-    CHECK_FALSE(validate_port_identities(std::array{PortHandle{1, 0, false, std::string("\xff", 1), PortKind::Audio}}).valid);
+    CHECK_FALSE(
+        validate_port_identities(std::array{PortHandle{1, 0, false, "   ", PortKind::Audio}})
+            .valid);
+    CHECK_FALSE(
+        validate_port_identities(
+            std::array{PortHandle{1, 0, false, std::string("bad\0name", 8), PortKind::Audio}})
+            .valid);
+    CHECK_FALSE(validate_port_identities(
+                    std::array{PortHandle{1, 0, false, std::string("\xff", 1), PortKind::Audio}})
+                    .valid);
     const auto decomposed = std::array{PortHandle{1, 0, false, "e\xCC\x81", PortKind::Audio}};
     const auto composed = std::array{PortHandle{1, 0, false, "\xC3\xA9", PortKind::Audio}};
     CHECK(port_identity_fingerprint(decomposed) == port_identity_fingerprint(composed));

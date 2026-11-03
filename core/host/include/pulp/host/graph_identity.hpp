@@ -51,7 +51,7 @@ PortIdentityReport validate_port_identities(std::span<const PortHandle> ports,
 // Stable semantic fingerprint of a validated identity set.  Returns zero when
 // validation fails.  Canonical port indexes and insertion order are excluded.
 std::uint64_t port_identity_fingerprint(std::span<const PortHandle> ports,
-                                         std::span<const PortIdentityAlias> aliases = {});
+                                        std::span<const PortIdentityAlias> aliases = {});
 
 struct PortIdentityDiff {
     std::vector<std::string> added;
