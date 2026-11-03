@@ -227,6 +227,17 @@ stat-then-reopen flow over the caller-controlled path.
 
 ---
 
+### Windows CPU presentation controls
+
+Windows CPU fallback emits `render/frame`, shared `canvas/paint`,
+`canvas/raster_readback`, `canvas/win_bgra_swizzle` and
+`render/win_dib_present`. GPU acquisition is not a positive control for a CPU
+run: require scene paint and DIB presentation instead, plus the application's
+live data-delivery activity. Shared scene painting owns the `paint` marker;
+placing it only in a platform wrapper misses paths that call the shared
+renderer directly. Screenshot rasterization also paints, so a `paint` count
+alone does not establish presented frame cadence.
+
 ## A declared category is not a populated one
 
 `trace.hpp` declares ten categories — `dsp`, `dsp.node`, `render`, `layout`,
