@@ -170,8 +170,10 @@ the other's. Every processor in one binary that does not override
 VST3 and CLAP open the editor through the contract whenever
 `editor_factory()` is non-null, and fall back to `create_view()` otherwise. A
 UI-package plug-in's AU v2 component serves a view-free Cocoa view factory
-(`au_v2_contract_view.mm`) that opens the package's editor. The standalone host
-still opens `create_view()`.
+(`au_v2_contract_view.mm`) that opens the package's editor. The standalone app
+hosts the contract editor in its own native window (macOS today; other
+platforms fail the run), where a Space the editor forwards plays or stops the
+standalone's transport.
 
 ## pulp_add_plugin_bundle
 

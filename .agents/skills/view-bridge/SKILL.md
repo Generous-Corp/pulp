@@ -104,9 +104,14 @@ error. Things that are easy to get wrong:
 - Every processor in the binary that does not override `editor_factory()` gets
   the package factory, including inner processors a wrapper composes. Hosts ask
   only the top-level processor.
-- VST3 and CLAP open a non-null `editor_factory()` through
-  `ContractEditorSession` (`contract_editor_session.hpp`, `pulp-format-core`) before
-  they consider `create_view()`. A new format adapter should map its editor API
+- VST3, CLAP and the standalone app open a non-null `editor_factory()`
+  through `ContractEditorSession` (`contract_editor_session.hpp`,
+  `pulp-format-core`) before they consider `create_view()`. A UI-package AU v2
+  serves it from `au_v2_contract_view.mm`. The standalone window
+  (`standalone_contract_editor_mac.mm`) drives the tick from its own event loop
+  (`IdleSource::host_driven`). Its headless run captures through
+  `EditorAutomation::capture_png()` and fails when the editor offers no capture.
+  A forwarded Space toggles `StandaloneTestInputHost::set_playing`. A new format adapter should map its editor API
   onto that session rather than re-implementing gesture release, the idle tick
   or size negotiation.
 - The hook calls the package function lazily, on the first `editor_factory()`

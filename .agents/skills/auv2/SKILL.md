@@ -255,6 +255,13 @@ per plug-in, and the factory class is exported. Things to keep straight:
   invalidate path runs instead of detach.
 - AU v2 has no resize request. An editor's `request_resize` moves the
   container's frame, and the host follows the frame.
+- `pulp-test-au-v2-contract-adapters` builds all three adapter types from
+  their real entry macros (one translation unit each, because
+  `PULP_REGISTER_PLUGIN` defines a fixed-name registrar) and registers their
+  `<Class>Factory` functions with `AudioComponentRegister`. Use it when you need
+  a real adapter instance in-process without a bundle.
+- The AppKit key mapping lives in `detail/appkit_contract_key.hpp`, shared with
+  the standalone contract window.
 - A `create_view()` AU (PULP_AU_GUI) keeps the ViewBridge factory even when its
   processor overrides `editor_factory()`. Only view-free UI-package AUs serve the
   contract view.
