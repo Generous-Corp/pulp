@@ -24,7 +24,10 @@ NodeId add_node(SignalGraph& graph, const SubgraphNodeSpec& spec, const std::str
         return graph.add_output_node(spec.channels, name);
     case NodeType::Gain: {
         const auto id = graph.add_gain_node(name);
-        graph.set_node_gain(id, spec.gain);
+        if (id != 0 && !graph.set_node_gain(id, spec.gain)) {
+            graph.remove_node(id);
+            return 0;
+        }
         return id;
     }
     default:
@@ -50,16 +53,27 @@ SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphT
                               "template and instance identities must be non-empty");
         return out;
     }
+    auto rollback = [&] {
+        for (auto it = out.instance.nodes.rbegin(); it != out.instance.nodes.rend(); ++it)
+            graph.remove_node(*it);
+        out.instance.nodes.clear();
+        out.instance.ports.clear();
+        out.instance.parameters.clear();
+        out.instance.parameter_nodes.clear();
+        out.instance.parameter_bounds.clear();
+    };
     std::unordered_set<std::string> keys;
     for (const auto& spec : definition.nodes) {
         if (spec.key.empty() || !valid_node_type(spec.type) || spec.channels <= 0 ||
-            !keys.insert(spec.key).second) {
+            !std::isfinite(spec.gain) || !keys.insert(spec.key).second) {
+            rollback();
             out.result = boundary(GraphResult::Code::UnknownNode,
                                   "template node keys must be unique built-in nodes");
             return out;
         }
         const auto id = add_node(graph, spec, out.instance.instance_identity + "." + spec.key);
         if (id == 0) {
+            rollback();
             out.result = boundary(GraphResult::Code::UnknownNode, "unable to add template node");
             return out;
         }
@@ -68,12 +82,6 @@ SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphT
     std::unordered_map<std::string, NodeId> ids;
     for (std::size_t i = 0; i < definition.nodes.size(); ++i)
         ids.emplace(definition.nodes[i].key, out.instance.nodes[i]);
-    auto rollback = [&] {
-        for (auto it = out.instance.nodes.rbegin(); it != out.instance.nodes.rend(); ++it)
-            graph.remove_node(*it);
-        out.instance.nodes.clear();
-        out.instance.ports.clear();
-    };
     for (const auto& edge : definition.edges) {
         const auto src = ids.find(edge.source), dst = ids.find(edge.destination);
         if (src == ids.end() || dst == ids.end()) {
@@ -118,17 +126,34 @@ SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphT
         }
         auto exposed = *found;
         exposed.name = port.name;
-        out.instance.ports.emplace(port.name, std::move(exposed));
+        if (!out.instance.ports.emplace(port.name, std::move(exposed)).second) {
+            rollback();
+            out.result = boundary(GraphResult::Code::UnknownPort, "duplicate exposed port name");
+            return out;
+        }
     }
+    std::unordered_set<NodeId> bound_nodes;
     for (const auto& parameter : definition.parameters) {
         const auto node = ids.find(parameter.node);
-        if (node == ids.end() || parameter.path.empty() || parameter.minimum > parameter.maximum ||
+        if (node == ids.end() || parameter.path.empty() || !std::isfinite(parameter.minimum) ||
+            !std::isfinite(parameter.maximum) || parameter.minimum > parameter.maximum ||
             !std::isfinite(parameter.default_value) ||
             parameter.default_value < parameter.minimum ||
             parameter.default_value > parameter.maximum) {
             rollback();
             out.result =
                 boundary(GraphResult::Code::UnknownPort, "invalid exposed parameter declaration");
+            return out;
+        }
+        if (out.instance.parameters.count(parameter.path) != 0) {
+            rollback();
+            out.result = boundary(GraphResult::Code::UnknownPort, "duplicate parameter path");
+            return out;
+        }
+        if (!bound_nodes.insert(node->second).second) {
+            rollback();
+            out.result = boundary(GraphResult::Code::UnknownPort,
+                                  "node is already bound to another parameter");
             return out;
         }
         if (!graph.set_node_gain(node->second, parameter.default_value)) {
@@ -139,6 +164,8 @@ SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphT
         }
         out.instance.parameters.emplace(parameter.path, parameter.default_value);
         out.instance.parameter_nodes.emplace(parameter.path, node->second);
+        out.instance.parameter_bounds.emplace(
+            parameter.path, SubgraphParameterBounds{parameter.minimum, parameter.maximum});
     }
     return out;
 }
@@ -155,17 +182,30 @@ GraphResult restore_subgraph_state(SignalGraph& graph, SubgraphInstance& instanc
         return boundary(GraphResult::Code::UnknownPort,
                         "state parameter set does not match the template");
     }
+    // Validate every entry before mutating anything so a bad entry cannot
+    // leave the instance half-restored.
     for (const auto& [path, value] : state.parameters) {
-        const auto it = instance.parameters.find(path);
-        if (it == instance.parameters.end() || !std::isfinite(value)) {
+        const auto known = instance.parameters.find(path);
+        const auto bounds = instance.parameter_bounds.find(path);
+        const auto node = instance.parameter_nodes.find(path);
+        if (known == instance.parameters.end() || bounds == instance.parameter_bounds.end() ||
+            node == instance.parameter_nodes.end()) {
             return boundary(GraphResult::Code::UnknownPort, "state contains an unknown parameter");
         }
-        const auto node = instance.parameter_nodes.find(path);
-        if (node == instance.parameter_nodes.end() || !graph.set_node_gain(node->second, value)) {
+        if (!std::isfinite(value) || value < bounds->second.minimum ||
+            value > bounds->second.maximum) {
+            return boundary(GraphResult::Code::UnknownPort,
+                            "state parameter value is non-finite or out of range");
+        }
+        const auto* target = graph.node(node->second);
+        if (!target || target->type != NodeType::Gain) {
             return boundary(GraphResult::Code::UnknownPort,
                             "state parameter target is unavailable");
         }
-        it->second = value;
+    }
+    for (const auto& [path, value] : state.parameters) {
+        graph.set_node_gain(instance.parameter_nodes.at(path), value);
+        instance.parameters.at(path) = value;
     }
     return {GraphResult::Code::Ok};
 }

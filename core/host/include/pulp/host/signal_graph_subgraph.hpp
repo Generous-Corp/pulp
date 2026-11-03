@@ -59,6 +59,11 @@ struct SubgraphState {
     std::unordered_map<std::string, float> parameters;
 };
 
+struct SubgraphParameterBounds {
+    float minimum = 0.0f;
+    float maximum = 1.0f;
+};
+
 struct SubgraphInstance {
     std::string template_identity;
     std::string instance_identity;
@@ -67,6 +72,7 @@ struct SubgraphInstance {
     std::unordered_map<std::string, PortHandle> ports;
     std::unordered_map<std::string, float> parameters;
     std::unordered_map<std::string, NodeId> parameter_nodes;
+    std::unordered_map<std::string, SubgraphParameterBounds> parameter_bounds;
 
     SubgraphState save_state() const;
 };
@@ -81,14 +87,20 @@ struct SubgraphExpansionResult {
 };
 
 // Expand one template instance into graph-owned nodes and edges. Expansion is
-// immutable with respect to the template; a failed edge/port validation rolls
-// back every node created by this call. Diagnostics name the subgraph boundary.
+// immutable with respect to the template. Any failure (node, edge, port, or
+// parameter declaration) rolls back every node and clears every instance entry
+// created by this call, so a failed result holds no NodeIds. Exposed port names
+// and parameter paths must be unique, parameter bounds must be finite, and each
+// parameter must target a distinct gain node. Diagnostics name the subgraph
+// boundary.
 SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphTemplate& definition,
                                              std::string instance_identity,
                                              std::uint32_t instance_index = 0);
 
 // Restore only declared parameter paths. Identity and node topology remain
-// stable; out-of-range or foreign state is rejected at the subgraph boundary.
+// stable. Every entry is validated (known path, finite value within the
+// declared [minimum, maximum], live gain target) before any is applied, so a
+// rejected restore leaves the instance and graph unchanged.
 GraphResult restore_subgraph_state(SignalGraph& graph, SubgraphInstance& instance,
                                    const SubgraphState& state);
 
