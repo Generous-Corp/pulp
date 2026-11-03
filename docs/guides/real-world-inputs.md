@@ -50,50 +50,63 @@ for why application-selected providers are not Pulp-redistributed dependencies.
 
 Capture and inference happen on a provider or worker thread. At the handoff,
 translate the result into Pulp's frame, submit it to a gate, then read the
-accepted value while processing audio. This is the smallest complete example;
-the provider could be a camera model, phone sensor, MIDI device, or OSC
-receiver.
+accepted value while processing audio. The excerpt below uses only the public
+runtime API and is complete C++ apart from the provider's frame transport. The
+provider could be a camera model, phone sensor, MIDI device, or OSC receiver.
 
 ```cpp
+#include <cstdint>
+#include <span>
+#include "pulp/runtime/external_input.hpp"
+
 using namespace pulp::runtime;
+using Frame = ExternalInputFrame<1>;
 
-ExternalInputGate<1> gate;
-ExternalInputPolicy policy{
-    .source_id = 7,
-    .minimum_confidence = 0.6f,
-    .max_age_samples = 4800,
-    .expected_count = 1,
-};
+void process_block(ExternalInputGate<1>& gate,
+                   const ExternalInputPolicy& policy,
+                   bool has_new_frame,
+                   const Frame& frame,
+                   std::span<float> output,
+                   float base_parameter) noexcept {
+    // The application reads its latest complete frame from a TripleBuffer,
+    // OSC/IPC receiver, MIDI adapter, or another existing handoff.
+    if (has_new_frame)
+        (void)gate.submit(frame, policy);
 
-// The provider adapter does this away from the audio callback.
-ExternalInputFrame<1> frame{
-    .source_id = 7,
-    .epoch = provider_epoch,
-    .sequence = ++sequence,
-    .provider_time_ns = timestamp_ns,
-    .status = ExternalInputStatus::valid,
-    .confidence = model_confidence,
-    .count = 1,
-    .values = {normalise_provider_value(result)},
-};
-handoff.write(frame); // TripleBuffer, OSC/IPC, MIDI, or another existing path
+    // No new frame is still a valid audio block: keep the last accepted value,
+    // or use the base parameter until the first value is accepted.
+    const float control = gate.valid() ? gate.value(0, 0.0f) : 0.0f;
+    const float effective = base_parameter + control;
+    for (float& sample : output)
+        sample = effective; // replace with the application's existing DSP
 
-// Consumer side: submit a complete frame, then use the bounded value.
-const auto verdict = gate.submit(handoff.read(), policy);
-if (verdict == ExternalInputVerdict::accepted && gate.valid()) {
-    const float effective = base_parameter + map(gate.value(0, 0.0f));
-    render_audio(effective);
+    // Advance once with this block's actual sample count.
+    gate.advance(static_cast<std::uint64_t>(output.size()), policy);
 }
-gate.advance(block_samples, policy);
 ```
 
-`handoff`, `provider_epoch`, `sequence`, `timestamp_ns`, `result`,
-`normalise_provider_value`, `map`, and `render_audio` are application code. The
-public runtime types are the frame, policy, gate, verdict, and status shown
+The provider constructs a frame away from the callback and the application-owned
+handoff supplies `has_new_frame` and `frame`. A duplicate sequence returns
+`unchanged`; an older sequence or provider timestamp is rejected. A new epoch
+allows a provider restart, while `advance` expires an accepted value after the
+configured sample budget. None of these cases stops the callback from writing
+audio: it continues with the last accepted value or the base parameter.
+
+The public runtime types are the frame, policy, gate, verdict, and status shown
 above. Keep related values in one frame so a hand pose, face pose, or IMU
 orientation cannot be assembled from different updates. The
 `examples/cv-control` application shows a fuller mapping and ingress example;
 its `ControlSample` and `SignalMapping` remain application-owned.
+
+```mermaid
+flowchart LR
+    A[Camera, sensor, MIDI, OSC, or ML worker] --> B[Application-owned handoff]
+    B --> C[ExternalInputGate]
+    C -->|accepted value or base value| D[Existing mapping and modulation]
+    D --> E[Audio callback]
+    C -->|stale, invalid, denied, or paused| F[Safe fallback]
+    F --> D
+```
 
 ## Choosing a handoff
 
