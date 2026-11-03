@@ -2007,6 +2007,10 @@
           {
             "name": "--json",
             "kind": "flag"
+          },
+          {
+            "name": "--output",
+            "kind": "option"
           }
         ],
         "subcommands": []
