@@ -789,10 +789,17 @@ that check runs before `has_editor()`. Things to keep straight:
   move that call after `processor_.reset()`.
 - `onKeyDown` returns `kResultFalse` for a forwarded key, which is how Space
   stays the host's transport key. Return `kResultTrue` only for `consumed`.
-- VST3 has no idle callback, and the adapter does not tick `Editor::idle()`.
-  A contract editor drives its own frame clock until a host timer is wired.
-- The scale is not negotiated: `IPlugViewContentScaleSupport` is not
-  implemented yet, so `EditorSize::scale` keeps the editor's own value.
+- VST3 has no idle callback, so the view ticks `Editor::idle()` itself with a
+  paced `MainThreadDispatcher::call_async_after` chain (16 ms) that runs only
+  while attached. `removed()`, `owner_terminated()` and the destructor stop it.
+  A tick already queued then sees the cleared flag and neither ticks nor
+  touches the view. Without a registered main-thread backend (the Windows and
+  Linux stubs today) nothing ticks. Tests drive the chain through their own
+  queued backend, registered after `initialize()` so it is the active one.
+- `setContentScaleFactor()` (`IPlugViewContentScaleSupport`, declared through
+  the view's `DEFINE_INTERFACES`) hands the scale to `Editor::set_size()`. Later
+  `onSize()` calls take the scale from `Editor::size()`, so an editor must report
+  the scale it accepted. macOS hosts normally never call it.
 
 ## Gotchas
 
