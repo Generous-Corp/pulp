@@ -139,4 +139,15 @@ std::string handle_minos(const std::string& params_json) {
     return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
 }
 
+std::string handle_graph(const std::string& params_json) {
+    auto path = extract_string(params_json, "path");
+    if (path.empty()) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: path is required\"}]}";
+    auto root = find_project_root();
+    if (root.empty()) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+    auto binary = resolve_cli_binary(root);
+    auto op = extract_string(params_json, "operation"); if (op.empty()) op = "inspect";
+    auto output = exec(shell_quote(binary.string()) + " graph " + shell_quote(op) + " " + shell_quote(path) + " --json 2>&1");
+    return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+}
+
 } // namespace pulp_mcp

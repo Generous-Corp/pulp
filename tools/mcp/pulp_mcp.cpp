@@ -474,6 +474,7 @@ std::string pulp_mcp::server::tools_list_json() {
         R"JSON({"name":"pulp_build","description":"Build the Pulp project (configure + compile)","inputSchema":{"type":"object","properties":{}}},)JSON";
     out +=
         R"JSON({"name":"pulp_test","description":"Run the Pulp test suite","inputSchema":{"type":"object","properties":{"filter":{"type":"string","description":"Test name filter (regex)"}}}},)JSON";
+    out += R"JSON({"name":"pulp_graph","description":"Inspect or validate a .pulpgraph notation file without loading plugin code.","inputSchema":{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"operation":{"type":"string","enum":["inspect","validate","canonicalize"]}}}},)JSON";
     out +=
         R"JSON({"name":"pulp_status","description":"Show Pulp project status","inputSchema":{"type":"object","properties":{}}},)JSON";
     out +=
@@ -744,6 +745,8 @@ static std::string handle_request_raw(const std::string& json) {
             result = handle_test(args_json);
         else if (name == "pulp_status")
             result = handle_status(args_json);
+        else if (name == "pulp_graph")
+            result = handle_graph(args_json);
         else if (name == "pulp_validate")
             result = handle_validate(args_json);
         else if (name == "pulp_gpu_doctor")
