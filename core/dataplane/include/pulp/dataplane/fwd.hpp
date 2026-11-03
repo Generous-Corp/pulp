@@ -26,17 +26,17 @@ class ValueChannelTelemetryAttachment;
 
 namespace pulp::view {
 
-using dataplane::HostParamSurface;
+using dataplane::EventFrame;
+using dataplane::EventSource;
 using dataplane::HostActionSurface;
-using dataplane::StateStoreHostParamSurface;
+using dataplane::HostParamSurface;
+using dataplane::MeterFrame;
 using dataplane::MeterSource;
 using dataplane::ScalarSource;
-using dataplane::VectorSource;
-using dataplane::EventSource;
-using dataplane::MeterFrame;
-using dataplane::VectorFrame;
-using dataplane::EventFrame;
+using dataplane::StateStoreHostParamSurface;
 using dataplane::ValueChannelSet;
 using dataplane::ValueChannelTelemetryAttachment;
+using dataplane::VectorFrame;
+using dataplane::VectorSource;
 
 } // namespace pulp::view

@@ -19,16 +19,16 @@ namespace pulp::dataplane {
 
 /// The shape of a channel's payload.
 enum class ValueChannelShape {
-    scalar,  ///< one number per publish (gain reduction, envelope level)
-    meter,   ///< a multi-channel `MeterFrame` (peak/RMS per channel)
-    vector,  ///< a block of samples for a scope-style display
-    events,  ///< a per-block list of `ValueEvent` occurrences
+    scalar, ///< one number per publish (gain reduction, envelope level)
+    meter,  ///< a multi-channel `MeterFrame` (peak/RMS per channel)
+    vector, ///< a block of samples for a scope-style display
+    events, ///< a per-block list of `ValueEvent` occurrences
 };
 
 /// What a channel is, for discovery and for a UI lint to check names against.
 struct ValueChannelInfo {
-    std::string name;   ///< verbatim lookup key
-    std::string unit;   ///< display only ("dB", "Hz"); may be empty
+    std::string name; ///< verbatim lookup key
+    std::string unit; ///< display only ("dB", "Hz"); may be empty
     ValueChannelShape shape = ValueChannelShape::scalar;
     /// The value a bound view falls back to when the channel goes stale. Event
     /// channels do not synthesize fallback occurrences, so this is ignored for
@@ -36,8 +36,7 @@ struct ValueChannelInfo {
     float neutral = 0.0f;
 };
 
-using ValueChannelContinuousPayload =
-    std::variant<float, MeterFrame, VectorFrame>;
+using ValueChannelContinuousPayload = std::variant<float, MeterFrame, VectorFrame>;
 
 /// A coherent continuous payload copied by the existing UI reader path.
 struct ValueChannelTelemetrySnapshot {
@@ -79,7 +78,7 @@ class ScalarTelemetryState;
 class MeterTelemetryState;
 class VectorTelemetryState;
 class EventTelemetryState;
-}  // namespace detail
+} // namespace detail
 
 /// Exclusive reader attachment for every telemetry sidecar in one channel set.
 /// Only one attachment may exist at a time. Its continuous reads are the sole
@@ -87,7 +86,7 @@ class EventTelemetryState;
 /// producer SPSC taps. All read and pop calls on an attachment must therefore
 /// be serialized on one broker thread.
 class ValueChannelTelemetryAttachment {
-public:
+  public:
     ValueChannelTelemetryAttachment();
     ~ValueChannelTelemetryAttachment();
     ValueChannelTelemetryAttachment(ValueChannelTelemetryAttachment&&) noexcept;
@@ -101,17 +100,15 @@ public:
     /// Read the latest UI-consumed snapshot. Returns false for event channels or
     /// an invalid index. A valid continuous channel can return `available=false`
     /// until its UI path has performed a read.
-    bool read_continuous(std::size_t index,
-                         ValueChannelTelemetrySnapshot& snapshot) noexcept;
+    bool read_continuous(std::size_t index, ValueChannelTelemetrySnapshot& snapshot) noexcept;
 
     /// Pop the next producer event batch. Returns false for continuous channels,
     /// an invalid index, or an empty tap.
-    bool try_pop_events(std::size_t index,
-                        ValueChannelTelemetryEventBatch& batch) noexcept;
+    bool try_pop_events(std::size_t index, ValueChannelTelemetryEventBatch& batch) noexcept;
     ValueChannelTelemetryEventStats event_stats(std::size_t index) const noexcept;
     bool source_alive(std::size_t index) const noexcept;
 
-private:
+  private:
     friend class ValueChannelSet;
     struct Impl;
     ValueChannelTelemetryAttachment(
@@ -124,8 +121,8 @@ private:
 namespace detail {
 
 std::shared_ptr<ValueChannelTelemetryControl> make_value_channel_telemetry_control();
-std::uint64_t value_channel_telemetry_control_identity(
-    const ValueChannelTelemetryControl*) noexcept;
+std::uint64_t
+value_channel_telemetry_control_identity(const ValueChannelTelemetryControl*) noexcept;
 void value_channel_telemetry_index_add(ValueChannelTelemetryControl*, std::string_view name,
                                        ValueChannelShape shape, std::size_t index);
 std::ptrdiff_t value_channel_telemetry_index_lookup(const ValueChannelTelemetryControl*,
@@ -150,6 +147,6 @@ void mark_meter_source_dead(MeterTelemetryState*) noexcept;
 void mark_vector_source_dead(VectorTelemetryState*) noexcept;
 void mark_event_source_dead(EventTelemetryState*) noexcept;
 
-}  // namespace detail
+} // namespace detail
 
-}  // namespace pulp::dataplane
+} // namespace pulp::dataplane

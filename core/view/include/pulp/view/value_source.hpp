@@ -9,14 +9,14 @@
 
 namespace pulp::view {
 
-using dataplane::MeterFrame;
-using dataplane::PublishCounter;
-using dataplane::MeterSource;
-using dataplane::VectorFrame;
-using dataplane::ValueEvent;
 using dataplane::EventFrame;
-using dataplane::VectorSource;
 using dataplane::EventSource;
+using dataplane::MeterFrame;
+using dataplane::MeterSource;
+using dataplane::PublishCounter;
 using dataplane::ScalarSource;
+using dataplane::ValueEvent;
+using dataplane::VectorFrame;
+using dataplane::VectorSource;
 
 } // namespace pulp::view

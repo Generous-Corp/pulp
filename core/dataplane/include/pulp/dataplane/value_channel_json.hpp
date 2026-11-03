@@ -32,7 +32,6 @@ choc::value::Value value_channels_to_value(const ValueChannelSet* channels);
 /// Serialize an owned metadata snapshot. Inspector hosts use this overload so
 /// a hot-swappable processor cannot leave a retained raw ValueChannelSet
 /// pointer behind after its logic instance is reclaimed.
-choc::value::Value
-value_channels_to_value(std::span<const ValueChannelInfo> channels);
+choc::value::Value value_channels_to_value(std::span<const ValueChannelInfo> channels);
 
 } // namespace pulp::dataplane

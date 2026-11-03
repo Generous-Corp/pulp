@@ -10,10 +10,10 @@
 namespace pulp::view {
 
 using dataplane::SpectrumData;
-using dataplane::WaveformData;
 using dataplane::VisualizationBacklogPolicy;
-using dataplane::VisualizationConfig;
 using dataplane::VisualizationBenchCounters;
 using dataplane::VisualizationBridge;
+using dataplane::VisualizationConfig;
+using dataplane::WaveformData;
 
 } // namespace pulp::view

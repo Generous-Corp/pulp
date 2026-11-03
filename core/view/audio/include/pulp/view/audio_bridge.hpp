@@ -9,8 +9,8 @@
 
 namespace pulp::view {
 
-using dataplane::MeterData;
-using dataplane::MeterBallistics;
 using dataplane::AudioBridge;
+using dataplane::MeterBallistics;
+using dataplane::MeterData;
 
 } // namespace pulp::view

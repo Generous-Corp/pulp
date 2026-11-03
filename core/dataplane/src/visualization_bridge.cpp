@@ -15,8 +15,7 @@ namespace pulp::dataplane {
 namespace {
 double bench_now_us() noexcept {
     using clock = std::chrono::steady_clock;
-    return std::chrono::duration<double, std::micro>(clock::now().time_since_epoch())
-        .count();
+    return std::chrono::duration<double, std::micro>(clock::now().time_since_epoch()).count();
 }
 } // namespace
 #endif
@@ -253,8 +252,8 @@ bool VisualizationBridge::poll() {
         spectrum_buf_.write(spec);
 #ifdef PULP_BENCHMARK
         if (bench_counters_) {
-            bench_counters_->triplebuffer_publish_total_us.fetch_add(
-                bench_now_us() - publish_start, std::memory_order_relaxed);
+            bench_counters_->triplebuffer_publish_total_us.fetch_add(bench_now_us() - publish_start,
+                                                                     std::memory_order_relaxed);
         }
 #endif
     }
@@ -275,8 +274,8 @@ bool VisualizationBridge::poll() {
         waveform_buf_.write(wd);
 #ifdef PULP_BENCHMARK
         if (bench_counters_) {
-            bench_counters_->triplebuffer_publish_total_us.fetch_add(
-                bench_now_us() - publish_start, std::memory_order_relaxed);
+            bench_counters_->triplebuffer_publish_total_us.fetch_add(bench_now_us() - publish_start,
+                                                                     std::memory_order_relaxed);
         }
 #endif
     }

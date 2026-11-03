@@ -59,7 +59,7 @@ using ValueChannelAccess = std::function<void(const ValueChannelVisitor&)>;
 /// race a declaration. Declaring returns a reference the processor keeps and
 /// publishes through.
 class ValueChannelSet {
-public:
+  public:
     ValueChannelSet() = default;
     ValueChannelSet(const ValueChannelSet&) = delete;
     ValueChannelSet& operator=(const ValueChannelSet&) = delete;
@@ -78,19 +78,19 @@ public:
         ok,
         empty_name,
         duplicate_name,
-        reserved_character,  ///< contains ':', reserved for the "value:" JS prefix
+        reserved_character, ///< contains ':', reserved for the "value:" JS prefix
     };
 
     /// Declare a scalar channel. Returns nullptr on refusal; `error` receives
     /// the reason when non-null.
-    ScalarSource* declare_scalar(std::string name, std::string unit = {},
-                                 float neutral = 0.0f, DeclareError* error = nullptr);
+    ScalarSource* declare_scalar(std::string name, std::string unit = {}, float neutral = 0.0f,
+                                 DeclareError* error = nullptr);
     /// Declare a multi-channel meter.
-    MeterSource* declare_meter(std::string name, std::string unit = {},
-                               float neutral = 0.0f, DeclareError* error = nullptr);
+    MeterSource* declare_meter(std::string name, std::string unit = {}, float neutral = 0.0f,
+                               DeclareError* error = nullptr);
     /// Declare a block channel for a scope-style display.
-    VectorSource* declare_vector(std::string name, std::string unit = {},
-                                 float neutral = 0.0f, DeclareError* error = nullptr);
+    VectorSource* declare_vector(std::string name, std::string unit = {}, float neutral = 0.0f,
+                                 DeclareError* error = nullptr);
     /// Declare occurrences carrying frame offsets and values.
     EventSource* declare_events(std::string name, std::string unit = {},
                                 DeclareError* error = nullptr);
@@ -105,20 +105,26 @@ public:
 
     /// Every declared channel, in declaration order. This is what discovery and
     /// a UI lint read.
-    const std::vector<ValueChannelInfo>& infos() const noexcept { return infos_; }
+    const std::vector<ValueChannelInfo>& infos() const noexcept {
+        return infos_;
+    }
 
     /// Claim the transport-free telemetry sidecars. The claim is exclusive;
     /// callers receive an invalid attachment while another reader owns them.
     /// Creating and destroying the attachment happens off the audio thread.
     ValueChannelTelemetryAttachment attach_telemetry() const;
 
-    bool empty() const noexcept { return infos_.empty(); }
-    std::size_t size() const noexcept { return infos_.size(); }
+    bool empty() const noexcept {
+        return infos_.empty();
+    }
+    std::size_t size() const noexcept {
+        return infos_.size();
+    }
 
     /// Human-readable reason, for diagnostics and test failure messages.
     static const char* describe(DeclareError e) noexcept;
 
-private:
+  private:
     /// The sources for one declared channel; exactly one is non-null, matching
     /// the shape recorded in `infos_` at the same index.
     struct Entry {
@@ -130,8 +136,8 @@ private:
     };
 
     /// Shared declaration checks; returns nullptr and sets `error` on refusal.
-    Entry* add_entry(std::string name, std::string unit, float neutral,
-                     ValueChannelShape shape, DeclareError* error);
+    Entry* add_entry(std::string name, std::string unit, float neutral, ValueChannelShape shape,
+                     DeclareError* error);
     /// Index into the parallel vectors, or -1. Metadata lives ONLY in `infos_`
     /// so there is no second copy to drift.
     std::ptrdiff_t index_of(std::string_view name, ValueChannelShape shape) const;
@@ -146,4 +152,4 @@ private:
     std::shared_ptr<detail::ValueChannelTelemetryControl> telemetry_control_;
 };
 
-}  // namespace pulp::dataplane
+} // namespace pulp::dataplane

@@ -10,8 +10,8 @@
 
 namespace pulp::view {
 
-using dataplane::ValueChannelVisitor;
 using dataplane::ValueChannelAccess;
 using dataplane::ValueChannelSet;
+using dataplane::ValueChannelVisitor;
 
 } // namespace pulp::view

@@ -23,8 +23,7 @@ void MeterSource::publish(const MeterFrame& frame) {
 
 MeterFrame MeterSource::read() {
     const auto& published = buffer_.read();
-    detail::record_meter_snapshot(telemetry_, published.value,
-                                  published.publication);
+    detail::record_meter_snapshot(telemetry_, published.value, published.publication);
     return published.value;
 }
 
@@ -35,12 +34,10 @@ VectorSource::~VectorSource() {
 void VectorSource::publish(const float* samples, int count) {
     detail::PublishedValue<VectorFrame> published;
     auto& frame = published.value;
-    frame.count = count < 0 ? 0 : (count > VectorFrame::kMaxSamples
-                                       ? VectorFrame::kMaxSamples
-                                       : count);
+    frame.count =
+        count < 0 ? 0 : (count > VectorFrame::kMaxSamples ? VectorFrame::kMaxSamples : count);
     if (samples != nullptr && frame.count > 0) {
-        std::copy_n(samples, static_cast<std::size_t>(frame.count),
-                    frame.samples.begin());
+        std::copy_n(samples, static_cast<std::size_t>(frame.count), frame.samples.begin());
     }
     published.publication = ++writer_publication_;
     buffer_.write(published);
@@ -49,8 +46,7 @@ void VectorSource::publish(const float* samples, int count) {
 
 VectorFrame VectorSource::read() {
     const auto& published = buffer_.read();
-    detail::record_vector_snapshot(telemetry_, published.value,
-                                   published.publication);
+    detail::record_vector_snapshot(telemetry_, published.value, published.publication);
     return published.value;
 }
 
@@ -63,12 +59,9 @@ void EventSource::publish(const ValueEvent* events, int count) {
     auto& frame = published.value;
     frame.count = events == nullptr || count < 0
                       ? 0
-                      : (count > EventFrame::kMaxEvents
-                             ? EventFrame::kMaxEvents
-                             : count);
+                      : (count > EventFrame::kMaxEvents ? EventFrame::kMaxEvents : count);
     if (frame.count > 0) {
-        std::copy_n(events, static_cast<std::size_t>(frame.count),
-                    frame.events.begin());
+        std::copy_n(events, static_cast<std::size_t>(frame.count), frame.events.begin());
     }
     published.publication = ++writer_publication_;
     frame.publication = static_cast<std::uint32_t>(published.publication);
@@ -95,9 +88,8 @@ void ScalarSource::publish(float value) {
 
 float ScalarSource::read() {
     const auto& published = buffer_.read();
-    detail::record_scalar_snapshot(telemetry_, published.value,
-                                   published.publication);
+    detail::record_scalar_snapshot(telemetry_, published.value, published.publication);
     return published.value;
 }
 
-}  // namespace pulp::dataplane
+} // namespace pulp::dataplane

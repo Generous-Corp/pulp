@@ -8,9 +8,9 @@
 #include <optional>
 #include <string_view>
 
+#include <pulp/dataplane/host_surfaces.hpp>
 #include <pulp/runtime/alive_token.hpp>
 #include <pulp/state/parameter.hpp>
-#include <pulp/dataplane/host_surfaces.hpp>
 
 namespace pulp::state {
 class StateStore;
@@ -28,7 +28,7 @@ namespace pulp::dataplane {
 /// cardinality (state::param_value_count), so a range that merely quantizes via
 /// range.step stays continuous here — matching how format adapters expose it.
 class StateStoreHostParamSurface : public HostParamSurface {
-public:
+  public:
     /// Resolve a design param_key to a registered ParamID, or nullopt if the
     /// store carries no such parameter. ParamID 0 is a valid id, so the
     /// optional (not a sentinel id) carries the "unknown" signal.
@@ -41,11 +41,10 @@ public:
     /// Owner-lifetime-aware form used by format adapters. A host may retain an
     /// editor after destroying its plugin instance; once @p owner_alive retires
     /// every operation fails closed without touching the dangling store.
-    StateStoreHostParamSurface(state::StateStore& store,
-                               runtime::AliveToken::Handle owner_alive,
+    StateStoreHostParamSurface(state::StateStore& store, runtime::AliveToken::Handle owner_alive,
                                KeyResolver resolver = {});
 
-protected:
+  protected:
     bool do_has_param(std::string_view key) override;
     double do_get_param(std::string_view key) override;
     void do_set_param(std::string_view key, double normalized) override;
@@ -54,7 +53,7 @@ protected:
     std::string do_param_display_text(std::string_view key, double normalized) override;
     int do_param_step_count(std::string_view key) override;
 
-private:
+  private:
     bool owner_is_alive() const;
 
     state::StateStore& store_;

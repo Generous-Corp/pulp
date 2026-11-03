@@ -33,14 +33,18 @@ class ChannelProcessor : public pulp::format::Processor {
         onsets = channels.declare_events("onsets");
     }
 
-    pulp::format::PluginDescriptor descriptor() const override { return {}; }
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {};
+    }
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const pulp::format::PrepareContext&) override {}
     void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
                  pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {}
 
-    ValueChannelSet* value_channels() override { return &channels; }
+    ValueChannelSet* value_channels() override {
+        return &channels;
+    }
 
     ValueChannelSet channels;
     pulp::dataplane::ScalarSource* gain_reduction = nullptr;
@@ -51,7 +55,9 @@ class ChannelProcessor : public pulp::format::Processor {
 
 class SilentProcessor : public pulp::format::Processor {
   public:
-    pulp::format::PluginDescriptor descriptor() const override { return {}; }
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {};
+    }
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const pulp::format::PrepareContext&) override {}
     void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,

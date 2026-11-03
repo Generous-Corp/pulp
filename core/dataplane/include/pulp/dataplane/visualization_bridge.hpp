@@ -35,7 +35,6 @@ struct VisualizationBenchCounters {
     std::atomic<double> triplebuffer_publish_total_us{0.0};
 };
 
-
 /// Published one-sided amplitude spectrum (lock-free via TripleBuffer).
 /// `magnitude_db` is calibrated in peak-amplitude dBFS: a full-scale,
 /// bin-centered sinusoid reads 0 dBFS at an interior bin. DC and Nyquist use

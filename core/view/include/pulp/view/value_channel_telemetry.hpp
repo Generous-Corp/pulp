@@ -10,13 +10,13 @@
 
 namespace pulp::view {
 
-using dataplane::ValueChannelShape;
-using dataplane::ValueChannelInfo;
 using dataplane::ValueChannelContinuousPayload;
-using dataplane::ValueChannelTelemetrySnapshot;
+using dataplane::ValueChannelInfo;
+using dataplane::ValueChannelShape;
+using dataplane::ValueChannelTelemetryAttachment;
+using dataplane::ValueChannelTelemetryDescriptor;
 using dataplane::ValueChannelTelemetryEventBatch;
 using dataplane::ValueChannelTelemetryEventStats;
-using dataplane::ValueChannelTelemetryDescriptor;
-using dataplane::ValueChannelTelemetryAttachment;
+using dataplane::ValueChannelTelemetrySnapshot;
 
 } // namespace pulp::view

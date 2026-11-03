@@ -48,10 +48,14 @@
 namespace {
 
 class CoreOnlyProcessor : public pulp::format::Processor {
-public:
-    CoreOnlyProcessor() { level = channels.declare_scalar("level", "dB"); }
+  public:
+    CoreOnlyProcessor() {
+        level = channels.declare_scalar("level", "dB");
+    }
 
-    pulp::dataplane::ValueChannelSet* value_channels() override { return &channels; }
+    pulp::dataplane::ValueChannelSet* value_channels() override {
+        return &channels;
+    }
 
     pulp::dataplane::ValueChannelSet channels;
     pulp::dataplane::ScalarSource* level = nullptr;

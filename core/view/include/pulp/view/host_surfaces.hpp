@@ -9,8 +9,8 @@
 
 namespace pulp::view {
 
-using dataplane::HostParamSurface;
 using dataplane::HostActionSurface;
+using dataplane::HostParamSurface;
 using dataplane::param_index_to_normalized;
 using dataplane::param_normalized_to_index;
 

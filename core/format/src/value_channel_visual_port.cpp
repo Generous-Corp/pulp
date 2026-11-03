@@ -68,7 +68,9 @@ ValueChannelVisualPort::at(std::size_t index) const noexcept {
     return index < channels_.size() ? &channels_[index] : nullptr;
 }
 
-std::size_t ValueChannelVisualPort::channel_count() const noexcept { return channels_.size(); }
+std::size_t ValueChannelVisualPort::channel_count() const noexcept {
+    return channels_.size();
+}
 
 VisualChannelInfo ValueChannelVisualPort::channel(std::size_t index) const noexcept {
     const Channel* c = at(index);

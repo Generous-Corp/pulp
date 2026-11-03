@@ -21,8 +21,7 @@ std::int64_t ui_snapshot_time_ns() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
 }
 
-template <typename Payload>
-struct ContinuousSnapshot {
+template <typename Payload> struct ContinuousSnapshot {
     Payload payload{};
     std::uint64_t source_publication = 0;
     std::uint64_t ui_snapshot_sequence = 0;
@@ -59,7 +58,7 @@ using ChannelIndex =
 } // namespace
 
 class ValueChannelTelemetryControl {
-public:
+  public:
     const std::uint64_t generation_identity =
         next_value_channel_set_identity.fetch_add(1, std::memory_order_relaxed);
     std::atomic<bool> claimed{false};
@@ -70,7 +69,7 @@ public:
 };
 
 class ValueChannelTelemetryState {
-public:
+  public:
     static_assert(std::atomic<bool>::is_always_lock_free,
                   "value-channel telemetry activation must be lock-free");
     static_assert(std::atomic<std::uint64_t>::is_always_lock_free,
@@ -84,19 +83,27 @@ public:
     virtual void deactivate() noexcept {
         active_generation_.store(0, std::memory_order_release);
     }
-    virtual bool read_continuous(ValueChannelTelemetrySnapshot&) noexcept { return false; }
-    virtual bool try_pop_events(ValueChannelTelemetryEventBatch&) noexcept { return false; }
-    virtual ValueChannelTelemetryEventStats event_stats() const noexcept { return {}; }
+    virtual bool read_continuous(ValueChannelTelemetrySnapshot&) noexcept {
+        return false;
+    }
+    virtual bool try_pop_events(ValueChannelTelemetryEventBatch&) noexcept {
+        return false;
+    }
+    virtual ValueChannelTelemetryEventStats event_stats() const noexcept {
+        return {};
+    }
 
     std::uint64_t active_generation() const noexcept {
         return active_generation_.load(std::memory_order_acquire);
     }
-    bool source_alive() const noexcept { return source_alive_.load(std::memory_order_acquire); }
+    bool source_alive() const noexcept {
+        return source_alive_.load(std::memory_order_acquire);
+    }
     void mark_source_dead() noexcept {
         source_alive_.store(false, std::memory_order_release);
     }
 
-private:
+  private:
     std::atomic<std::uint64_t> active_generation_{0};
     std::atomic<bool> source_alive_{true};
     std::uint64_t next_generation_ = 0;
@@ -104,8 +111,10 @@ private:
 
 template <typename Payload, ValueChannelShape Shape>
 class ContinuousTelemetryState : public ValueChannelTelemetryState {
-public:
-    ValueChannelShape shape() const noexcept override { return Shape; }
+  public:
+    ValueChannelShape shape() const noexcept override {
+        return Shape;
+    }
 
     void record(const Payload& payload, std::uint64_t source_publication) noexcept {
         const auto generation = active_generation();
@@ -128,12 +137,12 @@ public:
         result.source_publication = snapshot.source_publication;
         result.ui_snapshot_sequence = snapshot.ui_snapshot_sequence;
         result.ui_snapshot_time_ns = snapshot.ui_snapshot_time_ns;
-        result.available = snapshot.available &&
-                           snapshot.attachment_generation == active_generation();
+        result.available =
+            snapshot.available && snapshot.attachment_generation == active_generation();
         return true;
     }
 
-private:
+  private:
     runtime::TripleBuffer<ContinuousSnapshot<Payload>> snapshots_;
     std::uint64_t ui_snapshot_sequence_ = 0;
 };
@@ -146,7 +155,7 @@ class VectorTelemetryState final
     : public ContinuousTelemetryState<VectorFrame, ValueChannelShape::vector> {};
 
 class EventTelemetryState final : public ValueChannelTelemetryState {
-public:
+  public:
     ValueChannelShape shape() const noexcept override {
         return ValueChannelShape::events;
     }
@@ -190,7 +199,7 @@ public:
         };
     }
 
-private:
+  private:
     struct QueuedEventBatch {
         ValueChannelTelemetryEventBatch value;
         std::uint64_t attachment_generation = 0;
@@ -203,8 +212,8 @@ std::shared_ptr<ValueChannelTelemetryControl> make_value_channel_telemetry_contr
     return std::make_shared<ValueChannelTelemetryControl>();
 }
 
-std::uint64_t value_channel_telemetry_control_identity(
-    const ValueChannelTelemetryControl* control) noexcept {
+std::uint64_t
+value_channel_telemetry_control_identity(const ValueChannelTelemetryControl* control) noexcept {
     return control != nullptr ? control->generation_identity : 0;
 }
 
@@ -302,7 +311,7 @@ void mark_event_source_dead(EventTelemetryState* state) noexcept {
         state->mark_source_dead();
 }
 
-}  // namespace pulp::dataplane::detail
+} // namespace pulp::dataplane::detail
 
 namespace pulp::dataplane {
 
@@ -319,14 +328,12 @@ struct ValueChannelTelemetryAttachment::Impl {
                 .index = i,
                 .info = std::move(infos[i]),
                 .has_source_timestamp = false,
-                .has_ui_snapshot_timestamp =
-                    states[i]->shape() != ValueChannelShape::events,
+                .has_ui_snapshot_timestamp = states[i]->shape() != ValueChannelShape::events,
             });
         }
         bool expected = false;
-        if (!control->claimed.compare_exchange_strong(
-                expected, true, std::memory_order_acq_rel,
-                std::memory_order_acquire)) {
+        if (!control->claimed.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
+                                                      std::memory_order_acquire)) {
             return;
         }
         for (const auto& state : states) {
@@ -353,8 +360,7 @@ ValueChannelTelemetryAttachment::ValueChannelTelemetryAttachment(
     std::shared_ptr<detail::ValueChannelTelemetryControl> control,
     std::vector<std::shared_ptr<detail::ValueChannelTelemetryState>> states,
     std::vector<ValueChannelInfo> infos)
-    : impl_(std::make_unique<Impl>(std::move(control), std::move(states),
-                                   std::move(infos))) {
+    : impl_(std::make_unique<Impl>(std::move(control), std::move(states), std::move(infos))) {
     if (!impl_->claimed)
         impl_.reset();
 }
@@ -363,8 +369,8 @@ ValueChannelTelemetryAttachment::ValueChannelTelemetryAttachment() = default;
 ValueChannelTelemetryAttachment::~ValueChannelTelemetryAttachment() = default;
 ValueChannelTelemetryAttachment::ValueChannelTelemetryAttachment(
     ValueChannelTelemetryAttachment&&) noexcept = default;
-ValueChannelTelemetryAttachment& ValueChannelTelemetryAttachment::operator=(
-    ValueChannelTelemetryAttachment&&) noexcept = default;
+ValueChannelTelemetryAttachment&
+ValueChannelTelemetryAttachment::operator=(ValueChannelTelemetryAttachment&&) noexcept = default;
 
 bool ValueChannelTelemetryAttachment::valid() const noexcept {
     return impl_ != nullptr;
@@ -379,26 +385,23 @@ ValueChannelTelemetryAttachment::channels() const noexcept {
 
 bool ValueChannelTelemetryAttachment::read_continuous(
     std::size_t index, ValueChannelTelemetrySnapshot& snapshot) noexcept {
-    return impl_ && index < impl_->states.size() &&
-           impl_->states[index]->read_continuous(snapshot);
+    return impl_ && index < impl_->states.size() && impl_->states[index]->read_continuous(snapshot);
 }
 
 bool ValueChannelTelemetryAttachment::try_pop_events(
     std::size_t index, ValueChannelTelemetryEventBatch& batch) noexcept {
-    return impl_ && index < impl_->states.size() &&
-           impl_->states[index]->try_pop_events(batch);
+    return impl_ && index < impl_->states.size() && impl_->states[index]->try_pop_events(batch);
 }
 
-ValueChannelTelemetryEventStats ValueChannelTelemetryAttachment::event_stats(
-    std::size_t index) const noexcept {
+ValueChannelTelemetryEventStats
+ValueChannelTelemetryAttachment::event_stats(std::size_t index) const noexcept {
     if (!impl_ || index >= impl_->states.size())
         return {};
     return impl_->states[index]->event_stats();
 }
 
 bool ValueChannelTelemetryAttachment::source_alive(std::size_t index) const noexcept {
-    return impl_ && index < impl_->states.size() &&
-           impl_->states[index]->source_alive();
+    return impl_ && index < impl_->states.size() && impl_->states[index]->source_alive();
 }
 
-}  // namespace pulp::dataplane
+} // namespace pulp::dataplane
