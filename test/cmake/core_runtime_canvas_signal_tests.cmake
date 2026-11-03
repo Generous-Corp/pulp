@@ -1186,6 +1186,11 @@ if(TARGET pulp-render)
         PRIVATE pulp::view-audio pulp::render)
     target_compile_definitions(pulp-visualization-bench-consumer-check PRIVATE PULP_BENCHMARK)
 endif()
+# The bridge's own PULP_BENCHMARK body, compiled (never linked) the same way.
+add_library(pulp-visualization-bench-source-check OBJECT
+    ${CMAKE_SOURCE_DIR}/core/dataplane/src/visualization_bridge.cpp)
+target_link_libraries(pulp-visualization-bench-source-check PRIVATE pulp::dataplane-audio)
+target_compile_definitions(pulp-visualization-bench-source-check PRIVATE PULP_BENCHMARK)
 
 # Clipboard tests
 pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform

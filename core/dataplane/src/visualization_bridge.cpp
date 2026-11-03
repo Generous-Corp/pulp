@@ -17,6 +17,13 @@ double bench_now_us() noexcept {
     using clock = std::chrono::steady_clock;
     return std::chrono::duration<double, std::micro>(clock::now().time_since_epoch()).count();
 }
+
+// Adds the microseconds since `since_us` to a sink accumulator; a null
+// accumulator is not recorded.
+void bench_add(std::atomic<double>* total, double since_us) noexcept {
+    if (total != nullptr)
+        total->fetch_add(bench_now_us() - since_us, std::memory_order_relaxed);
+}
 } // namespace
 #endif
 
