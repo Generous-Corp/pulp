@@ -34,12 +34,42 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace pulp::state {
 class StateStore;
 }
 
 namespace pulp::format {
+
+class ContractEditorSession;
+
+/// The contract sessions one adapter instance opened that a host still holds.
+///
+/// A host may keep an editor (a VST3 view, an AU Cocoa view) after the plug-in
+/// instance that made it is torn down, but the editor's factory belongs to the
+/// processor. An adapter whose editors outlive it in that way declares one of
+/// these after its processor, so its destruction (or an explicit
+/// `invalidate_all()`) invalidates every registered session while the
+/// processor and store still exist. Sessions unregister themselves when they
+/// are destroyed or invalidated. Main thread only.
+class ContractSessionRegistry {
+  public:
+    ContractSessionRegistry() = default;
+    ~ContractSessionRegistry();
+    ContractSessionRegistry(const ContractSessionRegistry&) = delete;
+    ContractSessionRegistry& operator=(const ContractSessionRegistry&) = delete;
+
+    /// Invalidate every registered session and forget them.
+    void invalidate_all();
+    std::size_t size() const {
+        return sessions_.size();
+    }
+
+  private:
+    friend class ContractEditorSession;
+    std::vector<ContractEditorSession*> sessions_;
+};
 
 class ContractEditorSession {
   public:
@@ -98,6 +128,9 @@ class ContractEditorSession {
     /// One idle tick: Editor::idle() while attached.
     void tick();
 
+    /// Be invalidated when `registry` (its adapter instance) goes away first.
+    void register_with(ContractSessionRegistry& registry);
+
     /// The editor's size, or its preferred size while it reports none.
     EditorSize size() const;
     /// The editor's size hints (defaults when the editor is gone).
@@ -119,6 +152,7 @@ class ContractEditorSession {
     void visibility_changed(bool visible);
 
   private:
+    friend class ContractSessionRegistry;
     class Context;
     struct IdleState;
 
@@ -128,7 +162,10 @@ class ContractEditorSession {
     void stop_idle();
     static void schedule_idle(std::shared_ptr<IdleState> state);
 
+    void unregister();
+
     IdleSource idle_source_;
+    ContractSessionRegistry* registry_ = nullptr;
     // Declared in dependency order so the editor is destroyed first, then the
     // context it was created with, then the port the context hands out.
     std::unique_ptr<StateStoreParamPort> port_;

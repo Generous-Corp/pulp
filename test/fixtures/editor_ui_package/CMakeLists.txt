@@ -22,7 +22,19 @@ foreach(_pkg a b)
         PULP_EDITOR_FACTORY_HEADER "ui_package_${_pkg}.hpp")
 endforeach()
 
+# The UI package plug-in A and the UI none plug-in also build an AU v2
+# component, so the AU contract view factory is exercised in a real module.
+set(_au_variants "")
+if(APPLE AND PULP_HAS_AUSDK)
+    set(_au_variants A None)
+endif()
+
 foreach(_variant A B None Plain)
+    set(_formats CLAP)
+    string(SUBSTRING "${_variant}" 0 1 _code)
+    if(_variant IN_LIST _au_variants)
+        list(APPEND _formats AU)
+    endif()
     if(_variant STREQUAL "A")
         set(_ui UI pulp-test-ui-package-a)
     elseif(_variant STREQUAL "B")
@@ -34,14 +46,34 @@ foreach(_variant A B None Plain)
     endif()
     pulp_add_plugin(PulpEditorUi${_variant}
         ${_ui}
-        FORMATS           CLAP
+        FORMATS           ${_formats}
         PLUGIN_NAME       "Pulp Editor UI ${_variant}"
-        BUNDLE_ID         "dev.pulp.test.editor-ui-package"
+        BUNDLE_ID         "dev.pulp.test.editor-ui-package-${_variant}"
         MANUFACTURER      "Pulp"
         VERSION           "1.0.0"
         CATEGORY          Effect
+        PLUGIN_CODE       "PEu${_code}"
+        MANUFACTURER_CODE "PlEu"
     )
+    if(TARGET PulpEditorUi${_variant}_AU)
+        target_compile_definitions(PulpEditorUi${_variant}_AU PRIVATE
+            PULP_FIXTURE_AU_CLASS=PulpEditorUi${_variant}AU)
+    endif()
 endforeach()
+
+if(_au_variants)
+    add_executable(pulp-test-editor-ui-package-au-host editor_ui_package_au_host.mm)
+    target_link_libraries(pulp-test-editor-ui-package-au-host PRIVATE
+        "-framework AppKit" "-framework AudioToolbox" "-framework AudioUnit")
+    add_dependencies(pulp-test-editor-ui-package-au-host PulpEditorUiA_AU PulpEditorUiNone_AU)
+    add_test(NAME editor-ui-package-au-contract-view
+        COMMAND pulp-test-editor-ui-package-au-host
+            "$<TARGET_BUNDLE_DIR:PulpEditorUiA_AU>" "$<TARGET_BUNDLE_DIR:PulpEditorUiNone_AU>")
+    set_tests_properties(editor-ui-package-au-contract-view PROPERTIES
+        LABELS "format;editor-host;auv2" TIMEOUT 60
+        ENVIRONMENT_MODIFICATION
+            "CI=unset:;PULP_HEADLESS=unset:;PULP_TEST_MODE=unset:;PULP_DISABLE_PLUGIN_EDITOR=unset:")
+endif()
 
 add_executable(pulp-test-editor-ui-package-host editor_ui_package_host.cpp)
 target_link_libraries(pulp-test-editor-ui-package-host PRIVATE clap ${CMAKE_DL_LIBS})
@@ -97,6 +129,12 @@ foreach(_variant A B None Plain ViewControl)
         "set(${_variant}_SOURCES [==[${_sources}]==])\n"
         "set(${_variant}_PACKAGE [==[${_package}]==])\n")
 endforeach()
+# The AU component of the UI package plug-in, checked like its CLAP module.
+if(TARGET PulpEditorUiA_AU)
+    pulp_link_closure(PulpEditorUiA_AU TARGETS_OUT _closure)
+    string(REPLACE "PulpEditorUiA" "<plugin>" _closure "${_closure}")
+    string(APPEND _record_content "set(AU_CLOSURE [==[${_closure}]==])\n")
+endif()
 file(WRITE "${_record}" "${_record_content}")
 
 add_test(NAME editor-ui-package-none-links-nothing

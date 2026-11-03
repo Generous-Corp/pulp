@@ -5,6 +5,7 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>
 
+#include <algorithm>
 #include <utility>
 
 namespace pulp::format {
@@ -43,6 +44,33 @@ struct ContractEditorSession::IdleState {
     bool running = false;
 };
 
+ContractSessionRegistry::~ContractSessionRegistry() {
+    invalidate_all();
+}
+
+void ContractSessionRegistry::invalidate_all() {
+    auto sessions = std::move(sessions_);
+    sessions_.clear();
+    for (auto* session : sessions) {
+        session->registry_ = nullptr;
+        session->invalidate();
+    }
+}
+
+void ContractEditorSession::register_with(ContractSessionRegistry& registry) {
+    unregister();
+    registry_ = &registry;
+    registry.sessions_.push_back(this);
+}
+
+void ContractEditorSession::unregister() {
+    if (registry_ == nullptr)
+        return;
+    auto& sessions = registry_->sessions_;
+    sessions.erase(std::remove(sessions.begin(), sessions.end(), this), sessions.end());
+    registry_ = nullptr;
+}
+
 std::unique_ptr<ContractEditorSession>
 ContractEditorSession::create(Processor& processor, state::StateStore& store,
                               EditorFactory& factory, HostHooks hooks, IdleSource idle) {
@@ -64,6 +92,7 @@ ContractEditorSession::ContractEditorSession(Processor& processor, state::StateS
       context_(std::make_unique<Context>(*port_, processor.editor_host_kind(), std::move(hooks))) {}
 
 ContractEditorSession::~ContractEditorSession() {
+    unregister();
     stop_idle();
     // Destroyed while attached: the host tore its window down without an
     // orderly detach.
@@ -132,6 +161,7 @@ void ContractEditorSession::detach() {
 }
 
 void ContractEditorSession::invalidate() {
+    unregister();
     stop_idle();
     if (editor_) {
         editor_->invalidate();

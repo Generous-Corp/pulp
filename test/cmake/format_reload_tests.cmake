@@ -508,6 +508,23 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     pulp_add_test_suite(pulp-test-midi-out-offset-parity GROUP pulp-test-group-fmt-au-v2
         LIBRARIES pulp::format pulp::midi ausdk)
 
+    # AU v2 contract view factory (au_v2_contract_view.mm): the Cocoa view a
+    # UI-package plug-in serves through the editor-host contract, compiled with
+    # test-unique class names and driven through a fake Audio Unit.
+    add_executable(pulp-test-au-v2-contract-view
+        test_au_v2_contract_view.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_v2_contract_view.mm)
+    target_link_libraries(pulp-test-au-v2-contract-view PRIVATE
+        pulp::format-core ausdk Catch2::Catch2WithMain
+        "-framework AppKit" "-framework AudioToolbox" "-framework AudioUnit")
+    target_compile_definitions(pulp-test-au-v2-contract-view PRIVATE
+        PULP_AU_CONTRACT_VIEW_FACTORY_CLASS=PulpAUContractViewFactory_Test
+        PULP_AU_CONTRACT_HOST_VIEW_CLASS=PulpAUContractHostView_Test)
+    set_target_properties(pulp-test-au-v2-contract-view PROPERTIES CXX_STANDARD 23)
+    target_compile_options(pulp-test-au-v2-contract-view PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
+    catch_discover_tests(pulp-test-au-v2-contract-view)
+
     # AU v2 Cocoa editor-view advertisement (kAudioUnitProperty_CocoaUI). Compiles
     # the Cocoa view module with PULP_AU_GUI + a test-unique factory class name and
     # asserts the cross-TU filler registers + advertises the right, resolvable class.
