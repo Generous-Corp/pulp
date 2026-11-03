@@ -1,0 +1,22 @@
+# Requires the three slice executables' renders to be byte-identical.
+#   cmake -DRUN_DIR=<dir> -P compare_audio.cmake
+# One second of stereo float at 94 blocks of 512 frames.
+set(_expected_bytes 385024)
+foreach(_kind headless vellum rmlui)
+    set(_file "${RUN_DIR}/${_kind}.f32")
+    if(NOT EXISTS "${_file}")
+        message(FATAL_ERROR "missing render: ${_file}")
+    endif()
+    file(SIZE "${_file}" _size)
+    if(NOT _size EQUAL _expected_bytes)
+        message(FATAL_ERROR "${_file} is ${_size} bytes, expected ${_expected_bytes}")
+    endif()
+    file(SHA256 "${_file}" _hash_${_kind})
+    message(STATUS "${_kind}: ${_hash_${_kind}}")
+endforeach()
+foreach(_kind vellum rmlui)
+    if(NOT _hash_${_kind} STREQUAL _hash_headless)
+        message(FATAL_ERROR "${_kind} audio differs from headless")
+    endif()
+endforeach()
+message(STATUS "audio identical across headless, vellum and rmlui")
