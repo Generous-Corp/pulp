@@ -305,7 +305,7 @@ def render_table(verdicts: list) -> str:
 
 def _run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
     print("$ " + " ".join(str(c) for c in cmd), file=sys.stderr, flush=True)
-    return subprocess.run(cmd, text=True, **kwargs)
+    return subprocess.run(cmd, text=True, encoding="utf-8", errors="replace", **kwargs)
 
 
 def check_vellum_prefix(prefix: Path) -> str:
