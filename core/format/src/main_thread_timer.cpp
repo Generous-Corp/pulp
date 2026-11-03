@@ -24,23 +24,26 @@ struct MainThreadTimer::Impl {
             self->tick();
     }
 
-    static void cancel(void* context) {
-        auto* self = static_cast<Impl*>(context);
-        dispatch_source_cancel(self->source);
-    }
-
-    void stop() {
+    // Cancel, on the main thread where the handler runs, so no tick is in
+    // progress while cancelling and none is invoked afterwards.
+    void stop_on_main_thread() {
         if (source == nullptr)
             return;
-        // Cancel on the main thread, where the handler runs, so no tick is in
-        // progress while cancelling and none is invoked afterwards.
-        if (pthread_main_np() != 0)
-            dispatch_source_cancel(source);
-        else
-            dispatch_sync_f(dispatch_get_main_queue(), this, &Impl::cancel);
+        dispatch_source_cancel(source);
         dispatch_release(source);
         source = nullptr;
         tick = nullptr;
+    }
+
+    static void stop_thunk(void* context) {
+        static_cast<Impl*>(context)->stop_on_main_thread();
+    }
+
+    void stop() {
+        if (pthread_main_np() != 0)
+            stop_on_main_thread();
+        else
+            dispatch_sync_f(dispatch_get_main_queue(), this, &Impl::stop_thunk);
     }
 
     bool start(int interval_ms, std::function<void()> fn) {
