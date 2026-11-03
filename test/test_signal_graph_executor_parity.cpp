@@ -3812,12 +3812,13 @@ TEST_CASE("SignalGraph edge probe has one concurrent reader and bounded loss acc
         ++count;
     };
     pulp::graph::GraphRuntimeProbeSample sample;
-    while (!done.load(std::memory_order_acquire)) {
-        if (graph.read_audio_edge_probe(sample))
-            consume(sample);
-        else
-            std::this_thread::yield();
-    }
+    REQUIRE(pulp::test::pump_until([&] { return done.load(std::memory_order_acquire); },
+                                   [&] {
+                                       if (graph.read_audio_edge_probe(sample))
+                                           consume(sample);
+                                       else
+                                           std::this_thread::yield();
+                                   }));
     producer.join();
     while (graph.read_audio_edge_probe(sample))
         consume(sample);
