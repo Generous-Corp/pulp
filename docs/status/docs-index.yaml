@@ -74,6 +74,11 @@ docs:
     kind: guide
     summary: FrameClock, ValueAnimation, motion tokens, widget animations, JS bridge animation API
 
+  - slug: graph-edge-probes
+    path: guides/graph-edge-probes.md
+    kind: guide
+    summary: One named serial SignalGraph audio edge, source-side peak/RMS, bounded capture, lifecycle, identity and explicit refusals
+
   - slug: audio-inspector
     path: guides/audio-inspector.md
     kind: guide
