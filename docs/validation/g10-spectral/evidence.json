@@ -1,10 +1,10 @@
 {
   "goal": "G-10 spectral evidence",
   "date": "2026-11-02",
-  "branch": "codex/g10-spectral-20261102",
-  "head": "0f616a440cecdbdaff6234be48f682eec1184587",
+  "branch": "main",
+  "head": "a9197c3505d7ccb7df57f2907504271171552c93",
   "platform_scope": "macOS arm64 source checkout",
-  "verdict": "PARTIAL",
+  "verdict": "BLOCKED",
   "change_scope": [
     "docs/reports/g10-spectral-evidence-20261102.md",
     "docs/validation/g10-spectral/evidence.json"
@@ -20,7 +20,8 @@
     "runtime ProcessorNode serialization is intentionally unavailable"
   ],
   "typed_frame_gap": "A public adapter contract is missing for block-to-frame scheduling, ownership, latency, and frame-stage composition.",
-  "build_gate": "N/A: no code or build-system files changed; build/ absent",
-  "pr": "https://github.com/Generous-Corp/pulp/pull/11427",
-  "next_action": "Lead surface:1000120036 must assign and specify the typed-frame adapter contract before runtime wiring."
+  "build_gate": "N/A: no production implementation was specified; typed-frame contract is missing",
+  "pr": null,
+  "next_action": "Assign an owner for the typed-frame adapter and specify ownership/lifetime, hop scheduling, channel-group shape, latency/tail, block chronology, back-pressure, and automation composition before runtime wiring.",
+  "head_scope": "main source head before status-only disposition commit 34c5c9fb47beb652d84c067136605c77fa213e0b"
 }

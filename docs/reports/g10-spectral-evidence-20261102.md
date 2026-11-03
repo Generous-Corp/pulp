@@ -1,11 +1,20 @@
 # G-10 spectral SignalGraph evidence
 
 Date: 2026-11-02  
-Branch: `codex/g10-spectral-20261102`  
-Observed head: `0f616a440cecdbdaff6234be48f682eec1184587`  
+Fixture source branch: `main`
+
+Observed fixture head: `a9197c3505d7ccb7df57f2907504271171552c93`
+
+This evidence predates the status-only disposition commit `34c5c9fb47beb652d84c067136605c77fa213e0b`; the fixture source is the valid `main` parent.
+
 Platform scope: macOS arm64 source checkout; no build directory was present.
 
 ## Bounded verdict
+
+**BLOCKED / implementation contract missing.** The evidence below remains valid,
+but Wave 2 implementation cannot proceed until an owner specifies the public
+typed-frame adapter contract. No SignalGraph or spectral production code was
+invented in this lane.
 
 **PARTIAL / evidence-only.** The existing public APIs prove that a graph can retain an
 in-process `format::Processor` through `SignalGraph::add_processor_node()`, but the
@@ -78,4 +87,4 @@ speculative compile probe or runtime adapter was added.
 No code or build-system files changed, so no build gate was run. The worktree had no
 `build/` directory. The next safe action for `surface:1000120036` is to choose an
 explicit owner for the typed-frame adapter contract and define its public API before
-any SignalGraph wiring is attempted. PR status: **open, unarmed**: https://github.com/Generous-Corp/pulp/pull/11427
+any SignalGraph wiring is attempted. Implementation status: **BLOCKED**, no PR opened for speculative runtime wiring. The prior evidence PR remains the source receipt: https://github.com/Generous-Corp/pulp/pull/11427

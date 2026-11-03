@@ -18,6 +18,22 @@ Positive control: `first_trigger=8`, `second_trigger=40`, finite feedback.
 Planted negative control: a sample exactly equal to the strict trigger
 threshold (`0.5`) must not fire. If it fires, the event boundary is wrong.
 
+## Wave 2 implementation disposition (2026-11-03)
+
+The G-5 implementation lane is **PARTIAL / evidence-only**. The public scalar
+composition remains the accepted bounded surface; no additional runtime event
+transport or callback scheduling contract is specified by the roadmap. The
+fixture was rerun from the Wave 2 implementation worktree with the exact command
+below and produced the positive and planted-negative receipt:
+
+```text
+fixture=g5-events sr=48000 first_trigger=8 second_trigger=40 positive=1 planted_negative=1 final_feedback=0.767825
+```
+
+The next implementation step is blocked until the roadmap names whether this
+contract should become a reusable runtime API (including block partition and host
+timestamp semantics).
+
 ## Receipt and limits
 
 The exact receipt is the fixture stdout line:
