@@ -229,6 +229,36 @@ which is what a host reads as "no" and matches leaving it unimplemented.
 Add the property to **all three** classes when touching this. A helper wired
 into only the instrument leaves an `aumf`/`aumi` MPE plug-in silently
 unreachable, and no test that exercises one class catches it.
+## Contract editors (`au_v2_contract_view.mm`)
+
+A plug-in that declares `pulp_add_plugin(... UI <package>)` is view-free, since
+UI implies NO_EDITOR. Its `*_AU` module therefore compiles
+`au_v2_contract_view.mm` instead of the ViewBridge `au_v2_cocoa_view.mm`. That
+file is a view-free `AUCocoaUIBase` factory whose class names
+(`PulpAUContractViewFactory_<MFR>_<CODE>` and `PulpAUContractHostView_...`) are
+per plug-in, and the factory class is exported. Things to keep straight:
+
+- The factory returns a container `NSView` that owns a `ContractEditorSession`.
+  The editor attaches into the container at creation, so the container is its
+  `NativeParent` for its whole life. Host frame changes, backing-scale changes,
+  window moves and keys reaching the container map onto the session.
+  `-dealloc` is the orderly close: gestures are released, then `detach()`.
+- A host may dispose the unit while it still holds the view. Each AU adapter
+  (effect, instrument, MIDI processor) declares a `ContractSessionRegistry
+  contract_sessions_` after `processor_` and hands it out through
+  `PulpEditorContext::contract_sessions`, and the view registers its session
+  there. The adapter's destruction then invalidates the editor before the
+  processor that owns its factory goes. Keep that member after `processor_`.
+- `uiViewForAudioUnit:` returns an autoreleased view. A test that must observe
+  the view's `-dealloc` before disposing the unit has to drain its own
+  autorelease pool first. Otherwise the view outlives the unit and the
+  invalidate path runs instead of detach.
+- AU v2 has no resize request. An editor's `request_resize` moves the
+  container's frame, and the host follows the frame.
+- A `create_view()` AU (PULP_AU_GUI) keeps the ViewBridge factory even when its
+  processor overrides `editor_factory()`. Only view-free UI-package AUs serve the
+  contract view.
+
 ## Factory presets
 
 All three adapters override `AUBase::GetPresets` and

@@ -167,9 +167,11 @@ one host process each read their own package's factory and neither can replace
 the other's. Every processor in one binary that does not override
 `editor_factory()` shares that binary's package.
 
-`UI` is not yet read by the format adapters: VST3, CLAP, AU and the standalone
-host still open the editor through `create_view()`. A host that drives the
-editor-host contract itself reads `editor_factory()`.
+VST3 and CLAP open the editor through the contract whenever
+`editor_factory()` is non-null, and fall back to `create_view()` otherwise. A
+UI-package plug-in's AU v2 component serves a view-free Cocoa view factory
+(`au_v2_contract_view.mm`) that opens the package's editor. The standalone host
+still opens `create_view()`.
 
 ## pulp_add_plugin_bundle
 
