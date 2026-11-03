@@ -1415,6 +1415,7 @@
    "inputs": [
     "core/audio/include",
     "core/canvas/include",
+    "core/dataplane/include",
     "core/events/include",
     "core/host/include",
     "core/midi/include",
