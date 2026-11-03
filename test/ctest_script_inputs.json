@@ -5195,6 +5195,16 @@
    ],
    "kind": "python"
   },
+  "editor-host-acceptance-selftest": {
+   "entry": "tools/scripts/test_editor_host_acceptance.py",
+   "inputs": [
+    "tools/ci/governed-build.sh",
+    "tools/scripts/core_vellum_direction.py",
+    "tools/scripts/editor_host_acceptance.py",
+    "tools/scripts/test_editor_host_acceptance.py"
+   ],
+   "kind": "python"
+  },
   "ensure-signing-ready": {
    "entry": "tools/scripts/test_ensure_signing_ready.sh",
    "inputs": [
