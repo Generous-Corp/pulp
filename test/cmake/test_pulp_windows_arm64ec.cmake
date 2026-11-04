@@ -52,4 +52,18 @@ if(NOT CMAKE_C_FLAGS MATCHES "/arm64EC")
     message(FATAL_ERROR "explicit /arm64EC did not propagate to C flags")
 endif()
 
+# The canvas runtime closure must use the same detector. A raw
+# CMAKE_CXX_COMPILER_ARCHITECTURE_ID check misses the common ARM64 + explicit
+# /arm64EC configuration and drops the STL thunk archive from plugin links.
+file(READ "${CMAKE_CURRENT_LIST_DIR}/../../core/canvas/CMakeLists.txt" _canvas_cmake)
+if(_canvas_cmake MATCHES
+        "CMAKE_CXX_COMPILER_ARCHITECTURE_ID[ \t]+STREQUAL[ \t]+\\\"ARM64EC\\\"")
+    message(FATAL_ERROR
+        "canvas ARM64EC thunk closure reverted to the raw CMake architecture check")
+endif()
+if(NOT _canvas_cmake MATCHES "pulp_windows_target_is_arm64ec")
+    message(FATAL_ERROR
+        "canvas ARM64EC thunk closure does not use the shared target detector")
+endif()
+
 message(STATUS "PASS: Windows ARM64EC compiler contract")
