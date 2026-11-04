@@ -126,10 +126,11 @@ endfunction()
 function(pulp_configure_runtime_pins)
     set(_root "${PROJECT_SOURCE_DIR}")
 
-    # Prefer the VERSION.md shipped with the Skia tree actually linked; an
-    # explicit SKIA_DIR can point somewhere other than this checkout.
+    # An explicit provider owns its identity even when its metadata is missing.
+    # Let the parser report unknown values rather than borrowing the checkout's
+    # bundled prebuilt identity for a different set of linked archives.
     set(_version_md "${_root}/external/skia-build/VERSION.md")
-    if(SKIA_DIR AND EXISTS "${SKIA_DIR}/VERSION.md")
+    if(SKIA_DIR)
         set(_version_md "${SKIA_DIR}/VERSION.md")
     endif()
     _pulp_runtime_pins_skia("${_version_md}"
