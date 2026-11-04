@@ -5,6 +5,7 @@
 #include <array>
 #include <iostream>
 #include <stdexcept>
+#include <unordered_map>
 
 using namespace pulp;
 using namespace pulp::host;
@@ -54,13 +55,17 @@ class StatefulGain final : public format::Processor {
             out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * state().get_value(7) + offset;
     }
     std::vector<std::uint8_t> serialize_plugin_state() const override {
-        return {offset};
+        return large_state.empty() ? std::vector<std::uint8_t>{offset} : large_state;
     }
     bool deserialize_plugin_state(std::span<const std::uint8_t> bytes) override {
         ++restores;
         // This also proves StateStore was bound and parameters were restored
         // before the custom callback.
         check(state().get_value(7) == 0.75f, "bound parameter state precedes custom restore");
+        if (bytes.size() > 1 && bytes[0] == 42) {
+            large_state.assign(bytes.begin(), bytes.end());
+            return true;
+        }
         if (bytes.size() != 1 || bytes[0] == 254)
             return false;
         if (bytes[0] == 255)
@@ -69,9 +74,12 @@ class StatefulGain final : public format::Processor {
         return true;
     }
     std::uint8_t offset = 1;
+    std::vector<std::uint8_t> large_state;
 };
 
-const ProcessorTypeKey key{"org.example.stateful-gain", 7};
+// Deliberately distinct from the product bundle ID: the registered graph
+// identity, rather than the bundle fallback, must be serialized.
+const ProcessorTypeKey key{"org.example.graph.stateful-gain", 7};
 const std::array allowed{key};
 
 std::shared_ptr<format::ProcessorNodeInstance> fresh() {
@@ -142,16 +150,26 @@ void positive_and_isolation() {
     check(render(restored_graph) ==
               std::array<float, 8>{3, 3.75f, 2.25f, 3.375f, 2.625f, 4.5f, 1.5f, 6},
           "graph output depends on restored parameter and custom values");
-    const auto graph_json = GraphSerializer::to_json(restored_graph);
+    const std::unordered_map<NodeId, std::pair<float, float>> layout{
+        {restored_graph.nodes()[0].id, {12.5f, -3.0f}},
+        {restored_graph.nodes()[1].id, {20.0f, 7.25f}},
+        {restored_graph.nodes()[2].id, {42.0f, 8.0f}}};
+    const auto graph_json = GraphSerializer::to_json(restored_graph, layout);
     check(!graph_json.empty() && graph_json.find("\"processors\"") != std::string::npos,
           "graph v4 Processor envelope emits through the installed SDK");
+    check(graph_json.find("\"type_id\": \"org.example.graph.stateful-gain\"") !=
+                  std::string::npos &&
+              graph_json.find("\"type_id\": \"org.example.stateful-gain\"") == std::string::npos,
+          "graph v4 emits registered identity distinct from bundle ID");
     GraphLoadOptions load_options;
     load_options.processor_registry = &registry;
     load_options.processor_allowlist = {key};
     SignalGraph roundtrip_graph;
     const auto roundtrip = GraphSerializer::from_json(roundtrip_graph, graph_json, load_options);
     check(roundtrip.ok, "graph v4 Processor envelope restores through the installed SDK");
-    const auto roundtrip_json = GraphSerializer::to_json(roundtrip_graph);
+    check(roundtrip.editor_layout == layout, "graph v4 restores every editor layout coordinate");
+    const auto roundtrip_json = GraphSerializer::to_json(roundtrip_graph, roundtrip.editor_layout);
+    check(roundtrip_json == graph_json, "graph v4 layout and graph topology roundtrip exactly");
     const auto parameter_field = graph_json.substr(graph_json.find("\"parameters_b64\""), 160);
     const auto custom_field = graph_json.substr(graph_json.find("\"custom_b64\""), 80);
     check(roundtrip_json.find(parameter_field) != std::string::npos &&
@@ -163,7 +181,8 @@ void positive_and_isolation() {
         std::cerr << "GRAPH_JSON=" << graph_json << '\n';
         check(false, "graph v4 custom state field is present");
     }
-    const auto custom_value_begin = oversized_json.find('"', custom_key + std::string("\"custom_b64\":").size());
+    const auto custom_value_begin =
+        oversized_json.find('"', custom_key + std::string("\"custom_b64\":").size());
     check(custom_value_begin != std::string::npos, "graph v4 custom state value is quoted");
     oversized_json.insert(custom_value_begin + 1, std::string(12 * 1024 * 1024, 'A'));
     check(oversized_json.find("\"custom_b64\": \"") != std::string::npos &&
@@ -189,12 +208,21 @@ void positive_and_isolation() {
     check(!GraphSerializer::from_json(range_graph, range_json, load_options).ok,
           "graph v4 rejects narrowed type version");
     auto orphan_json = graph_json;
-    const auto node_id_key = orphan_json.find("\"node_id\": 2");
-    check(node_id_key != std::string::npos, "graph v4 processor node id field is present");
-    orphan_json.replace(node_id_key, std::string("\"node_id\": 2").size(), "\"node_id\": 99");
+    const auto processors_key = orphan_json.find("\"processors\": [");
+    check(processors_key != std::string::npos, "graph v4 processor array is present");
+    const auto record_begin = orphan_json.find('{', processors_key);
+    const auto record_end = orphan_json.find('}', record_begin);
+    check(record_begin != std::string::npos && record_end != std::string::npos,
+          "graph v4 processor record is present");
+    auto surplus_record = orphan_json.substr(record_begin, record_end - record_begin + 1);
+    const auto node_id_key = surplus_record.find("\"node_id\": 2");
+    check(node_id_key != std::string::npos, "graph v4 matching processor record is present");
+    surplus_record.replace(node_id_key, std::string("\"node_id\": 2").size(), "\"node_id\": 99");
+    orphan_json.insert(record_end + 1, ", " + surplus_record);
     SignalGraph orphan_graph;
-    check(!GraphSerializer::from_json(orphan_graph, orphan_json, load_options).ok,
-          "graph v4 rejects orphan Processor records");
+    const auto orphan = GraphSerializer::from_json(orphan_graph, orphan_json, load_options);
+    check(!orphan.ok && orphan.error == "Processor restore record has no matching processor node",
+          "graph v4 rejects surplus orphan after matching record restores");
 
     auto live = fresh();
     SignalGraph live_graph;
@@ -381,10 +409,63 @@ void independent_parameter_schema() {
     check(result.ok(), "envelope schema 1 and parameter schema 3 are independent");
     check(result.processors[0].instance->state_store().serialize() == f.parameters,
           "matching parameter schema retains exact bytes");
+    SignalGraph emitted;
+    wire(emitted, result.processors[0].instance);
+    const auto json = GraphSerializer::to_json(emitted);
+    check(!json.empty(), "independent parameter schema emits graph v4 JSON");
+    GraphLoadOptions options;
+    options.processor_registry = &registry;
+    options.processor_allowlist = {key};
+    SignalGraph decoded;
+    const auto loaded = GraphSerializer::from_json(decoded, json, options);
+    check(loaded.ok && GraphSerializer::to_json(decoded) == json,
+          "envelope schema 1 and parameter schema 3 roundtrip through graph JSON");
     state_source->state_store().set_state_version(4);
     f.parameters = state_source->state_store().serialize();
     const std::array future_records{f.record()};
     expect_failure(registry.restore_batch(future_records, allowed), Code::UnsupportedVersion, 1);
+}
+
+void aggregate_json_boundary() {
+    Fixture fixture;
+    check(fixture.parameters.size() == 24,
+          "aggregate fixture has measured 24-byte parameter state");
+    ProcessorRestoreRegistry registry;
+    check(registry.register_type(descriptor()) == Code::Restored,
+          "register exact-limit Processor factory");
+    SignalGraph source;
+    constexpr auto part_limit = ProcessorRestoreRegistry::max_state_part_bytes;
+    for (int i = 0; i < 4; ++i) {
+        auto instance = fresh();
+        instance->state_store().set_value(7, 0.75f);
+        instance->set_graph_type_id(key.type_id);
+        instance->set_graph_type_version(key.type_version);
+        auto& state = static_cast<StatefulGain&>(instance->processor()).large_state;
+        state.assign(i == 3 ? part_limit - 4 * fixture.parameters.size() : part_limit, 42);
+        check(source.add_processor_node(instance) != 0, "add bounded Processor node");
+    }
+    GraphLoadOptions options;
+    options.processor_registry = &registry;
+    options.processor_allowlist = {key};
+    auto json = GraphSerializer::to_json(source);
+    check(!json.empty(), "serialize exact 32 MiB aggregate state");
+    SignalGraph exact;
+    const auto accepted = GraphSerializer::from_json(exact, json, options);
+    check(accepted.ok, "graph v4 accepts exact 32 MiB decoded aggregate");
+    check(GraphSerializer::to_json(exact) == json,
+          "exact-limit Processor state survives graph JSON roundtrip");
+
+    // A fourth state's final byte moves the aggregate one byte past the
+    // budget, while every individual part remains under its own cap.
+    const auto final = source.nodes().back().id;
+    const auto instance = source.processor_node_instance(final);
+    check(instance != nullptr, "fourth Processor instance is available");
+    static_cast<StatefulGain&>(instance->processor()).large_state.push_back(42);
+    json = GraphSerializer::to_json(source);
+    SignalGraph over_limit;
+    const auto rejected = GraphSerializer::from_json(over_limit, json, options);
+    check(!rejected.ok && rejected.error.find("aggregate limit") != std::string::npos,
+          "graph v4 rejects aggregate decoded limit plus one byte");
 }
 } // namespace
 
@@ -394,8 +475,8 @@ int main() {
         planted_negatives();
         candidate_aliases();
         independent_parameter_schema();
-        std::cout << "PASS: " << checks
-                  << " Processor restore and graph v4 emission checks\n";
+        aggregate_json_boundary();
+        std::cout << "PASS: " << checks << " Processor restore and graph v4 emission checks\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

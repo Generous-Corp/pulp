@@ -825,6 +825,32 @@ std::string b64_encode(const std::vector<uint8_t>& bytes) {
     return out;
 }
 
+// Validate the wire form and calculate its exact decoded size before the
+// decoder allocates either its cleaned input or output buffer.
+std::optional<std::size_t> b64_decoded_size(std::string_view encoded) {
+    std::size_t length = 0;
+    std::size_t padding = 0;
+    bool saw_padding = false;
+    for (const char c : encoded) {
+        if (c == '\n' || c == '\r' || c == ' ' || c == '\t')
+            continue;
+        const bool alphabet = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                              (c >= '0' && c <= '9') || c == '+' || c == '/';
+        if (c == '=') {
+            saw_padding = true;
+            ++padding;
+            if (padding > 2)
+                return std::nullopt;
+        } else if (!alphabet || saw_padding) {
+            return std::nullopt;
+        }
+        ++length;
+    }
+    if (length % 4 != 0 || (padding != 0 && length < 4))
+        return std::nullopt;
+    return (length / 4) * 3 - padding;
+}
+
 std::optional<std::vector<uint8_t>> b64_decode(std::string_view s) {
     static int8_t kT[256];
     static bool init = false;
@@ -983,7 +1009,8 @@ std::string GraphSerializer::to_json(
         const auto& n = *n_ptr;
         auto node_obj = choc::value::createObject("Node");
         node_obj.addMember("id",   (int64_t)n.id);
-        node_obj.addMember("type", graph.is_processor_node(n.id) ? "processor" : node_type_str(n.type));
+        node_obj.addMember("type",
+                           graph.is_processor_node(n.id) ? "processor" : node_type_str(n.type));
         node_obj.addMember("name", n.name);
         node_obj.addMember("num_input_ports",  (int64_t)n.num_input_ports);
         node_obj.addMember("num_output_ports", (int64_t)n.num_output_ports);
@@ -1033,9 +1060,11 @@ std::string GraphSerializer::to_json(
     if (has_processors) {
         auto processors = choc::value::createEmptyArray();
         for (const auto& n : graph.nodes()) {
-            if (!graph.is_processor_node(n.id)) continue;
+            if (!graph.is_processor_node(n.id))
+                continue;
             const auto instance = graph.processor_node_instance(n.id);
-            if (!instance) return {};
+            if (!instance)
+                return {};
             const auto& d = instance->descriptor();
             auto p = choc::value::createObject("Processor");
             p.addMember("node_id", (int64_t)n.id);
@@ -1587,7 +1616,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         std::vector<std::vector<std::uint8_t>> parameter_blobs, custom_blobs;
         std::vector<ProcessorRestoreRecord> records;
         std::size_t decoded_total = 0;
-        parameter_blobs.reserve(records_json.size()); custom_blobs.reserve(records_json.size());
+        parameter_blobs.reserve(records_json.size());
+        custom_blobs.reserve(records_json.size());
         records.reserve(records_json.size());
         for (uint32_t i = 0; i < records_json.size(); ++i) {
             const auto& p = records_json[i];
@@ -1602,23 +1632,30 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 result.error = "Processor state encoding exceeds limits";
                 return result;
             }
-            const auto encoded_upper_bound = [](std::size_t bytes) {
-                return (bytes / 4) * 3 + (bytes % 4 != 0 ? 3 : 0);
-            };
-            if (encoded_upper_bound(parameters_text.size()) >
-                    ProcessorRestoreRegistry::max_total_state_bytes - decoded_total ||
-                encoded_upper_bound(custom_text.size()) >
-                    ProcessorRestoreRegistry::max_total_state_bytes - decoded_total -
-                        encoded_upper_bound(parameters_text.size())) {
+            const auto parameter_size = b64_decoded_size(parameters_text);
+            const auto custom_size = b64_decoded_size(custom_text);
+            if (!parameter_size || !custom_size) {
+                result.error = "invalid Processor state encoding";
+                return result;
+            }
+            if (*parameter_size > ProcessorRestoreRegistry::max_state_part_bytes ||
+                *custom_size > ProcessorRestoreRegistry::max_state_part_bytes ||
+                *parameter_size > ProcessorRestoreRegistry::max_total_state_bytes - decoded_total ||
+                *custom_size > ProcessorRestoreRegistry::max_total_state_bytes - decoded_total -
+                                   *parameter_size) {
                 result.error = "Processor state exceeds aggregate limit";
                 return result;
             }
             auto parameters = b64_decode(parameters_text);
             auto custom = b64_decode(custom_text);
-            if (!parameters || !custom) { result.error = "invalid Processor state encoding"; return result; }
+            if (!parameters || !custom) {
+                result.error = "invalid Processor state encoding";
+                return result;
+            }
             if (parameters->size() > ProcessorRestoreRegistry::max_state_part_bytes ||
                 custom->size() > ProcessorRestoreRegistry::max_state_part_bytes ||
-                parameters->size() > ProcessorRestoreRegistry::max_total_state_bytes - decoded_total) {
+                parameters->size() >
+                    ProcessorRestoreRegistry::max_total_state_bytes - decoded_total) {
                 result.error = "Processor state exceeds limits";
                 return result;
             }
@@ -1633,25 +1670,39 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             const auto envelope_version_value = p["state_schema_version"].getInt64();
             const auto input_channels_value = p["input_channels"].getInt64();
             const auto output_channels_value = p["output_channels"].getInt64();
-            if (node_id_value <= 0 || static_cast<std::uint64_t>(node_id_value) > std::numeric_limits<std::uint32_t>::max() ||
+            if (node_id_value <= 0 ||
+                static_cast<std::uint64_t>(node_id_value) >
+                    std::numeric_limits<std::uint32_t>::max() ||
                 type_version_value <= 0 || type_version_value > std::numeric_limits<int>::max() ||
-                envelope_version_value <= 0 || envelope_version_value > std::numeric_limits<int>::max() ||
-                input_channels_value < 0 || input_channels_value > std::numeric_limits<int>::max() ||
-                output_channels_value < 0 || output_channels_value > std::numeric_limits<int>::max()) {
+                envelope_version_value <= 0 ||
+                envelope_version_value > std::numeric_limits<int>::max() ||
+                input_channels_value < 0 ||
+                input_channels_value > std::numeric_limits<int>::max() ||
+                output_channels_value < 0 ||
+                output_channels_value > std::numeric_limits<int>::max()) {
                 result.error = "invalid Processor record range";
                 return result;
             }
-            parameter_blobs.push_back(std::move(*parameters)); custom_blobs.push_back(std::move(*custom));
-            records.push_back({static_cast<std::uint32_t>(node_id_value),
-                               {std::string(p["type_id"].getString()), static_cast<int>(type_version_value)},
-                               static_cast<int>(envelope_version_value),
-                               static_cast<int>(input_channels_value),
-                               static_cast<int>(output_channels_value),
-                               parameter_blobs.back(), custom_blobs.back()});
+            parameter_blobs.push_back(std::move(*parameters));
+            custom_blobs.push_back(std::move(*custom));
+            records.push_back(
+                {static_cast<std::uint32_t>(node_id_value),
+                 {std::string(p["type_id"].getString()), static_cast<int>(type_version_value)},
+                 static_cast<int>(envelope_version_value),
+                 static_cast<int>(input_channels_value),
+                 static_cast<int>(output_channels_value),
+                 parameter_blobs.back(),
+                 custom_blobs.back()});
         }
-        const auto restored = options.processor_registry->restore_batch(records, options.processor_allowlist);
-        if (!restored.ok()) { result.error = std::string("Processor restore failed: ") + processor_restore_code_name(restored.code); return result; }
-        for (auto& item : restored.processors) restored_processors.emplace(item.node_id, std::move(item.instance));
+        const auto restored =
+            options.processor_registry->restore_batch(records, options.processor_allowlist);
+        if (!restored.ok()) {
+            result.error = std::string("Processor restore failed: ") +
+                           processor_restore_code_name(restored.code);
+            return result;
+        }
+        for (auto& item : restored.processors)
+            restored_processors.emplace(item.node_id, std::move(item.instance));
     }
     std::unordered_set<NodeId> seen_persisted_node_ids;
     std::unordered_map<NodeId, std::pair<NodeId, std::vector<uint8_t>>> deferred_state;
@@ -1664,8 +1715,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             const auto old_id_value = nv["id"].getInt64();
             const NodeId old_id = (NodeId)old_id_value;
             if (old_id_value <= 0 ||
-                 static_cast<std::uint64_t>(old_id_value) > std::numeric_limits<NodeId>::max() ||
-                 !seen_persisted_node_ids.insert(old_id).second) {
+                static_cast<std::uint64_t>(old_id_value) > std::numeric_limits<NodeId>::max() ||
+                !seen_persisted_node_ids.insert(old_id).second) {
                 graph.clear();
                 result.error = "invalid or duplicate node id in sample region graph";
                 return result;
@@ -1677,11 +1728,16 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             if (type_s == "processor") {
                 if (!root.hasObjectMember("processors")) {
                     graph.clear();
-                    result.error = "Processor nodes are runtime-owned and unsupported by .pulpgraph v1";
+                    result.error =
+                        "Processor nodes are runtime-owned and unsupported by .pulpgraph v1";
                     return result;
                 }
                 const auto restored = restored_processors.find(old_id);
-                if (restored == restored_processors.end()) { graph.clear(); result.error = "Processor node missing restore record"; return result; }
+                if (restored == restored_processors.end()) {
+                    graph.clear();
+                    result.error = "Processor node missing restore record";
+                    return result;
+                }
                 auto instance = std::move(restored->second);
                 restored_processors.erase(restored);
                 const auto& descriptor = instance->descriptor();
@@ -1694,12 +1750,17 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     return result;
                 }
                 new_id = graph.add_processor_node(std::move(instance), name);
-                if (new_id == 0) { graph.clear(); result.error = "failed to add restored Processor node"; return result; }
+                if (new_id == 0) {
+                    graph.clear();
+                    result.error = "failed to add restored Processor node";
+                    return result;
+                }
                 id_map[old_id] = new_id;
                 graph.set_node_gain(new_id, gain);
                 if (nv.hasObjectMember("layout")) {
                     const auto& pos = nv["layout"];
-                    result.editor_layout[new_id] = {(float)get_double(pos["x"]), (float)get_double(pos["y"])};
+                    result.editor_layout[new_id] = {(float)get_double(pos["x"]),
+                                                    (float)get_double(pos["y"])};
                 }
                 continue;
             }
