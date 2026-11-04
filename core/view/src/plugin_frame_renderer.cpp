@@ -131,14 +131,18 @@ PluginFrameRenderer::Frame PluginFrameRenderer::render(
 
     if (request.idle) request.idle();
 
-    // Swapchain acquire, instrumented because it is the one part of the frame
-    // that BLOCKS: under a Fifo (vsync) present mode GetCurrentTexture() waits
-    // for the next refresh. Without this span a trace shows a frame whose
-    // children sum to ~2 ms but whose total is 20-45 ms, with nowhere to
-    // attribute the difference.
+    // Acquisition can wait for a drawable or for outstanding GPU work. Keep
+    // the last completed recording's timing and outstanding submission count
+    // alongside the wait; its duration alone cannot distinguish those causes.
+    // Timing is opt-in and asynchronous: zero is not a valid sample until the
+    // provider has delivered one, and it is never this frame's render time.
     bool acquired = false;
     {
-        PULP_TRACE_SCOPE_NAMED("gpu", "gpu_acquire");
+        PULP_TRACE_SCOPE_NAMED_ARGS(
+            "gpu", "gpu_acquire",
+            "gpu_timing_available", skia.gpu_render_timing_available(),
+            "last_gpu_render_ms", skia.gpu_render_time_ms(),
+            "frames_in_flight", skia.gpu_frames_in_flight());
         acquired = gpu.begin_frame();
     }
     if (!acquired) {
