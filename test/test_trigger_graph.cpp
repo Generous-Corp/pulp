@@ -615,10 +615,19 @@ TEST_CASE("Typed and spectral preparation remain separate admission lanes", "[tr
     REQUIRE(identity);
     SignalGraph spectral_first;
     REQUIRE(spectral_first.add_spectral_analysis(*identity.value, "analysis"));
-    CHECK(spectral_first.add_trigger_producer({}) == 0);
-    CHECK(spectral_first.add_trigger_envelope({}) == 0);
-    CHECK(spectral_first.add_trigger_modulation() == 0);
-    CHECK(spectral_first.add_trigger_lowpass(0.5f) == 0);
+    std::array<NodeId, 4> refused_nodes{};
+    std::size_t allocation_count = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        refused_nodes = {spectral_first.add_trigger_producer({}),
+                         spectral_first.add_trigger_envelope({}),
+                         spectral_first.add_trigger_modulation(),
+                         spectral_first.add_trigger_lowpass(0.5f)};
+        allocation_count = probe.allocation_count();
+    }
+    CHECK(allocation_count == 0);
+    for (const auto id : refused_nodes)
+        CHECK(id == 0);
 
     SignalGraph trigger_first;
     auto producer = trigger_first.add_trigger_producer({});
@@ -627,6 +636,15 @@ TEST_CASE("Typed and spectral preparation remain separate admission lanes", "[tr
     REQUIRE(envelope != 0);
     REQUIRE(trigger_first.connect_trigger({producer, envelope}) == TriggerGraphResult::Accepted);
     REQUIRE(trigger_first.add_spectral_analysis(*identity.value, "analysis"));
-    CHECK(trigger_first.prepare_trigger_plan(48000, 32).result == TriggerGraphResult::Mode);
-    CHECK_FALSE(trigger_first.prepare(48000, 32));
+    TriggerPreparation refused_plan;
+    bool generic_prepared = true;
+    {
+        pulp::test::RtAllocationProbe probe;
+        refused_plan = trigger_first.prepare_trigger_plan(48000, 32);
+        generic_prepared = trigger_first.prepare(48000, 32);
+        allocation_count = probe.allocation_count();
+    }
+    CHECK(allocation_count == 0);
+    CHECK(refused_plan.result == TriggerGraphResult::Mode);
+    CHECK_FALSE(generic_prepared);
 }
