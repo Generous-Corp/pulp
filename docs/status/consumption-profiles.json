@@ -420,7 +420,8 @@
       "pulp/graph/graph_runtime_plan.hpp",
       "pulp/graph/graph_runtime_probe.hpp",
       "pulp/graph/graph_runtime_queue.hpp",
-      "pulp/graph/graph_types.hpp"
+      "pulp/graph/graph_types.hpp",
+      "pulp/graph/spectral_frame.hpp"
     ],
     "core/host/include": [
       "pulp/host/anticipation_eligibility.hpp",
@@ -514,6 +515,7 @@
       "pulp/host/signal_graph_prepared_topology_edit.hpp",
       "pulp/host/signal_graph_runtime.hpp",
       "pulp/host/signal_graph_subgraph.hpp",
+      "pulp/host/spectral_graph.hpp",
       "pulp/host/timeline_device_resolver.hpp",
       "pulp/host/timeline_graph_binding.hpp",
       "pulp/host/timeline_offline_graph.hpp",
