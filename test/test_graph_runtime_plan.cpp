@@ -497,8 +497,9 @@ TEST_CASE("GraphRuntimePlan only admits audio feedback in every build mode",
         spec.spectral_input_ports = 1;
         spec.spectral_output_ports = 1;
     }
-    for (auto kind : {GraphRuntimeConnectionKind::Audio, GraphRuntimeConnectionKind::Event,
-                      GraphRuntimeConnectionKind::Automation, GraphRuntimeConnectionKind::Spectral}) {
+    for (auto kind :
+         {GraphRuntimeConnectionKind::Audio, GraphRuntimeConnectionKind::Event,
+          GraphRuntimeConnectionKind::Automation, GraphRuntimeConnectionKind::Spectral}) {
         auto edge = connect(1, 0, 2, 0);
         edge.kind = kind;
         REQUIRE(build_graph_runtime_plan(nodes, std::span(&edge, 1)).ok());
