@@ -2149,6 +2149,7 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
             m.e == std::floor(m.e) && m.f == std::floor(m.f) && bounds_.width > 0.0f &&
             bounds_.height > 0.0f && shadows_.empty();
         if (!eligible) {
+            PULP_TRACE_INSTANT_ARGS("canvas", "view_raster_cache_bypass", "view_id", id_.c_str());
             scene_cache_valid_ = false;
             canvas.invalidate_layer(cache->layer);
             cache->layer = {};
@@ -2158,6 +2159,7 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
         if (!scene_cache_valid_ || !canvas.layer_valid(cache->layer) ||
             cache->width != bounds_.width || cache->height != bounds_.height ||
             cache->scale_x != m.a || cache->scale_y != m.d) {
+            PULP_TRACE_INSTANT_ARGS("canvas", "view_raster_cache_miss", "view_id", id_.c_str());
             canvas.invalidate_layer(cache->layer);
             cache->layer = {};
             scene_cache_valid_ = false;
@@ -2179,6 +2181,8 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
                 paint_content(canvas, layers, children_ns);
                 return;
             }
+        } else {
+            PULP_TRACE_INSTANT_ARGS("canvas", "view_raster_cache_hit", "view_id", id_.c_str());
         }
         canvas.draw_layer(cache->layer);
         return;
