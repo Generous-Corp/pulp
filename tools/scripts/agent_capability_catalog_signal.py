@@ -495,7 +495,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:7e6e9a7d417035db9e3ceb30f8db5b46c8fb1c1884b2b213e57cb44cab9f0bac',
+                header_fingerprint='sha256:6f759d487423b44497cd90ad356d6421fd71c2f94e1b81b0827d59555b1d4fc5',
             ),
             binding(
                 role='graph_sample_region',
@@ -503,7 +503,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:7e6e9a7d417035db9e3ceb30f8db5b46c8fb1c1884b2b213e57cb44cab9f0bac',
+                header_fingerprint='sha256:6f759d487423b44497cd90ad356d6421fd71c2f94e1b81b0827d59555b1d4fc5',
             ),
             binding(
                 role='graph_sample_regions',
@@ -511,7 +511,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:7e6e9a7d417035db9e3ceb30f8db5b46c8fb1c1884b2b213e57cb44cab9f0bac',
+                header_fingerprint='sha256:6f759d487423b44497cd90ad356d6421fd71c2f94e1b81b0827d59555b1d4fc5',
             ),
             binding(
                 role='SampleRegionCandidate',
@@ -885,7 +885,7 @@ EXPORTS = [
             binding(role="event_block", kind="cpp_type",
                     include="pulp/host/custom_node_events.hpp",
                     qualified_name="pulp::host::CustomNodeEventBlock", target="Pulp::host",
-                    header_fingerprint="sha256:3593ccc6cb772b630fc61bec7014eb5315b5bef7e99d6047206947384c7c6006"),
+                    header_fingerprint="sha256:e01e87078bef719bd88de116aca4259fd465461d56fb59e34a16f5ce1e473676"),
             binding(role="node_type", kind="cpp_type",
                     include="pulp/host/custom_node_type.hpp",
                     qualified_name="pulp::host::CustomNodeType", target="Pulp::host",
