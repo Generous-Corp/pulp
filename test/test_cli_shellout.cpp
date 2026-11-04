@@ -238,7 +238,8 @@ TEST_CASE("pulp graph canonicalize preserves editor layout", "[cli][shellout][gr
 }
 
 TEST_CASE("pulp graph JSON validation reports a stable error code", "[cli][shellout][graph]") {
-    if (!binary_exists()) SKIP("pulp not built");
+    if (!binary_exists())
+        SKIP("pulp not built");
     const auto project = unique_temp_dir("pulp-graph-json-validation");
     const auto graph = project / "invalid.pulpgraph";
     write_text(graph, "{broken");
@@ -249,11 +250,14 @@ TEST_CASE("pulp graph JSON validation reports a stable error code", "[cli][shell
 }
 
 TEST_CASE("pulp graph fmt is byte stable and render produces a WAV", "[cli][shellout][graph]") {
-    if (!binary_exists()) SKIP("pulp not built");
+    if (!binary_exists())
+        SKIP("pulp not built");
     const auto project = unique_temp_dir("pulp-graph-format-render");
     const auto graph = project / "simple.pulpgraph";
     const auto output = project / "render.wav";
-    write_text(graph, R"({"format_version":1,"nodes":[{"id":1,"type":"audio_in","name":"in","num_input_ports":0,"num_output_ports":2,"gain":1},{"id":2,"type":"audio_out","name":"out","num_input_ports":2,"num_output_ports":0,"gain":1}],"connections":[{"source_node":1,"source_port":0,"dest_node":2,"dest_port":0,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false}]})");
+    write_text(
+        graph,
+        R"({"format_version":1,"nodes":[{"id":1,"type":"audio_in","name":"in","num_input_ports":0,"num_output_ports":2,"gain":1},{"id":2,"type":"audio_out","name":"out","num_input_ports":2,"num_output_ports":0,"gain":1}],"connections":[{"source_node":1,"source_port":0,"dest_node":2,"dest_port":0,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false}]})");
     const auto first = run_pulp({"graph", "fmt", graph.string()});
     REQUIRE(first.exit_code == 0);
     const auto once = read_file(graph);
@@ -263,8 +267,8 @@ TEST_CASE("pulp graph fmt is byte stable and render produces a WAV", "[cli][shel
     const auto valid = run_pulp({"graph", "validate", graph.string(), "--json"});
     REQUIRE(valid.exit_code == 0);
     REQUIRE(valid.stdout_output.find("\"code\":\"ok\"") != std::string::npos);
-    const auto rendered = run_pulp({"graph", "render", graph.string(), "--output",
-                                    output.string(), "--json"});
+    const auto rendered =
+        run_pulp({"graph", "render", graph.string(), "--output", output.string(), "--json"});
     REQUIRE(rendered.exit_code == 0);
     REQUIRE(rendered.stdout_output.find("\"frames\":48000") != std::string::npos);
     REQUIRE(std::filesystem::file_size(output) > 48000);
