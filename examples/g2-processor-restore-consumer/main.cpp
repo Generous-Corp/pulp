@@ -453,8 +453,19 @@ void aggregate_json_boundary() {
     SignalGraph exact;
     const auto accepted = GraphSerializer::from_json(exact, json, options);
     check(accepted.ok, "graph v4 accepts exact 32 MiB decoded aggregate");
-    check(GraphSerializer::to_json(exact) == json,
-          "exact-limit Processor state survives graph JSON roundtrip");
+    const auto reserialized = GraphSerializer::to_json(exact);
+    if (reserialized != json) {
+        // Diagnostic for a CI-only divergence: report where the roundtrip differs.
+        std::size_t at = 0;
+        while (at < json.size() && at < reserialized.size() && json[at] == reserialized[at])
+            ++at;
+        const auto from = at > 120 ? at - 120 : 0;
+        std::cerr << "ROUNDTRIP_DIFF source_size=" << json.size()
+                  << " roundtrip_size=" << reserialized.size() << " first_diff=" << at
+                  << "\nsource   ...=" << json.substr(from, 240)
+                  << "\nroundtrip...=" << reserialized.substr(from, 240) << '\n';
+    }
+    check(reserialized == json, "exact-limit Processor state survives graph JSON roundtrip");
 
     // A fourth state's final byte moves the aggregate one byte past the
     // budget, while every individual part remains under its own cap.
