@@ -242,10 +242,6 @@ function(pulp_add_plugin target)
         # UI <package> implies a view-free link for the standalone too: its
         # editor is the package's, so Pulp's view, render and Dawn stay out of
         # the app, and a package that draws with Dawn brings the only copy.
-        if(NOT _PULP_CONTRACT_STANDALONE_TARGET)
-            message(FATAL_ERROR
-                "pulp_add_plugin(${target} UI ${PLUGIN_UI}): this Pulp SDK does not export the view-free standalone target (pulp::standalone-contract)")
-        endif()
         set(PULP_${target}_VIEW_TARGET "${_PULP_VIEW_TARGET}" CACHE INTERNAL "")
         set(PULP_${target}_STANDALONE_TARGET "${_PULP_CONTRACT_STANDALONE_TARGET}" CACHE INTERNAL "")
         set(PULP_${target}_VIEW_FREE_STANDALONE TRUE CACHE INTERNAL "")
