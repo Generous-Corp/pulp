@@ -142,8 +142,9 @@ void positive_and_isolation() {
     check(render(restored_graph) ==
               std::array<float, 8>{3, 3.75f, 2.25f, 3.375f, 2.625f, 4.5f, 1.5f, 6},
           "graph output depends on restored parameter and custom values");
-    check(GraphSerializer::to_json(restored_graph).empty(),
-          "graph-file persistence remains unsupported");
+    const auto graph_json = GraphSerializer::to_json(restored_graph);
+    check(!graph_json.empty() && graph_json.find("\"processors\"") != std::string::npos,
+          "graph v4 Processor envelope emits through the installed SDK");
 
     auto live = fresh();
     SignalGraph live_graph;
@@ -344,7 +345,7 @@ int main() {
         candidate_aliases();
         independent_parameter_schema();
         std::cout << "PASS: " << checks
-                  << " Processor restore checks; graph v4 persistence not claimed\n";
+                  << " Processor restore and graph v4 emission checks\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

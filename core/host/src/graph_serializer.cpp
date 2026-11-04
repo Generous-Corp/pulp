@@ -1,6 +1,7 @@
 // GraphSerializer implementation: SignalGraph <-> .pulpgraph JSON.
 
 #include <pulp/host/graph_serializer.hpp>
+#include <pulp/host/processor_restore.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/runtime/log.hpp>
 
@@ -901,11 +902,8 @@ bool GraphSerializer::register_migration(int from_version,
 std::string GraphSerializer::to_json(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
-    for (const auto& node : graph.nodes()) {
-        if (graph.is_processor_node(node.id)) {
-            return {};
-        }
-    }
+    bool has_processors = false;
+    for (const auto& node : graph.nodes()) has_processors |= graph.is_processor_node(node.id);
     auto root = choc::value::createObject("PulpGraph");
     const auto regions = graph.sample_regions();
     if (graph.nodes().size() > kMaxSerializedNodes ||
@@ -972,7 +970,7 @@ std::string GraphSerializer::to_json(
     // Preserve canonical bytes for existing ordinary and sample-region files;
     // v4 is selected by the future Processor writer, while the reader accepts
     // region-bearing v4 files through the migration above.
-    const int version = regions.empty() ? 2 : 3;
+    const int version = has_processors ? 4 : (regions.empty() ? 2 : 3);
     root.addMember("format_version", (int64_t)version);
 
     // Nodes
@@ -981,7 +979,7 @@ std::string GraphSerializer::to_json(
         const auto& n = *n_ptr;
         auto node_obj = choc::value::createObject("Node");
         node_obj.addMember("id",   (int64_t)n.id);
-        node_obj.addMember("type", node_type_str(n.type));
+        node_obj.addMember("type", graph.is_processor_node(n.id) ? "processor" : node_type_str(n.type));
         node_obj.addMember("name", n.name);
         node_obj.addMember("num_input_ports",  (int64_t)n.num_input_ports);
         node_obj.addMember("num_output_ports", (int64_t)n.num_output_ports);
@@ -1027,6 +1025,27 @@ std::string GraphSerializer::to_json(
         nodes_arr.addArrayElement(node_obj);
     }
     root.addMember("nodes", nodes_arr);
+
+    if (has_processors) {
+        auto processors = choc::value::createEmptyArray();
+        for (const auto& n : graph.nodes()) {
+            if (!graph.is_processor_node(n.id)) continue;
+            const auto instance = graph.processor_node_instance(n.id);
+            if (!instance) return {};
+            const auto& d = instance->descriptor();
+            auto p = choc::value::createObject("Processor");
+            p.addMember("node_id", (int64_t)n.id);
+            p.addMember("type_id", d.bundle_id);
+            p.addMember("type_version", (int64_t)1);
+            p.addMember("state_schema_version", (int64_t)instance->state_store().state_version());
+            p.addMember("input_channels", (int64_t)d.default_input_channels());
+            p.addMember("output_channels", (int64_t)d.default_output_channels());
+            p.addMember("parameters_b64", b64_encode(instance->state_store().serialize()));
+            p.addMember("custom_b64", b64_encode(instance->processor().serialize_plugin_state()));
+            processors.addArrayElement(p);
+        }
+        root.addMember("processors", processors);
+    }
 
     // Connections
     auto conns_arr = choc::value::createEmptyArray();
@@ -1541,6 +1560,38 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
 
     // Pass 1: instantiate every node, build old-id → new-id map.
     std::unordered_map<NodeId, NodeId> id_map;
+    std::unordered_map<NodeId, std::shared_ptr<format::ProcessorNodeInstance>> restored_processors;
+    if (root.hasObjectMember("processors")) {
+        if (!options.processor_registry) {
+            result.error = "Processor records require a ProcessorRestoreRegistry";
+            return result;
+        }
+        const auto& records_json = root["processors"];
+        if (!records_json.isArray() || records_json.size() > ProcessorRestoreRegistry::max_nodes) {
+            result.error = "invalid processors envelope";
+            return result;
+        }
+        std::vector<std::vector<std::uint8_t>> parameter_blobs, custom_blobs;
+        std::vector<ProcessorRestoreRecord> records;
+        parameter_blobs.reserve(records_json.size()); custom_blobs.reserve(records_json.size());
+        records.reserve(records_json.size());
+        for (uint32_t i = 0; i < records_json.size(); ++i) {
+            const auto& p = records_json[i];
+            auto parameters = b64_decode(p["parameters_b64"].getString());
+            auto custom = b64_decode(p["custom_b64"].getString());
+            if (!parameters || !custom) { result.error = "invalid Processor state encoding"; return result; }
+            parameter_blobs.push_back(std::move(*parameters)); custom_blobs.push_back(std::move(*custom));
+            records.push_back({static_cast<std::uint32_t>(p["node_id"].getInt64()),
+                               {std::string(p["type_id"].getString()), static_cast<int>(p["type_version"].getInt64())},
+                               static_cast<int>(p["state_schema_version"].getInt64()),
+                               static_cast<int>(p["input_channels"].getInt64()),
+                               static_cast<int>(p["output_channels"].getInt64()),
+                               parameter_blobs.back(), custom_blobs.back()});
+        }
+        const auto restored = options.processor_registry->restore_batch(records, options.processor_allowlist);
+        if (!restored.ok()) { result.error = std::string("Processor restore failed: ") + processor_restore_code_name(restored.code); return result; }
+        for (auto& item : restored.processors) restored_processors.emplace(item.node_id, std::move(item.instance));
+    }
     std::unordered_set<NodeId> seen_persisted_node_ids;
     std::unordered_map<NodeId, std::pair<NodeId, std::vector<uint8_t>>> deferred_state;
     std::unordered_set<NodeId> unresolved_plugin_nodes;
@@ -1561,16 +1612,26 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             }
             const std::string name(nv["name"].getString());
             const std::string type_s(nv["type"].getString());
+            const float gain = nv.hasObjectMember("gain") ? (float)get_double(nv["gain"]) : 1.0f;
+            NodeId new_id = 0;
             if (type_s == "processor") {
-                graph.clear();
-                result.error = "Processor nodes are runtime-owned and unsupported by .pulpgraph v1";
-                return result;
+                if (!root.hasObjectMember("processors")) {
+                    graph.clear();
+                    result.error = "Processor nodes are runtime-owned and unsupported by .pulpgraph v1";
+                    return result;
+                }
+                const auto restored = restored_processors.find(old_id);
+                if (restored == restored_processors.end()) { graph.clear(); result.error = "Processor node missing restore record"; return result; }
+                new_id = graph.add_processor_node(std::move(restored->second), name);
+                if (new_id == 0) { graph.clear(); result.error = "failed to add restored Processor node"; return result; }
+                id_map[old_id] = new_id;
+                graph.set_node_gain(new_id, gain);
+                continue;
             }
             NodeType t = NodeType::Custom;
             const bool known_type = parse_type(type_s, t);
             const int in_ch  = (int)nv["num_input_ports"].getInt64();
             const int out_ch = (int)nv["num_output_ports"].getInt64();
-            const float gain = nv.hasObjectMember("gain") ? (float)get_double(nv["gain"]) : 1.0f;
             std::string node_shape_error;
             if (!validate_generated_node_shape(
                     t, type_s, in_ch, out_ch, node_shape_error)) {
@@ -1580,7 +1641,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 return result;
             }
 
-            NodeId new_id = 0;
             switch (t) {
                 case NodeType::AudioInput:  new_id = graph.add_input_node(out_ch, name); break;
                 case NodeType::AudioOutput: new_id = graph.add_output_node(in_ch, name); break;

@@ -198,6 +198,15 @@ bool SignalGraph::is_processor_node(NodeId id) const {
     return processor_nodes_.contains(id);
 }
 
+std::shared_ptr<format::ProcessorNodeInstance>
+SignalGraph::processor_node_instance(NodeId id) const {
+    GraphMutationLock mutation_lock(*this);
+    const auto it = processor_nodes_.find(id);
+    if (it == processor_nodes_.end() || !it->second)
+        return {};
+    return it->second->instance;
+}
+
 bool SignalGraph::set_processor_audio_input_provider(
     NodeId id, format::AudioInputBusProvider provider) noexcept {
     GraphMutationLock mutation_lock(*this);

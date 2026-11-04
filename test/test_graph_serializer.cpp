@@ -2864,7 +2864,10 @@ TEST_CASE("GraphSerializer refuses runtime-owned Processor nodes",
           "[host][serializer][processor-node]") {
     SignalGraph graph;
     REQUIRE(graph.add_processor_node(std::make_unique<RuntimeOnlyProcessor>()) != 0);
-    REQUIRE(GraphSerializer::to_json(graph).empty());
+    const auto emitted = GraphSerializer::to_json(graph);
+    REQUIRE_FALSE(emitted.empty());
+    REQUIRE(emitted.find("\"format_version\"") != std::string::npos);
+    REQUIRE(emitted.find("\"processors\"") != std::string::npos);
 
     constexpr auto encoded = R"json({
       "format_version": 2,

@@ -165,6 +165,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
     NodeId add_processor_node(std::unique_ptr<format::Processor> processor,
                               const std::string& name = {});
     bool is_processor_node(NodeId id) const;
+    /// Returns the retained Processor instance for a runtime-owned node.
+    /// Control-thread only; the returned shared handle keeps the instance alive.
+    std::shared_ptr<format::ProcessorNodeInstance> processor_node_instance(NodeId id) const;
 
     /// Install a host-owned realtime input-bus provider on an in-process
     /// Processor node. The small POD handle is copied before prepare(); the
