@@ -1162,6 +1162,28 @@ class CompiledDataTests(unittest.TestCase):
                 self.assertNotIn("spawning_sources", after["executables"]["pulp-test-d"])
                 self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 0)
 
+    def test_a_missing_nonsignal_header_prevents_a_clean_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            source = write(repo.root, "test/test_d.cpp",
+                           '#include "support/helper.hpp"\nint run() { return fork(); }\n')
+            header = write(repo.root, "test/support/helper.hpp", "struct Helper {};\n")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            list_path = repo.root / sti.DEFAULT_LIST
+            before = list_path.read_bytes()
+            self.assertEqual(json.loads(before)["executables"]["pulp-test-d"]["spawning_sources"],
+                             ["test/test_d.cpp"])
+            source.write_text('#include "support/helper.hpp"\nint run() { return 0; }\n', encoding="utf-8")
+            header.unlink()
+            for mode in ("--write", "--check"):
+                proc = self.run_tool(repo, mode)
+                self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+                self.assertIn('unresolved quoted include "support/helper.hpp"', proc.stderr)
+                self.assertEqual(list_path.read_bytes(), before)
+            header.write_text("struct Helper {};\n", encoding="utf-8")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 0)
+
     def test_detected_sources_lists_only_what_a_signal_matched(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)

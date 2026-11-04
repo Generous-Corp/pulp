@@ -850,8 +850,14 @@ def source_signals(root: Path, rel: str, defines: list[str]) -> list[str]:
     return hits
 
 
-def _test_include_closure(root: Path, rel: str) -> list[str]:
-    """`rel` and every header under test/ it reaches through quoted includes."""
+def _test_include_closure(root: Path, rel: str, *, unreadable: set[str] | None = None) -> list[str]:
+    """`rel` and every header under test/ it reaches through quoted includes.
+
+    The optional diagnostic set makes an incomplete closure explicit to
+    callers that need proof of a clean scan. Unresolved quoted includes are
+    conservative failures there, even if an external include directory might
+    resolve them during compilation.
+    """
     seen: list[str] = []
     stack = [rel]
     while stack:
@@ -861,14 +867,19 @@ def _test_include_closure(root: Path, rel: str) -> list[str]:
         try:
             text = (root / cur).read_text(encoding="utf-8", errors="replace")
         except OSError:
+            if unreadable is not None:
+                unreadable.add(cur)
             continue
         seen.append(cur)
-        for name in INCLUDE.findall(text):
+        for name in INCLUDE.findall(strip_c_comments(text, keep_strings=True)):
             for base in (os.path.dirname(cur), "test", "test/support"):
                 cand = os.path.normpath(os.path.join(base, name))
                 if cand.startswith("test/") and (root / cand).is_file():
                     stack.append(cand)
                     break
+            else:
+                if unreadable is not None:
+                    unreadable.add(f'{cur}: unresolved quoted include "{name}"')
     return seen
 
 
@@ -1329,15 +1340,11 @@ def retain_scanned_clean_entries(current: dict, checked_in: dict, root: Path,
         previous = checked_in["executables"][name]
         scan_sources = (set(sources) | set(previous.get("sources") or [])
                         | set(previous.get("spawning_sources") or []))
-        unreadable = []
+        unreadable: set[str] = set()
         for source in sorted(scan_sources):
-            try:
-                with (root / source).open("rb") as stream:
-                    stream.read(1)
-            except OSError:
-                unreadable.append(source)
+            _test_include_closure(root, source, unreadable=unreadable)
         if unreadable:
-            problems.append(f"{name}: unreadable scan sources: {', '.join(unreadable)}")
+            problems.append(f"{name}: unreadable scan sources: {', '.join(sorted(unreadable))}")
             continue
         entries[name] = {"kind": "compiled", "data": "none", "inputs": [],
                          "sources": [], "undeclared_sources": []}
