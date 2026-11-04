@@ -254,7 +254,9 @@ TEST_CASE("Independent audio feedback survives spectral preparation",
             std::array<float, 64> input{}, output{};
             const float* ip[] = {input.data()};
             float* op[] = {output.data()};
-            graph.process({op, 1, 64}, {ip, 1, 64}, 64);
+            pulp::audio::BufferView<float> ov{op, 1, 64};
+            pulp::audio::BufferView<const float> iv{ip, 1, 64};
+            graph.process(ov, iv, 64);
             for (float value : output)
                 REQUIRE(value == 0);
             REQUIRE(graph.routed_walk_fallbacks() == 0);
