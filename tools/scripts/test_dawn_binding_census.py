@@ -152,7 +152,8 @@ class MachOFixtures(unittest.TestCase):
     def test_the_command_line_exit_status(self) -> None:
         script = Path(census.__file__)
         run = lambda *a: subprocess.run([sys.executable, str(script), *map(str, a)],
-                                        capture_output=True, text=True).returncode
+                                        capture_output=True, text=True,
+                                        encoding="utf-8").returncode
         self.assertEqual(run(self.zero, self.one), 0)
         self.assertEqual(run(self.one, self.two), 1)
         self.assertEqual(run(self.dir / "missing"), 2)
