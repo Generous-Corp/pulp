@@ -12,6 +12,7 @@ REVIEWED_MINIMAL_TARGETS = {
     'pulp/host/signal_graph_executor_routing.hpp': 'Pulp::host',
     'pulp/host/spectral_graph.hpp': 'Pulp::host',
     'pulp/audio/live_dsp_telemetry.hpp': 'Pulp::audio',
+    "pulp/signal/spectral_frame_codec.hpp": "Pulp::signal",
     "pulp/audio/impulse_response.hpp": "Pulp::audio",
     "pulp/audio/format_registry.hpp": "Pulp::audio",
     "pulp/audio/audio_file.hpp": "Pulp::audio",
@@ -188,6 +189,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
 
     {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
 
+    {
+        "include": "pulp/signal/spectral_frame_codec.hpp",
+        "fingerprint": "sha256:43e9fbdc2c1acf08d70523589b8cf25d4a4e98ea531898bfc2978aa5eec72a37",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Offline owned-value spectral stream encoding and strict decoding. This is "
+            "persistence infrastructure, not a generator-facing DSP transform, graph "
+            "routing contract, Processor serializer, or synthesis capability."
+        ),
+    },
     {
         "include": "pulp/signal/indexed_control.hpp",
         "fingerprint": "sha256:c25979e2e1c3b30cef33b022b908411bed087824f1407777e68d0809ed27632a",
