@@ -1,4 +1,4 @@
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_runtime.hpp>
 
 #include <cstdint>
 #include <iostream>
@@ -60,7 +60,8 @@ int main() try {
     // Planted negative: an unknown node never yields a fabricated latency entry.
     require(graph.node_latency_samples(999999) == 0, "unknown-node-zero");
     std::cout << "g7-latency-pdc PASS total_latency_samples=" << graph.latency_samples()
-              << " delayed_node_input_latency_samples=" << graph.node_latency_samples(delayed) << '\n';
+              << " delayed_node_input_latency_samples=" << graph.node_latency_samples(delayed)
+              << '\n';
     return 0;
 } catch (const std::exception& error) {
     std::cerr << "g7-latency-pdc FAIL rule=" << error.what() << '\n';
