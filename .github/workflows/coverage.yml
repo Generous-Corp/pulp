@@ -106,8 +106,8 @@ jobs:
     if: github.head_ref != 'release/version-bump' && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.x'
       - name: Install PyYAML
@@ -147,7 +147,7 @@ jobs:
       #   - schedule / dispatch → forced to true (full coverage on canonical lanes)
       ios: ${{ github.event_name != 'pull_request' || github.event.action == 'auto_merge_enabled' || steps.filter.outputs.ios == 'true' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
           lfs: false
@@ -199,7 +199,7 @@ jobs:
       windows_route: ${{ steps.resolve.outputs.windows_route }}
       android_kotlin_runs_on: ${{ steps.resolve.outputs.android_kotlin_runs_on }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
           lfs: false
@@ -320,7 +320,7 @@ jobs:
       # diff-mode so docs-only changes still skip the expensive native build.
       native_build_required: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.action == 'auto_merge_enabled' || steps.classify.outputs.native_build_required }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           lfs: false
@@ -429,7 +429,7 @@ jobs:
     # upload set. If Windows fits the cap, it still uploads its own current flag.
     continue-on-error: ${{ matrix.os == 'windows' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
           # No current coverage input is stored as an LFS object. Keep this
@@ -863,7 +863,7 @@ jobs:
         # The suite's full output, kept off the runner's log (see the coverage
         # step). Uploaded even when the suite failed.
         if: always() && matrix.os == 'linux'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: coverage-suite-log-${{ matrix.os }}-${{ github.sha }}
           path: build-coverage/coverage-suite.log
@@ -968,7 +968,7 @@ jobs:
 
       - name: Upload HTML report
         if: always() && env.PULP_COVERAGE_SKIP_HTML != '1'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: coverage-report-${{ matrix.os }}-${{ github.sha }}
           path: build-coverage/coverage/
@@ -977,7 +977,7 @@ jobs:
       - name: Upload summary
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: coverage-summary-${{ matrix.os }}-${{ github.sha }}
           path: build-coverage/coverage/summary.txt
@@ -985,7 +985,7 @@ jobs:
 
       - name: Upload Python HTML report
         if: always() && matrix.os == 'linux'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: coverage-python-report-${{ github.sha }}
           path: build-coverage/python/html/
@@ -995,7 +995,7 @@ jobs:
       - name: Upload Python summary
         if: always() && matrix.os == 'linux'
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: coverage-python-summary-${{ github.sha }}
           path: build-coverage/python/summary.txt
@@ -1008,7 +1008,7 @@ jobs:
         # upload and `if-no-files-found: error` would hard-fail the leg.
         if: always() && matrix.os == 'macos' && needs.changed-files.outputs.ios == 'true'
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: coverage-apple-summary-${{ github.sha }}
           path: build-coverage/apple/summary.txt
@@ -1113,7 +1113,7 @@ jobs:
         # build/ctest-failure report as a diagnostic artifact; the semantic
         # verifier prevents that partial report from reaching Codecov.
         if: always() && steps.coverage-suite.outputs.budget_hit != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ matrix.os == 'linux' && format('coverage-cobertura-{0}', github.sha) || format('coverage-cobertura-{0}-{1}', matrix.os, github.sha) }}
           path: build-coverage/coverage.cobertura.xml
@@ -1122,7 +1122,7 @@ jobs:
 
       - name: Upload Python Cobertura XML
         if: always() && matrix.os == 'linux'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: coverage-python-${{ github.sha }}
           path: build-coverage/python/coverage.python.xml
@@ -1134,7 +1134,7 @@ jobs:
         # `if-no-files-found: error` would hard-fail the leg when the
         # Swift step legitimately skipped on a non-iOS PR diff.
         if: always() && matrix.os == 'macos' && needs.changed-files.outputs.ios == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: coverage-apple-${{ github.sha }}
           path: build-coverage/apple/coverage.apple.lcov
@@ -1498,7 +1498,7 @@ jobs:
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.android_kotlin_runs_on) }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
 
@@ -1582,7 +1582,7 @@ jobs:
 
       - name: Upload Kotlin coverage artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: android-kotlin-coverage-${{ github.sha }}
           path: |
@@ -1611,7 +1611,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
           lfs: false
@@ -1655,7 +1655,7 @@ jobs:
 
       - name: Upload pulp-react coverage artifact
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pulp-react-coverage-${{ github.sha }}
           path: packages/pulp-react/coverage/cobertura-coverage.xml
@@ -1763,7 +1763,7 @@ jobs:
           echo "gate_ready=true" >> "$GITHUB_OUTPUT"
           echo "Native coverage required and coverage job succeeded — running diff-cover."
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         if: steps.gate_preconditions.outputs.gate_ready == 'true'
         with:
           # diff-cover compares HEAD against --compare-branch using real
@@ -2106,7 +2106,7 @@ jobs:
 
       - name: Upload diff-cover report artifact
         if: always() && steps.gate_preconditions.outputs.gate_ready == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: coverage-diff-${{ github.sha }}
           path: |

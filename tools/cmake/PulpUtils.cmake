@@ -322,6 +322,8 @@ endif()
 # The plugin module's ordinary-build default remains
 # `set(_pulp_control_profile "production-stripped")`.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpUiAssets.cmake")
+# pulp_add_plugin(... UI <package>): the per-plug-in editor-factory hook.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpEditorPackage.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpJsBytecode.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpInstall.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpReload.cmake")
