@@ -59,7 +59,10 @@ class ToneProcessor final : public pulp::format::Processor {
     double phase_ = 0.0;
 };
 
-std::vector<float> render(const pulp::midi::TuningProvider& tuning, std::size_t block_frames) {
+std::vector<float> render(const pulp::midi::TuningProvider& tuning, std::size_t block_frames,
+                          bool force_failure = false) {
+    if (force_failure)
+        return {};
     const auto note = tuning.note_to_frequency(69);
     if (!note.valid || note.should_filter_note || !std::isfinite(note.frequency_hz) ||
         note.frequency_hz <= 0.0 || note.frequency_hz >= kSampleRate / 2.0)
@@ -88,12 +91,12 @@ std::vector<float> render(const pulp::midi::TuningProvider& tuning, std::size_t 
     return {result.audio.channel(0).begin(), result.audio.channel(0).end()};
 }
 
-bool matches_oracle(const std::vector<float>& audio) {
+bool matches_oracle(const std::vector<float>& audio, double frequency_hz) {
     if (audio.size() != kFrames)
         return false;
     for (std::size_t frame = 0; frame < kFrames; ++frame) {
-        const auto expected =
-            std::sin(2.0 * std::numbers::pi * kTunedA4 * static_cast<double>(frame) / kSampleRate);
+        const auto expected = std::sin(2.0 * std::numbers::pi * frequency_hz *
+                                       static_cast<double>(frame) / kSampleRate);
         if (!std::isfinite(audio[frame]) ||
             std::abs(static_cast<double>(audio[frame]) - expected) > 2.0e-5)
             return false;
@@ -104,7 +107,9 @@ bool matches_oracle(const std::vector<float>& audio) {
 } // namespace
 
 int main(int argc, char** argv) {
-    const bool planted = argc == 2 && std::string_view(argv[1]) == "--planted-default-a4";
+    const bool failed_render = argc == 2 && std::string_view(argv[1]) == "--test-failed-render";
+    const bool planted =
+        argc == 2 && (std::string_view(argv[1]) == "--planted-default-a4" || failed_render);
     if (argc > 1 && !planted)
         return 2;
 
@@ -113,15 +118,18 @@ int main(int argc, char** argv) {
         std::abs(tuning.note_to_frequency(69).frequency_hz - (planted ? 440.0 : kTunedA4)) > 1.0e-9)
         return 3;
 
-    const auto blocks32 = render(tuning, 32);
-    const auto blocks17 = render(tuning, 17);
+    const auto blocks32 = render(tuning, 32, failed_render);
+    const auto blocks17 = render(tuning, 17, failed_render);
+    if (blocks32.size() != kFrames || blocks17.size() != kFrames)
+        return 7;
     if (planted) {
-        if (matches_oracle(blocks32) || matches_oracle(blocks17))
+        if (!matches_oracle(blocks32, 440.0) || !matches_oracle(blocks17, 440.0) ||
+            matches_oracle(blocks32, kTunedA4) || matches_oracle(blocks17, kTunedA4))
             return 4;
         std::cerr << "planted-default-a4 rejected by tuned audio oracle\n";
         return 42;
     }
-    if (!matches_oracle(blocks32) || !matches_oracle(blocks17) ||
+    if (!matches_oracle(blocks32, kTunedA4) || !matches_oracle(blocks17, kTunedA4) ||
         blocks32.size() != blocks17.size())
         return 5;
     for (std::size_t frame = 0; frame < blocks32.size(); ++frame)

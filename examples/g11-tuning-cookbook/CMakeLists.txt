@@ -16,3 +16,9 @@ add_test(NAME graph-tuning-planted-default-a4
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/planted_negative.cmake)
 set_tests_properties(graph-tuning-planted-default-a4
                      PROPERTIES LABELS "examples;installed-sdk;graph;tuning;negative")
+add_test(NAME graph-tuning-failed-render-refused
+         COMMAND ${CMAKE_COMMAND}
+                 -DPROBE=$<TARGET_FILE:pulp-graph-tuning-cookbook>
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/failed_render.cmake)
+set_tests_properties(graph-tuning-failed-render-refused
+                     PROPERTIES LABELS "examples;installed-sdk;graph;tuning;negative")
