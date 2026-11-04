@@ -603,7 +603,7 @@ TEST_CASE("Static raster cache paints transformed and non-leaf content directly"
 TEST_CASE("Scripted raster cache refreshes after canvas command replacement",
           "[view][subtree-cache][raster][bridge]") {
     class CountingCanvas : public pulp::view::CanvasWidget {
-    public:
+      public:
         int paints = 0;
         void paint(Canvas& canvas) override {
             ++paints;
