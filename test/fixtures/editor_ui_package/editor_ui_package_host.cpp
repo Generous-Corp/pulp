@@ -7,12 +7,20 @@
 // the UI package its own pulp_add_plugin() declared: a module loaded later
 // must not replace an earlier module's choice, and a module that declared
 // none must report none while the others are loaded.
+//
+// Each UI package module is view-free (UI implies NO_EDITOR), so its only GUI
+// is the editor-host contract's. The host instantiates it and opens that GUI:
+// create, set_parent, a size, destroy. A module without a package must offer
+// no GUI at all.
 
 #if defined(_WIN32)
 #include <windows.h>
 #else
 #include <dlfcn.h>
 #endif
+
+#include <clap/clap.h>
+#include <clap/ext/gui.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -22,31 +30,11 @@
 
 namespace {
 
-// The CLAP C ABI, declared here so the host carries no SDK.
-struct ClapVersion {
-    std::uint32_t major, minor, revision;
-};
-struct ClapDescriptorHead {
-    ClapVersion version;
-    const char* id;
-    const char* name;
-};
-struct ClapFactoryHead {
-    std::uint32_t (*get_plugin_count)(const void* factory);
-    const ClapDescriptorHead* (*get_plugin_descriptor)(const void* factory, std::uint32_t index);
-};
-struct ClapEntry {
-    ClapVersion version;
-    bool (*init)(const char* path);
-    void (*deinit)();
-    const void* (*get_factory)(const char* id);
-};
-
 struct Module {
     std::string path;
     std::string expected;
     void* handle = nullptr;
-    const ClapEntry* entry = nullptr;
+    const clap_plugin_entry_t* entry = nullptr;
 };
 
 void* open_module(const char* path) {
@@ -71,6 +59,68 @@ void close_module(void* handle) {
 #else
     dlclose(handle);
 #endif
+}
+
+const char* platform_api() {
+#if defined(__APPLE__)
+    return CLAP_WINDOW_API_COCOA;
+#elif defined(_WIN32)
+    return CLAP_WINDOW_API_WIN32;
+#else
+    return CLAP_WINDOW_API_X11;
+#endif
+}
+
+int g_fake_window = 0;
+
+// Open and close the plug-in's GUI. Returns an empty string on success, or
+// what went wrong.
+std::string open_gui(const clap_plugin_factory_t* factory, const char* id, bool expect_gui) {
+    clap_host_t host{};
+    host.clap_version = CLAP_VERSION;
+    host.name = "pulp-test-editor-ui-package-host";
+    host.vendor = "Pulp";
+    host.url = "";
+    host.version = "1";
+    host.get_extension = [](const clap_host_t*, const char*) -> const void* { return nullptr; };
+    host.request_restart = [](const clap_host_t*) {};
+    host.request_process = [](const clap_host_t*) {};
+    host.request_callback = [](const clap_host_t*) {};
+
+    const clap_plugin_t* plugin = factory->create_plugin(factory, &host, id);
+    if (plugin == nullptr || !plugin->init(plugin))
+        return "plug-in did not instantiate";
+    std::string error;
+    const auto* gui =
+        static_cast<const clap_plugin_gui_t*>(plugin->get_extension(plugin, CLAP_EXT_GUI));
+    if (!expect_gui) {
+        if (gui != nullptr)
+            error = "offers a GUI without a UI package";
+    } else if (gui == nullptr) {
+        error = "offers no GUI";
+    } else if (!gui->is_api_supported(plugin, platform_api(), false)) {
+        error = "does not support the platform window API";
+    } else if (!gui->create(plugin, platform_api(), false)) {
+        error = "gui create failed";
+    } else {
+        clap_window_t window{};
+        window.api = platform_api();
+#if defined(_WIN32)
+        window.win32 = &g_fake_window;
+#elif defined(__APPLE__)
+        window.cocoa = &g_fake_window;
+#else
+        window.x11 = 42;
+#endif
+        uint32_t w = 0, h = 0;
+        if (!gui->set_parent(plugin, &window))
+            error = "gui set_parent failed";
+        else if (!gui->get_size(plugin, &w, &h) || w != 320 || h != 200)
+            error = "gui size is not the editor's 320x200";
+        gui->destroy(plugin);
+    }
+    plugin->destroy(plugin);
+    return error;
 }
 
 } // namespace
@@ -100,7 +150,7 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "FAIL cannot load %s\n", m.path.c_str());
             return 1;
         }
-        m.entry = static_cast<const ClapEntry*>(find_symbol(m.handle, "clap_entry"));
+        m.entry = static_cast<const clap_plugin_entry_t*>(find_symbol(m.handle, "clap_entry"));
         if (m.entry == nullptr || !m.entry->init(m.path.c_str())) {
             std::fprintf(stderr, "FAIL no usable clap_entry in %s\n", m.path.c_str());
             return 1;
@@ -110,8 +160,8 @@ int main(int argc, char** argv) {
     // Reverse order: the module loaded last is read first, so a choice that
     // leaked between images would show on the earlier ones.
     for (auto it = modules.rbegin(); it != modules.rend(); ++it) {
-        const auto* factory =
-            static_cast<const ClapFactoryHead*>(it->entry->get_factory("clap.plugin-factory"));
+        const auto* factory = static_cast<const clap_plugin_factory_t*>(
+            it->entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
         const std::uint32_t count = factory != nullptr ? factory->get_plugin_count(factory) : 0;
         if (count != 1) {
             std::fprintf(stderr, "FAIL %s lists %u plug-ins, expected 1\n", it->path.c_str(),
@@ -126,9 +176,17 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "FAIL %s reports %s, expected %s\n", it->path.c_str(), name,
                          it->expected.c_str());
             ++failures;
-        } else {
-            std::printf("ok   %s reports %s\n", it->path.c_str(), name);
+            continue;
         }
+        const bool expect_gui = it->expected != "editor:none";
+        const std::string gui_error = open_gui(factory, descriptor->id, expect_gui);
+        if (!gui_error.empty()) {
+            std::fprintf(stderr, "FAIL %s %s\n", it->path.c_str(), gui_error.c_str());
+            ++failures;
+            continue;
+        }
+        std::printf("ok   %s reports %s%s\n", it->path.c_str(), name,
+                    expect_gui ? " and opens its contract GUI" : " and offers no GUI");
     }
 
     for (auto& m : modules) {

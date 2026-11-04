@@ -483,6 +483,41 @@ host has attached" protocol.
 Window API negotiation is compile-time platform-switched to Cocoa /
 Win32 / X11.
 
+### Contract editors (`clap_contract_gui.cpp`)
+
+A processor whose initialized `editor_factory()` is non-null gets the contract
+`clap_plugin_gui` instead of the `create_view()` one, in GUI and view-free builds
+alike. The contract GUI lives in `clap_contract_gui.cpp`, which is compiled into
+both `pulp-format-clap-core` and `pulp-format-view`. It sits on a
+`ContractEditorSession` (shared with VST3, and with AU next). Things to keep
+straight:
+
+- The choice is made in `clap_entry.hpp`'s `get_static_extension`, which reads
+  `PulpClapPlugin::editor_factory`. `clap_init()` caches it from
+  `Processor::editor_factory()` on the main thread, because `get_extension()`
+  may be called from any thread and `editor_factory()` is main-thread only.
+  Do not call `editor_factory()` from the extension lookup. Before `init()`
+  there is no factory, so a GUI query then gets the legacy GUI (in a
+  `PULP_CLAP_GUI` build) or none.
+- Per-instance state is `PulpClapPlugin::contract_gui`, a type-erased
+  `std::shared_ptr<void>`, so `clap_adapter.hpp` and `clap_adapter.cpp` need no
+  contract types. It is declared after `processor` and outside the
+  `PULP_CLAP_GUI` block, so its offset does not depend on that define, and a
+  GUI the host never destroyed goes before the processor that owns its factory.
+- Idle: when the host offers `timer-support`, a timer is registered at
+  `set_parent()` and ticked through this plug-in's `timer-support` extension. The
+  plug-in only exposes that extension when the contract applies. Without host
+  timers, or when the host refuses `register_timer()`, the session ticks itself
+  from `detail::MainThreadTimer` (`use_self_paced_idle()`). The timer is given
+  back in gui `destroy()` and in `ContractGui`'s destructor. On Apple the
+  session's own tick is a main-queue dispatch source, so tests pump the real
+  run loop (`test_support::MainLoop`) and wait for ticks rather than count
+  posted tasks.
+- CLAP has no key callback, so keys reach a contract editor only through its
+  own native view.
+- WebCLAP (`PULP_WCLAP`) leaves the contract GUI out; `PulpWclap.cmake`'s source
+  list carries no contract code.
+
 ### Proportional resize with aspect lock
 
 `gui_can_resize` returns `true`. `gui_get_resize_hints` advertises
