@@ -80,8 +80,8 @@
       "sample_one": {
         "attempts": 1,
         "accepted": 1,
-        "overflow": 0,
-        "refusals": 0,
+        "overflow": 7,
+        "refusals": 2,
         "next_sequence": 17
       }
     },
@@ -165,8 +165,8 @@
       "sample_one": {
         "attempts": 1,
         "accepted": 1,
-        "overflow": 0,
-        "refusals": 0,
+        "overflow": 7,
+        "refusals": 2,
         "next_sequence": 17
       }
     }
