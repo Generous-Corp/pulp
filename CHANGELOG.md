@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1540"></a>
+## [1.54.0] - 2026-11-04
+
+- release/version bump ([#11503](https://github.com/Generous-Corp/pulp/pull/11503))
+- codex/g6 voice contract 20261104 ([#11495](https://github.com/Generous-Corp/pulp/pull/11495))
+- codex/windows fetchcontent isolation 20261103 ([#11499](https://github.com/Generous-Corp/pulp/pull/11499))
+- codex/g5 events wave2 20261103 ([#11473](https://github.com/Generous-Corp/pulp/pull/11473))
+
 <a id="v1530"></a>
 ## [1.53.0] - 2026-11-04
 
@@ -12162,6 +12170,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.54.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.54.0
 [1.53.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.53.0
 [1.52.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.52.0
 [1.51.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.51.0

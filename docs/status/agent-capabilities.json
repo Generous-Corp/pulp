@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 88,
+  "manifest_revision": 89,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -15879,6 +15879,26 @@
               "algorithmic_latency_samples()",
               "startup_samples()",
               "retained_fft_bytes()"
+            ],
+            "enums": []
+          }
+        ],
+        "spectral_frame_codec.hpp": [
+          {
+            "class": "EncodedSpectralStream",
+            "qualified_name": "pulp::signal::EncodedSpectralStream",
+            "template": null,
+            "methods": [
+              "view()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "SpectralCodecResult",
+            "qualified_name": "pulp::signal::SpectralCodecResult",
+            "template": "class T",
+            "methods": [
+              "bool()"
             ],
             "enums": []
           }
