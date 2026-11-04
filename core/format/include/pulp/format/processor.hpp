@@ -1228,17 +1228,27 @@ public:
     /// processor and must outlive every editor it creates; the returned
     /// pointer is non-owning. Called on the host's main thread.
     ///
-    /// Null (the default) leaves the processor on the existing editor path
-    /// (`has_editor()`, `create_view()` and the hooks around them), which
-    /// format adapters keep using unchanged. A processor with no factory and
-    /// `has_editor() == false` is headless.
+    /// The default returns the factory of the UI package this plug-in's
+    /// binary declares with `pulp_add_plugin(... UI <package>)` (see
+    /// `pulp/format/editor_package.hpp`), so a plug-in gets its package's
+    /// editor without overriding this. Each plug-in binary carries its own
+    /// choice; every processor in that binary that does not override this
+    /// shares it. An override wins over the package.
+    ///
+    /// Null (no UI package, `UI none`, and no override) leaves the processor
+    /// on the existing editor path (`has_editor()`, `create_view()` and the
+    /// hooks around them), which format adapters keep using unchanged. A
+    /// processor with no factory and `has_editor() == false` is headless.
+    ///
+    /// Defined out of line (format.cpp) so a derived class's vtable names
+    /// this exported member rather than the hidden image-local accessor: a
+    /// hot-reload logic dylib resolves Processor's members from the plug-in
+    /// that loads it, and could not resolve a hidden symbol.
     ///
     /// Appended to preserve additive-only vtable ordering (node_abi_gate).
-    virtual EditorFactory* editor_factory() {
-        return nullptr;
-    }
+    virtual EditorFactory* editor_factory();
 
-private:
+  private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;
     static constexpr std::size_t kF64FallbackMaxBuses = 16;
 

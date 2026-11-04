@@ -72,7 +72,7 @@ jobs:
       # host's ccache is shared with PR jobs, so every object is compiled here.
       CCACHE_DISABLE: "1"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       # The FetchContent seed and the configure-check cache are shared with PR
       # jobs on a self-hosted pool, so CMake fetches every dependency at its
@@ -270,12 +270,12 @@ jobs:
       # assemble-gallery.mjs with "missing wasm for example-plugins/mono-synth". The
       # skip is quiet; the assemble is not. Without these two checkouts this workflow
       # cannot deploy the gallery at all, which is exactly how it broke.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         if: steps.relevance.outputs.run == 'true'
         with:
           repository: danielraffel/pulp-example-plugins
           path: _ext/pulp-example-plugins
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         if: steps.relevance.outputs.run == 'true'
         with:
           repository: danielraffel/pulp-classic-effects
@@ -541,7 +541,7 @@ jobs:
 
       - name: Upload proof screenshots
         if: always() && steps.relevance.outputs.run == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: wclap-cloudflare-proof
           path: |

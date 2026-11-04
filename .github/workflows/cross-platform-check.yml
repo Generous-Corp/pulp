@@ -81,7 +81,7 @@ jobs:
     env:
       PULP_BUILD_DIR: build-linux
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: false
 
@@ -184,7 +184,7 @@ jobs:
 
       - name: Upload Linux build + test logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: cross-platform-linux-logs
           path: |
@@ -205,7 +205,7 @@ jobs:
     env:
       PULP_BUILD_DIR: build-linux-arm64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: false
 
@@ -288,7 +288,7 @@ jobs:
 
       - name: Upload Linux build + test logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: cross-platform-linux-arm64-logs
           path: |
@@ -314,7 +314,7 @@ jobs:
     outputs:
       runs_on: ${{ steps.resolve.outputs.runs_on }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           sparse-checkout: tools/scripts/windows_runner_selector.py
           sparse-checkout-cone-mode: false
@@ -338,7 +338,7 @@ jobs:
     env:
       PULP_BUILD_DIR: build-windows
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: false
 
@@ -477,7 +477,7 @@ jobs:
 
       - name: Upload Windows build + test logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: cross-platform-windows-logs
           path: |
@@ -505,7 +505,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
 
@@ -579,7 +579,7 @@ jobs:
 
       - name: Upload Android build logs + APK
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: cross-platform-android-logs
           path: |

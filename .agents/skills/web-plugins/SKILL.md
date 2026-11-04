@@ -1403,6 +1403,14 @@ The same applies to any sibling file the adapter calls into: `PulpWclap.cmake`
 already lists `clap_remote_controls.cpp` and `clap_note_name.cpp` next to
 `clap_adapter.cpp` for exactly this reason.
 
+The headless `Processor` defaults follow the same rule. The native
+`Processor::editor_factory()` definition lives in `format.cpp`, but WAM and
+WebCLAP use `headless_defaults.cpp` instead; that TU must keep the headless
+definition, and both curated source lists must include `editor_package.cpp` for
+the image-local hook implementation. Otherwise every WebCLAP module fails at
+`wasm-ld` with an undefined `Processor::editor_factory()` symbol even though
+native editor-host and reload tests pass.
+
 ## The source list covers `core/runtime/` too — not just the adapter's TUs
 
 The rule above ("a new CLAP adapter TU must be added to `PulpWclap.cmake`")

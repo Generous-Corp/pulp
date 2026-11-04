@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pathlib
 import shutil
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -19,6 +20,21 @@ import unittest
 REPO = pathlib.Path(__file__).resolve().parents[2]
 FINDSKIA = REPO / "tools/cmake/FindSkia.cmake"
 WINDOWS_PROVIDER = REPO / "tools/cmake/PulpWindowsSkiaProvider.cmake"
+
+
+def _archive_with_coff_members(machine: int) -> bytes:
+    """Return a minimal valid COFF archive for the configure fixture."""
+    def member(name: str, payload: bytes) -> bytes:
+        header = f"{name:<16}{0:>12}{0:>6}{0:>6}{0:>8}{len(payload):>10}`\n".encode("ascii")
+        assert len(header) == 60
+        return header + payload + (b"\n" if len(payload) & 1 else b"")
+
+    payload = bytearray(20)
+    struct.pack_into("<H", payload, 0, machine)
+    data = bytearray(b"!<arch>\n")
+    data.extend(member("/", b"linker index"))
+    data.extend(member("member.obj/", bytes(payload)))
+    return bytes(data)
 
 
 class FindSkiaWindowsArm64Slice(unittest.TestCase):
@@ -38,6 +54,16 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
         skia = self.tmp / name
         release = skia / "build" / "win-gpu" / "lib" / "Release"
         (skia / "build" / "include").mkdir(parents=True, exist_ok=True)
+        if arm64ec or arm64x:
+            # The provider guard checks the metadata and the actual COFF
+            # members, so the fixture must model both rather than using a
+            # text placeholder that could never reach a real linker.
+            (skia / "build" / "win-gpu").mkdir(parents=True, exist_ok=True)
+            (skia / "build" / "win-gpu" / "msvc-toolchain.json").write_text(
+                '{"target":{"architecture":"%s"}}\n'
+                % ("arm64ec" if arm64ec else "arm64x"),
+                encoding="utf-8",
+            )
         # FindSkia only needs archive-shaped paths for this configure test; the
         # real linkable contents are supplied by skia-builder.
         for libdir, present in ((release / "arm64", arm64),
@@ -47,9 +73,16 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
                                 (release, flat)):
             if present:
                 libdir.mkdir(parents=True, exist_ok=True)
-                (libdir / "skia.lib").write_bytes(b"fixture\n")
+                machine = 0xA641 if arm64ec else 0xA64E if arm64x else 0xAA64
+                (libdir / "skia.lib").write_bytes(
+                    _archive_with_coff_members(machine)
+                    if arm64ec or arm64x else b"fixture\n"
+                )
                 if dawn:
-                    (libdir / "dawn_combined.lib").write_bytes(b"fixture\n")
+                    (libdir / "dawn_combined.lib").write_bytes(
+                        _archive_with_coff_members(machine)
+                        if arm64ec or arm64x else b"fixture\n"
+                    )
         return skia
 
     def _configure(self, skia: pathlib.Path, *, target_arch: str, expect_found: bool,

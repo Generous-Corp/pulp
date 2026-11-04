@@ -167,6 +167,113 @@ TEST_CASE("pulp --help is an alias for pulp help", "[cli][shellout]") {
     REQUIRE(c.stdout_output.find("pulp") != std::string::npos);
 }
 
+TEST_CASE("pulp graph canonicalize refuses unresolved plugin state", "[cli][shellout][graph]") {
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
+
+    const auto project = unique_temp_dir("pulp-graph-canonicalize-plugin-state");
+    const auto graph = project / "stateful.pulpgraph";
+    const std::string original = R"({
+  "format_version": 1,
+  "nodes": [{
+    "id": 1,
+    "type": "plugin",
+    "name": "Missing Plugin",
+    "num_input_ports": 1,
+    "num_output_ports": 1,
+    "gain": 1,
+    "plugin": {
+      "format": "clap",
+      "unique_id": "pulp.test.missing.state",
+      "name": "Missing Plugin",
+      "manufacturer": "PulpTest",
+      "version": "1.0.0",
+      "last_path": "/nonexistent/Missing.clap",
+      "state_b64": "AAE="
+    }
+  }],
+  "connections": []
+}
+)";
+    write_text(graph, original);
+
+    const auto result = run_pulp({"graph", "canonicalize", graph.string()});
+    REQUIRE(result.exit_code != 0);
+    REQUIRE_FALSE(result.timed_out);
+    REQUIRE((result.stdout_output + result.stderr_output).find("unresolved") != std::string::npos);
+    REQUIRE(read_file(graph) == original);
+}
+
+TEST_CASE("pulp graph canonicalize preserves editor layout", "[cli][shellout][graph]") {
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
+
+    const auto project = unique_temp_dir("pulp-graph-canonicalize-layout");
+    const auto graph = project / "layout.pulpgraph";
+    write_text(graph, R"({
+  "format_version": 1,
+  "nodes": [{
+    "id": 1,
+    "type": "gain",
+    "name": "Gain",
+    "num_input_ports": 2,
+    "num_output_ports": 2,
+    "gain": 1,
+    "layout": {"x": 123.5, "y": 45.25}
+  }],
+  "connections": []
+}
+
+
+)");
+
+    const auto result = run_pulp({"graph", "canonicalize", graph.string()});
+    REQUIRE(result.exit_code == 0);
+    const auto out = read_file(graph);
+    REQUIRE(out.find("\"layout\"") != std::string::npos);
+    REQUIRE(out.find("123.5") != std::string::npos);
+    REQUIRE(out.find("45.25") != std::string::npos);
+}
+
+TEST_CASE("pulp graph JSON validation reports a stable error code", "[cli][shellout][graph]") {
+    if (!binary_exists())
+        SKIP("pulp not built");
+    const auto project = unique_temp_dir("pulp-graph-json-validation");
+    const auto graph = project / "invalid.pulpgraph";
+    write_text(graph, "{broken");
+    const auto result = run_pulp({"graph", "validate", graph.string(), "--json"});
+    REQUIRE(result.exit_code != 0);
+    REQUIRE(result.stdout_output.find("\"code\": \"invalid_graph\"") != std::string::npos);
+    REQUIRE(result.stdout_output.find("\"valid\": false") != std::string::npos);
+}
+
+TEST_CASE("pulp graph fmt is byte stable and render produces a WAV", "[cli][shellout][graph]") {
+    if (!binary_exists())
+        SKIP("pulp not built");
+    const auto project = unique_temp_dir("pulp-graph-format-render");
+    const auto graph = project / "simple.pulpgraph";
+    const auto output = project / "render.wav";
+    write_text(
+        graph,
+        R"({"format_version":1,"nodes":[{"id":1,"type":"audio_in","name":"in","num_input_ports":0,"num_output_ports":2,"gain":1},{"id":2,"type":"audio_out","name":"out","num_input_ports":2,"num_output_ports":0,"gain":1}],"connections":[{"source_node":1,"source_port":0,"dest_node":2,"dest_port":0,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false}]})");
+    const auto first = run_pulp({"graph", "fmt", graph.string()});
+    REQUIRE(first.exit_code == 0);
+    const auto once = read_file(graph);
+    const auto second = run_pulp({"graph", "fmt", graph.string()});
+    REQUIRE(second.exit_code == 0);
+    REQUIRE(read_file(graph) == once);
+    const auto valid = run_pulp({"graph", "validate", graph.string(), "--json"});
+    REQUIRE(valid.exit_code == 0);
+    REQUIRE(valid.stdout_output.find("\"code\":\"ok\"") != std::string::npos);
+    const auto rendered =
+        run_pulp({"graph", "render", graph.string(), "--output", output.string(), "--json"});
+    REQUIRE(rendered.exit_code == 0);
+    REQUIRE(rendered.stdout_output.find("\"frames\":48000") != std::string::npos);
+    REQUIRE(std::filesystem::file_size(output) > 48000);
+}
+
 TEST_CASE("pulp with no arguments prints help and exits 0", "[cli][shellout]") {
     if (!binary_exists()) {
         SKIP("pulp not built");

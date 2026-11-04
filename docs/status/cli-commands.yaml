@@ -392,6 +392,26 @@ commands:
             required: false
     docs: reference/cli.md#ship
 
+  - name: graph
+    status: usable
+    summary: Inspect, validate, explain, format, and offline-render .pulpgraph files.
+    args:
+      - name: operation
+        kind: positional
+        required: true
+        description: inspect, validate, explain, render, fmt, or canonicalize
+      - name: file
+        kind: positional
+        required: true
+        description: Path to a .pulpgraph file
+      - name: --json
+        kind: flag
+        description: Emit machine-readable result and error codes
+      - name: --output
+        kind: option
+        description: Write the offline render to a float WAV file
+    docs: reference/cli.md#graph
+
   - name: bake
     status: usable
     summary: "Freeze a .pulpgraph into a signed, distributable .pulpbake artifact, and verify one. Loads the graph, prepares it, freezes it via the bake lowering, and signs it with Ed25519; a non-bakeable graph (a hosted plugin node, a MIDI/automation/sidechain lane, or a non-opted-in Custom type) is refused with the specific reason and a non-zero exit. Key handling reuses the reload-trust key file, the same path `ship swap-pack` uses."

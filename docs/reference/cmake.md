@@ -28,6 +28,7 @@ pulp_add_plugin(<target>
     AAX_NATIVE_CODE <4-char>
     SOURCES         <file-list>
     PROCESSOR_FACTORY <function-name>
+    UI              <ui-package-target|none>
     UI_SCRIPT       <path>
     ICON            <1024x1024 png>
     ICNS            <path>
@@ -54,7 +55,7 @@ An argument `pulp_add_plugin()` does not recognise (a misspelled keyword, a keyw
 | `CATEGORY` | No | `"Effect"` | Plugin category: `Effect`, `Instrument`, or `MidiEffect` |
 | `ACCEPTS_MIDI` | No | Off | Mirrors `PluginDescriptor::accepts_midi` for package metadata. AU v2/AUv3 effects that accept MIDI need this so Pulp emits a MIDI-routable component type (`aumf`) instead of an audio-only effect (`aufx`). MIDI output is controlled by `PluginDescriptor::produces_midi`; there is no `pulp_add_plugin(PRODUCES_MIDI)` flag. |
 | `NATIVE_UI` | No | Off | Link the native scripted Skia/Dawn view composition (`Pulp::view-native` and, for Standalone, `Pulp::standalone-native`) without WebView/WebKit. `ScriptedUiSession`, `WidgetBridge`, and `@pulp/react` remain available. Omit this for editors that instantiate `WebViewPanel`; the existing WebView-capable targets remain the default. |
-| `NO_EDITOR` | No | Off | Editor-less (audio-only) plug-in. VST3, CLAP, AU v2 and LV2 modules link `Pulp::format-core` (CLAP also `Pulp::format-clap-core`, the adapter without its GUI extension) instead of the format + view umbrella, so the image carries no view, canvas, render, Skia, Dawn or wgpu code and stages no GPU runtime. The plug-in exposes no editor (Pulp's generated AutoUI editor is not built in); hosts show their generic parameter UI. The processor must not override `create_view()`. Cannot be combined with `NATIVE_UI` or `UI_SCRIPT`. Standalone, AUv3 and AAX outputs keep the default view-linked path. |
+| `NO_EDITOR` | No | Off | Editor-less (audio-only) plug-in. VST3, CLAP, AU v2 and LV2 modules link `Pulp::format-core` (CLAP also `Pulp::format-clap-core`, the adapter without its GUI extension) instead of the format + view umbrella, so the image carries no view, canvas, render, Skia, Dawn or wgpu code and stages no GPU runtime. The plug-in exposes no editor (Pulp's generated AutoUI editor is not built in); hosts show their generic parameter UI. The processor must not override `create_view()`. Cannot be combined with `NATIVE_UI` or `UI_SCRIPT`. `UI <package>` implies it (see [UI Packages](#ui-packages)). Standalone, AUv3 and AAX outputs keep the default view-linked path. |
 | `GPU_UI` | No | Off | The plug-in's C++ editor needs the GPU host (a view whose `requires_gpu_host()` is true): link the full editor stack. Without it, macOS plug-ins get the lite editor stack (see `LITE_EDITOR`). |
 | `FULL_EDITOR` | No | Off | Link the full editor stack for any other reason (the escape hatch from the lite default). |
 | `LITE_EDITOR` | No | Default on macOS | States the default explicitly. Unless the plug-in declares `UI_SCRIPT`, `GPU_UI` or `FULL_EDITOR`, its macOS VST3, CLAP, AU v2 and Standalone binaries leave out the GPU plug-in and window hosts and link lite replacements for the few library functions that reach Skia unconditionally (text measurement, font resolution, the emoji fallback, native GPU textures), so the VST3, CLAP and AU v2 modules carry no Skia, Dawn or Tint (the Standalone app still links Dawn through the standalone host). The editor opens on the CoreGraphics host, which an AutoUi or CPU-painted C++ editor already uses, and measures text through CoreText, which it already paints with. An editor that asks for the GPU host anyway logs one warning naming `GPU_UI` and opens on the CoreGraphics host. Combining `LITE_EDITOR` with `UI_SCRIPT`, `GPU_UI` or `FULL_EDITOR` is a configure error. Other platforms build the full stack. See [Binary Footprint](#binary-footprint). |
@@ -64,6 +65,7 @@ An argument `pulp_add_plugin()` does not recognise (a misspelled keyword, a keyw
 | `AAX_NATIVE_CODE` | AAX only | -- | 4-character stable AAX Native identifier |
 | `SOURCES` | No | -- | Source files for the core object library |
 | `PROCESSOR_FACTORY` | No | -- | Factory function name (for generated entry points) |
+| `UI` | No | -- | A UI package target that supplies the plug-in's default editor through the editor-host contract (`pulp/format/editor_host.hpp`). Every created format and standalone target links the package and compiles a generated source that installs the package's factory as that binary's default, so `Processor::editor_factory()` returns it unless the processor overrides it. A package implies `NO_EDITOR`: the VST3, CLAP, AU v2 and LV2 modules link no Pulp view, canvas or render code, and combining it with `NATIVE_UI`, `UI_SCRIPT`, `GPU_UI`, `FULL_EDITOR` or `LITE_EDITOR` is a configure error. `none`, or no `UI` argument, generates and links nothing, and `editor_factory()` returns null. See [UI Packages](#ui-packages). |
 | `UI_SCRIPT` | No | -- | Path to a JavaScript UI entry file. Its bytes, the `theme.json` beside it, and the image, font, data and shader files beside it (`png jpg jpeg gif webp bmp ico svg ttf otf woff woff2 json wgsl glsl sksl frag vert`, skipping dot-directories, `node_modules` and nested build trees; the script must sit in its own directory, and one holding a `CMakeLists.txt` is refused at configure) are compiled into every created format target and registered with `pulp::format` at load, so the shipped image carries its editor and the files it loads relative to itself, and never reads the developer's source tree. A dev build (`PULP_DEV_BUILD`: defaults to `PULP_BUILD_TESTS` in the Pulp checkout and OFF for an installed-SDK consumer, where the `pulp` CLI's configure passes `-DPULP_DEV_BUILD=ON`) also records the absolute path; a hot-reloading editor (the Standalone host, or a DAW launched with `PULP_DEV_HOT_RELOAD=1`) then reads that file while it exists, which is what keeps the edit-and-see loop live. Every other open evaluates the embedded bytes, and `pulp ship` builds a `build-ship/` that carries the dev build's whole configuration with the option off rather than shipping a dev build. A file added beside the script after configure re-runs CMake on the next build; an edit to an embedded file re-encodes it at build time. |
 | `ICON` | No | -- | A 1024x1024 PNG, converted to an `.icns` and bundled into every macOS bundle the call creates (Standalone, VST3, AU, CLAP, AAX). Mutually exclusive with `ICNS`. |
 | `ICNS` | No | -- | A finished `.icns`, bundled as-is into the same set. Prefer this when the asset is laid out per size; the `ICON` path downscales with `sips`, whose kernel rings small tiles. **Scope:** this fills `CFBundleIconFile` and ships the asset. macOS does not render that key for a non-`.app` bundle, so no icon appears in Finder for the plug-in formats; see the product-icon comment in `PulpUtils.cmake`. |
@@ -121,6 +123,58 @@ relative paths into those reviewed asset roots, embedded or on disk. Kits with m
 token files require the matching `SCRIPT` / `TOKENS` argument so the project
 makes the choice intentionally. The helper does not apply kits automatically
 and does not run package code.
+
+### UI Packages
+
+A UI package is any CMake target that declares two target properties:
+
+| Property | Value |
+|---|---|
+| `PULP_EDITOR_FACTORY_FUNCTION` | Fully qualified name of a function `::pulp::format::EditorFactory* name()` that returns the package's editor factory. The factory must outlive every editor it creates; a function-local static is the usual shape. It is called on the host's main thread, the first time a host asks for the editor, never at load. |
+| `PULP_EDITOR_FACTORY_HEADER` | The header, on the package's include path, that declares that function. |
+
+```cmake
+add_library(my-ui STATIC my_ui_editor.cpp)
+target_link_libraries(my-ui PUBLIC Pulp::format-core)
+target_include_directories(my-ui PUBLIC include)
+set_target_properties(my-ui PROPERTIES
+    PULP_EDITOR_FACTORY_FUNCTION "my_ui::editor_factory"
+    PULP_EDITOR_FACTORY_HEADER "my_ui/editor_factory.hpp")
+
+pulp_add_plugin(MyPlugin FORMATS CLAP VST3 Standalone UI my-ui ...)
+```
+
+An installed package lists both properties in its targets' `EXPORT_PROPERTIES`
+so they survive `install(EXPORT)`. The package target must exist when
+`pulp_add_plugin()` runs; a missing target or property stops configuration.
+
+A plug-in that declares a package gets `NO_EDITOR`'s view-free link without
+saying so: its VST3, CLAP, AU v2 and LV2 modules link `Pulp::format-core`
+instead of the format and view umbrella, so they carry no Pulp view, canvas,
+render, Skia or Dawn code. As with `NO_EDITOR`, Standalone, AUv3 and AAX
+outputs still link the view stack. `NATIVE_UI`, `UI_SCRIPT`, `GPU_UI`,
+`FULL_EDITOR` and `LITE_EDITOR` select Pulp's own view editor, so combining
+any of them with a package stops configuration with
+`UI <package> cannot be combined with ...`. `UI none` selects no package and
+leaves the link as it would be without `UI`.
+
+The choice belongs to the plug-in binary, not to a process-wide registry. The
+generated source defines the hook with internal linkage and installs it, at
+static init, into a slot in `pulp-format-core` that has internal linkage and
+hidden accessors (`pulp/format/editor_package.hpp`). `pulp-format-core` is
+linked statically into each plug-in module and executable, so two plug-ins in
+one host process each read their own package's factory and neither can replace
+the other's. Every processor in one binary that does not override
+`editor_factory()` shares that binary's package.
+
+A format whose adapter does not open contract editors yet still builds, but
+without an editor; `pulp_add_plugin()` names those formats in a configure
+warning.
+
+VST3 opens a `UI` package's editor through the editor-host contract. CLAP, AU
+and the standalone host still open the editor through `create_view()`, so a
+`UI` plug-in builds them with no editor. A host that drives the editor-host
+contract itself reads `editor_factory()`.
 
 ## pulp_add_plugin_bundle
 

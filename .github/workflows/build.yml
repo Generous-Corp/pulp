@@ -188,7 +188,7 @@ jobs:
       windows_leg: ${{ steps.resolve.outputs.windows_leg }}
       hosted_windows_allowed: ${{ steps.resolve.outputs.hosted_windows_allowed }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           # Shared resolver lives in the repo at tools/scripts/resolve_runs_on.py.
           # We only need the script; no LFS or submodules required.
@@ -1216,7 +1216,7 @@ jobs:
             echo "merged_base=${parent_list[0]}"
           } >> "$GITHUB_OUTPUT"
           echo "#$DISPATCH_PR_NUMBER is headed by $GITHUB_REF_NAME at $GITHUB_SHA; testing merge $merge_sha onto ${parent_list[0]}"
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           # Classification needs two immutable trees, not Pulp's entire
           # history. Full history made a traveling runner fetch into a 70 GiB
@@ -1576,7 +1576,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.merge_group.base_ref }}
           fetch-depth: 1
@@ -1601,7 +1601,7 @@ jobs:
       build_required: ${{ steps.reuse.outputs.build_required }}
       macos_reused: ${{ steps.reuse.outputs.macos_reused }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 2
           lfs: false
@@ -1760,7 +1760,7 @@ jobs:
     # macOS (it refuses any other RUNNER_OS), git and python3.
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 1
           lfs: false
@@ -1914,7 +1914,7 @@ jobs:
             exit 0
           fi
           echo "gate-git-seed: alternates=$mirror/objects mirror_main=$head"
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: false
           # GPU provenance self-tests use HEAD^ and exact historical receipts.
@@ -2151,12 +2151,17 @@ jobs:
           # match `$LOCALAPPDATA/Pulp/fc`, and off Windows the sources never left
           # <build>/_deps at all.
           #
+          # ~/.cache/pulp/fetchcontent-src is the shared source cache setup.sh
+          # clones into on Linux; drift-fast and read-audit-nightly restore it
+          # (the path list is part of the cache version, so keep them identical).
+          #
           # Deliberately NOT relocated via FETCHCONTENT_BASE_DIR: PulpWclap.cmake
           # and PulpWebUi.cmake resolve CHOC from `<root>/build*/_deps/choc-src`,
           # so moving it breaks the wclap and web-UI paths — and with them the
           # required macOS gate.
           path: |
             ${{ github.workspace }}/${{ env.PULP_BUILD_DIR }}/_deps
+            ~/.cache/pulp/fetchcontent-src
           key: ${{ runner.os }}-${{ matrix.key || 'build' }}-fetchcontent-${{ hashFiles('setup.sh') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.key || 'build' }}-fetchcontent-
@@ -2371,12 +2376,17 @@ jobs:
           # match `$LOCALAPPDATA/Pulp/fc`, and off Windows the sources never left
           # <build>/_deps at all.
           #
+          # ~/.cache/pulp/fetchcontent-src is the shared source cache setup.sh
+          # clones into on Linux; drift-fast and read-audit-nightly restore it
+          # (the path list is part of the cache version, so keep them identical).
+          #
           # Deliberately NOT relocated via FETCHCONTENT_BASE_DIR: PulpWclap.cmake
           # and PulpWebUi.cmake resolve CHOC from `<root>/build*/_deps/choc-src`,
           # so moving it breaks the wclap and web-UI paths — and with them the
           # required macOS gate.
           path: |
             ${{ github.workspace }}/${{ env.PULP_BUILD_DIR }}/_deps
+            ~/.cache/pulp/fetchcontent-src
           key: ${{ steps.fetchcontent-cache.outputs.cache-primary-key }}
 
       - name: Fetch prebuilt Skia (macOS)
@@ -2812,7 +2822,7 @@ jobs:
       - name: Record iOS gate digest
         if: (steps.build.outputs.ios_gate_digest != '') && inputs.pr_number == ''
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}
           path: ${{ runner.temp }}/ios-gate-shadow/marker.json
@@ -3193,7 +3203,7 @@ jobs:
           always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
           && runner.os == 'Linux' && steps.ctest.outcome != 'skipped'
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: a2t-scope-headroom
           path: ${{ runner.temp }}/a2t-scope-headroom.json
@@ -3234,7 +3244,7 @@ jobs:
           always() && github.event_name == 'merge_group' && runner.os == 'macOS'
           && steps.build.outcome == 'success'
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: test-receipts-macos
           path: ${{ runner.temp }}/merge-group-shadows/test-receipts.json
@@ -3425,7 +3435,7 @@ jobs:
           && matrix.lane != 'contract'
           && inputs.pr_number == ''
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
           path: |
@@ -3444,7 +3454,7 @@ jobs:
 
       - name: Upload exact GPU-audio SDK (macOS ARM64, retry)
         if: steps.gpu_audio_sdk_upload.outcome == 'failure'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
           path: |
@@ -3490,7 +3500,7 @@ jobs:
         if: >-
           steps.a2t_structural_verification.outcome == 'success'
           && needs.classify.outputs.a2t_receipt_attestation_required == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: a2t-structural-verification-${{ needs.classify.outputs.a2t_evidence_head }}
           path: ${{ runner.temp }}/a2t-structural-verification-${{ needs.classify.outputs.a2t_evidence_head }}/attestation.json
@@ -3554,7 +3564,7 @@ jobs:
         # every test passed must never turn a green gate red.
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ctest-logs-${{ matrix.key }}
           path: |
@@ -3621,7 +3631,7 @@ jobs:
         id: reuse_record_upload
         if: ${{ (!cancelled() && steps.reuse_record.outcome == 'success') && inputs.pr_number == '' }}
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           # One artifact per run attempt: a re-run keeps the failed attempt's
           # record, which is the flake evidence a replay most needs.
@@ -3724,7 +3734,7 @@ jobs:
 
       - name: Publish exact protected-validation receipt
         if: steps.protected_receipt.outcome == 'success'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: protected-validation-${{ matrix.key }}-${{ github.event.pull_request.head.sha }}-${{ github.event.pull_request.base.sha }}
           path: ${{ steps.protected_receipt.outputs.path }}/receipt.json
@@ -3740,7 +3750,7 @@ jobs:
       - name: Upload plugin bundles (macOS)
         if: (success() && runner.os == 'macOS' && github.event_name != 'pull_request') && inputs.pr_number == ''
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: plugins-${{ matrix.key }}
           path: |
@@ -3751,7 +3761,7 @@ jobs:
 
       - name: Upload plugin bundles (Windows)
         if: (success() && runner.os == 'Windows' && github.event_name != 'pull_request') && inputs.pr_number == ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: plugins-${{ matrix.key }}
           path: |
@@ -3761,7 +3771,7 @@ jobs:
 
       - name: Upload plugin bundles (Linux)
         if: (success() && runner.os == 'Linux' && github.event_name != 'pull_request') && inputs.pr_number == ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: plugins-${{ matrix.key }}
           path: |
@@ -3849,7 +3859,7 @@ jobs:
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: true
 
@@ -3929,7 +3939,7 @@ jobs:
     name: Windows MIDI Services SDK compile-gate (advisory)
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: true
 
@@ -3996,7 +4006,7 @@ jobs:
     name: Windows BLE compile-gate (advisory)
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: true
 
@@ -4106,7 +4116,7 @@ jobs:
         if: ${{ !cancelled() }}
         id: reuse_record_checkout
         continue-on-error: true
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 1
           sparse-checkout: |
@@ -4141,7 +4151,7 @@ jobs:
         # nothing it uploads may feed a later run.
         if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' && inputs.pr_number == '' }}
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
           path: ${{ runner.temp }}/reuse-record/
@@ -4175,7 +4185,7 @@ jobs:
       # The whole tree at depth 1, like the classify job: when classify was
       # never given a runner, the verdict classifies the group here.
       - name: Check out the bootstrap verdict and classifier
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 1
           lfs: false
@@ -4204,7 +4214,7 @@ jobs:
         if: ${{ !cancelled() }}
         id: reuse_record_checkout
         continue-on-error: true
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 1
           sparse-checkout: |
@@ -4237,7 +4247,7 @@ jobs:
         id: reuse_record_upload
         if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
           path: ${{ runner.temp }}/reuse-record/
@@ -4391,7 +4401,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 1
           sparse-checkout: |
@@ -4431,7 +4441,7 @@ jobs:
     continue-on-error: true
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 1
           sparse-checkout: |

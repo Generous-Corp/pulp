@@ -474,7 +474,9 @@ Traps:
   from its slice in `.github/vellum-ownership.json` as well fails the freeze
   check ("transferred slice ... cannot change without a designed ownership
   reversal"). Drop the path from `frozen_paths`, record it in
-  `owner-unfreezes.json` with the ruling's title, and land that before the
+  `owner-unfreezes.json` with the URL of the owner's own approval comment
+  and its author (`approved_by`, the owner's login; a bot-authored comment
+  quoting the owner is not the approval), and land that before the
   change that edits the path, because the pin is read at the base commit.
 - The pin, the receipt copy and `frozen_paths` are read at the BASE commit. A
   change cannot exempt itself by editing them; a re-pin applies to the changes
@@ -834,3 +836,10 @@ right place for the demand, since changing it is a routing decision and
 regenerating its output is not. And the refresh itself has moved to the version
 bot's bump commit, so an ordinary PR does not produce one. There is no
 `Skill-Update: skip` ritual left to perform for a ledger refresh.
+
+## Carried commits across two open PRs
+
+If a change's commits also sit in another open, unstacked PR, review HOLDs it as
+a carried commit. Stack the dependent PR on the other's branch so each diff
+shows only its own change, or close it as superseded. Routing events and
+ledgers for the shared commits belong to the PR that owns them.

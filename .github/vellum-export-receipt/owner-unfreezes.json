@@ -1,10 +1,10 @@
 {
-  "schema": "pulp.vellum.owner-unfreezes.v1",
+  "schema": "pulp.vellum.owner-unfreezes.v2",
   "unfreezes": [
     {
       "path": "core/view/include/pulp/view/value_source.hpp",
-      "ruling": "OWNER DECISION 2026-11-03: unfreeze value_source.hpp for the data-plane move",
-      "decided_by": "owner"
+      "approval_url": "https://github.com/Generous-Corp/pulp/pull/11451#issuecomment-6612900699",
+      "approved_by": "danielraffel"
     }
   ]
 }
