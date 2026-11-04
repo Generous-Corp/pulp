@@ -35,6 +35,20 @@ excludes the locale implementation supplied by the static CRT. Link that
 archive through the exported Pulp canvas target; do not silence unresolved
 symbols or relabel a native ARM64 library as ARM64EC.
 
+Keep a separate CMake build directory for each architecture and for traced
+versus shipping builds. On Windows, Pulp keeps FetchContent binary subbuilds
+under a short `%LOCALAPPDATA%/Pulp/fc/<build-directory-key>` path. The key is
+stable for the same build directory and separates different builds, including
+native ARM64 CLI tools and ARM64EC plugin SDKs. Sharing one binary directory
+can overwrite another build's dependency objects and generated headers even
+when the builds run sequentially.
+
+The immutable FetchContent **source** cache remains shared. Existing automatic
+entries pointing at the former per-user binary root migrate on configure;
+their old files are retained. Explicit `FETCHCONTENT_BASE_DIR` and
+`PULP_FETCHCONTENT_BASE_DIR` overrides are respected, so assign different
+override paths to separate builds too.
+
 ## Required provenance
 
 Every release candidate records:
