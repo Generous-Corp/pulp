@@ -88,7 +88,7 @@ adding a three-sample prime followed by B=4096/H=63 exposed all 66 required
 slots, and the rerun detected the mutation. These are targeted controls, not a
 claim that every admission row has its own mutation receipt. The guarded-engine
 transaction mutation and installed-consumer lowering mutation are also confirmed
-with restored green at the final runtime revision. Independent audio feedback
+with restored green at the final runtime revision. Independent audio feedback,
 active-controller load refusal, and live custom-state refusal each have
 confirmed production mutations.
 
@@ -104,7 +104,9 @@ findings. The governed full `pulp build --all` passed. The routed delivery is st
 `b995a005a46f62d2b597939d94cb60a47a43cab5`. It fixes the normal inventory writer
 when a still-registered executable loses its last dependency. It is unmerged
 and lacks counted approval; this branch never approves or merges that work.
-Gate closeout remains pending the regenerated inventory and light-host completion.
+The inventory was regenerated without deleting valid entries. Gate receipts and
+any host-policy exclusions are reported in the delivery PR; they do not upgrade
+the qualification scope described below.
 
 ### Exact remaining obligations
 
