@@ -227,3 +227,12 @@ schedule, shared-engine/destructive-reprepare controls, or the complete tuple
 oracle through controller replacement. The selective-mask tail oracle detects
 omitted zero synthesis; offline codec EOF-source integration remains outside this
 routed slice's admission.
+
+The prepare-time mask revalidation control corrupts a mutable local token's owned
+payload after a valid factory call, then prepares a copied graph through the
+production bank. Valid endpoint gains pass; NaN/Inf, negative and above-one gains
+return `InvalidMask`. Independent removal of the preparation finite, minimum and
+maximum predicates was confirmed, with restored-green controls, at
+`467b46e14c749837fb292ad4bbf116c08f728aec`. These checks
+are independent of the earlier factory predicate mutations. Unknown catalog ID
+and malformed configuration length still require separate internal controls.
