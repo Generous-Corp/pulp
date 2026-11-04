@@ -9,18 +9,11 @@
  },
  "executables": {
   "Pulp UI Script Fixture": {
-   "data": "undeclared",
-   "detected_sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ],
+   "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ],
-   "undeclared_sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ]
+   "sources": [],
+   "undeclared_sources": []
   },
   "pulp-control-broker-crash-fixture": {
    "data": "none",
@@ -318,6 +311,21 @@
    "sources": [],
    "spawning_sources": [
     "test/test_child_process_standard_input.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-clap-identity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-scan-worker",
+    "pulp-test-fixture-clap-identity"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_clap_identity.cpp"
    ],
    "spawns": "declared",
    "undeclared_sources": []
@@ -2799,6 +2807,7 @@
   "pulp-test-clap-entry",
   "pulp-test-clap-host-validation",
   "pulp-test-clap-hosted-editor",
+  "pulp-test-clap-identity",
   "pulp-test-clap-latency-quirk",
   "pulp-test-clap-midi-events",
   "pulp-test-clap-slot-channel-width",
