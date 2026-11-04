@@ -171,9 +171,10 @@ A format whose adapter does not open contract editors yet still builds, but
 without an editor; `pulp_add_plugin()` names those formats in a configure
 warning.
 
-`UI` is not yet read by the format adapters: VST3, CLAP, AU and the standalone
-host still open the editor through `create_view()`. A host that drives the
-editor-host contract itself reads `editor_factory()`.
+VST3 opens a `UI` package's editor through the editor-host contract. CLAP, AU
+and the standalone host still open the editor through `create_view()`, so a
+`UI` plug-in builds them with no editor. A host that drives the editor-host
+contract itself reads `editor_factory()`.
 
 ## pulp_add_plugin_bundle
 

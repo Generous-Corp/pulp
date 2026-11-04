@@ -1065,6 +1065,125 @@ class CompiledDataTests(unittest.TestCase):
             self.assertEqual(json.loads(list_path.read_text(encoding="utf-8"))["tests"]["alpha"], fresh)
             self.assertNotIn("kept", proc.stdout)
 
+    def test_write_preserves_a_previously_recorded_executable_after_its_last_dependency_is_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            list_path = repo.root / sti.DEFAULT_LIST
+            before = json.loads(list_path.read_text(encoding="utf-8"))
+            self.assertEqual(before["executables"]["pulp-test-d"]["spawns"], "undeclared")
+
+            write(repo.root, "test/test_d.cpp", "int value = 1;\n")
+            stale = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(stale.returncode, 1, stale.stdout + stale.stderr)
+            self.assertIn("stale compiled entry: pulp-test-d", stale.stdout)
+            proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            after = json.loads(list_path.read_text(encoding="utf-8"))
+            self.assertEqual(set(after["executables"]), set(before["executables"]))
+            self.assertEqual(after["executables"]["pulp-test-d"], {
+                "kind": "compiled", "data": "none", "inputs": [], "sources": [],
+                "undeclared_sources": []})
+            for name in before["executables"]:
+                if name != "pulp-test-d":
+                    self.assertEqual(after["executables"][name], before["executables"][name])
+            self.assertEqual(after["executables_scanned"], before["executables_scanned"])
+            self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 0)
+            stable = list_path.read_bytes()
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.assertEqual(list_path.read_bytes(), stable)
+
+            # A new dependency must still replace the clean record and fail
+            # the check until regenerated; retaining the name is not a waiver.
+            write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("stale compiled entry: pulp-test-d", proc.stdout)
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            restored = json.loads(list_path.read_text(encoding="utf-8"))
+            self.assertEqual(restored["executables"]["pulp-test-d"],
+                             before["executables"]["pulp-test-d"])
+
+    def test_an_unreadable_indexed_source_cannot_be_normalized_to_clean(self) -> None:
+        for missing in (True, False):
+            if not missing and (os.name == "nt" or os.geteuid() == 0):
+                continue  # chmod cannot make a source unreadable to this process.
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as tmp:
+                repo = Repo(Path(tmp)); compiled_evidence(repo)
+                source = write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
+                self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+                list_path = repo.root / sti.DEFAULT_LIST
+                before = list_path.read_bytes()
+                if missing:
+                    source.unlink()
+                else:
+                    source.chmod(0)
+                try:
+                    for mode in ("--write", "--check"):
+                        proc = self.run_tool(repo, mode)
+                        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+                        self.assertIn("unreadable scan sources: test/test_d.cpp", proc.stderr)
+                        self.assertEqual(list_path.read_bytes(), before)
+                finally:
+                    if not missing:
+                        source.chmod(0o600)
+
+    def test_an_unreadable_dependency_header_cannot_be_normalized_to_clean(self) -> None:
+        for missing in (True, False):
+            if not missing and (os.name == "nt" or os.geteuid() == 0):
+                continue
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as tmp:
+                repo = Repo(Path(tmp)); compiled_evidence(repo)
+                write(repo.root, "test/test_d.cpp", '#include "support/runner.hpp"\n')
+                header = write(repo.root, "test/support/runner.hpp", "int run() { return fork(); }\n")
+                self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+                list_path = repo.root / sti.DEFAULT_LIST
+                before = list_path.read_bytes()
+                if missing:
+                    header.unlink()
+                else:
+                    header.chmod(0)
+                try:
+                    for mode in ("--write", "--check"):
+                        proc = self.run_tool(repo, mode)
+                        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+                        self.assertIn("unreadable scan sources: test/support/runner.hpp", proc.stderr)
+                        self.assertEqual(list_path.read_bytes(), before)
+                finally:
+                    if not missing:
+                        header.chmod(0o600)
+                # An actual readable header with the spawn removed is clean.
+                header.write_text("int run() { return 0; }\n", encoding="utf-8")
+                self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+                after = json.loads(list_path.read_text(encoding="utf-8"))
+                self.assertIn("pulp-test-d", after["executables"])
+                self.assertEqual(after["executables"]["pulp-test-d"]["data"], "none")
+                self.assertNotIn("spawning_sources", after["executables"]["pulp-test-d"])
+                self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 0)
+
+    def test_a_missing_nonsignal_header_prevents_a_clean_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            source = write(repo.root, "test/test_d.cpp",
+                           '#include "support/helper.hpp"\nint run() { return fork(); }\n')
+            header = write(repo.root, "test/support/helper.hpp", "struct Helper {};\n")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            list_path = repo.root / sti.DEFAULT_LIST
+            before = list_path.read_bytes()
+            self.assertEqual(json.loads(before)["executables"]["pulp-test-d"]["spawning_sources"],
+                             ["test/test_d.cpp"])
+            source.write_text('#include "support/helper.hpp"\nint run() { return 0; }\n', encoding="utf-8")
+            header.unlink()
+            for mode in ("--write", "--check"):
+                proc = self.run_tool(repo, mode)
+                self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+                self.assertIn('unresolved quoted include "support/helper.hpp"', proc.stderr)
+                self.assertEqual(list_path.read_bytes(), before)
+            header.write_text("struct Helper {};\n", encoding="utf-8")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 0)
+
     def test_detected_sources_lists_only_what_a_signal_matched(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)
@@ -1304,6 +1423,30 @@ class GateProfileTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
             self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
             self.assertNotIn("SKIPPED the compiled entries", proc.stdout)
+
+    def test_off_profile_checks_do_not_normalize_unreadable_compiled_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            source = write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            list_path = repo.root / sti.DEFAULT_LIST
+            before = list_path.read_bytes()
+            source.unlink()
+            self.cache(repo, CMAKE_BUILD_TYPE="Debug")
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, sti.SKIP_EXIT, proc.stdout + proc.stderr)
+            self.assertIn("SKIPPED the compiled entries", proc.stdout)
+            self.assertEqual(list_path.read_bytes(), before)
+            proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn("cause_class=INCOMPLETE_CONFIGURE", proc.stderr)
+            self.assertNotIn("cannot refresh compiled entries", proc.stderr)
+            self.assertEqual(list_path.read_bytes(), before)
+            write(repo.root, "tools/scripts/test_alpha.py", "import newmod\n")
+            write(repo.root, "tools/scripts/newmod.py", "")
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("stale entry: alpha", proc.stdout)
 
     def test_an_off_profile_build_skips_the_compiled_half_by_name(self) -> None:
         for values, reason in ((dict(PULP_BUILD_EXAMPLES="ON"), "PULP_BUILD_EXAMPLES=ON"),

@@ -775,6 +775,36 @@ structural test enforces that every hosted adapter uses the factory. See the
 `view-bridge` skill for the lifecycle protocol and the rationale. Editing
 `vst3_plug_view.cpp` triggers `view-bridge`, not this skill.
 
+A processor whose `editor_factory()` is non-null (a `UI <package>` plug-in,
+or one that overrides it) gets a `ContractPlugView` instead
+(`vst3_contract_view.cpp`, compiled into `pulp-format-core`, view-free), and
+that check runs before `has_editor()`. Things to keep straight:
+
+- Each view owns its own `StateStoreParamPort`. `removed()` calls
+  `release_all()` before `Editor::detach()`, so a window closed mid-drag still
+  sends `endEdit`.
+- `terminate()` and the adapter's destructor call `owner_terminated()` on
+  every view the host still holds. The view closes the editor in order there:
+  stop idle, release gestures, `Editor::detach()` (the host's NSView is still
+  alive), then destroy, because the editor's factory belongs to the processor
+  about to be reset. `invalidate()` is only for a parent that is already gone.
+  Do not move that call after `processor_.reset()`.
+- `onKeyDown` returns `kResultFalse` for a forwarded key, which is how Space
+  stays the host's transport key. Return `kResultTrue` only for `consumed`.
+- VST3 has no idle callback, so the view ticks `Editor::idle()` itself from a
+  `detail::MainThreadTimer` (16 ms) that runs only while attached. On Apple it
+  is a main-queue `dispatch_source`: `stop()` cancels it on the main thread
+  (a call from another thread waits for that), so no tick runs after stop
+  returns. `removed()`, `owner_terminated()` and the destructor stop it.
+  Elsewhere it is a `MainThreadDispatcher::call_async_after` chain; without a
+  registered main-thread backend (the Windows and Linux stubs today) nothing
+  ticks. Tests pump the real main run loop on Apple, so idle assertions must
+  wait for a tick rather than count exact ones.
+- `setContentScaleFactor()` (`IPlugViewContentScaleSupport`, declared through
+  the view's `DEFINE_INTERFACES`) hands the scale to `Editor::set_size()`. Later
+  `onSize()` calls take the scale from `Editor::size()`, so an editor must report
+  the scale it accepted. macOS hosts normally never call it.
+
 ## Gotchas
 
 ### Linux: export only `GetPluginFactory` / `ModuleEntry` / `ModuleExit`
