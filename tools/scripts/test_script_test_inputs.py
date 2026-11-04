@@ -1424,6 +1424,30 @@ class GateProfileTests(unittest.TestCase):
             self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
             self.assertNotIn("SKIPPED the compiled entries", proc.stdout)
 
+    def test_off_profile_checks_do_not_normalize_unreadable_compiled_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            source = write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            list_path = repo.root / sti.DEFAULT_LIST
+            before = list_path.read_bytes()
+            source.unlink()
+            self.cache(repo, CMAKE_BUILD_TYPE="Debug")
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, sti.SKIP_EXIT, proc.stdout + proc.stderr)
+            self.assertIn("SKIPPED the compiled entries", proc.stdout)
+            self.assertEqual(list_path.read_bytes(), before)
+            proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn("cause_class=INCOMPLETE_CONFIGURE", proc.stderr)
+            self.assertNotIn("cannot refresh compiled entries", proc.stderr)
+            self.assertEqual(list_path.read_bytes(), before)
+            write(repo.root, "tools/scripts/test_alpha.py", "import newmod\n")
+            write(repo.root, "tools/scripts/newmod.py", "")
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("stale entry: alpha", proc.stdout)
+
     def test_an_off_profile_build_skips_the_compiled_half_by_name(self) -> None:
         for values, reason in ((dict(PULP_BUILD_EXAMPLES="ON"), "PULP_BUILD_EXAMPLES=ON"),
                                (dict(PULP_SANITIZER="address", CMAKE_BUILD_TYPE="Debug"), "PULP_SANITIZER=address"),

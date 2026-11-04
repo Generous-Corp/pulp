@@ -1577,12 +1577,6 @@ def main(argv: list[str]) -> int:
     except (OSError, json.JSONDecodeError):
         checked_in = {"tests": {}}
     current = build_list(inventory, root, build_dir)
-    clean_errors = retain_scanned_clean_entries(current, checked_in, root,
-                                                test_executables(build_dir) or {})
-    if clean_errors:
-        print("script-test-inputs: cannot refresh compiled entries: " + "; ".join(clean_errors),
-              file=sys.stderr)
-        return 2
     off_profile = outside_gate_profile_build(build_dir, inventory, root)
     # A stale configure blocks writes, but --check must still judge the
     # inventory against the current CTest evidence. Returning SKIP (77) here
@@ -1599,6 +1593,13 @@ def main(argv: list[str]) -> int:
               "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER).",
               file=sys.stderr)
         return 2
+    if not off_profile:
+        clean_errors = retain_scanned_clean_entries(current, checked_in, root,
+                                                    test_executables(build_dir) or {})
+        if clean_errors:
+            print("script-test-inputs: cannot refresh compiled entries: " + "; ".join(clean_errors),
+                  file=sys.stderr)
+            return 2
     if a.write:
         carried = carry_unconfigured_entries(current, checked_in, inventory, root, build_dir)
         dropped = entries_write_would_delete(current, checked_in)
