@@ -863,20 +863,28 @@ TEST_CASE("Failed or cancelled candidates paused around validation cannot change
             auto candidate = target.graph.begin_prepared_topology_edit();
             REQUIRE(candidate);
             std::latch paused{1}, resume{1};
+            bool resumed_in_time = true;
             SignalGraph::PreparedTopologyEdit::Result result{};
             std::thread preparer([&] {
                 if (!pause_after_validation) {
                     paused.count_down();
-                    resume.wait();
+                    resumed_in_time =
+                        pulp::test::wait_for_condition([&] { return resume.try_wait(); });
+                    if (!resumed_in_time)
+                        return;
                 }
                 result = candidate->prepare(fail_validation ? 44100 : 48000, 64);
                 if (pause_after_validation) {
                     paused.count_down();
-                    resume.wait();
+                    resumed_in_time =
+                        pulp::test::wait_for_condition([&] { return resume.try_wait(); });
+                    if (!resumed_in_time)
+                        return;
                 }
                 candidate.reset();
             });
-            paused.wait();
+            const bool paused_in_time =
+                pulp::test::wait_for_condition([&] { return paused.try_wait(); });
             pulp::format::ProcessContext seek;
             seek.transport_jump = true;
             target.process(&seek);
@@ -885,6 +893,8 @@ TEST_CASE("Failed or cancelled candidates paused around validation cannot change
             const auto actual_epoch = SpectralControllerTestAccess::epoch(target.graph);
             resume.count_down();
             preparer.join();
+            REQUIRE(paused_in_time);
+            REQUIRE(resumed_in_time);
             REQUIRE((result == SignalGraph::PreparedTopologyEdit::Result::Prepared) ==
                     !fail_validation);
             REQUIRE(actual == control.output);
