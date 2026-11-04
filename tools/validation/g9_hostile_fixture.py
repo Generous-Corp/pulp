@@ -20,6 +20,11 @@ def process_state(pid: int) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
+def is_live_process_state(state: str | None) -> bool:
+    """A listed zombie is terminated, even while its PID awaits reaping."""
+    return bool(state) and "Z" not in state.upper()
+
+
 def wait_gone(pid: int, seconds: float) -> bool:
     end = time.monotonic() + seconds
     while time.monotonic() < end:
@@ -93,7 +98,7 @@ def run_case(name: str, timeout: float, out: Path) -> dict:
             record["parent_gone"] = process_state(proc.pid) is None
             record["descendant_state_after_parent"] = process_state(descendant_pid)
             record["descendant_alive_after_parent"] = (
-                record["descendant_state_after_parent"] is not None)
+                is_live_process_state(record["descendant_state_after_parent"]))
             record["descendant_cleanup"] = cleanup_descendant(descendant_pid)
     record["detected"] = timed_out or proc.returncode != 0
     (out / f"{name}.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")

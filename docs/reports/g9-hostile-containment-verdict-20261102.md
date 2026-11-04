@@ -17,8 +17,10 @@ The executable fixture launches real crash, hang, deadline, descendant, clean
 exit, and slow-within-budget subprocesses. It exits nonzero if any expected
 observation fails. The descendant prints its PID before the parent is
 terminated. The harness checks the parent's exit and the descendant's live
-Darwin process state, then sends the descendant SIGTERM and verifies that its
-PID disappears. This cleanup is fixture hygiene, **not** hosted-plugin
+Darwin process state. An absent PID or any state containing `Z` is not counted
+as live; a zombie is terminated even if its PID remains listed until reaped.
+The harness then sends the descendant SIGTERM and verifies that its PID
+disappears. This cleanup is fixture hygiene, **not** hosted-plugin
 containment. The descendant's stdout/stderr are redirected to DEVNULL so an
 inherited pipe cannot hold the parent's `communicate()` open.
 
@@ -43,6 +45,16 @@ All eight receipt checks passed; `isolation_implemented=false`. The PID and
 liveness observations establish that the spawned child survived this fixture's
 parent termination. They do not establish a platform-neutral cleanup contract
 or prove how a production host would handle arbitrary descendants.
+
+On 2026-11-03, the zombie-state repair was checked with a fresh Darwin run:
+`/tmp/g9-zombie-repair-20261103.28Bgd5/receipt.json`, SHA-256
+`49ec1ef2380e5d9a461bb84c84eb2e10802ae4c52eb9b5d65ce1252bfeca3302`.
+All eight checks passed. The descendant had live state `S` after its parent
+exited, then disappeared after fixture cleanup; `isolation_implemented=false`.
+The classifier regression passes for `S`, absent PID, and zombie states `Z`,
+`Z+`, `SZ`, and `z`, and the receipt path rejects a mocked zombie after parent
+exit. A planted version of the old any-state classifier fails those zombie
+checks. The receipt is local run output, not a committed artifact.
 
 ## Remaining G-9 gates
 
