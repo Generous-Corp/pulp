@@ -44,3 +44,8 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PU
 cmake --build build --parallel 1
 ctest --test-dir build --output-on-failure
 ```
+
+The consumer includes `pulp/host/signal_graph_runtime.hpp` directly. Callers
+that inspect transport fields also include `pulp/format/process_context.hpp`;
+the full `signal_graph.hpp` compatibility umbrella is unnecessary for this
+bounded runtime seam.
