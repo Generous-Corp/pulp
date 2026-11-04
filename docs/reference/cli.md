@@ -1498,7 +1498,14 @@ an alias. Formatting refuses unresolved plugin nodes or rejected plugin state.
 and renders one second at 48 kHz to a float WAV. Its JSON result reports frame,
 sample rate, and block counts. Unresolved node types and prepare failures return
 nonzero errors. The MCP `pulp_graph` tool exposes the read-only `inspect`,
-`validate`, `explain`, and `render` operations; file writing stays in the CLI.
+`validate`, `explain`, `render`, and `probe` operations; file writing stays in the CLI.
+
+`pulp graph probe FILE --input INPUT.wav --source-node source --source-port audio
+--destination-node downstream --destination-port audio --block-frames 64 --json`
+observes one ordinary serial audio edge offline. The JSON report preserves the
+public probe identity, sequence, sample-relative timestamps, frame counts,
+peak/RMS and loss count. Measurements precede downstream mixing and PDC.
+See [edge probe limits and lifecycle](../guides/graph-edge-probes.md).
 
 ### Sample-region graph inspection
 
