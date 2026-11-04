@@ -71,11 +71,18 @@ void allocation_and_lifetime() {
     check(pool.voice(0).note_id() == 10 && pool.steal_count() == 1, "free-slot-reuse");
     check(!pool.voice(0).releasing() && pool.voice(0).pressure() == 0.0f,
           "reuse-resets-expression-and-tail");
+    pool.voice(0).set_smoothing(0.5f);
     pool.reset_all();
     check(pool.active_count() == 0 && !pool.last_was_glide(), "reset-clears-voices");
     check(pool.steal_count() == 1, "reset-preserves-cumulative-steals");
     pool.reset_steal_count();
     check(pool.steal_count() == 0, "explicit-telemetry-reset");
+    pool.dispatch(event(Kind::NoteOn, 11));
+    auto expression = event(Kind::Pressure, 11);
+    expression.state.pressure = 0.5f;
+    pool.dispatch(expression);
+    pool.voice(0).render(nullptr, 1);
+    check(pool.voice(0).pressure() == 0.25f, "reset-preserves-smoothing-configuration");
 }
 
 void policies_and_ties() {
@@ -148,6 +155,14 @@ void boundaries_and_order() {
     pool.dispatch_all(buffer);
     pool.voice(0).render(nullptr, 1);
     check(pool.voice(0).pressure() == 0.25f, "explicit-sort-changes-event-order");
+    buffer.clear();
+    buffer.set_realtime_capacity_limit(true);
+    const auto capacity = buffer.capacity();
+    for (std::size_t i = 0; i < capacity; ++i)
+        check(buffer.add(a), "bounded-buffer-accepts-reserved-capacity");
+    check(!buffer.add(b) && buffer.size() == capacity && buffer.capacity() == capacity &&
+              buffer.dropped_event_count() == 1,
+          "bounded-buffer-rejects-and-counts-overflow");
 }
 
 int main() {

@@ -19,13 +19,13 @@ uses only installed public headers and `Pulp::midi`. It is a state probe:
 its voice advances expression smoothers but produces no audio. It does not
 construct a graph, use a format adapter, or exercise `MpeVoiceTracker` itself.
 
-| Surface | Characterized behavior |
+| Surface | Source-audited behavior; executable confirmation pending |
 |---|---|
 | Capacity | Construction preallocates the requested pool. Eight notes fill eight slots; a ninth steals without growing the pool. Zero capacity silently ignores notes. There is no allocator maximum/admission error. |
 | Stealing | Oldest, lowest velocity, lowest pitch and highest pitch are selectable. Equal priority selects the first pool slot. Release tails remain active and have no special stealing priority. |
-| Lifetime | NoteOff begins a voice-owned tail. The voice calls `finish_release()` when complete. Reuse resets voice and expression state. |
+| Lifetime | NoteOff begins a voice-owned tail. The voice calls `finish_release()` when complete. Reuse calls virtual `reset()`: the base clears note/expression/tail bookkeeping, but preserves smoothing configuration. Derived DSP/graph state needs its own reset implementation. |
 | Identity | Distinct generations may share pitch/channel. Stale NoteOff/expression for a stolen generation is ignored; current-generation expression reaches its slot. |
-| Reset | `reset_all()` clears voices/glide/ages but preserves cumulative steal count. `reset_steal_count()` clears that counter separately. |
+| Reset | `reset_all()` calls each voice's reset, clears glide state and resets the age counter; it does not clear the age vector or cumulative steal count. `reset_steal_count()` clears that counter separately. |
 | Ordering | `dispatch()` acts immediately, regardless of `sample_offset`. `dispatch_all()` respects buffer order without sorting or rendering sample intervals. Explicit `MpeBuffer::sort()` preserves producer order at equal offsets. |
 
 Input generations must already be valid and unique for simultaneous lifetimes;
@@ -58,7 +58,11 @@ this allocator. A graph integration cannot infer sustain from this evidence.
    sequence. The graph integration must render intervals between events before
    dispatch; calling `dispatch_all()` once per block is insufficient. Equal-time
    events retain producer order, including retirement before replacement.
-   Cross-block coordinates, late-event rejection, capacity/drop reporting and
+   Set the event buffer's reserved capacity before prepare and enable
+   `set_realtime_capacity_limit(true)`; the default buffer may grow. Reject a
+   full-capacity append without partial publication, and publish the saturating
+   dropped-event count at the same bounded observation boundary. This does not
+   by itself prove callback allocation behavior. Cross-block coordinates, late-event rejection and
    reset epoch must use the eventual G-5 graph event contract. No transport is
    defined by the current scalar indexed-control slice.
 5. **Sustain and tails.** Sustain policy belongs at the existing MIDI/voice
@@ -118,3 +122,8 @@ pressure event's generation from 1 to 9. The unchanged stale-generation oracle
 must fail after a real recompile and pass after restoration. This changes the
 event sent through the public API, not the expected value or the installed SDK.
 Record baseline, broken and restored outputs in the phase status.
+
+This change currently supplies the executable source and source-backed contract.
+Execution and the mutation control are pending host admission; the behavior table
+is not a passing-test receipt. No installed-SDK build result is inferred from
+successful configuration or matching header hashes.
