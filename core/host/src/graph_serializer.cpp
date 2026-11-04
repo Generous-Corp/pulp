@@ -1039,7 +1039,9 @@ std::string GraphSerializer::to_json(
             const auto& d = instance->descriptor();
             auto p = choc::value::createObject("Processor");
             p.addMember("node_id", (int64_t)n.id);
-            p.addMember("type_id", d.bundle_id);
+            p.addMember("type_id", instance->graph_type_id().empty()
+                                       ? d.bundle_id
+                                       : std::string(instance->graph_type_id()));
             p.addMember("type_version", (int64_t)instance->graph_type_version());
             p.addMember("state_schema_version", (int64_t)instance->graph_state_schema_version());
             p.addMember("input_channels", (int64_t)d.default_input_channels());
@@ -1598,6 +1600,17 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             const auto custom_text = std::string_view(p["custom_b64"].getString());
             if (!bounded_encoded(parameters_text) || !bounded_encoded(custom_text)) {
                 result.error = "Processor state encoding exceeds limits";
+                return result;
+            }
+            const auto encoded_upper_bound = [](std::size_t bytes) {
+                return (bytes / 4) * 3 + (bytes % 4 != 0 ? 3 : 0);
+            };
+            if (encoded_upper_bound(parameters_text.size()) >
+                    ProcessorRestoreRegistry::max_total_state_bytes - decoded_total ||
+                encoded_upper_bound(custom_text.size()) >
+                    ProcessorRestoreRegistry::max_total_state_bytes - decoded_total -
+                        encoded_upper_bound(parameters_text.size())) {
+                result.error = "Processor state exceeds aggregate limit";
                 return result;
             }
             auto parameters = b64_decode(parameters_text);

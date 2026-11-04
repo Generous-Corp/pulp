@@ -163,10 +163,38 @@ void positive_and_isolation() {
         std::cerr << "GRAPH_JSON=" << graph_json << '\n';
         check(false, "graph v4 custom state field is present");
     }
-    oversized_json.insert(custom_key + 14, std::string(12 * 1024 * 1024, 'A'));
+    const auto custom_value_begin = oversized_json.find('"', custom_key + std::string("\"custom_b64\":").size());
+    check(custom_value_begin != std::string::npos, "graph v4 custom state value is quoted");
+    oversized_json.insert(custom_value_begin + 1, std::string(12 * 1024 * 1024, 'A'));
+    check(oversized_json.find("\"custom_b64\": \"") != std::string::npos &&
+              oversized_json.back() == '}',
+          "oversized graph v4 fixture remains valid JSON");
     SignalGraph rejected_graph;
     check(!GraphSerializer::from_json(rejected_graph, oversized_json, load_options).ok,
           "graph v4 rejects oversized encoded state before decode");
+    auto malformed_json = graph_json;
+    const auto malformed_value = malformed_json.find("\"custom_b64\":");
+    const auto malformed_quote = malformed_json.find('"', malformed_value + 14);
+    const auto malformed_end = malformed_json.find('"', malformed_quote + 1);
+    malformed_json.replace(malformed_quote + 1, malformed_end - malformed_quote - 1, "%%%");
+    SignalGraph malformed_graph;
+    check(!GraphSerializer::from_json(malformed_graph, malformed_json, load_options).ok,
+          "graph v4 rejects malformed base64");
+    auto range_json = graph_json;
+    const auto type_version_key = range_json.find("\"type_version\": 7");
+    check(type_version_key != std::string::npos, "graph v4 type version field is present");
+    range_json.replace(type_version_key, std::string("\"type_version\": 7").size(),
+                       "\"type_version\": 4294967303");
+    SignalGraph range_graph;
+    check(!GraphSerializer::from_json(range_graph, range_json, load_options).ok,
+          "graph v4 rejects narrowed type version");
+    auto orphan_json = graph_json;
+    const auto node_id_key = orphan_json.find("\"node_id\": 2");
+    check(node_id_key != std::string::npos, "graph v4 processor node id field is present");
+    orphan_json.replace(node_id_key, std::string("\"node_id\": 2").size(), "\"node_id\": 99");
+    SignalGraph orphan_graph;
+    check(!GraphSerializer::from_json(orphan_graph, orphan_json, load_options).ok,
+          "graph v4 rejects orphan Processor records");
 
     auto live = fresh();
     SignalGraph live_graph;
