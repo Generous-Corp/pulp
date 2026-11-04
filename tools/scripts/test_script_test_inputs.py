@@ -1065,6 +1065,46 @@ class CompiledDataTests(unittest.TestCase):
             self.assertEqual(json.loads(list_path.read_text(encoding="utf-8"))["tests"]["alpha"], fresh)
             self.assertNotIn("kept", proc.stdout)
 
+    def test_write_preserves_a_previously_recorded_executable_after_its_last_dependency_is_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            list_path = repo.root / sti.DEFAULT_LIST
+            before = json.loads(list_path.read_text(encoding="utf-8"))
+            self.assertEqual(before["executables"]["pulp-test-d"]["spawns"], "undeclared")
+
+            write(repo.root, "test/test_d.cpp", "int value = 1;\n")
+            stale = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(stale.returncode, 1, stale.stdout + stale.stderr)
+            self.assertIn("stale compiled entry: pulp-test-d", stale.stdout)
+            proc = self.run_tool(repo, "--write")
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            after = json.loads(list_path.read_text(encoding="utf-8"))
+            self.assertEqual(set(after["executables"]), set(before["executables"]))
+            self.assertEqual(after["executables"]["pulp-test-d"], {
+                "kind": "compiled", "data": "none", "inputs": [], "sources": [],
+                "undeclared_sources": []})
+            for name in before["executables"]:
+                if name != "pulp-test-d":
+                    self.assertEqual(after["executables"][name], before["executables"][name])
+            self.assertEqual(after["executables_scanned"], before["executables_scanned"])
+            self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 0)
+            stable = list_path.read_bytes()
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.assertEqual(list_path.read_bytes(), stable)
+
+            # A new dependency must still replace the clean record and fail
+            # the check until regenerated; retaining the name is not a waiver.
+            write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("stale compiled entry: pulp-test-d", proc.stdout)
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            restored = json.loads(list_path.read_text(encoding="utf-8"))
+            self.assertEqual(restored["executables"]["pulp-test-d"],
+                             before["executables"]["pulp-test-d"])
+
     def test_detected_sources_lists_only_what_a_signal_matched(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)

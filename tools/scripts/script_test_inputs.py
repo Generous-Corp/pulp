@@ -1299,6 +1299,27 @@ def carry_unconfigured_entries(current: dict, checked_in: dict, inventory: dict,
     return sorted(set(carried))
 
 
+def retain_scanned_clean_entries(current: dict, checked_in: dict) -> None:
+    """Refresh old dependency records whose executable was scanned clean.
+
+    A removed final dependency leaves no compiled entry, but the executable
+    is still configured and scanned. Keep its name with a fresh empty record
+    so the unseen-entry guard does not mistake that transition for a missing
+    test. Never copy old dependency metadata or infer a scan from the old list.
+    """
+    if not set(EXECUTABLE_SCANS) <= set(current.get("executables_scanned_for") or []):
+        return
+    scanned = set(current.get("executables_scanned") or [])
+    entries = current.get("executables")
+    if entries is None:
+        return
+    for name in checked_in.get("executables") or {}:
+        if name in scanned and name not in entries:
+            entries[name] = {"kind": "compiled", "data": "none", "inputs": [],
+                             "sources": [], "undeclared_sources": []}
+    current["executables"] = dict(sorted(entries.items()))
+
+
 def entries_write_would_delete(current: dict, checked_in: dict) -> list[str]:
     """Checked-in test and executable names absent from what --write would
     write, after unconfigured entries were carried. Main's list holds every
@@ -1518,7 +1539,12 @@ def main(argv: list[str]) -> int:
         print("script-test-inputs: SKIPPED: " + off_platform + ". The required gate checks the list; "
               "this is a skip, not a pass.")
         return SKIP_EXIT
+    try:
+        checked_in = json.loads(list_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        checked_in = {"tests": {}}
     current = build_list(inventory, root, build_dir)
+    retain_scanned_clean_entries(current, checked_in)
     off_profile = outside_gate_profile_build(build_dir, inventory, root)
     # A stale configure blocks writes, but --check must still judge the
     # inventory against the current CTest evidence. Returning SKIP (77) here
@@ -1536,12 +1562,8 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 2
     if a.write:
-        try:
-            previous = json.loads(list_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            previous = {}
-        carried = carry_unconfigured_entries(current, previous, inventory, root, build_dir)
-        dropped = entries_write_would_delete(current, previous)
+        carried = carry_unconfigured_entries(current, checked_in, inventory, root, build_dir)
+        dropped = entries_write_would_delete(current, checked_in)
         if dropped and not a.allow_delete:
             print("script-test-inputs: refusing to write: it would delete "
                   f"{len(dropped)} checked-in entr{'y' if len(dropped) == 1 else 'ies'} this configure "
@@ -1569,10 +1591,6 @@ def main(argv: list[str]) -> int:
             print("script-test-inputs: note: no --build-dir, so an entry generated into a build tree "
                   f"could not be recorded as {BINARY_DIR_TOKEN}; pass --build-dir alongside --inventory-json")
         return 0
-    try:
-        checked_in = json.loads(list_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        checked_in = {"tests": {}}
     if off_profile:
         # Script entries are filtered to the gate's registrations and still
         # compare; this build's compiled entries cannot, so they are left out
