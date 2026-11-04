@@ -105,7 +105,8 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
         // value) at the destination's position, so it extends source liveness
         // like an audio feedforward edge — but event (MIDI) edges carry no audio.
         for (const auto& conn : plan.connections) {
-            if (is_event(conn)) continue;
+            if (is_event(conn) || is_spectral(conn))
+                continue;
             if (conn.feedback) {
                 last_use[conn.source_index] = pinned;
             } else {
@@ -171,7 +172,7 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
             port_base[n + 1] = port_base[n] + plan.nodes[n].output_ports;
         std::vector<std::uint32_t> readers(port_base[node_count], 0);
         for (const auto& conn : plan.connections) {
-            if (is_event(conn) || conn.source_index >= node_count ||
+            if (is_event(conn) || is_spectral(conn) || conn.source_index >= node_count ||
                 conn.source_port >= plan.nodes[conn.source_index].output_ports)
                 continue;
             ++readers[port_base[conn.source_index] + conn.source_port];
@@ -179,7 +180,7 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
         assignment.reads_in_place.assign(plan.connections.size(), 0);
         for (std::size_t i = 0; i < plan.connections.size(); ++i) {
             const auto& conn = plan.connections[i];
-            if (is_event(conn) || is_automation_conn(conn))
+            if (!carries_audio(conn))
                 continue;
             if (conn.feedback) {
                 assignment.reads_in_place[i] = 1;
@@ -204,6 +205,8 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
     // differing latency time-align — matching the host graph's per-connection
     // delay lines. Feedback and event connections carry no delay.
     try {
+        const bool spectral_plan = std::any_of(plan.connections.begin(), plan.connections.end(),
+                                               [](const auto& edge) { return is_spectral(edge); });
         std::vector<std::uint32_t> input_latency(node_count, 0);
         std::vector<std::uint32_t> output_latency(node_count, 0);
         for (const auto node_index : plan.processing_order_indices) {
@@ -226,6 +229,11 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
                 max_upstream = std::max(max_upstream, output_latency[conn.source_index]);
             }
             input_latency[node_index] = max_upstream;
+            if (spectral_plan && static_cast<std::uint64_t>(max_upstream) + node.latency_samples >
+                                     std::numeric_limits<std::uint32_t>::max()) {
+                assignment.ok = false;
+                return assignment;
+            }
             output_latency[node_index] = static_cast<std::uint32_t>(
                 std::min<std::uint64_t>(
                     static_cast<std::uint64_t>(max_upstream) + node.latency_samples,
@@ -237,7 +245,7 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
         }
         for (std::size_t i = 0; i < plan.connections.size(); ++i) {
             const auto& conn = plan.connections[i];
-            if (conn.feedback || is_event(conn) ||
+            if (conn.feedback || is_event(conn) || is_spectral(conn) ||
                 (is_automation_conn(conn) && !conn.automation.audio_rate)) {
                 continue;
             }

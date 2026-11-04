@@ -82,6 +82,7 @@ enum class LowerRejectReason {
     StatefulCustomNotYetLoadable, // load_baked: matching Custom instance could
                                   // not be created or rejected authenticated state.
     ParameterContractMismatch,    // promoted parameter identities or metadata are invalid
+    SpectralPersistenceUnsupported,
 };
 
 // Result of bake(): on success `processor` is non-null and `accepted` is true;

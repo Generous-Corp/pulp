@@ -245,6 +245,12 @@ LowerabilityProof lowerability_of(
     // frozen topology cannot capture. The explicit kind checks give those graphs a
     // specific, actionable reason instead of a generic NotExecutorEligible.
     for (const auto& node : nodes) {
+        if (node.spectral_identity) {
+            proof.reason = LowerRejectReason::SpectralPersistenceUnsupported;
+            proof.offending_node = node.id;
+            proof.message = "spectral graph persistence is not admitted";
+            return proof;
+        }
         if (node.type == NodeType::Plugin) {
             // A hosted Plugin owns opaque external state (its own DSP, presets,
             // sample caches). Freezing the topology cannot capture that state, so

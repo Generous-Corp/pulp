@@ -1,0 +1,77 @@
+{
+  "id": "g10-routed-spectral-runtime",
+  "title": "Runtime-only named routed spectral stages share the SignalGraph serial plan",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "g10-routed-ports-20261104",
+  "owned_paths": [
+    "core/host/include/pulp/host/spectral_graph.hpp",
+    "core/host/include/pulp/host/signal_graph_executor_routing.hpp",
+    "core/host/src/signal_graph_authoring.cpp",
+    "core/host/src/signal_graph_live_swap.cpp",
+    "core/host/src/signal_graph_live_swap_catalog.cpp",
+    "docs/status/sequencer-exposure/rows/g10-routed-spectral-runtime.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/spectral_graph.hpp",
+      "needles": [
+        "SpectralIdentity",
+        "QualifiedSpectralStage"
+      ]
+    },
+    {
+      "path": "test/test_routed_spectral_ports.cpp",
+      "needles": [
+        "Named spectral stages execute independently",
+        "Independent audio feedback survives"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "Named runtime-only spectral factories and typed handles are installed with Pulp::host. The standalone installed consumer executes independent built-in stages; full G-10 qualification remains PARTIAL.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/spectral_graph.hpp",
+          "needles": [
+            "SpectralIdentity",
+            "QualifiedSpectralStage"
+          ]
+        },
+        {
+          "kind": "sdk_target",
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": [
+            "list(APPEND _pulp_sdk_header_subsystems host)",
+            "FILES_MATCHING PATTERN \"*.hpp\""
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline timeline CLI operation or document format changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Named ports are an in-process graph authoring API and do not grant a new live product control surface."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "Reviewed infrastructure fingerprints cover the public headers. Notation/catalog authoring is unqualified and no generator-facing spectral capability is claimed."
+    }
+  }
+}

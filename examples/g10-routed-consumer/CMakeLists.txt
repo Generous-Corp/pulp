@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.24)
+project(G10RoutedConsumer LANGUAGES CXX)
+find_package(Pulp REQUIRED COMPONENTS host)
+add_executable(g10-routed-consumer main.cpp)
+target_compile_features(g10-routed-consumer PRIVATE cxx_std_20)
+target_link_libraries(g10-routed-consumer PRIVATE Pulp::host)
+enable_testing()
+add_test(NAME g10-routed-public-consumer COMMAND g10-routed-consumer)
