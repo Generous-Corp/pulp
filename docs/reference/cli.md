@@ -1485,6 +1485,21 @@ Remaining limitation:
 - `skia` and `coregraphics` still validate headless render paths, not the live app.
   Use `live-gpu` when you need proof from the actual design-tool renderer.
 
+### graph
+
+`pulp graph validate FILE --json` checks a saved `.pulpgraph` and returns
+`valid`, a stable `code`, and graph counts. Invalid input exits nonzero with
+`code: invalid_graph` and a diagnostic `message`. `inspect` and `explain`
+report the graph shape without running plugin code. `fmt` rewrites the file in
+canonical JSON form and is byte stable on repeated runs; `canonicalize` remains
+an alias. Formatting refuses unresolved plugin nodes or rejected plugin state.
+
+`pulp graph render FILE --output OUTPUT.wav --json` prepares the saved graph
+and renders one second at 48 kHz to a float WAV. Its JSON result reports frame,
+sample rate, and block counts. Unresolved node types and prepare failures return
+nonzero errors. The MCP `pulp_graph` tool exposes the read-only `inspect`,
+`validate`, `explain`, and `render` operations; file writing stays in the CLI.
+
 ### Sample-region graph inspection
 
 Sample-region graph and capability reports are read-only views of the declared

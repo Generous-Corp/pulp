@@ -394,19 +394,22 @@ commands:
 
   - name: graph
     status: usable
-    summary: Inspect, validate, and canonicalize .pulpgraph notation without loading plugin code.
+    summary: Inspect, validate, explain, format, and offline-render .pulpgraph files.
     args:
       - name: operation
         kind: positional
         required: true
-        description: inspect, validate, or canonicalize
+        description: inspect, validate, explain, render, fmt, or canonicalize
       - name: file
         kind: positional
         required: true
         description: Path to a .pulpgraph file
       - name: --json
         kind: flag
-        description: Emit machine-readable inspection output
+        description: Emit machine-readable result and error codes
+      - name: --output
+        kind: option
+        description: Write the offline render to a float WAV file
     docs: reference/cli.md#graph
 
   - name: bake
