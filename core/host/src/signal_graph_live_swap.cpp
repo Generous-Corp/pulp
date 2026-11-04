@@ -19,12 +19,12 @@
 // helper whose caller must already hold graph_mutation_mutex_; the public
 // entry points take it.
 
+#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/crossfade_plugin_slot.hpp>
+#include <pulp/format/processor.hpp>
+#include <pulp/runtime/log.hpp>
 #include "signal_graph_internal.hpp"
 #include "signal_graph_live_swap_detail.hpp"
-#include <pulp/format/processor.hpp>
-#include <pulp/host/crossfade_plugin_slot.hpp>
-#include <pulp/host/signal_graph.hpp>
-#include <pulp/runtime/log.hpp>
 
 #include <algorithm>
 #include <array>
@@ -53,29 +53,26 @@ constexpr float kLiveSwapWarmSafetyMargin = 1.5f;
 
 using namespace live_swap_detail;
 
-LiveSwapAdmission
-evaluate_live_swap_admission(const pulp::audio::AudioProcessLoadSnapshot& graph,
-                             const std::vector<pulp::audio::AudioProcessLoadSnapshot>& staged_nodes,
-                             float headroom_threshold, std::uint64_t min_callbacks) {
+LiveSwapAdmission evaluate_live_swap_admission(
+    const pulp::audio::AudioProcessLoadSnapshot& graph,
+    const std::vector<pulp::audio::AudioProcessLoadSnapshot>& staged_nodes,
+    float headroom_threshold, std::uint64_t min_callbacks) {
     // Deny on uncertainty: an unmeasured graph or node could xrun under a doubled
     // fade render, and eager-silence is the safe fallback.
-    if (graph.callback_count < min_callbacks)
-        return {false, "no history"};
+    if (graph.callback_count < min_callbacks) return {false, "no history"};
     for (const auto& n : staged_nodes) {
-        if (n.callback_count < min_callbacks)
-            return {false, "no history"};
+        if (n.callback_count < min_callbacks) return {false, "no history"};
     }
     // Projected peak = current worst-case graph load + the fade's added second render
     // of each staged node (its own worst-case load), all as callback-budget fractions.
     float projected = std::max(graph.load, graph.last_load);
-    for (const auto& n : staged_nodes)
-        projected += std::max(n.load, n.last_load);
-    if (projected > headroom_threshold)
-        return {false, "over budget"};
+    for (const auto& n : staged_nodes) projected += std::max(n.load, n.last_load);
+    if (projected > headroom_threshold) return {false, "over budget"};
     return {true, "ok"};
 }
 
-SignalGraph::SwapResult SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
+SignalGraph::SwapResult
+SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
     GraphMutationLock mutation_lock(*this);
     if (refuse_spectral_mutation_())
         return SwapResult::NeedsEagerPrepare;
@@ -84,63 +81,77 @@ SignalGraph::SwapResult SignalGraph::stage_plugin_replacement(NodeId id, PluginC
 
     const auto catalog_it = scanned_plugin_catalog_.find(token.value);
     if (!token || catalog_it == scanned_plugin_catalog_.end()) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::UntrustedIdentity, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::UntrustedIdentity,
+                                      id,
                                       "replacement token is not in the scan catalog");
     }
 
     auto* n = node_mut_locked_(id);
     if (!n || n->type != NodeType::Plugin || !n->plugin || !live_slot_.live()) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::PredicateExcluded, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::PredicateExcluded,
+                                      id,
                                       "node is not a prepared plugin node");
     }
 
     const NodeLiveSwapPolicy policy = n->live_swap_policy;
     if (!policy.allow_live_instance_swap) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::NotOptedIn, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::NotOptedIn,
+                                      id,
                                       "node has not opted into live instance swap");
     }
     if (node_has_feedback_edge_locked_(id)) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::FeedbackNotSwappable, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::FeedbackNotSwappable,
+                                      id,
                                       "node participates in a feedback edge");
     }
     if (n->hosted_editor_open) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::EditorOpen, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::EditorOpen,
+                                      id,
                                       "hosted editor is open");
     }
 
     const auto old_meta_it = prepared_plugin_meta_.find(id);
     if (old_meta_it == prepared_plugin_meta_.end()) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::PredicateExcluded, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::PredicateExcluded,
+                                      id,
                                       "prepared plugin metadata is unavailable");
     }
     const auto live_shape_it = live_slot_.live()->shapes.find(id);
     if (live_shape_it == live_slot_.live()->shapes.end()) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::PredicateExcluded, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::PredicateExcluded,
+                                      id,
                                       "live snapshot shape is unavailable");
     }
 
     const PluginInfo replacement_info = catalog_it->second;
     auto loaded = load_live_swap_plugin_locked_(replacement_info);
     if (!loaded) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::LoadFailed, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::LoadFailed,
+                                      id,
                                       "replacement plugin did not load");
     }
     if (!loaded->prepare(live_slot_.live()->sample_rate, live_slot_.live()->max_block_size)) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::PrepareFailed, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::PrepareFailed,
+                                      id,
                                       "replacement plugin did not prepare");
     }
 
-    const bool same_identity = same_plugin_identity(n->plugin_info, replacement_info);
+    const bool same_identity = same_plugin_identity(n->plugin_info,
+                                                   replacement_info);
     std::vector<HostParamInfo> new_params = loaded->parameters();
-    if (node_has_parameter_or_automation_contract_locked_(id) && !same_identity &&
-        !same_parameter_contract(old_meta_it->second.parameters, new_params)) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::ParamContractMismatch, id,
-                                      "replacement parameter contract differs from the live node");
+    if (node_has_parameter_or_automation_contract_locked_(id)
+        && !same_identity
+        && !same_parameter_contract(old_meta_it->second.parameters, new_params)) {
+        return fail_swap_edit_locked_(
+            LiveSwapFallbackReason::ParamContractMismatch,
+            id,
+            "replacement parameter contract differs from the live node");
     }
 
     const std::vector<std::uint8_t> old_state = n->plugin->save_state();
     if (old_state.size() > policy.max_state_bytes) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::StateTooLarge, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::StateTooLarge,
+                                      id,
                                       "saved plugin state exceeds the policy limit");
     }
 
@@ -149,13 +160,15 @@ SignalGraph::SwapResult SignalGraph::stage_plugin_replacement(NodeId id, PluginC
     if (live_shape.type != NodeType::Plugin ||
         live_shape.num_input_ports != loaded_info.num_inputs ||
         live_shape.num_output_ports != loaded_info.num_outputs) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::ShapeMismatch, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::ShapeMismatch,
+                                      id,
                                       "replacement port shape differs from the live node");
     }
 
     const int new_latency = std::max(0, loaded->latency_samples());
     if (new_latency != old_meta_it->second.latency_samples) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::LatencyChanged, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::LatencyChanged,
+                                      id,
                                       "replacement latency differs from the live node");
     }
     const bool wants_transport = loaded->wants_transport();
@@ -181,7 +194,8 @@ SignalGraph::SwapResult SignalGraph::stage_plugin_replacement(NodeId id, PluginC
     warmed_load.peak_load = std::min(1.0f, warmed_load.peak_load * kLiveSwapWarmSafetyMargin);
 
     if (!loaded->restore_state(old_state)) {
-        return fail_swap_edit_locked_(LiveSwapFallbackReason::StateRestoreFailed, id,
+        return fail_swap_edit_locked_(LiveSwapFallbackReason::StateRestoreFailed,
+                                      id,
                                       "replacement plugin rejected the live state");
     }
 
@@ -245,8 +259,8 @@ SignalGraph::load_live_swap_plugin_locked_(const PluginInfo& info) const {
     return PluginSlot::load(info);
 }
 
-pulp::audio::AudioProcessLoadSnapshot SignalGraph::warm_staged_slot_locked_(PluginSlot& slot,
-                                                                            NodeId id) const {
+pulp::audio::AudioProcessLoadSnapshot
+SignalGraph::warm_staged_slot_locked_(PluginSlot& slot, NodeId id) const {
     assert_graph_mutation_locked_();
     if (!live_slot_.live()) {
         return pulp::audio::AudioProcessLoadSnapshot{};
@@ -263,10 +277,12 @@ pulp::audio::AudioProcessLoadSnapshot SignalGraph::warm_staged_slot_locked_(Plug
         return pulp::audio::AudioProcessLoadSnapshot{};
     }
 
-    pulp::audio::Buffer<float> input(static_cast<std::size_t>(std::max(0, shape.num_input_ports)),
-                                     static_cast<std::size_t>(block_size));
-    pulp::audio::Buffer<float> output(static_cast<std::size_t>(std::max(0, shape.num_output_ports)),
-                                      static_cast<std::size_t>(block_size));
+    pulp::audio::Buffer<float> input(
+        static_cast<std::size_t>(std::max(0, shape.num_input_ports)),
+        static_cast<std::size_t>(block_size));
+    pulp::audio::Buffer<float> output(
+        static_cast<std::size_t>(std::max(0, shape.num_output_ports)),
+        static_cast<std::size_t>(block_size));
 
     std::uint32_t noise = 0x9e3779b9u ^ static_cast<std::uint32_t>(id);
     for (std::size_t ch = 0; ch < input.num_channels(); ++ch) {
@@ -274,7 +290,8 @@ pulp::audio::AudioProcessLoadSnapshot SignalGraph::warm_staged_slot_locked_(Plug
         for (auto& sample : channel) {
             noise = noise * 1664525u + 1013904223u;
             const auto bits = static_cast<std::uint16_t>((noise >> 8) & 0xffffu);
-            const float centered = (static_cast<float>(bits) / 32767.5f) - 1.0f;
+            const float centered =
+                (static_cast<float>(bits) / 32767.5f) - 1.0f;
             sample = centered * 0.25f;
         }
     }
@@ -293,31 +310,29 @@ pulp::audio::AudioProcessLoadSnapshot SignalGraph::warm_staged_slot_locked_(Plug
     auto input_view = const_input.view();
     std::array<format::ProcessBusBufferView<const float>, 1> input_buses{{
         {
-            .info =
-                {
-                    .name = "Plugin Node In",
-                    .index = 0,
-                    .direction = format::BusDirection::Input,
-                    .role = format::BusRole::Main,
-                    .declared_channels = static_cast<int>(input_view.num_channels()),
-                    .optional = input_view.num_channels() == 0,
-                    .active = input_view.num_channels() > 0,
-                },
+            .info = {
+                .name = "Plugin Node In",
+                .index = 0,
+                .direction = format::BusDirection::Input,
+                .role = format::BusRole::Main,
+                .declared_channels = static_cast<int>(input_view.num_channels()),
+                .optional = input_view.num_channels() == 0,
+                .active = input_view.num_channels() > 0,
+            },
             .buffer = input_view,
         },
     }};
     std::array<format::ProcessBusBufferView<float>, 1> output_buses{{
         {
-            .info =
-                {
-                    .name = "Plugin Node Out",
-                    .index = 0,
-                    .direction = format::BusDirection::Output,
-                    .role = format::BusRole::Main,
-                    .declared_channels = static_cast<int>(output_view.num_channels()),
-                    .optional = false,
-                    .active = output_view.num_channels() > 0,
-                },
+            .info = {
+                .name = "Plugin Node Out",
+                .index = 0,
+                .direction = format::BusDirection::Output,
+                .role = format::BusRole::Main,
+                .declared_channels = static_cast<int>(output_view.num_channels()),
+                .optional = false,
+                .active = output_view.num_channels() > 0,
+            },
             .buffer = output_view,
         },
     }};
@@ -330,8 +345,7 @@ pulp::audio::AudioProcessLoadSnapshot SignalGraph::warm_staged_slot_locked_(Plug
         output.clear();
         midi_out.clear();
         midi_out.clear_sysex();
-        if (auto* ump = midi_out.ump())
-            ump->clear();
+        if (auto* ump = midi_out.ump()) ump->clear();
         warm.begin(block_size, sample_rate);
         slot.process(process_buffers, midi_in, midi_out, param_events, block_size);
         warm.end();
@@ -342,13 +356,13 @@ pulp::audio::AudioProcessLoadSnapshot SignalGraph::warm_staged_slot_locked_(Plug
 bool SignalGraph::node_has_feedback_edge_locked_(NodeId id) const {
     assert_graph_mutation_locked_();
     for (const auto& c : connections_) {
-        if (c.feedback && (c.source_node == id || c.dest_node == id))
-            return true;
+        if (c.feedback && (c.source_node == id || c.dest_node == id)) return true;
     }
     return false;
 }
 
-bool SignalGraph::node_has_parameter_or_automation_contract_locked_(NodeId id) const {
+bool SignalGraph::node_has_parameter_or_automation_contract_locked_(
+    NodeId id) const {
     assert_graph_mutation_locked_();
     if (auto it = prepared_plugin_meta_.find(id);
         it != prepared_plugin_meta_.end() && !it->second.parameters.empty()) {
@@ -367,8 +381,10 @@ bool SignalGraph::staged_replacement_relaxes_identity_locked_(NodeId id) const {
     return staged_replacements_.find(id) != staged_replacements_.end();
 }
 
-void SignalGraph::set_live_swap_diagnostics_locked_(LiveSwapFallbackReason reason, NodeId node,
-                                                    std::string message) {
+void SignalGraph::set_live_swap_diagnostics_locked_(
+    LiveSwapFallbackReason reason,
+    NodeId node,
+    std::string message) {
     assert_graph_mutation_locked_();
     last_swap_diagnostics_ = LiveSwapDiagnostics{
         .reason = reason,
@@ -388,8 +404,10 @@ void SignalGraph::cancel_swap_edit_locked_() {
     staged_replacements_.clear();
 }
 
-SignalGraph::SwapResult SignalGraph::fail_swap_edit_locked_(LiveSwapFallbackReason reason,
-                                                            NodeId node, std::string message) {
+SignalGraph::SwapResult SignalGraph::fail_swap_edit_locked_(
+    LiveSwapFallbackReason reason,
+    NodeId node,
+    std::string message) {
     assert_graph_mutation_locked_();
     set_live_swap_diagnostics_locked_(reason, node, std::move(message));
     cancel_swap_edit_locked_();
@@ -397,7 +415,8 @@ SignalGraph::SwapResult SignalGraph::fail_swap_edit_locked_(LiveSwapFallbackReas
     return SwapResult::NeedsEagerPrepare;
 }
 
-std::vector<pulp::audio::AudioProcessLoadSnapshot> SignalGraph::staged_node_loads_locked_() const {
+std::vector<pulp::audio::AudioProcessLoadSnapshot>
+SignalGraph::staged_node_loads_locked_() const {
     assert_graph_mutation_locked_();
     std::vector<pulp::audio::AudioProcessLoadSnapshot> loads;
     loads.reserve(staged_replacements_.size());
@@ -437,7 +456,8 @@ void SignalGraph::begin_swap_edit() {
     set_live_swap_diagnostics_locked_(LiveSwapFallbackReason::None, 0, {});
 }
 
-SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_block_size) {
+SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
+                                                  int max_block_size) {
     struct ObserverCall {
         NodeId id = 0;
         std::shared_ptr<PluginSlot> old_slot;
@@ -452,35 +472,38 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
     if (!trigger_producers_.empty() || !trigger_envelopes_.empty() || !trigger_audio_.empty() ||
         !trigger_edges_.empty())
         return SwapResult::NeedsEagerPrepare;
-    if (!in_swap_edit_)
-        return SwapResult::NotInSwapEdit;
+    if (!in_swap_edit_) return SwapResult::NotInSwapEdit;
 
     // MidiOutput publication is still owned by the live snapshot. Refuse this
     // lane before the generic failure path invalidates that snapshot: callers
     // must be able to drain a pending note-off with extract_midi() and then use
     // eager prepare(). The authoring edits remain in nodes_/connections_; only
     // the old compiled snapshot stays live until that eager replacement.
-    const bool candidate_has_midi_output =
-        std::any_of(nodes_.begin(), nodes_.end(),
-                    [](const GraphNode& node) { return node.type == NodeType::MidiOutput; });
+    const bool candidate_has_midi_output = std::any_of(
+        nodes_.begin(), nodes_.end(),
+        [](const GraphNode& node) { return node.type == NodeType::MidiOutput; });
     const auto& live = live_slot_.live();
-    const bool live_has_midi_output =
-        live != nullptr &&
-        std::any_of(live->shapes.begin(), live->shapes.end(),
-                    [](const auto& entry) { return entry.second.type == NodeType::MidiOutput; });
+    const bool live_has_midi_output = live != nullptr && std::any_of(
+        live->shapes.begin(), live->shapes.end(),
+        [](const auto& entry) { return entry.second.type == NodeType::MidiOutput; });
     if (candidate_has_midi_output || live_has_midi_output) {
-        set_live_swap_diagnostics_locked_(LiveSwapFallbackReason::PredicateExcluded, 0,
-                                          "MIDI output has snapshot-local pending egress");
+        set_live_swap_diagnostics_locked_(
+            LiveSwapFallbackReason::PredicateExcluded,
+            0,
+            "MIDI output has snapshot-local pending egress");
         cancel_swap_edit_locked_();
         return SwapResult::NeedsEagerPrepare;
     }
 
-    auto fail = [&](LiveSwapFallbackReason reason, NodeId node, std::string message) {
+    auto fail = [&](LiveSwapFallbackReason reason,
+                    NodeId node,
+                    std::string message) {
         return fail_swap_edit_locked_(reason, node, std::move(message));
     };
 
     if (!preflight_locked_(max_block_size)) {
-        return fail(LiveSwapFallbackReason::PredicateExcluded, 0,
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
                     "graph preflight rejected the live swap");
     }
 
@@ -489,24 +512,30 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
         for (const auto& [id, _] : staged_replacements_) {
             if (const auto* n = node(id)) {
                 headroom_threshold =
-                    std::min(headroom_threshold, n->live_swap_policy.headroom_threshold);
+                    std::min(headroom_threshold,
+                             n->live_swap_policy.headroom_threshold);
             }
         }
-        const auto admission =
-            evaluate_live_swap_admission(graph_load(), staged_node_loads_locked_(),
-                                         headroom_threshold, kLiveSwapMinAdmissionCallbacks);
+        const auto admission = evaluate_live_swap_admission(
+            graph_load(),
+            staged_node_loads_locked_(),
+            headroom_threshold,
+            kLiveSwapMinAdmissionCallbacks);
         if (!admission.admit) {
-            const auto reason = std::string(admission.reason) == "over budget"
-                                    ? LiveSwapFallbackReason::OverBudget
-                                    : LiveSwapFallbackReason::NoLoadHistory;
-            return fail(reason, staged_replacements_.begin()->first, admission.reason);
+            const auto reason =
+                std::string(admission.reason) == "over budget"
+                    ? LiveSwapFallbackReason::OverBudget
+                    : LiveSwapFallbackReason::NoLoadHistory;
+            return fail(reason,
+                        staged_replacements_.begin()->first,
+                        admission.reason);
         }
     }
 
     struct CandidateRestore {
         GraphNode* node = nullptr;
         std::shared_ptr<PluginSlot> old_slot;
-        std::shared_ptr<PluginSlot> new_slot; // bare new instance (not the fade wrapper)
+        std::shared_ptr<PluginSlot> new_slot;  // bare new instance (not the fade wrapper)
         PluginInfo old_info;
         bool old_transport_sensitive = false;
         bool had_metadata = false;
@@ -533,13 +562,15 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
         auto* n = node_mut_locked_(id);
         if (!n || n->type != NodeType::Plugin || !n->plugin || !staged.slot) {
             rollback_candidate_view();
-            return fail(LiveSwapFallbackReason::PredicateExcluded, id,
+            return fail(LiveSwapFallbackReason::PredicateExcluded,
+                        id,
                         "staged replacement no longer matches a plugin node");
         }
         const auto meta_it = prepared_plugin_meta_.find(id);
         if (meta_it == prepared_plugin_meta_.end()) {
             rollback_candidate_view();
-            return fail(LiveSwapFallbackReason::PredicateExcluded, id,
+            return fail(LiveSwapFallbackReason::PredicateExcluded,
+                        id,
                         "prepared plugin metadata is unavailable");
         }
 
@@ -566,14 +597,15 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
         // begin_swap_edit's fade-done reclaim). fade_ms == 0 keeps the instant switch.
         const int fade_ms = n->live_swap_policy.fade_ms;
         if (fade_ms > 0 && r.old_slot) {
-            const auto fade_samples = static_cast<std::size_t>(std::max<long long>(
-                0, static_cast<long long>(static_cast<double>(fade_ms) * sample_rate / 1000.0)));
+            const auto fade_samples = static_cast<std::size_t>(
+                std::max<long long>(0, static_cast<long long>(
+                    static_cast<double>(fade_ms) * sample_rate / 1000.0)));
             const auto curve = n->live_swap_policy.curve == LiveSwapCurve::Smoothstep
                                    ? signal::TransitionCurve::Smoothstep
                                    : signal::TransitionCurve::EqualPower;
-            n->plugin =
-                std::make_shared<CrossfadePluginSlot>(staged.slot, r.old_slot, fade_samples, curve,
-                                                      staged.info.num_outputs, max_block_size);
+            n->plugin = std::make_shared<CrossfadePluginSlot>(
+                staged.slot, r.old_slot, fade_samples, curve,
+                staged.info.num_outputs, max_block_size);
         } else {
             n->plugin = staged.slot;
         }
@@ -582,15 +614,18 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
     }
 
     if (!live_slot_.live() ||
-        !snapshot_is_plugin_reinit_free_locked_(*live_slot_.live(), sample_rate, max_block_size)) {
+        !snapshot_is_plugin_reinit_free_locked_(*live_slot_.live(), sample_rate,
+                                                max_block_size)) {
         rollback_candidate_view();
-        return fail(LiveSwapFallbackReason::PredicateExcluded, 0,
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
                     "graph is not eligible for a live swap");
     }
     auto next = compile_(sample_rate, max_block_size, CompileMode::SwapNoAnticipation);
     if (!next) {
         rollback_candidate_view();
-        return fail(LiveSwapFallbackReason::PredicateExcluded, 0,
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
                     "candidate graph did not compile");
     }
     // A latency-changing edit still needs the eager/crossfade path: adopting
@@ -602,10 +637,11 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
         return std::any_of(graph.connections.begin(), graph.connections.end(),
                            [](const Connection& c) { return c.feedback; });
     };
-    if (next->total_latency_samples != old.total_latency_samples || has_feedback(*next) ||
-        has_feedback(old)) {
+    if (next->total_latency_samples != old.total_latency_samples ||
+        has_feedback(*next) || has_feedback(old)) {
         rollback_candidate_view();
-        return fail(LiveSwapFallbackReason::PredicateExcluded, 0,
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
                     "candidate graph changes latency or carries feedback state");
     }
 
@@ -618,7 +654,8 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
         next->routed.parallel.valid != old.routed.parallel.valid ||
         next->pdc_execution_domain != old.pdc_execution_domain) {
         rollback_candidate_view();
-        return fail(LiveSwapFallbackReason::PredicateExcluded, 0,
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
                     "candidate graph changes routed execution availability or PDC domain");
     }
 
@@ -631,7 +668,8 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
     if (old.connection_identities.size() != old.connection_delays.size() ||
         next->connection_identities.size() != next->connection_delays.size()) {
         rollback_candidate_view();
-        return fail(LiveSwapFallbackReason::PredicateExcluded, 0,
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
                     "candidate graph has inconsistent connection identities");
     }
     std::unordered_map<std::uint64_t, std::size_t> old_delayed;
@@ -645,8 +683,7 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
     bool delay_structure_ok = true;
     for (std::size_t i = 0; i < next->connection_delays.size(); ++i) {
         const auto& candidate_delay = next->connection_delays[i];
-        if (candidate_delay.delay_samples <= 0)
-            continue;
+        if (candidate_delay.delay_samples <= 0) continue;
         const auto found = old_delayed.find(next->connection_identities[i]);
         if (found == old_delayed.end()) {
             delay_structure_ok = false;
@@ -654,8 +691,8 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
         }
         const auto old_index = found->second;
         const auto& live_delay = old.connection_delays[old_index];
-        if (candidate_delay.delay_samples != live_delay.delay_samples || !candidate_delay.state ||
-            !live_delay.state ||
+        if (candidate_delay.delay_samples != live_delay.delay_samples ||
+            !candidate_delay.state || !live_delay.state ||
             candidate_delay.state->ring.size() != live_delay.state->ring.size()) {
             delay_structure_ok = false;
             break;
@@ -664,14 +701,14 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
     }
     if (!delay_structure_ok || matched_delays.size() != old_delayed.size()) {
         rollback_candidate_view();
-        return fail(LiveSwapFallbackReason::PredicateExcluded, 0,
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
                     "candidate graph changes PDC connection identity or delay");
     }
 
     const auto routed_can_adopt = [&](const CompiledGraph::RoutedPath& candidate,
                                       const CompiledGraph::RoutedPath& live) {
-        if (!candidate.valid)
-            return true;
+        if (!candidate.valid) return true;
         for (const auto [candidate_index, live_index] : matched_delays) {
             if (!candidate.pool.can_adopt_delay_ring_state(
                     static_cast<std::uint32_t>(candidate_index), live.pool,
@@ -684,12 +721,14 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
     if (!routed_can_adopt(next->routed.serial, old.routed.serial) ||
         !routed_can_adopt(next->routed.parallel, old.routed.parallel)) {
         rollback_candidate_view();
-        return fail(LiveSwapFallbackReason::PredicateExcluded, 0,
+        return fail(LiveSwapFallbackReason::PredicateExcluded,
+                    0,
                     "candidate routed pool cannot adopt PDC state");
     }
 
     for (const auto [candidate_index, live_index] : matched_delays) {
-        next->connection_delays[candidate_index].state = old.connection_delays[live_index].state;
+        next->connection_delays[candidate_index].state =
+            old.connection_delays[live_index].state;
         if (next->routed.serial.valid) {
             (void)next->routed.serial.pool.adopt_delay_ring_state(
                 static_cast<std::uint32_t>(candidate_index), old.routed.serial.pool,
@@ -716,7 +755,8 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
     // the old — never the reverse; seq_cst pairs with process_impl's pinned load so
     // the audio thread never sees a null/torn pointer (NO silent block).
     live_slot_.publish(next);
-    total_latency_samples_.store(next->total_latency_samples, std::memory_order_relaxed);
+    total_latency_samples_.store(next->total_latency_samples,
+                                 std::memory_order_relaxed);
     publish_prepared_stats_locked_(*next);
     // No reclaim here: Slot::publish() already parked the displaced snapshot and
     // reclaimed it if the readers had drained.
@@ -726,7 +766,8 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate, int max_bl
 
     for (auto& call : observer_calls) {
         if (call.policy.on_instance_swapped) {
-            call.policy.on_instance_swapped(call.id, std::move(call.old_slot),
+            call.policy.on_instance_swapped(call.id,
+                                            std::move(call.old_slot),
                                             std::move(call.new_slot));
         }
     }
@@ -743,19 +784,18 @@ void SignalGraph::abort_swap_edit() {
     invalidate_live_locked_();
 }
 
-bool SignalGraph::snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& old_cg, double sr,
-                                                         int bs) const {
+bool SignalGraph::snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& old_cg,
+                                                         double sr, int bs) const {
     assert_graph_mutation_locked_();
     // (1) A sample-rate / block-size change requires re-preparing every instance.
-    if (old_cg.sample_rate != sr || old_cg.max_block_size != bs)
-        return false;
+    if (old_cg.sample_rate != sr || old_cg.max_block_size != bs) return false;
     // (2) A custom-type re-register rebinds callbacks to instances the old
     // factory produced (audio-thread type confusion on an opaque void*).
-    if (custom_registry_generation_ != old_cg.custom_registry_generation)
-        return false;
+    if (custom_registry_generation_ != old_cg.custom_registry_generation) return false;
     // (3) A swap over a live anticipation pump races the interior instances
     // and the new lane's ring starts empty; exclude anticipation on either side.
-    if (anticipation_enabled_.load(std::memory_order_seq_cst) || old_cg.anticipation.valid) {
+    if (anticipation_enabled_.load(std::memory_order_seq_cst) ||
+        old_cg.anticipation.valid) {
         return false;
     }
     // (4) A smoothed sparse-automation edge would snap its destination mid-ramp
@@ -766,22 +806,17 @@ bool SignalGraph::snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& ol
     // note-off before extract_midi() observes it; keep output-bearing topologies
     // on eager prepare until their egress mailbox can also be shared safely.
     for (const auto& n : nodes_) {
-        if (n.type == NodeType::MidiOutput)
-            return false;
+        if (n.type == NodeType::MidiOutput) return false;
     }
     for (const auto& [_, shape] : old_cg.shapes) {
-        if (shape.type == NodeType::MidiOutput)
-            return false;
+        if (shape.type == NodeType::MidiOutput) return false;
     }
     for (const auto& c : connections_) {
-        if (c.feedback)
-            return false;
-        if (c.automation && c.automation_smoothing_ms > 0.0f)
-            return false;
+        if (c.feedback) return false;
+        if (c.automation && c.automation_smoothing_ms > 0.0f) return false;
     }
     for (const auto& c : old_cg.connections) {
-        if (c.feedback)
-            return false;
+        if (c.feedback) return false;
     }
     // (5) Identical node SET (no node added / removed / re-typed since this
     // snapshot compiled; authored_shapes holds every node id before any private
@@ -800,11 +835,10 @@ bool SignalGraph::snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& ol
             const auto it = old_cg.plugins.find(n.id);
             const bool was_resolved = (it != old_cg.plugins.end());
             const bool now_resolved = (n.plugin != nullptr);
-            if (was_resolved != now_resolved)
-                return false; // resolved-since / lost slot
+            if (was_resolved != now_resolved) return false;  // resolved-since / lost slot
             if (now_resolved) {
-                if (it->second.get() != n.plugin.get() &&
-                    !staged_replacement_relaxes_identity_locked_(n.id)) {
+                if (it->second.get() != n.plugin.get()
+                    && !staged_replacement_relaxes_identity_locked_(n.id)) {
                     return false;
                 }
                 // A cache miss would silently yield empty params / 0 latency.
@@ -813,13 +847,10 @@ bool SignalGraph::snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& ol
                 }
             }
         } else if (n.type == NodeType::Custom) {
-            if (n.custom_state_pending)
-                return false; // a pending blob needs a re-prepare
+            if (n.custom_state_pending) return false;  // a pending blob needs a re-prepare
             const auto it = old_cg.custom_instances.find(n.id);
-            if (it == old_cg.custom_instances.end())
-                return false;
-            if (it->second != n.custom_instance.get())
-                return false; // re-instanced
+            if (it == old_cg.custom_instances.end()) return false;
+            if (it->second != n.custom_instance.get()) return false;  // re-instanced
         }
     }
     return true;

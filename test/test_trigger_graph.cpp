@@ -560,3 +560,18 @@ TEST_CASE("Typed bounded audio chain preparation is charged and resets filter st
     CHECK(block.output[0] == 0.5f);
     CHECK(block.output[1] == 0.25f);
 }
+
+TEST_CASE("Typed retired generation releases its reservation only after the last owner",
+          "[trigger]") {
+    Fixture fixture;
+    auto old = Access::pin(fixture.graph);
+    const auto first = fixture.graph.trigger_resources();
+    auto candidate = fixture.graph.prepare_trigger_plan(48000, 32);
+    REQUIRE(candidate.result == TriggerGraphResult::Accepted);
+    const auto overlap = fixture.graph.trigger_resources();
+    REQUIRE(fixture.graph.try_install_prepared_trigger_plan(candidate.plan) ==
+            TriggerGraphResult::Accepted);
+    CHECK(fixture.graph.trigger_resources().total() == overlap.total());
+    old.reset();
+    CHECK(fixture.graph.trigger_resources().generation_bytes == first.generation_bytes);
+}

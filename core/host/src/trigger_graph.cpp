@@ -481,8 +481,8 @@ TriggerPreparation SignalGraph::prepare_trigger_plan(double sample_rate, int max
         if (inputs < 0 || outputs < 0 || inputs > 64 || outputs > 64)
             return fail(TriggerGraphResult::Budget);
         ports += static_cast<std::size_t>(inputs + outputs);
-        if (!charge(1, sizeof(NodeRuntime) + 32768) ||
-            !charge(node.name.size() + node.custom_type_id.size(), 8))
+        if (!charge(1, sizeof(NodeRuntime) + 32768) || !charge(node.name.size(), 8) ||
+            !charge(node.custom_type_id.size(), 8))
             return fail(TriggerGraphResult::Budget);
     }
     for (const auto& connection : connections_)
