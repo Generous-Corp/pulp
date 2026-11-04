@@ -111,6 +111,15 @@ live analyzer and modulation layers drawing. Confirm actual reuse through the
 `view_raster_cache_bypass` trace events, then compare the same binary with the
 cache off, on, and off again under the same audio and interaction workload.
 
+CPU fallback needs a persistent store too: passing a per-editor
+`RasterSceneCache` to `raster_plugin_scene_rgba()` preserves static pixels across
+its fresh frame surfaces. The Windows host owns that store for its lifetime;
+isolated captures can omit it. Without the store, the trace correctly reports
+cache bypasses. Check those events before comparing CPU fallback with WARP,
+and do not choose a fallback merely because an older, different workload was
+faster. Text raster policy changes discard the CPU store; View invalidation
+handles content, bounds, and backing-scale changes.
+
 Audio capture advances independently of animation time. `HostFramePump` can
 report a nominal resume delta after a long frame; using that delta to throttle
 audio draining can skip another slow frame and overflow a bounded capture
