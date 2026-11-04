@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/format/contract_editor_session.hpp>
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/editor_package.hpp>
 #include <pulp/format/host_parameter_edit.hpp>
@@ -248,9 +249,10 @@ TEST_CASE("a disconnected ParamPort releases its gestures and refuses every late
     REQUIRE(f.host.entries.back() == "E1");
     const auto host_entries = f.host.entries.size();
 
-    // Nothing reads or writes the store any more.
-    REQUIRE(port.params().empty());
-    REQUIRE(port.info(kGain) == nullptr);
+    // Nothing reads or writes the store any more. The parameter list stays
+    // readable: it is the port's own.
+    REQUIRE(port.params().size() == 2);
+    REQUIRE(port.info(kGain) != nullptr);
     REQUIRE(port.get(kGain) == 0.0f);
     port.begin(kGain);
     port.set(kGain, 0.9f);
@@ -267,6 +269,31 @@ TEST_CASE("a disconnected ParamPort releases its gestures and refuses every late
 
     port.disconnect(); // idempotent
     subscription.reset();
+}
+
+TEST_CASE("a ParamPort's parameter list is its own and outlives the store",
+          "[editor-host][param-port]") {
+    auto store = std::make_unique<StateStore>();
+    add_unit_param(*store, kGain, "Gain");
+    add_unit_param(*store, kMix, "Mix");
+    StateStoreParamPort port(*store);
+
+    // An editor builds its controls from these and keeps them.
+    const auto* gain = port.info(kGain);
+    const auto params = port.params();
+    REQUIRE(gain != nullptr);
+    REQUIRE(params.size() == 2);
+    // They are the port's copy, never pointers into the store, so destroying
+    // the store cannot leave them dangling.
+    REQUIRE(gain != store->info(kGain));
+    REQUIRE(params.data() != store->all_params().data());
+
+    port.disconnect();
+    store.reset();
+    REQUIRE(gain->id == kGain);
+    REQUIRE(gain->name == "Gain");
+    REQUIRE(params[1].name == "Mix");
+    REQUIRE(port.info(kMix) == &params[1]);
 }
 
 TEST_CASE("a disconnected ParamPort outlives its store", "[editor-host][param-port]") {
@@ -622,4 +649,68 @@ TEST_CASE("query_extension is null by default and reaches a host's extension", "
     REQUIRE(ext != nullptr);
     REQUIRE(ext->answer == 42);
     REQUIRE(through_base.query_extension("dev.pulp.test.example/2") == nullptr);
+}
+
+namespace {
+
+/// Counts idle ticks; attaches to any non-empty Cocoa parent.
+class TickingEditor final : public Editor {
+  public:
+    explicit TickingEditor(int& idles) : idles_(idles) {}
+    bool supports_parent(NativeParentKind kind) const override {
+        return kind == NativeParentKind::cocoa_view;
+    }
+    bool attach(const NativeParent&) override {
+        return true;
+    }
+    void detach() override {}
+    void invalidate() override {}
+    EditorSize size() const override {
+        return {400, 300, 1.0};
+    }
+    bool set_size(const EditorSize&) override {
+        return true;
+    }
+    void idle() override {
+        ++idles_;
+    }
+
+  private:
+    int& idles_;
+};
+
+class TickingFactory final : public EditorFactory {
+  public:
+    explicit TickingFactory(int& idles) : idles_(idles) {}
+    bool supports(EditorRole role) const override {
+        return role == EditorRole::editor;
+    }
+    std::unique_ptr<Editor> create(Processor&, EditorContext&, EditorRole) override {
+        return std::make_unique<TickingEditor>(idles_);
+    }
+
+  private:
+    int& idles_;
+};
+
+} // namespace
+
+TEST_CASE("a contract session whose owner is gone draws no more frames", "[editor-host]") {
+    Fixture f;
+    GainProcessor processor;
+    int idles = 0;
+    TickingFactory factory(idles);
+    auto session = ContractEditorSession::create(processor, f.store, factory, {},
+                                                 ContractEditorSession::IdleSource::host_driven);
+    REQUIRE(session);
+    int parent = 0;
+    REQUIRE(session->attach({NativeParentKind::cocoa_view, &parent, 0}));
+    session->tick();
+    REQUIRE(idles == 1);
+
+    session->disconnect_owner();
+    session->tick();
+    session->tick();
+    REQUIRE(idles == 1);
+    session->close_for_owner();
 }

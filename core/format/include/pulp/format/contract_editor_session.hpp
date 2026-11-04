@@ -34,6 +34,7 @@
 #include <pulp/format/detail/main_thread_timer.hpp>
 #include <pulp/format/editor_host.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -161,8 +162,8 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     bool register_with(ContractSessionRegistry& registry);
     /// The owner is going away on another thread: release every gesture, cut
     /// the port from the store and refuse the context's host hooks. Any
-    /// thread. The editor stays attached until `close_for_owner()` runs on
-    /// the main thread.
+    /// thread. The editor stays attached, but is no longer ticked, until
+    /// `close_for_owner()` runs on the main thread.
     void disconnect_owner();
 
     /// The editor's size, or its preferred size while it reports none.
@@ -203,6 +204,7 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     std::unique_ptr<Editor> editor_;
     bool attached_ = false;
     detail::MainThreadTimer idle_timer_;
+    std::atomic<bool> owner_gone_{false};
 };
 
 } // namespace pulp::format

@@ -171,12 +171,18 @@ class ParamPort {
 /// `release_all()`) closes only the gestures that port opened, so closing one
 /// window mid-drag never ends another window's gesture.
 ///
-/// Main thread only, apart from `info()`, `get()` and `disconnect()`. The
-/// store must outlive the port or be disconnected from it first: after
-/// `disconnect()` the port holds no reference to the store, refuses every
-/// call, and its subscriptions are already removed, so an editor that outlives
-/// the store (its plug-in instance disposed while a host still holds the
-/// editor's window) never reaches it.
+/// Main thread only, apart from `info()`, `params()`, `get()` and
+/// `disconnect()`. The store must outlive the port or be disconnected from it
+/// first: after `disconnect()` returns the port holds no reference to the
+/// store and calls into it no more, so an editor that outlives the store (its
+/// plug-in instance disposed while a host still holds the editor's window)
+/// never reaches it. `get()`, `begin()`, `set()`, `end()` and
+/// `add_listener()` are then refused, and the port's subscriptions are
+/// already removed.
+///
+/// `params()` and `info()` describe the parameters as they were when the port
+/// was made. The span and pointers they return stay valid for the port's
+/// lifetime, connected or not, so an editor may keep them.
 class StateStoreParamPort final : public ParamPort {
   public:
     explicit StateStoreParamPort(state::StateStore& store);
@@ -199,7 +205,9 @@ class StateStoreParamPort final : public ParamPort {
     void release_all();
 
     /// Release every gesture, remove every listener this port registered, and
-    /// let go of the store, which may be destroyed afterwards. Any thread;
+    /// let go of the store, which may be destroyed once this returns. Waits
+    /// for a store call already in progress on another thread to finish; the
+    /// port never calls the store while holding its own lock. Any thread;
     /// idempotent.
     void disconnect();
     /// False after `disconnect()`.

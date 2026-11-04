@@ -82,7 +82,9 @@ void ContractSessionRegistry::close_all() {
     // posted task holds the sessions, so the last reference drops there.
     for (const auto& session : live)
         session->disconnect_owner();
-    auto close = [sessions = std::move(live)]() mutable {
+    // The posted task owns the only references, so this thread never drops
+    // the last one (which would destroy an editor here).
+    std::function<void()> close = [sessions = std::move(live)]() mutable {
         for (const auto& session : sessions)
             session->close_for_owner();
         sessions.clear();
@@ -109,6 +111,7 @@ bool ContractEditorSession::register_with(ContractSessionRegistry& registry) {
 }
 
 void ContractEditorSession::disconnect_owner() {
+    owner_gone_.store(true);
     if (port_)
         port_->disconnect();
     if (context_)
@@ -211,7 +214,9 @@ void ContractEditorSession::destroy_editor() {
 }
 
 void ContractEditorSession::tick() {
-    if (editor_ && attached_)
+    // Once the owner is gone, draw nothing until the main thread closes the
+    // editor: its ports are cut, and a frame would show nothing true.
+    if (editor_ && attached_ && !owner_gone_.load())
         editor_->idle();
 }
 

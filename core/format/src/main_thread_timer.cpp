@@ -40,6 +40,9 @@ struct MainThreadTimer::Impl {
     }
 
     void stop() {
+        // Nothing to cancel: never wait for the main thread for nothing.
+        if (source == nullptr)
+            return;
         if (pthread_main_np() != 0)
             stop_on_main_thread();
         else
@@ -139,16 +142,28 @@ bool is_main_thread() {
 #endif
 }
 
-bool post_to_main_thread(std::function<void()> fn) {
+bool post_to_main_thread(std::function<void()>& fn) {
 #if defined(__APPLE__)
     auto* boxed = new std::function<void()>(std::move(fn));
+    fn = nullptr;
     dispatch_async_f(dispatch_get_main_queue(), boxed, [](void* context) {
         std::unique_ptr<std::function<void()>> task(static_cast<std::function<void()>*>(context));
         (*task)();
     });
     return true;
 #else
-    return events::MainThreadDispatcher::call_async(std::move(fn));
+    // The posted task and this frame share one box; the task empties it after
+    // running, so whichever side lets go last frees only an empty function.
+    auto box = std::make_shared<std::function<void()>>(std::move(fn));
+    fn = nullptr;
+    if (events::MainThreadDispatcher::call_async([box] {
+            auto task = std::move(*box);
+            *box = nullptr;
+            task();
+        }))
+        return true;
+    fn = std::move(*box);
+    return false;
 #endif
 }
 
