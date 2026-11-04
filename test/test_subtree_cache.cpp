@@ -598,7 +598,6 @@ TEST_CASE("Static raster cache paints transformed and non-leaf content directly"
     }
 }
 
-
 #endif  // PULP_HAS_SKIA
 
 TEST_CASE("Raster cache falls back to direct painting without retained textures",
