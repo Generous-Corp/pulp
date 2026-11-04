@@ -131,15 +131,25 @@ bool MainThreadTimer::running() const {
     return impl_->running();
 }
 
-void run_on_main_thread_and_wait(const std::function<void()>& fn) {
+bool is_main_thread() {
 #if defined(__APPLE__)
-    if (pthread_main_np() == 0) {
-        dispatch_sync_f(dispatch_get_main_queue(), const_cast<std::function<void()>*>(&fn),
-                        [](void* context) { (*static_cast<std::function<void()>*>(context))(); });
-        return;
-    }
+    return pthread_main_np() != 0;
+#else
+    return events::MainThreadDispatcher::is_main_thread();
 #endif
-    fn();
+}
+
+bool post_to_main_thread(std::function<void()> fn) {
+#if defined(__APPLE__)
+    auto* boxed = new std::function<void()>(std::move(fn));
+    dispatch_async_f(dispatch_get_main_queue(), boxed, [](void* context) {
+        std::unique_ptr<std::function<void()>> task(static_cast<std::function<void()>*>(context));
+        (*task)();
+    });
+    return true;
+#else
+    return events::MainThreadDispatcher::call_async(std::move(fn));
+#endif
 }
 
 } // namespace pulp::format::detail
