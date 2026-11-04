@@ -91,5 +91,25 @@ not compare the supplied kinds with the named catalog ports. The shared validato
 now does both comparisons. The controlled pre-fix run passed two mismatched-kind
 control assertions then accepted the forged pair; the repaired generic and
 prepared-edit cases pass 42 assertions. Independent removal/restoration proof is
-pending. Geometry/mask refusal controls now pass 46 assertions, with independent
-production predicate removals also pending.
+confirmed. Geometry/mask refusal controls pass 46 assertions. The following
+fifteen production mutations each passed baseline, failed after a witnessed
+recompile, and passed after exact source restoration at qualification commit
+`cc86da1c7f453c4fedb5523fa709c07d47dd5083`:
+
+- Named-handle kind versus catalog check; legacy swap-entry spectral refusal.
+- FFT size minimum, maximum and power-of-two predicates independently.
+- Hop minimum and maximum independently.
+- Channel minimum and maximum independently.
+- Sample-rate finite and positive predicates independently.
+- Mask length, finite gain, minimum gain and maximum gain independently.
+
+These used `tools/scripts/confirm_failure.sh --file <production source> --break
+<single-predicate removal> --build-dir build --target
+pulp-test-routed-spectral-ports --object <affected translation unit> --test
+'./build/test/pulp-test-routed-spectral-ports <tag>' --keep-logs`. Tags were
+`[spectral-handle-validation]`, `[spectral-swap-refusal]` and `[spectral-refusal]`.
+The identity/mask source is `core/graph/include/pulp/graph/spectral_frame.hpp`;
+each listed predicate was replaced by `false` separately. This closes those
+specific factory predicates, not every graph/catalog validation obligation in
+row 5 or row 11. A separate advisory review of the same committed fixes reported
+no actionable finding; it is not a counted PR verdict.

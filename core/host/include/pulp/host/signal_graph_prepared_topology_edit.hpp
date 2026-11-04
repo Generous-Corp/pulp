@@ -158,8 +158,11 @@ class SignalGraph::PreparedTopologyEdit {
     Result prepare_quiesced(double sample_rate, int max_block_size);
     Result commit();
     ExecutionSnapshot committed_execution_snapshot() const noexcept {
-        if (owner_->spectral_mode_.load(std::memory_order_acquire))
+        if (owner_->spectral_mode_.load(std::memory_order_acquire)) {
+            owner_->spectral_error_.store(SpectralError::SpectralPinnedExecutionUnsupported,
+                                          std::memory_order_relaxed);
             return {};
+        }
         return ExecutionSnapshot(*owner_, committed_snapshot_);
     }
     Result last_result() const noexcept { return last_result_; }

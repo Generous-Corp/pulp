@@ -542,3 +542,208 @@ TEST_CASE("Live custom state cannot invalidate spectral publication",
     control.process();
     REQUIRE(target.output == control.output);
 }
+
+TEST_CASE("Frame tuples are partition invariant and restart on a fresh bank epoch",
+          "[host][spectral-fault][spectral-tuples]") {
+    using pulp::graph::SpectralFrameStamp;
+    const auto collect = [](int partition, std::uint64_t epoch) {
+        FaultGraph f(63, 4096);
+        f.bank.reset(epoch);
+        std::vector<SpectralFrameStamp> stamps;
+        std::vector<float> input(8192, 0.25f), scratch(4096);
+        for (int pos = 0; pos < 8192;) {
+            const int count = std::min(8192 - pos, partition ? partition : 1 + pos * 17 % 4096);
+            f.bank.begin_block();
+            f.process(f.analysis, std::span(input).subspan(pos, count),
+                      std::span(scratch).first(count));
+            const auto* batch = f.bank.find(f.stage)->input;
+            stamps.insert(stamps.end(), batch->stamps.begin(),
+                          batch->stamps.begin() + batch->count);
+            REQUIRE(f.bank.find(f.analysis)->first_error == pulp::host::SpectralError::None);
+            pos += count;
+        }
+        return stamps;
+    };
+    const auto fixed = collect(64, 17);
+    REQUIRE_FALSE(fixed.empty());
+    REQUIRE(collect(4096, 17) == fixed);
+    REQUIRE(collect(0, 17) == fixed);
+    const auto fresh = collect(0, 18);
+    REQUIRE(fresh.size() == fixed.size());
+    const auto first = pulp::signal::spectral_frame_engine_first_frame_start(256, 63, true);
+    for (std::size_t i = 0; i < fixed.size(); ++i) {
+        const SpectralFrameStamp expected{17, i, first + static_cast<std::int64_t>(i) * 63,
+                                          first + static_cast<std::int64_t>(i) * 63 + 256};
+        REQUIRE(fixed[i] == expected);
+        auto next = expected;
+        next.epoch = 18;
+        REQUIRE(fresh[i] == next);
+    }
+}
+
+TEST_CASE("Distinct spectral controllers retain distinct epoch namespaces across reset",
+          "[host][spectral-transition][spectral-namespace]") {
+    using namespace pulp::host;
+    ControllerGraph first, second;
+    const auto epoch = [](ControllerGraph& g) {
+        auto reader = SpectralControllerTestAccess::reader(g.graph);
+        REQUIRE(reader);
+        return reader->spectral->nodes.front()->epoch;
+    };
+    const auto first_before = epoch(first), second_before = epoch(second);
+    REQUIRE(first_before != second_before);
+    REQUIRE((first_before >> 32) != (second_before >> 32));
+    pulp::format::ProcessContext reset;
+    reset.reset_requested = true;
+    first.process(&reset);
+    second.process(&reset);
+    REQUIRE(epoch(first) == first_before + 1);
+    REQUIRE(epoch(second) == second_before + 1);
+    REQUIRE(epoch(first) != epoch(second));
+}
+
+TEST_CASE("Spectral sequence exhaustion refuses before publishing a wrapped successor",
+          "[host][spectral-fault][spectral-sequence-limit]") {
+    FaultGraph f;
+    auto* node = f.bank.find(f.analysis);
+    node->sequence = std::numeric_limits<std::uint64_t>::max();
+    const auto origin = node->origin;
+    REQUIRE_FALSE(node->advance());
+    REQUIRE(node->sequence == std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(node->origin == origin);
+    REQUIRE(node->first_error == pulp::host::SpectralError::ChronologyExhausted);
+    REQUIRE(node->outputs.front()->fatal);
+}
+
+TEST_CASE("Spectral retained storage cap rejects a bounded oversized candidate",
+          "[host][spectral-fault][spectral-memory-cap]") {
+    using namespace pulp::host;
+    for (int stages : {1, 17}) {
+        SignalGraph graph;
+        const auto shape = *SpectralIdentity::make(256, 1, 1, 48000).value;
+        const auto analysis = *graph.add_spectral_analysis(shape, "analysis").value;
+        const auto synthesis = *graph.add_spectral_synthesis(shape, "synthesis").value;
+        auto previous = analysis.frames;
+        for (int i = 0; i < stages; ++i) {
+            const auto stage =
+                *graph
+                     .add_spectral_stage(shape, *QualifiedSpectralStage::identity_v1(shape).value,
+                                         "identity")
+                     .value;
+            REQUIRE(graph.connect(previous, stage.frames_in));
+            previous = stage.frames_out;
+        }
+        REQUIRE(graph.connect(previous, synthesis.frames));
+        SpectralRuntimeBank bank;
+        const auto result = bank.prepare(graph.nodes(), graph.connections(), 48000, 4096);
+        REQUIRE(result == (stages == 1 ? SpectralError::None : SpectralError::CapacityExceeded));
+        REQUIRE(bank.charged_bytes <= SpectralRuntimeBank::memory_limit);
+    }
+}
+
+TEST_CASE("Untimed spectral telemetry keeps sticky errors and labels records retained across reset",
+          "[host][spectral-transition][spectral-telemetry]") {
+    using namespace pulp::host;
+    ControllerGraph target;
+    REQUIRE_FALSE(target.graph.live_dsp_telemetry_enabled());
+    target.input.fill(std::numeric_limits<float>::quiet_NaN());
+    for (int i = 0; i < 8; ++i)
+        target.process();
+    const auto failed = target.graph.poll_live_dsp_telemetry();
+    REQUIRE(failed.available);
+    REQUIRE_FALSE(failed.enabled);
+    std::uint64_t failed_node = 0, old_epoch = 0, error_count = 0;
+    std::int64_t error_position = 0;
+    for (const auto& diagnostic : failed.spectral) {
+        if (diagnostic.first_error == static_cast<std::uint8_t>(SpectralError::InvalidFrame)) {
+            failed_node = diagnostic.node;
+            old_epoch = diagnostic.epoch;
+            error_count = diagnostic.errors;
+            error_position = diagnostic.first_error_position;
+            break;
+        }
+    }
+    REQUIRE(failed_node != 0);
+    REQUIRE(error_count > 0);
+    target.input.fill(0.25f);
+    for (int i = 0; i < 300; ++i)
+        target.process();
+    pulp::format::ProcessContext reset;
+    reset.reset_requested = true;
+    target.process(&reset);
+    const auto retained = target.graph.poll_live_dsp_telemetry();
+    REQUIRE(retained.blocks_dropped > 0);
+    REQUIRE(retained.age_blocks > 0);
+    bool found = false;
+    for (const auto& diagnostic : retained.spectral) {
+        if (diagnostic.node != failed_node)
+            continue;
+        found = true;
+        REQUIRE(diagnostic.epoch == old_epoch);
+        REQUIRE(diagnostic.first_error == static_cast<std::uint8_t>(SpectralError::InvalidFrame));
+        REQUIRE(diagnostic.first_error_position == error_position);
+        REQUIRE(diagnostic.errors >= error_count);
+    }
+    REQUIRE(found);
+    target.process();
+    const auto fresh = target.graph.poll_live_dsp_telemetry();
+    REQUIRE(fresh.available);
+    REQUIRE(fresh.age_blocks == 0);
+    REQUIRE(fresh.sequence_number > retained.sequence_number);
+    for (const auto& diagnostic : fresh.spectral) {
+        if (!diagnostic.node)
+            continue;
+        REQUIRE(diagnostic.epoch == old_epoch + 1);
+        REQUIRE(diagnostic.first_error == 0);
+        REQUIRE(diagnostic.errors == 0);
+    }
+}
+
+TEST_CASE("Retained legacy processing handles prevent spectral conversion until released",
+          "[host][spectral-transition][spectral-retained-handle]") {
+    using namespace pulp::host;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1), output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, output, 0));
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    REQUIRE(edit->prepare(48000, 64) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    auto retained = edit->committed_execution_snapshot();
+    REQUIRE(retained);
+    edit.reset();
+    graph.release();
+    graph.clear();
+    const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    const auto analysis = *graph.add_spectral_analysis(shape, "analysis").value;
+    const auto synthesis = *graph.add_spectral_synthesis(shape, "synthesis").value;
+    REQUIRE(graph.connect(analysis.frames, synthesis.frames));
+    REQUIRE_FALSE(graph.prepare(48000, 64));
+    REQUIRE(graph.spectral_error() == SpectralError::RequiresStoppedController);
+    std::array<float, 64> in, out{};
+    in.fill(0.25f);
+    const float* ip[] = {in.data()};
+    float* op[] = {out.data()};
+    pulp::audio::BufferView<const float> iv{ip, 1, 64};
+    pulp::audio::BufferView<float> ov{op, 1, 64};
+    retained.process(ov, iv, 64);
+    REQUIRE(out == in);
+    retained = {};
+    REQUIRE(graph.prepare(48000, 64));
+}
+
+TEST_CASE("Spectral pinned execution refusal is named at every handoff phase",
+          "[host][spectral-transition][spectral-pinned-diagnostic]") {
+    using namespace pulp::host;
+    ControllerGraph target;
+    auto edit = target.edit();
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
+    REQUIRE_FALSE(edit->committed_execution_snapshot());
+    REQUIRE(target.graph.spectral_error() == SpectralError::SpectralPinnedExecutionUnsupported);
+    target.process();
+    REQUIRE_FALSE(edit->committed_execution_snapshot());
+    REQUIRE(target.graph.spectral_error() == SpectralError::SpectralPinnedExecutionUnsupported);
+    REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::None);
+    REQUIRE_FALSE(edit->committed_execution_snapshot());
+    REQUIRE(target.graph.spectral_error() == SpectralError::SpectralPinnedExecutionUnsupported);
+}
