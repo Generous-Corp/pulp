@@ -1307,8 +1307,10 @@ def retain_scanned_clean_entries(current: dict, checked_in: dict, root: Path,
     is still configured and scanned. Keep its name with a fresh empty record
     so the unseen-entry guard does not mistake that transition for a missing
     test. Never copy old dependency metadata or infer a scan from the old list.
-    The scanners skip unreadable sources; those are not evidence of a clean
-    executable. Return errors instead of normalizing such a record.
+    The scanners skip unreadable sources and headers; those are not evidence
+    of a clean executable. Current indexed sources and the old record's
+    dependency sources must remain readable. Removing a formerly recorded
+    source still requires investigation, as it did under the deletion guard.
     """
     if not set(EXECUTABLE_SCANS) <= set(current.get("executables_scanned_for") or []):
         return []
@@ -1324,15 +1326,18 @@ def retain_scanned_clean_entries(current: dict, checked_in: dict, root: Path,
         if not sources:
             problems.append(f"{name}: no indexed sources to scan")
             continue
+        previous = checked_in["executables"][name]
+        scan_sources = (set(sources) | set(previous.get("sources") or [])
+                        | set(previous.get("spawning_sources") or []))
         unreadable = []
-        for source in sources:
+        for source in sorted(scan_sources):
             try:
                 with (root / source).open("rb") as stream:
                     stream.read(1)
             except OSError:
                 unreadable.append(source)
         if unreadable:
-            problems.append(f"{name}: unreadable indexed sources: {', '.join(unreadable)}")
+            problems.append(f"{name}: unreadable scan sources: {', '.join(unreadable)}")
             continue
         entries[name] = {"kind": "compiled", "data": "none", "inputs": [],
                          "sources": [], "undeclared_sources": []}

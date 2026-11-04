@@ -1107,6 +1107,8 @@ class CompiledDataTests(unittest.TestCase):
 
     def test_an_unreadable_indexed_source_cannot_be_normalized_to_clean(self) -> None:
         for missing in (True, False):
+            if not missing and (os.name == "nt" or os.geteuid() == 0):
+                continue  # chmod cannot make a source unreadable to this process.
             with self.subTest(missing=missing), tempfile.TemporaryDirectory() as tmp:
                 repo = Repo(Path(tmp)); compiled_evidence(repo)
                 source = write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
@@ -1121,11 +1123,44 @@ class CompiledDataTests(unittest.TestCase):
                     for mode in ("--write", "--check"):
                         proc = self.run_tool(repo, mode)
                         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
-                        self.assertIn("unreadable indexed sources: test/test_d.cpp", proc.stderr)
+                        self.assertIn("unreadable scan sources: test/test_d.cpp", proc.stderr)
                         self.assertEqual(list_path.read_bytes(), before)
                 finally:
                     if not missing:
                         source.chmod(0o600)
+
+    def test_an_unreadable_dependency_header_cannot_be_normalized_to_clean(self) -> None:
+        for missing in (True, False):
+            if not missing and (os.name == "nt" or os.geteuid() == 0):
+                continue
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as tmp:
+                repo = Repo(Path(tmp)); compiled_evidence(repo)
+                write(repo.root, "test/test_d.cpp", '#include "support/runner.hpp"\n')
+                header = write(repo.root, "test/support/runner.hpp", "int run() { return fork(); }\n")
+                self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+                list_path = repo.root / sti.DEFAULT_LIST
+                before = list_path.read_bytes()
+                if missing:
+                    header.unlink()
+                else:
+                    header.chmod(0)
+                try:
+                    for mode in ("--write", "--check"):
+                        proc = self.run_tool(repo, mode)
+                        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+                        self.assertIn("unreadable scan sources: test/support/runner.hpp", proc.stderr)
+                        self.assertEqual(list_path.read_bytes(), before)
+                finally:
+                    if not missing:
+                        header.chmod(0o600)
+                # An actual readable header with the spawn removed is clean.
+                header.write_text("int run() { return 0; }\n", encoding="utf-8")
+                self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+                after = json.loads(list_path.read_text(encoding="utf-8"))
+                self.assertIn("pulp-test-d", after["executables"])
+                self.assertEqual(after["executables"]["pulp-test-d"]["data"], "none")
+                self.assertNotIn("spawning_sources", after["executables"]["pulp-test-d"])
+                self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 0)
 
     def test_detected_sources_lists_only_what_a_signal_matched(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
