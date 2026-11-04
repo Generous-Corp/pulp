@@ -9,6 +9,15 @@ void require(bool value, const char* message) {
         throw std::runtime_error(message);
 }
 
+void render_callback(pulp::host::SignalGraph& graph, pulp::audio::BufferView<float>& output,
+                     const pulp::audio::BufferView<const float>& input, int count)
+#if defined(__clang__) && __has_cpp_attribute(clang::nonblocking)
+    [[clang::nonblocking]]
+#endif
+{
+    graph.process(output, input, count);
+}
+
 auto render(int partition) {
     using namespace pulp::host;
     const auto shape = *SpectralIdentity::make(256, 63, 1, 48000).value;
@@ -60,7 +69,7 @@ auto render(int partition) {
         float* op[] = {wet.data() + pos, other.data() + pos};
         pulp::audio::BufferView<const float> iv(ip, 1, count);
         pulp::audio::BufferView<float> ov(op, 2, count);
-        graph.process(ov, iv, count);
+        render_callback(graph, ov, iv, count);
         pos += count;
     }
     double energy = 0, error = 0;

@@ -22,19 +22,19 @@ Installed fixture: `examples/g10-routed-consumer`. Guarded engine owner:
 | 1. Installed edges and explicit unsupported modes | Installed consumer passed; removing lowering breaks it while the old adapter passes. | Independently mutate pinned-mode and unsupported-operation refusals; retain public error assertions. |
 | 2. Partition reconstruction, impulses and N+H | Fixed/irregular and maximum blocks reconstruct; prefix mutation detected. | Separate analysis-double-latency and underrun-read mutations; explicit peak location/tolerance and zero-frame callback controls. |
 | 3. Dry/wet, upstream U, nested/fan-out PDC | Nested dry/fan-out waveform control. | Independently remove U propagation, allocate frame-edge audio delay, and sum alternative latency; confirm each fails. |
-| 4. Frame tuples, startup and epochs | Origin-stride and epoch-increment mutations detected. | Compare full tuples across partitions; independent drop/reorder and old-epoch reuse mutations with reset/seek/replacement. |
-| 5. Independent validation predicates | Shape, mask, rate, join/orphan controls; combined mask and rate mutations. | Each geometry/config predicate separately; named diagnostics; generic/prepared-edit bypass, stale handles, cycles and automation controls. |
+| 4. Frame tuples, startup and epochs | Full tuple/partition equality, startup grid, drop/reorder and old-bank-epoch mutations confirmed; prior origin-stride and transition increment controls. | Extend full tuple oracle through controller seek/replacement, rather than bank reset alone. |
+| 5. Independent validation predicates | All thirteen factory geometry/config predicates independently mutation-confirmed; named generic/prepared-edit handle-kind bypass confirmed. | Remaining graph predicates: stale handles, joins, cycles, automation and candidate revalidation independently. |
 | 6. Borrow lifetime, fan-out ownership and capacity | Sibling preservation and maximal 66-frame batch; F-1 mutation detected. | Writable alias and retained borrowed-pointer production mutations independently detected. |
 | 7. Candidate isolation and reader lifetime | Rejected candidate/reset comparison and reader Busy backpressure. | Reprepare-active, shared-engine and premature-retirement mutations; assert continued rendering from retained state. |
 | 8. Failed/cancelled candidate versus concurrent reset | Boundary-barrier and failed-offer controls; late-offer mutation detected. | Before/after-validation failure, cancellation and stale-generation schedules; shared-allocator mutation with sample/tuple/topology oracle. |
 | 9. Successful offer/reset and failure without reset | Offer+seek/exhaustion controls and epoch mutation. | Candidate-side reservation, retired-object reset and double-increment mutations independently. |
-| 10. Namespace uniqueness and exhaustion | Synthetic maximum transition serial control. | Distinct controller namespaces plus namespace-reuse/wrap/failed-candidate-serial-consumption mutations. |
+| 10. Namespace uniqueness and exhaustion | Distinct controller namespaces and namespace-reuse mutation confirmed; synthetic maximum transition serial control. | Transition wrap and failed-candidate-serial-consumption mutations independently. |
 | 11. Closed catalog and config revalidation | Public opaque factories; invalid gain controls. | Public construction/registration escape control, candidate revalidation bypasses and unknown internal catalog ID refusal. |
 | 12. Zero-preservation qualification and runtime guard | Constant identity mutation detected by zero-input control. | Independently remove runtime zero guard and qualification oracle, retaining an outer control that detects escape. |
 | 13. Bad-slot replacement and duplicate chronology | Missing-frame and unsolicited duplicate controls; duplicate guard mutation detected. | Independently omit zero replacement, replace for every duplicate and overwrite accepted payload. |
 | 14. Fatal prefix, siblings and partition-invariant onset | Fatal-prefix and capacity-marker controls; cutoff mutation detected. | Executor-false/full-block-clear, lost full-edge marker and partitioned onset mutations. |
 | 15. Finite guarded synthesis and transactional history | Guarded transaction suite and combined nonfinite-return mutation detected. | Inverse, OLA, quotient and partial-commit guards removed independently; retain earlier history and finite-output oracle. |
-| 16. Arithmetic/resource limits | Synthetic chronology test; chronology bound mutation detected. | Independent counter-overflow and memory-cap bypasses; bounded candidate allocation failure and unchanged active output. |
+| 16. Arithmetic/resource limits | Origin bound, u64 sequence wrap prevention and 64 MiB cap each mutation-confirmed; oversized test allocation stays below 100 MiB if cap is bypassed. | Output-clock bound, allocation-failure injection and unchanged active output independently. |
 | 17. Tail/drain composition | Installed prefix/tail silence and nested impulse control. | Nontrivial mask/DC/interior-bin finite tails and early-stop mutations. Codec EOF-source integration itself remains outside R admission. |
 | 18. Serial dispatch and callback resource audit | Toggle controls, no fallback, C++ new probe over reset/activation/callbacks. | Parallel/anticipation eligibility mutations; independent allocation/lock/I/O planted controls. Timing claims require the separate roadmap callback matrix. |
 
@@ -113,3 +113,20 @@ each listed predicate was replaced by `false` separately. This closes those
 specific factory predicates, not every graph/catalog validation obligation in
 row 5 or row 11. A separate advisory review of the same committed fixes reported
 no actionable finding; it is not a counted PR verdict.
+
+The next batch, at `ac5d11c27964c0c6acb02c1024528aa0b1a11112`, independently
+confirmed ten more production mutations with the same baseline/broken/restored
+workflow: reuse a controller namespace; permit u64 sequence wrap; bypass retained
+storage charging; drop a published frame; reorder published stamps; retain an
+old bank epoch on reset; overwrite the sticky first-error record; retain its
+error across reset; admit conversion while a legacy processing handle survives;
+and omit the named pinned-execution diagnostic. All ten compiled, failed their
+specific controls, and restored green. The complete routed executable then
+passed **33,604 assertions in 30 cases**. Independent advisory review of the new
+diagnostic and controls reported no actionable finding.
+
+The untimed telemetry control also demonstrates a full publication ring retains
+explicitly old-epoch records across reset, reports drops and age, and publishes
+cleared error state with the fresh epoch after draining. It does not relabel old
+records as current. Exact parameter ingress and early access-gate reopening are
+still separate outstanding obligations.
