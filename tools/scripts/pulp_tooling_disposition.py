@@ -81,6 +81,7 @@ INITIAL_POLICY: dict[str, dict[str, set[str]]] = {
     "cli": {
         "candidate-shared-later": {
             "build", "cache", "clean", "coverage", "create", "design",
+            "graph",
             "design-debug", "dev", "doctor", "export-tokens", "harness",
             "import-design", "inspect", "run", "sdk", "ship",
             "status", "test", "trace", "upgrade", "validate", "version",
@@ -135,7 +136,7 @@ INITIAL_POLICY: dict[str, dict[str, set[str]]] = {
             "pulp_inspect_capabilities", "pulp_inspect_doctor",
             "pulp_inspect_list", "pulp_inspect_pending_requests",
             "pulp_inspect_profiles", "pulp_screenshot", "pulp_simulate_click",
-            "pulp_status", "pulp_test", "pulp_trace_explain",
+            "pulp_status", "pulp_graph", "pulp_test", "pulp_trace_explain",
             "pulp_trace_query", "pulp_trace_snapshot", "pulp_trace_start",
             "pulp_trace_stop", "pulp_validate",
         },

@@ -539,5 +539,22 @@ TEST_CASE("CLAP offers the contract GUI only to a processor with an editor facto
         // Editors are refused in CI, as the create_view() GUI is.
         REQUIRE(p.gui == nullptr);
     }
+#if PULP_TEST_EDITOR_NEEDS_DISPLAY
+    {
+        g_processor_has_factory = true;
+        EditorEnvironment env;
+        pulp::test_support::ScopedEnvUnset no_display("DISPLAY");
+        OpenPlugin p(host);
+        // No display server to open a window on.
+        REQUIRE(p.gui == nullptr);
+    }
+#endif
+    {
+        // The control: the same plug-in with editors allowed offers the GUI.
+        g_processor_has_factory = true;
+        EditorEnvironment env;
+        OpenPlugin p(host);
+        REQUIRE(p.gui != nullptr);
+    }
     g_processor_has_factory = true;
 }

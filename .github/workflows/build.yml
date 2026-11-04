@@ -2151,12 +2151,17 @@ jobs:
           # match `$LOCALAPPDATA/Pulp/fc`, and off Windows the sources never left
           # <build>/_deps at all.
           #
+          # ~/.cache/pulp/fetchcontent-src is the shared source cache setup.sh
+          # clones into on Linux; drift-fast and read-audit-nightly restore it
+          # (the path list is part of the cache version, so keep them identical).
+          #
           # Deliberately NOT relocated via FETCHCONTENT_BASE_DIR: PulpWclap.cmake
           # and PulpWebUi.cmake resolve CHOC from `<root>/build*/_deps/choc-src`,
           # so moving it breaks the wclap and web-UI paths — and with them the
           # required macOS gate.
           path: |
             ${{ github.workspace }}/${{ env.PULP_BUILD_DIR }}/_deps
+            ~/.cache/pulp/fetchcontent-src
           key: ${{ runner.os }}-${{ matrix.key || 'build' }}-fetchcontent-${{ hashFiles('setup.sh') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.key || 'build' }}-fetchcontent-
@@ -2371,12 +2376,17 @@ jobs:
           # match `$LOCALAPPDATA/Pulp/fc`, and off Windows the sources never left
           # <build>/_deps at all.
           #
+          # ~/.cache/pulp/fetchcontent-src is the shared source cache setup.sh
+          # clones into on Linux; drift-fast and read-audit-nightly restore it
+          # (the path list is part of the cache version, so keep them identical).
+          #
           # Deliberately NOT relocated via FETCHCONTENT_BASE_DIR: PulpWclap.cmake
           # and PulpWebUi.cmake resolve CHOC from `<root>/build*/_deps/choc-src`,
           # so moving it breaks the wclap and web-UI paths — and with them the
           # required macOS gate.
           path: |
             ${{ github.workspace }}/${{ env.PULP_BUILD_DIR }}/_deps
+            ~/.cache/pulp/fetchcontent-src
           key: ${{ steps.fetchcontent-cache.outputs.cache-primary-key }}
 
       - name: Fetch prebuilt Skia (macOS)

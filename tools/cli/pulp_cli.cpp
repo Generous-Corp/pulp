@@ -41,6 +41,7 @@ static const Command commands[] = {
     {"gpu", "Run deterministic GPU evidence probes", cmd_gpu},
     {"ship", "Sign, package, and distribute", cmd_ship},
     {"bake", "Freeze a graph into a signed .pulpbake", cmd_bake},
+    {"graph", "Inspect and validate .pulpgraph notation", cmd_graph},
     {"design", "Launch the AI design tool", cmd_design},
     {"docs", "Browse local documentation", cmd_docs},
     {"authority", "Find the native source of truth", cmd_authority},

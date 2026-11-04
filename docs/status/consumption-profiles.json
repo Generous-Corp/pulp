@@ -373,6 +373,7 @@
       "pulp/format/reload/scripted_ui_swap_unit.hpp",
       "pulp/format/reload/swap_pack.hpp",
       "pulp/format/settings_panel.hpp",
+      "pulp/format/spectral_frame_processor.hpp",
       "pulp/format/standalone.hpp",
       "pulp/format/standalone_control_host.hpp",
       "pulp/format/standalone_settings.hpp",
