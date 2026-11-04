@@ -242,4 +242,71 @@ int SignalGraph::node_latency_samples(NodeId id) const {
     return (int)it->second.input_latency;
 }
 
+std::optional<SignalGraph::PreparedNodeLatency>
+SignalGraph::PreparedLatencySnapshot::node(NodeId id) const {
+    for (const auto& value : nodes) {
+        if (value.node_id == id)
+            return value;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::int64_t>
+SignalGraph::PreparedLatencySnapshot::connection_delay(const Connection& query) const {
+    for (const auto& value : connections) {
+        const auto& candidate = value.connection;
+        // Connection::operator== intentionally ignores several routing flags
+        // for legacy authoring equivalence. Latency identity needs the full
+        // edge kind so a query cannot accidentally resolve a different edge.
+        if (candidate.source_node != query.source_node ||
+            candidate.source_port != query.source_port || candidate.dest_node != query.dest_node ||
+            candidate.dest_port != query.dest_port || candidate.feedback != query.feedback ||
+            candidate.midi != query.midi || candidate.automation != query.automation ||
+            candidate.audio_rate_modulation != query.audio_rate_modulation ||
+            candidate.sidechain != query.sidechain ||
+            candidate.automation_param_id != query.automation_param_id ||
+            candidate.spectral != query.spectral) {
+            continue;
+        }
+        return value.delay_samples;
+    }
+    return std::nullopt;
+}
+
+std::optional<SignalGraph::PreparedLatencySnapshot> SignalGraph::prepared_latency_snapshot() const {
+    // Keep the published snapshot pinned while copying every value. The
+    // resulting object is independent of the graph and remains stable across
+    // later authoring mutations; a subsequent call observes the invalidated
+    // (null) publication until prepare() succeeds again.
+    auto read_guard = read_snapshot_(true);
+    const auto* cg = read_guard.get();
+    if (!cg)
+        return std::nullopt;
+
+    PreparedLatencySnapshot result;
+    result.total_latency_samples = cg->total_latency_samples;
+    result.nodes.reserve(cg->order.size());
+    for (const auto id : cg->order) {
+        const auto it = cg->runtime.find(id);
+        if (it == cg->runtime.end())
+            continue;
+        result.nodes.push_back(PreparedNodeLatency{
+            .node_id = id,
+            .input_latency_samples = it->second.input_latency,
+            .output_latency_samples = it->second.output_latency,
+        });
+    }
+
+    result.connections.reserve(cg->connections.size());
+    for (std::size_t i = 0; i < cg->connections.size(); ++i) {
+        const auto delay =
+            i < cg->connection_delays.size() ? cg->connection_delays[i].delay_samples : 0;
+        result.connections.push_back(PreparedConnectionDelay{
+            .connection = cg->connections[i],
+            .delay_samples = delay,
+        });
+    }
+    return result;
+}
+
 } // namespace pulp::host
