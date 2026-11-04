@@ -2147,7 +2147,11 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
             m.b == 0.0f && m.c == 0.0f && m.a > 0.0f && m.d > 0.0f && std::isfinite(m.a) &&
             std::isfinite(m.d) && std::isfinite(m.e) && std::isfinite(m.f) &&
             m.e == std::floor(m.e) && m.f == std::floor(m.f) && bounds_.width > 0.0f &&
-            bounds_.height > 0.0f && shadows_.empty();
+            bounds_.height > 0.0f && shadows_.empty() &&
+            // The retained layer covers only the border box. Painted outlines,
+            // like shadows, can extend beyond it and must stay on the direct path.
+            !(outline_width_ > 0.0f && outline_style_ != BorderStyle::none &&
+              outline_style_ != BorderStyle::hidden);
         if (!eligible) {
             PULP_TRACE_INSTANT_ARGS("canvas", "view_raster_cache_bypass", "view_id", id_.c_str());
             scene_cache_valid_ = false;

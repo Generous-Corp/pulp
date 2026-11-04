@@ -540,6 +540,37 @@ TEST_CASE("Static leaf raster cache reuses pixels and refreshes on mutation and 
     REQUIRE(cached.paints == 7);
 }
 
+TEST_CASE("Static raster cache preserves outward leaf outlines on every frame",
+          "[view][subtree-cache][raster]") {
+    auto store = SkiaCanvas::create_retained_layer_store();
+    CountingView cached;
+    cached.set_bounds({16, 16, 32, 32});
+    cached.set_raster_cached(true);
+    CountingView direct;
+    direct.set_bounds(cached.bounds());
+    for (auto* view : {&cached, &direct}) {
+        view->set_outline_color(Color::rgba8(220, 30, 60, 255));
+        view->set_outline_width(4.0f);
+        view->set_outline_offset(0.0f);
+        view->set_outline_style(View::BorderStyle::solid);
+    }
+    const auto render = [&](View& view, bool retain) {
+        auto info = SkImageInfo::MakeN32Premul(64, 64);
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        SkiaCanvas canvas(surface->getCanvas(), nullptr, retain ? store : nullptr);
+        view.paint_all(canvas);
+        std::vector<uint8_t> pixels(64 * 64 * 4);
+        REQUIRE(surface->readPixels(info, pixels.data(), 64 * 4, 0, 0));
+        return pixels;
+    };
+    const auto expected = render(direct, false);
+    REQUIRE(render(cached, true) == expected);
+    REQUIRE(render(cached, true) == expected);
+    REQUIRE(cached.paints == 2);
+}
+
 TEST_CASE("Static raster cache paints transformed and non-leaf content directly",
           "[view][subtree-cache][raster]") {
     auto store = SkiaCanvas::create_retained_layer_store();
