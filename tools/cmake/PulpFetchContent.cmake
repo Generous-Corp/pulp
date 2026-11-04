@@ -35,16 +35,6 @@ function(pulp_configure_fetchcontent_base_dir)
         return()
     endif()
 
-    if(DEFINED FETCHCONTENT_BASE_DIR AND NOT "${FETCHCONTENT_BASE_DIR}" STREQUAL "")
-        return()
-    endif()
-
-    if(DEFINED ENV{PULP_FETCHCONTENT_BASE_DIR} AND NOT "$ENV{PULP_FETCHCONTENT_BASE_DIR}" STREQUAL "")
-        set(FETCHCONTENT_BASE_DIR "$ENV{PULP_FETCHCONTENT_BASE_DIR}" CACHE PATH
-            "Base directory for FetchContent dependency subbuilds" FORCE)
-        return()
-    endif()
-
     if(DEFINED ENV{LOCALAPPDATA} AND NOT "$ENV{LOCALAPPDATA}" STREQUAL "")
         set(_pulp_fetchcontent_base "$ENV{LOCALAPPDATA}/Pulp/fc")
     elseif(DEFINED ENV{USERPROFILE} AND NOT "$ENV{USERPROFILE}" STREQUAL "")
@@ -52,11 +42,58 @@ function(pulp_configure_fetchcontent_base_dir)
     else()
         set(_pulp_fetchcontent_base "${CMAKE_BINARY_DIR}/fc")
     endif()
+    string(REPLACE "\\" "/" _pulp_fetchcontent_base "${_pulp_fetchcontent_base}")
+
+    if(DEFINED FETCHCONTENT_BASE_DIR AND NOT "${FETCHCONTENT_BASE_DIR}" STREQUAL "")
+        set(_pulp_automatic FALSE)
+        if(DEFINED PULP_FETCHCONTENT_AUTOMATIC_BASE_DIR)
+            if("${FETCHCONTENT_BASE_DIR}" STREQUAL "${PULP_FETCHCONTENT_AUTOMATIC_BASE_DIR}")
+                set(_pulp_automatic TRUE)
+            endif()
+        else()
+            # Migrate the old automatic per-user BINARY tree. Its exact path
+            # and cache help identify it; other operator paths stay untouched.
+            get_property(_pulp_base_help CACHE FETCHCONTENT_BASE_DIR PROPERTY HELPSTRING)
+            if("${FETCHCONTENT_BASE_DIR}" STREQUAL "${_pulp_fetchcontent_base}"
+               AND _pulp_base_help STREQUAL "Base directory for FetchContent dependency subbuilds")
+                set(_pulp_automatic TRUE)
+            endif()
+        endif()
+        if(NOT _pulp_automatic)
+            set(PULP_FETCHCONTENT_AUTOMATIC_BASE_DIR "" CACHE INTERNAL
+                "Last automatically selected FetchContent binary tree" FORCE)
+            return()
+        endif()
+    endif()
+
+    if(DEFINED ENV{PULP_FETCHCONTENT_BASE_DIR} AND NOT "$ENV{PULP_FETCHCONTENT_BASE_DIR}" STREQUAL "")
+        set(FETCHCONTENT_BASE_DIR "$ENV{PULP_FETCHCONTENT_BASE_DIR}" CACHE PATH
+            "Base directory for FetchContent dependency subbuilds" FORCE)
+        set(PULP_FETCHCONTENT_AUTOMATIC_BASE_DIR "" CACHE INTERNAL
+            "Last automatically selected FetchContent binary tree" FORCE)
+        return()
+    endif()
 
     # MSBuild still trips over MAX_PATH in generated FetchContent subbuilds.
     # Keep transient dependency build trees out of deep Actions workspaces.
+    # Only immutable dependency SOURCES can be shared. Native ARM64 tooling,
+    # ARM64EC plugins and x64 consumers must not overwrite each other's
+    # compiled objects or generated headers in a common mbedtls-build, etc.
+    set(_pulp_binary_identity "${CMAKE_BINARY_DIR}")
+    if(EXISTS "${_pulp_binary_identity}")
+        file(REAL_PATH "${_pulp_binary_identity}" _pulp_binary_identity)
+    endif()
+    string(REPLACE "\\" "/" _pulp_binary_identity "${_pulp_binary_identity}")
+    cmake_path(NORMAL_PATH _pulp_binary_identity)
+    string(REGEX REPLACE "/+$" "" _pulp_binary_identity "${_pulp_binary_identity}")
+    string(TOLOWER "${_pulp_binary_identity}" _pulp_binary_identity)
+    string(SHA256 _pulp_binary_key "${_pulp_binary_identity}")
+    string(SUBSTRING "${_pulp_binary_key}" 0 16 _pulp_binary_key)
+    string(APPEND _pulp_fetchcontent_base "/${_pulp_binary_key}")
     set(FETCHCONTENT_BASE_DIR "${_pulp_fetchcontent_base}" CACHE PATH
         "Base directory for FetchContent dependency subbuilds" FORCE)
+    set(PULP_FETCHCONTENT_AUTOMATIC_BASE_DIR "${_pulp_fetchcontent_base}" CACHE INTERNAL
+        "Last automatically selected FetchContent binary tree" FORCE)
     unset(_pulp_fetchcontent_base)
 endfunction()
 
