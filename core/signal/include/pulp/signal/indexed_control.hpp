@@ -77,7 +77,7 @@ template <typename SampleType = float> class IndexedControlT {
             return table_.back();
         const auto left = static_cast<std::size_t>(index);
         const auto fraction = static_cast<SampleType>(index - static_cast<double>(left));
-        return table_[left] + (table_[left + 1] - table_[left]) * fraction;
+        return std::lerp(table_[left], table_[left + 1], fraction);
     }
 
   private:

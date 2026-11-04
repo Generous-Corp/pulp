@@ -97,6 +97,31 @@ TEST_CASE("IndexedControl follows external index and rejects invalid index", "[s
     REQUIRE(reader.process(std::numeric_limits<double>::quiet_NaN()) == 0.0f);
 }
 
+TEMPLATE_TEST_CASE("IndexedControl interpolates extreme finite samples", "[signal][mod][g5]", float,
+                   double) {
+    using T = TestType;
+    const auto max = std::numeric_limits<T>::max();
+    IndexedControlT<T> reader;
+    const std::array<T, 2> extremes{-max, max};
+    reader.set_table(extremes);
+    CHECK(reader.process(0.5) == 0);
+    const std::array<T, 3> table{0, -max, max};
+    reader.set_table(table);
+    CHECK(reader.process(1.0) == -max);
+    REQUIRE(reader.process(1.5) == 0);
+    REQUIRE(reader.process(1.5) == 0);    // paused external time
+    REQUIRE(reader.process(1.0) == -max); // reversed external time
+    REQUIRE(reader.process(0.0) == 0);
+    REQUIRE(reader.process(2.0) == max);
+    REQUIRE(reader.process(-1.0) == 0);
+    REQUIRE(reader.process(3.0) == max);
+    const std::array<T, 2> ordinary{0, 1};
+    reader.set_table(ordinary);
+    REQUIRE(reader.process(0.5) == T{0.5});
+    REQUIRE(reader.process(0.5) == T{0.5});
+    REQUIRE(reader.process(0.25) == T{0.25});
+}
+
 // ── TriggerDetectT ───────────────────────────────────────────────────────────
 
 TEST_CASE("TriggerDetect fires on the rising edge only", "[signal][mod][trigger]") {
