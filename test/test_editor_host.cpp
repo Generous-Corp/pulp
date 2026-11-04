@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/editor_host.hpp>
+#include <pulp/format/editor_package.hpp>
 #include <pulp/format/host_parameter_edit.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
@@ -400,6 +401,45 @@ TEST_CASE("a processor has no editor factory unless it provides one", "[editor-h
 
     GainProcessorWithEditor with_editor;
     REQUIRE(with_editor.editor_factory() != nullptr);
+}
+
+namespace {
+
+RecordingFactory& package_factory() {
+    static RecordingFactory factory;
+    return factory;
+}
+
+EditorFactory* package_hook() {
+    return &package_factory();
+}
+
+} // namespace
+
+TEST_CASE("a processor without its own factory returns its binary's UI package factory",
+          "[editor-host][editor-package]") {
+    struct ClearHook {
+        ~ClearHook() {
+            install_plugin_editor_factory_hook(nullptr);
+        }
+    } clear_hook;
+
+    GainProcessor processor;
+    REQUIRE(processor.editor_factory() == nullptr);
+
+    // What the source pulp_add_plugin(... UI <package>) generates does at
+    // static init.
+    install_plugin_editor_factory_hook(&package_hook);
+    REQUIRE(plugin_editor_factory() == &package_factory());
+    REQUIRE(processor.editor_factory() == &package_factory());
+
+    // A processor that supplies its own factory keeps it.
+    GainProcessorWithEditor with_editor;
+    REQUIRE(with_editor.editor_factory() != nullptr);
+    REQUIRE(with_editor.editor_factory() != &package_factory());
+
+    install_plugin_editor_factory_hook(nullptr);
+    REQUIRE(processor.editor_factory() == nullptr);
 }
 
 TEST_CASE("an editor and an inspector share one port through the contract",

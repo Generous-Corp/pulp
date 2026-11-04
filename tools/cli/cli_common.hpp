@@ -186,6 +186,7 @@ int cmd_run(const std::vector<std::string>& args);
 int cmd_validate(const std::vector<std::string>& args);
 int cmd_ship(const std::vector<std::string>& args);
 int cmd_bake(const std::vector<std::string>& args);
+int cmd_graph(const std::vector<std::string>& args);
 int cmd_doctor(const std::vector<std::string>& args);
 int cmd_doctor_gpu(const std::vector<std::string>& args);
 int cmd_gpu(const std::vector<std::string>& args);
