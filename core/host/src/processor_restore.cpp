@@ -1,5 +1,5 @@
-#include <pulp/host/processor_restore.hpp>
 #include <pulp/format/processor_node_adapter.hpp>
+#include <pulp/host/processor_restore.hpp>
 
 #include <algorithm>
 #include <set>
