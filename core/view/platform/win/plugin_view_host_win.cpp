@@ -33,6 +33,7 @@
 #include <pulp/view/window_host.hpp>
 
 #ifdef PULP_HAS_SKIA
+#include "software_adapter_policy.hpp"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkData.h"
@@ -976,11 +977,21 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
                                                options_.present_policy, options_.enable_gpu_timing,
                                                env && env[0] == '1', "WinPluginViewHost");
 
+        if (!surfaces.ok())
+            return; // the caller decides what a failure means
+
+        const char* allow_software = std::getenv("PULP_WINDOWS_ALLOW_SOFTWARE_GPU");
+        if (win_render::prefer_raster(surfaces.gpu->adapter_info(),
+                                      allow_software && std::strcmp(allow_software, "1") == 0)) {
+            runtime::log_info("WinPluginViewHost: Microsoft WARP software adapter; "
+                              "using Skia CPU raster for this editor");
+            use_gpu_ = false;
+            return; // local surfaces retire before the first frame or publication
+        }
+
         partial_repaint_enabled_ = surfaces.partial_repaint;
         gpu_surface_ = std::move(surfaces.gpu);
         skia_surface_ = std::move(surfaces.skia);
-        if (!surfaces.ok())
-            return; // the caller decides what a failure means
 
         damage_.mark_full(); // a new surface has no previous frame to preserve
         // The surface is live: tell the scripted UI (navigator.gpu) and anyone

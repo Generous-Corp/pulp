@@ -122,6 +122,18 @@ Compare CPU recording time with explicitly enabled GPU timestamp measurements;
 a cheap paint span does not establish a cheap frame. Qualify native GPU
 performance separately from software rendering and remote display transport.
 
+The Windows editor host selects Skia CPU raster when Dawn identifies D3D12's
+Microsoft WARP adapter (`vendor=microsoft`, `architecture=warp`). WARP may report
+an integrated adapter type, which does not make it hardware accelerated. With
+the separately tested vector-raster provider and static-pixel cache, a live
+64-band modulation workload in Windows ARM UTM measured 417–446 ms mean frames
+on WARP versus 50–54 ms on raster. Those timings qualify that experimental
+configuration, not every SDK or native GPU. Hardware adapters retain GPU
+rendering. Set `PULP_WINDOWS_ALLOW_SOFTWARE_GPU=1` before launching the host to
+retain WARP for explicit GPU qualification or an editor that needs its GPU
+capabilities. Test policy selection and that override in the actual desktop
+session.
+
 For expensive static leaf artwork, `View::set_raster_cached(true)` (or the
 script bridge's `setRasterCached(id, true)`) retains pixels while preserving
 invalidation on content, geometry, scale, and device changes. Select the node

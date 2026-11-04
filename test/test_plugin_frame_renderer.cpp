@@ -29,6 +29,7 @@
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/view/view.hpp>
+#include "../core/view/platform/win/software_adapter_policy.hpp"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkData.h"
@@ -44,6 +45,39 @@
 
 using namespace pulp::view;
 using pulp::render::FrameOutcome;
+
+TEST_CASE("Windows software adapter policy recognizes WARP independently of adapter type",
+          "[view][render][windows]") {
+    pulp::render::GpuSurface::AdapterInfo adapter;
+    adapter.available = true;
+    adapter.backend_type = "D3D12";
+    adapter.vendor = "microsoft";
+    adapter.architecture = "warp";
+    adapter.adapter_type = pulp::render::GpuSurface::AdapterType::integrated_gpu;
+    CHECK(win_render::prefer_raster(adapter, false));
+    adapter.adapter_type = pulp::render::GpuSurface::AdapterType::cpu;
+    CHECK(win_render::prefer_raster(adapter, false));
+    CHECK_FALSE(win_render::prefer_raster(adapter, true));
+
+    SECTION("Null validation backends never qualify as software rendering") {
+        adapter.null_backend = true;
+        CHECK_FALSE(win_render::prefer_raster(adapter, false));
+    }
+    SECTION("Unavailable adapter identity does not change rendering policy") {
+        adapter.available = false;
+        CHECK_FALSE(win_render::prefer_raster(adapter, false));
+    }
+    SECTION("Hardware and other backends retain GPU rendering") {
+        adapter.architecture = "xe";
+        CHECK_FALSE(win_render::prefer_raster(adapter, false));
+        adapter.architecture = "warp";
+        adapter.vendor = "intel";
+        CHECK_FALSE(win_render::prefer_raster(adapter, false));
+        adapter.vendor = "microsoft";
+        adapter.backend_type = "Vulkan";
+        CHECK_FALSE(win_render::prefer_raster(adapter, false));
+    }
+}
 
 namespace {
 

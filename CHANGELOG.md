@@ -9,6 +9,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1550"></a>
+## [1.55.0] - 2026-11-04
+
+- release/version bump ([#11507](https://github.com/Generous-Corp/pulp/pull/11507))
+- feature/clap editor contract ([#11462](https://github.com/Generous-Corp/pulp/pull/11462))
+- codex/windows arm64ec toolset contract 20261104 ([#11489](https://github.com/Generous-Corp/pulp/pull/11489))
+- feature/g7 offline edge probe 20261104 ([#11505](https://github.com/Generous-Corp/pulp/pull/11505))
+- fix/g10 inventory clean record 20261103 ([#11498](https://github.com/Generous-Corp/pulp/pull/11498))
+- codex/g11 spatial cookbook 20261104 ([#11504](https://github.com/Generous-Corp/pulp/pull/11504))
+
 <a id="v1540"></a>
 ## [1.54.0] - 2026-11-04
 
@@ -12170,6 +12180,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.55.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.55.0
 [1.54.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.54.0
 [1.53.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.53.0
 [1.52.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.52.0
