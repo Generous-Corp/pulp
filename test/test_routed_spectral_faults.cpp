@@ -944,3 +944,27 @@ TEST_CASE("Failed candidate at the last transition serial cannot consume or wrap
     REQUIRE(target.graph.spectral_error() == SpectralError::EpochExhausted);
     REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == UINT32_MAX);
 }
+
+TEST_CASE("Candidate preparation revalidates owned mask values independently of factories",
+          "[host][spectral-fault][spectral-config-revalidation]") {
+    using namespace pulp::host;
+    FaultGraph f;
+    const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    for (float gain : {0.0f, 1.0f, -0.25f, 1.25f, std::numeric_limits<float>::infinity(),
+                       std::numeric_limits<float>::quiet_NaN()}) {
+        auto nodes = f.graph.nodes();
+        std::vector<float> gains(shape.bins(), 0.5f);
+        auto token = *QualifiedSpectralStage::real_mask_v1(shape, gains).value;
+        // The token is a mutable local object. Corrupt its owned payload to
+        // exercise the independent preparation validator, bypassing its factory.
+        const_cast<float*>(token.gains().data())[3] = gain;
+        for (auto& node : nodes)
+            if (node.id == f.stage)
+                node.spectral_stage = token;
+        SpectralRuntimeBank candidate;
+        const auto result = candidate.prepare(nodes, f.graph.connections(), 48000, 512);
+        REQUIRE(result == ((std::isfinite(gain) && gain >= 0 && gain <= 1)
+                               ? SpectralError::None
+                               : SpectralError::InvalidMask));
+    }
+}
