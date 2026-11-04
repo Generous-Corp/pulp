@@ -475,7 +475,7 @@ std::string pulp_mcp::server::tools_list_json() {
     out +=
         R"JSON({"name":"pulp_test","description":"Run the Pulp test suite","inputSchema":{"type":"object","properties":{"filter":{"type":"string","description":"Test name filter (regex)"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_graph","description":"Inspect or validate a .pulpgraph notation file without loading plugin code.","inputSchema":{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"operation":{"type":"string","enum":["inspect","validate"]}}}},)JSON";
+        R"JSON({"name":"pulp_graph","description":"Inspect, validate, explain or render a .pulpgraph file without loading plugin code.","inputSchema":{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"operation":{"type":"string","enum":["inspect","validate","explain","render"]}}}},)JSON";
     out +=
         R"JSON({"name":"pulp_status","description":"Show Pulp project status","inputSchema":{"type":"object","properties":{}}},)JSON";
     out +=
