@@ -571,6 +571,42 @@ TEST_CASE("Static raster cache preserves outward leaf outlines on every frame",
     REQUIRE(cached.paints == 2);
 }
 
+TEST_CASE("Static raster cache preserves captured box paint extents on every frame",
+          "[view][subtree-cache][raster]") {
+    auto store = SkiaCanvas::create_retained_layer_store();
+    View cached;
+    cached.set_bounds({16, 16, 32, 32});
+    cached.set_background_color(Color::rgba8(30, 120, 200, 255));
+    cached.set_captured_box_paint_rect(16.0f, 16.0f, 49.0f, 48.0f, 1.0f);
+    cached.set_raster_cached(true);
+
+    View direct;
+    direct.set_bounds(cached.bounds());
+    direct.set_background_color(Color::rgba8(30, 120, 200, 255));
+    direct.set_captured_box_paint_rect(16.0f, 16.0f, 49.0f, 48.0f, 1.0f);
+
+    const auto render = [&](View& view, bool retain) {
+        auto info = SkImageInfo::MakeN32Premul(64, 64);
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        SkiaCanvas canvas(surface->getCanvas(), nullptr, retain ? store : nullptr);
+        view.paint_all(canvas);
+        std::vector<uint8_t> pixels(64 * 64 * 4);
+        REQUIRE(surface->readPixels(info, pixels.data(), 64 * 4, 0, 0));
+        return pixels;
+    };
+
+    const auto expected = render(direct, false);
+    REQUIRE(render(cached, true) == expected);
+    REQUIRE(render(cached, true) == expected);
+
+    View ordinary;
+    ordinary.set_bounds(cached.bounds());
+    ordinary.set_background_color(Color::rgba8(30, 120, 200, 255));
+    REQUIRE(expected != render(ordinary, false));
+}
+
 TEST_CASE("Static raster cache paints transformed and non-leaf content directly",
           "[view][subtree-cache][raster]") {
     auto store = SkiaCanvas::create_retained_layer_store();

@@ -2142,12 +2142,21 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
                                       std::int64_t& children_ns) {
     if (auto* cache = dynamic_cast<detail::RasterContentCache*>(scene_cache_.get())) {
         const auto m = canvas.current_transform();
+        const auto paint_bounds = self_paint_bounds();
+        const bool paint_bounds_match_border_box =
+            paint_bounds.x == 0.0f && paint_bounds.y == 0.0f &&
+            paint_bounds.width == bounds_.width && paint_bounds.height == bounds_.height;
         const bool eligible =
             child_count() == 0 && canvas.supports(canvas::CanvasCapability::retained_layer_cache) &&
             m.b == 0.0f && m.c == 0.0f && m.a > 0.0f && m.d > 0.0f && std::isfinite(m.a) &&
             std::isfinite(m.d) && std::isfinite(m.e) && std::isfinite(m.f) &&
             m.e == std::floor(m.e) && m.f == std::floor(m.f) && bounds_.width > 0.0f &&
             bounds_.height > 0.0f && shadows_.empty() &&
+            // Captured browser paint can extend beyond the layout box by a
+            // snapped edge. The retained layer is still border-box sized, so
+            // record such views directly until the cache can retain that full
+            // paint extent and key it for invalidation.
+            paint_bounds_match_border_box &&
             // The retained layer covers only the border box. Painted outlines,
             // like shadows, can extend beyond it and must stay on the direct path.
             !(outline_width_ > 0.0f && outline_style_ != BorderStyle::none &&
