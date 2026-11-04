@@ -55,6 +55,15 @@ class IdentityVectors(unittest.TestCase):
             fingerprint(changed)
         self.assertEqual(caught.exception.code, "edge_channel_mismatch")
 
+    def test_object_member_order_preserves_frozen_identity(self):
+        reordered = copy.deepcopy(self.accepted)
+        reordered["nodes"] = dict(reversed(list(reordered["nodes"].items())))
+        reordered["edges"] = dict(reversed(list(reordered["edges"].items())))
+        self.assertEqual(
+            fingerprint(reordered)["digest"],
+            "sha256:2222eca305c4af8fe076923e5bb00b0cf0c9db9065a45f8cb78c5f64e6bb4e25",
+        )
+
     def test_duplicate_keys_and_legacy_refusal(self):
         with self.assertRaises(IdentityError) as caught:
             parse_document(b'{"document_schema":"pulp.graph.authored-io-gain.v1","nodes":{},"nodes":{}}')
