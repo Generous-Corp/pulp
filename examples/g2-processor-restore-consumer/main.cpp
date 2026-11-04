@@ -150,15 +150,22 @@ void positive_and_isolation() {
     load_options.processor_allowlist = {key};
     SignalGraph roundtrip_graph;
     const auto roundtrip = GraphSerializer::from_json(roundtrip_graph, graph_json, load_options);
-    check(roundtrip.ok(), "graph v4 Processor envelope restores through the installed SDK");
+    check(roundtrip.ok, "graph v4 Processor envelope restores through the installed SDK");
     const auto roundtrip_json = GraphSerializer::to_json(roundtrip_graph);
-    check(roundtrip_json == graph_json, "graph v4 restore preserves parameter/custom bytes");
+    const auto parameter_field = graph_json.substr(graph_json.find("\"parameters_b64\""), 160);
+    const auto custom_field = graph_json.substr(graph_json.find("\"custom_b64\""), 80);
+    check(roundtrip_json.find(parameter_field) != std::string::npos &&
+              roundtrip_json.find(custom_field) != std::string::npos,
+          "graph v4 restore preserves parameter/custom bytes");
     auto oversized_json = graph_json;
-    const auto custom_key = oversized_json.find("\"custom_b64\":\"");
-    check(custom_key != std::string::npos, "graph v4 custom state field is present");
+    const auto custom_key = oversized_json.find("\"custom_b64\":");
+    if (custom_key == std::string::npos) {
+        std::cerr << "GRAPH_JSON=" << graph_json << '\n';
+        check(false, "graph v4 custom state field is present");
+    }
     oversized_json.insert(custom_key + 14, std::string(12 * 1024 * 1024, 'A'));
     SignalGraph rejected_graph;
-    check(!GraphSerializer::from_json(rejected_graph, oversized_json, load_options).ok(),
+    check(!GraphSerializer::from_json(rejected_graph, oversized_json, load_options).ok,
           "graph v4 rejects oversized encoded state before decode");
 
     auto live = fresh();

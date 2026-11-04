@@ -137,6 +137,7 @@ ProcessorRestoreRegistry::restore_batch(std::span<const ProcessorRestoreRecord> 
         if (!same_capabilities(actual.effective_capabilities(), type.capabilities))
             return failure(ProcessorRestoreCode::ProcessorCapabilityMismatch, record);
         instance->set_graph_type_version(type.type.type_version);
+        instance->set_graph_state_schema_version(record.state_schema_version);
         const auto parameter_version = state::serialized_state_version(record.parameters);
         if (!parameter_version)
             return failure(ProcessorRestoreCode::ProcessorStateRestoreFailed, record);

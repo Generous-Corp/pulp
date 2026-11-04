@@ -1041,7 +1041,7 @@ std::string GraphSerializer::to_json(
             p.addMember("node_id", (int64_t)n.id);
             p.addMember("type_id", d.bundle_id);
             p.addMember("type_version", (int64_t)instance->graph_type_version());
-            p.addMember("state_schema_version", (int64_t)instance->state_store().state_version());
+            p.addMember("state_schema_version", (int64_t)instance->graph_state_schema_version());
             p.addMember("input_channels", (int64_t)d.default_input_channels());
             p.addMember("output_channels", (int64_t)d.default_output_channels());
             p.addMember("parameters_b64", b64_encode(instance->state_store().serialize()));
@@ -1584,6 +1584,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         }
         std::vector<std::vector<std::uint8_t>> parameter_blobs, custom_blobs;
         std::vector<ProcessorRestoreRecord> records;
+        std::size_t decoded_total = 0;
         parameter_blobs.reserve(records_json.size()); custom_blobs.reserve(records_json.size());
         records.reserve(records_json.size());
         for (uint32_t i = 0; i < records_json.size(); ++i) {
@@ -1602,12 +1603,37 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             auto parameters = b64_decode(parameters_text);
             auto custom = b64_decode(custom_text);
             if (!parameters || !custom) { result.error = "invalid Processor state encoding"; return result; }
+            if (parameters->size() > ProcessorRestoreRegistry::max_state_part_bytes ||
+                custom->size() > ProcessorRestoreRegistry::max_state_part_bytes ||
+                parameters->size() > ProcessorRestoreRegistry::max_total_state_bytes - decoded_total) {
+                result.error = "Processor state exceeds limits";
+                return result;
+            }
+            decoded_total += parameters->size();
+            if (custom->size() > ProcessorRestoreRegistry::max_total_state_bytes - decoded_total) {
+                result.error = "Processor state exceeds limits";
+                return result;
+            }
+            decoded_total += custom->size();
+            const auto node_id_value = p["node_id"].getInt64();
+            const auto type_version_value = p["type_version"].getInt64();
+            const auto envelope_version_value = p["state_schema_version"].getInt64();
+            const auto input_channels_value = p["input_channels"].getInt64();
+            const auto output_channels_value = p["output_channels"].getInt64();
+            if (node_id_value <= 0 || static_cast<std::uint64_t>(node_id_value) > std::numeric_limits<std::uint32_t>::max() ||
+                type_version_value <= 0 || type_version_value > std::numeric_limits<int>::max() ||
+                envelope_version_value <= 0 || envelope_version_value > std::numeric_limits<int>::max() ||
+                input_channels_value < 0 || input_channels_value > std::numeric_limits<int>::max() ||
+                output_channels_value < 0 || output_channels_value > std::numeric_limits<int>::max()) {
+                result.error = "invalid Processor record range";
+                return result;
+            }
             parameter_blobs.push_back(std::move(*parameters)); custom_blobs.push_back(std::move(*custom));
-            records.push_back({static_cast<std::uint32_t>(p["node_id"].getInt64()),
-                               {std::string(p["type_id"].getString()), static_cast<int>(p["type_version"].getInt64())},
-                               static_cast<int>(p["state_schema_version"].getInt64()),
-                               static_cast<int>(p["input_channels"].getInt64()),
-                               static_cast<int>(p["output_channels"].getInt64()),
+            records.push_back({static_cast<std::uint32_t>(node_id_value),
+                               {std::string(p["type_id"].getString()), static_cast<int>(type_version_value)},
+                               static_cast<int>(envelope_version_value),
+                               static_cast<int>(input_channels_value),
+                               static_cast<int>(output_channels_value),
                                parameter_blobs.back(), custom_blobs.back()});
         }
         const auto restored = options.processor_registry->restore_batch(records, options.processor_allowlist);
@@ -1624,10 +1650,9 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             const auto& nv = nodes[i];
             const auto old_id_value = nv["id"].getInt64();
             const NodeId old_id = (NodeId)old_id_value;
-            if (has_region_records &&
-                (old_id_value <= 0 ||
+            if (old_id_value <= 0 ||
                  static_cast<std::uint64_t>(old_id_value) > std::numeric_limits<NodeId>::max() ||
-                 !seen_persisted_node_ids.insert(old_id).second)) {
+                 !seen_persisted_node_ids.insert(old_id).second) {
                 graph.clear();
                 result.error = "invalid or duplicate node id in sample region graph";
                 return result;
@@ -1659,6 +1684,10 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 if (new_id == 0) { graph.clear(); result.error = "failed to add restored Processor node"; return result; }
                 id_map[old_id] = new_id;
                 graph.set_node_gain(new_id, gain);
+                if (nv.hasObjectMember("layout")) {
+                    const auto& pos = nv["layout"];
+                    result.editor_layout[new_id] = {(float)get_double(pos["x"]), (float)get_double(pos["y"])};
+                }
                 continue;
             }
             NodeType t = NodeType::Custom;

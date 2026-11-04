@@ -134,6 +134,8 @@ class ProcessorNodeInstance final {
     }
     int graph_type_version() const noexcept { return graph_type_version_; }
     void set_graph_type_version(int version) noexcept { graph_type_version_ = version; }
+    int graph_state_schema_version() const noexcept { return graph_state_schema_version_; }
+    void set_graph_state_schema_version(int version) noexcept { graph_state_schema_version_ = version; }
     std::span<const state::ParamInfo> parameter_catalog() const noexcept {
         return parameter_catalog_;
     }
@@ -162,6 +164,7 @@ class ProcessorNodeInstance final {
     PluginDescriptor descriptor_;
     std::vector<state::ParamInfo> parameter_catalog_;
     int graph_type_version_ = 1;
+    int graph_state_schema_version_ = 1;
     ProcessorNode adapter_;
     bool prepared_ = false;
 };
