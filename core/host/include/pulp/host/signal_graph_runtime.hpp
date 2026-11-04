@@ -150,8 +150,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
         // Value lookups deliberately return nullopt for unknown identities;
         // zero is a valid latency and must not be used as a miss sentinel.
         std::optional<PreparedNodeLatency> node(NodeId id) const;
-        std::optional<std::int64_t> connection_delay(
-            const Connection& connection) const;
+        std::optional<std::int64_t> connection_delay(const Connection& connection) const;
     };
 
     struct RuntimeBudgetReport {
