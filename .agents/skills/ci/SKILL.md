@@ -4489,6 +4489,11 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   validated (e.g. via `shipyard pr`), push with `PULP_SKIP_DIFF_COVER=1 git push`
   and it completes in seconds. (Learned 2026-07-07 after ~an hour lost mis-blaming
   MTU/SSH for a diff-cover build during a deps-bump push.)
+  On a tartci gate host (m3, `TARTCI_ROLE` not `light`) the hook refuses the
+  build and reports `diff coverage: NOT CHECKED`; that refusal is never what
+  blocks the push (with `PULP_SKIP_DIFF_COVER=1` or
+  `PULP_DISABLE_PREPUSH_DIFF_COVER=1` it prints one informational line). A
+  blocked push on m3 is another gate (often `format_changed`) named above it.
 - **Continuous sensor:** `tools/scripts/install_host_vitals_sensor.sh` installs a
   per-user launchd agent (`com.pulp.host-vitals`, 60 s) that publishes the latest
   reading to `~/.local/state/pulp/host_vitals.json` and a rotating
