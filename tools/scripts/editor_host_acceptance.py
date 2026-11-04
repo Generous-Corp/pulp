@@ -18,6 +18,13 @@ acceptance item. Every check is a named line a harness printed ("[kind] ok:
 seen to pass. An item this tree cannot run yet is SKIP with the reason, never
 PASS, and a run with any SKIP says so in its summary.
 
+Item 3g is a mutation check the runner performs itself: through
+tools/scripts/confirm_failure.sh it removes the RmlUi editor's gesture calls,
+rebuilds the RmlUi slice, and requires the harness to fail, then restores the
+source and requires it to pass again. confirm_failure.sh restores through git,
+so it needs that editor source unmodified; with --skip-build the mutation is
+not run and 3g is SKIP.
+
 Exit status: 0 when no item failed (SKIPs allowed), 1 when any item failed,
 2 when the run could not start (no Vellum SDK, configure or build failure).
 """
@@ -75,6 +82,17 @@ class TagClean:
 
     def describe(self) -> str:
         return f"every [{self.tag}] check (at least {self.minimum})"
+
+
+@dataclasses.dataclass(frozen=True)
+class Mutation:
+    """A confirm_failure.sh run that must report CONFIRMED: the harness passes
+    with the code and fails with the named piece of it removed."""
+
+    name: str
+
+    def describe(self) -> str:
+        return f"mutation {self.name}"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -142,17 +160,23 @@ ITEMS: tuple = (
         Line("vellum/clap", "Space is forwarded to the host"),
         Line("vellum/au", "Space is forwarded to the host"),
     )),
-    Item("2e", "With Vellum: Space is consumed when a text field has focus",
-         skip_reason="the slice's Vellum editor has no text field; needs a pulp-vellum editor "
-                     "with one (M3)"),
+    Item("2e", "With Vellum: Space is consumed when a text field has focus", (
+        Line("vellum", "the editor's text field takes focus"),
+        Line("vellum", "Space is consumed when a text field has focus"),
+        Line("vellum", "the focused text field received the Space"),
+        Line("vellum", "Space is forwarded again once the field loses focus"),
+    )),
     Item("2f", "With Vellum: standalone launch, window, screenshot, quit",
          _standalone_checks("vellum")),
     Item("3a", "With RmlUi: soft-rendered .rml frame equals the golden image byte for byte", (
         TestPassed("pulp-editor-host-slice-rmlui"),
         Line("rmlui", "the frame at gain 0.75 equals the module's golden image byte for byte"),
     )),
-    Item("3b", "With RmlUi: an empty document as the golden image's negative control",
-         skip_reason="not yet in the slice: the RmlUi harness renders only knob_led.rml"),
+    Item("3b", "With RmlUi: an empty document as the golden image's negative control", (
+        Line("rmlui", "an empty document renders"),
+        Line("rmlui", "an empty document's frame does not equal the golden image"),
+        Line("rmlui", "the knob document's frame equals the golden image again"),
+    )),
     Item("3c", "With RmlUi: the Vellum renderer within a geometry/texture tolerance",
          skip_reason="the installed SDK slice links only VellumRmlUi::SoftRenderer; the Vellum "
                      "RmlUi renderer arrives with the rmlui/ subproject (M2)"),
@@ -166,9 +190,10 @@ ITEMS: tuple = (
     Item("3f", "With RmlUi: two editor instances open together", (
         Line("rmlui", "two editor instances are open at once"),
     )),
-    Item("3g", "With RmlUi: removing the gesture calls makes the drag check fail",
-         skip_reason="a mutation check run with tools/scripts/confirm_failure.sh, recorded in "
-                     "the M2 thin-slice evidence; this runner does not rebuild a broken editor"),
+    Item("3g", "With RmlUi: removing the gesture calls makes the drag check fail", (
+        Line("rmlui", "the drag opens one host gesture first"),
+        Mutation("rmlui-gesture"),
+    )),
     Item("3h", "With RmlUi: VST3, CLAP and AU v2 editors in process, and the standalone",
          _format_checks("rmlui") + _standalone_checks("rmlui")),
     Item("4", "Bring your own UI: a plain AppKit editor over the contract alone", (
@@ -203,6 +228,10 @@ class Observations:
     failed: set = dataclasses.field(default_factory=set)
     tests: dict = dataclasses.field(default_factory=dict)
     direction_passed: bool | None = None
+    # confirm_failure.sh verdicts by mutation name ("CONFIRMED", "NOT
+    # CONFIRMED", "INCONCLUSIVE"), and why mutations did not run at all.
+    mutations: dict = dataclasses.field(default_factory=dict)
+    mutation_skip_reason: str = ""
 
     def ok_count(self, tag: str) -> int:
         return sum(1 for t, _ in self.ok if t == tag)
@@ -246,6 +275,11 @@ def evaluate_check(check, obs: Observations) -> tuple[bool, str]:
         if count < check.minimum:
             return False, f"[{check.tag}] reported {count} checks, expected at least {check.minimum}"
         return True, f"[{check.tag}] {count} checks ok"
+    if isinstance(check, Mutation):
+        verdict = obs.mutations.get(check.name)
+        if verdict is None:
+            return False, f"{check.describe()} did not run"
+        return verdict == "CONFIRMED", f"{check.describe()}: {verdict}"
     if isinstance(check, Direction):
         if obs.direction_passed is None:
             return False, "core_vellum_direction.py did not run"
@@ -266,6 +300,10 @@ def evaluate(items: Iterable[Item], obs: Observations) -> list:
     for item in items:
         if item.skip_reason:
             verdicts.append(Verdict(item.key, item.title, SKIP, [item.skip_reason]))
+            continue
+        mutations = [c for c in item.checks if isinstance(c, Mutation)]
+        if obs.mutation_skip_reason and any(c.name not in obs.mutations for c in mutations):
+            verdicts.append(Verdict(item.key, item.title, SKIP, [obs.mutation_skip_reason]))
             continue
         if not item.checks:
             # An item with nothing to check proves nothing.
@@ -306,6 +344,45 @@ def render_table(verdicts: list) -> str:
 def _run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
     print("$ " + " ".join(str(c) for c in cmd), file=sys.stderr, flush=True)
     return subprocess.run(cmd, text=True, encoding="utf-8", errors="replace", **kwargs)
+
+
+# Item 3g: the RmlUi editor without its gesture calls must fail the harness.
+GESTURE_MUTATION = {
+    "name": "rmlui-gesture",
+    "file": "test/editor_host_slice/rmlui_editor.cpp",
+    "break": r"s/\n\s*params\.begin\(kGainParam\);//; s/\n\s*params\.end\(kGainParam\);//",
+    "target": "pulp-slice-rmlui",
+}
+
+_CONFIRM_VERDICT = re.compile(r"confirm-failure: (CONFIRMED|NOT CONFIRMED|INCONCLUSIVE)")
+
+
+def parse_confirm_failure(text: str) -> str:
+    """The verdict confirm_failure.sh printed, or INCONCLUSIVE when none."""
+    found = _CONFIRM_VERDICT.findall(text)
+    return found[-1] if found else "INCONCLUSIVE"
+
+
+def find_binary(build: Path, name: str) -> Path | None:
+    for candidate in sorted(build.rglob(name)):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def run_mutation(build: Path, mutation: dict) -> str:
+    binary = find_binary(build, mutation["target"])
+    if binary is None:
+        return "INCONCLUSIVE"
+    out_dir = build / "editor-host-acceptance-mutation"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    result = _run([str(REPO_ROOT / "tools/scripts/confirm_failure.sh"),
+                   "--file", mutation["file"],
+                   "--break", f"perl -0pi -e '{mutation['break']}'",
+                   "--build-dir", str(build), "--target", mutation["target"],
+                   "--test", f"{binary} {out_dir}"],
+                  capture_output=True, cwd=str(REPO_ROOT))
+    return parse_confirm_failure(result.stdout + "\n" + result.stderr)
 
 
 def check_vellum_prefix(prefix: Path) -> str:
@@ -360,6 +437,12 @@ def main(argv: list | None = None) -> int:
     direction = _run([sys.executable, str(REPO_ROOT / "tools/scripts/core_vellum_direction.py"),
                       "--root", str(REPO_ROOT)], capture_output=True)
     obs.direction_passed = direction.returncode == 0
+
+    if args.skip_build:
+        obs.mutation_skip_reason = ("not run: --skip-build (the mutation check rebuilds the "
+                                    "RmlUi slice)")
+    else:
+        obs.mutations[GESTURE_MUTATION["name"]] = run_mutation(build, GESTURE_MUTATION)
 
     verdicts = evaluate(ITEMS, obs)
     print(render_table(verdicts))

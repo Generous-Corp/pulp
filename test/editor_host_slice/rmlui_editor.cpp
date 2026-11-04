@@ -35,10 +35,13 @@ std::atomic<int> g_live{0};
 class DocumentAssets final : public rml::AssetProvider {
   public:
     rml::Status load(std::string_view path, rml::Asset& out) override {
-        if (path != "knob_led.rml")
+        if (path == "knob_led.rml")
+            out.bytes = kSliceRmlDocument;
+        else if (path == "empty.rml")
+            out.bytes = kSliceEmptyRmlDocument;
+        else
             return rml::Status::missing_asset;
         out.path = std::string(path);
-        out.bytes = kSliceRmlDocument;
         return rml::Status::ok;
     }
 };
@@ -133,8 +136,15 @@ class RmlUiEditor final : public format::Editor, public format::EditorAutomation
         png.assign(encoded.begin(), encoded.end());
         return !png.empty();
     }
-    // Request grammar for the slice: "drag <dy>".
+    // Request grammar for the slice: "drag <dy>", and "document <path>" to
+    // show another of the slice's documents.
     bool inject_input(std::string_view request, std::string& error) override {
+        if (request.rfind("document ", 0) == 0) {
+            document_ = std::string(request.substr(9));
+            backend_.close();
+            open_backend();
+            return true;
+        }
         if (request.rfind("drag ", 0) != 0) {
             error = "unsupported request";
             return false;
@@ -160,7 +170,7 @@ class RmlUiEditor final : public format::Editor, public format::EditorAutomation
     void open_backend() {
         backend_.open(width_, height_);
         backend_.bind_model("controls", std::make_shared<GainModel>(context_.params()), {"gain"});
-        backend_.load_document("knob_led.rml");
+        backend_.load_document(document_);
     }
 
     void render_frame() {
@@ -194,6 +204,7 @@ class RmlUiEditor final : public format::Editor, public format::EditorAutomation
     format::EditorContext& context_;
     std::uint32_t width_ = 160;
     std::uint32_t height_ = 96;
+    std::string document_ = "knob_led.rml";
     DocumentAssets assets_;
     rml::SoftRenderer renderer_;
     rml::HeadlessRecorder no_lua_;

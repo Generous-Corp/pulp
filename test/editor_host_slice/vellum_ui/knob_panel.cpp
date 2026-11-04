@@ -11,6 +11,7 @@
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 
@@ -71,6 +72,9 @@ class Panel final : public KnobPanel {
         auto meter = std::make_unique<MeterView>();
         meter_ = meter.get();
         root_.add_child(std::move(meter));
+        auto field = std::make_unique<view::TextEditor>();
+        field_ = field.get();
+        root_.add_child(std::move(field));
         layout();
     }
 
@@ -121,6 +125,27 @@ class Panel final : public KnobPanel {
         return view::render_to_png(root_, width_, height_, 1.0f, view::ScreenshotBackend::skia);
     }
 
+    void set_text_focus(bool focused) override {
+        if (focused == text_focused_)
+            return;
+        text_focused_ = focused;
+        field_->on_focus_changed(focused);
+    }
+    bool text_focused() const override {
+        return text_focused_;
+    }
+    bool type_text(const std::string& utf8) override {
+        if (!text_focused_ || !field_->accepts_text_input())
+            return false;
+        view::TextInputEvent input;
+        input.text = utf8;
+        field_->on_text_input(input);
+        return true;
+    }
+    std::string text() const override {
+        return field_->text();
+    }
+
   private:
     // Geometry goes through the flex layout every render runs, so the hit
     // test and the paint agree on where the knob is.
@@ -132,11 +157,13 @@ class Panel final : public KnobPanel {
         root.direction = view::FlexDirection::row;
         root.padding = 8;
         root.gap = 8;
-        const float knob_size = std::min(w * 0.6f, h - 16.0f);
+        const float knob_size = std::min(w * 0.45f, h - 16.0f);
         knob_->flex().preferred_width = knob_size;
         knob_->flex().preferred_height = knob_size;
         meter_->flex().preferred_width = 16;
         meter_->flex().preferred_height = h - 16;
+        field_->flex().preferred_width = 64;
+        field_->flex().preferred_height = 22;
         root_.layout_children();
     }
 
@@ -146,6 +173,8 @@ class Panel final : public KnobPanel {
     view::View root_;
     view::Knob* knob_ = nullptr;
     MeterView* meter_ = nullptr;
+    view::TextEditor* field_ = nullptr;
+    bool text_focused_ = false;
     bool suppress_ = false;
 };
 

@@ -31,10 +31,18 @@ def full_output() -> str:
     return "\n".join(lines)
 
 
+def mutations_confirmed() -> dict:
+    return {check.name: "CONFIRMED" for item in acc.ITEMS for check in item.checks
+            if isinstance(check, acc.Mutation)}
+
+
 class Verdicts(unittest.TestCase):
-    def evaluate(self, text: str, direction: bool | None = True) -> dict:
+    def evaluate(self, text: str, direction: bool | None = True, mutations: dict | None = None,
+                 mutation_skip_reason: str = "") -> dict:
         obs = acc.parse_ctest_output(text)
         obs.direction_passed = direction
+        obs.mutations = mutations_confirmed() if mutations is None else mutations
+        obs.mutation_skip_reason = mutation_skip_reason
         return {v.key: v for v in acc.evaluate(acc.ITEMS, obs)}
 
     def test_every_check_seen_passes_every_runnable_item(self) -> None:
@@ -47,7 +55,7 @@ class Verdicts(unittest.TestCase):
     def test_unrunnable_items_are_skip_never_pass(self) -> None:
         verdicts = self.evaluate(full_output())
         skipped = {key for key, v in verdicts.items() if v.status == acc.SKIP}
-        self.assertEqual(skipped, {"2e", "3b", "3c", "3g", "6", "7"})
+        self.assertEqual(skipped, {"3c", "6", "7"})
         for key in skipped:
             self.assertTrue(verdicts[key].details[0], f"{key} has no reason")
 
@@ -84,6 +92,32 @@ class Verdicts(unittest.TestCase):
         self.assertEqual(self.evaluate(full_output(), direction=False)["5"].status, acc.FAIL)
         self.assertEqual(self.evaluate(full_output(), direction=None)["5"].status, acc.FAIL)
 
+    def test_the_mutation_must_be_confirmed(self) -> None:
+        for verdict in ("NOT CONFIRMED", "INCONCLUSIVE"):
+            verdicts = self.evaluate(full_output(), mutations={"rmlui-gesture": verdict})
+            self.assertEqual(verdicts["3g"].status, acc.FAIL, verdict)
+        self.assertEqual(self.evaluate(full_output(), mutations={})["3g"].status, acc.FAIL)
+        self.assertEqual(self.evaluate(full_output())["3g"].status, acc.PASS)
+
+    def test_a_mutation_that_did_not_run_is_skip_with_its_reason(self) -> None:
+        verdicts = self.evaluate(full_output(), mutations={}, mutation_skip_reason="not run: x")
+        self.assertEqual(verdicts["3g"].status, acc.SKIP)
+        self.assertEqual(verdicts["3g"].details, ["not run: x"])
+        self.assertEqual(verdicts["3d"].status, acc.PASS)
+
+    def test_confirm_failure_output_is_read_for_its_verdict(self) -> None:
+        self.assertEqual(acc.parse_confirm_failure(
+            "confirm-failure: breaking\nconfirm-failure: CONFIRMED — the test passes"), "CONFIRMED")
+        self.assertEqual(acc.parse_confirm_failure(
+            "confirm-failure: NOT CONFIRMED — the test still passes"), "NOT CONFIRMED")
+        self.assertEqual(acc.parse_confirm_failure("no verdict at all"), "INCONCLUSIVE")
+
+    def test_the_text_field_and_empty_document_items_need_their_lines(self) -> None:
+        for key, line in (("2e", "Space is consumed when a text field has focus"),
+                          ("3b", "an empty document's frame does not equal the golden image")):
+            text = full_output().replace(f"ok: {line}", "ok: something else")
+            self.assertEqual(self.evaluate(text)[key].status, acc.FAIL, key)
+
     def test_empty_output_passes_nothing(self) -> None:
         verdicts = self.evaluate("", direction=None)
         self.assertFalse(any(v.status == acc.PASS for v in verdicts.values()))
@@ -91,6 +125,7 @@ class Verdicts(unittest.TestCase):
     def test_summary_never_calls_a_skip_a_pass(self) -> None:
         obs = acc.parse_ctest_output(full_output())
         obs.direction_passed = True
+        obs.mutations = mutations_confirmed()
         table = acc.render_table(acc.evaluate(acc.ITEMS, obs))
         self.assertIn("SKIP", table)
         self.assertIn("SKIPPED items are not passes", table)

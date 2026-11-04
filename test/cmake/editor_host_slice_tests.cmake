@@ -63,10 +63,13 @@ set_target_properties(pulp-slice-vellum-ui PROPERTIES
     BUILD_RPATH "${PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX}/mirror/lib;${PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX}/lib")
 _pulp_slice_link_map(pulp-slice-vellum-ui)
 
-# The RmlUi document, embedded as a string.
+# The RmlUi documents, embedded as strings: the knob panel, and the module's
+# empty document for the golden image's negative control.
 file(READ "${_slice_dir}/knob_led.rml" _slice_rml)
+file(READ "${_slice_dir}/empty.rml" _slice_empty_rml)
 file(WRITE "${_slice_out}/gen/slice_rmlui_document.hpp"
-    "#pragma once\ninline constexpr const char* kSliceRmlDocument = R\"rml(${_slice_rml})rml\";\n")
+    "#pragma once\ninline constexpr const char* kSliceRmlDocument = R\"rml(${_slice_rml})rml\";\n"
+    "inline constexpr const char* kSliceEmptyRmlDocument = R\"rml(${_slice_empty_rml})rml\";\n")
 
 foreach(_kind headless vellum rmlui native)
     add_executable(pulp-slice-${_kind} ${_slice_dir}/slice_main.cpp)
@@ -76,20 +79,20 @@ endforeach()
 
 target_sources(pulp-slice-headless PRIVATE ${_slice_dir}/headless_editor.cpp)
 target_compile_definitions(pulp-slice-headless PRIVATE
-    SLICE_KIND="headless" SLICE_EXPECT_EDITOR=0 SLICE_EXACT_DRAG=0 SLICE_HAS_LED=0
+    SLICE_KIND="headless" SLICE_TEXT_FIELD=0 SLICE_EMPTY_DOCUMENT=0 SLICE_EXPECT_EDITOR=0 SLICE_EXACT_DRAG=0 SLICE_HAS_LED=0
     SLICE_VALUE_KEY="none")
 
 target_sources(pulp-slice-vellum PRIVATE ${_slice_dir}/vellum_editor.cpp)
 target_link_libraries(pulp-slice-vellum PRIVATE pulp-slice-vellum-ui)
 target_compile_definitions(pulp-slice-vellum PRIVATE
-    SLICE_KIND="vellum" SLICE_EXPECT_EDITOR=1 SLICE_EXACT_DRAG=0 SLICE_HAS_LED=0
+    SLICE_KIND="vellum" SLICE_TEXT_FIELD=1 SLICE_EMPTY_DOCUMENT=0 SLICE_EXPECT_EDITOR=1 SLICE_EXACT_DRAG=0 SLICE_HAS_LED=0
     SLICE_VALUE_KEY="knob")
 
 target_sources(pulp-slice-rmlui PRIVATE ${_slice_dir}/rmlui_editor.cpp)
 target_include_directories(pulp-slice-rmlui PRIVATE "${_slice_out}/gen")
 target_link_libraries(pulp-slice-rmlui PRIVATE VellumRmlUi::SoftRenderer)
 target_compile_definitions(pulp-slice-rmlui PRIVATE
-    SLICE_KIND="rmlui" SLICE_EXPECT_EDITOR=1 SLICE_EXACT_DRAG=1 SLICE_HAS_LED=1
+    SLICE_KIND="rmlui" SLICE_TEXT_FIELD=0 SLICE_EMPTY_DOCUMENT=1 SLICE_EXPECT_EDITOR=1 SLICE_EXACT_DRAG=1 SLICE_HAS_LED=1
     SLICE_VALUE_KEY="gain"
     SLICE_GOLDEN_PNG="${_slice_dir}/knob_led.golden.png")
 set_target_properties(pulp-slice-rmlui PROPERTIES
@@ -100,7 +103,7 @@ pulp_test_data(pulp-slice-rmlui NO_DEFINE PATHS test/editor_host_slice/knob_led.
 target_sources(pulp-slice-native PRIVATE ${_slice_dir}/native_editor.mm)
 set_source_files_properties(${_slice_dir}/native_editor.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 target_compile_definitions(pulp-slice-native PRIVATE
-    SLICE_KIND="native" SLICE_EXPECT_EDITOR=1 SLICE_EXACT_DRAG=1 SLICE_HAS_LED=0
+    SLICE_KIND="native" SLICE_TEXT_FIELD=0 SLICE_EMPTY_DOCUMENT=0 SLICE_EXPECT_EDITOR=1 SLICE_EXACT_DRAG=1 SLICE_HAS_LED=0
     SLICE_VALUE_KEY="gain")
 
 # Each editor inside Pulp's real VST3, CLAP and AU v2 adapters, in process, and
