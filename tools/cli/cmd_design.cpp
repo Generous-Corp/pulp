@@ -5,14 +5,22 @@
 // the live GPU design tool.
 
 #include "cli_common.hpp"
+#if PULP_ENABLE_DESIGN_IMPORT
 #include "cmd_design_subcommands.hpp"
 #include "design_binding.hpp"
+#endif
 
 #include <iostream>
 #include <string>
 #include <vector>
 
 int cmd_design(const std::vector<std::string>& args) {
+#if !PULP_ENABLE_DESIGN_IMPORT
+    (void) args;
+    std::cerr << "pulp design is unavailable in this SDK build; enable "
+                 "PULP_ENABLE_DESIGN_IMPORT to build the authoring tools.\n";
+    return 2;
+#else
     using namespace pulp::cli::design;
     // `pulp design lint` and `pulp design diff` operate on DESIGN.md
     // files and do NOT launch the live design tool. They short-circuit
@@ -178,4 +186,5 @@ int cmd_design(const std::vector<std::string>& args) {
         cmd += " " + shell_quote(arg);
     }
     return run(cmd);
+#endif
 }
