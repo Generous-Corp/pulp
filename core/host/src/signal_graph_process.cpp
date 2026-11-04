@@ -40,13 +40,21 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
     // private nested struct (signal_graph.hpp) so the control-thread snapshot
     // readers can pin the same way.
     auto read_guard = read_snapshot_();
+    if (typed_trigger_authoring_.load(std::memory_order_acquire)) {
+        (void)process_trigger_snapshot_(output, input, num_samples, transport, read_guard.get());
+        return;
+    }
     process_snapshot_impl(output, input, num_samples, transport, read_guard.get());
 }
 
 void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                                         const audio::BufferView<const float>& input,
                                         int num_samples, const format::ProcessContext* transport,
-                                        CompiledGraph* cg) {
+                                        CompiledGraph* cg, bool trigger_admitted) {
+    // Only the controller entry may advance a typed clock. In particular a
+    // copied ExecutionSnapshot cannot render even the current generation.
+    if (cg && cg->trigger_state && !trigger_admitted)
+        return;
     // Negative or zero block sizes mean "nothing to do" — return without
     // touching output (a memset with size_t(negative) wraps to a huge size).
     if (num_samples <= 0)
@@ -309,7 +317,8 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
             // block-size mismatch — NEVER re-run the interior, whose plugin state
             // the producer owns), then run the routed walk with the interior masked
             // so only the exterior runs live. Uses the serial routed snapshot.
-            if (anticipation_enabled_.load(std::memory_order_relaxed) && cg->anticipation.valid &&
+            if (!cg->trigger_state && anticipation_enabled_.load(std::memory_order_relaxed) &&
+                cg->anticipation.valid &&
                 cg->anticipation.lane.output_channels() == cg->anticipation.prefill.size()) {
                 // STRUCTURALLY TERMINAL once anticipation is valid: the interior's
                 // plugin state is advanced solely by the producer (pump_anticipation),
@@ -381,11 +390,12 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
             bool routed_eligible_dispatch_failed = false;
 
             const bool use_parallel =
-                cg->pdc_execution_domain == PdcExecutionDomain::RoutedParallel ||
-                (cg->pdc_execution_domain == PdcExecutionDomain::Dynamic &&
-                 parallel_routing_enabled_.load(std::memory_order_relaxed));
+                !cg->trigger_state &&
+                (cg->pdc_execution_domain == PdcExecutionDomain::RoutedParallel ||
+                 (cg->pdc_execution_domain == PdcExecutionDomain::Dynamic &&
+                  parallel_routing_enabled_.load(std::memory_order_relaxed)));
             const bool use_serial =
-                !cg->processors.empty() ||
+                cg->trigger_state || !cg->processors.empty() ||
                 cg->pdc_execution_domain == PdcExecutionDomain::RoutedSerial ||
                 (cg->pdc_execution_domain == PdcExecutionDomain::Dynamic &&
                  canonical_executor_routing_enabled_.load(std::memory_order_relaxed));
@@ -457,7 +467,7 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
     // Authored Processor nodes have only the routed ProcessBlock binding. Never
     // reinterpret one as the unresolved-plugin pass-through used by the legacy
     // reference walk; a routed failure is a fail-closed silent block.
-    if (!cg->processors.empty()) {
+    if (cg->trigger_state || !cg->processors.empty()) {
         output.clear();
         routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
         return;
