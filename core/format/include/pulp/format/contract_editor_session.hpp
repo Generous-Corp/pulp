@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace pulp::state {
@@ -56,9 +57,18 @@ class ContractEditorSession;
 /// `close_all()`) closes every registered session while the processor and
 /// store still exist. The host still holds those windows, so each editor is
 /// closed in order (gestures released, detached, destroyed), never
-/// invalidated. Sessions unregister themselves when they are destroyed,
-/// closed or invalidated. Main thread only, except that destruction or
-/// `close_all()` from another thread waits for the main thread to close them.
+/// invalidated.
+///
+/// A host may dispose of the instance off the main thread. Waiting for the
+/// main thread there could deadlock a host whose main thread is waiting for
+/// that worker, so the registry does not wait: it releases every gesture and
+/// cuts each session's port from the store at once (both safe from any
+/// thread), then posts the close to the main thread, holding the sessions
+/// alive until it runs. By then the processor is gone; an editor reaches the
+/// plug-in only through its context, which refuses everything after the cut.
+///
+/// Sessions are held weakly: a session the host has already closed and
+/// destroyed is simply skipped, so nothing needs to unregister.
 class ContractSessionRegistry {
   public:
     ContractSessionRegistry() = default;
@@ -66,19 +76,19 @@ class ContractSessionRegistry {
     ContractSessionRegistry(const ContractSessionRegistry&) = delete;
     ContractSessionRegistry& operator=(const ContractSessionRegistry&) = delete;
 
-    /// Close every registered session for its owner (close_for_owner()) and
-    /// forget them.
+    /// Close every live registered session for its owner and forget them: at
+    /// once on the main thread, posted to it from any other thread.
     void close_all();
-    std::size_t size() const {
-        return sessions_.size();
-    }
+    /// Registered sessions still alive.
+    std::size_t size() const;
 
   private:
     friend class ContractEditorSession;
-    std::vector<ContractEditorSession*> sessions_;
+    mutable std::mutex mutex_;
+    std::vector<std::weak_ptr<ContractEditorSession>> sessions_;
 };
 
-class ContractEditorSession {
+class ContractEditorSession : public std::enable_shared_from_this<ContractEditorSession> {
   public:
     /// Interval of the session's own idle tick while attached (about 60 Hz).
     static constexpr int kIdleIntervalMs = 16;
@@ -146,8 +156,14 @@ class ContractEditorSession {
     /// One idle tick: Editor::idle() while attached.
     void tick();
 
-    /// Be invalidated when `registry` (its adapter instance) goes away first.
-    void register_with(ContractSessionRegistry& registry);
+    /// Be closed by `registry` when its adapter instance goes away first. The
+    /// session must be owned by a std::shared_ptr; false otherwise.
+    bool register_with(ContractSessionRegistry& registry);
+    /// The owner is going away on another thread: release every gesture, cut
+    /// the port from the store and refuse the context's host hooks. Any
+    /// thread. The editor stays attached until `close_for_owner()` runs on
+    /// the main thread.
+    void disconnect_owner();
 
     /// The editor's size, or its preferred size while it reports none.
     EditorSize size() const;
@@ -179,10 +195,7 @@ class ContractEditorSession {
     void stop_idle();
     void destroy_editor();
 
-    void unregister();
-
     IdleSource idle_source_;
-    ContractSessionRegistry* registry_ = nullptr;
     // Declared in dependency order so the editor is destroyed first, then the
     // context it was created with, then the port the context hands out.
     std::unique_ptr<StateStoreParamPort> port_;

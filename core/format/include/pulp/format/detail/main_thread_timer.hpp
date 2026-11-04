@@ -40,9 +40,14 @@ class MainThreadTimer {
     std::unique_ptr<Impl> impl_;
 };
 
-/// Run `fn` on the main thread and return once it has run: inline on the main
-/// thread, otherwise (on Apple platforms) synchronously on the main queue.
-/// Elsewhere there is no main queue to wait on, so `fn` runs inline.
-void run_on_main_thread_and_wait(const std::function<void()>& fn);
+/// Whether the calling thread is the main thread: the process main thread on
+/// Apple platforms, MainThreadDispatcher's answer elsewhere.
+bool is_main_thread();
+
+/// Run `fn` on the main thread later and return at once, without waiting for
+/// it: the main queue on Apple platforms, MainThreadDispatcher elsewhere.
+/// False when nothing can run it (no main-thread backend), in which case `fn`
+/// has not run and the caller still owns what it captured.
+bool post_to_main_thread(std::function<void()> fn);
 
 } // namespace pulp::format::detail

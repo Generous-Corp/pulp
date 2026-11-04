@@ -22,10 +22,13 @@
 //   container deallocates          -> every gesture released, Editor::detach()
 //   AU instance disposed first     -> its ContractSessionRegistry closes the
 //                                     editor in order (gestures released,
-//                                     Editor::detach(), destroyed) on the main
-//                                     thread before the processor goes; the
+//                                     Editor::detach(), destroyed); the
 //                                     container is still alive, so the editor
-//                                     is never invalidated here
+//                                     is never invalidated here. Disposed off
+//                                     the main thread, the gestures are
+//                                     released and the store cut at once and
+//                                     the close is posted to the main thread,
+//                                     never waited for
 //
 // Idle runs from the session's own main-thread timer. Edits go through the session's StateStoreParamPort
 // into the AU instance's store, which the adapter already reports to the host.
@@ -137,17 +140,17 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 
 // The container the host embeds. It owns the session; the editor draws into it.
 @interface PULP_AU_CONTRACT_HOST_VIEW_CLASS : NSView {
-    std::unique_ptr<pulp::format::ContractEditorSession> _session;
+    std::shared_ptr<pulp::format::ContractEditorSession> _session;
     bool _applyingEditorSize;
 }
-- (void)adoptSession:(std::unique_ptr<pulp::format::ContractEditorSession>)session;
+- (void)adoptSession:(std::shared_ptr<pulp::format::ContractEditorSession>)session;
 - (pulp::format::ContractEditorSession*)session;
 - (void)applyEditorSize;
 @end
 
 @implementation PULP_AU_CONTRACT_HOST_VIEW_CLASS
 
-- (void)adoptSession:(std::unique_ptr<pulp::format::ContractEditorSession>)session {
+- (void)adoptSession:(std::shared_ptr<pulp::format::ContractEditorSession>)session {
     _session = std::move(session);
 }
 
@@ -265,7 +268,9 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
         [view release];
         return nil;
     }
-    [view adoptSession:std::move(session)];
+    // Shared: the instance's registry may hold the session past this view
+    // while it closes the editor on the main thread.
+    [view adoptSession:std::shared_ptr<format::ContractEditorSession>(std::move(session))];
     [view applyEditorSize];
     format::NativeParent parent;
     parent.kind = format::NativeParentKind::cocoa_view;
