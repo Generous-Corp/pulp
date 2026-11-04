@@ -5498,6 +5498,14 @@
    ],
    "kind": "python"
   },
+  "g9-hostile-fixture-regression": {
+   "entry": "tools/validation/test_g9_hostile_fixture.py",
+   "inputs": [
+    "tools/validation/g9_hostile_fixture.py",
+    "tools/validation/test_g9_hostile_fixture.py"
+   ],
+   "kind": "python"
+  },
   "gallery-diff-selftest": {
    "entry": "tools/scripts/test_gallery_visual_diff.py",
    "inputs": [
