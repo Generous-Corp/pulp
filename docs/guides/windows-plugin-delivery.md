@@ -91,6 +91,40 @@ may be remote transport or scheduling, while long paint/GPU/JavaScript spans
 inside the guest are renderer work. Keep this diagnosis independent from the
 audio callback and never move tracing onto the real-time audio thread.
 
+Keep timed captures separate from functional screenshots and state dumps. Do
+not compile, capture screenshots, or write per-frame diagnostic files during
+the timed workload. Require the intended editor to mount: a successful process
+exit from a fallback editor does not validate the scripted interface.
+
+Record the actual renderer adapter. In a Windows ARM VM, D3D12 may use the
+Microsoft Basic Render Driver (WARP), which executes GPU work in software.
+Compare CPU recording time with explicitly enabled GPU timestamp measurements;
+a cheap paint span does not establish a cheap frame. Qualify native GPU
+performance separately from software rendering and remote display transport.
+
+For expensive static leaf artwork, `View::set_raster_cached(true)` (or the
+script bridge's `setRasterCached(id, true)`) retains pixels while preserving
+invalidation on content, geometry, scale, and device changes. Select the node
+through an authored semantic marker rather than a generated importer ID. Keep
+live analyzer and modulation layers drawing. Confirm actual reuse through the
+`view_raster_cache_hit`, `view_raster_cache_miss`, and
+`view_raster_cache_bypass` trace events, then compare the same binary with the
+cache off, on, and off again under the same audio and interaction workload.
+
+Audio capture advances independently of animation time. `HostFramePump` can
+report a nominal resume delta after a long frame; using that delta to throttle
+audio draining can skip another slow frame and overflow a bounded capture
+buffer. Drain `VisualizationBridge` on every delivered frame and throttle UI
+publication separately. For a latest-window analyzer, retain its bounded
+backlog policy and verify sequence progress and dropped-frame counts under
+load; a larger buffer alone does not prove the scheduling defect fixed.
+
+Check initial, maximized, and restored windows using native parent/editor
+client dimensions as well as screenshots. Measure settling latency: a stale
+frame during resize and persistent clipping need different fixes. Preserve
+complete parsed state snapshots, since copying a live JSON file during its
+rewrite can capture an empty or partial document.
+
 ## Optional dependencies stay optional
 
 Platform- or application-specific dependencies belong in the plugin or its
