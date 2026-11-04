@@ -52,7 +52,13 @@
 
 #include <pluginterfaces/gui/iplugview.h>
 
+namespace pulp::format {
+struct HostActionRequest;
+}
+
 namespace pulp::format::vst3 {
+
+class ContractPlugView;
 
 // Constructs the editor IPlugView, defined in vst3_plug_view.cpp.
 //
@@ -299,7 +305,17 @@ public:
 
     static Steinberg::FUnknown* createInstance(void*);
 
-private:
+    /// Called by a ContractPlugView (vst3_contract_view.hpp) as it is
+    /// destroyed, so the adapter stops tracking it.
+    void forget_contract_view(ContractPlugView* view);
+
+  private:
+    // Tell every live contract view that the processor is going away, so each
+    // invalidates and destroys its editor while the processor that owns the
+    // editor factory, and the store its port reads, are still alive.
+    void terminate_contract_views();
+    bool contract_host_action(const HostActionRequest& request);
+
     // Declared FIRST so it is destroyed LAST: the final detach cancels and
     // joins the tracing auto-flush timer and writes the .pftrace, and that must
     // happen after every span this instance can still emit. RAII rather than a
@@ -321,6 +337,8 @@ private:
     // Declared after processor_ so reverse member destruction retires retained
     // editor handles before either referenced object is released.
     runtime::AliveToken owner_alive_;
+    // Contract views the host still holds (not owned: the host releases them).
+    std::vector<ContractPlugView*> contract_views_;
 
     // Working buffers
     std::vector<float*> input_ptrs_;
