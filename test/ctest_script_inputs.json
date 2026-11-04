@@ -7,18 +7,11 @@
  },
  "executables": {
   "Pulp UI Script Fixture": {
-   "data": "undeclared",
-   "detected_sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ],
+   "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ],
-   "undeclared_sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ]
+   "sources": [],
+   "undeclared_sources": []
   },
   "pulp-control-broker-crash-fixture": {
    "data": "none",
@@ -3342,6 +3335,7 @@
   "pulp-test-timeline-smf",
   "pulp-test-tracing",
   "pulp-test-transition-cost",
+  "pulp-test-trigger-admission",
   "pulp-test-true-peak-limiter",
   "pulp-test-udev-monitor",
   "pulp-test-unique-temp-dir",
