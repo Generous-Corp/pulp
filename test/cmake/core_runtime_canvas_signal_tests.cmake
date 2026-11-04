@@ -516,6 +516,12 @@ else()
 endif()
 add_test(NAME signal-public-headers-no-exceptions
     COMMAND pulp-test-signal-no-exceptions)
+pulp_add_test_suite(pulp-test-spectral-codec
+    SOURCES test_spectral_frame_codec.cpp
+    LIBRARIES pulp::signal pulp::runtime)
+target_compile_definitions(pulp-test-spectral-codec PRIVATE
+    SPECTRAL_CODEC_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/spectral-frame-codec")
+
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
 pulp_add_test_suite(pulp-test-spectral-primitives GROUP pulp-test-group-core-signal
     SOURCES test_spectral_frame_engine.cpp test_spectral_band_mask.cpp
