@@ -42,7 +42,7 @@ jobs:
     steps:
       # Only the resolver is needed; it owns the opt-in class-label rewrite so
       # the three release workflows share one tested implementation.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           # Resolver policy comes from the default branch, like release-cli.yml.
           ref: ${{ github.event.repository.default_branch }}
@@ -131,7 +131,7 @@ jobs:
       CCACHE_DISABLE: "1"
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       # The FetchContent seed and the configure-check cache on a self-hosted
       # host can be written by earlier jobs, PR gate jobs included, so CMake
@@ -470,7 +470,7 @@ jobs:
       # signs and notarizes the example-plugin packages and keeps them as
       # workflow artifacts. It cannot delay, block, or break a release.
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pulp-macos-${{ github.ref_name }}${{ steps.signing.outputs.artifact_suffix }}
           path: artifacts/

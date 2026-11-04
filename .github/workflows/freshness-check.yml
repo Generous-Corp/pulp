@@ -30,9 +30,9 @@ jobs:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.12'
 
@@ -69,7 +69,7 @@ jobs:
     outputs:
       runs_on: ${{ steps.resolve.outputs.runs_on }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           sparse-checkout: tools/scripts/windows_runner_selector.py
           sparse-checkout-cone-mode: false
@@ -103,7 +103,7 @@ jobs:
           - r8brain-free-src
     runs-on: ${{ matrix.os == 'windows-x64' && fromJSON(needs.windows-runner.outputs.runs_on) || matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Configure stub
         run: |

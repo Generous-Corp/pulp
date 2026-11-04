@@ -46,8 +46,13 @@ def _find_step(text: str, name: str) -> str:
 
 
 def _find_uses_step(text: str, uses: str) -> str:
+    # Keep the test bound to the requested major while allowing Dependabot's
+    # full semver action pins (for example, v7.0.1) to advance within it.
+    ref_pattern = re.escape(uses)
+    if re.search(r"@v\d+$", uses):
+        ref_pattern += r"(?:\.\d+(?:\.\d+)?)?"
     pattern = re.compile(
-        rf"^\s{{6}}-\s+uses:\s+{re.escape(uses)}\s*\n"
+        rf"^\s{{6}}-\s+uses:\s+{ref_pattern}\s*\n"
         r"([\s\S]*?)(?=^\s{6}-\s+(?:name:|uses:)|\Z)",
         re.MULTILINE,
     )
@@ -329,8 +334,8 @@ class ActionMajorPinTests(unittest.TestCase):
         self.assertNotIn("shipyard-merge-steward.yml",
                          (REPO_ROOT / ".github" / "schedule-backstop.json").read_text(encoding="utf-8"))
         self.assertIn("actions: read", text)
-        self.assertIn("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09", text)
-        self.assertIn("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", text)
+        self.assertIn("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", text)
+        self.assertIn("actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9", text)
         self.assertEqual(text.count("run_steward_with_retry()"), 1)
 
 if __name__ == "__main__":
