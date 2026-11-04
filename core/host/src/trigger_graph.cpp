@@ -214,6 +214,10 @@ PreparedTriggerPlan::PreparedTriggerPlan(std::unique_ptr<Impl> impl) : impl_(std
 PreparedTriggerPlan::~PreparedTriggerPlan() = default;
 
 bool SignalGraph::ensure_trigger_controller_() {
+    if (refuse_spectral_mutation_() ||
+        std::any_of(nodes_.begin(), nodes_.end(),
+                    [](const auto& node) { return node.spectral_identity.has_value(); }))
+        return false;
     if (trigger_controller_)
         return true;
     static_assert(sizeof(detail::TriggerController) + sizeof(detail::TriggerArena) +
@@ -393,7 +397,10 @@ TriggerPreparation SignalGraph::prepare_trigger_plan(double sample_rate, int max
     GraphMutationLock lock(*this);
     auto fail = [](TriggerGraphResult code) { return TriggerPreparation{code, {}}; };
     if (!canonical_executor_routing_enabled() || parallel_routing_enabled() ||
-        anticipation_enabled() || !sample_region_definitions_.empty() || in_swap_edit_)
+        anticipation_enabled() || !sample_region_definitions_.empty() || in_swap_edit_ ||
+        spectral_mode_.load(std::memory_order_acquire) ||
+        std::any_of(nodes_.begin(), nodes_.end(),
+                    [](const auto& node) { return node.spectral_identity.has_value(); }))
         return fail(TriggerGraphResult::Mode);
     if (max_frames < 1 || max_frames > 4096 || !std::isfinite(sample_rate) || sample_rate <= 0)
         return fail(TriggerGraphResult::Budget);

@@ -609,3 +609,24 @@ TEST_CASE("Typed framework audio vector is charged through its maximum admitted 
     CHECK(accepted_count > 0);
     CHECK(refused);
 }
+
+TEST_CASE("Typed and spectral preparation remain separate admission lanes", "[trigger]") {
+    auto identity = SpectralIdentity::make(256, 63, 1, 48000);
+    REQUIRE(identity);
+    SignalGraph spectral_first;
+    REQUIRE(spectral_first.add_spectral_analysis(*identity.value, "analysis"));
+    CHECK(spectral_first.add_trigger_producer({}) == 0);
+    CHECK(spectral_first.add_trigger_envelope({}) == 0);
+    CHECK(spectral_first.add_trigger_modulation() == 0);
+    CHECK(spectral_first.add_trigger_lowpass(0.5f) == 0);
+
+    SignalGraph trigger_first;
+    auto producer = trigger_first.add_trigger_producer({});
+    auto envelope = trigger_first.add_trigger_envelope({});
+    REQUIRE(producer != 0);
+    REQUIRE(envelope != 0);
+    REQUIRE(trigger_first.connect_trigger({producer, envelope}) == TriggerGraphResult::Accepted);
+    REQUIRE(trigger_first.add_spectral_analysis(*identity.value, "analysis"));
+    CHECK(trigger_first.prepare_trigger_plan(48000, 32).result == TriggerGraphResult::Mode);
+    CHECK_FALSE(trigger_first.prepare(48000, 32));
+}
