@@ -163,7 +163,11 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             CACHE INTERNAL "" FORCE)
     endif()
     _pulp_apply_ui_script_definition(${target}_Standalone "${PULP_${target}_UI_SCRIPT}")
-    _pulp_apply_view_mac_objc_suffix(${target}_Standalone)
+    # The view layer's per-binary Objective-C classes; a view-free standalone
+    # (UI <package>) has no view layer for them.
+    if(NOT PULP_${target}_VIEW_FREE_STANDALONE)
+        _pulp_apply_view_mac_objc_suffix(${target}_Standalone)
+    endif()
     target_include_directories(${target}_Standalone PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set_target_properties(${target}_Standalone PROPERTIES
         OUTPUT_NAME "${name}"

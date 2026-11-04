@@ -1,14 +1,18 @@
 // Modulation toolkit, event domain: the trigger/gate kit and the envelope
 // family.
+#include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/signal/envelope.hpp>
+#include <pulp/signal/indexed_control.hpp>
 #include <pulp/signal/mod_tools.hpp>
 #include <pulp/signal/trigger.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -30,6 +34,93 @@ template <typename Fn> std::vector<int> fire_times(int n, Fn&& step) {
 }
 
 } // namespace
+
+TEST_CASE("MapClip retains valid configuration after invalid input", "[signal][mod][g5]") {
+    MapClip map;
+    REQUIRE(map.configure(0.0f, 1.0f, 100.0f, 200.0f));
+    REQUIRE(map.process(-2.0f) == 100.0f);
+    REQUIRE(map.process(0.5f) == 150.0f);
+    REQUIRE(map.process(2.0f) == 200.0f);
+    REQUIRE_FALSE(map.configure(1.0f, 1.0f, 0.0f, 1.0f));
+    REQUIRE_FALSE(map.configure(0.0f, std::numeric_limits<float>::infinity(), 0.0f, 1.0f));
+    REQUIRE(map.process(0.5f) == 150.0f);
+    REQUIRE(map.process(std::numeric_limits<float>::quiet_NaN()) == 100.0f);
+}
+
+TEMPLATE_TEST_CASE("MapClip keeps extreme finite intervals bounded", "[signal][mod][g5]", float,
+                   double) {
+    using T = TestType;
+    const auto max = std::numeric_limits<T>::max();
+    MapClipT<T> map;
+    REQUIRE(map.configure(0, 1, -max, max));
+    for (const auto input : std::array<T, 5>{-1, 0, T{0.5}, 1, 2}) {
+        const auto output = map.process(input);
+        REQUIRE(std::isfinite(output));
+        REQUIRE(output == (input <= 0 ? -max : input >= 1 ? max : T{0}));
+    }
+    REQUIRE(map.configure(-max, max, 0, 1));
+    for (const auto unit : std::array<T, 5>{0, T{0.25}, T{0.5}, T{0.75}, 1}) {
+        const auto input = (2 * unit - 1) * max;
+        REQUIRE(map.process(input) == unit);
+        REQUIRE(std::isfinite(map.process(input)));
+    }
+    REQUIRE(map.configure(-max / 2, max / 2, max, -max));
+    REQUIRE(map.process(-max) == max);
+    REQUIRE(map.process(0) == 0);
+    REQUIRE(map.process(max) == -max);
+    REQUIRE(map.configure(-max, max, -max, max));
+    REQUIRE(map.process(-max) == -max);
+    REQUIRE(map.process(0) == 0);
+    REQUIRE(map.process(max) == max);
+    REQUIRE(map.configure(max / 2, max, max / 2, max));
+    REQUIRE(map.process(max * T{0.75}) == max * T{0.75});
+    // A blanket half-scaling fix would collapse a subnormal interval.
+    const auto tiny = std::numeric_limits<T>::denorm_min();
+    REQUIRE(map.configure(-tiny, tiny, 0, 1));
+    REQUIRE(map.process(-tiny) == 0);
+    REQUIRE(map.process(0) == T{0.5});
+    REQUIRE(map.process(tiny) == 1);
+    REQUIRE_FALSE(map.configure(0, 1, 0, std::numeric_limits<T>::infinity()));
+    REQUIRE(map.process(0) == T{0.5});
+}
+
+TEST_CASE("IndexedControl follows external index and rejects invalid index", "[signal][mod][g5]") {
+    IndexedControl reader;
+    REQUIRE(reader.process(0.0) == 0.0f);
+    const std::array<float, 3> table{0.0f, 1.0f, 0.0f};
+    reader.set_table(table);
+    REQUIRE(reader.process(0.5) == 0.5f);
+    REQUIRE(reader.process(1.0) == 1.0f);
+    REQUIRE(reader.process(0.5) == 0.5f); // external time reversed
+    REQUIRE(reader.process(-1.0) == 0.0f);
+    REQUIRE(reader.process(3.0) == 0.0f);
+    REQUIRE(reader.process(std::numeric_limits<double>::quiet_NaN()) == 0.0f);
+}
+
+TEMPLATE_TEST_CASE("IndexedControl interpolates extreme finite samples", "[signal][mod][g5]", float,
+                   double) {
+    using T = TestType;
+    const auto max = std::numeric_limits<T>::max();
+    IndexedControlT<T> reader;
+    const std::array<T, 2> extremes{-max, max};
+    reader.set_table(extremes);
+    CHECK(reader.process(0.5) == 0);
+    const std::array<T, 3> table{0, -max, max};
+    reader.set_table(table);
+    CHECK(reader.process(1.0) == -max);
+    REQUIRE(reader.process(1.5) == 0);
+    REQUIRE(reader.process(1.5) == 0);    // paused external time
+    REQUIRE(reader.process(1.0) == -max); // reversed external time
+    REQUIRE(reader.process(0.0) == 0);
+    REQUIRE(reader.process(2.0) == max);
+    REQUIRE(reader.process(-1.0) == 0);
+    REQUIRE(reader.process(3.0) == max);
+    const std::array<T, 2> ordinary{0, 1};
+    reader.set_table(ordinary);
+    REQUIRE(reader.process(0.5) == T{0.5});
+    REQUIRE(reader.process(0.5) == T{0.5});
+    REQUIRE(reader.process(0.25) == T{0.25});
+}
 
 // ── TriggerDetectT ───────────────────────────────────────────────────────────
 

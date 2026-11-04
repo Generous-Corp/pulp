@@ -115,8 +115,10 @@ target_compile_definitions(pulp-slice-native PRIVATE
     SLICE_VALUE_KEY="gain")
 
 # Each editor inside Pulp's real VST3, CLAP and AU v2 adapters, in process, and
-# as a headless standalone app. These link Pulp's format adapters (and the
-# standalone app its view stack), so the symbol census does not read them.
+# as a headless standalone app. These link Pulp's format adapters, so the
+# symbol census does not read them. The standalone app is the view-free host a
+# UI package plug-in's Standalone links (pulp::standalone-contract), so its
+# only Dawn is the one its editor brings.
 set(_slice_editor_vellum ${_slice_dir}/vellum_editor.cpp)
 set(_slice_editor_rmlui ${_slice_dir}/rmlui_editor.cpp)
 set(_slice_editor_native ${_slice_dir}/native_editor.mm)
@@ -147,7 +149,7 @@ foreach(_kind vellum rmlui native)
     add_executable(pulp-slice-standalone-${_kind}
         ${_slice_dir}/standalone_main.cpp ${_slice_editor_${_kind}})
     target_link_libraries(pulp-slice-standalone-${_kind} PRIVATE
-        pulp-slice-gain-meter pulp-slice-harness pulp::standalone)
+        pulp-slice-gain-meter pulp-slice-harness pulp::standalone-contract)
     target_compile_definitions(pulp-slice-standalone-${_kind} PRIVATE SLICE_KIND="${_kind}")
 endforeach()
 target_link_libraries(pulp-slice-formats-vellum PRIVATE pulp-slice-vellum-ui)

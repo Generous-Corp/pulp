@@ -419,6 +419,21 @@ public:
     // run_with_editor() for a processor with an editor factory: the editor-host
     // contract editor in its own native window (detail/standalone_contract_editor.hpp).
     bool run_contract_editor(EditorFactory& factory);
+
+    // The view layer. standalone_view_layer.cpp defines these for
+    // pulp::standalone and pulp::standalone-native; standalone_view_layer_none.cpp
+    // defines them for pulp::standalone-contract, the standalone of a UI package
+    // plug-in, which links no Pulp view, canvas or render code (its editor is
+    // the package's, opened through the editor-host contract).
+    void attach_view_layer();
+    void prepare_view_input(const StandaloneConfig& config);
+    // Audio thread: append the musical typing keyboard's recovery events.
+    void drain_view_input(midi::MidiBuffer& midi, int frames) noexcept;
+    void shutdown_view_input() noexcept;
+    int view_waveform_capacity() const noexcept;
+    // run_with_editor() for a processor without an editor factory: its
+    // create_view() editor in a Pulp window.
+    bool run_view_editor(bool use_gpu, const StandaloneConfig& effective_config);
     std::function<void(const std::vector<std::string>&)> open_files_handler_;
 
     // Declared FIRST so it is destroyed LAST: the final detach cancels and
@@ -497,8 +512,12 @@ public:
     TestSignalSource test_signal_;
     view::AudioBridge input_meter_bridge_;
     view::AudioBridge output_meter_bridge_;
-    std::unique_ptr<view::CommandRegistry> command_registry_;
-    std::unique_ptr<detail::StandaloneMusicalTyping> musical_typing_;
+    // View-layer objects, owned through a deleter the view layer supplies, so
+    // a StandaloneApp built without a view layer (pulp::standalone-contract)
+    // never names their destructors. Null there.
+    template <typename T> using ViewLayerPtr = std::unique_ptr<T, void (*)(T*)>;
+    ViewLayerPtr<view::CommandRegistry> command_registry_{nullptr, nullptr};
+    ViewLayerPtr<detail::StandaloneMusicalTyping> musical_typing_{nullptr, nullptr};
 #if PULP_ENABLE_AUDIO_PROBES
     // Realtime output-boundary probe. prepare()d in start() with the
     // device's channel/buffer/rate; analyze_output() is called from the audio
@@ -530,7 +549,7 @@ public:
     // window exists, behind a shared CommandRegistry routed by
     // `route_global_keys` (Cmd/Ctrl+Shift+A). Opened when PULP_AUDIO_INSPECTOR
     // is set in the environment.
-    std::unique_ptr<view::AudioInspectorWindow> audio_inspector_;
+    ViewLayerPtr<view::AudioInspectorWindow> audio_inspector_{nullptr, nullptr};
 #endif
     // The MAXIMUM frames the audio callback may deliver in one block. This is
     // NOT the nominal buffer_size: when the device runs at a different sample
