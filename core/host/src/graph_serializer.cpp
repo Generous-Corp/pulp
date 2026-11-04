@@ -1130,15 +1130,15 @@ class PluginNodeResolver {
 
     // Returns the path to load, or nullopt with `reason` set.
     std::optional<std::string> resolve(const PluginInfo& info, std::string& reason) {
+        if (!options_.load_plugins) {
+            reason = "plugin loading is disabled for this load";
+            return std::nullopt;
+        }
         // Audio Units are found through the component registry by identity;
         // the stored path is never opened.
         if (info.format == PluginFormat::AudioUnit || info.format == PluginFormat::AudioUnitV3 ||
             info.format == PluginFormat::BuiltIn) {
             return info.path;
-        }
-        if (!options_.load_plugins) {
-            reason = "plugin loading is disabled for this load";
-            return std::nullopt;
         }
         if (!info.path.empty() && path_within_known_root(info.path, info.format)) {
             if (options_.blacklist && options_.blacklist->is_blacklisted(info.path)) {

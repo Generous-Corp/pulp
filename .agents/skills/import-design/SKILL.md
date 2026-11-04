@@ -406,6 +406,10 @@ Check before `resolve()`, never after: a resolved path is never a symlink, so a
 check placed after it cannot fire, which is how a symlinked `--provenance` was
 once written through to its target. Stage writes through `mkstemp`, never a
 fixed `.<name>.tmp`, which a pre-planted symlink can redirect.
+Compare destinations by file identity, and a destination that does not exist
+yet by its name decomposed (NFD), case-folded and decomposed again: APFS treats
+`ART.PDF` and `art.pdf`, and the NFC and NFD spellings of `café.svg`, as one
+file, while `resolve()` keeps the caller's spelling.
 
 The installed `pulp-import-design` SDK runtime includes the browser-capture
 manifest plus the materialized JSX siblings

@@ -1,5 +1,10 @@
 # G-10 spectral SignalGraph evidence
 
+Current status (2026-11-03): **PARTIAL**. The Wave 2 adapter update below is
+implemented and tested; the original evidence verdict records the earlier
+2026-11-02 state. Direct routed spectral ports, canonical persisted encoding,
+and A3 qualification remain open.
+
 Date: 2026-11-02  
 Fixture source branch: `main`
 
@@ -88,3 +93,29 @@ No code or build-system files changed, so no build gate was run. The worktree ha
 `build/` directory. The next safe action for `surface:1000120036` is to choose an
 explicit owner for the typed-frame adapter contract and define its public API before
 any SignalGraph wiring is attempted. Implementation status: **BLOCKED**, no PR opened for speculative runtime wiring. The prior evidence PR remains the source receipt: https://github.com/Generous-Corp/pulp/pull/11427
+
+## Wave 2 adapter update (2026-11-03)
+
+The later Wave 2 slice adds `format::SpectralFrameProcessor`, an owned in-process
+`format::Processor` that SignalGraph can retain and route through its existing
+audio ports. It wraps the existing `SpectralFrameEngineT<float>` once and calls a
+bounded ordered chain of owned `SpectralFrameStage` objects for each coherent
+channel-group frame. A stage receives a borrowed `SpectralFrameView` only during
+its callback. The view carries sequence, signed analysis-window origin, sample
+rate, FFT size, hop, window, channel count, and positive-bin count. The bins use
+the engine's DC..Nyquist positive-frequency convention; DC and Nyquist are real.
+The engine fixes the equal-hop WOLA schedule and reports `fft_size + hop` latency.
+There is no stage tail or alternate synthesis hop in this adapter.
+
+The stage chain is installed before prepare, runs on the audio thread, and may
+rewrite the frame in place. Rejected or non-finite frames are zeroed before
+synthesis; the first `SpectralFrameError` is queryable until reset. Reset restarts
+sequence and stream origin. The adapter takes the graph's prepared sample rate,
+block size and channel count and refuses incompatible geometry. Existing graph
+audio edges allow the adapter to compose with other graph nodes and processors.
+
+This bounded adapter does **not** add a routed `spectral{…}` graph port or
+inter-node frame transport. Graph edges still carry audio samples. It also does
+not define a persisted canonical frame encoding, assets schema, stage parameter
+automation, or G-5 granular time-index. These are remaining G-10 contracts; this
+slice must not be cited as proof of the full G-10 phase or the A3 flagship.
