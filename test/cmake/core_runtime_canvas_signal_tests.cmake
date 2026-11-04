@@ -521,6 +521,9 @@ pulp_add_test_suite(pulp-test-spectral-codec
     LIBRARIES pulp::signal pulp::runtime)
 target_compile_definitions(pulp-test-spectral-codec PRIVATE
     SPECTRAL_CODEC_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/spectral-frame-codec")
+pulp_test_data(pulp-test-spectral-codec NO_DEFINE
+    PATHS test/fixtures/spectral-frame-codec/zero.hex
+          test/fixtures/spectral-frame-codec/asymmetric.hex)
 
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
 pulp_add_test_suite(pulp-test-spectral-primitives GROUP pulp-test-group-core-signal
