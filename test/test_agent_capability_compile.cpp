@@ -687,7 +687,7 @@ int main() {
         (void)binding_161;
         auto volatile binding_162 = static_cast<pulp::host::NodeId (pulp::host::SignalGraph::PreparedTopologyEdit::*)(std::string_view, int, const std::string&)>(&pulp::host::SignalGraph::PreparedTopologyEdit::add_custom_node);
         (void)binding_162;
-        auto volatile binding_163 = &pulp::host::SignalGraph::PreparedTopologyEdit::connect;
+        auto volatile binding_163 = static_cast<bool (pulp::host::SignalGraph::PreparedTopologyEdit::*)(pulp::host::NodeId, pulp::host::PortIndex, pulp::host::NodeId, pulp::host::PortIndex)>(&pulp::host::SignalGraph::PreparedTopologyEdit::connect);
         (void)binding_163;
         pulp::host::SampleRegionDefinition probe_value_0{}; (void)probe_value_0;
         pulp::host::SampleRegionDescriptor probe_value_1{}; (void)probe_value_1;

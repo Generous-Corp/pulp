@@ -10,6 +10,7 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/host/src/signal_graph.cpp"
         "${ROOT}/core/host/src/signal_graph_mailbox.cpp"
         "${ROOT}/core/host/src/signal_graph_authoring.cpp"
+        "${ROOT}/core/host/src/spectral_graph.cpp"
         "${ROOT}/core/host/src/signal_graph_process.cpp"
         "${ROOT}/core/host/src/signal_graph_prepare.cpp"
         "${ROOT}/core/host/src/signal_graph_diagnostics.cpp"
