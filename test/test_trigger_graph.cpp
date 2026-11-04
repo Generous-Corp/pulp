@@ -575,3 +575,37 @@ TEST_CASE("Typed retired generation releases its reservation only after the last
     old.reset();
     CHECK(fixture.graph.trigger_resources().generation_bytes == first.generation_bytes);
 }
+
+TEST_CASE("Typed framework audio vector is charged through its maximum admitted count",
+          "[trigger]") {
+    Fixture fixture;
+    std::size_t accepted_count = 0;
+    bool refused = false;
+    for (std::size_t count = 1; count <= 64; ++count) {
+        REQUIRE(fixture.graph.add_trigger_lowpass(0.5f) != 0);
+        const auto before = fixture.graph.trigger_resources();
+        TriggerPreparation candidate;
+        std::size_t allocated = 0;
+        {
+            pulp::test::RtAllocationProbe probe;
+            candidate = fixture.graph.prepare_trigger_plan(48000, 1);
+            allocated = probe.allocated_bytes();
+        }
+        const auto after = fixture.graph.trigger_resources();
+        INFO("audio nodes=" << count << " measured=" << allocated
+                            << " charged=" << after.generation_bytes - before.generation_bytes);
+        if (candidate.result == TriggerGraphResult::Budget) {
+            CHECK(allocated == 0);
+            CHECK(after.total() == before.total());
+            refused = true;
+            break;
+        }
+        REQUIRE(candidate.result == TriggerGraphResult::Accepted);
+        CHECK(allocated <= after.generation_bytes - before.generation_bytes);
+        CHECK(after.total() <= TriggerResourceReport::limit);
+        accepted_count = count;
+    }
+    INFO("maximum admitted framework audio count=" << accepted_count);
+    CHECK(accepted_count > 0);
+    CHECK(refused);
+}

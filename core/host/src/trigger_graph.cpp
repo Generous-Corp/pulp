@@ -487,7 +487,8 @@ TriggerPreparation SignalGraph::prepare_trigger_plan(double sample_rate, int max
     }
     for (const auto& connection : connections_)
         feedback += connection.feedback ? 1 : 0;
-    if (!charge(connections_.size(), 4096) ||
+    if (!charge(trigger_audio_.size(), sizeof(detail::TriggerState::AudioState)) ||
+        !charge(connections_.size(), 4096) ||
         !charge(ports + feedback, static_cast<std::size_t>(max_frames) * sizeof(float) * 2))
         return fail(TriggerGraphResult::Budget);
     try {
