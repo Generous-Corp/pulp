@@ -105,6 +105,10 @@ class PreparedOwnedBuiltInSlot final : public PluginSlot {
 } // namespace
 
 std::unique_ptr<SignalGraph::PreparedTopologyEdit> SignalGraph::begin_prepared_topology_edit() {
+    if (spectral_access_closed_.load(std::memory_order_seq_cst)) {
+        spectral_error_.store(SpectralError::Busy, std::memory_order_relaxed);
+        return {};
+    }
     return std::unique_ptr<PreparedTopologyEdit>(new PreparedTopologyEdit(*this));
 }
 
@@ -150,7 +154,8 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     }
 
     base_authoring_generation_ = owner.authoring_generation_;
-    base_live_ = owner.live_slot_.live();
+    base_live_ =
+        owner.spectral_mode_.load(std::memory_order_acquire) ? nullptr : owner.live_slot_.live();
     base_canonical_routing_ =
         owner.canonical_executor_routing_enabled_.load(std::memory_order_relaxed);
     base_parallel_routing_ = owner.parallel_routing_enabled_.load(std::memory_order_relaxed);
@@ -170,7 +175,9 @@ SignalGraph::PreparedTopologyEdit::~PreparedTopologyEdit() {
 bool SignalGraph::PreparedTopologyEdit::base_is_current_locked_() const {
     owner_->assert_graph_mutation_locked_();
     return owner_->authoring_generation_ == base_authoring_generation_ &&
-           owner_->live_slot_.live() == base_live_ &&
+           (owner_->spectral_mode_.load(std::memory_order_acquire)
+                ? !owner_->spectral_access_closed_.load(std::memory_order_seq_cst)
+                : owner_->live_slot_.live() == base_live_) &&
            owner_->canonical_executor_routing_enabled_.load(std::memory_order_relaxed) ==
                base_canonical_routing_ &&
            owner_->parallel_routing_enabled_.load(std::memory_order_relaxed) ==
@@ -399,6 +406,8 @@ std::size_t SignalGraph::PreparedTopologyEdit::prune_unused_custom_node_types() 
 }
 
 std::size_t SignalGraph::PreparedTopologyEdit::custom_node_type_count() const {
+    if (!candidate_)
+        return 0;
     GraphMutationLock candidate_lock(*candidate_);
     return candidate_->custom_node_types_.size();
 }
@@ -723,21 +732,23 @@ SampleRegionResult SignalGraph::PreparedTopologyEdit::connect_in_sample_region(
 }
 
 SampleRegionProof SignalGraph::PreparedTopologyEdit::prove_sample_region(SampleRegionId id) const {
-    return candidate_->prove_sample_region(id);
+    return candidate_ ? candidate_->prove_sample_region(id) : SampleRegionProof{};
 }
 
 std::optional<SampleRegionDescriptor>
 SignalGraph::PreparedTopologyEdit::sample_region(SampleRegionId id) const {
-    return candidate_->sample_region(id);
+    return candidate_ ? candidate_->sample_region(id) : std::nullopt;
 }
 
 std::vector<SampleRegionDescriptor> SignalGraph::PreparedTopologyEdit::sample_regions() const {
-    return candidate_->sample_regions();
+    return candidate_ ? candidate_->sample_regions() : std::vector<SampleRegionDescriptor>{};
 }
 
 SampleRegionParameterContract
 SignalGraph::PreparedTopologyEdit::sample_region_parameter_contract() const {
-    return SampleRegionParameterContract::from_regions(candidate_->sample_region_definitions_);
+    return candidate_
+               ? SampleRegionParameterContract::from_regions(candidate_->sample_region_definitions_)
+               : SampleRegionParameterContract{};
 }
 
 SampleRegionResult SignalGraph::PreparedTopologyEdit::bind_sample_region_parameters(
@@ -909,15 +920,17 @@ bool SignalGraph::PreparedTopologyEdit::set_exact_parameter_event_nodes(
 }
 
 const GraphNode* SignalGraph::PreparedTopologyEdit::node(NodeId id) const {
-    return candidate_->node(id);
+    return candidate_ ? candidate_->node(id) : nullptr;
 }
 
 const std::vector<GraphNode>& SignalGraph::PreparedTopologyEdit::nodes() const {
-    return candidate_->nodes_;
+    static const std::vector<GraphNode> empty;
+    return candidate_ ? candidate_->nodes_ : empty;
 }
 
 const std::vector<Connection>& SignalGraph::PreparedTopologyEdit::connections() const {
-    return candidate_->connections_;
+    static const std::vector<Connection> empty;
+    return candidate_ ? candidate_->connections_ : empty;
 }
 
 bool SignalGraph::PreparedTopologyEdit::routed_execution_ready(int block_size) const noexcept {
@@ -967,10 +980,24 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         return last_result_ = Result::StaleBase;
     }
 
+    if (owner_->spectral_mode_.load(std::memory_order_acquire)) {
+        const auto unsupported = [](const auto& nodes) {
+            return std::any_of(nodes.begin(), nodes.end(), [](const auto& n) {
+                return n.type == NodeType::Plugin || n.type == NodeType::Custom;
+            });
+        };
+        if (unsupported(owner_->nodes_) || unsupported(candidate_->nodes_)) {
+            owner_->spectral_error_.store(SpectralError::UnsupportedTransactionalReplacement,
+                                          std::memory_order_relaxed);
+            return last_result_ = Result::PreflightFailed;
+        }
+    }
     GraphMutationLock candidate_lock(*candidate_);
     if (const auto rejection = sample_region_preparation_result_(sample_rate, max_block_size))
         return last_result_ = *rejection;
-    const auto old_keepalive = owner_->live_slot_.live();
+    const auto old_keepalive = owner_->spectral_mode_.load(std::memory_order_acquire)
+                                   ? std::shared_ptr<CompiledGraph>{}
+                                   : owner_->live_slot_.live();
     const auto* old = old_keepalive.get();
     const bool candidate_has_midi_output =
         std::any_of(candidate_->nodes_.begin(), candidate_->nodes_.end(),
@@ -979,7 +1006,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         old != nullptr &&
         std::any_of(old->shapes.begin(), old->shapes.end(),
                     [](const auto& entry) { return entry.second.type == NodeType::MidiOutput; });
-    if (candidate_has_midi_output || live_has_midi_output) {
+    if (!owner_->spectral_mode_.load(std::memory_order_acquire) &&
+        (candidate_has_midi_output || live_has_midi_output)) {
         return last_result_ = Result::MidiOutputSnapshotLocalRequired;
     }
 
@@ -1115,8 +1143,10 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
     }
 
     auto next = candidate_->compile_(sample_rate, max_block_size);
-    if (!next)
+    if (!next) {
+        owner_->spectral_error_.store(candidate_->spectral_error(), std::memory_order_relaxed);
         return last_result_ = Result::CompileFailed;
+    }
 
     if (old != nullptr) {
         // Adopt stable runtime ingress/egress identities before publication. A
@@ -1256,6 +1286,8 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
     // private candidate. The owner's authoring graph and live publication remain
     // unchanged unless the candidate succeeds and commit() is called.
     GraphMutationLock owner_lock(*owner_);
+    if (owner_->refuse_spectral_mutation_())
+        return last_result_ = Result::PreflightFailed;
     if (!base_is_current_locked_() || owner_->in_swap_edit_)
         return last_result_ = Result::StaleBase;
     if (const auto rejection = baseline_removal_rejection_locked_())
@@ -1379,6 +1411,11 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
         return last_result_ = Result::NotPrepared;
 
     GraphMutationLock owner_lock(*owner_);
+    if (prepared_snapshot_->spectral && !owner_->spectral_mode_.load(std::memory_order_acquire)) {
+        owner_->spectral_error_.store(SpectralError::RequiresStoppedController,
+                                      std::memory_order_relaxed);
+        return last_result_ = Result::PreflightFailed;
+    }
     const auto fail_before_commit = [&](Result result) {
         if (!rollback_quiesced_lifecycles_locked_())
             return last_result_ = Result::QuiescedRollbackFailed;
@@ -1404,7 +1441,8 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
             }
             owner_->node_load_.reserve(owner_->node_load_.size() + incoming);
         }
-        owner_->live_slot_.prepare_publish();
+        if (!owner_->spectral_mode_.load(std::memory_order_acquire))
+            owner_->live_slot_.prepare_publish();
 
         if (candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed) &&
             prepared_snapshot_->routed.parallel.valid &&
@@ -1425,59 +1463,18 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
         throw;
     }
 
-    // Transfer only load measurers allocated for genuinely new/reused IDs.
-    // std::unordered_map<NodeId, unique_ptr<...>> uses the same default
-    // allocator, integral hash, and equality on both sides; destination buckets
-    // were reserved above. Extract/insert therefore transfers ownership and
-    // preserves the addresses captured by the compiled snapshot without an
-    // allocation after the exception boundary.
-    {
-        std::scoped_lock load_locks(owner_->node_load_mu_, candidate_->node_load_mu_);
-        for (auto it = candidate_->node_load_.begin(); it != candidate_->node_load_.end();) {
-            if (!it->second || owner_->node_load_.find(it->first) != owner_->node_load_.end()) {
-                ++it;
-                continue;
-            }
-            auto current = it++;
-            auto node = candidate_->node_load_.extract(current);
-            [[maybe_unused]] const auto inserted =
-                owner_->node_load_.insert(std::move(node));
-            assert(inserted.inserted);
-        }
+    if (owner_->spectral_mode_.load(std::memory_order_acquire)) {
+        const auto result = owner_->offer_spectral_candidate_locked_(candidate_, prepared_snapshot_,
+                                                                     base_authoring_generation_);
+        owner_->spectral_error_.store(result, std::memory_order_relaxed);
+        if (result != SpectralError::None)
+            return last_result_ = Result::PreflightFailed;
+        prepared_snapshot_.reset();
+        committed_ = true;
+        return last_result_ = Result::Staged;
     }
-
-    owner_->cancel_swap_edit_locked_();
-    owner_->nodes_ = std::move(candidate_->nodes_);
-    owner_->processor_nodes_ = std::move(candidate_->processor_nodes_);
-    owner_->connections_ = std::move(candidate_->connections_);
-    owner_->connection_identities_ = std::move(candidate_->connection_identities_);
-    owner_->next_connection_identity_ = candidate_->next_connection_identity_;
-    owner_->custom_node_types_ = std::move(candidate_->custom_node_types_);
-    owner_->sample_kernel_types_ = std::move(candidate_->sample_kernel_types_);
-    owner_->custom_node_diagnostics_ = std::move(candidate_->custom_node_diagnostics_);
-    owner_->sample_region_definitions_ = std::move(candidate_->sample_region_definitions_);
-    owner_->sample_region_parameter_binding_ = candidate_->sample_region_parameter_binding_;
-    owner_->sample_region_proof_block_size_ = candidate_->sample_region_proof_block_size_;
-    owner_->prepared_sample_region_bank_ = candidate_->prepared_sample_region_bank_;
-    owner_->prepared_sample_regions_ = candidate_->prepared_sample_regions_;
-    owner_->custom_registry_generation_ = candidate_->custom_registry_generation_;
-    owner_->next_id_ = candidate_->next_id_;
-    owner_->limits_ = candidate_->limits_;
-    owner_->prepared_plugin_meta_ = std::move(candidate_->prepared_plugin_meta_);
-    owner_->exact_parameter_event_claims_ =
-        std::move(candidate_->exact_parameter_event_claims_);
-    owner_->canonical_executor_routing_enabled_.store(
-        candidate_->canonical_executor_routing_enabled_.load(std::memory_order_relaxed),
-        std::memory_order_relaxed);
-    owner_->parallel_routing_enabled_.store(
-        candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed),
-        std::memory_order_relaxed);
-    owner_->anticipation_enabled_.store(
-        candidate_->anticipation_enabled_.load(std::memory_order_relaxed),
-        std::memory_order_relaxed);
-    owner_->transport_suppressed_for_anticipation_.store(
-        candidate_->transport_suppressed_for_anticipation_.load(std::memory_order_relaxed),
-        std::memory_order_relaxed);
+    owner_->adopt_candidate_authoring_locked_(*candidate_);
+    prepared_snapshot_->legacy_processing_lifetime = owner_->processing_handle_lifetime_;
 
     // The telemetry toggle is an independent control setting, so it does not
     // stale a topology edit. Re-seed from the owner's authoritative
@@ -1500,6 +1497,59 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     quiesced_processors_.clear();
     committed_ = true;
     return last_result_ = Result::Committed;
+}
+
+void SignalGraph::adopt_candidate_authoring_locked_(SignalGraph& candidate) {
+    // Transfer only load measurers allocated for genuinely new/reused IDs.
+    // std::unordered_map<NodeId, unique_ptr<...>> uses the same default
+    // allocator, integral hash, and equality on both sides; destination buckets
+    // were reserved above. Extract/insert therefore transfers ownership and
+    // preserves the addresses captured by the compiled snapshot without an
+    // allocation after the exception boundary.
+    {
+        std::scoped_lock load_locks(this->node_load_mu_, candidate.node_load_mu_);
+        for (auto it = candidate.node_load_.begin(); it != candidate.node_load_.end();) {
+            if (!it->second || this->node_load_.find(it->first) != this->node_load_.end()) {
+                ++it;
+                continue;
+            }
+            auto current = it++;
+            auto node = candidate.node_load_.extract(current);
+            [[maybe_unused]] const auto inserted = this->node_load_.insert(std::move(node));
+            assert(inserted.inserted);
+        }
+    }
+
+    this->cancel_swap_edit_locked_();
+    this->nodes_ = std::move(candidate.nodes_);
+    this->processor_nodes_ = std::move(candidate.processor_nodes_);
+    this->connections_ = std::move(candidate.connections_);
+    this->connection_identities_ = std::move(candidate.connection_identities_);
+    this->next_connection_identity_ = candidate.next_connection_identity_;
+    this->custom_node_types_ = std::move(candidate.custom_node_types_);
+    this->sample_kernel_types_ = std::move(candidate.sample_kernel_types_);
+    this->custom_node_diagnostics_ = std::move(candidate.custom_node_diagnostics_);
+    this->sample_region_definitions_ = std::move(candidate.sample_region_definitions_);
+    this->sample_region_parameter_binding_ = candidate.sample_region_parameter_binding_;
+    this->sample_region_proof_block_size_ = candidate.sample_region_proof_block_size_;
+    this->prepared_sample_region_bank_ = candidate.prepared_sample_region_bank_;
+    this->prepared_sample_regions_ = candidate.prepared_sample_regions_;
+    this->custom_registry_generation_ = candidate.custom_registry_generation_;
+    this->next_id_ = candidate.next_id_;
+    this->limits_ = candidate.limits_;
+    this->prepared_plugin_meta_ = std::move(candidate.prepared_plugin_meta_);
+    this->exact_parameter_event_claims_ = std::move(candidate.exact_parameter_event_claims_);
+    this->canonical_executor_routing_enabled_.store(
+        candidate.canonical_executor_routing_enabled_.load(std::memory_order_relaxed),
+        std::memory_order_relaxed);
+    this->parallel_routing_enabled_.store(
+        candidate.parallel_routing_enabled_.load(std::memory_order_relaxed),
+        std::memory_order_relaxed);
+    this->anticipation_enabled_.store(
+        candidate.anticipation_enabled_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    this->transport_suppressed_for_anticipation_.store(
+        candidate.transport_suppressed_for_anticipation_.load(std::memory_order_relaxed),
+        std::memory_order_relaxed);
 }
 
 } // namespace pulp::host

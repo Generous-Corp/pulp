@@ -526,6 +526,9 @@ pulp_test_data(pulp-test-spectral-codec NO_DEFINE
           test/fixtures/spectral-frame-codec/asymmetric.hex)
 
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
+pulp_add_test_suite(pulp-test-spectral-guarded-split
+    SOURCES test_spectral_frame_engine_guarded.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-spectral-primitives GROUP pulp-test-group-core-signal
     SOURCES test_spectral_frame_engine.cpp test_spectral_band_mask.cpp
             test_spectral_mask_processor.cpp
