@@ -1,9 +1,10 @@
 Commands and control outcomes are bound to source_git_sha=8ecb5db3c9c0323ed065d7b9055e217ba715b292.
+The receipt package is bound to receipt_package_git_sha=da24589115dee2326152c92eb97087655ec44812.
 
 $ ctest --test-dir /Volumes/Workshop/Code/agent-worktrees/g7-exact-receipt-consumer-build --output-on-failure
-1/1 Test #1: g7-latency-pdc ... Passed
+1/1 Test #1: g7-latency-pdc-consumer ... Passed
 
-$ ./g7-latency-pdc (three runs)
+$ /Volumes/Workshop/Code/agent-worktrees/g7-exact-receipt-consumer-build/pulp-g7-latency-pdc-consumer (three runs)
 g7-latency-pdc PASS total_latency_samples=4 delayed_node_input_latency_samples=0
 [all three outputs byte-identical; receipt sha256 8a24976fa451f4d1637220cce6b46bd82ead17f8002e0d39a2a7301bc4f47544]
 

@@ -19,6 +19,7 @@ full G-7 completion.
 ## Exact-head receipt
 
 - **Source head:** `8ecb5db3c9c0323ed065d7b9055e217ba715b292`.
+- **Receipt package head:** `da24589115dee2326152c92eb97087655ec44812`.
 - **Installed SDK:** `/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/8ecb5db3c9c0323ed065d7b9055e217ba715b292/11a0d651ba9e`.
 - **SDK provenance:** SHA-256
   `4335a1fb583b56590a34253bcbe6564189942b9f59ef27cbc46429f43012cb4f`.
