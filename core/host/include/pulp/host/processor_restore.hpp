@@ -1,12 +1,18 @@
 #pragma once
 
-#include <pulp/format/processor_node_adapter.hpp>
+#include <pulp/format/plugin_descriptor.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
+
+namespace pulp::format {
+class ProcessorNodeInstance;
+}
 
 namespace pulp::host {
 
