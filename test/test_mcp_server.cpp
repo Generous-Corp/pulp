@@ -650,6 +650,38 @@ TEST_CASE("MCP pulp_minos tool measures a binary and validates its arg", "[mcp][
     require_contains(err, "binary is required");
 }
 
+TEST_CASE("MCP graph exposes read-only operations and refuses edits", "[mcp][tools][graph]") {
+#if defined(_WIN32)
+    SKIP("fake extensionless pulp CLI is only executable through popen on POSIX");
+#else
+    TempDir project;
+    std::ofstream(project.path / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+    std::filesystem::create_directories(project.path / "core");
+    make_fake_pulp_cli(project.path);
+    ScopedCurrentPath cwd(project.path);
+
+    const auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":70,"method":"tools/list"})JSON");
+    require_contains(tools, R"JSON("name":"pulp_graph")JSON");
+    require_contains(tools, R"JSON("inspect","validate","explain","render")JSON");
+
+    for (const auto& operation : {"explain", "render"}) {
+        const auto response = handle_request(tool_call(
+            "71", "pulp_graph", std::string(R"JSON({"path":"graph.pulpgraph","operation":")JSON") +
+                                    operation + R"JSON("})JSON"));
+        require_contains(response, std::string("fake-pulp [graph] [") + operation +
+                                       "] [graph.pulpgraph] [--json]");
+    }
+
+    for (const auto& operation : {"save", "canonicalize"}) {
+        const auto response = handle_request(tool_call(
+            "72", "pulp_graph", std::string(R"JSON({"path":"graph.pulpgraph","operation":")JSON") +
+                                    operation + R"JSON("})JSON"));
+        require_contains(response, "Error: operation is not available through the read-only MCP surface");
+        REQUIRE(response.find("fake-pulp") == std::string::npos);
+    }
+#endif
+}
+
 TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop", "[mcp][main]") {
     std::ostringstream out;
     std::ostringstream err;
