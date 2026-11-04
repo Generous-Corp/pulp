@@ -109,6 +109,11 @@ class Item:
     title: str
     checks: tuple = ()
     skip_reason: str = ""
+    # A CTest test the build registers instead of this item's checks when an
+    # optional SDK component is missing. When it passed and none of the
+    # item's own tests ran, the item is SKIP with `absent_reason`.
+    absent_marker: str = ""
+    absent_reason: str = ""
 
 
 def _format_checks(kind: str) -> tuple:
@@ -177,9 +182,16 @@ ITEMS: tuple = (
         Line("rmlui", "an empty document's frame does not equal the golden image"),
         Line("rmlui", "the knob document's frame equals the golden image again"),
     )),
-    Item("3c", "With RmlUi: the Vellum renderer within a geometry/texture tolerance",
-         skip_reason="the installed SDK slice links only VellumRmlUi::SoftRenderer; the Vellum "
-                     "RmlUi renderer arrives with the rmlui/ subproject (M2)"),
+    Item("3c", "With RmlUi: the Vellum renderer within a geometry/texture tolerance", (
+        TestPassed("pulp-editor-host-slice-rmlui-renderer"),
+        Line("rmlui-renderer", "the soft renderer's frame equals the module's golden image"),
+        Line("rmlui-renderer", "the Vellum renderer renders the knob document"),
+        Line("rmlui-renderer",
+             "the Vellum renderer's frame is within the tolerance of the soft renderer's"),
+        Line("rmlui-renderer", "an empty document falls outside that tolerance"),
+        Line("rmlui-renderer", "the knob at gain 0.2 falls outside that tolerance"),
+    ), absent_marker="pulp-editor-host-slice-rmlui-renderer-absent",
+         absent_reason="Vellum SDK built without VELLUM_RMLUI_VELLUM_RENDERER"),
     Item("3d", "With RmlUi: a knob drag is begin -> set(0.75) -> end", (
         Line("rmlui", "the drag lands on exactly 0.75"),
         Line("rmlui", "the host sees set(0.75) immediately before end"),
@@ -216,7 +228,7 @@ ITEMS: tuple = (
 
 # "[vellum/vst3] ok: attach to a real NSView", optionally behind ctest -V's
 # "12: " prefix.
-_LINE = re.compile(r"^(?:\d+: )?\[(?P<tag>[a-z0-9_/]+)\] (?P<state>ok|FAIL): (?P<text>.*?)\s*$")
+_LINE = re.compile(r"^(?:\d+: )?\[(?P<tag>[a-z0-9_/-]+)\] (?P<state>ok|FAIL): (?P<text>.*?)\s*$")
 _RESULT = re.compile(
     r"Test\s+#\d+: (?P<name>\S+) \.*\s*(?:\*+)?(?P<state>Passed|Failed|Not Run|Timeout|"
     r"Exception|Skipped)")
@@ -300,6 +312,11 @@ def evaluate(items: Iterable[Item], obs: Observations) -> list:
     for item in items:
         if item.skip_reason:
             verdicts.append(Verdict(item.key, item.title, SKIP, [item.skip_reason]))
+            continue
+        own_tests = [c.name for c in item.checks if isinstance(c, TestPassed)]
+        if (item.absent_marker and obs.tests.get(item.absent_marker) == "Passed" and
+                not any(name in obs.tests for name in own_tests)):
+            verdicts.append(Verdict(item.key, item.title, SKIP, [item.absent_reason]))
             continue
         mutations = [c for c in item.checks if isinstance(c, Mutation)]
         if obs.mutation_skip_reason and any(c.name not in obs.mutations for c in mutations):

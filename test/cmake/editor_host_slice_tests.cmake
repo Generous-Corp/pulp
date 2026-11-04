@@ -24,7 +24,9 @@ endif()
 
 find_package(Vellum CONFIG REQUIRED
     PATHS "${PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX}/lib/cmake/Vellum" NO_DEFAULT_PATH)
-find_package(VellumRmlUi CONFIG REQUIRED
+# VellumRenderer (the RmlUi renderer on Vellum's own graphics) is optional: an
+# SDK built without VELLUM_RMLUI_VELLUM_RENDERER does not carry it.
+find_package(VellumRmlUi CONFIG REQUIRED OPTIONAL_COMPONENTS VellumRenderer
     PATHS "${PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX}/lib/cmake/VellumRmlUi" NO_DEFAULT_PATH)
 
 set(_slice_dir "${CMAKE_CURRENT_SOURCE_DIR}/editor_host_slice")
@@ -192,7 +194,35 @@ add_test(NAME pulp-editor-host-slice-symbols
         --vellum-prefix ${PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX})
 set_tests_properties(pulp-editor-host-slice-symbols PROPERTIES LABELS "editor-host-slice")
 
-add_custom_target(pulp-editor-host-slice DEPENDS
+# Acceptance item 3c: the knob document through VellumRenderer, within a stated
+# tolerance of the soft renderer's golden frame. Without the component a marker
+# test says so, and the runner reports 3c as SKIP with that reason.
+set(_slice_renderer_targets "")
+if(TARGET VellumRmlUi::VellumRenderer)
+    add_executable(pulp-slice-rmlui-vellum-renderer ${_slice_dir}/rmlui_vellum_renderer_main.cpp)
+    target_compile_features(pulp-slice-rmlui-vellum-renderer PRIVATE cxx_std_20)
+    target_include_directories(pulp-slice-rmlui-vellum-renderer PRIVATE "${_slice_out}/gen")
+    target_link_libraries(pulp-slice-rmlui-vellum-renderer PRIVATE
+        VellumRmlUi::Core VellumRmlUi::SoftRenderer VellumRmlUi::VellumRenderer
+        Vellum::DawnHeaders)
+    target_compile_definitions(pulp-slice-rmlui-vellum-renderer PRIVATE
+        SLICE_GOLDEN_PNG="${_slice_dir}/knob_led.golden.png")
+    set_target_properties(pulp-slice-rmlui-vellum-renderer PROPERTIES
+        OSX_ARCHITECTURES arm64
+        BUILD_RPATH "${PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX}/mirror/lib;${PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX}/lib")
+    add_test(NAME pulp-editor-host-slice-rmlui-renderer COMMAND pulp-slice-rmlui-vellum-renderer)
+    set_tests_properties(pulp-editor-host-slice-rmlui-renderer PROPERTIES
+        LABELS "editor-host-slice")
+    list(APPEND _slice_renderer_targets pulp-slice-rmlui-vellum-renderer)
+else()
+    add_test(NAME pulp-editor-host-slice-rmlui-renderer-absent
+        COMMAND ${CMAKE_COMMAND} -E echo
+            "Vellum SDK built without VELLUM_RMLUI_VELLUM_RENDERER")
+    set_tests_properties(pulp-editor-host-slice-rmlui-renderer-absent PROPERTIES
+        LABELS "editor-host-slice")
+endif()
+
+add_custom_target(pulp-editor-host-slice DEPENDS ${_slice_renderer_targets}
     pulp-slice-headless pulp-slice-vellum pulp-slice-rmlui pulp-slice-native pulp-slice-vellum-ui
     pulp-slice-formats-vellum pulp-slice-formats-rmlui pulp-slice-formats-native
     pulp-slice-standalone-vellum pulp-slice-standalone-rmlui pulp-slice-standalone-native)

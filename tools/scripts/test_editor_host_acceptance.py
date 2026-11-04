@@ -55,7 +55,7 @@ class Verdicts(unittest.TestCase):
     def test_unrunnable_items_are_skip_never_pass(self) -> None:
         verdicts = self.evaluate(full_output())
         skipped = {key for key, v in verdicts.items() if v.status == acc.SKIP}
-        self.assertEqual(skipped, {"3c", "6", "7"})
+        self.assertEqual(skipped, {"6", "7"})
         for key in skipped:
             self.assertTrue(verdicts[key].details[0], f"{key} has no reason")
 
@@ -117,6 +117,24 @@ class Verdicts(unittest.TestCase):
                           ("3b", "an empty document's frame does not equal the golden image")):
             text = full_output().replace(f"ok: {line}", "ok: something else")
             self.assertEqual(self.evaluate(text)[key].status, acc.FAIL, key)
+
+    def test_3c_runs_when_the_sdk_carries_the_vellum_renderer(self) -> None:
+        verdicts = self.evaluate(full_output())
+        self.assertEqual(verdicts["3c"].status, acc.PASS)
+        text = full_output().replace("ok: an empty document falls outside that tolerance",
+                                     "FAIL: an empty document falls outside that tolerance")
+        self.assertEqual(self.evaluate(text)["3c"].status, acc.FAIL)
+
+    def test_3c_is_skip_with_its_reason_when_the_sdk_lacks_the_vellum_renderer(self) -> None:
+        without = "\n".join(
+            line for line in full_output().splitlines()
+            if "pulp-editor-host-slice-rmlui-renderer" not in line and "[rmlui-renderer]" not in line)
+        marker = "2/9 Test  #2: pulp-editor-host-slice-rmlui-renderer-absent ....   Passed    0.01 sec"
+        verdict = self.evaluate(without + "\n" + marker)["3c"]
+        self.assertEqual(verdict.status, acc.SKIP)
+        self.assertEqual(verdict.details, ["Vellum SDK built without VELLUM_RMLUI_VELLUM_RENDERER"])
+        # Neither the renderer test nor the marker: the item did not run, a FAIL.
+        self.assertEqual(self.evaluate(without)["3c"].status, acc.FAIL)
 
     def test_empty_output_passes_nothing(self) -> None:
         verdicts = self.evaluate("", direction=None)
