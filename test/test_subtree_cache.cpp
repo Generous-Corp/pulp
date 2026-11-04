@@ -497,8 +497,7 @@ TEST_CASE("Static leaf raster cache reuses pixels and refreshes on mutation and 
         REQUIRE(surface != nullptr);
         surface->getCanvas()->clear(SK_ColorWHITE);
         surface->getCanvas()->scale(scale, scale);
-        SkiaCanvas canvas(surface->getCanvas(), nullptr,
-                          retain ? store : nullptr);
+        SkiaCanvas canvas(surface->getCanvas(), nullptr, retain ? store : nullptr);
         view.paint_all(canvas);
         std::vector<uint8_t> pixels(static_cast<std::size_t>(size) * size * 4);
         REQUIRE(surface->readPixels(info, pixels.data(), size * 4, 0, 0));
@@ -540,7 +539,6 @@ TEST_CASE("Static leaf raster cache reuses pixels and refreshes on mutation and 
     render(cached, 2.0f, true);
     REQUIRE(cached.paints == 7);
 }
-
 
 TEST_CASE("Static raster cache paints transformed and non-leaf content directly",
           "[view][subtree-cache][raster]") {

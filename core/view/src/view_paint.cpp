@@ -2142,14 +2142,12 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
                                       std::int64_t& children_ns) {
     if (auto* cache = dynamic_cast<detail::RasterContentCache*>(scene_cache_.get())) {
         const auto m = canvas.current_transform();
-        const bool eligible = child_count() == 0 &&
-            canvas.supports(canvas::CanvasCapability::retained_layer_cache) &&
-            m.b == 0.0f && m.c == 0.0f && m.a > 0.0f && m.d > 0.0f &&
-            std::isfinite(m.a) && std::isfinite(m.d) &&
-            std::isfinite(m.e) && std::isfinite(m.f) &&
-            m.e == std::floor(m.e) && m.f == std::floor(m.f) &&
-            bounds_.width > 0.0f && bounds_.height > 0.0f &&
-            shadows_.empty();
+        const bool eligible =
+            child_count() == 0 && canvas.supports(canvas::CanvasCapability::retained_layer_cache) &&
+            m.b == 0.0f && m.c == 0.0f && m.a > 0.0f && m.d > 0.0f && std::isfinite(m.a) &&
+            std::isfinite(m.d) && std::isfinite(m.e) && std::isfinite(m.f) &&
+            m.e == std::floor(m.e) && m.f == std::floor(m.f) && bounds_.width > 0.0f &&
+            bounds_.height > 0.0f && shadows_.empty();
         if (!eligible) {
             scene_cache_valid_ = false;
             canvas.invalidate_layer(cache->layer);
@@ -2164,8 +2162,8 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
             cache->layer = {};
             scene_cache_valid_ = false;
             pulp::runtime::ScopedAllocAllowed allow;
-            const auto opened = canvas.begin_layer(
-                {0.0f, 0.0f, bounds_.width, bounds_.height}, true);
+            const auto opened =
+                canvas.begin_layer({0.0f, 0.0f, bounds_.width, bounds_.height}, true);
             if (!opened) {
                 paint_content(canvas, layers, children_ns);
                 return;

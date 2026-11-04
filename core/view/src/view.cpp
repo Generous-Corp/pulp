@@ -387,7 +387,8 @@ void View::set_raster_cached(bool enabled) {
         set_subtree_cached(false);
         return;
     }
-    if (dynamic_cast<detail::RasterContentCache*>(scene_cache_.get())) return;
+    if (dynamic_cast<detail::RasterContentCache*>(scene_cache_.get()))
+        return;
     set_subtree_cached(true);
     scene_cache_ = std::make_shared<detail::RasterContentCache>();
     scene_cache_valid_ = false;
