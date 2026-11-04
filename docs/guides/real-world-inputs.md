@@ -330,7 +330,8 @@ host's permissions, scheduling, or lifecycle.
 MediaPipe, OpenCV, OpenSeeFace, ONNX Runtime, LiteRT, Core ML, platform sensor
 APIs, and device SDKs remain application-selected dependencies. Audit model
 weights, task bundles, codecs, and SDK terms separately from runtime licenses.
-Do not add any of them to Pulp core for an application that does not use them.
+Keep these integrations optional and outside Pulp core; applications should
+include only the dependencies they use.
 
 ## Connecting TouchDesigner over OSC
 
