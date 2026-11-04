@@ -155,7 +155,11 @@ function(pulp_add_plugin target)
     # contradict that and are a configure error. `UI none` selects no package
     # and leaves the link as it would be without UI.
     set(_pulp_no_editor_reason "NO_EDITOR")
+    # Read by format helpers that build a contract editor of their own (the AU
+    # v2 Cocoa view factory); always refreshed so a removed UI leaves nothing.
+    set(PULP_${target}_UI_PACKAGE "" CACHE INTERNAL "")
     if(PLUGIN_UI AND NOT PLUGIN_UI STREQUAL "none")
+        set(PULP_${target}_UI_PACKAGE "${PLUGIN_UI}" CACHE INTERNAL "")
         set(_pulp_ui_conflicts "")
         foreach(_kw NATIVE_UI UI_SCRIPT GPU_UI FULL_EDITOR LITE_EDITOR)
             if(PLUGIN_${_kw})

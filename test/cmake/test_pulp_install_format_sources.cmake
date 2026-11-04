@@ -62,6 +62,7 @@ set(_required_sources
     au_audio_unit.h
     au_entry.mm
     au_v2_cocoa_view.mm
+    au_v2_contract_view.mm
     au_view_controller_ios.mm
     au_view_controller_mac.mm
     vst3_plug_view.cpp)

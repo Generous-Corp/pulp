@@ -1,7 +1,6 @@
 #include <pulp/graph/graph_runtime_plan.hpp>
 
 #include <algorithm>
-#include <cassert>
 #include <functional>
 #include <limits>
 #include <queue>
@@ -154,6 +153,26 @@ GraphRuntimePlanResult build_graph_runtime_plan(
 
         for (std::uint32_t i = 0; i < connection_specs.size(); ++i) {
             const auto& spec = connection_specs[i];
+            // Validate the discriminator before interpreting ports or assigning
+            // storage. Unknown and not-yet-executable lanes must not fall through
+            // to the audio path, including in Release builds.
+            switch (spec.kind) {
+            case GraphRuntimeConnectionKind::Audio:
+            case GraphRuntimeConnectionKind::Event:
+            case GraphRuntimeConnectionKind::Automation:
+            case GraphRuntimeConnectionKind::Spectral:
+                break;
+            case GraphRuntimeConnectionKind::Trigger:
+                return fail(GraphRuntimePlanErrorCode::UnsupportedTrigger, i, spec.source_node,
+                            "typed triggers require a prepared producer/consumer pair");
+            default:
+                return fail(GraphRuntimePlanErrorCode::InvalidConnectionKind, i, spec.source_node,
+                            "unknown graph connection kind");
+            }
+            if (spec.feedback && !carries_audio(spec)) {
+                return fail(GraphRuntimePlanErrorCode::NonAudioFeedback, i, spec.source_node,
+                            "only audio connections support previous-block feedback");
+            }
             const auto source_index = find_node_index(lookup, spec.source_node);
             if (source_index == std::numeric_limits<std::uint32_t>::max()) {
                 return fail(GraphRuntimePlanErrorCode::UnknownSourceNode, i,
@@ -196,13 +215,6 @@ GraphRuntimePlanResult build_graph_runtime_plan(
                 }
             }
 
-            // Lane invariants (debug-only; no effect on release output). An
-            // automation connection is never a feedback back-edge — automation
-            // edges contribute to topological order, so a back-edge here would be
-            // un-orderable and is rejected upstream. The automation payload is
-            // only meaningful when kind == Automation.
-            assert(!(is_automation_conn(spec) && spec.feedback) &&
-                   "automation connections are never feedback back-edges");
             result.plan.connections.push_back({
                 source_index,
                 spec.source_port,

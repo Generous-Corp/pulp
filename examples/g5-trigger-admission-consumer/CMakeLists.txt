@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.24)
+project(PulpTriggerAdmissionConsumer LANGUAGES CXX)
+find_package(Pulp CONFIG REQUIRED COMPONENTS graph)
+add_executable(pulp-trigger-admission main.cpp)
+target_compile_features(pulp-trigger-admission PRIVATE cxx_std_20)
+target_link_libraries(pulp-trigger-admission PRIVATE Pulp::graph)
+enable_testing()
+add_test(NAME trigger-admission COMMAND pulp-trigger-admission)

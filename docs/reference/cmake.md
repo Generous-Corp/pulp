@@ -171,10 +171,11 @@ A format whose adapter does not open contract editors yet still builds, but
 without an editor; `pulp_add_plugin()` names those formats in a configure
 warning.
 
-VST3 and CLAP open a `UI` package's editor through the editor-host contract.
-AU and the standalone host still open the editor through `create_view()`, so a
-`UI` plug-in builds them with no editor. A host that drives the editor-host
-contract itself reads `editor_factory()`.
+VST3 and CLAP open the editor through the contract whenever
+`editor_factory()` is non-null, and fall back to `create_view()` otherwise. A
+UI-package plug-in's AU v2 component serves a view-free Cocoa view factory
+(`au_v2_contract_view.mm`) that opens the package's editor. The standalone host
+still opens `create_view()`.
 
 ## pulp_add_plugin_bundle
 

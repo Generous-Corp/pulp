@@ -7,6 +7,7 @@
 
 #if defined(__APPLE__)
 #include <CoreFoundation/CoreFoundation.h>
+#include <pthread.h>
 #endif
 
 #include <pulp/events/main_thread_dispatcher.hpp>
@@ -29,6 +30,9 @@ struct ContractEditorLog {
     int live = 0;
     int idles = 0;
     double last_scale = 0.0;
+    /// Attach, detach, invalidate and destruction calls made off the main
+    /// thread (always 0 where the main thread cannot be told apart).
+    int off_main_thread_calls = 0;
 
     bool saw(const std::string& call) const {
         for (const auto& c : calls)
@@ -50,6 +54,12 @@ inline ContractEditorLog& contract_log() {
     static ContractEditorLog log;
     return log;
 }
+inline void note_editor_thread() {
+#if defined(__APPLE__)
+    if (pthread_main_np() == 0)
+        ++contract_log().off_main_thread_calls;
+#endif
+}
 inline ContractEditorConfig& contract_config() {
     static ContractEditorConfig config;
     return config;
@@ -68,6 +78,7 @@ class RecordingContractEditor final : public format::Editor {
         ++contract_log().live;
     }
     ~RecordingContractEditor() override {
+        note_editor_thread();
         --contract_log().live;
         contract_log().calls.push_back("destroyed");
     }
@@ -76,6 +87,7 @@ class RecordingContractEditor final : public format::Editor {
         return kind != format::NativeParentKind::none;
     }
     bool attach(const format::NativeParent& parent) override {
+        note_editor_thread();
         contract_log().calls.push_back(parent.kind == format::NativeParentKind::cocoa_view
                                            ? "attach:cocoa_view"
                                            : "attach:other");
@@ -83,9 +95,11 @@ class RecordingContractEditor final : public format::Editor {
         return contract_config().attach_succeeds;
     }
     void detach() override {
+        note_editor_thread();
         contract_log().calls.push_back("detach");
     }
     void invalidate() override {
+        note_editor_thread();
         contract_log().calls.push_back("invalidate");
     }
     format::EditorSize size() const override {

@@ -41,6 +41,10 @@
 #include <limits>
 #include <memory>
 
+namespace pulp::format {
+class ContractSessionRegistry;
+}
+
 namespace pulp::format::au {
 
 /// Custom AU property ID the Cocoa view factory queries to obtain the
@@ -54,6 +58,9 @@ struct PulpEditorContext {
     pulp::format::Processor* processor = nullptr;
     pulp::state::StateStore* store = nullptr;
     pulp::runtime::AliveToken::Handle owner_alive;
+    /// Contract editors register here (contract_editor_session.hpp) so the AU
+    /// instance invalidates them before its processor goes.
+    pulp::format::ContractSessionRegistry* contract_sessions = nullptr;
 };
 
 /// Cross-TU Cocoa-view hook. The AU adapter classes are compiled into the

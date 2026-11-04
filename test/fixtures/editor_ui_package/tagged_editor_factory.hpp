@@ -6,9 +6,22 @@
 
 #include <pulp/format/editor_host.hpp>
 
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 
 namespace pulp::test_fixtures {
+
+/// Appends `event` to the file PULP_TEST_EDITOR_LOG names, when set, so a
+/// host process can see what an editor inside a loaded module did.
+inline void log_editor_event(const char* event) {
+    if (const char* path = std::getenv("PULP_TEST_EDITOR_LOG")) {
+        if (std::FILE* f = std::fopen(path, "a")) {
+            std::fprintf(f, "%s\n", event);
+            std::fclose(f);
+        }
+    }
+}
 
 /// Attaches to any window and keeps the size the host gives it.
 class TaggedEditor final : public format::Editor {
@@ -19,8 +32,12 @@ class TaggedEditor final : public format::Editor {
     bool attach(const format::NativeParent&) override {
         return true;
     }
-    void detach() override {}
-    void invalidate() override {}
+    void detach() override {
+        log_editor_event("detach");
+    }
+    void invalidate() override {
+        log_editor_event("invalidate");
+    }
     format::EditorSize size() const override {
         return size_;
     }

@@ -649,11 +649,19 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     endif()
 
     if(PULP_${target}_NO_EDITOR)
-        # No Cocoa view factory: without PULP_AU_GUI the AU reports no
+        # No Pulp view editor: without PULP_AU_GUI there is no ViewBridge
+        # Cocoa view factory. A plug-in that declares UI <package> gets the
+        # view-free contract factory (au_v2_contract_view.mm) instead, which
+        # serves the package's editor; any other editor-less AU reports no
         # kAudioUnitProperty_CocoaUI, so hosts show their generic editor.
+        set(_pulp_au_contract_view "")
+        if(PULP_${target}_UI_PACKAGE)
+            set(_pulp_au_contract_view ${_PULP_FORMAT_SOURCE_DIR}/au_v2_contract_view.mm)
+        endif()
         add_library(${target}_AU MODULE
             ${PULP_${target}_CORE_OBJECTS}
             ${au_entry}
+            ${_pulp_au_contract_view}
         )
         _pulp_plugin_module_link_hygiene(${target}_AU)
         target_link_libraries(${target}_AU PRIVATE
@@ -664,6 +672,9 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
             "-framework CoreFoundation"
             "-framework CoreAudio"
         )
+        if(_pulp_au_contract_view)
+            target_link_libraries(${target}_AU PRIVATE "-framework Cocoa")
+        endif()
     else()
         add_library(${target}_AU MODULE
             ${PULP_${target}_CORE_OBJECTS}
@@ -692,7 +703,15 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     set(_pulp_au_cocoa_class_suffix "${manufacturer_code}_${plugin_code}")
     string(REGEX REPLACE "[^A-Za-z0-9_]" "_" _pulp_au_cocoa_class_suffix
         "${_pulp_au_cocoa_class_suffix}")
-    if(PULP_${target}_NO_EDITOR)
+    if(PULP_${target}_NO_EDITOR AND PULP_${target}_UI_PACKAGE)
+        target_compile_definitions(${target}_AU PRIVATE
+            PULP_AU_CONTRACT_VIEW_FACTORY_CLASS=PulpAUContractViewFactory_${_pulp_au_cocoa_class_suffix}
+            PULP_AU_CONTRACT_HOST_VIEW_CLASS=PulpAUContractHostView_${_pulp_au_cocoa_class_suffix})
+        _pulp_apply_macho_exports(${target}_AU "${target}_AU"
+            "_${target}AUFactory"
+            "_OBJC_CLASS_$_PulpAUContractViewFactory_${_pulp_au_cocoa_class_suffix}"
+            "_OBJC_METACLASS_$_PulpAUContractViewFactory_${_pulp_au_cocoa_class_suffix}")
+    elseif(PULP_${target}_NO_EDITOR)
         _pulp_apply_macho_exports(${target}_AU "${target}_AU"
             "_${target}AUFactory")
     else()
