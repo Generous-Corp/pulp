@@ -4,6 +4,7 @@
 // fallback policy for an already-published CompiledGraph.
 
 #include "signal_graph_internal.hpp"
+#include "spectral_graph_internal.hpp"
 
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_execution_snapshot.hpp>
@@ -30,11 +31,15 @@ void SignalGraph::process(audio::BufferView<float>& output,
 void SignalGraph::process_impl(audio::BufferView<float>& output,
                                const audio::BufferView<const float>& input, int num_samples,
                                const format::ProcessContext* transport) {
+    if (spectral_mode_.load(std::memory_order_acquire)) {
+        process_spectral_(output, input, num_samples, transport);
+        return;
+    }
     // See runtime::Slot: its reader count and the raw snapshot
     // pointer form one RCU-style lifetime handshake. Slot::ReadGuard is a
     // private nested struct (signal_graph.hpp) so the control-thread snapshot
     // readers can pin the same way.
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_();
     process_snapshot_impl(output, input, num_samples, transport, read_guard.get());
 }
 
@@ -53,6 +58,8 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
             routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
         return;
     }
+    if (cg->spectral)
+        cg->spectral->begin_block();
 
     SampleRegionExecutionDomain::Admission sample_region_admission;
     // Snapshot-owned instrumentation never survives a transport discontinuity
@@ -98,20 +105,36 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         int num_samples;
         ~TelemetryRecordGuard() {
             auto& store = cg->live_dsp_telemetry;
-            if (!store.enabled() || !store.prepared())
+            if ((!store.enabled() && !cg->spectral) || !store.prepared())
                 return;
             std::int64_t* scratch = store.external_record_scratch();
             if (scratch == nullptr)
                 return;
             const std::uint32_t n = store.node_count();
+            auto diagnostics = store.spectral_scratch();
             for (std::uint32_t i = 0; i < n && i < cg->ordered_runtime.size(); ++i) {
                 auto* rt = cg->ordered_runtime[i].runtime;
                 auto* m = rt ? rt->load : nullptr;
                 scratch[i] = m ? m->last_elapsed_ns() : 0;
+                if (i < diagnostics.size()) {
+                    diagnostics[i] = {};
+                    if (auto* state = cg->spectral->find(cg->ordered_runtime[i].id))
+                        diagnostics[i] = {state->id,
+                                          state->root,
+                                          state->epoch,
+                                          state->first_error == SpectralError::None
+                                              ? state->sequence
+                                              : state->first_error_sequence,
+                                          state->errors,
+                                          state->first_error_position,
+                                          state->origin,
+                                          static_cast<std::uint8_t>(state->first_error)};
+                }
             }
             const std::int64_t graph_ns = graph_measurer ? graph_measurer->last_elapsed_ns() : 0;
             store.inject_block(std::span<const std::int64_t>(scratch, n), graph_ns,
-                               static_cast<std::uint32_t>(num_samples), cg->sample_rate);
+                               static_cast<std::uint32_t>(num_samples), cg->sample_rate,
+                               diagnostics);
         }
     } telemetry_record_guard{cg, graph_load_.get(), num_samples};
 
@@ -407,6 +430,11 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                 routed_eligible_dispatch_failed = true; // setup failed; safe to retry
             }
 
+            if (cg->spectral) {
+                output.clear();
+                routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
             if (routed_eligible_dispatch_failed &&
                 routed_only_execution_owners_.load(std::memory_order_relaxed) == 0) {
                 const std::uint64_t prev =
@@ -450,7 +478,7 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
 void SignalGraph::ExecutionSnapshot::process(audio::BufferView<float>& output,
                                              const audio::BufferView<const float>& input,
                                              int num_samples) const noexcept {
-    if (owner_ == nullptr || snapshot_ == nullptr) {
+    if (owner_ == nullptr || snapshot_ == nullptr || snapshot_->spectral) {
         if (num_samples > 0)
             output.clear();
         return;
@@ -461,7 +489,7 @@ void SignalGraph::ExecutionSnapshot::process(audio::BufferView<float>& output,
 void SignalGraph::ExecutionSnapshot::process(
     audio::BufferView<float>& output, const audio::BufferView<const float>& input, int num_samples,
     const format::ProcessContext& transport) const noexcept {
-    if (owner_ == nullptr || snapshot_ == nullptr) {
+    if (owner_ == nullptr || snapshot_ == nullptr || snapshot_->spectral) {
         if (num_samples > 0)
             output.clear();
         return;

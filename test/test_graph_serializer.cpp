@@ -586,11 +586,10 @@ TEST_CASE("GraphSerializer preserves unresolved region type versions and refuses
     REQUIRE(version_pos != std::string::npos);
     future.replace(version_pos, std::string("\"format_version\": 3").size(),
                    "\"format_version\": 4");
-    SignalGraph rejected;
-    const auto refusal = GraphSerializer::from_json(rejected, future);
-    REQUIRE_FALSE(refusal.ok);
-    REQUIRE(refusal.error.find("unsupported graph format_version 4") != std::string::npos);
-    REQUIRE(rejected.nodes().empty());
+    SignalGraph migrated;
+    const auto migrated_result = GraphSerializer::from_json(migrated, future);
+    REQUIRE(migrated_result.ok);
+    REQUIRE(migrated.sample_regions().size() == fixture.graph.sample_regions().size());
 }
 
 TEST_CASE("GraphSerializer validates unresolved region topology",
@@ -1307,7 +1306,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
 
     SignalGraph future_version;
     auto future_result = GraphSerializer::from_json(future_version, R"({
-  "format_version": 4,
+  "format_version": 5,
   "nodes": [
     {
       "id": 1,
@@ -1320,7 +1319,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
   "connections": []
 })");
     REQUIRE_FALSE(future_result.ok);
-    REQUIRE(future_result.error.find("unsupported graph format_version 4") != std::string::npos);
+    REQUIRE(future_result.error.find("unsupported graph format_version 5") != std::string::npos);
     REQUIRE(future_version.nodes().empty());
 }
 
@@ -1355,7 +1354,7 @@ TEST_CASE("GraphSerializer dispatches graph format migrations before materializi
             const auto pos = migrated_json.find("\"format_version\": 0");
             if (pos == std::string::npos) return false;
             migrated_json.replace(pos, std::string("\"format_version\": 0").size(),
-                                  "\"format_version\": 3");
+                                  "\"format_version\": 4");
             return true;
         }));
 
@@ -1389,7 +1388,7 @@ TEST_CASE("GraphSerializer rejects graph migrations that do not advance versions
 
 TEST_CASE("GraphSerializer rejects invalid graph migration registrations",
           "[host][serializer][migration]") {
-    REQUIRE(GraphSerializer::current_format_version() == 3);
+    REQUIRE(GraphSerializer::current_format_version() == 4);
     REQUIRE_FALSE(GraphSerializer::register_migration(
         2, 2,
         [](const std::string& source_json, std::string& migrated_json) {

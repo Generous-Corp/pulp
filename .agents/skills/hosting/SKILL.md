@@ -2902,3 +2902,16 @@ refuses. Through the legacy whole-bus callback only channel 0 is bindable.
 `selected_route_ids()` persists one ID per bus, so independent left/right
 choices do not survive a project reload; hosts that need that must save
 `connected_route_channel` themselves.
+
+## Routed spectral controller
+
+Routed spectral analysis, closed identity/mask stages and synthesis run in the
+existing serial SignalGraph plan. Use named typed frame connections and the
+[public consumer guide](../../../docs/guides/routed-spectral-ports.md).
+Preparation requires a stopped controller; a prepared edit commits as `Staged`,
+activates at one render boundary, and requires control-side finalization.
+Snapshot-bound access must use the controller-aware snapshot lease, and live
+processor-provider mutation must refuse in spectral mode even when the legacy
+`live_slot_` is empty. Query prepared geometry from the active snapshot.
+Keep graph persistence and arbitrary stage registration refused; PARTIAL status
+does not establish notation coverage or realtime timing qualification.

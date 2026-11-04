@@ -13,6 +13,7 @@ target_sources(pulp-host PRIVATE
     src/signal_graph.cpp
     src/signal_graph_mailbox.cpp
     src/signal_graph_authoring.cpp
+    src/spectral_graph.cpp
     src/signal_graph_subgraph.cpp
     src/signal_graph_process.cpp
     src/signal_graph_diagnostics.cpp
