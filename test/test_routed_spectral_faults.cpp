@@ -9,9 +9,9 @@ struct FaultGraph {
     pulp::host::SignalGraph graph;
     pulp::host::SpectralRuntimeBank bank;
     pulp::host::NodeId analysis, stage, wet, sibling;
-    FaultGraph() {
+    FaultGraph(int hop = 64, int block = 512) {
         using namespace pulp::host;
-        const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
+        const auto identity = *SpectralIdentity::make(256, hop, 1, 48000).value;
         const auto a = *graph.add_spectral_analysis(identity, "analysis").value;
         const auto b = *graph.add_spectral_stage(identity,
             *QualifiedSpectralStage::identity_v1(identity).value, "identity").value;
@@ -20,7 +20,7 @@ struct FaultGraph {
         REQUIRE(graph.connect(a.frames, b.frames_in));
         REQUIRE(graph.connect(b.frames_out, c.frames));
         REQUIRE(graph.connect(a.frames, d.frames));
-        REQUIRE(bank.prepare(graph.nodes(), graph.connections(), 48000, 512)
+        REQUIRE(bank.prepare(graph.nodes(), graph.connections(), 48000, block)
                 == SpectralError::None);
         analysis = a.node; stage = b.node; wet = c.node; sibling = d.node;
         bank.reset(17);
@@ -357,4 +357,17 @@ TEST_CASE("A live spectral graph refuses processor input provider mutation",
     REQUIRE(graph.prepare(48000, 64));
     REQUIRE_FALSE(graph.set_processor_audio_input_provider(processor, provider));
     REQUIRE(graph.spectral_error() == SpectralError::UnsupportedOperation);
+}
+
+TEST_CASE("A boundary aligned callback needs every ceil B over H frame slot",
+          "[host][spectral-ports][spectral-max-batch]") {
+    FaultGraph f(63, 4096);
+    std::array<float, 4096> input{}, output{};
+    f.process(f.analysis, std::span(input).first(3), std::span(output).first(3));
+    f.bank.begin_block();
+    f.process(f.analysis, input, output);
+    const auto* node = f.bank.find(f.analysis);
+    REQUIRE(node->outputs.front()->count == 66);
+    REQUIRE_FALSE(node->outputs.front()->fatal);
+    REQUIRE(node->first_error == pulp::host::SpectralError::None);
 }
