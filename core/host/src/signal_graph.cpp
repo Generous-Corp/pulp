@@ -980,6 +980,8 @@ bool register_builtin_sample_region_types(SignalGraph& graph) {
     }
 
     SignalGraph::GraphMutationLock mutation_lock(graph);
+    if (graph.refuse_spectral_mutation_())
+        return false;
     auto next_custom = graph.custom_node_types_;
     auto next_scalar = graph.sample_kernel_types_;
     bool changed = false;
@@ -1410,6 +1412,8 @@ bool SignalGraph::set_custom_node_state(NodeId id,
     // Writes GraphNode custom fields + invalidate_live_locked_(); serialize against a
     // concurrent mutator/prepare.
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return false;
     if (sample_region_for_node_locked_(id) != 0)
         return false;
     cancel_swap_edit_locked_();

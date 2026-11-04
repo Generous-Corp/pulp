@@ -165,8 +165,8 @@ struct ControllerGraph {
     float* op[1] = {output.data()};
     pulp::audio::BufferView<const float> iv{ip, 1, 64};
     pulp::audio::BufferView<float> ov{op, 1, 64};
-    pulp::host::NodeId midi_in = 0, midi_out = 0;
-    ControllerGraph(bool with_midi = false) {
+    pulp::host::NodeId midi_in = 0, midi_out = 0, custom = 0;
+    ControllerGraph(bool with_midi = false, bool with_custom = false) {
         using namespace pulp::host;
         const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
         const auto in = graph.add_input_node(1), out = graph.add_output_node(1);
@@ -180,6 +180,18 @@ struct ControllerGraph {
             midi_in = graph.add_midi_input_node();
             midi_out = graph.add_midi_output_node();
             REQUIRE(graph.connect_midi(midi_in, midi_out));
+        }
+        if (with_custom) {
+            CustomNodeType type;
+            type.type_id = "spectral.test.custom";
+            type.version = 1;
+            type.num_input_ports = type.num_output_ports = 1;
+            type.create = []() -> void* { return new int{}; };
+            type.destroy = [](void* value) { delete static_cast<int*>(value); };
+            type.process_instance = [](void*, auto& out, const auto&, int) { out.clear(); };
+            REQUIRE(graph.register_custom_node_type(std::move(type)));
+            custom = graph.add_custom_node("spectral.test.custom");
+            REQUIRE(custom != 0);
         }
         REQUIRE(graph.prepare(48000, 64));
         input.fill(0.25f);
@@ -486,6 +498,20 @@ TEST_CASE("Active spectral controllers refuse teardown and graph loading",
     REQUIRE_FALSE(result.ok);
     REQUIRE(result.error.find("spectral") != std::string::npos);
     REQUIRE(target.graph.nodes().size() == node_count);
+    target.process();
+    control.process();
+    REQUIRE(target.output == control.output);
+}
+
+TEST_CASE("Live custom state cannot invalidate spectral publication",
+          "[host][spectral-transition][spectral-custom-state]") {
+    ControllerGraph target(false, true), control(false, true);
+    const auto latency = target.graph.latency_samples();
+    REQUIRE(latency == 320);
+    REQUIRE_FALSE(target.graph.set_custom_node_state(target.custom, {1, 2, 3}));
+    REQUIRE_FALSE(pulp::host::register_builtin_sample_region_types(target.graph));
+    REQUIRE(target.graph.custom_node_state(target.custom).empty());
+    REQUIRE(target.graph.latency_samples() == latency);
     target.process();
     control.process();
     REQUIRE(target.output == control.output);
