@@ -1,13 +1,37 @@
 #pragma once
 
-// An editor factory that only carries a name, so a test can tell which UI
-// package's factory a processor returned without opening an editor.
+// An editor factory that carries a name, so a test can tell which UI
+// package's factory a processor returned, and builds a minimal editor, so a
+// host can open the plug-in's GUI through the contract.
 
 #include <pulp/format/editor_host.hpp>
 
 #include <memory>
 
 namespace pulp::test_fixtures {
+
+/// Attaches to any window and keeps the size the host gives it.
+class TaggedEditor final : public format::Editor {
+  public:
+    bool supports_parent(format::NativeParentKind kind) const override {
+        return kind != format::NativeParentKind::none;
+    }
+    bool attach(const format::NativeParent&) override {
+        return true;
+    }
+    void detach() override {}
+    void invalidate() override {}
+    format::EditorSize size() const override {
+        return size_;
+    }
+    bool set_size(const format::EditorSize& size) override {
+        size_ = size;
+        return true;
+    }
+
+  private:
+    format::EditorSize size_{320, 200, 1.0};
+};
 
 class TaggedEditorFactory final : public format::EditorFactory {
   public:
@@ -17,12 +41,14 @@ class TaggedEditorFactory final : public format::EditorFactory {
         return tag_;
     }
 
-    bool supports(format::EditorRole) const override {
-        return false;
+    bool supports(format::EditorRole role) const override {
+        return role == format::EditorRole::editor;
     }
     std::unique_ptr<format::Editor> create(format::Processor&, format::EditorContext&,
-                                           format::EditorRole) override {
-        return nullptr;
+                                           format::EditorRole role) override {
+        if (role != format::EditorRole::editor)
+            return nullptr;
+        return std::make_unique<TaggedEditor>();
     }
 
   private:

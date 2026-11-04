@@ -79,6 +79,7 @@ target_sources(pulp-format-core PRIVATE
     src/host_parameter_edit.cpp
     src/editor_host.cpp
     src/editor_package.cpp
+    src/contract_editor_session.cpp
     src/main_thread_timer.cpp
     src/ara.cpp
     src/ara_factory.cpp
@@ -277,6 +278,7 @@ endif()
 if(PULP_HAS_CLAP)
     target_sources(pulp-format-view PRIVATE
         src/clap_adapter.cpp
+        src/clap_contract_gui.cpp
         src/clap_remote_controls.cpp
         src/clap_note_name.cpp
     )
@@ -293,6 +295,7 @@ if(PULP_HAS_CLAP)
     # carries no view, canvas, render, Skia or Dawn code.
     add_library(pulp-format-clap-core
         src/clap_adapter.cpp
+        src/clap_contract_gui.cpp
         src/clap_remote_controls.cpp
         src/clap_note_name.cpp
     )

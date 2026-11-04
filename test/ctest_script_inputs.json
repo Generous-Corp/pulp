@@ -1644,6 +1644,13 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-graph-identity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-graph-plugin-resolution": {
    "data": "none",
    "inputs": [],
@@ -1659,30 +1666,6 @@
     "test/test_graph_plugin_resolution.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": []
-  },
-  "pulp-test-signal-graph-subgraph": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "runtime_targets": [],
-   "sources": [],
-   "spawning_sources": [
-    "test/test_signal_graph_subgraph.cpp"
-   ],
-   "spawns": "none",
-   "undeclared_sources": []
-  },
-  "pulp-test-graph-identity": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "runtime_targets": [],
-   "sources": [],
-   "spawning_sources": [
-    "test/test_graph_identity.cpp"
-   ],
-   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-group-app-host": {
@@ -2457,6 +2440,13 @@
    "spawns": "undeclared",
    "undeclared_sources": []
   },
+  "pulp-test-signal-graph-subgraph": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-signal-graph-x9-modular-instrument": {
    "data": "none",
    "inputs": [],
@@ -2467,6 +2457,21 @@
     "test/test_signal_graph_x9_modular_instrument.cpp"
    ],
    "spawns": "undeclared",
+   "undeclared_sources": []
+  },
+  "pulp-test-spectral-codec": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_spectral_frame_codec.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/spectral-frame-codec/asymmetric.hex",
+    "test/fixtures/spectral-frame-codec/zero.hex"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_spectral_frame_codec.cpp"
+   ],
    "undeclared_sources": []
   },
   "pulp-test-streaming-model-contract": {
@@ -2754,6 +2759,7 @@
   "pulp-test-child-process-standard-input",
   "pulp-test-clap-ara-extension",
   "pulp-test-clap-bundle-entry",
+  "pulp-test-clap-contract-editor",
   "pulp-test-clap-editor-audio-continuity",
   "pulp-test-clap-entry",
   "pulp-test-clap-host-validation",
@@ -2990,7 +2996,6 @@
   "pulp-test-graphic-eq",
   "pulp-test-group-app-audio",
   "pulp-test-group-app-audio-support",
-  "pulp-test-signal-graph-subgraph",
   "pulp-test-group-app-host",
   "pulp-test-group-app-midi",
   "pulp-test-group-app-signal",
@@ -3261,6 +3266,7 @@
   "pulp-test-signal-graph-named-ports",
   "pulp-test-signal-graph-offline-parity",
   "pulp-test-signal-graph-pulpsynth-automation",
+  "pulp-test-signal-graph-subgraph",
   "pulp-test-signal-graph-x9-modular-instrument",
   "pulp-test-signal-harmony-engine",
   "pulp-test-signal-leslie",
@@ -3291,6 +3297,7 @@
   "pulp-test-skia-surface-readback-macos",
   "pulp-test-smf-interchange",
   "pulp-test-sos-cascade",
+  "pulp-test-spectral-codec",
   "pulp-test-spectral-cross-synthesis",
   "pulp-test-spectral-feature-frontends",
   "pulp-test-spectral-feature-frontends-no-exceptions",
@@ -13508,6 +13515,20 @@
    ],
    "kind": "python"
   },
+  "windows-arm64ec-provider-validator-selftest": {
+   "entry": "tools/windows/test_validate_arm64ec_provider.py",
+   "inputs": [
+    "tools/windows/test_validate_arm64ec_provider.py"
+   ],
+   "kind": "python"
+  },
+  "windows-arm64ec-thunk-tool-selftest": {
+   "entry": "tools/windows/test_build_arm64ec_stl_thunks.py",
+   "inputs": [
+    "tools/windows/test_build_arm64ec_stl_thunks.py"
+   ],
+   "kind": "python"
+  },
   "windows-posix-shims-selftest": {
    "entry": "tools/scripts/test_windows_posix_shims.py",
    "inputs": [
@@ -13597,20 +13618,6 @@
    "entry": "tools/scripts/test_check_yoga_oracle_pin.py",
    "inputs": [
     "tools/scripts/test_check_yoga_oracle_pin.py"
-   ],
-   "kind": "python"
-  },
-  "windows-arm64ec-provider-validator-selftest": {
-   "entry": "tools/windows/test_validate_arm64ec_provider.py",
-   "inputs": [
-    "tools/windows/test_validate_arm64ec_provider.py"
-   ],
-   "kind": "python"
-  },
-  "windows-arm64ec-thunk-tool-selftest": {
-   "entry": "tools/windows/test_build_arm64ec_stl_thunks.py",
-   "inputs": [
-    "tools/windows/test_build_arm64ec_stl_thunks.py"
    ],
    "kind": "python"
   }
