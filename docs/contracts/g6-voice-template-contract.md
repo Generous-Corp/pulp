@@ -124,6 +124,8 @@ event sent through the public API, not the expected value or the installed SDK.
 Record baseline, broken and restored outputs in the phase status.
 
 This change currently supplies the executable source and source-backed contract.
-Execution and the mutation control are pending host admission; the behavior table
-is not a passing-test receipt. No installed-SDK build result is inferred from
-successful configuration or matching header hashes.
+The installed-SDK build and mutation control are registered as
+`cmake-g6-voice-contract-sdk-consumer` in native POSIX CTest, with isolated
+fixture sources and captured phase outputs. Execution remains pending; the
+behavior table is not a passing-test receipt. No installed-SDK build result is
+inferred from registration, configuration or matching header hashes.

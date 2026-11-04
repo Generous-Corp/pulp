@@ -32,3 +32,11 @@ tools/scripts/confirm_failure.sh \
 
 Run the control from a clean committed consumer; retain baseline, broken and
 restored receipts. A compile failure is inconclusive, not a confirmed negative.
+
+Native POSIX CTest registers `cmake-g6-voice-contract-sdk-consumer`. It stages
+the current build's SDK, compares the installed MPE header hashes, and builds
+this exact consumer in a separate fixture. It runs the positive probe and the
+same mutation/restoration loop against an indexed copy, leaving checkout files
+untouched. Each phase's output and source/SDK provenance appear in the CTest log.
+The test has no `slow` label so changes to its registration reach the normal
+PR head affected-test lane. Registration alone is not execution evidence.
