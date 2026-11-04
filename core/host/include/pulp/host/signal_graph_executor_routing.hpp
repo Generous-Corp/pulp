@@ -13,6 +13,7 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace pulp::audio {
@@ -197,6 +198,25 @@ int calculate_lowerable_graph_latency_samples(
 // value", and the build falls back exactly as documented on
 // build_executor_snapshot below.
 struct ExecutorSnapshotBinders {
+    // Only the graph's closed catalog can supply spectral executable bindings.
+    // Keeping this resolver opaque prevents the raw snapshot builder from
+    // becoming an alternate public native-stage registration path.
+    class SpectralResolver {
+      public:
+        SpectralResolver() = default;
+        explicit operator bool() const noexcept {
+            return bool(resolve_);
+        }
+        format::GraphRuntimeNodeBinding operator()(NodeId id) const {
+            return resolve_(id);
+        }
+
+      private:
+        friend class SignalGraph;
+        explicit SpectralResolver(std::function<format::GraphRuntimeNodeBinding(NodeId)> resolve)
+            : resolve_(std::move(resolve)) {}
+        std::function<format::GraphRuntimeNodeBinding(NodeId)> resolve_;
+    };
     // A Gain node's live atomic. Empty (or a null result) fails the build for a
     // graph that has Gain nodes.
     std::function<std::atomic<float>*(NodeId)> gain_for;
@@ -235,7 +255,7 @@ struct ExecutorSnapshotBinders {
     // parameter-event mailbox. Empty means this snapshot has no injected
     // parameter events (for example baked/external routing callers).
     std::function<ParameterEventInjectionBinding(NodeId)> parameter_events_for;
-    std::function<format::GraphRuntimeNodeBinding(NodeId)> spectral_for;
+    SpectralResolver spectral_for;
 };
 
 // Build the executor snapshot (plan + bindings) for an eligible topology,

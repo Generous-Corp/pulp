@@ -781,3 +781,123 @@ TEST_CASE("Spectral preparation excludes alternate executors despite optimizatio
         REQUIRE(target.graph.routed_walk_fallbacks() == 0);
     }
 }
+
+TEST_CASE(
+    "An old metadata reader pins an unchanged retired spectral arena while new audio advances",
+    "[host][spectral-transition][spectral-retired-reader]") {
+    using namespace pulp::host;
+    ControllerGraph target, control;
+    auto candidate = target.edit();
+    REQUIRE(candidate->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
+    auto reference_candidate = control.edit();
+    REQUIRE(reference_candidate->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
+    {
+        auto retired = SpectralControllerTestAccess::reader(target.graph);
+        REQUIRE(retired);
+        const auto old_epoch = retired->spectral->nodes.front()->epoch;
+        const auto old_sequence = retired->spectral->nodes.front()->sequence;
+        target.process();
+        control.process();
+        REQUIRE(target.output == control.output);
+        {
+            auto active = SpectralControllerTestAccess::reader(target.graph);
+            REQUIRE(active);
+            REQUIRE(active.get() != retired.get());
+            REQUIRE(active->spectral.get() != retired->spectral.get());
+            REQUIRE(active->spectral->nodes.front()->epoch == old_epoch + 1);
+        }
+        REQUIRE(retired->spectral->nodes.front()->epoch == old_epoch);
+        REQUIRE(retired->spectral->nodes.front()->sequence == old_sequence);
+        REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::Busy);
+        REQUIRE(control.graph.finalize_spectral_transition() == SpectralError::None);
+        for (int block = 0; block < 12; ++block) {
+            target.process();
+            control.process();
+            REQUIRE(target.output == control.output);
+            REQUIRE(retired->spectral->nodes.front()->epoch == old_epoch);
+            REQUIRE(retired->spectral->nodes.front()->sequence == old_sequence);
+        }
+    }
+    REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::None);
+}
+
+TEST_CASE("Failed and cancelled preparations preserve active waveform without a reset",
+          "[host][spectral-transition][spectral-candidate-isolation]") {
+    using namespace pulp::host;
+    for (int disposition : {0, 1, 2}) {
+        ControllerGraph target, control;
+        const auto before_epoch = SpectralControllerTestAccess::epoch(target.graph);
+        {
+            auto candidate = target.graph.begin_prepared_topology_edit();
+            REQUIRE(candidate);
+            if (disposition == 0)
+                REQUIRE(candidate->prepare(44100, 64) !=
+                        SignalGraph::PreparedTopologyEdit::Result::Prepared);
+            else if (disposition == 1)
+                REQUIRE(candidate->prepare(48000, 64) ==
+                        SignalGraph::PreparedTopologyEdit::Result::Prepared);
+        }
+        REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == before_epoch);
+        REQUIRE(target.graph.spectral_transition_state() ==
+                SignalGraph::SpectralTransitionState::Idle);
+        target.input.fill(0);
+        control.input.fill(0);
+        for (int block = 0; block < 12; ++block) {
+            target.process();
+            control.process();
+            REQUIRE(target.output == control.output);
+            REQUIRE(SpectralControllerTestAccess::epoch(target.graph) ==
+                    SpectralControllerTestAccess::epoch(control.graph));
+        }
+    }
+}
+
+TEST_CASE("Failed or cancelled candidates paused around validation cannot change an active seek",
+          "[host][spectral-transition][spectral-validation-reset]") {
+    using namespace pulp::host;
+    for (bool pause_after_validation : {false, true}) {
+        for (bool fail_validation : {false, true}) {
+            ControllerGraph target, control;
+            const auto node_count = target.graph.nodes().size();
+            const auto edge_count = target.graph.connections().size();
+            auto candidate = target.graph.begin_prepared_topology_edit();
+            REQUIRE(candidate);
+            std::latch paused{1}, resume{1};
+            SignalGraph::PreparedTopologyEdit::Result result{};
+            std::thread preparer([&] {
+                if (!pause_after_validation) {
+                    paused.count_down();
+                    resume.wait();
+                }
+                result = candidate->prepare(fail_validation ? 44100 : 48000, 64);
+                if (pause_after_validation) {
+                    paused.count_down();
+                    resume.wait();
+                }
+                candidate.reset();
+            });
+            paused.wait();
+            pulp::format::ProcessContext seek;
+            seek.transport_jump = true;
+            target.process(&seek);
+            control.process(&seek);
+            const auto actual = target.output;
+            const auto actual_epoch = SpectralControllerTestAccess::epoch(target.graph);
+            resume.count_down();
+            preparer.join();
+            REQUIRE((result == SignalGraph::PreparedTopologyEdit::Result::Prepared) ==
+                    !fail_validation);
+            REQUIRE(actual == control.output);
+            REQUIRE(actual_epoch == SpectralControllerTestAccess::epoch(control.graph));
+            REQUIRE(SpectralControllerTestAccess::epoch(target.graph) ==
+                    SpectralControllerTestAccess::epoch(control.graph));
+            REQUIRE(target.graph.nodes().size() == node_count);
+            REQUIRE(target.graph.connections().size() == edge_count);
+            for (int block = 0; block < 12; ++block) {
+                target.process();
+                control.process();
+                REQUIRE(target.output == control.output);
+            }
+        }
+    }
+}

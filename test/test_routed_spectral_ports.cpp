@@ -3,6 +3,19 @@
 #include <cmath>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
+#include <type_traits>
+
+TEST_CASE("Public spectral lowering exposes no callable constructor",
+          "[host][spectral-ports][spectral-closed-catalog]") {
+    using namespace pulp::host;
+    using Callback = std::function<pulp::format::GraphRuntimeNodeBinding(NodeId)>;
+    using Resolver = decltype(ExecutorSnapshotBinders{}.spectral_for);
+    REQUIRE((std::is_constructible_v<Callback, Callback>));
+    REQUIRE(std::is_default_constructible_v<Resolver>);
+    REQUIRE_FALSE((std::is_constructible_v<Resolver, Callback>));
+    REQUIRE_FALSE((std::is_assignable_v<Resolver&, Callback>));
+    REQUIRE_FALSE(bool(Resolver{}));
+}
 
 namespace {
 std::vector<float> render(int partition, float gain) {
@@ -325,4 +338,53 @@ TEST_CASE("Named spectral ports reject forged kinds before recording an edge",
         source.kind = destination.kind = PortKind::Spectral;
         REQUIRE((edit ? edit->connect(source, destination) : graph.connect(source, destination)));
     }
+}
+
+TEST_CASE("Frequency selective masks preserve finite tails through the complete drain",
+          "[host][spectral-ports][spectral-mask-tail]") {
+    using namespace pulp::host;
+    const auto render_tail = [](bool irregular) {
+        SignalGraph graph;
+        const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
+        const auto input_node = graph.add_input_node(1), output_node = graph.add_output_node(1);
+        const auto analysis = *graph.add_spectral_analysis(shape, "analysis").value;
+        std::vector<float> gains(129);
+        gains[0] = 1;
+        gains[9] = 0.5f;
+        const auto stage =
+            *graph
+                 .add_spectral_stage(shape,
+                                     *QualifiedSpectralStage::real_mask_v1(shape, gains).value,
+                                     "DC and interior bin")
+                 .value;
+        const auto synthesis = *graph.add_spectral_synthesis(shape, "synthesis").value;
+        REQUIRE(graph.connect(graph.node(input_node)->out("audio"), analysis.audio[0]));
+        REQUIRE(graph.connect(analysis.frames, stage.frames_in));
+        REQUIRE(graph.connect(stage.frames_out, synthesis.frames));
+        REQUIRE(graph.connect(synthesis.audio[0], graph.node(output_node)->in("audio")));
+        REQUIRE(graph.prepare(48000, 4096));
+        REQUIRE(graph.latency_samples() == 320);
+        std::vector<float> input(1800), output(1800);
+        for (int i = 0; i <= 701; ++i)
+            input[i] = 0.25f + 0.1f * std::sin(i * 0.117f);
+        input[701] = 1;
+        for (int position = 0; position < 1800;) {
+            const int count = std::min(1800 - position, irregular ? 1 + position * 17 % 511 : 64);
+            const float* ip[] = {input.data() + position};
+            float* op[] = {output.data() + position};
+            pulp::audio::BufferView<const float> iv(ip, 1, count);
+            pulp::audio::BufferView<float> ov(op, 1, count);
+            graph.process(ov, iv, count);
+            position += count;
+        }
+        for (float value : output)
+            REQUIRE(std::isfinite(value));
+        // The last input contributes to the frame at origin 640. Its late
+        // support must survive beyond a drain shortened by one hop.
+        REQUIRE(std::abs(output[1213]) > 1e-9f);
+        for (int i = 702 + 320 + 255; i < 1800; ++i)
+            REQUIRE(output[i] == 0);
+        return output;
+    };
+    REQUIRE(render_tail(false) == render_tail(true));
 }

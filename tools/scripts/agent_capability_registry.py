@@ -9,6 +9,7 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    'pulp/host/signal_graph_executor_routing.hpp': 'Pulp::host',
     'pulp/host/spectral_graph.hpp': 'Pulp::host',
     'pulp/audio/live_dsp_telemetry.hpp': 'Pulp::audio',
     "pulp/audio/impulse_response.hpp": "Pulp::audio",
@@ -176,6 +177,13 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        'include': 'pulp/host/signal_graph_executor_routing.hpp',
+        'fingerprint': 'sha256:e77a455304bffa7e75d94903aee89f5d61ec9155b68281eaa107b8e6facd1088',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Existing executor lowering infrastructure with graph-owned opaque spectral resolver; no public native spectral-stage registration or notation capability.',
+    },
     {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:7184acce0063ba69aab4c271f79a4e65ca3e04fc01e68de2f27f84aa173b3e7a', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
 
     {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},

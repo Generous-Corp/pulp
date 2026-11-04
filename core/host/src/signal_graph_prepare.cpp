@@ -358,10 +358,9 @@ bool SignalGraph::build_routing_snapshot_locked_(CompiledGraph& cg, bool paralle
                         : nullptr,
             };
         },
-        .spectral_for =
-            [&cg](NodeId id) {
-                return cg.spectral ? cg.spectral->binding(id) : format::GraphRuntimeNodeBinding{};
-            },
+        .spectral_for = ExecutorSnapshotBinders::SpectralResolver{[&cg](NodeId id) {
+            return cg.spectral ? cg.spectral->binding(id) : format::GraphRuntimeNodeBinding{};
+        }},
     };
     if (!build_executor_snapshot(cg.executable_nodes, cg.connections, binders, plugin_ctx,
                                  cg.routed.plugin_scratch, out, parallel_safe, &custom_ctx)) {

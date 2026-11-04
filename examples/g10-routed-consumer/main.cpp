@@ -1,7 +1,9 @@
 #include <cmath>
 #include <iostream>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_executor_routing.hpp>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 void require(bool value, const char* message) {
@@ -89,6 +91,11 @@ auto render(int partition) {
 
 int main() {
     try {
+        using NativeResolver =
+            std::function<pulp::format::GraphRuntimeNodeBinding(pulp::host::NodeId)>;
+        using PublicResolver = decltype(pulp::host::ExecutorSnapshotBinders{}.spectral_for);
+        require(!std::is_constructible_v<PublicResolver, NativeResolver>,
+                "spectral callbacks must remain graph-owned");
         const auto fixed = render(64);
         require(render(4096) == fixed, "large partition invariance");
         require(render(0) == fixed, "irregular partition invariance");
