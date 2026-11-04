@@ -24,7 +24,7 @@ Installed fixture: `examples/g10-routed-consumer`. Guarded engine owner:
 | 3. Dry/wet, upstream U, nested/fan-out PDC | Nested dry/fan-out waveform control. | U propagation, frame-edge audio delay and alternative-latency sum mutations are now independently confirmed; retain exact-head installed refresh. |
 | 4. Frame tuples, startup and epochs | Full tuple/partition equality, startup grid, drop/reorder and old-bank-epoch mutations confirmed; prior origin-stride and transition increment controls. | Extend full tuple oracle through controller seek/replacement, rather than bank reset alone. |
 | 5. Independent validation predicates | All thirteen factory geometry/config predicates independently mutation-confirmed; named generic/prepared-edit handle-kind bypass confirmed. | Remaining graph predicates: stale handles, joins, cycles, automation and candidate revalidation independently. |
-| 6. Borrow lifetime, fan-out ownership and capacity | Sibling preservation and maximal 66-frame batch; F-1 mutation detected. | Writable alias and retained borrowed-pointer production mutations independently detected. |
+| 6. Borrow lifetime, fan-out ownership and capacity | Sibling preservation and maximal 66-frame batch; F-1 mutation detected. | Writable alias and deferred borrowed-pointer-copy mutations are confirmed; branch output across maximal batch remains covered by installed and internal controls. |
 | 7. Candidate isolation and reader lifetime | Rejected candidate/reset comparison and reader Busy backpressure. | Premature retirement and retired-object reset mutations confirmed with continued rendering; destructive active reprepare and shared-engine mutations remain. |
 | 8. Failed/cancelled candidate versus concurrent reset | Boundary-barrier and failed-offer controls; late-offer mutation detected. | Before/after-validation failure, cancellation and stale-generation schedules; shared-allocator mutation with sample/tuple/topology oracle. |
 | 9. Successful offer/reset and failure without reset | Offer+seek/exhaustion controls and epoch mutation. | Candidate-side serial consumption, retired-object reset and double increment independently confirmed; full controller tuple oracle remains. |
@@ -33,7 +33,7 @@ Installed fixture: `examples/g10-routed-consumer`. Guarded engine owner:
 | 12. Zero-preservation qualification and runtime guard | Constant identity mutation detected by zero-input control. | Independently remove runtime zero guard and qualification oracle, retaining an outer control that detects escape. |
 | 13. Bad-slot replacement and duplicate chronology | Missing-frame and unsolicited duplicate controls; duplicate guard mutation detected. | Independently omit zero replacement, replace for every duplicate and overwrite accepted payload. |
 | 14. Fatal prefix, siblings and partition-invariant onset | Fatal-prefix and capacity-marker controls; cutoff mutation detected. | Executor-false/full-block-clear, lost full-edge marker and partitioned onset mutations. |
-| 15. Finite guarded synthesis and transactional history | Guarded transaction suite and combined nonfinite-return mutation detected. | Inverse, OLA, quotient and partial-commit guards removed independently; retain earlier history and finite-output oracle. |
+| 15. Finite guarded synthesis and transactional history | Guarded transaction suite and combined nonfinite-return mutation detected. | Partial commit is independently confirmed through full rejected-frame support; inverse, OLA and quotient guards still need independent controls. |
 | 16. Arithmetic/resource limits | Origin bound, u64 sequence wrap prevention and 64 MiB cap each mutation-confirmed; oversized test allocation stays below 100 MiB if cap is bypassed. | Output-clock bound independently confirmed; bounded allocation-failure injection and unchanged active output remain. |
 | 17. Tail/drain composition | Installed prefix/tail silence and nested impulse control. | Nontrivial mask/DC/interior-bin tail control and omitted zero-synthesis mutation confirmed. Codec EOF-source integration remains outside R admission. |
 | 18. Serial dispatch and callback resource audit | Toggle controls, no fallback, C++ new probe over reset/activation/callbacks; installed-consumer RTSan independently detects planted malloc, mutex lock and write calls. | Parallel/anticipation eligibility mutations and broader resource scenario coverage. Timing claims require the separate roadmap callback matrix. |
@@ -236,3 +236,20 @@ maximum predicates was confirmed, with restored-green controls, at
 `467b46e14c749837fb292ad4bbf116c08f728aec`. These checks
 are independent of the earlier factory predicate mutations. Unknown catalog ID
 and malformed configuration length still require separate internal controls.
+
+## Borrow and whole-frame transaction controls
+
+A production mutation deferred copying analysis frames until the engine had
+finished emitting the callback batch, retaining its last borrowed pointer and
+using it to overwrite every published slot. The real routed signal control
+failed; baseline and restored source passed. This confirms that immediate copy
+into graph-owned edge storage matters beyond the existing writable-fan-out
+alias mutation.
+
+The first planted early-commit mutation passed the prior guarded transaction
+test: that test read only the prefix before the rejected frame's future support.
+The test now advances eight more valid hops and compares the full available
+history to a control engine. It passes 28,134 assertions in three guarded-engine
+cases, and the same production mutation now fails the transaction case before
+restoring green. The witnessed failure of the earlier oracle is retained as
+part of the evidence; it was not counted as a confirmed mutation.
