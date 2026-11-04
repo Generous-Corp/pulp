@@ -50,6 +50,13 @@
           "needles": [
             "graph-edge-probe installed CLI/MCP parity PASS"
           ]
+        },
+        {
+          "kind": "cli_definition",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": [
+            "probe: --input file.wav --source-node NAME --source-port NAME"
+          ]
         }
       ],
       "authority": {
@@ -75,6 +82,15 @@
           "path": "test/graph_edge_probe_sdk.py",
           "needles": [
             "graph-edge-probe installed CLI/MCP parity PASS"
+          ]
+        },
+        {
+          "kind": "mcp_definition",
+          "path": "tools/mcp/pulp_mcp.cpp",
+          "needles": [
+            "block_frames",
+            "source_node",
+            "destination_node"
           ]
         }
       ],
