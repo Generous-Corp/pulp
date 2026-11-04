@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1530"></a>
+## [1.53.0] - 2026-11-04
+
+- release/version bump ([#11497](https://github.com/Generous-Corp/pulp/pull/11497))
+- codex/fix ci checkout pin 20261103 ([#11493](https://github.com/Generous-Corp/pulp/pull/11493))
+- codex/g9 descendant proof 20261103 ([#11484](https://github.com/Generous-Corp/pulp/pull/11484))
+- codex/g4 subgraphs 20261103 ([#11445](https://github.com/Generous-Corp/pulp/pull/11445))
+- feat/graph g2 save cli reload 20261103 ([#11490](https://github.com/Generous-Corp/pulp/pull/11490))
+
 <a id="v1520"></a>
 ## [1.52.0] - 2026-11-04
 
@@ -12153,6 +12162,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.53.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.53.0
 [1.52.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.52.0
 [1.51.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.51.0
 [1.50.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.50.0
