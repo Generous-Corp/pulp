@@ -42,10 +42,12 @@
 #include <algorithm>
 #include <cassert>
 #include <complex>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <optional>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace pulp::signal {
@@ -71,6 +73,14 @@ struct SpectralFrameEngineConfig {
     /// leaves a hop of slack) instead of all in the callback that completed
     /// the frame. Bit-identical output; false restores the single burst.
     bool defer_synthesis = true;
+    /// Prepare transactional inverse/OLA scratch for the guarded split API.
+    /// Guarded and legacy synthesis must not be mixed on one stream.
+    bool guarded_split = false;
+};
+
+enum class SpectralSplitResult : std::uint8_t {
+    Ok, NotPrepared, InvalidBlock, InvalidFrame, ChronologyExhausted,
+    CapacityExceeded, NonfiniteSynthesis, OutputUnderrun
 };
 
 inline constexpr int kSpectralFrameEngineMinimumFftSize = 256;
@@ -138,6 +148,7 @@ inline std::optional<SpectralFrameEngineGeometry> checked_spectral_frame_engine_
     if (!is_valid_spectral_frame_geometry(config.fft_size, config.analysis_hop)
         || config.channels < 1 || config.max_block <= 0)
         return std::nullopt;
+    if (config.guarded_split && config.defer_synthesis) return std::nullopt;
 
     const int max_synthesis_hop = config.max_synthesis_hop > 0
         ? config.max_synthesis_hop
@@ -188,6 +199,10 @@ inline std::optional<SpectralFrameEngineGeometry> checked_spectral_frame_engine_
         || !checked_fft_retained_bytes<SampleType>(fft_size, target_max_bytes,
                                                    fft_retained_bytes)
         || !charge.add_retained_bytes(fft_retained_bytes))
+        return std::nullopt;
+    if (config.guarded_split
+        && (!charge.add<SampleType>(geometry.input_ring_elements)
+            || !charge.add<SampleType>(fft_size)))
         return std::nullopt;
 
     geometry.max_synthesis_hop = max_synthesis_hop;
@@ -261,6 +276,9 @@ public:
             frame_ptrs_[ch] = frames_.data() + static_cast<size_t>(ch) * num_bins_;
 
         time_buf_.assign(config_.fft_size, SampleType{0.0f});
+        guarded_numerator_.assign(config_.guarded_split
+            ? static_cast<size_t>(geometry->input_ring_elements) : 0, SampleType{0});
+        guarded_norm_.assign(config_.guarded_split ? config_.fft_size : 0, SampleType{0});
 
         reset();
     }
@@ -284,6 +302,109 @@ public:
     int analysis_hop() const { return config_.analysis_hop; }
     int num_bins() const { return num_bins_; }
     int channels() const { return config_.channels; }
+
+    /// Checked split analysis refuses the whole block before ingest on a clock
+    /// or block-limit error. Frame borrows expire when the callback returns.
+    template <typename Fn>
+    SpectralSplitResult analyze_guarded(const SampleType* const* in, int count, Fn&& fn) {
+        if (!config_.guarded_split || num_bins_ == 0) return SpectralSplitResult::NotPrepared;
+        if (count < 0 || count > config_.max_block || (count != 0 && !in))
+            return SpectralSplitResult::InvalidBlock;
+        for (int ch = 0; count != 0 && ch < config_.channels; ++ch)
+            if (!in[ch]) return SpectralSplitResult::InvalidBlock;
+        constexpr auto limit = std::numeric_limits<std::int64_t>::max();
+        if (samples_fed_ > limit - count
+            || samples_fed_ + count > limit - config_.analysis_hop)
+            return SpectralSplitResult::ChronologyExhausted;
+        analyze(in, count, std::forward<Fn>(fn));
+        return SpectralSplitResult::Ok;
+    }
+
+    /// Equal-hop split synthesis. Validate and stage every channel and divisor
+    /// before committing any ring cell, preserving earlier history on failure.
+    SpectralSplitResult synthesize_frame_guarded(
+        const std::complex<SampleType>* const* frames) noexcept {
+        if (!config_.guarded_split || num_bins_ == 0) return SpectralSplitResult::NotPrepared;
+        const int n = config_.fft_size;
+        constexpr auto limit = std::numeric_limits<std::int64_t>::max();
+        if (synth_pos_ > limit - n) return SpectralSplitResult::ChronologyExhausted;
+        if (synth_pos_ + n - read_pos_ > ring_size_)
+            return SpectralSplitResult::CapacityExceeded;
+        if (!frames) return SpectralSplitResult::InvalidFrame;
+        for (int ch = 0; ch < config_.channels; ++ch) {
+            if (!frames[ch]) return SpectralSplitResult::InvalidFrame;
+            for (int bin = 0; bin < num_bins_; ++bin)
+                if (!std::isfinite(frames[ch][bin].real())
+                    || !std::isfinite(frames[ch][bin].imag()))
+                    return SpectralSplitResult::InvalidFrame;
+            if (frames[ch][0].imag() != SampleType{0}
+                || frames[ch][num_bins_ - 1].imag() != SampleType{0})
+                return SpectralSplitResult::InvalidFrame;
+        }
+        const int skip = synth_pos_ < 0 ? static_cast<int>(-synth_pos_) : 0;
+        for (int ch = 0; ch < config_.channels; ++ch) {
+            fft_.inverse_real_half(frames[ch], time_buf_.data());
+            for (int i = 0; i < n; ++i)
+                if (!std::isfinite(time_buf_[i])) return SpectralSplitResult::NonfiniteSynthesis;
+            const auto* ring = output_ring_.data() + static_cast<size_t>(ch) * ring_size_;
+            auto* staged = guarded_numerator_.data() + static_cast<size_t>(ch) * n;
+            for (int i = skip; i < n; ++i) {
+                const auto idx = static_cast<size_t>((synth_pos_ + i) & ring_mask_);
+                const SampleType contribution = time_buf_[i] * window_[i];
+                staged[i] = ring[idx] + contribution;
+                if (!std::isfinite(contribution) || !std::isfinite(staged[i]))
+                    return SpectralSplitResult::NonfiniteSynthesis;
+            }
+        }
+        for (int i = skip; i < n; ++i) {
+            const auto idx = static_cast<size_t>((synth_pos_ + i) & ring_mask_);
+            guarded_norm_[i] = norm_ring_[idx] + window_[i] * window_[i];
+            if (!std::isfinite(guarded_norm_[i])) return SpectralSplitResult::NonfiniteSynthesis;
+        }
+        for (int ch = 0; ch < config_.channels; ++ch) {
+            auto* ring = output_ring_.data() + static_cast<size_t>(ch) * ring_size_;
+            const auto* staged = guarded_numerator_.data() + static_cast<size_t>(ch) * n;
+            for (int i = skip; i < n; ++i)
+                ring[static_cast<size_t>((synth_pos_ + i) & ring_mask_)] = staged[i];
+        }
+        for (int i = skip; i < n; ++i)
+            norm_ring_[static_cast<size_t>((synth_pos_ + i) & ring_mask_)] = guarded_norm_[i];
+        available_ = std::max(available_, synth_pos_);
+        synth_pos_ += config_.analysis_hop;
+        return SpectralSplitResult::Ok;
+    }
+
+    /// Pop a finite prefix and return its length. On failure the caller keeps
+    /// that prefix and supplies terminal silence from the first unread sample.
+    SpectralSplitResult read_output_guarded(SampleType* const* out, int count,
+                                            int& consumed) noexcept {
+        consumed = 0;
+        if (!config_.guarded_split || num_bins_ == 0) return SpectralSplitResult::NotPrepared;
+        if (count < 0 || count > config_.max_block || (count != 0 && !out))
+            return SpectralSplitResult::InvalidBlock;
+        for (int ch = 0; count != 0 && ch < config_.channels; ++ch)
+            if (!out[ch]) return SpectralSplitResult::InvalidBlock;
+        for (; consumed < count; ++consumed) {
+            if (read_pos_ >= available_) return SpectralSplitResult::OutputUnderrun;
+            const auto idx = static_cast<size_t>(read_pos_ & ring_mask_);
+            const bool startup = !config_.full_overlap_stream_start && read_pos_ < config_.fft_size;
+            const SampleType norm = startup ? std::max(norm_ring_[idx], min_norm_) : norm_ring_[idx];
+            if (!std::isfinite(norm)) return SpectralSplitResult::NonfiniteSynthesis;
+            for (int ch = 0; ch < config_.channels; ++ch) {
+                const auto* ring = output_ring_.data() + static_cast<size_t>(ch) * ring_size_;
+                auto& value = guarded_numerator_[static_cast<size_t>(ch) * config_.fft_size];
+                value = norm > SampleType{1e-9f} ? ring[idx] / norm : SampleType{0};
+                if (!std::isfinite(value)) return SpectralSplitResult::NonfiniteSynthesis;
+            }
+            for (int ch = 0; ch < config_.channels; ++ch) {
+                out[ch][consumed] = guarded_numerator_[static_cast<size_t>(ch) * config_.fft_size];
+                output_ring_[static_cast<size_t>(ch) * ring_size_ + idx] = SampleType{0};
+            }
+            norm_ring_[idx] = SampleType{0};
+            ++read_pos_;
+        }
+        return SpectralSplitResult::Ok;
+    }
 
     /// Equal-hop streaming: push `num_samples` per channel, invoke
     /// `on_frames(std::complex<SampleType>* const* frames, int num_bins)` once per
@@ -551,6 +672,8 @@ private:
     std::vector<std::complex<SampleType>> frames_;      // channels * num_bins
     std::vector<std::complex<SampleType>*> frame_ptrs_; // channels
     std::vector<SampleType> time_buf_;                  // fft_size
+    std::vector<SampleType> guarded_numerator_; // channels * fft_size
+    std::vector<SampleType> guarded_norm_;      // fft_size
 
     int input_pos_ = 0;
     std::int64_t samples_fed_ = 0;
