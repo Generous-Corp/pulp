@@ -426,9 +426,9 @@ SignalGraph::staged_node_loads_locked_() const {
 }
 
 void SignalGraph::begin_swap_edit() {
+    GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return;
-    GraphMutationLock lock(*this);
     if (in_swap_edit_) {
         runtime::log_error("SignalGraph: begin_swap_edit() while a swap edit is "
                            "already open — refused (nesting unsupported)");

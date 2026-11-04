@@ -197,17 +197,43 @@ TEST_CASE("Spectral fanout owns disjoint masks and aligns a dry nested path",
 TEST_CASE("Spectral public admission rejects malformed geometry and graph edges",
           "[host][spectral-ports][spectral-refusal]") {
     using namespace pulp::host;
-    REQUIRE_FALSE(SpectralIdentity::make(255, 64, 1, 48000));
-    REQUIRE_FALSE(SpectralIdentity::make(256, 129, 1, 48000));
-    REQUIRE_FALSE(SpectralIdentity::make(256, 64, 17, 48000));
-    REQUIRE_FALSE(SpectralIdentity::make(256, 64, 1, std::numeric_limits<double>::quiet_NaN()));
+    struct InvalidShape {
+        int size, hop, channels;
+        double rate;
+    };
+    const std::array invalid_shapes{
+        InvalidShape{128, 64, 1, 48000},
+        InvalidShape{32768, 64, 1, 48000},
+        InvalidShape{257, 64, 1, 48000},
+        InvalidShape{256, 0, 1, 48000},
+        InvalidShape{256, 129, 1, 48000},
+        InvalidShape{256, 64, 0, 48000},
+        InvalidShape{256, 64, 17, 48000},
+        InvalidShape{256, 64, 1, 0},
+        InvalidShape{256, 64, 1, -1},
+        InvalidShape{256, 64, 1, std::numeric_limits<double>::infinity()},
+        InvalidShape{256, 64, 1, std::numeric_limits<double>::quiet_NaN()}};
+    for (const auto& invalid : invalid_shapes) {
+        CAPTURE(invalid.size, invalid.hop, invalid.channels, invalid.rate);
+        const auto result =
+            SpectralIdentity::make(invalid.size, invalid.hop, invalid.channels, invalid.rate);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error == SpectralError::InvalidIdentity);
+    }
+    REQUIRE(SpectralIdentity::make(256, 1, 1, 1));
+    REQUIRE(SpectralIdentity::make(16384, 8192, 16, 96000));
     const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
     std::vector<float> mask(129, 1);
-    REQUIRE_FALSE(QualifiedSpectralStage::real_mask_v1(identity, std::span(mask).first(128)));
+    const auto short_mask =
+        QualifiedSpectralStage::real_mask_v1(identity, std::span(mask).first(128));
+    REQUIRE_FALSE(short_mask);
+    REQUIRE(short_mask.error == SpectralError::InvalidMask);
     for (const float invalid : {-0.1f, 1.1f, std::numeric_limits<float>::infinity(),
                                 std::numeric_limits<float>::quiet_NaN()}) {
         mask[5] = invalid;
-        REQUIRE_FALSE(QualifiedSpectralStage::real_mask_v1(identity, mask));
+        const auto rejected = QualifiedSpectralStage::real_mask_v1(identity, mask);
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error == SpectralError::InvalidMask);
     }
     SignalGraph graph, foreign;
     auto a = *graph.add_spectral_analysis(identity, "analysis").value;
@@ -261,5 +287,35 @@ TEST_CASE("Independent audio feedback survives spectral preparation",
                 REQUIRE(value == 0);
             REQUIRE(graph.routed_walk_fallbacks() == 0);
         }
+    }
+}
+
+TEST_CASE("Named spectral ports reject forged kinds before recording an edge",
+          "[host][spectral-ports][spectral-handle-validation]") {
+    using namespace pulp::host;
+    const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    for (bool prepared_edit : {false, true}) {
+        SignalGraph graph;
+        const auto analysis = *graph.add_spectral_analysis(identity, "analysis").value;
+        const auto synthesis = *graph.add_spectral_synthesis(identity, "synthesis").value;
+        auto edit = prepared_edit ? graph.begin_prepared_topology_edit() : nullptr;
+        auto source = graph.node(analysis.node)->out("frames");
+        auto destination = graph.node(synthesis.node)->in("frames");
+        source.kind = PortKind::Audio;
+        const auto mismatched = edit ? edit->connect(source, destination)
+                                     : graph.connect(source, destination);
+        REQUIRE(mismatched.code == GraphResult::Code::KindMismatch);
+        REQUIRE((edit ? edit->connections() : graph.connections()).empty());
+        for (const auto kind : {PortKind::Audio, PortKind::Sidechain, PortKind::Midi,
+                                PortKind::Event, PortKind::Control, PortKind::Param}) {
+            source.kind = destination.kind = kind;
+            const auto result = edit ? edit->connect(source, destination)
+                                     : graph.connect(source, destination);
+            REQUIRE(result.code == GraphResult::Code::KindMismatch);
+            REQUIRE_FALSE(result.rule.empty());
+            REQUIRE((edit ? edit->connections() : graph.connections()).empty());
+        }
+        source.kind = destination.kind = PortKind::Spectral;
+        REQUIRE((edit ? edit->connect(source, destination) : graph.connect(source, destination)));
     }
 }

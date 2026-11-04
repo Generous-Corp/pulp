@@ -867,7 +867,7 @@ GraphResult SignalGraph::connect(const PortHandle& source, const PortHandle& des
         return {GraphResult::Code::UnknownPort, dest.node, dest.index,
                 "unknown input port '" + dest.name + "'",
                 "use in(\"audio\") or an available input"};
-    if (sp->kind != dp->kind)
+    if (sp->kind != dp->kind || source.kind != sp->kind || dest.kind != dp->kind)
         return {GraphResult::Code::KindMismatch, dest.node, dp->index,
                 "port kind mismatch: '" + source.name + "' to '" + dest.name + "'",
                 "connect ports with the same kind"};

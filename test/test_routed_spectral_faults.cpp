@@ -155,6 +155,9 @@ struct SpectralControllerTestAccess {
     static bool terminal(SignalGraph& g) {
         return g.spectral_terminal_;
     }
+    static bool swap_edit_active(SignalGraph& g) {
+        return g.in_swap_edit_;
+    }
 };
 } // namespace pulp::host
 namespace {
@@ -501,6 +504,29 @@ TEST_CASE("Active spectral controllers refuse teardown and graph loading",
     target.process();
     control.process();
     REQUIRE(target.output == control.output);
+}
+
+TEST_CASE("Legacy swap entry refuses a spectral controller without changing its generation",
+          "[host][spectral-transition][spectral-swap-refusal]") {
+    using namespace pulp::host;
+    SignalGraph ordinary;
+    ordinary.begin_swap_edit();
+    REQUIRE(SpectralControllerTestAccess::swap_edit_active(ordinary));
+    ordinary.abort_swap_edit();
+    REQUIRE_FALSE(SpectralControllerTestAccess::swap_edit_active(ordinary));
+
+    ControllerGraph target, control;
+    auto candidate = target.graph.begin_prepared_topology_edit();
+    REQUIRE(candidate);
+    target.graph.begin_swap_edit();
+    REQUIRE_FALSE(SpectralControllerTestAccess::swap_edit_active(target.graph));
+    REQUIRE(target.graph.spectral_error() == SpectralError::UnsupportedOperation);
+    REQUIRE(candidate->prepare(48000, 64) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    for (int block = 0; block < 12; ++block) {
+        target.process();
+        control.process();
+        REQUIRE(target.output == control.output);
+    }
 }
 
 TEST_CASE("Live custom state cannot invalidate spectral publication",
