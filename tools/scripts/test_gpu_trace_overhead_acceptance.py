@@ -1295,6 +1295,7 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             [row["path"] for row in external],
             [
                 "core/view/platform/mac/window_host_mac.mm",
+                "core/view/src/plugin_frame_renderer.cpp",
                 "inspect/src/control_gpu_health_provider.cpp",
             ],
         )
@@ -1306,6 +1307,17 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(
             external[0]["owner_package"], "pulp-view-mac-window-host"
+        )
+        self.assertEqual(
+            external[1]["introducing_revision"],
+            "4a9ddce4f80b9c574e058cbbc5c752c40367df06",
+        )
+        self.assertEqual(
+            external[1]["owner_package"], "pulp-view-windows-frame-timing"
+        )
+        self.assertEqual(
+            external[1]["scope_authority"]["kind"],
+            "immutable-git-commit-boundary",
         )
         self.assertEqual(
             external[0]["scope_authority"]["kind"],
