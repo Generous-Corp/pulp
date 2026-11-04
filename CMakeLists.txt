@@ -522,31 +522,56 @@ if(ANDROID)
     pulp_wire_android_sources()
 endif()
 
-set(_pulp_standalone_sources
+# StandaloneApp's sources split in two. The core (audio and MIDI devices,
+# transport, the editor-host contract window) needs no Pulp view layer; the view
+# layer (the create_view() editor window and its Settings chrome, the musical
+# typing keyboard, the Audio Inspector, in-app updates) does.
+set(_pulp_standalone_core_sources
     core/format/src/standalone.cpp
     core/format/src/standalone_control_host.cpp
+    core/format/src/null_audio_device.cpp
+    core/format/src/test_signal.cpp)
+set(_pulp_standalone_view_sources
+    core/format/src/standalone_view_layer.cpp
     core/format/src/standalone_musical_typing.cpp
     core/format/src/standalone_updater.cpp
-    core/format/src/null_audio_device.cpp
-    core/format/src/test_signal.cpp
     core/format/src/settings_panel.cpp)
 # Synthetic key delivery for the test harness needs AppKit, so the macOS
 # backend is Obj-C++; every other platform links the unsupported stub.
 if(APPLE)
-    list(APPEND _pulp_standalone_sources
+    list(APPEND _pulp_standalone_core_sources
         core/format/src/standalone_key_driver_mac.mm
-        core/format/src/standalone_contract_editor_mac.mm
-        core/format/src/standalone_updater_mac.mm)
+        core/format/src/standalone_contract_editor_mac.mm)
+    list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_mac.mm)
 else()
-    list(APPEND _pulp_standalone_sources
+    list(APPEND _pulp_standalone_core_sources
         core/format/src/standalone_key_driver_stub.cpp
-        core/format/src/standalone_contract_editor_stub.cpp
-        core/format/src/standalone_updater_stub.cpp)
+        core/format/src/standalone_contract_editor_stub.cpp)
+    list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_stub.cpp)
 endif()
+set(_pulp_standalone_sources ${_pulp_standalone_core_sources} ${_pulp_standalone_view_sources})
 add_library(pulp-standalone STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone ALIAS pulp-standalone)
 add_library(pulp-standalone-native STATIC ${_pulp_standalone_sources})
 add_library(pulp::standalone-native ALIAS pulp-standalone-native)
+# The standalone of a UI package plug-in (pulp_add_plugin(... UI <package>)):
+# the core alone, with no Pulp view, canvas or render code, so Dawn reaches the
+# app only through its UI package. It still reads a few header-only view types
+# (the meter AudioBridge, key codes), hence the include paths without a link.
+add_library(pulp-standalone-contract STATIC
+    ${_pulp_standalone_core_sources} core/format/src/standalone_view_layer_none.cpp)
+add_library(pulp::standalone-contract ALIAS pulp-standalone-contract)
+target_include_directories(pulp-standalone-contract PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/view/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/view/audio/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/canvas/include>
+    $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-standalone-contract PUBLIC pulp::format-core)
+target_compile_definitions(pulp-standalone-contract PRIVATE PULP_ENABLE_INSPECTOR=0)
+if(APPLE AND NOT IOS)
+    target_link_libraries(pulp-standalone-contract PUBLIC "-framework AppKit")
+endif()
 function(_pulp_configure_standalone_target target view_target)
     target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>

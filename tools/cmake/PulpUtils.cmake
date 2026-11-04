@@ -31,6 +31,8 @@ _pulp_pick_target(_PULP_MIDI_TARGET Pulp::midi pulp::midi)
 _pulp_pick_target(_PULP_STANDALONE_TARGET Pulp::standalone pulp::standalone)
 _pulp_pick_target(_PULP_NATIVE_STANDALONE_TARGET
     Pulp::standalone-native pulp::standalone-native)
+_pulp_pick_target(_PULP_CONTRACT_STANDALONE_TARGET
+    Pulp::standalone-contract pulp::standalone-contract)
 _pulp_pick_target(_PULP_CONTROL_STANDALONE_TARGET
     Pulp::inspect-standalone-runtime pulp::inspect-standalone-runtime)
 _pulp_pick_target(_PULP_CONTROL_UI_TARGET
