@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.24)
+project(PulpClapIdentityConsumer LANGUAGES CXX)
+find_package(Pulp CONFIG REQUIRED COMPONENTS host)
+add_executable(clap-identity-consumer main.cpp)
+target_compile_features(clap-identity-consumer PRIVATE cxx_std_20)
+target_link_libraries(clap-identity-consumer PRIVATE Pulp::host)
