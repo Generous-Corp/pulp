@@ -30,7 +30,8 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 ctest --test-dir build --output-on-failure
 ```
 
-The same consumer also runs as `processor-restore-contract` in Pulp's tests.
+Pulp registers `cmake-g2-processor-restore-sdk-consumer` to install the SDK,
+build this same consumer in a separate CMake project, and run its CTest.
 It checks unknown/disallowed and duplicate types, exact type/state versions,
 decoded per-part/aggregate/node limits, duplicate node ids, declared and actual
 ports/capabilities, parameter rejection, custom rejection/throw, aliases to a

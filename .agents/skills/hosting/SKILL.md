@@ -76,8 +76,8 @@ code and must not retain, expose, or mutate live instances.
 This does not implement `.pulpgraph` v4. `GraphSerializer` still refuses
 Processor nodes. State capture/coherence, encoded-input limits, migrations,
 candidate graph validation/preparation, and safe publication remain separate
-work. Run `processor-restore-contract` plus the installed SDK consumer in
-`examples/g2-processor-restore-consumer` when changing the registry contract.
+work. Run `cmake-g2-processor-restore-sdk-consumer` (the installed SDK consumer
+in `examples/g2-processor-restore-consumer`) when changing the registry contract.
 
 ### SignalGraph snapshot readers
 
