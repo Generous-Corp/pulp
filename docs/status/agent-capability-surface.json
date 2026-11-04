@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 516,
-    "reviewed_headers": 267,
+    "public_headers": 517,
+    "reviewed_headers": 268,
     "legacy_unreviewed_headers": 249,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 98,
+      "infrastructure": 99,
       "legacy_unreviewed": 249,
       "unsupported_capability": 2
     },
@@ -97,8 +97,8 @@
         "unsupported_headers": 0
       },
       "host": {
-        "public_headers": 11,
-        "reviewed_headers": 11,
+        "public_headers": 12,
+        "reviewed_headers": 12,
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       }
@@ -1230,6 +1230,15 @@
       "disposition": "infrastructure",
       "capability_keys": [],
       "rationale": "A focused value contract for SignalGraph authoring lineage receipts. It lets control and importer code validate graph identity/generation without claiming an installed DSP capability or pulling in the runtime implementation surface."
+    },
+    {
+      "domain": "host",
+      "source": "core/host/include/pulp/host/signal_graph_executor_routing.hpp",
+      "fingerprint": "sha256:e77a455304bffa7e75d94903aee89f5d61ec9155b68281eaa107b8e6facd1088",
+      "include": "pulp/host/signal_graph_executor_routing.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Existing executor lowering infrastructure with graph-owned opaque spectral resolver; no public native spectral-stage registration or notation capability."
     },
     {
       "domain": "host",

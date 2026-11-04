@@ -154,3 +154,38 @@ Coverage is the fixture's N=256, H=63, C=1, fixed/large/irregular callbacks,
 independent identity/mask fan-out and dry PDC. It establishes resource-instrument
 sensitivity and clean tested callbacks, not the roadmap's paced timing matrix,
 all supported geometries, transition resource coverage, or full RT qualification.
+
+## Further routing and lifetime qualification
+
+At `d7add6ce8088381f91cc5d8311582ec37856b35e`, twelve additional independent
+production mutations were confirmed with compiled baseline/broken/restored
+controls: analysis latency double-counting, omitted upstream latency,
+alternative-path latency summation, frame-edge audio-delay allocation, foreign
+port owner, joined frame inputs, spectral cycle, writable fan-out alias,
+omitted missing-frame zero replacement, executor false on branch failure,
+whole-block clearing on branch failure, and lost full-edge fatal marker.
+Removing only the outer parallel and anticipation guards was **not confirmed**:
+independent inner eligibility checks still refused dispatch. Those two attempts
+are not evidence of mutation sensitivity and row 18 remains open.
+
+Commit `29c3322c9085441f65452c6fa33a627155dac11a` adds controls for a reader acquired after offer but before
+activation, failed/cancelled candidate isolation, seek before and after candidate
+validation, and finite selective-mask/DC/interior-bin tail support. These pass
+as part of 38,608 assertions in 36 cases; their destructive lifetime and tail
+mutations remain outstanding.
+
+An installed-only external probe demonstrated that the public snapshot binder
+accepted an arbitrary spectral callback (`accepted=1`, `snapshot_valid=1`). The
+resolver is now an opaque value whose callable constructor is accessible only
+to `SignalGraph`. Normal graph preparation uses the existing snapshot builder.
+The public consumer and unit control both reject callable construction; the
+closed catalog is not replaced with another registration mechanism. This fixes
+the observed registration escape but does not establish the independent
+malformed-candidate and unknown-catalog-ID obligations in row 11.
+
+The resolver access-control mutation is independently **CONFIRMED**: changing
+only its private callable-constructor section to public compiles, then fails
+both the five-assertion unit trait control and the installed-only consumer's
+runtime trait check. Both pass before the mutation and after exact restoration.
+The installed control copied the current public header and freshly built archive
+into the disposable qualification SDK and relinked the consumer each phase.
