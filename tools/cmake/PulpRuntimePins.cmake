@@ -6,7 +6,7 @@
 # consumer builds (PulpBuildInfo.cmake). Every value is read from the pin's
 # existing single source of truth; nothing here restates a pin:
 #
-#   skia.release / commit / builder_ref  VERSION.md of the linked Skia tree
+#   skia.release / commit / builder_ref  VERSION.md or explicit provider receipt
 #   skia.asset_sha256                    the fetcher's .skia-asset-sha256 stamp,
 #                                        checked against tools/deps/manifest.json
 #   dawn.commit                          dawn/dawn_version.h (kDawnVersion)
@@ -47,6 +47,24 @@ function(_pulp_runtime_pins_skia version_md out_release out_commit out_builder_r
     set(${out_release} "${_release}" PARENT_SCOPE)
     set(${out_commit} "${_commit}" PARENT_SCOPE)
     set(${out_builder_ref} "${_builder_ref}" PARENT_SCOPE)
+endfunction()
+
+# Explicit Windows provider packages may intentionally omit VERSION.md. Their
+# toolchain receipt carries the independently hash-bound producer identity so a
+# consumer does not borrow the identity of its own checkout.
+function(_pulp_runtime_pins_skia_provider_ref metadata out_ref)
+    set(_ref "")
+    if(EXISTS "${metadata}")
+        file(READ "${metadata}" _json)
+        string(JSON _candidate ERROR_VARIABLE _error GET "${_json}" producer skia_builder_ref)
+        string(LENGTH "${_candidate}" _candidate_length)
+        if(NOT _error AND NOT _candidate STREQUAL "null"
+           AND _candidate_length EQUAL 40
+           AND _candidate MATCHES "^[0-9a-fA-F]+$")
+            string(TOLOWER "${_candidate}" _ref)
+        endif()
+    endif()
+    set(${out_ref} "${_ref}" PARENT_SCOPE)
 endfunction()
 
 # Decode dawn::kDawnVersion (20 bytes of SHA-1) into a hex commit id.
@@ -135,6 +153,18 @@ function(pulp_configure_runtime_pins)
     endif()
     _pulp_runtime_pins_skia("${_version_md}"
         _skia_release _skia_commit _skia_builder_ref)
+    set(_provider_metadata "")
+    if(PULP_WINDOWS_ARM64EC_PROVIDER_METADATA)
+        set(_provider_metadata "${PULP_WINDOWS_ARM64EC_PROVIDER_METADATA}")
+    elseif(SKIA_DIR AND EXISTS "${SKIA_DIR}/build/win-gpu/msvc-toolchain.json")
+        set(_provider_metadata "${SKIA_DIR}/build/win-gpu/msvc-toolchain.json")
+    endif()
+    if(_provider_metadata)
+        _pulp_runtime_pins_skia_provider_ref("${_provider_metadata}" _provider_builder_ref)
+        if(_provider_builder_ref)
+            set(_skia_builder_ref "${_provider_builder_ref}")
+        endif()
+    endif()
     set(_dawn_commit "")
     set(_skia_linked FALSE)
     set(_skia_asset "")
