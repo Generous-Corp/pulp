@@ -13,6 +13,9 @@ project(Pulp
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
 )
+if(WIN32)
+    _pulp_min_os_pin_windows()
+endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCheckoutLocation.cmake)  # refuse /tmp checkouts before any build work
 
 # Pulp's own source-tree root. Use this — NOT CMAKE_SOURCE_DIR — when referencing
