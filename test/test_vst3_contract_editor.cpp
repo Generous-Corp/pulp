@@ -245,12 +245,53 @@ class ScopedEnvUnset {
     std::optional<std::string> prev_;
 };
 
-// Editors are refused in CI and headless environments; these tests open one.
+// Set `name` to `value` for one scope, then put back what was there (unset
+// included).
+class ScopedEnvSet {
+  public:
+    ScopedEnvSet(const char* name, const char* value) : name_(name) {
+        if (const char* prev = std::getenv(name))
+            prev_ = std::string(prev);
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), value);
+#else
+        ::setenv(name_.c_str(), value, 1);
+#endif
+    }
+    ~ScopedEnvSet() {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), prev_ ? prev_->c_str() : "");
+#else
+        if (prev_)
+            ::setenv(name_.c_str(), prev_->c_str(), 1);
+        else
+            ::unsetenv(name_.c_str());
+#endif
+    }
+
+  private:
+    std::string name_;
+    std::optional<std::string> prev_;
+};
+
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#define PULP_TEST_NEEDS_DISPLAY 1
+#else
+#define PULP_TEST_NEEDS_DISPLAY 0
+#endif
+
+// Editors are refused in CI and headless environments (on X11 platforms, also
+// without a display); these tests open one. The editors record calls and
+// never reach a display server, so a placeholder DISPLAY is enough.
 struct EditorEnvironment {
     ScopedEnvUnset disable_editor{"PULP_DISABLE_PLUGIN_EDITOR"};
     ScopedEnvUnset headless{"PULP_HEADLESS"};
     ScopedEnvUnset test_mode{"PULP_TEST_MODE"};
     ScopedEnvUnset ci{"CI"};
+#if PULP_TEST_NEEDS_DISPLAY
+    ScopedEnvSet display{"DISPLAY", ":99"};
+    ScopedEnvUnset wayland{"WAYLAND_DISPLAY"};
+#endif
 };
 
 class HostApp final : public Steinberg::Vst::IHostApplication {
@@ -481,6 +522,38 @@ TEST_CASE("VST3 terminate closes a contract editor the host still holds",
     REQUIRE(view->onKeyDown(u' ', Steinberg::KEY_SPACE, 0) == Steinberg::kResultFalse);
     view->removed();
     view->release();
+}
+
+TEST_CASE("VST3 opens no contract editor where editors are refused",
+          "[vst3][editor-host][vst3-contract]") {
+    g_log = {};
+    g_config = {};
+    g_legacy_views = 0;
+    HostApp host_app;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    SECTION("a headless process") {
+        EditorEnvironment env;
+        ScopedEnvSet headless("PULP_HEADLESS", "1");
+        REQUIRE(processor.createView(Steinberg::Vst::ViewType::kEditor) == nullptr);
+    }
+#if PULP_TEST_NEEDS_DISPLAY
+    SECTION("no display") {
+        EditorEnvironment env;
+        ScopedEnvUnset display("DISPLAY");
+        REQUIRE(processor.createView(Steinberg::Vst::ViewType::kEditor) == nullptr);
+    }
+#endif
+    SECTION("the control: the same process with editors allowed opens one") {
+        EditorEnvironment env;
+        auto* raw = processor.createView(Steinberg::Vst::ViewType::kEditor);
+        REQUIRE(dynamic_cast<ContractPlugView*>(raw) != nullptr);
+        raw->release();
+    }
+    REQUIRE(g_log.live == 0);
+    REQUIRE(g_legacy_views == 0);
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
 TEST_CASE("VST3 keeps create_view() for a processor without an editor factory",
