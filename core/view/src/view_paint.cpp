@@ -2149,9 +2149,8 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
         const float device_width = bounds_.width * m.a;
         const float device_height = bounds_.height * m.d;
         const bool integral_device_extents =
-            std::isfinite(device_width) && std::isfinite(device_height) &&
-            device_width >= 1.0f && device_height >= 1.0f &&
-            device_width == std::floor(device_width) &&
+            std::isfinite(device_width) && std::isfinite(device_height) && device_width >= 1.0f &&
+            device_height >= 1.0f && device_width == std::floor(device_width) &&
             device_height == std::floor(device_height);
         const bool eligible =
             child_count() == 0 && canvas.supports(canvas::CanvasCapability::retained_layer_cache) &&

@@ -610,7 +610,7 @@ TEST_CASE("Static raster cache preserves captured box paint extents on every fra
 TEST_CASE("Static raster cache preserves edges at fractional device extents",
           "[view][subtree-cache][raster][fractional-extents]") {
     class ContrastView : public View {
-    public:
+      public:
         int paints = 0;
         void paint(Canvas& canvas) override {
             ++paints;
@@ -625,14 +625,9 @@ TEST_CASE("Static raster cache preserves edges at fractional device extents",
         float width, height, scale_x, scale_y;
         bool reusable;
     } cases[] = {
-        {32.5f, 32, 1, 1, false},
-        {32, 32.5f, 1, 1, false},
-        {31, 32, 1.25f, 1.25f, false},
-        {32, 31, 1.25f, 1.25f, false},
-        {31, 32, 1.25f, 2, false},
-        {32, 31, 2, 1.25f, false},
-        {32, 32, 1.25f, 1.25f, true},
-        {32.5f, 31.5f, 2, 2, true},
+        {32.5f, 32, 1, 1, false},      {32, 32.5f, 1, 1, false},   {31, 32, 1.25f, 1.25f, false},
+        {32, 31, 1.25f, 1.25f, false}, {31, 32, 1.25f, 2, false},  {32, 31, 2, 1.25f, false},
+        {32, 32, 1.25f, 1.25f, true},  {32.5f, 31.5f, 2, 2, true},
     };
     for (const auto& test : cases) {
         DYNAMIC_SECTION(test.width << "x" << test.height << " at " << test.scale_x << "x"
