@@ -1341,16 +1341,16 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             "external-not-evaluated-by-a2t",
         )
         self.assertEqual(
-            external[1]["introducing_revision"],
+            external[2]["introducing_revision"],
             "fefbfecd9fc014df54fc55d6f3259524f1179a49",
         )
         self.assertTrue(
-            external[1]["scope_authority"][
+            external[2]["scope_authority"][
                 "producer_introduction_touched_authority_path"
             ]
         )
         self.assertEqual(
-            external[1]["owner_evidence_status"],
+            external[2]["owner_evidence_status"],
             "external-not-evaluated-by-a2t",
         )
 
