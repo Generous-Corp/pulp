@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 176,
+  "inventory_version": 177,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 514,
-    "reviewed_headers": 264,
+    "public_headers": 515,
+    "reviewed_headers": 265,
     "legacy_unreviewed_headers": 250,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 95,
+      "infrastructure": 96,
       "legacy_unreviewed": 250,
       "unsupported_capability": 2
     },
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 279,
-        "reviewed_headers": 156,
+        "public_headers": 280,
+        "reviewed_headers": 157,
         "legacy_unreviewed_headers": 123,
         "unsupported_headers": 2
       },
@@ -4446,6 +4446,15 @@
         "signal.spectral-feature-frontends"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectral_frame_codec.hpp",
+      "fingerprint": "sha256:43e9fbdc2c1acf08d70523589b8cf25d4a4e98ea531898bfc2978aa5eec72a37",
+      "include": "pulp/signal/spectral_frame_codec.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Offline owned-value spectral stream encoding and strict decoding. This is persistence infrastructure, not a generator-facing DSP transform, graph routing contract, Processor serializer, or synthesis capability."
     },
     {
       "domain": "signal",

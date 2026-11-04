@@ -15861,6 +15861,26 @@
             "enums": []
           }
         ],
+        "spectral_frame_codec.hpp": [
+          {
+            "class": "EncodedSpectralStream",
+            "qualified_name": "pulp::signal::EncodedSpectralStream",
+            "template": null,
+            "methods": [
+              "view()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "SpectralCodecResult",
+            "qualified_name": "pulp::signal::SpectralCodecResult",
+            "template": "class T",
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
+          }
+        ],
         "spectral_frame_engine.hpp": [
           {
             "class": "SpectralFrameEngineT",

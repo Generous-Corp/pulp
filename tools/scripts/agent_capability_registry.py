@@ -9,6 +9,7 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    "pulp/signal/spectral_frame_codec.hpp": "Pulp::signal",
     "pulp/audio/impulse_response.hpp": "Pulp::audio",
     "pulp/audio/format_registry.hpp": "Pulp::audio",
     "pulp/audio/audio_file.hpp": "Pulp::audio",
@@ -173,6 +174,17 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/spectral_frame_codec.hpp",
+        "fingerprint": "sha256:43e9fbdc2c1acf08d70523589b8cf25d4a4e98ea531898bfc2978aa5eec72a37",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Offline owned-value spectral stream encoding and strict decoding. This is "
+            "persistence infrastructure, not a generator-facing DSP transform, graph "
+            "routing contract, Processor serializer, or synthesis capability."
+        ),
+    },
     {
         "include": "pulp/audio/impulse_response.hpp",
         "fingerprint": "sha256:740702d0bf9e54f8584de49999cfcf91c7c9b71c84c355b46a6a686e283bbe69",
