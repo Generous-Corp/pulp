@@ -619,10 +619,9 @@ TEST_CASE("Typed and spectral preparation remain separate admission lanes", "[tr
     std::size_t allocation_count = 0;
     {
         pulp::test::RtAllocationProbe probe;
-        refused_nodes = {spectral_first.add_trigger_producer({}),
-                         spectral_first.add_trigger_envelope({}),
-                         spectral_first.add_trigger_modulation(),
-                         spectral_first.add_trigger_lowpass(0.5f)};
+        refused_nodes = {
+            spectral_first.add_trigger_producer({}), spectral_first.add_trigger_envelope({}),
+            spectral_first.add_trigger_modulation(), spectral_first.add_trigger_lowpass(0.5f)};
         allocation_count = probe.allocation_count();
     }
     CHECK(allocation_count == 0);
