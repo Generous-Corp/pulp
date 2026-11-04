@@ -9,11 +9,18 @@
  },
  "executables": {
   "Pulp UI Script Fixture": {
-   "data": "none",
+   "data": "undeclared",
+   "detected_sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ],
    "inputs": [],
    "kind": "compiled",
-   "sources": [],
-   "undeclared_sources": []
+   "sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ],
+   "undeclared_sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ]
   },
   "pulp-control-broker-crash-fixture": {
    "data": "none",
@@ -12559,6 +12566,7 @@
     "core/host",
     "core/host/include",
     "core/host/include/pulp/host",
+    "core/host/src",
     "core/platform/include/pulp/platform/child_process.hpp",
     "docs/status",
     "docs/status/consumption-profiles.json",
