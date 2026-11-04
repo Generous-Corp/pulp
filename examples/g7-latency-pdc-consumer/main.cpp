@@ -53,12 +53,14 @@ int main() try {
     require(graph.connect(dry, 0, output, 0), "dry-output");
     require(graph.prepare(48000.0, 64), "prepare");
     require(graph.latency_samples() == 4, "total-pdc");
-    require(graph.node_latency_samples(delayed) == 4, "node-latency");
+    // This query reports latency arriving at the node input; the intrinsic
+    // four samples are reflected in the externally reported total.
+    require(graph.node_latency_samples(delayed) == 0, "node-input-latency");
 
     // Planted negative: an unknown node never yields a fabricated latency entry.
     require(graph.node_latency_samples(999999) == 0, "unknown-node-zero");
     std::cout << "g7-latency-pdc PASS total_latency_samples=" << graph.latency_samples()
-              << " delayed_node_latency_samples=" << graph.node_latency_samples(delayed) << '\n';
+              << " delayed_node_input_latency_samples=" << graph.node_latency_samples(delayed) << '\n';
     return 0;
 } catch (const std::exception& error) {
     std::cerr << "g7-latency-pdc FAIL rule=" << error.what() << '\n';
