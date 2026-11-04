@@ -271,6 +271,7 @@ bool clap_init(const clap_plugin_t* plugin) {
     self->param_events_monitor.arm(!self->sample_accurate_params, &self->param_events);
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
+    self->editor_factory = self->processor->editor_factory();
     request_editor_prewarm(*self->processor);
 
     if (self->host && self->host->get_extension) {

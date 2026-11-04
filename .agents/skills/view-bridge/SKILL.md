@@ -95,6 +95,38 @@ linker keeps whichever copy it sees first. The proof is
 `PluginSlot`, asserting `mode=scripted`, `gpu=true`, and the script's own
 console line) plus `ui-script-plugin-editor-installed-sdk`.
 
+### `UI <package>` is the editor-host contract's default, per binary
+
+`pulp_add_plugin(... UI <package>)` names a UI package target that declares
+`PULP_EDITOR_FACTORY_FUNCTION` (a function returning
+`::pulp::format::EditorFactory*`) and `PULP_EDITOR_FACTORY_HEADER`. Each format
+and standalone target compiles `<build>/pulp_editor_package/<plugin>.cpp`,
+which installs an internal-linkage hook at static init into an image-local slot
+(`pulp/format/editor_package.hpp`), and `Processor::editor_factory()`'s default
+returns what that hook returns. A package implies `NO_EDITOR`: the plug-in's
+VST3/CLAP/AU v2/LV2 modules link no Pulp view layer, and `NATIVE_UI`,
+`UI_SCRIPT`, `GPU_UI`, `FULL_EDITOR` or `LITE_EDITOR` beside it is a configure
+error. Things that are easy to get wrong:
+
+- The slot is per image only because `pulp-format-core` is linked statically
+  and its accessors are hidden. Do not move the slot into a shared library or
+  give its accessors default visibility: two plug-ins in one host would then
+  read one hook. `editor-ui-package-per-plugin-factory` loads four CLAPs into
+  one process to hold this.
+- Every processor in the binary that does not override `editor_factory()` gets
+  the package factory, including inner processors a wrapper composes. Hosts ask
+  only the top-level processor.
+- VST3 and CLAP open a non-null `editor_factory()` through
+  `ContractEditorSession` (`contract_editor_session.hpp`, `pulp-format-core`) before
+  they consider `create_view()`. A new format adapter should map its editor API
+  onto that session rather than re-implementing gesture release, the idle tick
+  or size negotiation.
+- The hook calls the package function lazily, on the first `editor_factory()`
+  call, never at load, so an AU bundle's early registrar never builds UI state.
+- A test that installs a hook with `install_plugin_editor_factory_hook()` must
+  clear it (`nullptr`) before it ends, or every later test in the grouped
+  binary sees a factory on a headless processor.
+
 ### Native scripted UI is not a WebView
 
 When a materialized canvas is retained as the native paint and hit-test

@@ -8,12 +8,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/format/contract_editor_session.hpp>
 #include <pulp/format/editor_host.hpp>
+#include <pulp/format/editor_package.hpp>
 #include <pulp/format/host_parameter_edit.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 
+#include <cstdint>
 #include <memory>
+#include <thread>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -229,6 +233,129 @@ TEST_CASE("destroying the last port mid-gesture releases its gestures",
     REQUIRE(f.host.entries.back().front() == 'E');
 }
 
+TEST_CASE("a disconnected ParamPort releases its gestures and refuses every later call",
+          "[editor-host][param-port]") {
+    Fixture f;
+    f.store.set_value(kGain, 0.25f);
+    StateStoreParamPort port(f.store);
+    int heard = 0;
+    auto subscription = port.add_listener([&heard](ParamID, float) { ++heard; });
+    port.begin(kGain);
+    REQUIRE(f.store.open_gesture_count() == 1);
+    REQUIRE(port.connected());
+
+    port.disconnect();
+    REQUIRE_FALSE(port.connected());
+    // Every gesture it held is closed, and the host saw it end.
+    REQUIRE(f.store.open_gesture_count() == 0);
+    REQUIRE(f.host.entries.back() == "E1");
+    const auto host_entries = f.host.entries.size();
+
+    // Nothing reads or writes the store any more. The parameter list stays
+    // readable: it is the port's own.
+    REQUIRE(port.params().size() == 2);
+    REQUIRE(port.info(kGain) != nullptr);
+    REQUIRE(port.get(kGain) == 0.0f);
+    port.begin(kGain);
+    port.set(kGain, 0.9f);
+    port.end(kGain);
+    REQUIRE(f.store.open_gesture_count() == 0);
+    REQUIRE(f.store.get_value(kGain) == 0.25f);
+    REQUIRE(port.open_gestures(kGain) == 0);
+    REQUIRE(f.host.entries.size() == host_entries);
+    REQUIRE_FALSE(port.add_listener([](ParamID, float) {}));
+
+    // Its listener was removed with it: a write by another writer is unheard.
+    f.store.set_value(kMix, 0.6f);
+    REQUIRE(heard == 0);
+
+    port.disconnect(); // idempotent
+    subscription.reset();
+}
+
+TEST_CASE("a ParamPort's parameter list is its own and outlives the store",
+          "[editor-host][param-port]") {
+    auto store = std::make_unique<StateStore>();
+    add_unit_param(*store, kGain, "Gain");
+    add_unit_param(*store, kMix, "Mix");
+    StateStoreParamPort port(*store);
+
+    // An editor builds its controls from these and keeps them.
+    const auto* gain = port.info(kGain);
+    const auto params = port.params();
+    REQUIRE(gain != nullptr);
+    REQUIRE(params.size() == 2);
+    // They are the port's copy, never pointers into the store, so destroying
+    // the store cannot leave them dangling.
+    REQUIRE(gain != store->info(kGain));
+    REQUIRE(params.data() != store->all_params().data());
+
+    port.disconnect();
+    store.reset();
+    REQUIRE(gain->id == kGain);
+    REQUIRE(gain->name == "Gain");
+    REQUIRE(params[1].name == "Mix");
+    REQUIRE(port.info(kMix) == &params[1]);
+}
+
+namespace pulp::format::detail {
+// Defined in editor_host.cpp: listener registrations reset so far.
+std::uint64_t param_port_listener_resets();
+} // namespace pulp::format::detail
+
+TEST_CASE("each ParamPort listener registration is reset exactly once",
+          "[editor-host][param-port]") {
+    using pulp::format::detail::param_port_listener_resets;
+    Fixture f;
+    SECTION("disconnect, then the subscription") {
+        StateStoreParamPort port(f.store);
+        auto subscription = port.add_listener([](ParamID, float) {});
+        const auto before = param_port_listener_resets();
+        port.disconnect();
+        subscription.reset();
+        REQUIRE(param_port_listener_resets() - before == 1);
+    }
+    SECTION("the subscription, then disconnect") {
+        StateStoreParamPort port(f.store);
+        auto subscription = port.add_listener([](ParamID, float) {});
+        const auto before = param_port_listener_resets();
+        subscription.reset();
+        port.disconnect();
+        REQUIRE(param_port_listener_resets() - before == 1);
+    }
+    SECTION("both at once, on two threads") {
+        constexpr int kRounds = 500;
+        const auto before = param_port_listener_resets();
+        for (int round = 0; round < kRounds; ++round) {
+            StateStoreParamPort port(f.store);
+            auto subscription = port.add_listener([](ParamID, float) {});
+            std::thread disconnector([&port] { port.disconnect(); });
+            subscription.reset();
+            disconnector.join();
+        }
+        REQUIRE(param_port_listener_resets() - before == kRounds);
+    }
+}
+
+TEST_CASE("a disconnected ParamPort outlives its store", "[editor-host][param-port]") {
+    auto store = std::make_unique<StateStore>();
+    add_unit_param(*store, kGain, "Gain");
+    StateStoreParamPort port(*store);
+    auto subscription = port.add_listener([](ParamID, float) {});
+    port.begin(kGain);
+    port.disconnect();
+    store.reset();
+
+    // The store is gone; the port and its subscription touch nothing of it.
+    REQUIRE(port.get(kGain) == 0.0f);
+    port.begin(kGain);
+    port.set(kGain, 0.5f);
+    port.end(kGain);
+    port.release_all();
+    subscription.reset();
+    REQUIRE(port.open_gestures(kGain) == 0);
+}
+
 TEST_CASE("ParamSubscription cancels exactly once and moves its ownership", "[editor-host]") {
     int cancelled = 0;
     {
@@ -402,6 +529,45 @@ TEST_CASE("a processor has no editor factory unless it provides one", "[editor-h
     REQUIRE(with_editor.editor_factory() != nullptr);
 }
 
+namespace {
+
+RecordingFactory& package_factory() {
+    static RecordingFactory factory;
+    return factory;
+}
+
+EditorFactory* package_hook() {
+    return &package_factory();
+}
+
+} // namespace
+
+TEST_CASE("a processor without its own factory returns its binary's UI package factory",
+          "[editor-host][editor-package]") {
+    struct ClearHook {
+        ~ClearHook() {
+            install_plugin_editor_factory_hook(nullptr);
+        }
+    } clear_hook;
+
+    GainProcessor processor;
+    REQUIRE(processor.editor_factory() == nullptr);
+
+    // What the source pulp_add_plugin(... UI <package>) generates does at
+    // static init.
+    install_plugin_editor_factory_hook(&package_hook);
+    REQUIRE(plugin_editor_factory() == &package_factory());
+    REQUIRE(processor.editor_factory() == &package_factory());
+
+    // A processor that supplies its own factory keeps it.
+    GainProcessorWithEditor with_editor;
+    REQUIRE(with_editor.editor_factory() != nullptr);
+    REQUIRE(with_editor.editor_factory() != &package_factory());
+
+    install_plugin_editor_factory_hook(nullptr);
+    REQUIRE(processor.editor_factory() == nullptr);
+}
+
 TEST_CASE("an editor and an inspector share one port through the contract",
           "[editor-host][multi-editor]") {
     Fixture f;
@@ -524,4 +690,68 @@ TEST_CASE("query_extension is null by default and reaches a host's extension", "
     REQUIRE(ext != nullptr);
     REQUIRE(ext->answer == 42);
     REQUIRE(through_base.query_extension("dev.pulp.test.example/2") == nullptr);
+}
+
+namespace {
+
+/// Counts idle ticks; attaches to any non-empty Cocoa parent.
+class TickingEditor final : public Editor {
+  public:
+    explicit TickingEditor(int& idles) : idles_(idles) {}
+    bool supports_parent(NativeParentKind kind) const override {
+        return kind == NativeParentKind::cocoa_view;
+    }
+    bool attach(const NativeParent&) override {
+        return true;
+    }
+    void detach() override {}
+    void invalidate() override {}
+    EditorSize size() const override {
+        return {400, 300, 1.0};
+    }
+    bool set_size(const EditorSize&) override {
+        return true;
+    }
+    void idle() override {
+        ++idles_;
+    }
+
+  private:
+    int& idles_;
+};
+
+class TickingFactory final : public EditorFactory {
+  public:
+    explicit TickingFactory(int& idles) : idles_(idles) {}
+    bool supports(EditorRole role) const override {
+        return role == EditorRole::editor;
+    }
+    std::unique_ptr<Editor> create(Processor&, EditorContext&, EditorRole) override {
+        return std::make_unique<TickingEditor>(idles_);
+    }
+
+  private:
+    int& idles_;
+};
+
+} // namespace
+
+TEST_CASE("a contract session whose owner is gone draws no more frames", "[editor-host]") {
+    Fixture f;
+    GainProcessor processor;
+    int idles = 0;
+    TickingFactory factory(idles);
+    auto session = ContractEditorSession::create(processor, f.store, factory, {},
+                                                 ContractEditorSession::IdleSource::host_driven);
+    REQUIRE(session);
+    int parent = 0;
+    REQUIRE(session->attach({NativeParentKind::cocoa_view, &parent, 0}));
+    session->tick();
+    REQUIRE(idles == 1);
+
+    session->disconnect_owner();
+    session->tick();
+    session->tick();
+    REQUIRE(idles == 1);
+    session->close_for_owner();
 }

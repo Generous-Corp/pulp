@@ -74,6 +74,11 @@ endfunction()
 #                                        # so hosts route inbound MIDI to the plug-in
 #       SOURCES         pulp_gain.hpp main.cpp
 #       PROCESSOR_FACTORY create_pulp_gain  # Function that returns unique_ptr<Processor>
+#       UI              my-ui-package    # optional; a UI package target whose editor
+#                                        # factory Processor::editor_factory() returns
+#                                        # by default (see PulpEditorPackage.cmake).
+#                                        # Implies NO_EDITOR's view-free link;
+#                                        # `none` or no UI adds nothing to the link
 #       SOURCE_GIT_SHA  "${MY_SHA}"      # optional; commit recorded in each bundle's
 #       SOURCE_GIT_DIRTY FALSE           # pulp-build-info.json (default: read from git
 #                                        # at build time; see PulpBuildInfo.cmake)
@@ -90,7 +95,7 @@ function(pulp_add_plugin target)
     _pulp_resolve_consumer_targets()
     cmake_parse_arguments(PLUGIN
         "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;LITE_EDITOR;GPU_UI;FULL_EDITOR;AAX_HEADLESS;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
-        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
+        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
         ${ARGN}
     )
@@ -103,6 +108,10 @@ function(pulp_add_plugin target)
     _pulp_reject_unknown_arguments("pulp_add_plugin(${target})" "${PLUGIN_UNPARSED_ARGUMENTS}" PRODUCES_MIDI)
     _pulp_reject_unknown_formats("pulp_add_plugin(${target})" "${PLUGIN_FORMATS}"
         VST3 CLAP AU LV2 AAX AUv3 Standalone)
+    if("UI" IN_LIST PLUGIN_KEYWORDS_MISSING_VALUES)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): UI needs a UI package target, or none")
+    endif()
 
     # Defaults
     if(NOT PLUGIN_PLUGIN_NAME)
@@ -139,6 +148,36 @@ function(pulp_add_plugin target)
     # override create_view(); if it does, the link fails on the view symbols.
     # Standalone, AUv3 and AAX still link the view stack: a standalone app and
     # an app-extension host need a window, and the AAX GUI glue is not split.
+    #
+    # UI <package> implies NO_EDITOR: the plug-in's editor is the package's,
+    # reached through Processor::editor_factory(), so its modules link no Pulp
+    # view layer. Keywords that select or force Pulp's own view editor
+    # contradict that and are a configure error. `UI none` selects no package
+    # and leaves the link as it would be without UI.
+    set(_pulp_no_editor_reason "NO_EDITOR")
+    # Read by format helpers that build a contract editor of their own (the AU
+    # v2 Cocoa view factory); always refreshed so a removed UI leaves nothing.
+    set(PULP_${target}_UI_PACKAGE "" CACHE INTERNAL "")
+    if(PLUGIN_UI AND NOT PLUGIN_UI STREQUAL "none")
+        set(PULP_${target}_UI_PACKAGE "${PLUGIN_UI}" CACHE INTERNAL "")
+        set(_pulp_ui_conflicts "")
+        foreach(_kw NATIVE_UI UI_SCRIPT GPU_UI FULL_EDITOR LITE_EDITOR)
+            if(PLUGIN_${_kw})
+                list(APPEND _pulp_ui_conflicts ${_kw})
+            endif()
+        endforeach()
+        if(_pulp_ui_conflicts)
+            list(JOIN _pulp_ui_conflicts ", " _pulp_ui_conflicts_text)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): UI ${PLUGIN_UI} cannot be combined with "
+                "${_pulp_ui_conflicts_text}. A UI package plug-in links no Pulp view layer "
+                "(UI implies NO_EDITOR), and those keywords select Pulp's own view editor.")
+        endif()
+        if(NOT PLUGIN_NO_EDITOR)
+            set(_pulp_no_editor_reason "UI ${PLUGIN_UI}")
+        endif()
+        set(PLUGIN_NO_EDITOR TRUE)
+    endif()
     if(PLUGIN_NO_EDITOR)
         if(PLUGIN_NATIVE_UI OR PLUGIN_UI_SCRIPT)
             message(FATAL_ERROR
@@ -146,11 +185,11 @@ function(pulp_add_plugin target)
         endif()
         if(NOT _PULP_FORMAT_CORE_TARGET)
             message(FATAL_ERROR
-                "pulp_add_plugin(${target} NO_EDITOR): this Pulp SDK does not export Pulp::format-core")
+                "pulp_add_plugin(${target} ${_pulp_no_editor_reason}): this Pulp SDK does not export Pulp::format-core")
         endif()
         if("CLAP" IN_LIST PLUGIN_FORMATS AND PULP_HAS_CLAP AND NOT _PULP_FORMAT_CLAP_CORE_TARGET)
             message(FATAL_ERROR
-                "pulp_add_plugin(${target} NO_EDITOR): this Pulp SDK does not export Pulp::format-clap-core")
+                "pulp_add_plugin(${target} ${_pulp_no_editor_reason}): this Pulp SDK does not export Pulp::format-clap-core")
         endif()
         set(PULP_${target}_NO_EDITOR TRUE CACHE INTERNAL "")
         set(_pulp_core_format_target "${_PULP_FORMAT_CORE_TARGET}")
@@ -457,6 +496,12 @@ function(pulp_add_plugin target)
     if("Standalone" IN_LIST PLUGIN_FORMATS)
         _pulp_add_standalone(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}" "${PLUGIN_VERSION}" "${PLUGIN_PROCESSOR_FACTORY}")
     endif()
+
+    # ── UI package ───────────────────────────────────────────────────────
+    # Every target above that constructs the processor links the package and
+    # compiles the generated hook, so Processor::editor_factory() returns the
+    # package's factory in each of this plug-in's binaries and no other.
+    _pulp_attach_ui_package(${target} "${PLUGIN_UI}")
 
     # ── Product icon ───────────────────────────────────────────────────
     # ICNS bundles a finished .icns as-is; ICON derives one from a 1024x1024

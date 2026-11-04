@@ -1,4 +1,5 @@
 #pragma once
+#include <pulp/graph/spectral_frame.hpp>
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/process_block.hpp>
@@ -6,6 +7,7 @@
 #include <pulp/graph/graph_runtime_levelization.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
 #include <pulp/graph/graph_runtime_queue.hpp>
+#include <pulp/graph/graph_runtime_probe.hpp>
 #include <pulp/format/graph_runtime_worker_pool.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
@@ -24,6 +26,19 @@ class AudioProcessLoadMeasurer;
 }
 
 namespace pulp::format {
+
+// One source-side audio observation, before downstream mixing/PDC and before
+// serial scratch reuse. Configure only while processing is stopped. The ring
+// has one audio-thread producer and one control-thread reader.
+struct GraphRuntimeAudioEdgeProbe {
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
+                  std::atomic<bool>::is_always_lock_free);
+    graph::GraphRuntimeProbe<> samples;
+    std::uint32_t source_index = 0;
+    std::uint32_t source_port = 0;
+    std::uint32_t edge_index = 0;
+    std::uint64_t timestamp_samples = 0;
+};
 
 enum class AudioRateModulationDelivery : std::uint8_t {
     LegacyParameterEvents = 0,
@@ -85,6 +100,8 @@ struct GraphRuntimeNodeProcessContext {
     // Borrowed, final plain-domain dense lanes for this node. The executor owns
     // both descriptors and samples; they remain valid only for this callback.
     std::span<const AudioRateModulationView> node_audio_rate_modulations;
+    const graph::SpectralFrameBatchView* spectral_input = nullptr;
+    std::span<graph::SpectralFrameBatchView* const> spectral_outputs;
 };
 
 using GraphRuntimeNodeProcessFn = bool (*)(
@@ -126,6 +143,8 @@ struct GraphRuntimeNodeBinding {
     // fans out or the source keeps its output across blocks. Hosted plug-in
     // slots and native cores, which pass inputs on as mutable, leave it false.
     bool reads_inputs_only = false;
+    const graph::SpectralFrameBatchView* spectral_input = nullptr;
+    std::span<graph::SpectralFrameBatchView* const> spectral_outputs;
 };
 
 /// Control-thread-built graph snapshot for GraphRuntimeExecutor.
@@ -272,7 +291,9 @@ struct GraphRuntimeExecutorResult {
 /// Per-worker scratch for a parallel executor is a separate concern and must
 /// not be overloaded onto this shared pool.
 class GraphRuntimeBufferPool {
-public:
+  public:
+    /// Render-owner reset of prepared audio/PDC storage without reallocating.
+    void clear_history() noexcept;
     GraphRuntimeBufferPool() = default;
     GraphRuntimeBufferPool(const GraphRuntimeBufferPool& other);
     GraphRuntimeBufferPool& operator=(const GraphRuntimeBufferPool& other);
@@ -771,17 +792,16 @@ public:
     // via the process context. MidiInput/MidiOutput system nodes carry no audio
     // and no binding; the caller pre-fills a MidiInput node's `out` and drains a
     // MidiOutput node's `in` around this call. Pass null for audio-only graphs.
-    GraphRuntimeExecutorResult process_routed(
-        ProcessBlock& block,
-        const GraphRuntimeSnapshot& snapshot,
-        GraphRuntimeBufferPool& pool,
-        GraphRuntimeMidiScratch* midi = nullptr,
-        GraphRuntimeAutomationScratch* automation = nullptr,
-        std::span<const graph::GraphTimedCommand> commands = {},
-        std::span<GraphRuntimeCommandDecision> command_results = {},
-        GraphRuntimeCommandHandler command_handler = {},
-        GraphRuntimeEventSink event_sink = {},
-        std::span<const std::uint8_t> skip_mask = {}) noexcept;
+    GraphRuntimeExecutorResult
+    process_routed(ProcessBlock& block, const GraphRuntimeSnapshot& snapshot,
+                   GraphRuntimeBufferPool& pool, GraphRuntimeMidiScratch* midi = nullptr,
+                   GraphRuntimeAutomationScratch* automation = nullptr,
+                   std::span<const graph::GraphTimedCommand> commands = {},
+                   std::span<GraphRuntimeCommandDecision> command_results = {},
+                   GraphRuntimeCommandHandler command_handler = {},
+                   GraphRuntimeEventSink event_sink = {},
+                   std::span<const std::uint8_t> skip_mask = {},
+                   GraphRuntimeAudioEdgeProbe* audio_probe = nullptr) noexcept;
 
     // `skip_mask` (optional, indexed by dense node index; empty = run everything):
     // a non-zero entry means "do not run this node — its output slots are already

@@ -373,7 +373,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::register_builtin_sample_region_types',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
                 address_expression='static_cast<bool (*)(pulp::host::SignalGraph&)>(&pulp::host::register_builtin_sample_region_types)',
             ),
             binding(
@@ -382,7 +382,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::register_builtin_sample_region_types',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
                 address_expression='static_cast<bool (*)(pulp::host::SignalGraph::PreparedTopologyEdit&)>(&pulp::host::register_builtin_sample_region_types)',
             ),
             binding(
@@ -391,7 +391,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::begin_prepared_topology_edit',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_declare_sample_region',
@@ -399,7 +399,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::declare_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_remove_sample_region',
@@ -407,7 +407,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::remove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_add_sample_region_member',
@@ -415,7 +415,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::add_sample_region_member',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_remove_sample_region_member',
@@ -423,7 +423,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::remove_sample_region_member',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_set_sample_kernel_config',
@@ -431,7 +431,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::set_sample_kernel_config',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_connect_in_sample_region',
@@ -439,7 +439,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::connect_in_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_prove_sample_region',
@@ -447,7 +447,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_sample_region',
@@ -455,7 +455,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_sample_regions',
@@ -463,7 +463,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_sample_region_parameter_contract',
@@ -471,7 +471,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::sample_region_parameter_contract',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_prepare',
@@ -479,7 +479,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::prepare',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_commit',
@@ -487,7 +487,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::commit',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='graph_prove_sample_region',
@@ -495,7 +495,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c20ca970ab4d33ebee0b6800c4801746d31523f4ac3ff4fa167a587beb6c399',
+                header_fingerprint='sha256:7e6e9a7d417035db9e3ceb30f8db5b46c8fb1c1884b2b213e57cb44cab9f0bac',
             ),
             binding(
                 role='graph_sample_region',
@@ -503,7 +503,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c20ca970ab4d33ebee0b6800c4801746d31523f4ac3ff4fa167a587beb6c399',
+                header_fingerprint='sha256:7e6e9a7d417035db9e3ceb30f8db5b46c8fb1c1884b2b213e57cb44cab9f0bac',
             ),
             binding(
                 role='graph_sample_regions',
@@ -511,7 +511,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c20ca970ab4d33ebee0b6800c4801746d31523f4ac3ff4fa167a587beb6c399',
+                header_fingerprint='sha256:7e6e9a7d417035db9e3ceb30f8db5b46c8fb1c1884b2b213e57cb44cab9f0bac',
             ),
             binding(
                 role='SampleRegionCandidate',
@@ -647,7 +647,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::bind_sample_region_parameters',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
             binding(
                 role='edit_add_exact_node',
@@ -655,7 +655,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::add_custom_node',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
                 address_expression='static_cast<pulp::host::NodeId (pulp::host::SignalGraph::PreparedTopologyEdit::*)(std::string_view, int, const std::string&)>(&pulp::host::SignalGraph::PreparedTopologyEdit::add_custom_node)',
             ),
             binding(
@@ -663,8 +663,9 @@ EXPORTS = [
                 kind='cpp_function',
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::connect',
+                address_expression='static_cast<bool (pulp::host::SignalGraph::PreparedTopologyEdit::*)(pulp::host::NodeId, pulp::host::PortIndex, pulp::host::NodeId, pulp::host::PortIndex)>(&pulp::host::SignalGraph::PreparedTopologyEdit::connect)',
                 target='Pulp::host',
-                header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                header_fingerprint='sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e',
             ),
         ],
     ),

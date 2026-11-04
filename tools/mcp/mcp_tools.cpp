@@ -4,14 +4,26 @@
 #include "mcp_json.hpp"
 #include "mcp_shell.hpp"
 #include "mcp_tools_internal.hpp"
+#include <pulp/platform/child_process.hpp>
 
 #include <filesystem>
+#include <mutex>
 #include <sstream>
 #include <string>
 
 namespace fs = std::filesystem;
 
 namespace pulp_mcp {
+
+namespace {
+std::mutex graph_executable_mutex;
+fs::path graph_executable;
+} // namespace
+
+void configure_graph_executable(std::string executable_path) {
+    std::lock_guard lock(graph_executable_mutex);
+    graph_executable = std::move(executable_path);
+}
 
 std::string handle_build(const std::string& /*params_json*/) {
     auto root = find_project_root();
@@ -143,19 +155,60 @@ std::string handle_graph(const std::string& params_json) {
     auto path = extract_string(params_json, "path");
     if (path.empty())
         return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: path is required\"}]}";
-    auto root = find_project_root();
-    if (root.empty())
-        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
-    auto binary = resolve_cli_binary(root);
     auto op = extract_string(params_json, "operation");
     if (op.empty())
         op = "inspect";
-    if (op == "canonicalize")
-        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: canonicalize is not available "
+    if (op != "inspect" && op != "validate" && op != "explain" && op != "render" && op != "probe")
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: operation is not available "
                "through the read-only MCP surface\"}]}";
-    auto output = exec(shell_quote(binary.string()) + " graph " + shell_quote(op) + " " +
-                       shell_quote(path) + " --json 2>&1");
-    return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+    fs::path binary;
+    if (op == "probe") {
+        std::lock_guard lock(graph_executable_mutex);
+        if (!graph_executable.empty())
+            binary = sibling_pulp_cpp_path(graph_executable);
+        if (binary.empty() || !fs::is_regular_file(binary))
+            return "{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"Error: matched "
+                   "sibling pulp-cpp is unavailable\"}]}";
+    } else {
+        const auto root = find_project_root();
+        if (root.empty())
+            return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+        binary = resolve_cli_binary(root);
+    }
+    auto command = shell_quote(binary.string()) + " graph " + shell_quote(op) + " " +
+                   shell_quote(path) + " --json";
+    if (op == "probe") {
+        std::vector<std::string> arguments{"graph", "probe", path, "--json"};
+        for (const auto& [key, flag] : {std::pair{"input", "--input"},
+                                        {"source_node", "--source-node"},
+                                        {"source_port", "--source-port"},
+                                        {"destination_node", "--destination-node"},
+                                        {"destination_port", "--destination-port"}}) {
+            const auto value = extract_string(params_json, key);
+            if (!value.empty()) {
+                arguments.emplace_back(flag);
+                arguments.push_back(value);
+            }
+        }
+        const auto block = extract_raw(params_json, "block_frames");
+        if (!block.empty()) {
+            arguments.emplace_back("--block-frames");
+            arguments.push_back(std::to_string(extract_int(params_json, "block_frames", -1)));
+        }
+        pulp::platform::ProcessOptions options;
+        options.timeout_ms = 30000;
+        options.max_output_bytes = 2 * 1024 * 1024;
+        const auto process = pulp::platform::ChildProcess::run(binary.string(), arguments, options);
+        const bool failed = process.exit_code != 0 || process.timed_out ||
+                            process.output_limit_exceeded || process.was_cancelled;
+        const auto output =
+            process.stdout_output.empty() ? process.stderr_output : process.stdout_output;
+        return "{\"isError\":" + std::string(failed ? "true" : "false") +
+               ",\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+    }
+    const auto result = exec_with_status(command + " 2>&1");
+    return "{\"isError\":" + std::string(result.failed() ? "true" : "false") +
+           ",\"content\":[{\"type\":\"text\",\"text\":" + json_string(result.output) + "}]}";
 }
 
 } // namespace pulp_mcp

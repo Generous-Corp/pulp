@@ -304,6 +304,10 @@ pulp_add_test_suite(pulp-test-host-parameter-edit GROUP pulp-test-group-cap-form
 pulp_add_test_suite(pulp-test-editor-host GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format pulp::state)
 
+# The cancellable main-thread timer behind contract editors' idle ticks.
+pulp_add_test_suite(pulp-test-main-thread-timer GROUP pulp-test-group-cap-format
+    LIBRARIES pulp::format)
+
 # Plugin registry: legacy single global slot + keyed multi-plugin-bundle table.
 pulp_add_test_suite(pulp-test-plugin-registry GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
@@ -384,6 +388,14 @@ if(PULP_HAS_CLAP)
     target_include_directories(pulp-test-clap-slot-channel-width
         PRIVATE ${PULP_ROOT_DIR}/core/host/src)
     catch_discover_tests(pulp-test-clap-slot-channel-width)
+
+    # The CLAP adapter opening a processor's editor through the editor-host
+    # contract, built the way a UI-package plug-in is: no PULP_CLAP_GUI, and
+    # the view-free pulp-format-clap-core.
+    add_executable(pulp-test-clap-contract-editor test_clap_contract_editor.cpp)
+    target_link_libraries(pulp-test-clap-contract-editor PRIVATE
+        pulp::format-clap-core clap Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-clap-contract-editor)
 
     add_executable(pulp-test-clap-entry test_clap_entry.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
@@ -482,6 +494,14 @@ if(PULP_HAS_CLAP)
 endif()
 
 if(PULP_HAS_VST3)
+    # The VST3 adapter opening a processor's editor through the editor-host
+    # contract. Links format-core alone: the test defines make_plug_view()
+    # itself to tell the create_view() path apart.
+    add_executable(pulp-test-vst3-contract-editor test_vst3_contract_editor.cpp)
+    target_link_libraries(pulp-test-vst3-contract-editor PRIVATE
+        pulp::format-core Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-vst3-contract-editor)
+
     add_executable(pulp-test-vst3-plugin-state
         test_vst3_plugin_state.cpp harness/rt_allocation_probe.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp

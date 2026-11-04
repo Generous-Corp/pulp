@@ -128,6 +128,7 @@
         "core/format/src/au_v2_midi_processor.cpp",
         "core/format/src/au_v2_common.cpp",
         "core/format/src/au_v2_cocoa_view.mm",
+        "core/format/src/au_v2_contract_view.mm",
         "core/format/include/pulp/format/au_v2_adapter.hpp",
         "core/format/include/pulp/format/au_v2_instrument.hpp",
         "core/format/include/pulp/format/au_v2_entry.hpp",

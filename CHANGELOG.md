@@ -9,6 +9,116 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1600"></a>
+## [1.60.0] - 2026-11-04
+
+- release/version bump ([#11535](https://github.com/Generous-Corp/pulp/pull/11535))
+- fix/windows runner policy version 20261104 ([#11533](https://github.com/Generous-Corp/pulp/pull/11533))
+
+<a id="v1590"></a>
+## [1.59.0] - 2026-11-04
+
+- release/version bump ([#11532](https://github.com/Generous-Corp/pulp/pull/11532))
+- feature/au editor contract ([#11466](https://github.com/Generous-Corp/pulp/pull/11466))
+- g5 typed trigger runtime ([#11527](https://github.com/Generous-Corp/pulp/pull/11527))
+- fix/skia runtime pin source 20261104 ([#11528](https://github.com/Generous-Corp/pulp/pull/11528))
+- docs/input provider boundary 20261104 ([#11529](https://github.com/Generous-Corp/pulp/pull/11529))
+
+<a id="v1580"></a>
+## [1.58.0] - 2026-11-04
+
+- release/version bump ([#11526](https://github.com/Generous-Corp/pulp/pull/11526))
+- graph/g3 io gain identity 20261103 ([#11513](https://github.com/Generous-Corp/pulp/pull/11513))
+
+<a id="v1570"></a>
+## [1.57.0] - 2026-11-04
+
+- release/version bump ([#11523](https://github.com/Generous-Corp/pulp/pull/11523))
+- feature/g10 routed ports 20261104 ([#11502](https://github.com/Generous-Corp/pulp/pull/11502))
+- feature/g7 latency pdc 20261104 ([#11522](https://github.com/Generous-Corp/pulp/pull/11522))
+- fix/windows warp policy main 20261104 ([#11518](https://github.com/Generous-Corp/pulp/pull/11518))
+- evidence/g5 runtime 20261104 ([#11519](https://github.com/Generous-Corp/pulp/pull/11519))
+
+<a id="v1560"></a>
+## [1.56.0] - 2026-11-04
+
+- feature/g2 serializer v4 20261104 ([#11521](https://github.com/Generous-Corp/pulp/pull/11521))
+- release/version bump ([#11516](https://github.com/Generous-Corp/pulp/pull/11516))
+- feature/g11 tuning cookbook 20261104 ([#11514](https://github.com/Generous-Corp/pulp/pull/11514))
+- fix/pr dispatch checkout v7 20261104 ([#11515](https://github.com/Generous-Corp/pulp/pull/11515))
+- feature/g11 named bus cookbook 20261104 ([#11511](https://github.com/Generous-Corp/pulp/pull/11511))
+- feature/g10 offline codec 20261103 ([#11512](https://github.com/Generous-Corp/pulp/pull/11512))
+- feature/g5 event fixture 20261104 ([#11509](https://github.com/Generous-Corp/pulp/pull/11509))
+- phase/g2 processor restore 20261104 ([#11510](https://github.com/Generous-Corp/pulp/pull/11510))
+
+<a id="v1550"></a>
+## [1.55.0] - 2026-11-04
+
+- release/version bump ([#11507](https://github.com/Generous-Corp/pulp/pull/11507))
+- feature/clap editor contract ([#11462](https://github.com/Generous-Corp/pulp/pull/11462))
+- codex/windows arm64ec toolset contract 20261104 ([#11489](https://github.com/Generous-Corp/pulp/pull/11489))
+- feature/g7 offline edge probe 20261104 ([#11505](https://github.com/Generous-Corp/pulp/pull/11505))
+- fix/g10 inventory clean record 20261103 ([#11498](https://github.com/Generous-Corp/pulp/pull/11498))
+- codex/g11 spatial cookbook 20261104 ([#11504](https://github.com/Generous-Corp/pulp/pull/11504))
+
+<a id="v1540"></a>
+## [1.54.0] - 2026-11-04
+
+- release/version bump ([#11503](https://github.com/Generous-Corp/pulp/pull/11503))
+- codex/g6 voice contract 20261104 ([#11495](https://github.com/Generous-Corp/pulp/pull/11495))
+- codex/windows fetchcontent isolation 20261103 ([#11499](https://github.com/Generous-Corp/pulp/pull/11499))
+- codex/g5 events wave2 20261103 ([#11473](https://github.com/Generous-Corp/pulp/pull/11473))
+
+<a id="v1530"></a>
+## [1.53.0] - 2026-11-04
+
+- release/version bump ([#11497](https://github.com/Generous-Corp/pulp/pull/11497))
+- codex/fix ci checkout pin 20261103 ([#11493](https://github.com/Generous-Corp/pulp/pull/11493))
+- codex/g9 descendant proof 20261103 ([#11484](https://github.com/Generous-Corp/pulp/pull/11484))
+- codex/g4 subgraphs 20261103 ([#11445](https://github.com/Generous-Corp/pulp/pull/11445))
+- feat/graph g2 save cli reload 20261103 ([#11490](https://github.com/Generous-Corp/pulp/pull/11490))
+
+<a id="v1520"></a>
+## [1.52.0] - 2026-11-04
+
+- release/version bump ([#11487](https://github.com/Generous-Corp/pulp/pull/11487))
+- feature/vst3 editor contract ([#11453](https://github.com/Generous-Corp/pulp/pull/11453))
+- codex/windows ui geometry perf 20261103 ([#11481](https://github.com/Generous-Corp/pulp/pull/11481))
+- dependabot/github_actions/github actions d7a6b05ada ([#11454](https://github.com/Generous-Corp/pulp/pull/11454))
+- wave3/g3 fingerprint diff undo 20261103 ([#11444](https://github.com/Generous-Corp/pulp/pull/11444))
+- codex/g7 edge integration 20261103 ([#11482](https://github.com/Generous-Corp/pulp/pull/11482))
+
+<a id="v1510"></a>
+## [1.51.0] - 2026-11-04
+
+- g10 contract design ([#11460](https://github.com/Generous-Corp/pulp/pull/11460))
+- release/version bump ([#11480](https://github.com/Generous-Corp/pulp/pull/11480))
+- codex/windows plugin client dpi 20261103 ([#11477](https://github.com/Generous-Corp/pulp/pull/11477))
+- feature/g10 typed spectral frame 20261103 ([#11476](https://github.com/Generous-Corp/pulp/pull/11476))
+
+<a id="v1500"></a>
+## [1.50.0] - 2026-11-03
+
+- release/version bump ([#11474](https://github.com/Generous-Corp/pulp/pull/11474))
+- feature/editor ui package hook ([#11446](https://github.com/Generous-Corp/pulp/pull/11446))
+- agent/g10g11 cookbook ([#11458](https://github.com/Generous-Corp/pulp/pull/11458))
+- codex/windows native standalone fix 20261103 ([#11459](https://github.com/Generous-Corp/pulp/pull/11459))
+
+<a id="v1490"></a>
+## [1.49.0] - 2026-11-03
+
+- release/version bump ([#11470](https://github.com/Generous-Corp/pulp/pull/11470))
+- ci/drift fast fetchcontent cache ([#11463](https://github.com/Generous-Corp/pulp/pull/11463))
+- graph g2 cli 20261102 ([#11441](https://github.com/Generous-Corp/pulp/pull/11441))
+- release/version bump ([#11461](https://github.com/Generous-Corp/pulp/pull/11461))
+- fix/confirm failure python unimportable ([#11447](https://github.com/Generous-Corp/pulp/pull/11447))
+- feature/skills vellum release lessons ([#11457](https://github.com/Generous-Corp/pulp/pull/11457))
+- release/version bump ([#11452](https://github.com/Generous-Corp/pulp/pull/11452))
+- fix/illustrator unicode names ([#11449](https://github.com/Generous-Corp/pulp/pull/11449))
+- release/version bump ([#11448](https://github.com/Generous-Corp/pulp/pull/11448))
+- fix/illustrator receipt symlink ([#11443](https://github.com/Generous-Corp/pulp/pull/11443))
+- feature/editor host thin slice ([#11442](https://github.com/Generous-Corp/pulp/pull/11442))
+
 <a id="v1480"></a>
 ## [1.48.0] - 2026-11-03
 
@@ -12112,6 +12222,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.60.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.60.0
+[1.59.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.59.0
+[1.58.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.58.0
+[1.57.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.57.0
+[1.56.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.56.0
+[1.55.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.55.0
+[1.54.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.54.0
+[1.53.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.53.0
+[1.52.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.52.0
+[1.51.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.51.0
+[1.50.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.50.0
+[1.49.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.49.0
 [1.48.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.48.0
 [1.47.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.47.0
 [1.46.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.46.1

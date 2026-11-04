@@ -530,6 +530,10 @@ pulp_add_test_suite(pulp-test-processor-node-adapter
     SOURCES test_processor_node_adapter.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 
+pulp_add_test_suite(pulp-test-spectral-frame-processor GROUP pulp-test-group-sampler-host-graph
+    SOURCES test_spectral_frame_processor.cpp
+    LIBRARIES pulp::host pulp::format pulp::signal pulp::graph)
+
 # A generated/native DSP core (C-ABI native_core) reaches a graph through the
 # SAME ProcessorNode path as any Processor — no separate generated-DSP runtime.
 # Standalone (HeadlessHost) and in-graph (ProcessorNode) output must be bit-exact.
@@ -553,4 +557,13 @@ pulp_add_test_suite(pulp-test-retained-history-dspx03 GROUP pulp-test-group-samp
 # Named typed graph ports expose structured, actionable authoring diagnostics.
 pulp_add_test_suite(pulp-test-signal-graph-named-ports
     SOURCES test_signal_graph_named_ports.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+pulp_add_test_suite(pulp-test-signal-graph-subgraph
+    SOURCES test_signal_graph_subgraph.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+
+# G-3 authored-name identity: normalization, aliasing, semantic fingerprint,
+# value-owned diff, and undo controls.
+pulp_add_test_suite(pulp-test-graph-identity
+    SOURCES test_graph_identity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)

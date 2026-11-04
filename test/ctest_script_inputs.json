@@ -1496,6 +1496,38 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-editor-ui-package-au-host": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "PulpEditorUiA_AU",
+    "PulpEditorUiNone_AU"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/fixtures/editor_ui_package/editor_ui_package_au_host.mm"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-editor-ui-package-host": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "PulpEditorUiA_CLAP",
+    "PulpEditorUiB_CLAP",
+    "PulpEditorUiNone_CLAP",
+    "PulpEditorUiPlain_CLAP"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/fixtures/editor_ui_package/editor_ui_package_host.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-embed-compress": {
    "data": "declared",
    "detected_sources": [
@@ -1625,6 +1657,13 @@
    "sources": [
     "test/test_gpu_wavenet_session.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-graph-identity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
    "undeclared_sources": []
   },
   "pulp-test-graph-plugin-resolution": {
@@ -2324,6 +2363,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-routed-spectral-ports": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_routed_spectral_faults.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-sample-region-runtime": {
    "data": "none",
    "inputs": [],
@@ -2416,6 +2467,13 @@
    "spawns": "undeclared",
    "undeclared_sources": []
   },
+  "pulp-test-signal-graph-subgraph": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-signal-graph-x9-modular-instrument": {
    "data": "none",
    "inputs": [],
@@ -2426,6 +2484,21 @@
     "test/test_signal_graph_x9_modular_instrument.cpp"
    ],
    "spawns": "undeclared",
+   "undeclared_sources": []
+  },
+  "pulp-test-spectral-codec": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_spectral_frame_codec.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/spectral-frame-codec/asymmetric.hex",
+    "test/fixtures/spectral-frame-codec/zero.hex"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_spectral_frame_codec.cpp"
+   ],
    "undeclared_sources": []
   },
   "pulp-test-streaming-model-contract": {
@@ -2680,6 +2753,7 @@
   "pulp-test-au-plugin-state",
   "pulp-test-au-v2-cocoa-shipping",
   "pulp-test-au-v2-cocoa-ui",
+  "pulp-test-au-v2-contract-view",
   "pulp-test-au-v2-instrument-rt",
   "pulp-test-au-v2-param-display",
   "pulp-test-audio",
@@ -2713,6 +2787,7 @@
   "pulp-test-child-process-standard-input",
   "pulp-test-clap-ara-extension",
   "pulp-test-clap-bundle-entry",
+  "pulp-test-clap-contract-editor",
   "pulp-test-clap-editor-audio-continuity",
   "pulp-test-clap-entry",
   "pulp-test-clap-host-validation",
@@ -2863,6 +2938,8 @@
   "pulp-test-dspx07-projection",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
+  "pulp-test-editor-ui-package-au-host",
+  "pulp-test-editor-ui-package-host",
   "pulp-test-embed-compress",
   "pulp-test-external-input",
   "pulp-test-external-input-ingress",
@@ -2942,6 +3019,7 @@
   "pulp-test-gpu-wavenet-realtime-node",
   "pulp-test-gpu-wavenet-session",
   "pulp-test-graph-executor-routing",
+  "pulp-test-graph-identity",
   "pulp-test-graph-plugin-resolution",
   "pulp-test-graph-runtime-worker-pool",
   "pulp-test-graphic-eq",
@@ -3158,6 +3236,7 @@
   "pulp-test-reloadable-shell",
   "pulp-test-render-loop",
   "pulp-test-render-scenario",
+  "pulp-test-routed-spectral-ports",
   "pulp-test-routing-primitives",
   "pulp-test-runtime",
   "pulp-test-runtime-effect-names-gpu",
@@ -3217,6 +3296,7 @@
   "pulp-test-signal-graph-named-ports",
   "pulp-test-signal-graph-offline-parity",
   "pulp-test-signal-graph-pulpsynth-automation",
+  "pulp-test-signal-graph-subgraph",
   "pulp-test-signal-graph-x9-modular-instrument",
   "pulp-test-signal-harmony-engine",
   "pulp-test-signal-leslie",
@@ -3247,10 +3327,12 @@
   "pulp-test-skia-surface-readback-macos",
   "pulp-test-smf-interchange",
   "pulp-test-sos-cascade",
+  "pulp-test-spectral-codec",
   "pulp-test-spectral-cross-synthesis",
   "pulp-test-spectral-feature-frontends",
   "pulp-test-spectral-feature-frontends-no-exceptions",
   "pulp-test-spectral-gate-blur",
+  "pulp-test-spectral-guarded-split",
   "pulp-test-spectral-morph",
   "pulp-test-spectral-stream-start",
   "pulp-test-standalone-recording",
@@ -3291,6 +3373,7 @@
   "pulp-test-timeline-smf",
   "pulp-test-tracing",
   "pulp-test-transition-cost",
+  "pulp-test-trigger-admission",
   "pulp-test-true-peak-limiter",
   "pulp-test-udev-monitor",
   "pulp-test-unique-temp-dir",
@@ -3307,6 +3390,7 @@
   "pulp-test-vst3-audio-parity",
   "pulp-test-vst3-bundle-entry",
   "pulp-test-vst3-connection",
+  "pulp-test-vst3-contract-editor",
   "pulp-test-vst3-editor",
   "pulp-test-vst3-host-process-clock",
   "pulp-test-vst3-hosted-editor",
@@ -5464,6 +5548,14 @@
     "tools/scripts/framework_neutrality_check.py",
     "tools/scripts/test_cmajor_external_extra.py",
     "tools/validation"
+   ],
+   "kind": "python"
+  },
+  "g9-hostile-fixture-regression": {
+   "entry": "tools/validation/test_g9_hostile_fixture.py",
+   "inputs": [
+    "tools/validation/g9_hostile_fixture.py",
+    "tools/validation/test_g9_hostile_fixture.py"
    ],
    "kind": "python"
   },
@@ -13455,6 +13547,20 @@
    ],
    "kind": "python"
   },
+  "windows-arm64ec-provider-validator-selftest": {
+   "entry": "tools/windows/test_validate_arm64ec_provider.py",
+   "inputs": [
+    "tools/windows/test_validate_arm64ec_provider.py"
+   ],
+   "kind": "python"
+  },
+  "windows-arm64ec-thunk-tool-selftest": {
+   "entry": "tools/windows/test_build_arm64ec_stl_thunks.py",
+   "inputs": [
+    "tools/windows/test_build_arm64ec_stl_thunks.py"
+   ],
+   "kind": "python"
+  },
   "windows-posix-shims-selftest": {
    "entry": "tools/scripts/test_windows_posix_shims.py",
    "inputs": [
@@ -13544,20 +13650,6 @@
    "entry": "tools/scripts/test_check_yoga_oracle_pin.py",
    "inputs": [
     "tools/scripts/test_check_yoga_oracle_pin.py"
-   ],
-   "kind": "python"
-  },
-  "windows-arm64ec-provider-validator-selftest": {
-   "entry": "tools/windows/test_validate_arm64ec_provider.py",
-   "inputs": [
-    "tools/windows/test_validate_arm64ec_provider.py"
-   ],
-   "kind": "python"
-  },
-  "windows-arm64ec-thunk-tool-selftest": {
-   "entry": "tools/windows/test_build_arm64ec_stl_thunks.py",
-   "inputs": [
-    "tools/windows/test_build_arm64ec_stl_thunks.py"
    ],
    "kind": "python"
   }

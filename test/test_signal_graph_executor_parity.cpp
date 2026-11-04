@@ -3636,3 +3636,356 @@ TEST_CASE("Translated routing binder resolves an emitting event-aware custom nod
     }
     REQUIRE(saw_emission);
 }
+
+TEST_CASE("SignalGraph named audio edge probe observes its source without changing audio",
+          "[signal-graph][edge-probe]") {
+    using Status = SignalGraph::EdgeProbeStatus;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto gain = graph.add_gain_node("observed");
+    const auto downstream = graph.add_gain_node("downstream");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, downstream, 0));
+    REQUIRE(graph.connect(downstream, 0, output, 0));
+    graph.set_node_gain(gain, 0.5f);
+    graph.set_node_gain(downstream, 0.25f);
+    const auto source = graph.node(gain)->out("audio");
+    const auto destination = graph.node(downstream)->in("audio");
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::Unprepared);
+    REQUIRE(graph.prepare(48000, 64));
+    std::array<float, 64> in, out;
+    in.fill(0.5f);
+    const float* ip = in.data();
+    float* op = out.data();
+    pulp::audio::BufferView<const float> iv(&ip, 1, 64);
+    pulp::audio::BufferView<float> ov(&op, 1, 64);
+    graph.process(ov, iv, 64);
+    const auto baseline = out;
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::Attached);
+    const auto identity = graph.audio_edge_probe_identity();
+    REQUIRE(identity.connection != 0);
+    REQUIRE(identity.source == gain);
+    REQUIRE(identity.destination == downstream);
+    REQUIRE(identity.authoring.graph_identity == graph.authoring_receipt().graph_identity);
+    {
+        pulp::test::RtAllocationProbe allocation;
+        graph.process(ov, iv, 64);
+        REQUIRE_FALSE(allocation.saw_allocation());
+    }
+    REQUIRE(out == baseline);
+    pulp::graph::GraphRuntimeProbeSample sample;
+    REQUIRE(graph.read_audio_edge_probe(sample));
+    REQUIRE(sample.sequence == 0);
+    REQUIRE(sample.timestamp_samples == 0);
+    REQUIRE(sample.frames == 64);
+    REQUIRE(sample.peak == 0.25f);
+    REQUIRE(sample.rms == 0.25f);
+    // Distinguish the selected source from graph output and a wrong source.
+    REQUIRE(sample.peak != out[0]);
+    REQUIRE(sample.peak != in[0]);
+    REQUIRE_FALSE(graph.read_audio_edge_probe(sample));
+    for (int block = 0; block < 258; ++block)
+        graph.process(ov, iv, 64);
+    REQUIRE(graph.audio_edge_probe_dropped() == 2);
+    REQUIRE(graph.read_audio_edge_probe(sample));
+    REQUIRE(sample.sequence == 1);
+    REQUIRE(sample.timestamp_samples == 64);
+    for (int i = 0; i < 255; ++i)
+        REQUIRE(graph.read_audio_edge_probe(sample));
+    REQUIRE_FALSE(graph.read_audio_edge_probe(sample));
+    pulp::audio::BufferView<const float> short_iv(&ip, 1, 32);
+    pulp::audio::BufferView<float> short_ov(&op, 1, 32);
+    graph.process(short_ov, short_iv, 32);
+    REQUIRE(graph.read_audio_edge_probe(sample));
+    REQUIRE(sample.timestamp_samples == 259 * 64);
+    REQUIRE(sample.frames == 32);
+    graph.detach_audio_edge_probe();
+    REQUIRE(graph.audio_edge_probe_status() == Status::Detached);
+    graph.process(ov, iv, 64);
+    REQUIRE_FALSE(graph.read_audio_edge_probe(sample));
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::Attached);
+    REQUIRE(graph.audio_edge_probe_dropped() == 0);
+    graph.process(ov, iv, 64);
+    REQUIRE(graph.read_audio_edge_probe(sample));
+    REQUIRE(sample.timestamp_samples == 0);
+    REQUIRE(sample.sequence == 0);
+    REQUIRE(graph.prepare(48000, 64));
+    REQUIRE(graph.audio_edge_probe_status() == Status::Detached);
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::Attached);
+    REQUIRE(graph.disconnect(gain, 0, downstream, 0));
+    REQUIRE(graph.audio_edge_probe_status() == Status::Unprepared);
+    REQUIRE_FALSE(graph.read_audio_edge_probe(sample));
+    REQUIRE(graph.connect(gain, 0, downstream, 0));
+    REQUIRE(graph.prepare(48000, 64));
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::Attached);
+    REQUIRE(graph.audio_edge_probe_identity().connection != identity.connection);
+}
+
+TEST_CASE("SignalGraph edge probe rejects unsupported identities and execution modes",
+          "[signal-graph][edge-probe]") {
+    using Status = SignalGraph::EdgeProbeStatus;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto gain = graph.add_gain_node();
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.prepare(48000, 64));
+    auto source = graph.node(gain)->out("audio");
+    const auto destination = graph.node(output)->in("audio");
+    auto missing = source;
+    missing.name = "not-a-port";
+    REQUIRE(graph.attach_audio_edge_probe(missing, destination) == Status::UnknownPort);
+    missing = source;
+    ++missing.index;
+    REQUIRE(graph.attach_audio_edge_probe(missing, destination) == Status::UnknownPort);
+    REQUIRE(graph.attach_audio_edge_probe(graph.node(input)->out("audio"), destination) ==
+            Status::MissingEdge);
+    for (const auto kind : {pulp::host::PortKind::Midi, pulp::host::PortKind::Event,
+                            pulp::host::PortKind::Control, pulp::host::PortKind::Sidechain}) {
+        missing = source;
+        missing.kind = kind;
+        REQUIRE(graph.attach_audio_edge_probe(missing, destination) == Status::UnsupportedKind);
+    }
+    graph.set_parallel_routing_enabled(true);
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::UnsupportedExecution);
+    graph.set_parallel_routing_enabled(false);
+    graph.set_anticipation_enabled(true);
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::UnsupportedExecution);
+    graph.set_anticipation_enabled(false);
+    graph.set_canonical_executor_routing_enabled(false);
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::UnsupportedExecution);
+    graph.set_canonical_executor_routing_enabled(true);
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::Attached);
+    std::array<float, 64> in{}, out{};
+    const float* ip = in.data();
+    float* op = out.data();
+    pulp::audio::BufferView<const float> iv(&ip, 1, 64);
+    pulp::audio::BufferView<float> ov(&op, 1, 64);
+    pulp::format::ProcessContext transport;
+    transport.reset_requested = true;
+    graph.process(ov, iv, 64, transport);
+    REQUIRE(graph.audio_edge_probe_status() == Status::Detached);
+    pulp::graph::GraphRuntimeProbeSample sample;
+    REQUIRE_FALSE(graph.read_audio_edge_probe(sample));
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::Attached);
+    graph.set_canonical_executor_routing_enabled(false);
+    graph.process(ov, iv, 64);
+    REQUIRE(graph.audio_edge_probe_status() == Status::Detached);
+    REQUIRE_FALSE(graph.read_audio_edge_probe(sample));
+}
+
+TEST_CASE("SignalGraph edge probe has one concurrent reader and bounded loss accounting",
+          "[signal-graph][edge-probe]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(48000, 32));
+    REQUIRE(graph.attach_audio_edge_probe(graph.node(input)->out("audio"),
+                                          graph.node(output)->in("audio")) ==
+            SignalGraph::EdgeProbeStatus::Attached);
+    constexpr std::uint64_t blocks = 2000;
+    std::atomic<bool> done{false};
+    std::atomic<bool> allocated{false};
+    std::thread producer([&] {
+        std::array<float, 32> in, out;
+        in.fill(0.125f);
+        const float* ip = in.data();
+        float* op = out.data();
+        pulp::audio::BufferView<const float> iv(&ip, 1, 32);
+        pulp::audio::BufferView<float> ov(&op, 1, 32);
+        pulp::test::RtAllocationProbe allocation;
+        for (std::uint64_t block = 0; block < blocks; ++block)
+            graph.process(ov, iv, 32);
+        allocated.store(allocation.saw_allocation());
+        done.store(true, std::memory_order_release);
+    });
+    std::uint64_t count = 0, last_timestamp = 0;
+    bool valid = true;
+    const auto consume = [&](const pulp::graph::GraphRuntimeProbeSample& sample) {
+        valid = valid && sample.sequence == count && sample.rms == 0.125f && sample.frames == 32 &&
+                sample.timestamp_samples % 32 == 0 &&
+                (count == 0 || sample.timestamp_samples > last_timestamp);
+        last_timestamp = sample.timestamp_samples;
+        ++count;
+    };
+    pulp::graph::GraphRuntimeProbeSample sample;
+    REQUIRE(pulp::test::pump_until([&] { return done.load(std::memory_order_acquire); },
+                                   [&] {
+                                       if (graph.read_audio_edge_probe(sample))
+                                           consume(sample);
+                                       else
+                                           std::this_thread::yield();
+                                   }));
+    producer.join();
+    while (graph.read_audio_edge_probe(sample))
+        consume(sample);
+    REQUIRE(valid);
+    REQUIRE_FALSE(allocated.load());
+    REQUIRE(count > 0);
+    REQUIRE(count + graph.audio_edge_probe_dropped() == blocks);
+}
+
+TEST_CASE("SignalGraph edge probe refuses real feedback and MIDI connections",
+          "[signal-graph][edge-probe]") {
+    using Status = SignalGraph::EdgeProbeStatus;
+    SignalGraph graph;
+    const auto gain = graph.add_gain_node();
+    const auto output = graph.add_output_node(1);
+    const auto midi_in = graph.add_midi_input_node();
+    const auto midi_out = graph.add_midi_output_node();
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.connect_feedback(gain, 0, gain, 0));
+    REQUIRE(graph.connect_midi(midi_in, midi_out));
+    REQUIRE(graph.prepare(48000, 64));
+    REQUIRE(graph.attach_audio_edge_probe(graph.node(gain)->out("audio"),
+                                          graph.node(gain)->in("audio")) ==
+            Status::UnsupportedKind);
+    REQUIRE(graph.attach_audio_edge_probe(graph.node(midi_in)->out("audio"),
+                                          graph.node(midi_out)->in("audio")) ==
+            Status::UnsupportedKind);
+    REQUIRE(graph.attach_audio_edge_probe(graph.node(gain)->out("audio"),
+                                          graph.node(output)->in("audio")) == Status::Attached);
+    const auto identity = graph.audio_edge_probe_identity();
+    REQUIRE(graph.attach_audio_edge_probe(graph.node(gain)->out("audio"),
+                                          graph.node(gain)->in("audio")) ==
+            Status::UnsupportedKind);
+    REQUIRE(graph.audio_edge_probe_status() == Status::Attached);
+    REQUIRE(graph.audio_edge_probe_identity().connection == identity.connection);
+}
+
+TEST_CASE("G5 evidence: existing Custom MIDI lane delivers a bounded same-block trace",
+          "[host][graph][executor][custom][midi][g5-evidence]") {
+    // Evidence only: the fixture supplies block-relative offsets. This does not
+    // implement packet epochs, cursors, late refusal, or a transport scheduler.
+    struct Trace {
+        std::array<int, 16> times{};
+        std::array<int, 16> notes{};
+        std::size_t count = 0;
+        int cursor = 0;
+        int block_start = 0;
+        int producer_calls = 0;
+        int consumer_calls = 0;
+        bool same_block = true;
+        bool legal_offsets = true;
+        bool bounded = false;
+        std::size_t capacity = 0;
+        std::size_t retained = 0;
+        std::uint32_t drops = 0;
+    };
+    constexpr std::array<int, 7> times{0, 7, 7, 31, 32, 63, 95};
+    constexpr std::array<int, 7> notes{60, 62, 61, 63, 64, 65, 66};
+    auto run = [&](const std::vector<int>& partitions, bool connected, bool flood) {
+        Trace trace;
+        SignalGraph graph;
+        pulp::host::CustomNodeType producer;
+        producer.type_id = "pulp.test.g5_existing_producer";
+        producer.version = 1;
+        producer.num_input_ports = producer.num_output_ports = 1;
+        producer.process_events = [&](pulp::audio::BufferView<float>& out,
+                                      const pulp::audio::BufferView<const float>&, int n,
+                                      const pulp::host::CustomNodeEventBlock& events) {
+            trace.block_start = trace.cursor;
+            ++trace.producer_calls;
+            if (events.out != nullptr) {
+                trace.bounded = events.out->realtime_capacity_limited();
+                trace.capacity = events.out->event_capacity();
+                if (flood) {
+                    for (std::size_t i = 0; i < trace.capacity + 3; ++i)
+                        events.out->add(pulp::midi::MidiEvent::note_on(
+                            0, static_cast<std::uint8_t>(i % 128), 100));
+                } else {
+                    for (std::size_t i = 0; i < times.size(); ++i) {
+                        if (times[i] < trace.cursor || times[i] >= trace.cursor + n)
+                            continue;
+                        auto event = pulp::midi::MidiEvent::note_on(0, notes[i], 100);
+                        event.sample_offset = times[i] - trace.cursor;
+                        events.out->add(event);
+                    }
+                }
+                trace.retained = events.out->size();
+                trace.drops = events.out->dropped_event_count();
+            }
+            trace.cursor += n;
+            for (int i = 0; i < n; ++i)
+                out.channel_ptr(0)[i] = 0.0f;
+        };
+        pulp::host::CustomNodeType consumer;
+        consumer.type_id = "pulp.test.g5_existing_consumer";
+        consumer.version = 1;
+        consumer.num_input_ports = consumer.num_output_ports = 1;
+        consumer.process_events = [&](pulp::audio::BufferView<float>& out,
+                                      const pulp::audio::BufferView<const float>&, int n,
+                                      const pulp::host::CustomNodeEventBlock& events) {
+            ++trace.consumer_calls;
+            trace.same_block &= trace.producer_calls == trace.consumer_calls;
+            if (events.in != nullptr) {
+                for (const auto& event : *events.in) {
+                    trace.legal_offsets &= event.sample_offset >= 0 && event.sample_offset < n;
+                    if (trace.count < trace.times.size()) {
+                        trace.times[trace.count] = trace.block_start + event.sample_offset;
+                        trace.notes[trace.count] = event.data()[1];
+                    }
+                    ++trace.count;
+                    if (events.out != nullptr)
+                        events.out->add(event);
+                }
+            }
+            for (int i = 0; i < n; ++i)
+                out.channel_ptr(0)[i] = 0.0f;
+        };
+        REQUIRE(graph.register_custom_node_type(producer));
+        REQUIRE(graph.register_custom_node_type(consumer));
+        const auto input = graph.add_input_node(1, "In");
+        // Reverse creation order: the event edge must order these callbacks.
+        const auto sink = graph.add_custom_node(consumer.type_id, "Consumer");
+        const auto source = graph.add_custom_node(producer.type_id, "Producer");
+        const auto output = graph.add_output_node(1, "Out");
+        const auto midi_output = graph.add_midi_output_node("MIDI Out");
+        REQUIRE(source != 0);
+        REQUIRE(sink != 0);
+        REQUIRE(graph.connect(input, 0, source, 0));
+        REQUIRE(graph.connect(input, 0, sink, 0));
+        REQUIRE(graph.connect(sink, 0, output, 0));
+        if (connected)
+            REQUIRE(graph.connect_midi(source, sink));
+        REQUIRE(graph.connect_midi(sink, midi_output));
+        graph.set_canonical_executor_routing_enabled(true);
+        REQUIRE(graph.prepare(48000.0, 96));
+        REQUIRE(graph.routed_execution_status(96).routed_path_ready());
+        graph.acquire_routed_only_execution();
+        for (const int n : partitions) {
+            run_graph_process(graph, n, {std::vector<float>(n, 0.0f)}, 1);
+            const auto egress = drain_egress(graph, midi_output);
+            REQUIRE(egress.complete == !flood);
+        }
+        REQUIRE(graph.routed_only_execution_failures() == 0);
+        graph.release_routed_only_execution();
+        return trace;
+    };
+    for (const auto& partitions :
+         std::vector<std::vector<int>>{{96}, {32, 32, 32}, {7, 25, 1, 31, 32}}) {
+        const auto trace = run(partitions, true, false);
+        REQUIRE(trace.count == times.size());
+        REQUIRE(trace.same_block);
+        REQUIRE(trace.legal_offsets);
+        REQUIRE(trace.bounded);
+        REQUIRE(trace.drops == 0);
+        for (std::size_t i = 0; i < times.size(); ++i) {
+            REQUIRE(trace.times[i] == times[i]);
+            REQUIRE(trace.notes[i] == notes[i]);
+        }
+        // Planted negative: removing the event edge starves the same consumer.
+        REQUIRE(run(partitions, false, false).count == 0);
+    }
+    const auto overflow = run({96}, true, true);
+    REQUIRE(overflow.bounded);
+    REQUIRE(overflow.capacity > 0);
+    REQUIRE(overflow.retained == overflow.capacity);
+    REQUIRE(overflow.drops == 3);
+    REQUIRE(overflow.count == overflow.capacity);
+    REQUIRE(overflow.same_block);
+    REQUIRE(overflow.legal_offsets);
+}

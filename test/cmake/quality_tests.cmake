@@ -28,6 +28,10 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
+    add_test(NAME g9-hostile-fixture-regression
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/validation/test_g9_hostile_fixture.py")
+
     # The typed editor bridge is generated from one TOML contract. Keep the
     # safety audit and its production-path gate in the configured test graph so
     # a contract that is valid TOML but unsafe after C++/TypeScript name

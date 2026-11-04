@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import struct
 import sys
 from dataclasses import dataclass
@@ -31,6 +32,40 @@ ARM64X_MACHINES = frozenset({0xA641, 0xA64E, 0xAA64})
 class ArchiveMember:
     name: str
     machine: int
+
+
+def _version(value: object, *, label: str) -> tuple[int, int, int]:
+    """Parse a dotted MSVC compiler version from provider metadata or CMake."""
+    match = re.search(r"(?<!\d)(\d+)\.(\d+)\.(\d+)(?!\d)", str(value))
+    if not match:
+        raise ValueError(f"{label} does not contain a compiler version: {value!r}")
+    return tuple(int(part) for part in match.groups())
+
+
+def _provider_compiler_version(document: dict[str, object]) -> tuple[int, int, int]:
+    """Return the compiler version used to produce the static provider.
+
+    Skia and Dawn record their compiler independently.  Both records are
+    required (the archives are validated together) and must agree; silently choosing one would allow a mixed
+    provider to pass the consumer ABI gate and fail later at link time.
+    """
+    producer = document.get("producer")
+    if not isinstance(producer, dict):
+        raise ValueError("provider metadata is missing producer compiler records")
+    versions: list[tuple[int, int, int]] = []
+    for key in ("skia_gn_compiler", "dawn_cmake_compiler"):
+        record = producer.get(key)
+        if record is None:
+            raise ValueError(f"provider metadata is missing the {key} record")
+        if not isinstance(record, dict) or "version" not in record:
+            raise ValueError(f"provider metadata has an invalid {key} record")
+        versions.append(_version(record["version"], label=f"provider {key}"))
+    if not versions:
+        raise ValueError("provider metadata has no producer compiler version")
+    if any(candidate != versions[0] for candidate in versions[1:]):
+        rendered = ", ".join(".".join(str(part) for part in candidate) for candidate in versions)
+        raise ValueError(f"provider compiler versions disagree: {rendered}")
+    return versions[0]
 
 
 def _member_name(raw: bytes, longnames: bytes) -> str | None:
@@ -103,7 +138,10 @@ def read_coff_archive(path: pathlib.Path) -> list[ArchiveMember]:
 
 
 def validate_provider(
-    archives: list[pathlib.Path], target: str, metadata: pathlib.Path | None = None
+    archives: list[pathlib.Path],
+    target: str,
+    metadata: pathlib.Path | None = None,
+    consumer_compiler_version: str | None = None,
 ) -> list[ArchiveMember]:
     target = target.lower().replace("-win", "")
     if target not in {"arm64ec", "arm64x"}:
@@ -120,6 +158,20 @@ def validate_provider(
             )
         if target == "arm64ec" and declared not in {"arm64ec", "arm64x"}:
             raise ValueError(f"provider metadata target {declared!r} is not EC-compatible")
+        if consumer_compiler_version is not None:
+            required = _provider_compiler_version(document)
+            consumer = _version(consumer_compiler_version, label="consumer compiler")
+            if consumer < required:
+                required_text = ".".join(str(part) for part in required)
+                consumer_text = ".".join(str(part) for part in consumer)
+                raise ValueError(
+                    "consumer MSVC compiler "
+                    f"{consumer_text} is older than the provider compiler "
+                    f"{required_text}; use a matching or newer MSVC STL/CRT "
+                    "toolset instead of adding thunk shims"
+                )
+    elif consumer_compiler_version is not None:
+        raise ValueError("consumer compiler version cannot be checked without provider metadata")
     allowed = EC_MACHINES if target == "arm64ec" else ARM64X_MACHINES
     all_members: list[ArchiveMember] = []
     for archive in archives:
@@ -142,10 +194,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", required=True, choices=("arm64ec", "arm64x"))
     parser.add_argument("--metadata", type=pathlib.Path)
+    parser.add_argument("--consumer-compiler-version")
     parser.add_argument("--archive", action="append", type=pathlib.Path, required=True)
     args = parser.parse_args(argv)
     try:
-        members = validate_provider(args.archive, args.target, args.metadata)
+        members = validate_provider(
+            args.archive,
+            args.target,
+            args.metadata,
+            args.consumer_compiler_version,
+        )
     except (OSError, ValueError) as exc:
         print(f"ARM64EC provider validation failed: {exc}", file=sys.stderr)
         return 2

@@ -201,4 +201,65 @@ if(EXISTS "${_retire}/pulp-build-info.json" OR NOT EXISTS "${_retire}/user-asset
 endif()
 message(STATUS "ok: retire keeps files it does not own")
 
+# 11. Exercise the real configure-time provider selection, not only the parser.
+# An explicit provider without VERSION.md must not borrow the checkout prebuilt's
+# identity. The explicit positive uses distinct fixture values to catch fallback.
+set(_provider_fixture "${WORK_DIR}/provider-selection")
+file(MAKE_DIRECTORY "${_provider_fixture}/with-metadata" "${_provider_fixture}/without-metadata")
+file(MAKE_DIRECTORY "${_provider_fixture}/without-metadata/build/win-gpu")
+file(WRITE "${_provider_fixture}/without-metadata/build/win-gpu/msvc-toolchain.json"
+    "{\n  \"producer\": {\"skia_builder_ref\": \"cccccccccccccccccccccccccccccccccccccccc\"}\n}\n")
+file(WRITE "${_provider_fixture}/with-metadata/VERSION.md"
+    "**Release:** fixture-only\nSkia branch tip is `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n**skia-builder ref:** `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`\n")
+set(_provider_project [=[
+cmake_minimum_required(VERSION 3.25)
+project(ProviderPins VERSION 1.0.0 LANGUAGES NONE)
+set(PROJECT_SOURCE_DIR "@PULP_SOURCE_DIR@")
+set(PULP_HAS_SKIA TRUE)
+include("@PULP_SOURCE_DIR@/tools/cmake/PulpRuntimePins.cmake")
+pulp_configure_runtime_pins()
+]=])
+string(CONFIGURE "${_provider_project}" _provider_project @ONLY)
+file(WRITE "${_provider_fixture}/CMakeLists.txt" "${_provider_project}")
+foreach(_mode without-metadata with-metadata bundled)
+    set(_provider_args)
+    if(NOT _mode STREQUAL "bundled")
+        list(APPEND _provider_args "-DSKIA_DIR=${_provider_fixture}/${_mode}")
+    endif()
+    set(_provider_build "${_provider_fixture}/build-${_mode}")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -S "${_provider_fixture}" -B "${_provider_build}"
+            -G Ninja -DCMAKE_BUILD_TYPE=Release ${_provider_args}
+        RESULT_VARIABLE _provider_result OUTPUT_VARIABLE _provider_stdout
+        ERROR_VARIABLE _provider_stderr TIMEOUT 20)
+    if(NOT _provider_result EQUAL 0)
+        message(FATAL_ERROR "provider selection configure (${_mode}): ${_provider_stdout}${_provider_stderr}")
+    endif()
+    file(READ "${_provider_build}/pulp-runtime-pins/Release/runtime-pins.json.in" _provider_template)
+    file(WRITE "${WORK_DIR}/template.json" "${_provider_template}")
+    _finalize(_provider_json GIT_SHA "0123abcd" GIT_DIRTY FALSE)
+    if(_mode STREQUAL "without-metadata")
+        foreach(_field release commit)
+            string(JSON _field_type TYPE "${_provider_json}" skia ${_field})
+            _expect("explicit provider missing ${_field} is unknown" "${_field_type}" "NULL")
+        endforeach()
+        string(JSON _value GET "${_provider_json}" skia builder_ref)
+        _expect("explicit provider receipt builder" "${_value}" "cccccccccccccccccccccccccccccccccccccccc")
+    elseif(_mode STREQUAL "with-metadata")
+        string(JSON _value GET "${_provider_json}" skia release)
+        _expect("explicit provider release" "${_value}" "fixture-only")
+        string(JSON _value GET "${_provider_json}" skia commit)
+        _expect("explicit provider commit" "${_value}" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        string(JSON _value GET "${_provider_json}" skia builder_ref)
+        _expect("explicit provider builder" "${_value}" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    else()
+        string(JSON _value GET "${_provider_json}" skia release)
+        _expect("default provider release" "${_value}" "${_release}")
+        string(JSON _value GET "${_provider_json}" skia commit)
+        _expect("default provider commit" "${_value}" "${_commit}")
+        string(JSON _value GET "${_provider_json}" skia builder_ref)
+        _expect("default provider builder" "${_value}" "${_builder_ref}")
+    endif()
+endforeach()
+
 message(STATUS "bundle_build_info_contract_verified=true")

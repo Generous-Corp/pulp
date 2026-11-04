@@ -394,19 +394,40 @@ commands:
 
   - name: graph
     status: usable
-    summary: Inspect, validate, and canonicalize .pulpgraph notation without loading plugin code.
+    summary: Inspect, validate, explain, format, render, and probe saved graphs offline.
     args:
       - name: operation
         kind: positional
         required: true
-        description: inspect, validate, or canonicalize
+        description: inspect, validate, explain, render, probe, fmt, or canonicalize
       - name: file
         kind: positional
         required: true
         description: Path to a .pulpgraph file
       - name: --json
         kind: flag
-        description: Emit machine-readable inspection output
+        description: Emit machine-readable result and error codes
+      - name: --output
+        kind: option
+        description: Write the offline render to a float WAV file
+      - name: --input
+        kind: option
+        description: Required audio input file for probe
+      - name: --source-node
+        kind: option
+        description: Unique source node name for probe
+      - name: --source-port
+        kind: option
+        description: Named source output port for probe
+      - name: --destination-node
+        kind: option
+        description: Unique destination node name for probe
+      - name: --destination-port
+        kind: option
+        description: Named destination input port for probe
+      - name: --block-frames
+        kind: option
+        description: Probe block size from 1 to 4096 frames (default 64)
     docs: reference/cli.md#graph
 
   - name: bake

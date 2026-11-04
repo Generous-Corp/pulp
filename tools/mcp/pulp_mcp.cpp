@@ -475,7 +475,7 @@ std::string pulp_mcp::server::tools_list_json() {
     out +=
         R"JSON({"name":"pulp_test","description":"Run the Pulp test suite","inputSchema":{"type":"object","properties":{"filter":{"type":"string","description":"Test name filter (regex)"}}}},)JSON";
     out +=
-        R"JSON({"name":"pulp_graph","description":"Inspect or validate a .pulpgraph notation file without loading plugin code.","inputSchema":{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"operation":{"type":"string","enum":["inspect","validate"]}}}},)JSON";
+        R"JSON({"name":"pulp_graph","description":"Inspect, validate, explain, render or probe a .pulpgraph file without loading plugin code.","inputSchema":{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"operation":{"type":"string","enum":["inspect","validate","explain","render","probe"]},"input":{"type":"string"},"source_node":{"type":"string"},"source_port":{"type":"string"},"destination_node":{"type":"string"},"destination_port":{"type":"string"},"block_frames":{"type":"integer","minimum":1,"maximum":4096,"default":64}}}},)JSON";
     out +=
         R"JSON({"name":"pulp_status","description":"Show Pulp project status","inputSchema":{"type":"object","properties":{}}},)JSON";
     out +=
@@ -961,6 +961,7 @@ int pulp_mcp::server::run(int argc, char* argv[]) {
         const auto executable = pulp_mcp::current_process_executable_path(argv[0]);
         pulp_mcp::configure_control_mcp_executable(executable.string());
         pulp_mcp::configure_gpu_doctor_executable(executable.string());
+        pulp_mcp::configure_graph_executable(executable.string());
         pulp_mcp::configure_trace_analyze_executable(executable.string());
 #if PULP_MCP_ENABLE_INSPECTOR_CLIENT
         g_trace_session_opener = std::shared_ptr<pulp::inspect::InspectorControlSessionOpener>(

@@ -61,6 +61,24 @@ Keep the flat-plan, adapter, and load-measurer tests together when changing
 these contracts so a cache hit cannot hide a stale generation or an incorrect
 bus route.
 
+### Restoring in-process Processor state
+
+`ProcessorRestoreRegistry` (`pulp/host/processor_restore.hpp`) restores a batch
+of already-decoded parameter and custom payloads into fresh, unprepared
+`ProcessorNodeInstance`s. Register exact product-owned type descriptors and
+pass an explicit type/version allowlist. The envelope version is separate from
+the embedded StateStore schema; each must match its own declared/constructed
+version, with no migrations in this initial surface. All metadata and limits
+are validated before factories execute, all instances are constructed before
+restore, and a failure returns no instances. Factories are trusted control-side
+code and must not retain, expose, or mutate live instances.
+
+This does not implement `.pulpgraph` v4. `GraphSerializer` still refuses
+Processor nodes. State capture/coherence, encoded-input limits, migrations,
+candidate graph validation/preparation, and safe publication remain separate
+work. Run `cmake-g2-processor-restore-sdk-consumer` (the installed SDK consumer
+in `examples/g2-processor-restore-consumer`) when changing the registry contract.
+
 ### SignalGraph snapshot readers
 
 `runtime::Slot::live()` is publisher-thread-only. A status or telemetry
@@ -2884,3 +2902,16 @@ refuses. Through the legacy whole-bus callback only channel 0 is bindable.
 `selected_route_ids()` persists one ID per bus, so independent left/right
 choices do not survive a project reload; hosts that need that must save
 `connected_route_channel` themselves.
+
+## Routed spectral controller
+
+Routed spectral analysis, closed identity/mask stages and synthesis run in the
+existing serial SignalGraph plan. Use named typed frame connections and the
+[public consumer guide](../../../docs/guides/routed-spectral-ports.md).
+Preparation requires a stopped controller; a prepared edit commits as `Staged`,
+activates at one render boundary, and requires control-side finalization.
+Snapshot-bound access must use the controller-aware snapshot lease, and live
+processor-provider mutation must refuse in spectral mode even when the legacy
+`live_slot_` is empty. Query prepared geometry from the active snapshot.
+Keep graph persistence and arbitrary stage registration refused; PARTIAL status
+does not establish notation coverage or realtime timing qualification.

@@ -31,6 +31,7 @@
 #include <pulp/host/signal_graph_execution_status.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/host/signal_graph_node.hpp>
+#include <pulp/host/spectral_graph.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/budget_policy.hpp>
@@ -55,6 +56,7 @@ namespace pulp::host {
 
 class GraphSerializer;
 class SignalGraph;
+class SpectralRuntimeBank;
 
 namespace detail {
 struct ExactParameterIngressOwner;
@@ -120,6 +122,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::size_t automation_buffer_bytes = 0;
         std::size_t delay_buffer_bytes = 0;
         std::size_t total_prepared_buffer_bytes = 0;
+        std::size_t spectral_buffer_bytes = 0;
+        std::uint64_t snapshot_generation = 0;
     };
 
     struct RuntimeBudgetReport {
@@ -144,6 +148,31 @@ class SignalGraph : public format::AudioWorkgroupClient {
     };
 
     SignalGraph() = default;
+
+    SpectralResult<SpectralAnalysisPorts> add_spectral_analysis(SpectralIdentity identity,
+                                                                const std::string& name);
+    SpectralResult<SpectralStagePorts> add_spectral_stage(SpectralIdentity identity,
+                                                          QualifiedSpectralStage stage,
+                                                          const std::string& name);
+    SpectralResult<SpectralSynthesisPorts> add_spectral_synthesis(SpectralIdentity identity,
+                                                                  const std::string& name);
+    GraphResult connect(SpectralOutputPort source, SpectralInputPort dest) {
+        return connect(source.handle, dest.handle);
+    }
+    enum class SpectralTransitionState : std::uint8_t {
+        Idle,
+        Staged,
+        Activated,
+        Rejected,
+        Finalized
+    };
+    SpectralTransitionState spectral_transition_state() const noexcept;
+    SpectralError finalize_spectral_transition();
+    /// Control thread only, after the host has stopped calling process().
+    SpectralError stop_spectral_controller();
+    SpectralError spectral_error() const noexcept {
+        return spectral_error_.load(std::memory_order_relaxed);
+    }
 
     // Add nodes — returns the node ID
     NodeId add_input_node(int channels, const std::string& name = "Input");
@@ -462,6 +491,39 @@ class SignalGraph : public format::AudioWorkgroupClient {
         NodeId node_id = 0;
         audio::AudioProcessLoadSnapshot load;
     };
+    enum class EdgeProbeStatus : std::uint8_t {
+        Attached,
+        Detached,
+        Unprepared,
+        UnknownPort,
+        MissingEdge,
+        UnsupportedKind,
+        UnsupportedExecution,
+        Busy
+    };
+    struct EdgeProbeIdentity {
+        GraphAuthoringReceipt authoring;
+        std::uint64_t connection = 0;
+        NodeId source = 0;
+        NodeId destination = 0;
+        PortIndex source_port = 0;
+        PortIndex destination_port = 0;
+    };
+    // One ordinary audio edge, observed at its source before PDC/mixing. Attach
+    // and detach are control-thread lifecycle operations: stop process() and
+    // any pinned-snapshot rendering first, as for prepare(). Reattachment starts
+    // a fresh 256-record ring and a zero-based sample clock. Reprepare/topology
+    // publication retires the attachment; transport reset detaches it. Serial
+    // routing only; execution-mode changes detach at the next process call.
+    EdgeProbeStatus attach_audio_edge_probe(const PortHandle& source,
+                                            const PortHandle& destination);
+    void detach_audio_edge_probe();
+    // One control-thread consumer may read concurrently with process(). These
+    // methods serialize with other control-thread lifecycle operations.
+    bool read_audio_edge_probe(graph::GraphRuntimeProbeSample& sample);
+    std::uint64_t audio_edge_probe_dropped() const;
+    EdgeProbeStatus audio_edge_probe_status() const;
+    EdgeProbeIdentity audio_edge_probe_identity() const;
     std::vector<NodeLoadReport> node_loads() const;
     // true times nodes before any read; false stops until the next node_loads().
     void set_node_load_monitoring(bool enabled) noexcept;
@@ -504,7 +566,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
 
     // True once prepare() has published a live compiled snapshot.
     bool is_prepared() const noexcept {
-        return live_slot_.has_value();
+        return spectral_mode_.load(std::memory_order_acquire) || live_slot_.has_value();
     }
     // Max block size the live snapshot was prepared for (0 if not prepared).
     int prepared_max_block_size() const noexcept;
@@ -1028,6 +1090,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
     };
 
     struct CompiledGraph {
+        std::shared_ptr<SpectralRuntimeBank> spectral;
+        std::uint64_t execution_generation = 0;
+        std::shared_ptr<int> legacy_processing_lifetime;
         // Private executable topology. For ordinary graphs this is a copy of
         // nodes_; region-bearing graphs replace each admitted region with one
         // synthetic Custom anchor while leaving public authoring state intact.
@@ -1203,6 +1268,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
             // only ONE path runs per block.
         };
         RoutedPaths routed;
+        std::unique_ptr<format::GraphRuntimeAudioEdgeProbe> audio_edge_probe;
+        EdgeProbeIdentity audio_edge_probe_identity;
 
         // Anticipative rendering for this snapshot (built only when anticipation is
         // enabled at compile time AND the routed plan has an eligible latent
@@ -1246,6 +1313,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::unordered_map<std::string, CustomNodeDiagnosticsDescriptor> custom_node_diagnostics_;
     static std::uint64_t next_diagnostic_graph_identity_() noexcept;
     const std::uint64_t diagnostic_graph_identity_ = next_diagnostic_graph_identity_();
+    std::uint32_t spectral_transition_serial_ = 0;
+    SpectralRuntimeBank* spectral_render_target_ = nullptr;
 
     std::vector<SampleRegionDefinition> sample_region_definitions_;
     const SampleRegionParameterBinding* sample_region_parameter_binding_ = nullptr;
@@ -1316,6 +1385,79 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // leaves. See runtime/slot.hpp — a pin guarantees LIFETIME, not constness:
     // the audio thread writes this snapshot's scratch buffers every block.
     runtime::Slot<CompiledGraph> live_slot_;
+    std::shared_ptr<int> processing_handle_lifetime_ = std::make_shared<int>(0);
+    std::array<std::shared_ptr<CompiledGraph>, 3> spectral_slots_;
+    std::unique_ptr<SignalGraph> spectral_candidate_authoring_;
+    std::atomic<bool> spectral_mode_{false};
+    std::atomic<int> spectral_active_{0}, spectral_pending_{-1}, spectral_ack_{-1};
+    std::atomic<bool> spectral_access_closed_{false};
+    mutable std::atomic<bool> spectral_reclaiming_{false};
+    mutable std::atomic<unsigned> spectral_readers_{0}, spectral_accesses_{0};
+    mutable std::atomic<SpectralError> spectral_error_{SpectralError::None};
+    std::uint64_t spectral_offer_generation_ = 0;
+    std::uint64_t spectral_render_generation_ = 0;
+    SpectralError spectral_ack_error_ = SpectralError::None;
+    int spectral_retired_ = -1;
+    bool spectral_terminal_ = false;
+
+    class SnapshotAccess {
+      public:
+        explicit SnapshotAccess(runtime::Slot<CompiledGraph>::ReadGuard guard)
+            : legacy_(std::move(guard)), value_(legacy_.get()) {}
+        SnapshotAccess(const SignalGraph* owner, CompiledGraph* value, bool access)
+            : owner_(owner), value_(value), access_(access) {}
+        ~SnapshotAccess() {
+            if (owner_) {
+                if (access_)
+                    owner_->spectral_accesses_.fetch_sub(1, std::memory_order_seq_cst);
+                owner_->spectral_readers_.fetch_sub(1, std::memory_order_seq_cst);
+            }
+        }
+        SnapshotAccess(const SnapshotAccess&) = delete;
+        CompiledGraph* get() const noexcept {
+            return value_;
+        }
+        CompiledGraph* operator->() const noexcept {
+            return value_;
+        }
+        CompiledGraph& operator*() const noexcept {
+            return *value_;
+        }
+        explicit operator bool() const noexcept {
+            return value_ != nullptr;
+        }
+
+      private:
+        runtime::Slot<CompiledGraph>::ReadGuard legacy_;
+        const SignalGraph* owner_ = nullptr;
+        CompiledGraph* value_ = nullptr;
+        bool access_ = false;
+    };
+    SnapshotAccess read_snapshot_(bool access = false) const noexcept;
+    bool refuse_spectral_mutation_() const noexcept {
+        if (!spectral_mode_.load(std::memory_order_acquire))
+            return false;
+        spectral_error_.store(spectral_access_closed_.load(std::memory_order_seq_cst)
+                                  ? SpectralError::TransitionPending
+                                  : SpectralError::UnsupportedOperation,
+                              std::memory_order_relaxed);
+        return true;
+    }
+    bool spectral_mailboxes_pending_(const CompiledGraph&) const noexcept;
+    SpectralError offer_spectral_candidate_locked_(std::unique_ptr<SignalGraph>&,
+                                                   std::shared_ptr<CompiledGraph>, std::uint64_t);
+    void adopt_candidate_authoring_locked_(SignalGraph&);
+    friend struct SpectralControllerTestAccess;
+    struct SpectralBoundary {
+        int active;
+        int offered;
+    };
+    SpectralBoundary capture_spectral_boundary_() noexcept;
+    void process_spectral_boundary_(SpectralBoundary, audio::BufferView<float>&,
+                                    const audio::BufferView<const float>&, int,
+                                    const format::ProcessContext*);
+    void process_spectral_(audio::BufferView<float>&, const audio::BufferView<const float>&, int,
+                           const format::ProcessContext*);
 
     // Canonical-executor routing (control toggle, read relaxed on the audio
     // thread). DEFAULT ON: the routed executor is the primary inter-node backend
@@ -1666,6 +1808,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     void cancel_swap_edit_locked_();
     std::vector<audio::AudioProcessLoadSnapshot> staged_node_loads_locked_() const;
     void publish_prepared_stats_locked_(const CompiledGraph& cg);
+    static PreparedStats stats_for_snapshot_(const CompiledGraph& cg);
     void clear_prepared_stats_locked_();
     void invalidate_live_locked_();
     static void

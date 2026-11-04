@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -119,7 +120,8 @@ void gather_node_inputs(const graph::GraphRuntimePlan& plan,
         const auto conn_index =
             plan.inbound_connection_indices[node.first_inbound_connection + c];
         const auto& conn = plan.connections[conn_index];
-        if (graph::is_event(conn) || graph::is_automation_conn(conn)) continue;
+        if (!graph::carries_audio(conn))
+            continue;
         if (conn.dest_port >= node.input_ports)
             continue;
         if (resolved && ports[conn.dest_port].mode != Mode::Sum)
@@ -634,6 +636,8 @@ run_routed_node(std::uint32_t node_index, const graph::GraphRuntimePlan& plan,
     context.command_results = command_results;
     context.node_inputs = audio::BufferView<const float>(inputs, node.input_ports, frames);
     context.node_outputs = audio::BufferView<float>(outputs, node.output_ports, frames);
+    context.spectral_input = binding.spectral_input;
+    context.spectral_outputs = binding.spectral_outputs;
     context.node_midi_in = midi != nullptr ? midi->in(node_index) : nullptr;
     context.node_midi_out = midi != nullptr ? midi->out(node_index) : nullptr;
     context.node_param_events = automation != nullptr ? automation->events(node_index) : nullptr;
@@ -946,6 +950,16 @@ void GraphRuntimeBufferPool::unbind() noexcept {
     host_input_aliasable_ = false;
 }
 
+void GraphRuntimeBufferPool::clear_history() noexcept {
+    std::fill(storage_.begin(), storage_.end(), 0.0f);
+    for (auto& ring : ring_) {
+        if (!ring.state)
+            continue;
+        std::fill(ring.state->storage.begin(), ring.state->storage.end(), 0.0f);
+        ring.state->write_pos = 0;
+    }
+}
+
 bool GraphRuntimeBufferPool::bind(const GraphRuntimeSnapshot& snapshot) noexcept {
     using Mode = GraphRuntimeSnapshot::InputPortSource::Mode;
     unbind();
@@ -1026,7 +1040,7 @@ bool GraphRuntimeBufferPool::bind(const GraphRuntimeSnapshot& snapshot) noexcept
             if (conn.source_index != input_node)
                 continue;
             // An automation lane reads the AudioInput slot itself.
-            if (graph::is_event(conn) || graph::is_automation_conn(conn)) {
+            if (!graph::carries_audio(conn)) {
                 aliasable = false;
                 break;
             }
@@ -1181,7 +1195,7 @@ void GraphRuntimeSnapshot::resolve_input_ports() {
         output_base[n + 1] = output_base[n] + plan_.nodes[n].output_ports;
     std::vector<std::uint8_t> read_only_readers(output_base.back(), 1);
     for (const auto& conn : plan_.connections) {
-        if (graph::is_event(conn) || graph::is_automation_conn(conn))
+        if (!graph::carries_audio(conn))
             continue;
         if (conn.source_index >= plan_.nodes.size() || conn.dest_index >= plan_.nodes.size() ||
             conn.source_port >= plan_.nodes[conn.source_index].output_ports)
@@ -1199,7 +1213,7 @@ void GraphRuntimeSnapshot::resolve_input_ports() {
             const auto conn_index =
                 plan_.inbound_connection_indices[node.first_inbound_connection + c];
             const auto& conn = plan_.connections[conn_index];
-            if (graph::is_event(conn) || graph::is_automation_conn(conn))
+            if (!graph::carries_audio(conn))
                 continue;
             if (conn.dest_port >= node.input_ports)
                 continue;
@@ -1366,16 +1380,12 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process(
 }
 
 GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
-    ProcessBlock& block,
-    const GraphRuntimeSnapshot& snapshot,
-    GraphRuntimeBufferPool& pool,
-    GraphRuntimeMidiScratch* midi,
-    GraphRuntimeAutomationScratch* automation,
+    ProcessBlock& block, const GraphRuntimeSnapshot& snapshot, GraphRuntimeBufferPool& pool,
+    GraphRuntimeMidiScratch* midi, GraphRuntimeAutomationScratch* automation,
     std::span<const graph::GraphTimedCommand> commands,
     std::span<GraphRuntimeCommandDecision> command_results,
-    GraphRuntimeCommandHandler command_handler,
-    GraphRuntimeEventSink event_sink,
-    std::span<const std::uint8_t> skip_mask) noexcept {
+    GraphRuntimeCommandHandler command_handler, GraphRuntimeEventSink event_sink,
+    std::span<const std::uint8_t> skip_mask, GraphRuntimeAudioEdgeProbe* audio_probe) noexcept {
     if (!block.validate()) return fail_invalid_block();
     if (!snapshot.valid()) return fail_invalid_snapshot();
 
@@ -1509,6 +1519,16 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
 
     const auto command_decisions = command_results.first(commands.size());
     const bool time_nodes = node_load_timing();
+    graph::GraphRuntimeProbeSample probe_sample;
+    bool have_probe_sample = false;
+    struct ProbeClockAdvance {
+        GraphRuntimeAudioEdgeProbe* probe;
+        std::uint32_t frames;
+        ~ProbeClockAdvance() {
+            if (probe != nullptr)
+                probe->timestamp_samples += frames;
+        }
+    } probe_clock_advance{audio_probe, frames};
     for (const auto node_index : plan.processing_order_indices) {
         if (node_index >= bindings.size()) {
             zero_unwritten_sole_output();
@@ -1536,6 +1556,29 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
             nodes_processed_.fetch_add(result.nodes_processed, std::memory_order_relaxed);
             return result;
         }
+        if (audio_probe != nullptr && audio_probe->samples.attached() &&
+            node_index == audio_probe->source_index &&
+            audio_probe->source_port < plan.nodes[node_index].output_ports) {
+            const auto slot = assignment.nodes[node_index].output_base + audio_probe->source_port;
+            // An aliased AudioInput deliberately never writes its scratch slot.
+            // Observe the same host channel its downstream bindings read.
+            const float* samples = bound && pool.bound_node(node_index).host_input_aliased
+                                       ? routed_in_bus->input.channel_ptr(audio_probe->source_port)
+                                       : pool.slot_data(slot);
+            if (samples != nullptr) {
+                auto& sample = probe_sample;
+                sample.timestamp_samples = audio_probe->timestamp_samples;
+                sample.edge_index = audio_probe->edge_index;
+                sample.frames = frames;
+                double sum_squares = 0.0;
+                for (std::uint32_t frame = 0; frame < frames; ++frame) {
+                    sample.peak = std::max(sample.peak, std::abs(samples[frame]));
+                    sum_squares += static_cast<double>(samples[frame]) * samples[frame];
+                }
+                sample.rms = static_cast<float>(std::sqrt(sum_squares / frames));
+                have_probe_sample = true;
+            }
+        }
         if (plan.nodes[node_index].kind == graph::GraphRuntimeNodeKind::AudioOutput)
             sole_output_channels = 0;
         ++result.nodes_processed;
@@ -1544,6 +1587,9 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     nodes_processed_.fetch_add(result.nodes_processed, std::memory_order_relaxed);
 
     capture_feedback(plan, assignment, pool, frames);
+
+    if (have_probe_sample)
+        audio_probe->samples.try_push(probe_sample);
 
     blocks_processed_.fetch_add(1, std::memory_order_relaxed);
     return result;

@@ -9,12 +9,17 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    'pulp/host/signal_graph_executor_routing.hpp': 'Pulp::host',
+    'pulp/host/spectral_graph.hpp': 'Pulp::host',
+    'pulp/audio/live_dsp_telemetry.hpp': 'Pulp::audio',
+    "pulp/signal/spectral_frame_codec.hpp": "Pulp::signal",
     "pulp/audio/impulse_response.hpp": "Pulp::audio",
     "pulp/audio/format_registry.hpp": "Pulp::audio",
     "pulp/audio/audio_file.hpp": "Pulp::audio",
     "pulp/signal/parametric_eq.hpp": "Pulp::signal",
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
     "pulp/signal/smoothed_value.hpp": "Pulp::signal",
+    "pulp/signal/indexed_control.hpp": "Pulp::signal",
     "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
     "pulp/host/signal_graph.hpp": "Pulp::host",
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
@@ -174,6 +179,39 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        'include': 'pulp/host/signal_graph_executor_routing.hpp',
+        'fingerprint': 'sha256:e77a455304bffa7e75d94903aee89f5d61ec9155b68281eaa107b8e6facd1088',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Existing executor lowering infrastructure with graph-owned opaque spectral resolver; no public native spectral-stage registration or notation capability.',
+    },
+    {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:7184acce0063ba69aab4c271f79a4e65ca3e04fc01e68de2f27f84aa173b3e7a', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
+
+    {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
+
+    {
+        "include": "pulp/signal/spectral_frame_codec.hpp",
+        "fingerprint": "sha256:43e9fbdc2c1acf08d70523589b8cf25d4a4e98ea531898bfc2978aa5eec72a37",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Offline owned-value spectral stream encoding and strict decoding. This is "
+            "persistence infrastructure, not a generator-facing DSP transform, graph "
+            "routing contract, Processor serializer, or synthesis capability."
+        ),
+    },
+    {
+        "include": "pulp/signal/indexed_control.hpp",
+        "fingerprint": "sha256:c25979e2e1c3b30cef33b022b908411bed087824f1407777e68d0809ed27632a",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Bounded scalar mapping and caller-indexed table reads support one G-5 "
+            "workflow; they do not establish a graph event transport or independent "
+            "generator-facing capability contract."
+        ),
+    },
+    {
         "include": "pulp/audio/impulse_response.hpp",
         "fingerprint": "sha256:740702d0bf9e54f8584de49999cfcf91c7c9b71c84c355b46a6a686e283bbe69",
         "disposition": "infrastructure",
@@ -292,7 +330,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/spectral_frame_engine.hpp",
-        "fingerprint": "sha256:79757445451e61f1e9d043abe9fc566b89a07df381c76f4b1d3cae525eeb5d49",
+        "fingerprint": "sha256:652c2aa1bf00f6b2935bbb6b27bdfe3a5466668a596ab6b1d15fa315d0721d91",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
