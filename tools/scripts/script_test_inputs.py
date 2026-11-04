@@ -850,20 +850,37 @@ def source_signals(root: Path, rel: str, defines: list[str]) -> list[str]:
     return hits
 
 
-def _test_include_closure(root: Path, rel: str, *, unreadable: set[str] | None = None) -> list[str]:
+def _test_include_closure(root: Path, rel: str, *, unreadable: set[str] | None = None,
+                          build_dir: Path | None = None) -> list[str]:
     """`rel` and every header under test/ it reaches through quoted includes.
 
     The optional diagnostic set makes an incomplete closure explicit to
-    callers that need proof of a clean scan. Unresolved quoted includes are
-    conservative failures there, even if an external include directory might
-    resolve them during compilation.
+    callers that need proof of a clean scan. That validation also follows
+    generated sources and quoted absolute/local includes inside the checkout
+    or the configured build directory. It never follows a path outside those
+    roots or lets a binary-directory token escape its configured directory.
+    The ordinary process scan remains limited to test/ headers.
     """
+    source_root = root.resolve()
+    binary_root = build_dir.resolve() if build_dir is not None else None
+    if unreadable is not None and rel.startswith(BINARY_DIR_TOKEN + "/"):
+        generated = binary_root / rel[len(BINARY_DIR_TOKEN) + 1:] if binary_root else None
+        if generated is None or not generated.resolve().is_relative_to(binary_root):
+            unreadable.add(rel)
+            return []
+        rel = str(generated.resolve())
     seen: list[str] = []
     stack = [rel]
     while stack:
         cur = stack.pop()
         if cur in seen:
             continue
+        if unreadable is not None:
+            resolved = (root / cur).resolve()
+            if not (resolved.is_relative_to(source_root)
+                    or binary_root is not None and resolved.is_relative_to(binary_root)):
+                unreadable.add(cur)
+                continue
         try:
             text = (root / cur).read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -875,7 +892,14 @@ def _test_include_closure(root: Path, rel: str, *, unreadable: set[str] | None =
         for name in INCLUDE.findall(include_text):
             for base in (os.path.dirname(cur), "test", "test/support"):
                 cand = os.path.normpath(os.path.join(base, name))
-                if cand.startswith("test/") and (root / cand).is_file():
+                if unreadable is not None:
+                    resolved = (root / cand).resolve()
+                    contained = (resolved.is_relative_to(source_root)
+                                 or binary_root is not None and resolved.is_relative_to(binary_root))
+                    if contained and resolved.is_file():
+                        stack.append(_rel(resolved, root) or str(resolved))
+                        break
+                elif cand.startswith("test/") and (root / cand).is_file():
                     stack.append(cand)
                     break
             else:
@@ -1312,7 +1336,7 @@ def carry_unconfigured_entries(current: dict, checked_in: dict, inventory: dict,
 
 
 def retain_scanned_clean_entries(current: dict, checked_in: dict, root: Path,
-                                 scanned: dict[str, dict]) -> list[str]:
+                                 scanned: dict[str, dict], build_dir: Path | None = None) -> list[str]:
     """Refresh old dependency records whose executable was scanned clean.
 
     A removed final dependency leaves no compiled entry, but the executable
@@ -1343,7 +1367,7 @@ def retain_scanned_clean_entries(current: dict, checked_in: dict, root: Path,
                         | set(previous.get("spawning_sources") or []))
         unreadable: set[str] = set()
         for source in sorted(scan_sources):
-            _test_include_closure(root, source, unreadable=unreadable)
+            _test_include_closure(root, source, unreadable=unreadable, build_dir=build_dir)
         if unreadable:
             problems.append(f"{name}: unreadable scan sources: {', '.join(sorted(unreadable))}")
             continue
@@ -1595,7 +1619,7 @@ def main(argv: list[str]) -> int:
         return 2
     if not off_profile:
         clean_errors = retain_scanned_clean_entries(current, checked_in, root,
-                                                    test_executables(build_dir) or {})
+                                                    test_executables(build_dir) or {}, build_dir)
         if clean_errors:
             print("script-test-inputs: cannot refresh compiled entries: " + "; ".join(clean_errors),
                   file=sys.stderr)

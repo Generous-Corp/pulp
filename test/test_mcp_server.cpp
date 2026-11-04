@@ -662,7 +662,7 @@ TEST_CASE("MCP graph exposes read-only operations and refuses edits", "[mcp][too
 
     const auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":70,"method":"tools/list"})JSON");
     require_contains(tools, R"JSON("name":"pulp_graph")JSON");
-    require_contains(tools, R"JSON("inspect","validate","explain","render")JSON");
+    require_contains(tools, R"JSON("inspect","validate","explain","render","probe")JSON");
 
     for (const auto& operation : {"explain", "render"}) {
         const auto response = handle_request(

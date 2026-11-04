@@ -31,7 +31,7 @@ set(_PULP_UI_PACKAGE_TARGET_SUFFIXES
 # The formats whose adapter opens an editor through the editor-host contract
 # today. A UI package plug-in links no Pulp view layer, so a format missing
 # here builds with no editor at all, and pulp_add_plugin says so.
-set(_PULP_CONTRACT_EDITOR_FORMATS VST3)
+set(_PULP_CONTRACT_EDITOR_FORMATS VST3 CLAP)
 
 # Warn, naming them, when a UI package plug-in builds formats whose adapter
 # does not open contract editors yet.

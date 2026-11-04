@@ -2756,6 +2756,7 @@
   "pulp-test-child-process-standard-input",
   "pulp-test-clap-ara-extension",
   "pulp-test-clap-bundle-entry",
+  "pulp-test-clap-contract-editor",
   "pulp-test-clap-editor-audio-continuity",
   "pulp-test-clap-entry",
   "pulp-test-clap-host-validation",

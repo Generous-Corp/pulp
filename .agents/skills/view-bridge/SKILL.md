@@ -116,9 +116,11 @@ error. Things that are easy to get wrong:
 - Every processor in the binary that does not override `editor_factory()` gets
   the package factory, including inner processors a wrapper composes. Hosts ask
   only the top-level processor.
-- Format adapters do not read `editor_factory()` yet; they still open
-  `create_view()`. A `UI` package is reachable only from a host that drives the
-  editor-host contract itself.
+- VST3 and CLAP open a non-null `editor_factory()` through
+  `ContractEditorSession` (`contract_editor_session.hpp`, `pulp-format-core`) before
+  they consider `create_view()`. A new format adapter should map its editor API
+  onto that session rather than re-implementing gesture release, the idle tick
+  or size negotiation.
 - The hook calls the package function lazily, on the first `editor_factory()`
   call, never at load, so an AU bundle's early registrar never builds UI state.
 - A test that installs a hook with `install_plugin_editor_factory_hook()` must

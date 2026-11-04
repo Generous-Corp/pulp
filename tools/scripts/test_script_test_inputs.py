@@ -1246,6 +1246,74 @@ class CompiledDataTests(unittest.TestCase):
             self.assertEqual(seen[0], seen[1])
             self.assertFalse(any("index.cpp" in x for x in (seen[0] or {}).get("spawning_sources", [])))
 
+    def test_generated_clean_records_resolve_binary_tokens_and_absolute_unity_includes(self) -> None:
+        for missing in (None, "generated", "generated_header", "unity_source", "unity_header"):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as tmp:
+                repo = Repo(Path(tmp))
+                repo.build = repo.root / "build-ci"
+                repo.build.mkdir()
+                compiled_evidence(repo)
+                generated_header = write(repo.build, "generated/editor.hpp", "struct Editor {};\n")
+                generated = write(repo.build, "generated/editor.cpp",
+                                  f'#include "{generated_header}"\nconst char* p = "PULP_SOURCE_DIR";\n')
+                unity_header = write(repo.root, "core/view/local.hpp", "struct Local {};\n")
+                unity_source = write(repo.root, "core/view/local.mm", '#include "local.hpp"\n')
+                unity = write(repo.build, "generated/cluster.mm", f'#include "{unity_source}"\n')
+                index_path = repo.build / sti.TEST_DATA_DIR / "executables.json"
+                index = json.loads(index_path.read_text(encoding="utf-8"))
+                index["executables"]["pulp-test-d"]["sources"] += [
+                    generated.relative_to(repo.root).as_posix(), unity.relative_to(repo.root).as_posix()]
+                index_path.write_text(json.dumps(index), encoding="utf-8")
+                self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+                list_path = repo.root / sti.DEFAULT_LIST
+                before = list_path.read_bytes()
+                self.assertEqual(json.loads(before)["executables"]["pulp-test-d"]["sources"],
+                                 ["${CMAKE_BINARY_DIR}/generated/editor.cpp"])
+                generated.write_text(f'#include "{generated_header}"\n', encoding="utf-8")
+                if missing:
+                    {"generated": generated, "generated_header": generated_header,
+                     "unity_source": unity_source, "unity_header": unity_header}[missing].unlink()
+                    for mode in ("--write", "--check"):
+                        proc = self.run_tool(repo, mode)
+                        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+                        self.assertIn("unreadable scan sources", proc.stderr)
+                        self.assertEqual(list_path.read_bytes(), before)
+                else:
+                    proc = self.run_tool(repo, "--write")
+                    self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                    after = json.loads(list_path.read_text(encoding="utf-8"))
+                    self.assertEqual(set(after["executables"]), set(json.loads(before)["executables"]))
+                    self.assertEqual(after["executables"]["pulp-test-d"]["data"], "none")
+                    proc = self.run_tool(repo, "--check", "--full")
+                    self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_clean_source_validation_rejects_binary_token_and_include_escapes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            build = root / "build-ci"
+            build.mkdir()
+            inside = write(root, "inside.hpp", "struct Inside {};\n")
+            outside = write(Path(tmp), "outside.hpp", "struct Outside {};\n")
+            source = write(build, "source.cpp", f'#include "{inside}"\n')
+            missing: set[str] = set()
+            sti._test_include_closure(root, "${CMAKE_BINARY_DIR}/source.cpp",
+                                      unreadable=missing, build_dir=build)
+            self.assertFalse(missing)
+            for rel in ("${CMAKE_BINARY_DIR}/../inside.hpp", "${CMAKE_BINARY_DIR}/link.hpp"):
+                link = build / "link.hpp"
+                if not link.exists():
+                    link.symlink_to(outside)
+                with self.subTest(rel=rel):
+                    missing = set()
+                    sti._test_include_closure(root, rel, unreadable=missing, build_dir=build)
+                    self.assertTrue(missing)
+            source.write_text(f'#include "{outside}"\n', encoding="utf-8")
+            missing = set()
+            sti._test_include_closure(root, "${CMAKE_BINARY_DIR}/source.cpp",
+                                      unreadable=missing, build_dir=build)
+            self.assertTrue(missing)
+
     def test_reading_without_a_declaration_is_undeclared_and_a_quiet_source_gets_no_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)
