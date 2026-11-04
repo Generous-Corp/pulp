@@ -9,6 +9,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1520"></a>
+## [1.52.0] - 2026-11-04
+
+- release/version bump ([#11487](https://github.com/Generous-Corp/pulp/pull/11487))
+- feature/vst3 editor contract ([#11453](https://github.com/Generous-Corp/pulp/pull/11453))
+- codex/windows ui geometry perf 20261103 ([#11481](https://github.com/Generous-Corp/pulp/pull/11481))
+- dependabot/github_actions/github actions d7a6b05ada ([#11454](https://github.com/Generous-Corp/pulp/pull/11454))
+- wave3/g3 fingerprint diff undo 20261103 ([#11444](https://github.com/Generous-Corp/pulp/pull/11444))
+- codex/g7 edge integration 20261103 ([#11482](https://github.com/Generous-Corp/pulp/pull/11482))
+
 <a id="v1510"></a>
 ## [1.51.0] - 2026-11-04
 
@@ -12143,6 +12153,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.52.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.52.0
 [1.51.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.51.0
 [1.50.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.50.0
 [1.49.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.49.0
