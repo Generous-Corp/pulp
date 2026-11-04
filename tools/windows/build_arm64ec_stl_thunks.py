@@ -37,6 +37,20 @@ def strip_directives(path: pathlib.Path) -> None:
     path.write_bytes(data)
 
 
+def select_arm64ec_members(listing: str) -> list[str]:
+    """Return stable, unique ARM64EC object members from ``lib /list`` output."""
+    members = set()
+    for line in listing.splitlines():
+        member = line.strip()
+        lowered = member.lower()
+        if "\\arm64ec\\" not in lowered or not lowered.endswith(".obj"):
+            continue
+        if lowered.endswith("\\locale0_implib.obj"):
+            continue
+        members.add(member)
+    return sorted(members, key=str.casefold)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--msvcprt", type=pathlib.Path, required=True)
@@ -51,13 +65,7 @@ def main() -> int:
         encoding="utf-8",
         errors="replace",
     )
-    members = []
-    for line in listing.splitlines():
-        member = line.strip()
-        if "\\arm64ec\\" in member.lower() and member.lower().endswith(".obj"):
-            if member.lower().endswith("\\locale0_implib.obj"):
-                continue
-            members.append(member)
+    members = select_arm64ec_members(listing)
     if not members:
         raise RuntimeError("msvcprt.lib has no ARM64EC members")
 

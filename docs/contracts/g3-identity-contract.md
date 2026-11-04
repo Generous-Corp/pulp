@@ -1,6 +1,6 @@
 # G-3 identity contract
 
-Status: design decision, pending G1 port-name delivery.
+Status: implementation, evidence-gated after G1 port-name delivery.
 
 ## Decision
 
@@ -11,8 +11,10 @@ An authored name is compared after the encoding normalization below. A
 canonical number may change when order changes, but that change is not an
 identity change.
 
-This is a design contract only. It adds no public API and must not be used to
-land a runtime identity change before G1 port names are available.
+G1 port names are now available through the existing `PortHandle` owner
+surface. The control-side implementation may therefore expose the value-owned
+identity helpers described below; runtime scheduling and graph mutation remain
+outside this contract.
 
 ## Required behavior
 
@@ -69,9 +71,8 @@ reason for rejection without exposing a lossy replacement string as identity.
 
 ## Migration and dependency boundary
 
-Until G1 lands port names, this document is the authoritative decision record
-only. No public identity type, parameter, serializer, or compatibility API may
-be added under G-3. After G1, the implementation must expose authored names
-and aliases through the existing owner surface, add the controls above to that
-surface's executable conformance lane, and preserve this decision in the
-versioned contract. Canonical renumbering remains an internal derived index.
+The G1 port-name delivery is present in the owner surface. The implementation
+exposes authored names and aliases through the value-owned control-side API and
+the controls above are executable in its conformance lane. No runtime mutation,
+serializer, or compatibility behavior is implied by this contract. Canonical
+renumbering remains an internal derived index.

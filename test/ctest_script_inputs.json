@@ -79,6 +79,7 @@
     "tools/cli/cmd_dsp.cpp",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_gpu.cpp",
+    "tools/cli/cmd_graph.cpp",
     "tools/cli/cmd_host.cpp",
     "tools/cli/cmd_import.cpp",
     "tools/cli/cmd_inspect.cpp",
@@ -166,6 +167,7 @@
     "tools/cli/cmd_config.cpp",
     "tools/cli/cmd_design_subcommands.cpp",
     "tools/cli/cmd_doctor.cpp",
+    "tools/cli/cmd_graph.cpp",
     "tools/cli/cmd_host.cpp",
     "tools/cli/cmd_macos.cpp",
     "tools/cli/cmd_misc.cpp",
@@ -1494,6 +1496,23 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-editor-ui-package-host": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "PulpEditorUiA_CLAP",
+    "PulpEditorUiB_CLAP",
+    "PulpEditorUiNone_CLAP",
+    "PulpEditorUiPlain_CLAP"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/fixtures/editor_ui_package/editor_ui_package_host.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-embed-compress": {
    "data": "declared",
    "detected_sources": [
@@ -1640,6 +1659,30 @@
     "test/test_graph_plugin_resolution.cpp"
    ],
    "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-signal-graph-subgraph": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_signal_graph_subgraph.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-graph-identity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_graph_identity.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-group-app-host": {
@@ -2414,18 +2457,6 @@
    "spawns": "undeclared",
    "undeclared_sources": []
   },
-  "pulp-test-signal-graph-pulpsynth-automation": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "runtime_targets": [],
-   "sources": [],
-   "spawning_sources": [
-    "test/test_signal_graph_pulpsynth_automation.cpp"
-   ],
-   "spawns": "undeclared",
-   "undeclared_sources": []
-  },
   "pulp-test-signal-graph-x9-modular-instrument": {
    "data": "none",
    "inputs": [],
@@ -2873,6 +2904,7 @@
   "pulp-test-dspx07-projection",
   "pulp-test-edit-history",
   "pulp-test-editor-open-stages",
+  "pulp-test-editor-ui-package-host",
   "pulp-test-embed-compress",
   "pulp-test-external-input",
   "pulp-test-external-input-ingress",
@@ -2952,11 +2984,13 @@
   "pulp-test-gpu-wavenet-realtime-node",
   "pulp-test-gpu-wavenet-session",
   "pulp-test-graph-executor-routing",
+  "pulp-test-graph-identity",
   "pulp-test-graph-plugin-resolution",
   "pulp-test-graph-runtime-worker-pool",
   "pulp-test-graphic-eq",
   "pulp-test-group-app-audio",
   "pulp-test-group-app-audio-support",
+  "pulp-test-signal-graph-subgraph",
   "pulp-test-group-app-host",
   "pulp-test-group-app-midi",
   "pulp-test-group-app-signal",
@@ -3317,6 +3351,7 @@
   "pulp-test-vst3-audio-parity",
   "pulp-test-vst3-bundle-entry",
   "pulp-test-vst3-connection",
+  "pulp-test-vst3-contract-editor",
   "pulp-test-vst3-editor",
   "pulp-test-vst3-host-process-clock",
   "pulp-test-vst3-hosted-editor",
@@ -5474,6 +5509,14 @@
     "tools/scripts/framework_neutrality_check.py",
     "tools/scripts/test_cmajor_external_extra.py",
     "tools/validation"
+   ],
+   "kind": "python"
+  },
+  "g9-hostile-fixture-regression": {
+   "entry": "tools/validation/test_g9_hostile_fixture.py",
+   "inputs": [
+    "tools/validation/g9_hostile_fixture.py",
+    "tools/validation/test_g9_hostile_fixture.py"
    ],
    "kind": "python"
   },
@@ -13554,6 +13597,20 @@
    "entry": "tools/scripts/test_check_yoga_oracle_pin.py",
    "inputs": [
     "tools/scripts/test_check_yoga_oracle_pin.py"
+   ],
+   "kind": "python"
+  },
+  "windows-arm64ec-provider-validator-selftest": {
+   "entry": "tools/windows/test_validate_arm64ec_provider.py",
+   "inputs": [
+    "tools/windows/test_validate_arm64ec_provider.py"
+   ],
+   "kind": "python"
+  },
+  "windows-arm64ec-thunk-tool-selftest": {
+   "entry": "tools/windows/test_build_arm64ec_stl_thunks.py",
+   "inputs": [
+    "tools/windows/test_build_arm64ec_stl_thunks.py"
    ],
    "kind": "python"
   }

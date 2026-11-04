@@ -8,11 +8,14 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.48.0
+    VERSION 1.54.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
 )
+if(WIN32)
+    _pulp_min_os_pin_windows()
+endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCheckoutLocation.cmake)  # refuse /tmp checkouts before any build work
 
 # Pulp's own source-tree root. Use this — NOT CMAKE_SOURCE_DIR — when referencing
@@ -79,23 +82,12 @@ endif()
 
 # ARM64EC is a mixed-ABI target: every translation unit, including C-only
 # FetchContent dependencies such as Brotli and miniz, must be compiled with
-# the EC code-generation switch.  Relying on the C++ flags alone leaves those
+# the EC code-generation switch. Relying on the C++ flags alone leaves those
 # archives as native ARM64 and produces unresolved EC thunk symbols when a
-# plugin links them.  Keep the correction at the project boundary so all
-# dependencies inherit the same ABI.
-if(WIN32 AND
-   (CMAKE_GENERATOR_PLATFORM MATCHES "^(ARM64EC|ARM64X)$" OR
-    CMAKE_CXX_FLAGS MATCHES "ARM64EC|arm64EC" OR
-    CMAKE_CXX_COMPILER_ARCHITECTURE_ID MATCHES "^ARM64EC$"))
-    foreach(_pulp_ec_flag_var CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-        if(NOT "${${_pulp_ec_flag_var}}" MATCHES "(^|[ ;])/arm64EC([ ;]|$)")
-            string(APPEND ${_pulp_ec_flag_var} " /arm64EC")
-            set(${_pulp_ec_flag_var} "${${_pulp_ec_flag_var}}" CACHE STRING
-                "ARM64EC compile flags" FORCE)
-        endif()
-    endforeach()
-    unset(_pulp_ec_flag_var)
-endif()
+# plugin links them. ARM64X is deliberately excluded: it is a mixed image
+# format whose native ARM64 translation units must retain their own ABI.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWindowsArm64Ec.cmake)
+pulp_windows_apply_arm64ec_flags()
 
 message(STATUS "Pulp ${PROJECT_VERSION} — platform: ${PULP_PLATFORM}")
 
@@ -571,6 +563,25 @@ endfunction()
 _pulp_configure_standalone_target(pulp-standalone pulp::view)
 _pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)
 
+# Native standalone consumers select the deliberately narrow view-native
+# umbrella. On Skia desktop targets that umbrella contains the renderer and
+# platform layer, but the native HWND/X11 PluginViewHost factory lives in
+# view-tooling. A native standalone calls PluginViewHost::create() directly;
+# without this edge the factory translation unit is absent from the final
+# static link and WindowHost::create() fails at runtime with no window.
+# Keep this closure on the native standalone target so native plugin targets
+# retain their existing link floor while every future native standalone gets
+# the platform host it needs.
+if((WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID)) AND PULP_HAS_SKIA)
+    target_link_libraries(pulp-standalone-native PUBLIC pulp::view-tooling)
+    get_target_property(_native_standalone_links
+        pulp-standalone-native INTERFACE_LINK_LIBRARIES)
+    if(NOT "${_native_standalone_links}" MATCHES "pulp::view-tooling")
+        message(FATAL_ERROR
+            "pulp-standalone-native must expose pulp::view-tooling on Skia desktop targets: ${_native_standalone_links}")
+    endif()
+endif()
+
 # The GPU-health contracts are CPU-only and back Inspector's typed read
 # executor, so define the model before the optional Inspector runtime on every
 # supported SDK configuration. Native probes remain desktop-tooling-only.
@@ -933,6 +944,7 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
     add_subdirectory(test/fixtures/data_display_editor)
+    add_subdirectory(test/fixtures/editor_ui_package)
     add_subdirectory(test/fixtures/linux_plugin_isolation)
     add_subdirectory(test/fixtures/linux_reload_host)
     add_subdirectory(test/fixtures/ui_script_plugin)

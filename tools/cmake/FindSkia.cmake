@@ -322,6 +322,21 @@ if(APPLE AND NOT (CMAKE_SYSTEM_NAME STREQUAL "iOS")
         ARCHIVES "${SKIA_LIBRARY}" "${DAWN_LIBRARY}")
 endif()
 
+# ARM64EC/ARM64X must validate the actual COFF members in both GPU archives.
+# A provider manifest or directory name alone cannot catch a stale pure-ARM64
+# archive, which otherwise reaches the consumer as missing EC STL thunks.
+if(WIN32 AND _pulp_skia_target_arch MATCHES "^arm64(ec|x)-win$"
+        AND EXISTS "${SKIA_LIBRARY}" AND EXISTS "${DAWN_LIBRARY}")
+    include("${CMAKE_CURRENT_LIST_DIR}/PulpWindowsArm64EcProvider.cmake")
+    string(REGEX REPLACE "-win$" "" _pulp_provider_target
+        "${_pulp_skia_target_arch}")
+    set(PULP_WINDOWS_ARM64EC_PROVIDER_TARGET "${_pulp_provider_target}")
+    set(PULP_WINDOWS_ARM64EC_PROVIDER_ARCHIVES
+        "${SKIA_LIBRARY}" "${DAWN_LIBRARY}")
+    pulp_windows_validate_arm64ec_provider()
+    unset(_pulp_provider_target)
+endif()
+
 if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     set(SKIA_FOUND TRUE)
     # Include dirs: Skia headers, modules, and Dawn headers

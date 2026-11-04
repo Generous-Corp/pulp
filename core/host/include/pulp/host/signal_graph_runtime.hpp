@@ -462,6 +462,39 @@ class SignalGraph : public format::AudioWorkgroupClient {
         NodeId node_id = 0;
         audio::AudioProcessLoadSnapshot load;
     };
+    enum class EdgeProbeStatus : std::uint8_t {
+        Attached,
+        Detached,
+        Unprepared,
+        UnknownPort,
+        MissingEdge,
+        UnsupportedKind,
+        UnsupportedExecution,
+        Busy
+    };
+    struct EdgeProbeIdentity {
+        GraphAuthoringReceipt authoring;
+        std::uint64_t connection = 0;
+        NodeId source = 0;
+        NodeId destination = 0;
+        PortIndex source_port = 0;
+        PortIndex destination_port = 0;
+    };
+    // One ordinary audio edge, observed at its source before PDC/mixing. Attach
+    // and detach are control-thread lifecycle operations: stop process() and
+    // any pinned-snapshot rendering first, as for prepare(). Reattachment starts
+    // a fresh 256-record ring and a zero-based sample clock. Reprepare/topology
+    // publication retires the attachment; transport reset detaches it. Serial
+    // routing only; execution-mode changes detach at the next process call.
+    EdgeProbeStatus attach_audio_edge_probe(const PortHandle& source,
+                                            const PortHandle& destination);
+    void detach_audio_edge_probe();
+    // One control-thread consumer may read concurrently with process(). These
+    // methods serialize with other control-thread lifecycle operations.
+    bool read_audio_edge_probe(graph::GraphRuntimeProbeSample& sample);
+    std::uint64_t audio_edge_probe_dropped() const;
+    EdgeProbeStatus audio_edge_probe_status() const;
+    EdgeProbeIdentity audio_edge_probe_identity() const;
     std::vector<NodeLoadReport> node_loads() const;
     // true times nodes before any read; false stops until the next node_loads().
     void set_node_load_monitoring(bool enabled) noexcept;
@@ -1203,6 +1236,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
             // only ONE path runs per block.
         };
         RoutedPaths routed;
+        std::unique_ptr<format::GraphRuntimeAudioEdgeProbe> audio_edge_probe;
+        EdgeProbeIdentity audio_edge_probe_identity;
 
         // Anticipative rendering for this snapshot (built only when anticipation is
         // enabled at compile time AND the routed plan has an eligible latent

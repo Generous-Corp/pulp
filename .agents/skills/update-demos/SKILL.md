@@ -139,6 +139,13 @@ pulp minos publish-runbook --to 0.640.0
   / GLIBCXX 3.4.32, while the combined ARM64 Skia/Dawn/V8 floor remains unknown.
   An ARM64 sweep must measure each final binary and must not reuse the x64
   `--max 2.34` ceiling or claim Ubuntu 22.04 portability.
+- **Windows API floors must preserve compiler initialization.** Pinning the
+  API macros before `project()` by creating `CMAKE_C_FLAGS`/`CMAKE_CXX_FLAGS`
+  suppresses environment and compiler defaults: an ARM64EC request in
+  `CXXFLAGS` can silently become ARM64, and MSVC loses `/EHsc`. Verify the
+  actual target ABI and compile flags when rebuilding a Windows SDK. Use a
+  fresh, separate configure for each architecture; a cache created by the old
+  ordering retains its incomplete flags after upgrading the source.
 - **Measuring one binary's floor** (no registry needed) is the primitive under
   all of this: `pulp minos measure <path/to/binary>` — also exposed over MCP as
   `pulp_minos`. See `docs/guides/minimum-os-support.md`.

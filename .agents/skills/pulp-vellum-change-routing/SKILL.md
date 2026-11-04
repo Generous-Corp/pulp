@@ -836,3 +836,10 @@ right place for the demand, since changing it is a routing decision and
 regenerating its output is not. And the refresh itself has moved to the version
 bot's bump commit, so an ordinary PR does not produce one. There is no
 `Skill-Update: skip` ritual left to perform for a ledger refresh.
+
+## Carried commits across two open PRs
+
+If a change's commits also sit in another open, unstacked PR, review HOLDs it as
+a carried commit. Stack the dependent PR on the other's branch so each diff
+shows only its own change, or close it as superseded. Routing events and
+ledgers for the shared commits belong to the PR that owns them.

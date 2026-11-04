@@ -65,7 +65,7 @@ jobs:
       BUILD_DIR: build-intel-native
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: false
 
@@ -198,7 +198,7 @@ jobs:
 
       - name: Upload native-Intel logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: nightly-intel-native-logs
           path: |
@@ -220,7 +220,7 @@ jobs:
       BUILD_DIR: build-universal
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: false
 
@@ -378,7 +378,7 @@ jobs:
 
       - name: Upload universal logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: nightly-intel-universal-logs
           path: |
@@ -412,7 +412,7 @@ jobs:
       RUN_SHA: ${{ github.sha }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 1
           sparse-checkout: tools/scripts
