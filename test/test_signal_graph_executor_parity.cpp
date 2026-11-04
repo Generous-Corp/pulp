@@ -3885,8 +3885,8 @@ TEST_CASE("G5 evidence: existing Custom MIDI lane delivers a bounded same-block 
         producer.version = 1;
         producer.num_input_ports = producer.num_output_ports = 1;
         producer.process_events = [&](pulp::audio::BufferView<float>& out,
-                                     const pulp::audio::BufferView<const float>&, int n,
-                                     const pulp::host::CustomNodeEventBlock& events) {
+                                      const pulp::audio::BufferView<const float>&, int n,
+                                      const pulp::host::CustomNodeEventBlock& events) {
             trace.block_start = trace.cursor;
             ++trace.producer_calls;
             if (events.out != nullptr) {
@@ -3898,7 +3898,8 @@ TEST_CASE("G5 evidence: existing Custom MIDI lane delivers a bounded same-block 
                             0, static_cast<std::uint8_t>(i % 128), 100));
                 } else {
                     for (std::size_t i = 0; i < times.size(); ++i) {
-                        if (times[i] < trace.cursor || times[i] >= trace.cursor + n) continue;
+                        if (times[i] < trace.cursor || times[i] >= trace.cursor + n)
+                            continue;
                         auto event = pulp::midi::MidiEvent::note_on(0, notes[i], 100);
                         event.sample_offset = times[i] - trace.cursor;
                         events.out->add(event);
@@ -3908,15 +3909,16 @@ TEST_CASE("G5 evidence: existing Custom MIDI lane delivers a bounded same-block 
                 trace.drops = events.out->dropped_event_count();
             }
             trace.cursor += n;
-            for (int i = 0; i < n; ++i) out.channel_ptr(0)[i] = 0.0f;
+            for (int i = 0; i < n; ++i)
+                out.channel_ptr(0)[i] = 0.0f;
         };
         pulp::host::CustomNodeType consumer;
         consumer.type_id = "pulp.test.g5_existing_consumer";
         consumer.version = 1;
         consumer.num_input_ports = consumer.num_output_ports = 1;
         consumer.process_events = [&](pulp::audio::BufferView<float>& out,
-                                     const pulp::audio::BufferView<const float>&, int n,
-                                     const pulp::host::CustomNodeEventBlock& events) {
+                                      const pulp::audio::BufferView<const float>&, int n,
+                                      const pulp::host::CustomNodeEventBlock& events) {
             ++trace.consumer_calls;
             trace.same_block &= trace.producer_calls == trace.consumer_calls;
             if (events.in != nullptr) {
@@ -3927,10 +3929,12 @@ TEST_CASE("G5 evidence: existing Custom MIDI lane delivers a bounded same-block 
                         trace.notes[trace.count] = event.data()[1];
                     }
                     ++trace.count;
-                    if (events.out != nullptr) events.out->add(event);
+                    if (events.out != nullptr)
+                        events.out->add(event);
                 }
             }
-            for (int i = 0; i < n; ++i) out.channel_ptr(0)[i] = 0.0f;
+            for (int i = 0; i < n; ++i)
+                out.channel_ptr(0)[i] = 0.0f;
         };
         REQUIRE(graph.register_custom_node_type(producer));
         REQUIRE(graph.register_custom_node_type(consumer));
@@ -3945,7 +3949,8 @@ TEST_CASE("G5 evidence: existing Custom MIDI lane delivers a bounded same-block 
         REQUIRE(graph.connect(input, 0, source, 0));
         REQUIRE(graph.connect(input, 0, sink, 0));
         REQUIRE(graph.connect(sink, 0, output, 0));
-        if (connected) REQUIRE(graph.connect_midi(source, sink));
+        if (connected)
+            REQUIRE(graph.connect_midi(source, sink));
         REQUIRE(graph.connect_midi(sink, midi_output));
         graph.set_canonical_executor_routing_enabled(true);
         REQUIRE(graph.prepare(48000.0, 96));
@@ -3960,8 +3965,8 @@ TEST_CASE("G5 evidence: existing Custom MIDI lane delivers a bounded same-block 
         graph.release_routed_only_execution();
         return trace;
     };
-    for (const auto& partitions : std::vector<std::vector<int>>{
-             {96}, {32, 32, 32}, {7, 25, 1, 31, 32}}) {
+    for (const auto& partitions :
+         std::vector<std::vector<int>>{{96}, {32, 32, 32}, {7, 25, 1, 31, 32}}) {
         const auto trace = run(partitions, true, false);
         REQUIRE(trace.count == times.size());
         REQUIRE(trace.same_block);
