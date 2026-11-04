@@ -58,7 +58,7 @@ jobs:
     name: PULP_TRACING=ON compiles + tests pass
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
           lfs: false
@@ -138,7 +138,7 @@ jobs:
     name: Installed traced SDK advertises tracing to a consumer
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
           lfs: false
@@ -266,7 +266,7 @@ jobs:
     name: GPU trace spans are emitted on real hardware
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: false
           lfs: false

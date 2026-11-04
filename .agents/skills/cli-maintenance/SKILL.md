@@ -636,6 +636,13 @@ shell-out test `pulp-test-cli-swap-pack` runs in GPU builds.
 
 ### `pulp bake` — signed graph artifacts
 
+`pulp graph` is the offline graph-file command. Keep its `validate --json`
+result and error codes, `fmt` byte stability, `render` WAV output, read-only MCP
+operation allowlist, `docs/reference/cli.md`, and
+`docs/status/cli-commands.yaml` in sync. A new graph operation needs a shellout
+test on the installed CLI path; the MCP wrapper must not expose file-writing
+operations such as `fmt`.
+
 `pulp bake <input.pulpgraph> -o <output.pulpbake> --sign-key <file>` loads and
 prepares the graph, lowers it to the bounded baked-plan format, and writes the
 Ed25519-signed artifact atomically. `pulp bake verify <artifact> --trust <file>`
