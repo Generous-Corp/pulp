@@ -1,9 +1,13 @@
 #include <pulp/format/contract_editor_session.hpp>
 
+#include <pulp/format/detail/main_thread_timer.hpp>
+
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/state/store.hpp>
 
+#include <algorithm>
+#include <atomic>
 #include <utility>
 
 namespace pulp::format {
@@ -20,12 +24,17 @@ class ContractEditorSession::Context final : public EditorContext {
         return nullptr;
     }
     bool request_resize(const EditorSize& size) override {
-        if (!hooks_.request_resize || size.width == 0 || size.height == 0)
+        if (owner_gone_.load() || !hooks_.request_resize || size.width == 0 || size.height == 0)
             return false;
         return hooks_.request_resize(size);
     }
     bool host_action(const HostActionRequest& request) override {
+        if (owner_gone_.load())
+            return false;
         return hooks_.host_action ? hooks_.host_action(request) : false;
+    }
+    void owner_gone() {
+        owner_gone_.store(true);
     }
     EditorHostKind host_kind() const override {
         return kind_;
@@ -35,7 +44,79 @@ class ContractEditorSession::Context final : public EditorContext {
     ParamPort& port_;
     EditorHostKind kind_;
     HostHooks hooks_;
+    std::atomic<bool> owner_gone_{false};
 };
+
+ContractSessionRegistry::~ContractSessionRegistry() {
+    close_all();
+}
+
+std::size_t ContractSessionRegistry::size() const {
+    std::lock_guard lock(mutex_);
+    std::size_t live = 0;
+    for (const auto& weak : sessions_)
+        if (!weak.expired())
+            ++live;
+    return live;
+}
+
+void ContractSessionRegistry::close_all() {
+    std::vector<std::shared_ptr<ContractEditorSession>> live;
+    {
+        std::lock_guard lock(mutex_);
+        for (const auto& weak : sessions_)
+            if (auto session = weak.lock())
+                live.push_back(std::move(session));
+        sessions_.clear();
+    }
+    if (live.empty())
+        return;
+    if (detail::is_main_thread()) {
+        for (const auto& session : live)
+            session->close_for_owner();
+        return;
+    }
+    // Off the main thread: never wait for it (a host's main thread may be
+    // waiting for this one). Cut every session from the store now, while it
+    // still exists, then close the editors on the main thread later. The
+    // posted task holds the sessions, so the last reference drops there.
+    for (const auto& session : live)
+        session->disconnect_owner();
+    // The posted task owns the only references, so this thread never drops
+    // the last one (which would destroy an editor here).
+    std::function<void()> close = [sessions = std::move(live)]() mutable {
+        for (const auto& session : sessions)
+            session->close_for_owner();
+        sessions.clear();
+    };
+    if (!detail::post_to_main_thread(close)) {
+        runtime::log_error("editor host: no main thread to close an editor on; closing it here");
+        close();
+    }
+}
+
+bool ContractEditorSession::register_with(ContractSessionRegistry& registry) {
+    auto self = weak_from_this();
+    if (self.expired()) {
+        runtime::log_error("editor host: only a shared session can register for its owner");
+        return false;
+    }
+    std::lock_guard lock(registry.mutex_);
+    auto& sessions = registry.sessions_;
+    sessions.erase(std::remove_if(sessions.begin(), sessions.end(),
+                                  [](const auto& weak) { return weak.expired(); }),
+                   sessions.end());
+    sessions.push_back(std::move(self));
+    return true;
+}
+
+void ContractEditorSession::disconnect_owner() {
+    owner_gone_.store(true);
+    if (port_)
+        port_->disconnect();
+    if (context_)
+        context_->owner_gone();
+}
 
 std::unique_ptr<ContractEditorSession>
 ContractEditorSession::create(Processor& processor, state::StateStore& store,
@@ -133,7 +214,9 @@ void ContractEditorSession::destroy_editor() {
 }
 
 void ContractEditorSession::tick() {
-    if (editor_ && attached_)
+    // Once the owner is gone, draw nothing until the main thread closes the
+    // editor: its ports are cut, and a frame would show nothing true.
+    if (editor_ && attached_ && !owner_gone_.load())
         editor_->idle();
 }
 
