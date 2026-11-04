@@ -513,6 +513,7 @@
       "pulp/host/signal_graph_node.hpp",
       "pulp/host/signal_graph_prepared_topology_edit.hpp",
       "pulp/host/signal_graph_runtime.hpp",
+      "pulp/host/signal_graph_subgraph.hpp",
       "pulp/host/timeline_device_resolver.hpp",
       "pulp/host/timeline_graph_binding.hpp",
       "pulp/host/timeline_offline_graph.hpp",
