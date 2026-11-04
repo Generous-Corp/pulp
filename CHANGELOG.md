@@ -9,6 +9,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1600"></a>
+## [1.60.0] - 2026-11-04
+
+- release/version bump ([#11535](https://github.com/Generous-Corp/pulp/pull/11535))
+- fix/windows runner policy version 20261104 ([#11533](https://github.com/Generous-Corp/pulp/pull/11533))
+
+<a id="v1590"></a>
+## [1.59.0] - 2026-11-04
+
+- release/version bump ([#11532](https://github.com/Generous-Corp/pulp/pull/11532))
+- feature/au editor contract ([#11466](https://github.com/Generous-Corp/pulp/pull/11466))
+- g5 typed trigger runtime ([#11527](https://github.com/Generous-Corp/pulp/pull/11527))
+- fix/skia runtime pin source 20261104 ([#11528](https://github.com/Generous-Corp/pulp/pull/11528))
+- docs/input provider boundary 20261104 ([#11529](https://github.com/Generous-Corp/pulp/pull/11529))
+
 <a id="v1580"></a>
 ## [1.58.0] - 2026-11-04
 
@@ -12207,6 +12222,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.60.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.60.0
+[1.59.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.59.0
 [1.58.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.58.0
 [1.57.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.57.0
 [1.56.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.56.0
