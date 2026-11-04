@@ -100,8 +100,12 @@ TEST_CASE("Guarded synthesis rejects an entire frame without changing prior hist
     std::fill(bad.begin(), bad.end(), std::complex<float>{std::numeric_limits<float>::max(), 0.0f});
     REQUIRE(subject.synthesize_frame_guarded(invalid) == SpectralSplitResult::NonfiniteSynthesis);
     REQUIRE(subject.available_output() == control.available_output());
-    REQUIRE(subject.synthesize_frame_guarded(frames) == SpectralSplitResult::Ok);
-    REQUIRE(control.synthesize_frame_guarded(frames) == SpectralSplitResult::Ok);
+    // Advance beyond the rejected frame's full support. Reading only the
+    // next available prefix cannot observe an early commit into future history.
+    for (int i = 0; i < 8; ++i) {
+        REQUIRE(subject.synthesize_frame_guarded(frames) == SpectralSplitResult::Ok);
+        REQUIRE(control.synthesize_frame_guarded(frames) == SpectralSplitResult::Ok);
+    }
     const int available = control.available_output();
     std::array<std::vector<float>, 2> actual, expected;
     for (int ch = 0; ch < 2; ++ch) {
