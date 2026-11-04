@@ -465,3 +465,50 @@ TEST_CASE("GraphRuntimePlan skips the input-port check for automation edges",
     CHECK_FALSE(bad.ok());
     CHECK(bad.error.code == GraphRuntimePlanErrorCode::DestinationPortOutOfRange);
 }
+
+TEST_CASE("GraphRuntimePlan rejects unexecutable lanes before audio interpretation",
+          "[graph][graph-runtime][plan][trigger]") {
+    using namespace pulp::graph;
+    const std::array nodes{node(1, 1, 1), node(2, 1, 1)};
+    auto edge = connect(1, 0, 2, 0);
+    REQUIRE(build_graph_runtime_plan(nodes, std::span(&edge, 1)).ok());
+    edge.kind = GraphRuntimeConnectionKind::Trigger;
+    auto trigger = build_graph_runtime_plan(nodes, std::span(&edge, 1));
+    REQUIRE_FALSE(trigger.ok());
+    CHECK(trigger.error.code == GraphRuntimePlanErrorCode::UnsupportedTrigger);
+    CHECK(trigger.error.index == 0);
+    CHECK(trigger.error.node_id == 1);
+    CHECK(trigger.plan.node_count() == 0);
+    CHECK(trigger.plan.connection_count() == 0);
+    CHECK_FALSE(is_event(edge));
+    CHECK_FALSE(carries_audio(edge));
+    edge.kind = static_cast<GraphRuntimeConnectionKind>(255);
+    auto unknown = build_graph_runtime_plan(nodes, std::span(&edge, 1));
+    CHECK(unknown.error.code == GraphRuntimePlanErrorCode::InvalidConnectionKind);
+}
+
+TEST_CASE("GraphRuntimePlan only admits audio feedback in every build mode",
+          "[graph][graph-runtime][plan][trigger]") {
+    using namespace pulp::graph;
+    std::array nodes{node(1, 1, 1), node(2, 1, 1)};
+    for (auto& spec : nodes) {
+        spec.event_input_ports = 1;
+        spec.event_output_ports = 1;
+    }
+    for (auto kind : {GraphRuntimeConnectionKind::Audio,
+                      GraphRuntimeConnectionKind::Event,
+                      GraphRuntimeConnectionKind::Automation}) {
+        auto edge = connect(1, 0, 2, 0);
+        edge.kind = kind;
+        REQUIRE(build_graph_runtime_plan(nodes, std::span(&edge, 1)).ok());
+        edge.feedback = true;
+        auto feedback = build_graph_runtime_plan(nodes, std::span(&edge, 1));
+        if (kind == GraphRuntimeConnectionKind::Audio) {
+            REQUIRE(feedback.ok());
+        } else {
+            REQUIRE_FALSE(feedback.ok());
+            CHECK(feedback.error.code == GraphRuntimePlanErrorCode::NonAudioFeedback);
+            CHECK(feedback.plan.connection_count() == 0);
+        }
+    }
+}
