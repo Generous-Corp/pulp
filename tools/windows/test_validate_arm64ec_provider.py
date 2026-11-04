@@ -49,7 +49,16 @@ class Arm64EcProviderTests(unittest.TestCase):
         self.root = pathlib.Path(self.temp.name)
         self.metadata = self.root / "msvc-toolchain.json"
         self.metadata.write_text(
-            json.dumps({"target": {"architecture": "arm64ec"}}), encoding="utf-8"
+            json.dumps(
+                {
+                    "target": {"architecture": "arm64ec"},
+                    "producer": {
+                        "skia_gn_compiler": {"version": "19.51.36260"},
+                        "dawn_cmake_compiler": {"version": "19.51.36260"},
+                    },
+                }
+            ),
+            encoding="utf-8",
         )
 
     def tearDown(self) -> None:
@@ -64,12 +73,80 @@ class Arm64EcProviderTests(unittest.TestCase):
     def test_ec_archive_is_accepted(self) -> None:
         archive = self.root / "dawn_combined.lib"
         _archive(archive, [0xA641, 0xA641])
-        members = _mod.validate_provider([archive], "arm64ec", self.metadata)
+        members = _mod.validate_provider(
+            [archive], "arm64ec", self.metadata, "19.51.36260"
+        )
         self.assertEqual({member.machine for member in members}, {0xA641})
+
+    def test_older_consumer_toolset_is_rejected_before_link(self) -> None:
+        archive = self.root / "skia.lib"
+        _archive(archive, [0xA641])
+        with self.assertRaisesRegex(ValueError, "older than the provider compiler"):
+            _mod.validate_provider([archive], "arm64ec", self.metadata, "19.44.35207")
+
+    def test_newer_consumer_toolset_is_accepted(self) -> None:
+        archive = self.root / "skia.lib"
+        _archive(archive, [0xA641])
+        members = _mod.validate_provider(
+            [archive], "arm64ec", self.metadata, "19.52.10000"
+        )
+        self.assertEqual(len(members), 1)
+
+    def test_consumer_check_rejects_provider_without_compiler_record(self) -> None:
+        archive = self.root / "skia.lib"
+        _archive(archive, [0xA641])
+        self.metadata.write_text(
+            json.dumps({"target": {"architecture": "arm64ec"}}), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ValueError, "producer compiler records"):
+            _mod.validate_provider([archive], "arm64ec", self.metadata, "19.51.36260")
+
+    def _write_producer(self, producer: dict) -> None:
+        self.metadata.write_text(
+            json.dumps({"target": {"architecture": "arm64ec"}, "producer": producer}),
+            encoding="utf-8",
+        )
+
+    def _validate_with_producer(self, producer: dict) -> None:
+        archive = self.root / "skia.lib"
+        _archive(archive, [0xA641])
+        self._write_producer(producer)
+        _mod.validate_provider([archive], "arm64ec", self.metadata, "19.51.36260")
+
+    def test_each_missing_or_null_producer_record_is_rejected(self) -> None:
+        good = {"version": "19.51.36260"}
+        cases = {
+            "skia absent": {"dawn_cmake_compiler": good},
+            "dawn absent": {"skia_gn_compiler": good},
+            "skia null": {"skia_gn_compiler": None, "dawn_cmake_compiler": good},
+            "dawn null": {"skia_gn_compiler": good, "dawn_cmake_compiler": None},
+            "both absent": {},
+        }
+        for label, producer in cases.items():
+            with self.subTest(label), self.assertRaisesRegex(ValueError, "missing"):
+                self._validate_with_producer(producer)
+
+    def test_disagreeing_producer_versions_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "disagree"):
+            self._validate_with_producer(
+                {
+                    "skia_gn_compiler": {"version": "19.51.36260"},
+                    "dawn_cmake_compiler": {"version": "19.52.10000"},
+                }
+            )
 
     def test_arm64x_may_contain_native_and_ec_members(self) -> None:
         self.metadata.write_text(
-            json.dumps({"target": {"architecture": "arm64x"}}), encoding="utf-8"
+            json.dumps(
+                {
+                    "target": {"architecture": "arm64x"},
+                    "producer": {
+                        "skia_gn_compiler": {"version": "19.51.36260"},
+                        "dawn_cmake_compiler": {"version": "19.51.36260"},
+                    },
+                }
+            ),
+            encoding="utf-8",
         )
         archive = self.root / "skia.lib"
         _archive(archive, [0xAA64, 0xA64E])
