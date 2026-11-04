@@ -230,6 +230,64 @@ TEST_CASE("destroying the last port mid-gesture releases its gestures",
     REQUIRE(f.host.entries.back().front() == 'E');
 }
 
+TEST_CASE("a disconnected ParamPort releases its gestures and refuses every later call",
+          "[editor-host][param-port]") {
+    Fixture f;
+    f.store.set_value(kGain, 0.25f);
+    StateStoreParamPort port(f.store);
+    int heard = 0;
+    auto subscription = port.add_listener([&heard](ParamID, float) { ++heard; });
+    port.begin(kGain);
+    REQUIRE(f.store.open_gesture_count() == 1);
+    REQUIRE(port.connected());
+
+    port.disconnect();
+    REQUIRE_FALSE(port.connected());
+    // Every gesture it held is closed, and the host saw it end.
+    REQUIRE(f.store.open_gesture_count() == 0);
+    REQUIRE(f.host.entries.back() == "E1");
+    const auto host_entries = f.host.entries.size();
+
+    // Nothing reads or writes the store any more.
+    REQUIRE(port.params().empty());
+    REQUIRE(port.info(kGain) == nullptr);
+    REQUIRE(port.get(kGain) == 0.0f);
+    port.begin(kGain);
+    port.set(kGain, 0.9f);
+    port.end(kGain);
+    REQUIRE(f.store.open_gesture_count() == 0);
+    REQUIRE(f.store.get_value(kGain) == 0.25f);
+    REQUIRE(port.open_gestures(kGain) == 0);
+    REQUIRE(f.host.entries.size() == host_entries);
+    REQUIRE_FALSE(port.add_listener([](ParamID, float) {}));
+
+    // Its listener was removed with it: a write by another writer is unheard.
+    f.store.set_value(kMix, 0.6f);
+    REQUIRE(heard == 0);
+
+    port.disconnect(); // idempotent
+    subscription.reset();
+}
+
+TEST_CASE("a disconnected ParamPort outlives its store", "[editor-host][param-port]") {
+    auto store = std::make_unique<StateStore>();
+    add_unit_param(*store, kGain, "Gain");
+    StateStoreParamPort port(*store);
+    auto subscription = port.add_listener([](ParamID, float) {});
+    port.begin(kGain);
+    port.disconnect();
+    store.reset();
+
+    // The store is gone; the port and its subscription touch nothing of it.
+    REQUIRE(port.get(kGain) == 0.0f);
+    port.begin(kGain);
+    port.set(kGain, 0.5f);
+    port.end(kGain);
+    port.release_all();
+    subscription.reset();
+    REQUIRE(port.open_gestures(kGain) == 0);
+}
+
 TEST_CASE("ParamSubscription cancels exactly once and moves its ownership", "[editor-host]") {
     int cancelled = 0;
     {

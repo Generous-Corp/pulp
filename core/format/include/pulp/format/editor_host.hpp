@@ -402,6 +402,15 @@ class EditorAutomation {
 /// an orderly detach, the host calls `invalidate()` instead.
 ///
 /// Every member runs on the host's main thread.
+///
+/// Reaching the plug-in: an editor reaches parameter and visual state only
+/// through its `EditorContext` ports. Once the host has called `invalidate()`,
+/// or has begun closing the editor because its plug-in instance is going away
+/// (including a teardown off the main thread, where the instance is destroyed
+/// before the editor's close runs on the main thread), the editor must not use
+/// the `Processor&` it was created with: that processor may already be gone.
+/// Its ports are disconnected by then and refuse every call, so an editor that
+/// only uses its context stays safe.
 class Editor {
   public:
     virtual ~Editor() = default;
@@ -558,7 +567,10 @@ class EditorFactory {
 
     /// A new, unattached editor for `processor` in `role`, or null when the
     /// role is not supported. `context` outlives the editor. Several editors
-    /// may be alive at once, for one role or several.
+    /// may be alive at once, for one role or several. `processor` is valid
+    /// only until the host invalidates the editor or begins closing it for a
+    /// departing plug-in instance (see `Editor`); state after that is reached
+    /// through `context`, whose ports refuse calls once disconnected.
     virtual std::unique_ptr<Editor> create(Processor& processor, EditorContext& context,
                                            EditorRole role) = 0;
 
