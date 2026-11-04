@@ -2146,12 +2146,22 @@ void View::paint_content_maybe_cached(canvas::Canvas& canvas,
         const bool paint_bounds_match_border_box =
             paint_bounds.x == 0.0f && paint_bounds.y == 0.0f &&
             paint_bounds.width == bounds_.width && paint_bounds.height == bounds_.height;
+        const float device_width = bounds_.width * m.a;
+        const float device_height = bounds_.height * m.d;
+        const bool integral_device_extents =
+            std::isfinite(device_width) && std::isfinite(device_height) &&
+            device_width >= 1.0f && device_height >= 1.0f &&
+            device_width == std::floor(device_width) &&
+            device_height == std::floor(device_height);
         const bool eligible =
             child_count() == 0 && canvas.supports(canvas::CanvasCapability::retained_layer_cache) &&
             m.b == 0.0f && m.c == 0.0f && m.a > 0.0f && m.d > 0.0f && std::isfinite(m.a) &&
             std::isfinite(m.d) && std::isfinite(m.e) && std::isfinite(m.f) &&
             m.e == std::floor(m.e) && m.f == std::floor(m.f) && bounds_.width > 0.0f &&
             bounds_.height > 0.0f && shadows_.empty() &&
+            // Snapshot dimensions round up to whole pixels. Replaying that
+            // image into a fractional device extent would squeeze its pixels.
+            integral_device_extents &&
             // Captured browser paint can extend beyond the layout box by a
             // snapped edge. The retained layer is still border-box sized, so
             // record such views directly until the cache can retain that full
