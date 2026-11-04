@@ -903,7 +903,11 @@ std::string GraphSerializer::to_json(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
     bool has_processors = false;
-    for (const auto& node : graph.nodes()) has_processors |= graph.is_processor_node(node.id);
+    for (const auto& node : graph.nodes()) {
+        if (node.spectral_identity)
+            return {};
+        has_processors |= graph.is_processor_node(node.id);
+    }
     auto root = choc::value::createObject("PulpGraph");
     const auto regions = graph.sample_regions();
     if (graph.nodes().size() > kMaxSerializedNodes ||
@@ -1036,7 +1040,7 @@ std::string GraphSerializer::to_json(
             auto p = choc::value::createObject("Processor");
             p.addMember("node_id", (int64_t)n.id);
             p.addMember("type_id", d.bundle_id);
-            p.addMember("type_version", (int64_t)1);
+            p.addMember("type_version", (int64_t)instance->graph_type_version());
             p.addMember("state_schema_version", (int64_t)instance->state_store().state_version());
             p.addMember("input_channels", (int64_t)d.default_input_channels());
             p.addMember("output_channels", (int64_t)d.default_output_channels());
@@ -1281,6 +1285,13 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json,
                                                        const GraphLoadOptions& options) {
     LoadResult result;
+    {
+        SignalGraph::GraphMutationLock lock(graph);
+        if (graph.refuse_spectral_mutation_()) {
+            result.error = "active spectral controller refuses graph loading; stop it first";
+            return result;
+        }
+    }
     graph.clear();
     PluginNodeResolver plugin_resolver(options);
 
@@ -1577,8 +1588,19 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         records.reserve(records_json.size());
         for (uint32_t i = 0; i < records_json.size(); ++i) {
             const auto& p = records_json[i];
-            auto parameters = b64_decode(p["parameters_b64"].getString());
-            auto custom = b64_decode(p["custom_b64"].getString());
+            const auto bounded_encoded = [](std::string_view encoded) {
+                constexpr std::size_t max_encoded =
+                    ((ProcessorRestoreRegistry::max_state_part_bytes + 2) / 3) * 4 + 8;
+                return encoded.size() <= max_encoded;
+            };
+            const auto parameters_text = std::string_view(p["parameters_b64"].getString());
+            const auto custom_text = std::string_view(p["custom_b64"].getString());
+            if (!bounded_encoded(parameters_text) || !bounded_encoded(custom_text)) {
+                result.error = "Processor state encoding exceeds limits";
+                return result;
+            }
+            auto parameters = b64_decode(parameters_text);
+            auto custom = b64_decode(custom_text);
             if (!parameters || !custom) { result.error = "invalid Processor state encoding"; return result; }
             parameter_blobs.push_back(std::move(*parameters)); custom_blobs.push_back(std::move(*custom));
             records.push_back({static_cast<std::uint32_t>(p["node_id"].getInt64()),
@@ -1622,7 +1644,18 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 }
                 const auto restored = restored_processors.find(old_id);
                 if (restored == restored_processors.end()) { graph.clear(); result.error = "Processor node missing restore record"; return result; }
-                new_id = graph.add_processor_node(std::move(restored->second), name);
+                auto instance = std::move(restored->second);
+                restored_processors.erase(restored);
+                const auto& descriptor = instance->descriptor();
+                const auto persisted_inputs = nv["num_input_ports"].getInt64();
+                const auto persisted_outputs = nv["num_output_ports"].getInt64();
+                if (persisted_inputs != descriptor.default_input_channels() ||
+                    persisted_outputs != descriptor.default_output_channels()) {
+                    graph.clear();
+                    result.error = "Processor node port shape does not match restore descriptor";
+                    return result;
+                }
+                new_id = graph.add_processor_node(std::move(instance), name);
                 if (new_id == 0) { graph.clear(); result.error = "failed to add restored Processor node"; return result; }
                 id_map[old_id] = new_id;
                 graph.set_node_gain(new_id, gain);
@@ -1764,6 +1797,11 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 }
             }
         }
+    }
+    if (!restored_processors.empty()) {
+        graph.clear();
+        result.error = "Processor restore record has no matching processor node";
+        return result;
     }
 
     // v3 region-bearing graphs are installed as one locked authoring mutation.

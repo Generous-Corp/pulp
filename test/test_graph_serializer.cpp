@@ -2860,7 +2860,7 @@ class RuntimeOnlyProcessor final : public pulp::format::Processor {
 };
 } // namespace
 
-TEST_CASE("GraphSerializer refuses runtime-owned Processor nodes",
+TEST_CASE("GraphSerializer emits runtime-owned Processor v4 records",
           "[host][serializer][processor-node]") {
     SignalGraph graph;
     REQUIRE(graph.add_processor_node(std::make_unique<RuntimeOnlyProcessor>()) != 0);

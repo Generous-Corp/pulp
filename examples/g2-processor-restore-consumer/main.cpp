@@ -71,7 +71,7 @@ class StatefulGain final : public format::Processor {
     std::uint8_t offset = 1;
 };
 
-const ProcessorTypeKey key{"org.example.stateful-gain", 1};
+const ProcessorTypeKey key{"org.example.stateful-gain", 7};
 const std::array allowed{key};
 
 std::shared_ptr<format::ProcessorNodeInstance> fresh() {
@@ -145,6 +145,21 @@ void positive_and_isolation() {
     const auto graph_json = GraphSerializer::to_json(restored_graph);
     check(!graph_json.empty() && graph_json.find("\"processors\"") != std::string::npos,
           "graph v4 Processor envelope emits through the installed SDK");
+    GraphLoadOptions load_options;
+    load_options.processor_registry = &registry;
+    load_options.processor_allowlist = {key};
+    SignalGraph roundtrip_graph;
+    const auto roundtrip = GraphSerializer::from_json(roundtrip_graph, graph_json, load_options);
+    check(roundtrip.ok(), "graph v4 Processor envelope restores through the installed SDK");
+    const auto roundtrip_json = GraphSerializer::to_json(roundtrip_graph);
+    check(roundtrip_json == graph_json, "graph v4 restore preserves parameter/custom bytes");
+    auto oversized_json = graph_json;
+    const auto custom_key = oversized_json.find("\"custom_b64\":\"");
+    check(custom_key != std::string::npos, "graph v4 custom state field is present");
+    oversized_json.insert(custom_key + 14, std::string(12 * 1024 * 1024, 'A'));
+    SignalGraph rejected_graph;
+    check(!GraphSerializer::from_json(rejected_graph, oversized_json, load_options).ok(),
+          "graph v4 rejects oversized encoded state before decode");
 
     auto live = fresh();
     SignalGraph live_graph;

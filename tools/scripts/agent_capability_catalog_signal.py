@@ -665,6 +665,7 @@ EXPORTS = [
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::connect',
                 target='Pulp::host',
                 header_fingerprint='sha256:b18b39d398928a1525e18b409dfb538690948e47740c6c0636b82e32a1a0d577',
+                address_expression='static_cast<bool (pulp::host::SignalGraph::PreparedTopologyEdit::*)(pulp::host::NodeId, pulp::host::PortIndex, pulp::host::NodeId, pulp::host::PortIndex)>(&pulp::host::SignalGraph::PreparedTopologyEdit::connect)',
             ),
         ],
     ),
