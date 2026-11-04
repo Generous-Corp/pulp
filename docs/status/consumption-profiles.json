@@ -1630,7 +1630,7 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 84,
+        "installed_target_count": 85,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -1746,6 +1746,10 @@
           },
           {
             "exported_as": "Pulp::gpu-device",
+            "closure_node_count": 41
+          },
+          {
+            "exported_as": "Pulp::standalone-contract",
             "closure_node_count": 41
           },
           {
@@ -7015,6 +7019,96 @@
             "pulp-format",
             "pulp-view",
             "yogacore"
+          ]
+        },
+        "standalone-contract": {
+          "target": "pulp-standalone-contract",
+          "exported_as": "Pulp::standalone-contract",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "",
+          "closure": {
+            "node_count": 41,
+            "pulp_targets": [
+              "pulp-audio",
+              "pulp-events",
+              "pulp-format-core",
+              "pulp-foundation",
+              "pulp-graph",
+              "pulp-midi",
+              "pulp-music",
+              "pulp-native-components",
+              "pulp-platform",
+              "pulp-runtime",
+              "pulp-sample-bank-manifest",
+              "pulp-signal",
+              "pulp-simd",
+              "pulp-state",
+              "pulp-timebase"
+            ],
+            "third_party_targets": [
+              "ausdk",
+              "everest",
+              "hwy",
+              "lv2-headers",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-standalone-contract",
+              "pulp-tracing",
+              "vst3-sdk"
+            ]
+          },
+          "external_dependencies": {
+            "count": 26,
+            "third_party_targets": [
+              "ausdk",
+              "everest",
+              "hwy",
+              "lv2-headers",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-standalone-contract",
+              "pulp-tracing",
+              "vst3-sdk"
+            ],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [
+              "Accelerate",
+              "AppKit",
+              "AudioToolbox",
+              "Cocoa",
+              "CoreAudio",
+              "CoreBluetooth",
+              "CoreFoundation",
+              "CoreMIDI",
+              "CoreServices",
+              "Foundation",
+              "Security",
+              "UniformTypeIdentifiers",
+              "UserNotifications"
+            ],
+            "system_libraries": [
+              "bsm"
+            ]
+          },
+          "public_headers": {
+            "roots": [
+              "core/canvas/include",
+              "core/format/include",
+              "core/view/audio/include",
+              "core/view/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "framework:AppKit",
+            "pulp-format-core"
           ]
         },
         "standalone-native": {
