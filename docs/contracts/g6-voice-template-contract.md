@@ -117,11 +117,12 @@ allowed. The SDK release may differ from the source baseline only when the
 relevant installed headers are recorded and compared; this is header API
 characterization, not a claim about all binaries in that SDK.
 
-Use `tools/scripts/confirm_failure.sh` on the consumer to change the stale
-pressure event's generation from 1 to 9. The unchanged stale-generation oracle
-must fail after a real recompile and pass after restoration. This changes the
-event sent through the public API, not the expected value or the installed SDK.
-Record baseline, broken and restored outputs in the phase status.
+The registered test uses `tools/scripts/confirm_failure.sh` to invert the
+generation equality guard in a private staged copy of the production allocator
+header. The consumer remains unchanged: its stale-generation oracle must fail
+after a real recompile and pass after restoration. The original checkout and
+other SDK installations are untouched. Record baseline, broken and restored
+outputs in the phase status.
 
 This change currently supplies the executable source and source-backed contract.
 The installed-SDK build and mutation control are registered as

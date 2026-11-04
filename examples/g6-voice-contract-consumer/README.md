@@ -18,25 +18,25 @@ CMAKE_BUILD_PARALLEL_LEVEL=1 tools/ci/governed-build.sh cmake --build build-g6-c
 ```
 
 The process returns nonzero and names the failed rule; assertions remain active
-in Release. SDK headers are not modified. The planted-negative control changes
-the stimulus so a pressure event addresses the live generation instead of the
-stolen one, while retaining the same stale-event oracle:
+in Release. The registered planted-negative control inverts the production
+allocator's generation equality check in a private staged SDK copy. The
+consumer and its stale-event oracle remain unchanged. Run it after the parent
+Pulp build has completed on an admitted host:
 
 ```sh
-tools/scripts/confirm_failure.sh \
-  --file examples/g6-voice-contract-consumer/main.cpp \
-  --break 'perl -0pi -e "s/auto stale = event\(Kind::Pressure, 1\);/auto stale = event(Kind::Pressure, 9);/"' \
-  --build-dir build-g6-consumer --target pulp-g6-voice-contract --jobs 1 \
-  --test ./build-g6-consumer/pulp-g6-voice-contract --keep-logs
+ctest --test-dir build -V -R '^cmake-g6-voice-contract-sdk-consumer$'
 ```
 
-Run the control from a clean committed consumer; retain baseline, broken and
-restored receipts. A compile failure is inconclusive, not a confirmed negative.
+Retain baseline, broken and restored receipts. A compile failure is
+inconclusive, not a confirmed negative.
 
 Native POSIX CTest registers `cmake-g6-voice-contract-sdk-consumer`. It stages
 the current build's SDK, compares the installed MPE header hashes, and builds
 this exact consumer in a separate fixture. It runs the positive probe and the
-same mutation/restoration loop against an indexed copy, leaving checkout files
-untouched. Each phase's output and source/SDK provenance appear in the CTest log.
+mutation/restoration loop against the indexed private SDK header, leaving the
+consumer and checkout files untouched. Each phase's output and source/SDK
+provenance appear in the CTest log and a dedicated transcript in the existing
+`Testing/Temporary` CI artifact directory. The helper rejects dirty or mismatched
+SDK provenance and compares installed headers and consumer sources to HEAD blobs.
 The test has no `slow` label so changes to its registration reach the normal
 PR head affected-test lane. Registration alone is not execution evidence.
