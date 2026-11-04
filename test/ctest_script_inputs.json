@@ -3356,6 +3356,7 @@
   "pulp-test-timeline-smf",
   "pulp-test-tracing",
   "pulp-test-transition-cost",
+  "pulp-test-trigger-admission",
   "pulp-test-true-peak-limiter",
   "pulp-test-udev-monitor",
   "pulp-test-unique-temp-dir",

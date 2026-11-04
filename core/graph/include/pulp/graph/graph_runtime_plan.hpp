@@ -87,6 +87,9 @@ enum class GraphRuntimeConnectionKind : std::uint8_t {
     Event,
     Automation,
     Spectral,
+    // Reserved typed trigger lane. The planner refuses it until a prepared
+    // producer/consumer pair can execute it; it is never a MIDI Event edge.
+    Trigger,
 };
 
 struct GraphRuntimeConnectionSpec {
@@ -195,6 +198,9 @@ enum class GraphRuntimePlanErrorCode : std::uint8_t {
     DestinationPortOutOfRange,
     CycleDetected,
     AllocationFailed,
+    UnsupportedTrigger,
+    NonAudioFeedback,
+    InvalidConnectionKind,
 };
 
 struct GraphRuntimePlanError {
