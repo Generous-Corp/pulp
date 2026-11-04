@@ -37,6 +37,8 @@ foreach(_variant A B None Plain)
     endif()
     if(_variant STREQUAL "A")
         set(_ui UI pulp-test-ui-package-a)
+        # The UI package plug-in's standalone, whose link must stay view-free.
+        list(APPEND _formats Standalone)
     elseif(_variant STREQUAL "B")
         set(_ui UI pulp-test-ui-package-b)
     elseif(_variant STREQUAL "None")
@@ -97,7 +99,7 @@ set_tests_properties(editor-ui-package-per-plugin-factory PROPERTIES
 # default editor, which links Pulp's view layer. Only its configured target
 # graph is read, so it is not built.
 pulp_add_plugin(PulpEditorUiViewControl
-    FORMATS           CLAP
+    FORMATS           CLAP Standalone
     PLUGIN_NAME       "Pulp Editor UI View Control"
     BUNDLE_ID         "dev.pulp.test.editor-ui-package-view-control"
     MANUFACTURER      "Pulp"
@@ -128,6 +130,12 @@ foreach(_variant A B None Plain ViewControl)
         "set(${_variant}_CLOSURE [==[${_closure}]==])\n"
         "set(${_variant}_SOURCES [==[${_sources}]==])\n"
         "set(${_variant}_PACKAGE [==[${_package}]==])\n")
+endforeach()
+# The standalone of the UI package plug-in, and the default-editor control's.
+foreach(_variant A ViewControl)
+    pulp_link_closure(PulpEditorUi${_variant}_Standalone TARGETS_OUT _closure)
+    string(REPLACE "PulpEditorUi${_variant}" "<plugin>" _closure "${_closure}")
+    string(APPEND _record_content "set(${_variant}_STANDALONE_CLOSURE [==[${_closure}]==])\n")
 endforeach()
 # The AU component of the UI package plug-in, checked like its CLAP module.
 if(TARGET PulpEditorUiA_AU)

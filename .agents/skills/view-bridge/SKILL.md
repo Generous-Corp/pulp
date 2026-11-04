@@ -128,6 +128,21 @@ error. Things that are easy to get wrong:
   or size negotiation.
 - The hook calls the package function lazily, on the first `editor_factory()`
   call, never at load, so an AU bundle's early registrar never builds UI state.
+- A UI-package Standalone links `pulp::standalone-contract`, not
+  `pulp::standalone`: the same `StandaloneApp`, built from the core sources plus
+  `standalone_view_layer_none.cpp` instead of `standalone_view_layer.cpp`, so it
+  links no Pulp view, canvas, render or GPU-device code and the package's Dawn
+  (Vellum's provider) is the only one in the process. `dawn_binding_census.py`
+  counts it. Anything the standalone does that needs a Pulp view (the
+  `create_view()` window and Settings chrome, the musical typing keyboard, the
+  Audio Inspector, in-app updates) belongs in `standalone_view_layer.cpp` behind
+  one of `StandaloneApp`'s view-layer hooks, never in `standalone.cpp`; the
+  view-free library fails to link otherwise. View-layer members are owned
+  through a deleter the view layer supplies (`ViewLayerPtr`), so the core never
+  names their destructors. The per-binary view Objective-C cluster is skipped for
+  such a Standalone (`PULP_<target>_VIEW_FREE_STANDALONE`).
+  `editor-ui-package-links-no-view` checks the closure, and building the
+  fixture's `PulpEditorUiA_Standalone` proves the link.
 - A test that installs a hook with `install_plugin_editor_factory_hook()` must
   clear it (`nullptr`) before it ends, or every later test in the grouped
   binary sees a factory on a headless processor.

@@ -151,8 +151,12 @@ so they survive `install(EXPORT)`. The package target must exist when
 A plug-in that declares a package gets `NO_EDITOR`'s view-free link without
 saying so: its VST3, CLAP, AU v2 and LV2 modules link `Pulp::format-core`
 instead of the format and view umbrella, so they carry no Pulp view, canvas,
-render, Skia or Dawn code. As with `NO_EDITOR`, Standalone, AUv3 and AAX
-outputs still link the view stack. `NATIVE_UI`, `UI_SCRIPT`, `GPU_UI`,
+render, Skia or Dawn code. Its Standalone links `Pulp::standalone-contract`,
+the standalone app without Pulp's view layer, so it also carries no Pulp view,
+render or Dawn code and a package that draws with Dawn brings the only copy;
+that app opens only the package's editor (no Settings tab, musical typing
+keyboard or Audio Inspector, which are Pulp views). AUv3 and AAX outputs still
+link the view stack. `NATIVE_UI`, `UI_SCRIPT`, `GPU_UI`,
 `FULL_EDITOR` and `LITE_EDITOR` select Pulp's own view editor, so combining
 any of them with a package stops configuration with
 `UI <package> cannot be combined with ...`. `UI none` selects no package and
