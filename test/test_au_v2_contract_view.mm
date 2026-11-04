@@ -371,7 +371,8 @@ TEST_CASE("disposing the AU instance off the main thread cuts the store at once 
         // Done on the disposing thread: every gesture released and the port
         // cut from the store, so the store may go before the editor closes.
         REQUIRE(instance->store.open_gesture_count() == 0);
-        REQUIRE(params.params().empty());
+        // The parameter list is the port's own copy and stays readable.
+        REQUIRE(params.info(kGain) != nullptr);
         params.begin(kGain);
         REQUIRE(instance->store.open_gesture_count() == 0);
         // The editor itself is still open: it closes on the main thread.

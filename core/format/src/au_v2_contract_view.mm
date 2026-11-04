@@ -28,7 +28,13 @@
 //                                     the main thread, the gestures are
 //                                     released and the store cut at once and
 //                                     the close is posted to the main thread,
-//                                     never waited for
+//                                     never waited for. Cutting the store does
+//                                     wait for a parameter call already running
+//                                     on the main thread, so a host that
+//                                     disposes off the main thread while holding
+//                                     a lock that call needs would hang (AU's
+//                                     threading model already rules that out);
+//                                     such a wait is logged after a second
 //
 // Idle runs from the session's own main-thread timer. Edits go through the session's StateStoreParamPort
 // into the AU instance's store, which the adapter already reports to the host.

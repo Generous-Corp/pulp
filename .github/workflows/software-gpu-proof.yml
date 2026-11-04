@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: false
 
@@ -93,7 +93,7 @@ jobs:
 
       - name: Upload Linux proof receipt
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: advisory-software-gpu-linux
           path: |
@@ -112,7 +112,7 @@ jobs:
     outputs:
       runs_on: ${{ steps.resolve.outputs.runs_on }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           sparse-checkout: tools/scripts/windows_runner_selector.py
           sparse-checkout-cone-mode: false
@@ -132,7 +132,7 @@ jobs:
     runs-on: ${{ fromJSON(needs.windows-runner.outputs.runs_on) }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: false
 
@@ -185,7 +185,7 @@ jobs:
 
       - name: Upload Windows proof receipt
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: advisory-software-gpu-windows
           path: |
