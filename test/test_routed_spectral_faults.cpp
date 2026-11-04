@@ -142,7 +142,8 @@ struct ControllerGraph {
     float* op[1] = {output.data()};
     pulp::audio::BufferView<const float> iv{ip, 1, 64};
     pulp::audio::BufferView<float> ov{op, 1, 64};
-    ControllerGraph() {
+    pulp::host::NodeId midi_in = 0, midi_out = 0;
+    ControllerGraph(bool with_midi = false) {
         using namespace pulp::host;
         const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
         const auto in = graph.add_input_node(1), out = graph.add_output_node(1);
@@ -152,6 +153,11 @@ struct ControllerGraph {
         REQUIRE(graph.connect(a.frames, s.frames));
         REQUIRE(graph.connect(s.audio[0], graph.node(out)->in("audio")));
         REQUIRE(graph.connect(in, 0, out, 0));
+        if (with_midi) {
+            midi_in = graph.add_midi_input_node();
+            midi_out = graph.add_midi_output_node();
+            REQUIRE(graph.connect_midi(midi_in, midi_out));
+        }
         REQUIRE(graph.prepare(48000, 64));
         input.fill(0.25f);
         for (int i = 0; i < 12; ++i) graph.process(ov, iv, 64);
@@ -193,6 +199,7 @@ TEST_CASE("Offer after boundary capture cannot steal the active reset",
     REQUIRE(result == SignalGraph::PreparedTopologyEdit::Result::Staged);
     control.process(&reset);
     REQUIRE(target.output == control.output);
+    for (float value : target.output) REQUIRE(value == 0);
     REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == 2);
     REQUIRE(target.graph.spectral_transition_state() == SignalGraph::SpectralTransitionState::Staged);
     target.process();
@@ -370,4 +377,50 @@ TEST_CASE("A boundary aligned callback needs every ceil B over H frame slot",
     REQUIRE(node->outputs.front()->count == 66);
     REQUIRE_FALSE(node->outputs.front()->fatal);
     REQUIRE(node->first_error == pulp::host::SpectralError::None);
+}
+
+TEST_CASE("Unsolicited duplicate frames never advance the scheduled grid",
+          "[host][spectral-fault][spectral-duplicate]") {
+    FaultGraph f;
+    std::array<float, 64> input{}, output{};
+    f.process(f.analysis, input, output);
+    f.process(f.stage, input, output);
+    auto* stage = f.bank.find(f.stage);
+    REQUIRE(stage->sequence == 1);
+    f.bank.begin_block();
+    stage->input->count = 1; // Repeat the previous accepted descriptor/payload.
+    f.process(f.stage, std::span(input).first(1), std::span(output).first(1));
+    REQUIRE(stage->sequence == 1);
+    REQUIRE(stage->first_error == pulp::host::SpectralError::InvalidFrame);
+    REQUIRE(stage->outputs.front()->count == 0);
+}
+
+TEST_CASE("Mailbox refusal preserves ingress and egress exactly once",
+          "[host][spectral-transition][spectral-mailbox]") {
+    using namespace pulp::host;
+    ControllerGraph target(true);
+    auto candidate = target.edit();
+    pulp::midi::MidiBuffer events, extracted;
+    REQUIRE(events.add(pulp::midi::MidiEvent::note_on(0, 60, 100)));
+    REQUIRE(target.graph.inject_midi(target.midi_in, events));
+    REQUIRE(candidate->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
+    REQUIRE_FALSE(target.graph.inject_midi(target.midi_in, events));
+    target.process();
+    REQUIRE(target.graph.spectral_transition_state() == SignalGraph::SpectralTransitionState::Rejected);
+    REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::PendingMailboxData);
+    candidate = target.edit();
+    REQUIRE(candidate->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
+    target.process(); // Undrained output also refuses replacement.
+    REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::PendingMailboxData);
+    REQUIRE(target.graph.extract_midi(target.midi_out, extracted));
+    REQUIRE(extracted.size() == 1);
+    extracted.clear();
+    REQUIRE(target.graph.extract_midi(target.midi_out, extracted));
+    REQUIRE(extracted.empty());
+    candidate = target.edit();
+    REQUIRE(candidate->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
+    target.process();
+    REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::None);
+    REQUIRE(target.graph.extract_midi(target.midi_out, extracted));
+    REQUIRE(extracted.empty());
 }

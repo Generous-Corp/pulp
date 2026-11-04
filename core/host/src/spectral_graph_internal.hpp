@@ -172,6 +172,12 @@ public:
                     }
                     if (!n.advance()) break;
                 }
+                // Unsolicited trailing records never create another scheduled
+                // slot, including duplicates arriving in a zero-frame block.
+                while (n.fatal_origin == limit && cursor < batch->count) {
+                    n.error(SpectralError::InvalidFrame);
+                    ++cursor;
+                }
             }
             if (n.fatal_origin != limit) {
                 for (auto* out : n.outputs) {
