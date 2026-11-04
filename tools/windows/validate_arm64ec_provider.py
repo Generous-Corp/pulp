@@ -45,8 +45,8 @@ def _version(value: object, *, label: str) -> tuple[int, int, int]:
 def _provider_compiler_version(document: dict[str, object]) -> tuple[int, int, int]:
     """Return the compiler version used to produce the static provider.
 
-    Skia and Dawn record their compiler independently.  If both records are
-    present they must agree; silently choosing one would allow a mixed
+    Skia and Dawn record their compiler independently.  Both records are
+    required (the archives are validated together) and must agree; silently choosing one would allow a mixed
     provider to pass the consumer ABI gate and fail later at link time.
     """
     producer = document.get("producer")
@@ -56,7 +56,7 @@ def _provider_compiler_version(document: dict[str, object]) -> tuple[int, int, i
     for key in ("skia_gn_compiler", "dawn_cmake_compiler"):
         record = producer.get(key)
         if record is None:
-            continue
+            raise ValueError(f"provider metadata is missing the {key} record")
         if not isinstance(record, dict) or "version" not in record:
             raise ValueError(f"provider metadata has an invalid {key} record")
         versions.append(_version(record["version"], label=f"provider {key}"))

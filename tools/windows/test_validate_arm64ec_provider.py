@@ -101,6 +101,40 @@ class Arm64EcProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "producer compiler records"):
             _mod.validate_provider([archive], "arm64ec", self.metadata, "19.51.36260")
 
+    def _write_producer(self, producer: dict) -> None:
+        self.metadata.write_text(
+            json.dumps({"target": {"architecture": "arm64ec"}, "producer": producer}),
+            encoding="utf-8",
+        )
+
+    def _validate_with_producer(self, producer: dict) -> None:
+        archive = self.root / "skia.lib"
+        _archive(archive, [0xA641])
+        self._write_producer(producer)
+        _mod.validate_provider([archive], "arm64ec", self.metadata, "19.51.36260")
+
+    def test_each_missing_or_null_producer_record_is_rejected(self) -> None:
+        good = {"version": "19.51.36260"}
+        cases = {
+            "skia absent": {"dawn_cmake_compiler": good},
+            "dawn absent": {"skia_gn_compiler": good},
+            "skia null": {"skia_gn_compiler": None, "dawn_cmake_compiler": good},
+            "dawn null": {"skia_gn_compiler": good, "dawn_cmake_compiler": None},
+            "both absent": {},
+        }
+        for label, producer in cases.items():
+            with self.subTest(label), self.assertRaisesRegex(ValueError, "missing"):
+                self._validate_with_producer(producer)
+
+    def test_disagreeing_producer_versions_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "disagree"):
+            self._validate_with_producer(
+                {
+                    "skia_gn_compiler": {"version": "19.51.36260"},
+                    "dawn_cmake_compiler": {"version": "19.52.10000"},
+                }
+            )
+
     def test_arm64x_may_contain_native_and_ec_members(self) -> None:
         self.metadata.write_text(
             json.dumps(
