@@ -1,0 +1,174 @@
+{
+  "schema": 1,
+  "partitions": [
+    {
+      "blocks": [
+        2
+      ],
+      "events": [
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 1,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 2,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 3,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 4,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 5,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 6,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 7,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 8,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 1,
+          "port": 0,
+          "sequence": 16,
+          "payload": "trigger"
+        }
+      ],
+      "sample_zero": {
+        "attempts": 16,
+        "accepted": 8,
+        "overflow": 7,
+        "refusals": 2,
+        "next_sequence": 16
+      },
+      "sample_one": {
+        "attempts": 1,
+        "accepted": 1,
+        "overflow": 0,
+        "refusals": 0,
+        "next_sequence": 17
+      }
+    },
+    {
+      "blocks": [
+        1,
+        1
+      ],
+      "events": [
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 1,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 2,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 3,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 4,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 5,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 6,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 7,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 0,
+          "port": 0,
+          "sequence": 8,
+          "payload": "trigger"
+        },
+        {
+          "epoch": 0,
+          "sample": 1,
+          "port": 0,
+          "sequence": 16,
+          "payload": "trigger"
+        }
+      ],
+      "sample_zero": {
+        "attempts": 16,
+        "accepted": 8,
+        "overflow": 7,
+        "refusals": 2,
+        "next_sequence": 16
+      },
+      "sample_one": {
+        "attempts": 1,
+        "accepted": 1,
+        "overflow": 0,
+        "refusals": 0,
+        "next_sequence": 17
+      }
+    }
+  ]
+}
