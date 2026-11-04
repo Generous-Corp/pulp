@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -1366,16 +1367,12 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process(
 }
 
 GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
-    ProcessBlock& block,
-    const GraphRuntimeSnapshot& snapshot,
-    GraphRuntimeBufferPool& pool,
-    GraphRuntimeMidiScratch* midi,
-    GraphRuntimeAutomationScratch* automation,
+    ProcessBlock& block, const GraphRuntimeSnapshot& snapshot, GraphRuntimeBufferPool& pool,
+    GraphRuntimeMidiScratch* midi, GraphRuntimeAutomationScratch* automation,
     std::span<const graph::GraphTimedCommand> commands,
     std::span<GraphRuntimeCommandDecision> command_results,
-    GraphRuntimeCommandHandler command_handler,
-    GraphRuntimeEventSink event_sink,
-    std::span<const std::uint8_t> skip_mask) noexcept {
+    GraphRuntimeCommandHandler command_handler, GraphRuntimeEventSink event_sink,
+    std::span<const std::uint8_t> skip_mask, GraphRuntimeAudioEdgeProbe* audio_probe) noexcept {
     if (!block.validate()) return fail_invalid_block();
     if (!snapshot.valid()) return fail_invalid_snapshot();
 
@@ -1509,6 +1506,16 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
 
     const auto command_decisions = command_results.first(commands.size());
     const bool time_nodes = node_load_timing();
+    graph::GraphRuntimeProbeSample probe_sample;
+    bool have_probe_sample = false;
+    struct ProbeClockAdvance {
+        GraphRuntimeAudioEdgeProbe* probe;
+        std::uint32_t frames;
+        ~ProbeClockAdvance() {
+            if (probe != nullptr)
+                probe->timestamp_samples += frames;
+        }
+    } probe_clock_advance{audio_probe, frames};
     for (const auto node_index : plan.processing_order_indices) {
         if (node_index >= bindings.size()) {
             zero_unwritten_sole_output();
@@ -1536,6 +1543,29 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
             nodes_processed_.fetch_add(result.nodes_processed, std::memory_order_relaxed);
             return result;
         }
+        if (audio_probe != nullptr && audio_probe->samples.attached() &&
+            node_index == audio_probe->source_index &&
+            audio_probe->source_port < plan.nodes[node_index].output_ports) {
+            const auto slot = assignment.nodes[node_index].output_base + audio_probe->source_port;
+            // An aliased AudioInput deliberately never writes its scratch slot.
+            // Observe the same host channel its downstream bindings read.
+            const float* samples = bound && pool.bound_node(node_index).host_input_aliased
+                                       ? routed_in_bus->input.channel_ptr(audio_probe->source_port)
+                                       : pool.slot_data(slot);
+            if (samples != nullptr) {
+                auto& sample = probe_sample;
+                sample.timestamp_samples = audio_probe->timestamp_samples;
+                sample.edge_index = audio_probe->edge_index;
+                sample.frames = frames;
+                double sum_squares = 0.0;
+                for (std::uint32_t frame = 0; frame < frames; ++frame) {
+                    sample.peak = std::max(sample.peak, std::abs(samples[frame]));
+                    sum_squares += static_cast<double>(samples[frame]) * samples[frame];
+                }
+                sample.rms = static_cast<float>(std::sqrt(sum_squares / frames));
+                have_probe_sample = true;
+            }
+        }
         if (plan.nodes[node_index].kind == graph::GraphRuntimeNodeKind::AudioOutput)
             sole_output_channels = 0;
         ++result.nodes_processed;
@@ -1544,6 +1574,9 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     nodes_processed_.fetch_add(result.nodes_processed, std::memory_order_relaxed);
 
     capture_feedback(plan, assignment, pool, frames);
+
+    if (have_probe_sample)
+        audio_probe->samples.try_push(probe_sample);
 
     blocks_processed_.fetch_add(1, std::memory_order_relaxed);
     return result;

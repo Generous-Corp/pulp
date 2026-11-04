@@ -72,7 +72,9 @@ jobs:
       - name: Restore FetchContent sources
         uses: actions/cache/restore@v6
         with:
-          path: ${{ github.workspace }}/${{ env.PULP_BUILD_DIR }}/_deps
+          path: |
+            ${{ github.workspace }}/${{ env.PULP_BUILD_DIR }}/_deps
+            ~/.cache/pulp/fetchcontent-src
           key: Linux-linux-fetchcontent-${{ hashFiles('setup.sh') }}
           restore-keys: Linux-linux-fetchcontent-
 

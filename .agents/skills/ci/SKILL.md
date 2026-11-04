@@ -13128,3 +13128,38 @@ These changes preserve the required Vellum lanes on their existing runners.
   (a new head, never a close) only when it was ejected from the queue, a
   required check failed, or the last line of a PR comment is
   `verdict: HOLD head:<sha>` for the current head.
+
+### Carried-commit HOLDs: stack, or supersede
+
+When a PR's commits also appear in another open, unstacked PR, the reviewer
+HOLDs it because the same change would land twice. Stack the dependent PR on
+the other PR's branch (base it there), or close it as superseded; do not keep
+both open against `main`.
+
+### Owner-protected PRs read `reviewDecision` null
+
+On a repository that requires code-owner review, `reviewDecision` can stay null
+even after the owner approves. If the steward parks the PR as `owner-decision`
+while an APPROVED review exists at the exact head, remove the label with a note
+rather than waiting. Read the reviews list at the head, not the summary field.
+
+### Platform-only failures and the m1 build host
+
+- A Linux- or Windows-only failure never blocks a macOS landing. File a
+  `PARKED/<platform>` issue on Pulp with evidence and a next step; a dependency
+  repository with issues disabled (skia-builder) is tracked on Pulp too.
+- m1's login shell picks Xcode's Python 3.9. Put `/opt/homebrew/bin` first in
+  `PATH` before running Pulp scripts there, and remove worktrees and build
+  directories afterwards because its disk runs near full.
+- When a host's pre-push hook refuses the heavy suites, push the branch from
+  m1 (a named branch in a fresh worktree) instead of bypassing the hook.
+
+## A restore-only FetchContent cache must cover where `setup.sh` clones
+
+`setup.sh` clones every dependency into the shared source cache
+(`~/.cache/pulp/fetchcontent-src` on Linux), not into `<build>/_deps`. A cache
+step that lists only `_deps` never hits, so each run clones three.js and the SDK
+submodules cold (about 10 minutes) and a bootstrap step with a 10-minute limit
+dies. Main's Linux build leg saves both paths, and `drift-fast` and
+`read-audit-nightly` restore them. The path list is part of the cache version,
+so keep it identical across the save and every restore.

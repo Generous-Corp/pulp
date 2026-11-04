@@ -170,6 +170,9 @@ pulp ship check  # verify signing status
 
 Pulp can generate NSIS installers for distributing plugins on Windows.
 
+For the architecture-specific installer, installed-consumer, and RDP/Perfetto
+acceptance contract, see [Windows plugin delivery](../windows-plugin-delivery.md).
+
 ### Requirements
 
 Install NSIS: https://nsis.sourceforge.io/ — `makensis` must be on PATH.
