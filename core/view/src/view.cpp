@@ -1,4 +1,5 @@
 #include <pulp/view/view.hpp>
+#include "view_raster_cache.hpp"
 #include <pulp/view/view_lifecycle.hpp>
 #include <pulp/view/widget_painter.hpp>
 #include <pulp/view/widget_metrics.hpp>
@@ -378,6 +379,18 @@ void View::set_subtree_cached(bool v) {
     }
     // Turning caching on or off changes what the next frame must do; make sure
     // a repaint is on the way.
+    request_repaint();
+}
+
+void View::set_raster_cached(bool enabled) {
+    if (!enabled) {
+        set_subtree_cached(false);
+        return;
+    }
+    if (dynamic_cast<detail::RasterContentCache*>(scene_cache_.get())) return;
+    set_subtree_cached(true);
+    scene_cache_ = std::make_shared<detail::RasterContentCache>();
+    scene_cache_valid_ = false;
     request_repaint();
 }
 

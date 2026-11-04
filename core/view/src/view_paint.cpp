@@ -11,6 +11,7 @@
 
 #include <pulp/canvas/resource_counters.hpp>
 #include <pulp/view/view.hpp>
+#include "view_raster_cache.hpp"
 #include <pulp/view/border_style.hpp>
 #include <pulp/view/tracing_badge.hpp>
 #include <pulp/view/capability_fallback.hpp>
@@ -2139,6 +2140,51 @@ void View::paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
 void View::paint_content_maybe_cached(canvas::Canvas& canvas,
                                       const EffectLayerState& layers,
                                       std::int64_t& children_ns) {
+    if (auto* cache = dynamic_cast<detail::RasterContentCache*>(scene_cache_.get())) {
+        const auto m = canvas.current_transform();
+        const bool eligible = child_count() == 0 &&
+            canvas.supports(canvas::CanvasCapability::retained_layer_cache) &&
+            m.b == 0.0f && m.c == 0.0f && m.a > 0.0f && m.d > 0.0f &&
+            std::isfinite(m.a) && std::isfinite(m.d) &&
+            std::isfinite(m.e) && std::isfinite(m.f) &&
+            m.e == std::floor(m.e) && m.f == std::floor(m.f) &&
+            bounds_.width > 0.0f && bounds_.height > 0.0f &&
+            shadows_.empty();
+        if (!eligible) {
+            scene_cache_valid_ = false;
+            canvas.invalidate_layer(cache->layer);
+            cache->layer = {};
+            paint_content(canvas, layers, children_ns);
+            return;
+        }
+        if (!scene_cache_valid_ || !canvas.layer_valid(cache->layer) ||
+            cache->width != bounds_.width || cache->height != bounds_.height ||
+            cache->scale_x != m.a || cache->scale_y != m.d) {
+            canvas.invalidate_layer(cache->layer);
+            cache->layer = {};
+            scene_cache_valid_ = false;
+            pulp::runtime::ScopedAllocAllowed allow;
+            const auto opened = canvas.begin_layer(
+                {0.0f, 0.0f, bounds_.width, bounds_.height}, true);
+            if (!opened) {
+                paint_content(canvas, layers, children_ns);
+                return;
+            }
+            paint_content(canvas, layers, children_ns);
+            cache->layer = canvas.end_layer();
+            cache->width = bounds_.width;
+            cache->height = bounds_.height;
+            cache->scale_x = m.a;
+            cache->scale_y = m.d;
+            scene_cache_valid_ = canvas.layer_valid(cache->layer);
+            if (!scene_cache_valid_) {
+                paint_content(canvas, layers, children_ns);
+                return;
+            }
+        }
+        canvas.draw_layer(cache->layer);
+        return;
+    }
     // Not caching, or a backend that cannot record (CoreGraphics,
     // RecordingCanvas, base): paint the subtree directly, every frame. This is
     // the honest fallback — nothing blanks on a non-scene_cache backend.

@@ -482,4 +482,133 @@ TEST_CASE("Cached replay equals direct paint at 1x and 2x backing scale",
     }
 }
 
+TEST_CASE("Static leaf raster cache reuses pixels and refreshes on mutation and scale",
+          "[view][subtree-cache][raster]") {
+    auto store = SkiaCanvas::create_retained_layer_store();
+    CountingView cached;
+    cached.set_bounds({0, 0, 64, 64});
+    cached.set_raster_cached(true);
+    CountingView direct;
+    direct.set_bounds(cached.bounds());
+    const auto render = [&](View& view, float scale, bool retain) {
+        const int size = static_cast<int>(128 * scale);
+        auto info = SkImageInfo::MakeN32Premul(size, size);
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        surface->getCanvas()->scale(scale, scale);
+        SkiaCanvas canvas(surface->getCanvas(), nullptr,
+                          retain ? store : nullptr);
+        view.paint_all(canvas);
+        std::vector<uint8_t> pixels(static_cast<std::size_t>(size) * size * 4);
+        REQUIRE(surface->readPixels(info, pixels.data(), size * 4, 0, 0));
+        return pixels;
+    };
+    const auto initial = render(cached, 1.0f, true);
+    REQUIRE(initial == render(direct, 1.0f, false));
+    REQUIRE(cached.paints == 1);
+    REQUIRE(render(cached, 1.0f, true) == initial);
+    REQUIRE(cached.paints == 1);
+
+    cached.fill = direct.fill = Color::rgba8(210, 40, 80, 255);
+    cached.request_repaint();
+    const auto changed = render(cached, 1.0f, true);
+    REQUIRE(changed != initial);
+    REQUIRE(changed == render(direct, 1.0f, false));
+    REQUIRE(cached.paints == 2);
+
+    REQUIRE(render(cached, 2.0f, true) == render(direct, 2.0f, false));
+    REQUIRE(cached.paints == 3);
+    REQUIRE(render(cached, 2.0f, true) == render(direct, 2.0f, false));
+    REQUIRE(cached.paints == 3);
+
+    // A different renderer cannot reuse the old texture handle.
+    store = SkiaCanvas::create_retained_layer_store();
+    REQUIRE(render(cached, 2.0f, true) == render(direct, 2.0f, false));
+    REQUIRE(cached.paints == 4);
+    cached.set_opacity(0.5f);
+    direct.set_opacity(0.5f);
+    REQUIRE(render(cached, 2.0f, true) == render(direct, 2.0f, false));
+    REQUIRE(cached.paints == 4);
+
+    cached.set_bounds({0, 0, 80, 48});
+    direct.set_bounds(cached.bounds());
+    REQUIRE(render(cached, 2.0f, true) == render(direct, 2.0f, false));
+    REQUIRE(cached.paints == 5);
+    cached.set_raster_cached(false);
+    render(cached, 2.0f, true);
+    render(cached, 2.0f, true);
+    REQUIRE(cached.paints == 7);
+}
+
+
+TEST_CASE("Static raster cache paints transformed and non-leaf content directly",
+          "[view][subtree-cache][raster]") {
+    auto store = SkiaCanvas::create_retained_layer_store();
+    CountingView cached;
+    cached.set_bounds({0, 0, 32, 32});
+    cached.set_raster_cached(true);
+    CountingView direct;
+    direct.set_bounds(cached.bounds());
+    float origin = 0.0f;
+    float rotation = 0.0f;
+    float scale = 1.25f;
+    const auto render = [&](View& view) {
+        auto info = SkImageInfo::MakeN32Premul(128, 128);
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        surface->getCanvas()->translate(origin, origin);
+        surface->getCanvas()->rotate(rotation);
+        surface->getCanvas()->scale(scale, scale);
+        SkiaCanvas canvas(surface->getCanvas(), nullptr, store);
+        view.paint_all(canvas);
+        std::vector<uint8_t> pixels(128 * 128 * 4);
+        REQUIRE(surface->readPixels(info, pixels.data(), 128 * 4, 0, 0));
+        return pixels;
+    };
+    SECTION("fractional backing scale remains pixel identical") {
+        REQUIRE(render(cached) == render(direct));
+        REQUIRE(render(cached) == render(direct));
+        REQUIRE(cached.paints == 1);
+    }
+    SECTION("fractional origin bypasses caching") {
+        origin = 0.25f;
+        REQUIRE(render(cached) == render(direct));
+        REQUIRE(render(cached) == render(direct));
+        REQUIRE(cached.paints == 2);
+    }
+    SECTION("rotation bypasses caching") {
+        origin = 48.0f;
+        rotation = 12.0f;
+        REQUIRE(render(cached) == render(direct));
+        REQUIRE(render(cached) == render(direct));
+        REQUIRE(cached.paints == 2);
+    }
+    SECTION("adding a child bypasses an already populated cache") {
+        REQUIRE(render(cached) == render(direct));
+        auto a = std::make_unique<CountingView>();
+        auto b = std::make_unique<CountingView>();
+        a->set_bounds({4, 4, 8, 8});
+        b->set_bounds({4, 4, 8, 8});
+        a->fill = b->fill = Color::rgba8(230, 20, 50, 255);
+        cached.add_child(std::move(a));
+        direct.add_child(std::move(b));
+        REQUIRE(render(cached) == render(direct));
+        REQUIRE(render(cached) == render(direct));
+        REQUIRE(cached.paints == 3);
+    }
+}
+
 #endif  // PULP_HAS_SKIA
+
+TEST_CASE("Raster cache falls back to direct painting without retained textures",
+          "[view][subtree-cache][raster]") {
+    CountingView view;
+    view.set_bounds({0, 0, 64, 64});
+    view.set_raster_cached(true);
+    RecordingCanvas canvas;
+    view.paint_all(canvas);
+    view.paint_all(canvas);
+    REQUIRE(view.paints == 2);
+}
