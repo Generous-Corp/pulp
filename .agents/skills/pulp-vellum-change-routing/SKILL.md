@@ -474,7 +474,9 @@ Traps:
   from its slice in `.github/vellum-ownership.json` as well fails the freeze
   check ("transferred slice ... cannot change without a designed ownership
   reversal"). Drop the path from `frozen_paths`, record it in
-  `owner-unfreezes.json` with the ruling's title, and land that before the
+  `owner-unfreezes.json` with the URL of the owner's own approval comment
+  and its author (`approved_by`, the owner's login; a bot-authored comment
+  quoting the owner is not the approval), and land that before the
   change that edits the path, because the pin is read at the base commit.
 - The pin, the receipt copy and `frozen_paths` are read at the BASE commit. A
   change cannot exempt itself by editing them; a re-pin applies to the changes
