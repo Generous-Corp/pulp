@@ -2011,6 +2011,30 @@
           {
             "name": "--output",
             "kind": "option"
+          },
+          {
+            "name": "--input",
+            "kind": "option"
+          },
+          {
+            "name": "--source-node",
+            "kind": "option"
+          },
+          {
+            "name": "--source-port",
+            "kind": "option"
+          },
+          {
+            "name": "--destination-node",
+            "kind": "option"
+          },
+          {
+            "name": "--destination-port",
+            "kind": "option"
+          },
+          {
+            "name": "--block-frames",
+            "kind": "option"
           }
         ],
         "subcommands": []

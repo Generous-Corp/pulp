@@ -249,6 +249,19 @@ TEST_CASE("pulp graph JSON validation reports a stable error code", "[cli][shell
     REQUIRE(result.stdout_output.find("\"valid\": false") != std::string::npos);
 }
 
+TEST_CASE("pulp graph probe refuses incomplete options without opening files", "[cli][shellout][graph]") {
+    if (!binary_exists()) SKIP("pulp not built");
+    const auto missing = run_pulp({"graph", "probe", "absent.pulpgraph", "--json"});
+    REQUIRE(missing.exit_code == 2);
+    REQUIRE(missing.stdout_output.find("missing_option") != std::string::npos);
+    const auto unknown = run_pulp({"graph", "probe", "absent.pulpgraph", "--unknown", "value", "--json"});
+    REQUIRE(unknown.exit_code == 2);
+    REQUIRE(unknown.stdout_output.find("invalid_option") != std::string::npos);
+    const auto duplicate = run_pulp({"graph", "probe", "absent.pulpgraph", "--input", "a.wav", "--input", "b.wav", "--json"});
+    REQUIRE(duplicate.exit_code == 2);
+    REQUIRE(duplicate.stdout_output.find("invalid_option") != std::string::npos);
+}
+
 TEST_CASE("pulp graph fmt is byte stable and render produces a WAV", "[cli][shellout][graph]") {
     if (!binary_exists())
         SKIP("pulp not built");
