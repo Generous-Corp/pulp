@@ -9,6 +9,8 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    'pulp/host/spectral_graph.hpp': 'Pulp::host',
+    'pulp/audio/live_dsp_telemetry.hpp': 'Pulp::audio',
     "pulp/audio/impulse_response.hpp": "Pulp::audio",
     "pulp/audio/format_registry.hpp": "Pulp::audio",
     "pulp/audio/audio_file.hpp": "Pulp::audio",
@@ -173,6 +175,10 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:4e769c66364541d0be9fa46ccf1d82d6c5e1556850cac936754e0859fd0ba20a', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
+
+    {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:5c4a877f2d611bb0971ea5c9e42e2c68a06b490f1805c689c584cc4c58452f77', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
+
     {
         "include": "pulp/audio/impulse_response.hpp",
         "fingerprint": "sha256:740702d0bf9e54f8584de49999cfcf91c7c9b71c84c355b46a6a686e283bbe69",
@@ -292,7 +298,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/spectral_frame_engine.hpp",
-        "fingerprint": "sha256:79757445451e61f1e9d043abe9fc566b89a07df381c76f4b1d3cae525eeb5d49",
+        "fingerprint": "sha256:457be4c2ccfdf316e0e834f1e6fecf51bd489e82d1ee8181939e949c4722f22d",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
