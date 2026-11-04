@@ -45,6 +45,7 @@ bool design_transform(const FrameGeometry& g, float& sx, float& sy, float& tx,
 
 void paint_plugin_scene(canvas::Canvas& canvas, View& root,
                         const FrameGeometry& geometry, const Rect* clip) {
+    PULP_TRACE_SCOPE_NAMED("canvas", "paint");
     // FU-2: clip the ENTIRE body, background fill included. Everything outside
     // the clip must remain the retained scene's previous pixels; filling the
     // background unclipped would erase them.
@@ -304,7 +305,11 @@ std::vector<std::uint8_t> raster_plugin_scene_rgba(View& root, const FrameGeomet
 
     std::vector<std::uint8_t> pixels(static_cast<std::size_t>(w) * h * 4u);
     SkPixmap pixmap(info, pixels.data(), static_cast<std::size_t>(w) * 4u);
-    if (!surface->readPixels(pixmap, 0, 0)) return {};
+    {
+        PULP_TRACE_SCOPE_NAMED("canvas", "raster_readback");
+        if (!surface->readPixels(pixmap, 0, 0))
+            return {};
+    }
     if (out_w) *out_w = w;
     if (out_h) *out_h = h;
     return pixels;

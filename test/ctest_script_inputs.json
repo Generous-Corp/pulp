@@ -79,6 +79,7 @@
     "tools/cli/cmd_dsp.cpp",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_gpu.cpp",
+    "tools/cli/cmd_graph.cpp",
     "tools/cli/cmd_host.cpp",
     "tools/cli/cmd_import.cpp",
     "tools/cli/cmd_inspect.cpp",
@@ -166,6 +167,7 @@
     "tools/cli/cmd_config.cpp",
     "tools/cli/cmd_design_subcommands.cpp",
     "tools/cli/cmd_doctor.cpp",
+    "tools/cli/cmd_graph.cpp",
     "tools/cli/cmd_host.cpp",
     "tools/cli/cmd_macos.cpp",
     "tools/cli/cmd_misc.cpp",
@@ -2427,18 +2429,6 @@
    "sources": [],
    "spawning_sources": [
     "test/test_signal_graph_offline_parity.cpp"
-   ],
-   "spawns": "undeclared",
-   "undeclared_sources": []
-  },
-  "pulp-test-signal-graph-pulpsynth-automation": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "runtime_targets": [],
-   "sources": [],
-   "spawning_sources": [
-    "test/test_signal_graph_pulpsynth_automation.cpp"
    ],
    "spawns": "undeclared",
    "undeclared_sources": []
@@ -13574,6 +13564,20 @@
    "entry": "tools/scripts/test_check_yoga_oracle_pin.py",
    "inputs": [
     "tools/scripts/test_check_yoga_oracle_pin.py"
+   ],
+   "kind": "python"
+  },
+  "windows-arm64ec-provider-validator-selftest": {
+   "entry": "tools/windows/test_validate_arm64ec_provider.py",
+   "inputs": [
+    "tools/windows/test_validate_arm64ec_provider.py"
+   ],
+   "kind": "python"
+  },
+  "windows-arm64ec-thunk-tool-selftest": {
+   "entry": "tools/windows/test_build_arm64ec_stl_thunks.py",
+   "inputs": [
+    "tools/windows/test_build_arm64ec_stl_thunks.py"
    ],
    "kind": "python"
   }

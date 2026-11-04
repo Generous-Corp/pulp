@@ -9,6 +9,29 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1500"></a>
+## [1.50.0] - 2026-11-03
+
+- release/version bump ([#11474](https://github.com/Generous-Corp/pulp/pull/11474))
+- feature/editor ui package hook ([#11446](https://github.com/Generous-Corp/pulp/pull/11446))
+- agent/g10g11 cookbook ([#11458](https://github.com/Generous-Corp/pulp/pull/11458))
+- codex/windows native standalone fix 20261103 ([#11459](https://github.com/Generous-Corp/pulp/pull/11459))
+
+<a id="v1490"></a>
+## [1.49.0] - 2026-11-03
+
+- release/version bump ([#11470](https://github.com/Generous-Corp/pulp/pull/11470))
+- ci/drift fast fetchcontent cache ([#11463](https://github.com/Generous-Corp/pulp/pull/11463))
+- graph g2 cli 20261102 ([#11441](https://github.com/Generous-Corp/pulp/pull/11441))
+- release/version bump ([#11461](https://github.com/Generous-Corp/pulp/pull/11461))
+- fix/confirm failure python unimportable ([#11447](https://github.com/Generous-Corp/pulp/pull/11447))
+- feature/skills vellum release lessons ([#11457](https://github.com/Generous-Corp/pulp/pull/11457))
+- release/version bump ([#11452](https://github.com/Generous-Corp/pulp/pull/11452))
+- fix/illustrator unicode names ([#11449](https://github.com/Generous-Corp/pulp/pull/11449))
+- release/version bump ([#11448](https://github.com/Generous-Corp/pulp/pull/11448))
+- fix/illustrator receipt symlink ([#11443](https://github.com/Generous-Corp/pulp/pull/11443))
+- feature/editor host thin slice ([#11442](https://github.com/Generous-Corp/pulp/pull/11442))
+
 <a id="v1480"></a>
 ## [1.48.0] - 2026-11-03
 
@@ -12112,6 +12135,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.50.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.50.0
+[1.49.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.49.0
 [1.48.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.48.0
 [1.47.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.47.0
 [1.46.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.46.1

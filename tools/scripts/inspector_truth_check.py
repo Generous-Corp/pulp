@@ -243,6 +243,7 @@ REQUIRED_BUILD_CONTRACTS = {
         "target_compile_definitions(${target} PRIVATE PULP_ENABLE_INSPECTOR=0)",
         "_pulp_configure_standalone_target(pulp-standalone pulp::view)",
         "_pulp_configure_standalone_target(pulp-standalone-native pulp::view-native)",
+        "target_link_libraries(pulp-standalone-native PUBLIC pulp::view-tooling)",
     ),
     "inspect/CMakeLists.txt": (
         "if(NOT PULP_ENABLE_INSPECTOR)\n    return()\nendif()",
