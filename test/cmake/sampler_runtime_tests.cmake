@@ -561,3 +561,9 @@ pulp_add_test_suite(pulp-test-signal-graph-named-ports
 pulp_add_test_suite(pulp-test-signal-graph-subgraph
     SOURCES test_signal_graph_subgraph.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+
+# G-3 authored-name identity: normalization, aliasing, semantic fingerprint,
+# value-owned diff, and undo controls.
+pulp_add_test_suite(pulp-test-graph-identity
+    SOURCES test_graph_identity.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)

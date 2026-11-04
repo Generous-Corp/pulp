@@ -1673,6 +1673,18 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-graph-identity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_graph_identity.cpp"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
   "pulp-test-group-app-host": {
    "data": "declared",
    "detected_sources": [
@@ -2972,6 +2984,7 @@
   "pulp-test-gpu-wavenet-realtime-node",
   "pulp-test-gpu-wavenet-session",
   "pulp-test-graph-executor-routing",
+  "pulp-test-graph-identity",
   "pulp-test-graph-plugin-resolution",
   "pulp-test-graph-runtime-worker-pool",
   "pulp-test-graphic-eq",

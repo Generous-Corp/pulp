@@ -469,6 +469,56 @@ TEST_CASE("X11 plugin host ignores a stale echo of an earlier resize",
 
 #if defined(_WIN32)
 
+TEST_CASE("Windows plugin host sizes its HWND in physical pixels",
+          "[view][plugin-view-host][resize][hidpi][windows]") {
+    View root;
+    struct ParentWindow {
+        HWND hwnd = CreateWindowExW(0, L"STATIC", L"Pulp DPI test", WS_POPUP, 0, 0, 1200, 900,
+                                    nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ParentWindow() {
+            if (hwnd)
+                DestroyWindow(hwnd);
+        }
+    } parent;
+    REQUIRE(parent.hwnd != nullptr);
+    register_platform_plugin_view_host();
+    PluginViewHost::Options opts;
+    opts.size = {640, 480};
+    opts.use_gpu = false; // native geometry must work without an adapter
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+    auto hwnd = static_cast<HWND>(host->native_handle());
+    REQUIRE(hwnd != nullptr);
+    int notified = 0;
+    host->set_resize_callback([&](uint32_t, uint32_t) { ++notified; });
+
+    for (float scale : {1.0f, 1.25f, 1.5f, 2.0f}) {
+        CAPTURE(scale);
+        host->set_scale_factor(scale);
+        host->set_size(600, 400);
+        RECT client{};
+        REQUIRE(GetClientRect(hwnd, &client));
+        CHECK(client.right - client.left == static_cast<LONG>(600 * scale));
+        CHECK(client.bottom - client.top == static_cast<LONG>(400 * scale));
+        CHECK(host->get_size().width == 600);
+        CHECK(host->get_size().height == 400);
+        CHECK(notified == 0); // self-driven WM_SIZE must remain suppressed
+    }
+
+    // Reparenting must preserve that physical size rather than reverting to
+    // logical dimensions before the first DAW frame.
+    host->set_scale_factor(1.5f);
+    host->set_size(600, 400);
+    REQUIRE(host->try_attach_to_parent(parent.hwnd));
+    RECT attached{};
+    REQUIRE(GetClientRect(hwnd, &attached));
+    CHECK(attached.right - attached.left == 900);
+    CHECK(attached.bottom - attached.top == 600);
+    CHECK(host->get_size().width == 600);
+    CHECK(host->get_size().height == 400);
+    CHECK(notified == 0);
+}
+
 // ── Windows editor WM_SIZE reconcile (host-driven resize) ────────────────────
 //
 // A DAW resizes the editor container, which resizes our child HWND and posts
