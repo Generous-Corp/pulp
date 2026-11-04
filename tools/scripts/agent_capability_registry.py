@@ -176,7 +176,7 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
         "include": "pulp/signal/indexed_control.hpp",
-        "fingerprint": "sha256:8e82d8f2b4ac249dea4af0aa49d747df5992bcdb8a7aa54e280d232a64fa202f",
+        "fingerprint": "sha256:3fd30fe44c8938ef0d945520cac95b8b25b6c33d1640b112174c438bdb918d62",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

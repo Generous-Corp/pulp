@@ -33,9 +33,17 @@ template <typename SampleType = float> class MapClipT {
     SampleType process(SampleType input) const noexcept {
         if (!std::isfinite(input))
             return output_min_;
-        const auto unit =
-            (std::clamp(input, input_min_, input_max_) - input_min_) / (input_max_ - input_min_);
-        return output_min_ + unit * (output_max_ - output_min_);
+        if (input <= input_min_)
+            return output_min_;
+        if (input >= input_max_)
+            return output_max_;
+        const auto span = input_max_ - input_min_;
+        // Halve only overflowing spans: scaling tiny intervals can erase them.
+        const auto unit = std::isfinite(span)
+                              ? (input - input_min_) / span
+                              : (input * SampleType{0.5} - input_min_ * SampleType{0.5}) /
+                                    (input_max_ * SampleType{0.5} - input_min_ * SampleType{0.5});
+        return std::lerp(output_min_, output_max_, unit);
     }
 
   private:
