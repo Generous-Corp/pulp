@@ -7,17 +7,14 @@
 #include <pulp/runtime/crypto.hpp>
 
 namespace pulp::host::detail {
-// This authority is source-private and is never installed in the SDK.
-class ClapIdentityAccess {
-  public:
-    static PluginIdentityEvidence observed(PluginTypeIdentity type,
-                                           PluginArtifactProvenance artifact, bool loaded) {
-        return {std::move(type), PluginIdentityOrigin::clap_descriptor,
-                loaded ? "pulp.clap.exact-loader.v1" : "pulp.clap.descriptor-scanner.v1",
-                std::move(artifact),
-                loaded ? PluginIdentityVerification::loaded : PluginIdentityVerification::declared};
-    }
-};
+inline PluginIdentityEvidence ClapIdentityAccess::observed(PluginTypeIdentity type,
+                                                           PluginArtifactProvenance artifact,
+                                                           bool loaded) {
+    return {std::move(type), PluginIdentityOrigin::clap_descriptor,
+            loaded ? "pulp.clap.exact-loader.v1" : "pulp.clap.descriptor-scanner.v1",
+            std::move(artifact),
+            loaded ? PluginIdentityVerification::loaded : PluginIdentityVerification::declared};
+}
 
 inline std::optional<PluginArtifactProvenance> clap_artifact_provenance(const std::string& binary) {
     std::error_code error;

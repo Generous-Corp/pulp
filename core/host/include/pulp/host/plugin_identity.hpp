@@ -7,11 +7,9 @@
 #include <string_view>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace pulp::host {
-namespace detail {
-class ClapIdentityAccess;
-}
 
 /// CLAP-only type identity. Exact UTF-8 bytes; no name, path or normalization.
 struct PluginTypeIdentity {
@@ -42,6 +40,25 @@ struct PluginArtifactProvenance {
     std::optional<std::string> descriptor_version;
     bool operator==(const PluginArtifactProvenance&) const = default;
 };
+
+class PluginIdentityEvidence;
+struct PluginInfo;
+struct PluginSelection;
+struct PluginLoadResult;
+std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path);
+PluginLoadResult load_clap_plugin_exact(const PluginSelection& selection);
+
+namespace detail {
+// Complete in the installed header: consumers cannot define a friend class of
+// their own with privileged methods. Only these concrete production operations
+// can invoke the private mint; importing a capture never reaches it.
+class ClapIdentityAccess final {
+    friend std::vector<PluginInfo> pulp::host::scan_clap_bundle_descriptors(const std::string&);
+    friend PluginLoadResult pulp::host::load_clap_plugin_exact(const PluginSelection&);
+    static PluginIdentityEvidence observed(PluginTypeIdentity, PluginArtifactProvenance,
+                                           bool loaded);
+};
+} // namespace detail
 
 /// Immutable owned evidence. Public imports can only make declared assertions.
 /// Copies retain capture provenance; they do not attest to a current artifact.
