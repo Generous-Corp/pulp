@@ -53,6 +53,17 @@ SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphT
                               "template and instance identities must be non-empty");
         return out;
     }
+    // Reject invalid parameter targets before allocating nodes or changing topology.
+    for (const auto& parameter : definition.parameters) {
+        const auto target =
+            std::find_if(definition.nodes.begin(), definition.nodes.end(),
+                         [&](const SubgraphNodeSpec& spec) { return spec.key == parameter.node; });
+        if (target == definition.nodes.end() || target->type != NodeType::Gain) {
+            out.result =
+                boundary(GraphResult::Code::UnknownPort, "parameter target is not a gain node");
+            return out;
+        }
+    }
     auto rollback = [&] {
         for (auto it = out.instance.nodes.rbegin(); it != out.instance.nodes.rend(); ++it)
             graph.remove_node(*it);

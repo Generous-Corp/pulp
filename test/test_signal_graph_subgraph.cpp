@@ -48,6 +48,56 @@ TEST_CASE("subgraph state restore keeps stable identity") {
     CHECK(rejected.message().find("subgraph boundary") != std::string::npos);
 }
 
+TEST_CASE("subgraph rejects non-Gain parameter targets before changing the graph") {
+    for (const auto* target : {"in", "out"}) {
+        CAPTURE(target);
+        SignalGraph graph;
+        const auto input = graph.add_input_node(1, "existing input");
+        const auto gain = graph.add_gain_node("existing gain");
+        REQUIRE(graph.set_node_gain(gain, 0.25f));
+        REQUIRE(graph.connect(input, 0, gain, 0));
+        auto t = gain_template();
+        t.parameters.push_back({"invalid", target, 0.5f, 0.0f, 2.0f});
+
+        const auto expanded = instantiate_subgraph(graph, t, "voice");
+
+        CHECK_FALSE(expanded);
+        CHECK(expanded.result.code == GraphResult::Code::UnknownPort);
+        CHECK(expanded.result.message().find("subgraph boundary") != std::string::npos);
+        CHECK(expanded.result.message().find("not a gain node") != std::string::npos);
+        CHECK(expanded.instance.nodes.empty());
+        CHECK(expanded.instance.ports.empty());
+        CHECK(expanded.instance.parameters.empty());
+        CHECK(expanded.instance.parameter_nodes.empty());
+        CHECK(expanded.instance.parameter_bounds.empty());
+        CHECK(graph.nodes().size() == 2);
+        REQUIRE(graph.node(input));
+        CHECK(graph.node(input)->name == "existing input");
+        REQUIRE(graph.node(gain));
+        CHECK(graph.node(gain)->gain == 0.25f);
+        CHECK(graph.connections().size() == 1);
+        // Rollback alone would still consume IDs; rejection must precede allocation.
+        CHECK(graph.add_gain_node("next") == gain + 1);
+    }
+}
+
+TEST_CASE("subgraph Gain parameter default is applied and restores successfully") {
+    SignalGraph graph;
+    auto t = gain_template();
+    t.parameters[0].default_value = 0.5f;
+    auto expanded = instantiate_subgraph(graph, t, "voice");
+    REQUIRE(expanded);
+    const auto id = expanded.instance.parameter_nodes.at("gain");
+    REQUIRE(graph.node(id));
+    CHECK(graph.node(id)->type == NodeType::Gain);
+    CHECK(graph.node(id)->gain == 0.5f);
+    CHECK(expanded.instance.parameters.at("gain") == 0.5f);
+    auto state = expanded.instance.save_state();
+    state.parameters.at("gain") = 0.75f;
+    REQUIRE(restore_subgraph_state(graph, expanded.instance, state));
+    CHECK(graph.node(id)->gain == 0.75f);
+}
+
 TEST_CASE("subgraph rejects invalid boundary and rolls back") {
     SignalGraph graph;
     auto bad = gain_template();
