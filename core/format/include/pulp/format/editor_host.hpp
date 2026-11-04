@@ -171,8 +171,12 @@ class ParamPort {
 /// `release_all()`) closes only the gestures that port opened, so closing one
 /// window mid-drag never ends another window's gesture.
 ///
-/// Main thread only, apart from `info()` and `get()`. The store must outlive
-/// the port.
+/// Main thread only, apart from `info()`, `get()` and `disconnect()`. The
+/// store must outlive the port or be disconnected from it first: after
+/// `disconnect()` the port holds no reference to the store, refuses every
+/// call, and its subscriptions are already removed, so an editor that outlives
+/// the store (its plug-in instance disposed while a host still holds the
+/// editor's window) never reaches it.
 class StateStoreParamPort final : public ParamPort {
   public:
     explicit StateStoreParamPort(state::StateStore& store);
@@ -194,12 +198,19 @@ class StateStoreParamPort final : public ParamPort {
     /// the port goes away mid-gesture.
     void release_all();
 
+    /// Release every gesture, remove every listener this port registered, and
+    /// let go of the store, which may be destroyed afterwards. Any thread;
+    /// idempotent.
+    void disconnect();
+    /// False after `disconnect()`.
+    bool connected() const;
+
     /// Gestures this port currently holds open on `id` (0 when none).
     int open_gestures(state::ParamID id) const;
 
   private:
-    state::StateStore& store_;
-    std::unordered_map<state::ParamID, int> held_;
+    struct Link;
+    std::shared_ptr<Link> link_;
 };
 
 // ── Visual data ──────────────────────────────────────────────────────────────

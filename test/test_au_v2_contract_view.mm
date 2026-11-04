@@ -324,7 +324,8 @@ TEST_CASE("disposing the AU instance closes a contract editor its view still hol
     AudioComponentInstanceDispose(au);
 }
 
-TEST_CASE("disposing the AU instance off the main thread closes its editor on the main thread",
+TEST_CASE("disposing the AU instance off the main thread cuts the store at once and closes "
+          "the editor on the main thread later",
           "[auv2][editor-host][au-contract]") {
     EditorEnvironment env;
     reset_contract_recording();
@@ -336,23 +337,85 @@ TEST_CASE("disposing the AU instance off the main thread closes its editor on th
     @autoreleasepool {
         NSView* view = [open_view(au) retain];
         REQUIRE(view != nil);
-        contract_log().context->params().begin(kGain);
+        auto& params = contract_log().context->params();
+        params.begin(kGain);
+        REQUIRE(instance->store.open_gesture_count() == 1);
 
-        // The disposing thread waits for the main thread, so the main loop
-        // keeps running until it is done.
-        std::atomic<bool> done{false};
+        // The disposing thread does not wait for the main thread. If it did,
+        // the timed wait below gives up, and the main loop then lets it finish
+        // so it can be joined before the test fails.
+        dispatch_semaphore_t disposed = dispatch_semaphore_create(0);
         std::thread disposer([&] {
             instance->sessions.reset();
-            done = true;
+            dispatch_semaphore_signal(disposed);
         });
-        REQUIRE(loop.run_until([&done] { return done.load(); }));
+        const bool finished =
+            dispatch_semaphore_wait(
+                disposed,
+                dispatch_time(DISPATCH_TIME_NOW, 3 * static_cast<int64_t>(NSEC_PER_SEC))) == 0;
+        if (!finished)
+            loop.run_until([] { return contract_log().live == 0; });
         disposer.join();
+        dispatch_release(disposed);
+        REQUIRE(finished);
 
+        // Done on the disposing thread: every gesture released and the port
+        // cut from the store, so the store may go before the editor closes.
+        REQUIRE(instance->store.open_gesture_count() == 0);
+        REQUIRE(params.params().empty());
+        params.begin(kGain);
+        REQUIRE(instance->store.open_gesture_count() == 0);
+        // The editor itself is still open: it closes on the main thread.
+        REQUIRE_FALSE(contract_log().saw("detach"));
+        REQUIRE(contract_log().live == 1);
+
+        instance.reset();
+        g_instance = nullptr;
+        REQUIRE(loop.run_until([] { return contract_log().live == 0; }));
         REQUIRE(contract_log().saw("detach"));
         REQUIRE_FALSE(contract_log().saw("invalidate"));
+        REQUIRE(contract_log().off_main_thread_calls == 0);
+        const auto calls = contract_log().calls.size();
+        [view release];
+        REQUIRE(contract_log().calls.size() == calls);
+    }
+    AudioComponentInstanceDispose(au);
+}
+
+TEST_CASE("disposing the AU instance off the main thread never waits for a blocked main thread",
+          "[auv2][editor-host][au-contract]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    auto instance = std::make_unique<FakeInstance>(true);
+    g_instance = instance.get();
+    AudioUnit au = fake_audio_unit();
+    MainLoop loop;
+
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+
+        // A host whose main thread blocks until its worker has disposed of the
+        // instance. Waiting for the main thread on that worker would hang both.
+        dispatch_semaphore_t disposed = dispatch_semaphore_create(0);
+        std::thread disposer([&] {
+            instance->sessions.reset();
+            dispatch_semaphore_signal(disposed);
+        });
+        const bool finished =
+            dispatch_semaphore_wait(
+                disposed,
+                dispatch_time(DISPATCH_TIME_NOW, 3 * static_cast<int64_t>(NSEC_PER_SEC))) == 0;
+        // Run the main loop either way, so a waiting worker can finish and be
+        // joined before the verdict.
+        loop.run_until([] { return contract_log().live == 0; });
+        disposer.join();
+        dispatch_release(disposed);
+        CHECK(finished);
+
+        REQUIRE(contract_log().saw("detach"));
         REQUIRE(contract_log().live == 0);
         REQUIRE(contract_log().off_main_thread_calls == 0);
-        REQUIRE(instance->store.open_gesture_count() == 0);
         instance.reset();
         g_instance = nullptr;
         [view release];

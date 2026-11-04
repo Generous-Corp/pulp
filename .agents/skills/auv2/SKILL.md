@@ -251,11 +251,16 @@ per plug-in, and the factory class is exported. Things to keep straight:
   released, `detach()`, destroyed) before the processor that owns its factory
   goes. The container is still alive then, so the editor is detached, never
   invalidated. Keep that member after `processor_`.
-- `AudioComponentInstanceDispose` may run off the main thread. The registry's
-  `close_all()` then waits for the main thread to close the editors
-  (`detail::run_on_main_thread_and_wait`), so a host that disposes from a worker
-  while its main thread is blocked on that worker would deadlock; no host is
-  known to do that.
+- `AudioComponentInstanceDispose` may run off the main thread. Never wait for
+  the main thread there: a host whose main thread is waiting for the disposing
+  worker would deadlock (a frozen DAW). The registry's `close_all()` instead
+  releases every gesture and cuts each session's port from the store at once
+  (`StateStoreParamPort::disconnect()` and `disconnect_owner()` are safe from
+  any thread), then posts `close_for_owner()` to the main queue holding the
+  sessions alive. That is why the registry holds sessions weakly and the view
+  holds its session in a `shared_ptr`. By the time the editor closes the
+  processor is gone, so an editor must reach the plug-in only through its
+  context.
 - `uiViewForAudioUnit:` returns an autoreleased view. A test that must observe
   the view's `-dealloc` before disposing the unit has to drain its own
   autorelease pool first. Otherwise the view outlives the unit and the

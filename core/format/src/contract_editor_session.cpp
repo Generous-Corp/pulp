@@ -7,6 +7,7 @@
 #include <pulp/state/store.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <utility>
 
 namespace pulp::format {
@@ -23,12 +24,17 @@ class ContractEditorSession::Context final : public EditorContext {
         return nullptr;
     }
     bool request_resize(const EditorSize& size) override {
-        if (!hooks_.request_resize || size.width == 0 || size.height == 0)
+        if (owner_gone_.load() || !hooks_.request_resize || size.width == 0 || size.height == 0)
             return false;
         return hooks_.request_resize(size);
     }
     bool host_action(const HostActionRequest& request) override {
+        if (owner_gone_.load())
+            return false;
         return hooks_.host_action ? hooks_.host_action(request) : false;
+    }
+    void owner_gone() {
+        owner_gone_.store(true);
     }
     EditorHostKind host_kind() const override {
         return kind_;
@@ -38,39 +44,75 @@ class ContractEditorSession::Context final : public EditorContext {
     ParamPort& port_;
     EditorHostKind kind_;
     HostHooks hooks_;
+    std::atomic<bool> owner_gone_{false};
 };
 
 ContractSessionRegistry::~ContractSessionRegistry() {
     close_all();
 }
 
+std::size_t ContractSessionRegistry::size() const {
+    std::lock_guard lock(mutex_);
+    std::size_t live = 0;
+    for (const auto& weak : sessions_)
+        if (!weak.expired())
+            ++live;
+    return live;
+}
+
 void ContractSessionRegistry::close_all() {
-    if (sessions_.empty())
-        return;
-    // A host may dispose of the plug-in instance off the main thread, but the
-    // editors' windows belong to the main thread.
-    detail::run_on_main_thread_and_wait([this] {
-        auto sessions = std::move(sessions_);
+    std::vector<std::shared_ptr<ContractEditorSession>> live;
+    {
+        std::lock_guard lock(mutex_);
+        for (const auto& weak : sessions_)
+            if (auto session = weak.lock())
+                live.push_back(std::move(session));
         sessions_.clear();
-        for (auto* session : sessions) {
-            session->registry_ = nullptr;
-            session->close_for_owner();
-        }
-    });
-}
-
-void ContractEditorSession::register_with(ContractSessionRegistry& registry) {
-    unregister();
-    registry_ = &registry;
-    registry.sessions_.push_back(this);
-}
-
-void ContractEditorSession::unregister() {
-    if (registry_ == nullptr)
+    }
+    if (live.empty())
         return;
-    auto& sessions = registry_->sessions_;
-    sessions.erase(std::remove(sessions.begin(), sessions.end(), this), sessions.end());
-    registry_ = nullptr;
+    if (detail::is_main_thread()) {
+        for (const auto& session : live)
+            session->close_for_owner();
+        return;
+    }
+    // Off the main thread: never wait for it (a host's main thread may be
+    // waiting for this one). Cut every session from the store now, while it
+    // still exists, then close the editors on the main thread later. The
+    // posted task holds the sessions, so the last reference drops there.
+    for (const auto& session : live)
+        session->disconnect_owner();
+    auto close = [sessions = std::move(live)]() mutable {
+        for (const auto& session : sessions)
+            session->close_for_owner();
+        sessions.clear();
+    };
+    if (!detail::post_to_main_thread(close)) {
+        runtime::log_error("editor host: no main thread to close an editor on; closing it here");
+        close();
+    }
+}
+
+bool ContractEditorSession::register_with(ContractSessionRegistry& registry) {
+    auto self = weak_from_this();
+    if (self.expired()) {
+        runtime::log_error("editor host: only a shared session can register for its owner");
+        return false;
+    }
+    std::lock_guard lock(registry.mutex_);
+    auto& sessions = registry.sessions_;
+    sessions.erase(std::remove_if(sessions.begin(), sessions.end(),
+                                  [](const auto& weak) { return weak.expired(); }),
+                   sessions.end());
+    sessions.push_back(std::move(self));
+    return true;
+}
+
+void ContractEditorSession::disconnect_owner() {
+    if (port_)
+        port_->disconnect();
+    if (context_)
+        context_->owner_gone();
 }
 
 std::unique_ptr<ContractEditorSession>
@@ -94,7 +136,6 @@ ContractEditorSession::ContractEditorSession(Processor& processor, state::StateS
       context_(std::make_unique<Context>(*port_, processor.editor_host_kind(), std::move(hooks))) {}
 
 ContractEditorSession::~ContractEditorSession() {
-    unregister();
     stop_idle();
     // Destroyed while attached: the host tore its window down without an
     // orderly detach.
@@ -148,7 +189,6 @@ void ContractEditorSession::detach() {
 }
 
 void ContractEditorSession::close_for_owner() {
-    unregister();
     // detach() stops the tick, releases every gesture and detaches the editor
     // from the window the host still owns.
     detach();
@@ -156,7 +196,6 @@ void ContractEditorSession::close_for_owner() {
 }
 
 void ContractEditorSession::invalidate() {
-    unregister();
     stop_idle();
     if (editor_)
         editor_->invalidate();
