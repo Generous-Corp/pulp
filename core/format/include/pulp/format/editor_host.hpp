@@ -171,12 +171,18 @@ class ParamPort {
 /// `release_all()`) closes only the gestures that port opened, so closing one
 /// window mid-drag never ends another window's gesture.
 ///
-/// Main thread only, apart from `info()`, `get()` and `disconnect()`. The
-/// store must outlive the port or be disconnected from it first: after
-/// `disconnect()` the port holds no reference to the store, refuses every
-/// call, and its subscriptions are already removed, so an editor that outlives
-/// the store (its plug-in instance disposed while a host still holds the
-/// editor's window) never reaches it.
+/// Main thread only, apart from `info()`, `params()`, `get()` and
+/// `disconnect()`. The store must outlive the port or be disconnected from it
+/// first: after `disconnect()` returns the port holds no reference to the
+/// store and calls into it no more, so an editor that outlives the store (its
+/// plug-in instance disposed while a host still holds the editor's window)
+/// never reaches it. `get()`, `begin()`, `set()`, `end()` and
+/// `add_listener()` are then refused, and the port's subscriptions are
+/// already removed.
+///
+/// `params()` and `info()` describe the parameters as they were when the port
+/// was made. The span and pointers they return stay valid for the port's
+/// lifetime, connected or not, so an editor may keep them.
 class StateStoreParamPort final : public ParamPort {
   public:
     explicit StateStoreParamPort(state::StateStore& store);
@@ -199,8 +205,17 @@ class StateStoreParamPort final : public ParamPort {
     void release_all();
 
     /// Release every gesture, remove every listener this port registered, and
-    /// let go of the store, which may be destroyed afterwards. Any thread;
-    /// idempotent.
+    /// let go of the store, which may be destroyed once this returns. Waits
+    /// for a store call already in progress on another thread to finish; the
+    /// port never calls the store while holding its own lock. Any thread;
+    /// idempotent; never from inside one of this port's own store callbacks.
+    ///
+    /// Residual risk, accepted: that wait hangs a host that disconnects (for
+    /// example by disposing of the plug-in) off the main thread while holding
+    /// a lock its own main-thread parameter callback needs. Not waiting would
+    /// let that callback reach the departing instance after it is gone. A wait
+    /// longer than about a second is logged once, so such a hang can be told
+    /// apart.
     void disconnect();
     /// False after `disconnect()`.
     bool connected() const;
@@ -402,6 +417,15 @@ class EditorAutomation {
 /// an orderly detach, the host calls `invalidate()` instead.
 ///
 /// Every member runs on the host's main thread.
+///
+/// Reaching the plug-in: an editor reaches parameter and visual state only
+/// through its `EditorContext` ports. Once the host has called `invalidate()`,
+/// or has begun closing the editor because its plug-in instance is going away
+/// (including a teardown off the main thread, where the instance is destroyed
+/// before the editor's close runs on the main thread), the editor must not use
+/// the `Processor&` it was created with: that processor may already be gone.
+/// Its ports are disconnected by then and refuse every call, so an editor that
+/// only uses its context stays safe.
 class Editor {
   public:
     virtual ~Editor() = default;
@@ -558,7 +582,10 @@ class EditorFactory {
 
     /// A new, unattached editor for `processor` in `role`, or null when the
     /// role is not supported. `context` outlives the editor. Several editors
-    /// may be alive at once, for one role or several.
+    /// may be alive at once, for one role or several. `processor` is valid
+    /// only until the host invalidates the editor or begins closing it for a
+    /// departing plug-in instance (see `Editor`); state after that is reached
+    /// through `context`, whose ports refuse calls once disconnected.
     virtual std::unique_ptr<Editor> create(Processor& processor, EditorContext& context,
                                            EditorRole role) = 0;
 

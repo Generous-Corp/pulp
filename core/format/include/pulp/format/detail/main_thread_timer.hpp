@@ -45,9 +45,10 @@ class MainThreadTimer {
 bool is_main_thread();
 
 /// Run `fn` on the main thread later and return at once, without waiting for
-/// it: the main queue on Apple platforms, MainThreadDispatcher elsewhere.
-/// False when nothing can run it (no main-thread backend), in which case `fn`
-/// has not run and the caller still owns what it captured.
-bool post_to_main_thread(std::function<void()> fn);
+/// it: the main queue on Apple platforms, MainThreadDispatcher elsewhere. On
+/// success `fn` is taken (left empty), so the posted task owns what it
+/// captured and the caller keeps no reference to it. False when nothing can
+/// run it (no main-thread backend); `fn` is then left as it was.
+bool post_to_main_thread(std::function<void()>& fn);
 
 } // namespace pulp::format::detail
