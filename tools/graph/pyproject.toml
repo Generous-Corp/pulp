@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pulp-graph-identity"
+version = "0.1.0"
+description = "Pure authored I/O and Gain semantic identity for Pulp"
+requires-python = ">=3.13,<3.14"
+
+[project.scripts]
+pulp-graph-identity = "pulp_graph_identity.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
