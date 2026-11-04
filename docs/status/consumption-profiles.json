@@ -998,6 +998,7 @@
       "pulp/signal/harmony_engine.hpp",
       "pulp/signal/headphone_crossfeed.hpp",
       "pulp/signal/iir_design.hpp",
+      "pulp/signal/indexed_control.hpp",
       "pulp/signal/interpolator.hpp",
       "pulp/signal/junction.hpp",
       "pulp/signal/karplus_strong.hpp",

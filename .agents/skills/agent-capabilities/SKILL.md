@@ -1732,3 +1732,13 @@ infrastructure, not an advertised notation/catalog capability. A changed legacy
 telemetry header graduates through a reviewed registry row; never rewrite the
 frozen legacy baseline. After public header formatting, refresh fingerprints
 before regenerating the manifest and consumption census.
+
+## Bounded indexed control utilities
+
+`pulp/signal/indexed_control.hpp` contains a caller-indexed control table reader
+and scalar map/clip utility. Classify its public header as reviewed
+`infrastructure` with `Pulp::signal` as the minimal installed target owner;
+it does not advertise graph event transport or a standalone generator-facing
+capability. The G-5 fixture covers external index pause/reverse, strict trigger
+timing, and tested block partitions. Refresh the header fingerprint with
+`agent_capability_rederive.py` when this utility changes.

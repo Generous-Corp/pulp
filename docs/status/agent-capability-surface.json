@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 177,
+  "inventory_version": 179,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 515,
-    "reviewed_headers": 266,
+    "public_headers": 516,
+    "reviewed_headers": 267,
     "legacy_unreviewed_headers": 249,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 97,
+      "infrastructure": 98,
       "legacy_unreviewed": 249,
       "unsupported_capability": 2
     },
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 279,
-        "reviewed_headers": 156,
+        "public_headers": 280,
+        "reviewed_headers": 157,
         "legacy_unreviewed_headers": 123,
         "unsupported_headers": 2
       },
@@ -3450,6 +3450,15 @@
         "signal.sos-cascade"
       ],
       "rationale": "The public high-order IIR design helpers produce normalized SOS coefficient vectors accepted by the bounded cascade executor."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/indexed_control.hpp",
+      "fingerprint": "sha256:c25979e2e1c3b30cef33b022b908411bed087824f1407777e68d0809ed27632a",
+      "include": "pulp/signal/indexed_control.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Bounded scalar mapping and caller-indexed table reads support one G-5 workflow; they do not establish a graph event transport or independent generator-facing capability contract."
     },
     {
       "domain": "signal",
