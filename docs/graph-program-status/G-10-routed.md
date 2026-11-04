@@ -124,3 +124,28 @@ the qualification scope described below.
 
 G-10 and A3 remain PARTIAL. These qualification gaps are not implemented features
 or passing evidence, and require a follow-up contract/evidence packet.
+
+## Subsequent qualification state
+
+The focused evidence above is historical for the original implementation head.
+The current routed test executable passed **38,676 assertions in 39 cases** after
+its public resolver and transition controls were added. The guarded engine
+passed **28,134 assertions in three cases** after its transaction oracle was
+extended through the rejected frame's complete support. The public consumer is
+now 108 non-generated lines. A fresh development SDK installed from clean source
+`5919f57580c9c9b204ceb5aa2717caa61c1b9750` passed the installed consumer
+CTest; later commits in this qualification segment changed only tests and audit
+docs, with no change under `core/` or `examples/`. The installed consumer binary
+is 2,573,120 bytes, SHA-256
+`713af8cbb8316f5de5ae6f97f874ccad95e14e036f34e1ddde0b32d2c2cfe602`.
+
+The [acceptance audit](G-10-routed-acceptance.md) retains all eighteen admission
+rows and the exact outstanding predicates. Fifty-three independent production
+mutations have passing baseline, failing mutated source and restored-green
+receipts. The public snapshot-builder callback escape was closed and checked by
+both unit and installed-consumer controls. The two outer parallel/anticipation
+guard mutations remain inconclusive because separate inner checks refuse those
+modes. The local dedicated-builder gate passed with its source-test lane
+explicitly NOT CHECKED. Isolated m1 validation encountered source-test timeouts;
+that result is partial rather than a full gate pass. Full G-10/A3 status remains
+**PARTIAL**.
