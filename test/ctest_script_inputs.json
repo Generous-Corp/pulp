@@ -2348,6 +2348,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-routed-spectral-ports": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_routed_spectral_faults.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-sample-region-runtime": {
    "data": "none",
    "inputs": [],
@@ -3191,6 +3203,7 @@
   "pulp-test-reloadable-shell",
   "pulp-test-render-loop",
   "pulp-test-render-scenario",
+  "pulp-test-routed-spectral-ports",
   "pulp-test-routing-primitives",
   "pulp-test-runtime",
   "pulp-test-runtime-effect-names-gpu",
@@ -3285,6 +3298,7 @@
   "pulp-test-spectral-feature-frontends",
   "pulp-test-spectral-feature-frontends-no-exceptions",
   "pulp-test-spectral-gate-blur",
+  "pulp-test-spectral-guarded-split",
   "pulp-test-spectral-morph",
   "pulp-test-spectral-stream-start",
   "pulp-test-standalone-recording",
