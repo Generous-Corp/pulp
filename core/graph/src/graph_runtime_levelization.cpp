@@ -17,6 +17,9 @@ std::uint64_t graph_runtime_node_cost_weight(GraphRuntimeNodeKind kind,
         case GraphRuntimeNodeKind::Processor:
         case GraphRuntimeNodeKind::Utility:
         case GraphRuntimeNodeKind::Custom:
+        case GraphRuntimeNodeKind::SpectralAnalysis:
+        case GraphRuntimeNodeKind::SpectralStage:
+        case GraphRuntimeNodeKind::SpectralSynthesis:
             return std::max(input_ports, output_ports);
         case GraphRuntimeNodeKind::AudioInput:
         case GraphRuntimeNodeKind::AudioOutput:

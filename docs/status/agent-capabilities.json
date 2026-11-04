@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 88,
+  "manifest_revision": 90,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -15883,6 +15883,26 @@
             "enums": []
           }
         ],
+        "spectral_frame_codec.hpp": [
+          {
+            "class": "EncodedSpectralStream",
+            "qualified_name": "pulp::signal::EncodedSpectralStream",
+            "template": null,
+            "methods": [
+              "view()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "SpectralCodecResult",
+            "qualified_name": "pulp::signal::SpectralCodecResult",
+            "template": "class T",
+            "methods": [
+              "bool()"
+            ],
+            "enums": []
+          }
+        ],
         "spectral_frame_engine.hpp": [
           {
             "class": "SpectralFrameEngineT",
@@ -15898,6 +15918,11 @@
               "analysis_hop()",
               "num_bins()",
               "channels()",
+              "retained_storage_bytes()",
+              "analyze_guarded(const SampleType* const* in, int count, Fn&& fn)",
+              "synthesize_frame_guarded(const std::complex<SampleType>* const* frames)",
+              "stop_synthesis_guarded()",
+              "read_output_guarded(SampleType* const* out, int count, int& consumed)",
               "samples_until_next_frame()",
               "analyze(const SampleType* const* in, int num_samples, Fn&& on_frames)",
               "synthesize_frame(std::complex<SampleType>* const* frames, int synthesis_hop)",

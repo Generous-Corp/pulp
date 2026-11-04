@@ -34,6 +34,7 @@ std::string handle_build(const std::string& params_json);
 std::string handle_test(const std::string& params_json);
 std::string handle_status(const std::string& params_json);
 std::string handle_graph(const std::string& params_json);
+void configure_graph_executable(std::string executable_path);
 std::string handle_validate(const std::string& params_json);
 std::string handle_gpu_doctor(const std::string& params_json);
 std::string handle_gpu_recipes(const std::string& params_json);

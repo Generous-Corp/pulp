@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261104-windows-warp-policy-inheritance",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-04T12:19:45Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/view/platform/win/software_adapter_policy.hpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "The new Windows adapter policy helper is added within an exported source directory. Vellum inherits it on the next export so downstream Windows plugin hosts can reuse the Microsoft WARP classification; this records inheritance without changing existing source authority."
+}

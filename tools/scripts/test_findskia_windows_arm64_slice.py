@@ -60,7 +60,9 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
             # text placeholder that could never reach a real linker.
             (skia / "build" / "win-gpu").mkdir(parents=True, exist_ok=True)
             (skia / "build" / "win-gpu" / "msvc-toolchain.json").write_text(
-                '{"target":{"architecture":"%s"}}\n'
+                '{"target":{"architecture":"%s"},'
+                '"producer":{"skia_gn_compiler":{"version":"19.51.36260"},'
+                '"dawn_cmake_compiler":{"version":"19.51.36260"}}}\n'
                 % ("arm64ec" if arm64ec else "arm64x"),
                 encoding="utf-8",
             )
@@ -117,6 +119,10 @@ class FindSkiaWindowsArm64Slice(unittest.TestCase):
             "project(findskia_windows_arm64 NONE)\n"
             f'set(PULP_ROOT_DIR "{REPO.as_posix()}")\n'
             f'set(SKIA_DIR "{skia.as_posix()}")\n'
+            # The real Visual Studio configure supplies this value. The
+            # compiler-free fixture sets the same shape so the provider ABI
+            # guard is exercised on macOS/Linux as well.
+            'set(CMAKE_CXX_COMPILER_VERSION "19.51.36260")\n'
             f'include("{FINDSKIA.as_posix()}")\n'
             f'if(NOT SKIA_FOUND STREQUAL "{expected}")\n'
             "  message(FATAL_ERROR \"unexpected SKIA_FOUND=${SKIA_FOUND}\")\n"

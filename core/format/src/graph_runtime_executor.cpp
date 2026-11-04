@@ -120,7 +120,8 @@ void gather_node_inputs(const graph::GraphRuntimePlan& plan,
         const auto conn_index =
             plan.inbound_connection_indices[node.first_inbound_connection + c];
         const auto& conn = plan.connections[conn_index];
-        if (graph::is_event(conn) || graph::is_automation_conn(conn)) continue;
+        if (!graph::carries_audio(conn))
+            continue;
         if (conn.dest_port >= node.input_ports)
             continue;
         if (resolved && ports[conn.dest_port].mode != Mode::Sum)
@@ -635,6 +636,8 @@ run_routed_node(std::uint32_t node_index, const graph::GraphRuntimePlan& plan,
     context.command_results = command_results;
     context.node_inputs = audio::BufferView<const float>(inputs, node.input_ports, frames);
     context.node_outputs = audio::BufferView<float>(outputs, node.output_ports, frames);
+    context.spectral_input = binding.spectral_input;
+    context.spectral_outputs = binding.spectral_outputs;
     context.node_midi_in = midi != nullptr ? midi->in(node_index) : nullptr;
     context.node_midi_out = midi != nullptr ? midi->out(node_index) : nullptr;
     context.node_param_events = automation != nullptr ? automation->events(node_index) : nullptr;
@@ -947,6 +950,16 @@ void GraphRuntimeBufferPool::unbind() noexcept {
     host_input_aliasable_ = false;
 }
 
+void GraphRuntimeBufferPool::clear_history() noexcept {
+    std::fill(storage_.begin(), storage_.end(), 0.0f);
+    for (auto& ring : ring_) {
+        if (!ring.state)
+            continue;
+        std::fill(ring.state->storage.begin(), ring.state->storage.end(), 0.0f);
+        ring.state->write_pos = 0;
+    }
+}
+
 bool GraphRuntimeBufferPool::bind(const GraphRuntimeSnapshot& snapshot) noexcept {
     using Mode = GraphRuntimeSnapshot::InputPortSource::Mode;
     unbind();
@@ -1027,7 +1040,7 @@ bool GraphRuntimeBufferPool::bind(const GraphRuntimeSnapshot& snapshot) noexcept
             if (conn.source_index != input_node)
                 continue;
             // An automation lane reads the AudioInput slot itself.
-            if (graph::is_event(conn) || graph::is_automation_conn(conn)) {
+            if (!graph::carries_audio(conn)) {
                 aliasable = false;
                 break;
             }
@@ -1182,7 +1195,7 @@ void GraphRuntimeSnapshot::resolve_input_ports() {
         output_base[n + 1] = output_base[n] + plan_.nodes[n].output_ports;
     std::vector<std::uint8_t> read_only_readers(output_base.back(), 1);
     for (const auto& conn : plan_.connections) {
-        if (graph::is_event(conn) || graph::is_automation_conn(conn))
+        if (!graph::carries_audio(conn))
             continue;
         if (conn.source_index >= plan_.nodes.size() || conn.dest_index >= plan_.nodes.size() ||
             conn.source_port >= plan_.nodes[conn.source_index].output_ports)
@@ -1200,7 +1213,7 @@ void GraphRuntimeSnapshot::resolve_input_ports() {
             const auto conn_index =
                 plan_.inbound_connection_indices[node.first_inbound_connection + c];
             const auto& conn = plan_.connections[conn_index];
-            if (graph::is_event(conn) || graph::is_automation_conn(conn))
+            if (!graph::carries_audio(conn))
                 continue;
             if (conn.dest_port >= node.input_ports)
                 continue;

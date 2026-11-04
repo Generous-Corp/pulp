@@ -489,6 +489,8 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     // prepare()/mutator. custom_node_type() reads custom_node_types_ lock-free and
     // assumes the caller holds this mutex (true for every internal caller below).
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return false;
     for (const auto& definition : sample_region_definitions_) {
         for (const auto& member : definition.members) {
             if (member.type_id == type.type_id && member.version == type.version)
@@ -538,6 +540,8 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type,
         type.default_name = type.type_id;
 
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return false;
     const auto key = custom_node_key(type.type_id, type.version);
     const auto existing_scalar = sample_kernel_types_.find(key);
     const auto existing_custom = custom_node_types_.find(key);
@@ -976,6 +980,8 @@ bool register_builtin_sample_region_types(SignalGraph& graph) {
     }
 
     SignalGraph::GraphMutationLock mutation_lock(graph);
+    if (graph.refuse_spectral_mutation_())
+        return false;
     auto next_custom = graph.custom_node_types_;
     auto next_scalar = graph.sample_kernel_types_;
     bool changed = false;
@@ -1025,6 +1031,8 @@ bool SignalGraph::set_node_parameter(NodeId id, uint32_t param_id, float value) 
     // Forwards to the plugin slot's own (independently synchronized) parameter
     // store — no GraphNode plain field is written here.
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return false;
     if (sample_region_for_node_locked_(id) != 0)
         return false;
     auto* n = node_mut_locked_(id);
@@ -1042,6 +1050,10 @@ float SignalGraph::get_node_parameter(NodeId id, uint32_t param_id) const {
 }
 
 SignalGraph::PreparedStats SignalGraph::prepared_stats() const {
+    if (spectral_mode_.load(std::memory_order_acquire)) {
+        auto snapshot = read_snapshot_();
+        return snapshot ? stats_for_snapshot_(*snapshot) : PreparedStats{};
+    }
     return PreparedStats{
         .node_count = prepared_node_count_.load(std::memory_order_relaxed),
         .ordered_node_count =
@@ -1062,14 +1074,14 @@ SignalGraph::PreparedStats SignalGraph::prepared_stats() const {
 }
 
 std::uint64_t SignalGraph::sample_region_binding_generation() const noexcept {
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_();
     const auto* cg = read_guard.get();
     return cg != nullptr && cg->sample_region_bank ? cg->sample_region_bank->binding_generation()
                                                    : 0;
 }
 
 std::vector<SampleRegionRuntimeReceipt> SignalGraph::sample_region_runtime_receipts() const {
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_();
     const auto* cg = read_guard.get();
     std::vector<SampleRegionRuntimeReceipt> receipts;
     if (cg == nullptr)
@@ -1083,10 +1095,16 @@ std::vector<SampleRegionRuntimeReceipt> SignalGraph::sample_region_runtime_recei
 }
 
 int SignalGraph::prepared_max_block_size() const noexcept {
+    if (spectral_mode_.load(std::memory_order_acquire)) {
+        auto snapshot = read_snapshot_();
+        return snapshot ? snapshot->max_block_size : 0;
+    }
     return prepared_max_block_size_.load(std::memory_order_relaxed);
 }
 
 std::atomic<float>* SignalGraph::live_gain_atomic(NodeId id) const noexcept {
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->runtime.find(id);
     if (it == live_slot_.live()->runtime.end()) return nullptr;
@@ -1094,6 +1112,8 @@ std::atomic<float>* SignalGraph::live_gain_atomic(NodeId id) const noexcept {
 }
 
 PluginSlot* SignalGraph::live_plugin_slot(NodeId id) const noexcept {
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->plugins.find(id);
     if (it == live_slot_.live()->plugins.end()) return nullptr;
@@ -1101,6 +1121,8 @@ PluginSlot* SignalGraph::live_plugin_slot(NodeId id) const noexcept {
 }
 
 const CustomNodeProcessFn* SignalGraph::live_custom_processor(NodeId id) const noexcept {
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->custom_processors.find(id);
     if (it == live_slot_.live()->custom_processors.end()) return nullptr;
@@ -1109,6 +1131,8 @@ const CustomNodeProcessFn* SignalGraph::live_custom_processor(NodeId id) const n
 
 const CustomNodeTransportProcessFn* SignalGraph::live_custom_transport_processor(
     NodeId id) const noexcept {
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->custom_transport_processors.find(id);
     if (it == live_slot_.live()->custom_transport_processors.end()) return nullptr;
@@ -1117,6 +1141,8 @@ const CustomNodeTransportProcessFn* SignalGraph::live_custom_transport_processor
 
 const CustomNodeEventProcessFn* SignalGraph::live_custom_event_processor(
     NodeId id) const noexcept {
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->custom_event_processors.find(id);
     if (it == live_slot_.live()->custom_event_processors.end()) return nullptr;
@@ -1127,7 +1153,7 @@ int SignalGraph::live_custom_latency_samples(NodeId id) const noexcept {
     // Read-guarded rather than a bare live() deref: this one is read by the
     // PDC/bake paths while a re-prepare can be publishing a new snapshot, and
     // the guard keeps the map alive for the lookup.
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_();
     const auto* cg = read_guard.get();
     if (cg == nullptr) return 0;
     auto it = cg->custom_latency_samples.find(id);
@@ -1136,6 +1162,8 @@ int SignalGraph::live_custom_latency_samples(NodeId id) const noexcept {
 
 const CustomNodeParamProcessFn* SignalGraph::live_custom_param_processor(
     NodeId id) const noexcept {
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->custom_param_processors.find(id);
     if (it == live_slot_.live()->custom_param_processors.end()) return nullptr;
@@ -1144,6 +1172,8 @@ const CustomNodeParamProcessFn* SignalGraph::live_custom_param_processor(
 
 std::shared_ptr<const void> SignalGraph::live_snapshot_handle_locked_() const noexcept {
     assert_graph_mutation_locked_();
+    if (refuse_spectral_mutation_())
+        return {};
     return live_slot_.live();  // aliases the live CompiledGraph as an opaque keepalive
 }
 
@@ -1155,7 +1185,7 @@ std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
 SignalGraph::RoutedExecutionStatus
 SignalGraph::routed_execution_status(int block_size) const noexcept {
     RoutedExecutionStatus status;
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_();
     const auto* live = read_guard.get();
     if (live == nullptr || block_size <= 0)
         return status;
@@ -1206,8 +1236,12 @@ void SignalGraph::set_live_dsp_telemetry_enabled(bool enabled) {
     // lock -> pin order is safe because release() must acquire this same lock
     // before it can wait for readers.
     GraphMutationLock mutation_lock(*this);
+    if (spectral_access_closed_.load(std::memory_order_seq_cst)) {
+        spectral_error_.store(SpectralError::TransitionPending, std::memory_order_relaxed);
+        return;
+    }
     desired_live_dsp_telemetry_enabled_.store(enabled, std::memory_order_relaxed);
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_(true);
     if (auto* cg = read_guard.get()) {
         cg->live_dsp_telemetry.set_enabled(enabled);
     }
@@ -1221,7 +1255,7 @@ pulp::audio::LiveDspTelemetrySnapshot SignalGraph::poll_live_dsp_telemetry() {
     // Single non-real-time poller (control/UI thread): pin the live snapshot, drain
     // its ring (the SPSC consumer side; the audio thread is the producer), and return
     // a copy of the latest summary while the snapshot is still pinned alive.
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_(true);
     auto* cg = read_guard.get();
     if (!cg) return {};
     cg->live_dsp_telemetry.drain();
@@ -1323,6 +1357,8 @@ void SignalGraph::release() {
     // the pure-snapshot readers (inject_midi / extract_midi / node_latency_samples)
     // never take this mutex at all.
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return;
     ++authoring_generation_;
 
     cancel_swap_edit_locked_();
@@ -1376,6 +1412,8 @@ bool SignalGraph::set_custom_node_state(NodeId id,
     // Writes GraphNode custom fields + invalidate_live_locked_(); serialize against a
     // concurrent mutator/prepare.
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return false;
     if (sample_region_for_node_locked_(id) != 0)
         return false;
     cancel_swap_edit_locked_();
@@ -1395,7 +1433,7 @@ bool SignalGraph::set_custom_node_state(NodeId id,
 
 bool SignalGraph::ExecutionSnapshot::inject_midi(
     NodeId midi_input_node, const midi::MidiBuffer& events) const noexcept {
-    return snapshot_ != nullptr &&
+    return snapshot_ != nullptr && !snapshot_->spectral &&
            SignalGraph::inject_midi_into_snapshot_(*snapshot_, midi_input_node, events);
 }
 
@@ -1421,17 +1459,16 @@ SignalGraph::ExecutionSnapshot::sample_region_runtime_receipts() const {
 bool SignalGraph::ExecutionSnapshot::inject_parameter_events(
     NodeId plugin_node,
     const state::ParameterEventQueue& events) const noexcept {
-    return snapshot_ != nullptr &&
-           SignalGraph::inject_parameter_events_into_snapshot_(
-               *snapshot_, plugin_node, events);
+    return snapshot_ != nullptr && !snapshot_->spectral &&
+           SignalGraph::inject_parameter_events_into_snapshot_(*snapshot_, plugin_node, events);
 }
 
 bool SignalGraph::ExecutionSnapshot::inject_exact_parameter_events(
     NodeId plugin_node, const state::ParameterEventQueue& events,
     SnapshotParameterIngressPasskey) const noexcept {
-    return snapshot_ != nullptr &&
-           SignalGraph::inject_exact_parameter_events_into_snapshot_(
-               *snapshot_, plugin_node, events);
+    return snapshot_ != nullptr && !snapshot_->spectral &&
+           SignalGraph::inject_exact_parameter_events_into_snapshot_(*snapshot_, plugin_node,
+                                                                     events);
 }
 
 void SignalGraph::clear() {
@@ -1439,6 +1476,8 @@ void SignalGraph::clear() {
     // concurrent mutator/prepare. invalidate_live_locked_() drives only the non-blocking
     // prune, so holding the mutex across it is deadlock-free.
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return;
     cancel_swap_edit_locked_();
     connections_.clear();
     connection_identities_.clear();
@@ -1465,6 +1504,8 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     // drain mechanism and cannot invert lock order with release()'s reader wait.
     {
         GraphMutationLock mutation_lock(*this);
+        if (refuse_spectral_mutation_())
+            return false;
         if (sample_region_for_node_locked_(id) != 0)
             return false;
         auto* n = node_mut_locked_(id);
@@ -1476,7 +1517,7 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     // UI-thread-owned API is not the prepare/release thread, so without the
     // guard a concurrent prepare()/release() could retire+free `cg` between the
     // load and the store (use-after-free).
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_();
     auto* cg = read_guard.get();
     if (cg) {
         auto it = cg->runtime.find(id);

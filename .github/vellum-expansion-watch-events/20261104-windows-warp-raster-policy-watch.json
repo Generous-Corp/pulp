@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261104-windows-warp-raster-policy-watch",
+  "created_at": "2026-11-04T09:29:05Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Windows plugin host selects CPU raster for the explicitly identified Microsoft WARP software adapter using existing adapter_info, and retains an explicit software-GPU override. The shared renderer API and source authority are unchanged.",
+  "tests": [
+    "pulp-test-group-view-host --reporter compact",
+    "Windows ARM64EC desktop default and PULP_WINDOWS_ALLOW_SOFTWARE_GPU=1 paired traces",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
