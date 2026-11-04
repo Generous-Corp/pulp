@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1570"></a>
+## [1.57.0] - 2026-11-04
+
+- release/version bump ([#11523](https://github.com/Generous-Corp/pulp/pull/11523))
+- feature/g10 routed ports 20261104 ([#11502](https://github.com/Generous-Corp/pulp/pull/11502))
+- feature/g7 latency pdc 20261104 ([#11522](https://github.com/Generous-Corp/pulp/pull/11522))
+- fix/windows warp policy main 20261104 ([#11518](https://github.com/Generous-Corp/pulp/pull/11518))
+- evidence/g5 runtime 20261104 ([#11519](https://github.com/Generous-Corp/pulp/pull/11519))
+
 <a id="v1560"></a>
 ## [1.56.0] - 2026-11-04
 
@@ -12192,6 +12201,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.57.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.57.0
 [1.56.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.56.0
 [1.55.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.55.0
 [1.54.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.54.0
