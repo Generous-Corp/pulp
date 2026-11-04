@@ -31,6 +31,15 @@ def full_output() -> str:
     return "\n".join(lines)
 
 
+def census_passing() -> dict:
+    reports = []
+    for name in acc.CENSUS_BINARIES:
+        dawn = ["libvellum-skia-dawn-provider.dylib"] * acc.CENSUS_CONTROLS.get(name, 0)
+        reports.append({"artifact": f"/b/test/{name}", "verdict": "PASS", "reasons": [],
+                        "dawn_images": dawn})
+    return {"reports": reports}
+
+
 def mutations_confirmed() -> dict:
     return {check.name: "CONFIRMED" for item in acc.ITEMS for check in item.checks
             if isinstance(check, acc.Mutation)}
@@ -38,9 +47,10 @@ def mutations_confirmed() -> dict:
 
 class Verdicts(unittest.TestCase):
     def evaluate(self, text: str, direction: bool | None = True, mutations: dict | None = None,
-                 mutation_skip_reason: str = "") -> dict:
+                 mutation_skip_reason: str = "", census: dict | None | str = "pass") -> dict:
         obs = acc.parse_ctest_output(text)
         obs.direction_passed = direction
+        obs.census = census_passing() if census == "pass" else census
         obs.mutations = mutations_confirmed() if mutations is None else mutations
         obs.mutation_skip_reason = mutation_skip_reason
         return {v.key: v for v in acc.evaluate(acc.ITEMS, obs)}
@@ -55,7 +65,7 @@ class Verdicts(unittest.TestCase):
     def test_unrunnable_items_are_skip_never_pass(self) -> None:
         verdicts = self.evaluate(full_output())
         skipped = {key for key, v in verdicts.items() if v.status == acc.SKIP}
-        self.assertEqual(skipped, {"6", "7"})
+        self.assertEqual(skipped, {"6b", "7"})
         for key in skipped:
             self.assertTrue(verdicts[key].details[0], f"{key} has no reason")
 
@@ -136,14 +146,32 @@ class Verdicts(unittest.TestCase):
         # Neither the renderer test nor the marker: the item did not run, a FAIL.
         self.assertEqual(self.evaluate(without)["3c"].status, acc.FAIL)
 
+    def test_6a_passes_only_on_a_clean_census_with_both_controls(self) -> None:
+        self.assertEqual(self.evaluate(full_output())["6a"].status, acc.PASS)
+        self.assertEqual(self.evaluate(full_output(), census=None)["6a"].status, acc.FAIL)
+        self.assertEqual(self.evaluate(full_output(), census={"error": "x"})["6a"].status, acc.FAIL)
+        two = census_passing()
+        standalone = next(r for r in two["reports"] if r["artifact"].endswith("standalone-vellum"))
+        standalone.update(verdict="FAIL", reasons=["2 images define Dawn"],
+                          dawn_images=["a", "b"])
+        verdict = self.evaluate(full_output(), census=two)["6a"]
+        self.assertEqual(verdict.status, acc.FAIL)
+        self.assertIn("standalone-vellum", verdict.details[0])
+        # A blind census (no Dawn seen in the Vellum slice) fails its control.
+        blind = census_passing()
+        next(r for r in blind["reports"] if r["artifact"].endswith("/pulp-slice-vellum"))[
+            "dawn_images"] = []
+        self.assertEqual(self.evaluate(full_output(), census=blind)["6a"].status, acc.FAIL)
+
     def test_empty_output_passes_nothing(self) -> None:
-        verdicts = self.evaluate("", direction=None)
+        verdicts = self.evaluate("", direction=None, mutations={}, census=None)
         self.assertFalse(any(v.status == acc.PASS for v in verdicts.values()))
 
     def test_summary_never_calls_a_skip_a_pass(self) -> None:
         obs = acc.parse_ctest_output(full_output())
         obs.direction_passed = True
         obs.mutations = mutations_confirmed()
+        obs.census = census_passing()
         table = acc.render_table(acc.evaluate(acc.ITEMS, obs))
         self.assertIn("SKIP", table)
         self.assertIn("SKIPPED items are not passes", table)
