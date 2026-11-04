@@ -495,6 +495,7 @@
       "pulp/host/offline_signal_graph_host.hpp",
       "pulp/host/parameter_event_queue.hpp",
       "pulp/host/plugin_slot.hpp",
+      "pulp/host/processor_restore.hpp",
       "pulp/host/processor_signal_graph_binding.hpp",
       "pulp/host/sample_region_authoring.hpp",
       "pulp/host/sample_region_parameters.hpp",

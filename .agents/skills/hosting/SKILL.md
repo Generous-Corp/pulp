@@ -61,6 +61,24 @@ Keep the flat-plan, adapter, and load-measurer tests together when changing
 these contracts so a cache hit cannot hide a stale generation or an incorrect
 bus route.
 
+### Restoring in-process Processor state
+
+`ProcessorRestoreRegistry` (`pulp/host/processor_restore.hpp`) restores a batch
+of already-decoded parameter and custom payloads into fresh, unprepared
+`ProcessorNodeInstance`s. Register exact product-owned type descriptors and
+pass an explicit type/version allowlist. The envelope version is separate from
+the embedded StateStore schema; each must match its own declared/constructed
+version, with no migrations in this initial surface. All metadata and limits
+are validated before factories execute, all instances are constructed before
+restore, and a failure returns no instances. Factories are trusted control-side
+code and must not retain, expose, or mutate live instances.
+
+This does not implement `.pulpgraph` v4. `GraphSerializer` still refuses
+Processor nodes. State capture/coherence, encoded-input limits, migrations,
+candidate graph validation/preparation, and safe publication remain separate
+work. Run `cmake-g2-processor-restore-sdk-consumer` (the installed SDK consumer
+in `examples/g2-processor-restore-consumer`) when changing the registry contract.
+
 ### SignalGraph snapshot readers
 
 `runtime::Slot::live()` is publisher-thread-only. A status or telemetry
