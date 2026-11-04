@@ -212,7 +212,7 @@ bool SignalGraph::set_processor_audio_input_provider(
     // ProcessorNode copies the handle before prepare() and reads it from the
     // realtime callback thereafter. Refuse a live graph mutation rather than
     // racing a published snapshot or silently changing a running processor.
-    if (live_slot_.has_value())
+    if (refuse_spectral_mutation_() || live_slot_.has_value())
         return false;
     const auto it = processor_nodes_.find(id);
     if (it == processor_nodes_.end() || !it->second || !it->second->instance)

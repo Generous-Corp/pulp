@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/format/processor.hpp>
 #include "../core/host/src/spectral_graph_internal.hpp"
 #include <array>
 
@@ -304,4 +305,56 @@ TEST_CASE("Built-in identity preserves zero without invoking a contract guard",
     REQUIRE(f.bank.find(f.stage)->first_error == pulp::host::SpectralError::None);
     f.process(f.wet, input, output);
     for (float value : output) REQUIRE((value == 0 && !std::signbit(value)));
+}
+
+TEST_CASE("Activated block size is visible before authoring finalization",
+          "[host][spectral-transition][spectral-block-query]") {
+    using namespace pulp::host;
+    ControllerGraph target;
+    REQUIRE(target.graph.prepared_max_block_size() == 64);
+    auto candidate = target.edit(128);
+    REQUIRE(candidate->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
+    target.process();
+    REQUIRE(target.graph.prepared_max_block_size() == 128);
+    REQUIRE(target.graph.prepared_stats().max_block_size == 128);
+    REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::None);
+}
+
+namespace {
+class ProviderProbe final : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.name = "spectral-provider-probe";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.spectral-provider";
+        d.version = "1.0.0";
+        d.input_buses = {{"input", 1, false}};
+        d.output_buses = {{"output", 1, false}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override { out.clear(); }
+};
+}
+TEST_CASE("A live spectral graph refuses processor input provider mutation",
+          "[host][spectral-transition][spectral-provider]") {
+    using namespace pulp::host;
+    SignalGraph graph;
+    const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    const auto a = *graph.add_spectral_analysis(shape, "analysis").value;
+    const auto s = *graph.add_spectral_synthesis(shape, "synthesis").value;
+    REQUIRE(graph.connect(a.frames, s.frames));
+    const auto processor = graph.add_processor_node(std::make_unique<ProviderProbe>());
+    REQUIRE(processor != 0);
+    int context = 0;
+    pulp::format::AudioInputBusProvider provider{&context,
+        [](void*, size_t, size_t, pulp::audio::BufferView<const float>&) noexcept { return false; }};
+    REQUIRE(graph.set_processor_audio_input_provider(processor, provider));
+    REQUIRE(graph.prepare(48000, 64));
+    REQUIRE_FALSE(graph.set_processor_audio_input_provider(processor, provider));
+    REQUIRE(graph.spectral_error() == SpectralError::UnsupportedOperation);
 }

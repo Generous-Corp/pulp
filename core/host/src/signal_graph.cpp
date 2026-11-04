@@ -1090,6 +1090,10 @@ std::vector<SampleRegionRuntimeReceipt> SignalGraph::sample_region_runtime_recei
 }
 
 int SignalGraph::prepared_max_block_size() const noexcept {
+    if (spectral_mode_.load(std::memory_order_acquire)) {
+        auto snapshot = read_snapshot_();
+        return snapshot ? snapshot->max_block_size : 0;
+    }
     return prepared_max_block_size_.load(std::memory_order_relaxed);
 }
 
