@@ -16,7 +16,7 @@
 
 int cmd_design(const std::vector<std::string>& args) {
 #if !PULP_ENABLE_DESIGN_IMPORT
-    (void) args;
+    (void)args;
     std::cerr << "pulp design is unavailable in this SDK build; enable "
                  "PULP_ENABLE_DESIGN_IMPORT to build the authoring tools.\n";
     return 2;

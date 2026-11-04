@@ -138,11 +138,10 @@ PluginFrameRenderer::Frame PluginFrameRenderer::render(
     // provider has delivered one, and it is never this frame's render time.
     bool acquired = false;
     {
-        PULP_TRACE_SCOPE_NAMED_ARGS(
-            "gpu", "gpu_acquire",
-            "gpu_timing_available", skia.gpu_render_timing_available(),
-            "last_gpu_render_ms", skia.gpu_render_time_ms(),
-            "frames_in_flight", skia.gpu_frames_in_flight());
+        PULP_TRACE_SCOPE_NAMED_ARGS("gpu", "gpu_acquire", "gpu_timing_available",
+                                    skia.gpu_render_timing_available(), "last_gpu_render_ms",
+                                    skia.gpu_render_time_ms(), "frames_in_flight",
+                                    skia.gpu_frames_in_flight());
         acquired = gpu.begin_frame();
     }
     if (!acquired) {
