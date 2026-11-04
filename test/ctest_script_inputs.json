@@ -2459,6 +2459,21 @@
    "spawns": "undeclared",
    "undeclared_sources": []
   },
+  "pulp-test-spectral-codec": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_spectral_frame_codec.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/spectral-frame-codec/asymmetric.hex",
+    "test/fixtures/spectral-frame-codec/zero.hex"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_spectral_frame_codec.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-streaming-model-contract": {
    "data": "none",
    "inputs": [],
@@ -3281,6 +3296,7 @@
   "pulp-test-skia-surface-readback-macos",
   "pulp-test-smf-interchange",
   "pulp-test-sos-cascade",
+  "pulp-test-spectral-codec",
   "pulp-test-spectral-cross-synthesis",
   "pulp-test-spectral-feature-frontends",
   "pulp-test-spectral-feature-frontends-no-exceptions",
