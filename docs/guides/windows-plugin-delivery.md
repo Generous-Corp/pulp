@@ -111,6 +111,18 @@ may be remote transport or scheduling, while long paint/GPU/JavaScript spans
 inside the guest are renderer work. Keep this diagnosis independent from the
 audio callback and never move tracing onto the real-time audio thread.
 
+The Windows editor host selects Skia CPU raster when Dawn identifies D3D12's
+Microsoft WARP adapter (`vendor=microsoft`, `architecture=warp`). WARP may report
+an integrated adapter type, which does not make it hardware accelerated. With
+the separately tested vector-raster provider and static-pixel cache, a live
+64-band modulation workload in Windows ARM UTM measured 417–446 ms mean frames
+on WARP versus 50–54 ms on raster. Those timings qualify that experimental
+configuration, not every SDK or native GPU. Hardware adapters retain GPU
+rendering. Set `PULP_WINDOWS_ALLOW_SOFTWARE_GPU=1` before launching the host to
+retain WARP for explicit GPU qualification or an editor that needs its GPU
+capabilities. Test policy selection and that override in the actual desktop
+session.
+
 ## Optional dependencies stay optional
 
 Platform- or application-specific dependencies belong in the plugin or its
