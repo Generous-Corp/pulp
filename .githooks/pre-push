@@ -987,7 +987,16 @@ DIFF_COVER_SH="$ROOT/tools/scripts/local_diff_cover.sh"
 if [ "$_prepush_source_update_mode" = "no-source" ]; then
     echo "[pre-push] diff coverage skipped: push carries no branch source update." >&2
 elif [ "$_prepush_gate_host" -eq 1 ]; then
-    pulp_gate_host_skip_line "pre-push diff-coverage configure/build" "tools/scripts/local_diff_cover.sh"
+    # A gate host never builds diff coverage locally, so the lane is NOT
+    # CHECKED here (CI runs it on the PR). When the operator already asked to
+    # skip or demote diff coverage, the refusal banner is noise that reads as
+    # the cause of an unrelated gate failure, so it is replaced by one
+    # informational line. Without either knob a human is told in full.
+    if [ "${PULP_SKIP_DIFF_COVER:-0}" = "1" ] || [ "${PULP_DISABLE_PREPUSH_DIFF_COVER:-0}" = "1" ]; then
+        echo "[pre-push] diff coverage: NOT CHECKED (gate host; skipped by PULP_SKIP_DIFF_COVER / PULP_DISABLE_PREPUSH_DIFF_COVER; CI runs it on the PR)." >&2
+    else
+        pulp_gate_host_skip_line "pre-push diff-coverage configure/build" "tools/scripts/local_diff_cover.sh"
+    fi
     _prepush_diff_cover_refused=1
 elif [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
     # The coverage script owns both compare-ref freshness and changed-surface
@@ -1084,6 +1093,9 @@ if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ] && [ "$compat_flip_failed
 fi
 
 echo "[pre-push] gate failure(s) above; blocking push." >&2
+if [ "$_prepush_diff_cover_refused" = "1" ]; then
+    echo "[pre-push] note: diff coverage is NOT CHECKED on this gate host and is not the failure; the blocking gate is named above." >&2
+fi
 echo "[pre-push] To bypass (use sparingly; CI still runs the same gates):" >&2
 echo "[pre-push]   PULP_DISABLE_PREPUSH_GATES=1 git push          # demote skill/version/compat/compat-aggregate/node-ABI/docs-noise/hotspot-size/deps/flip" >&2
 echo "[pre-push]   PULP_DISABLE_PREPUSH_DIFF_COVER=1 git push     # demote diff-cover only" >&2

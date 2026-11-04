@@ -1448,7 +1448,8 @@ class GateHostSkipTests(unittest.TestCase):
         self.assertIn("TARTCI_ROLE=dev-overflow", result.stderr)
         self.assertIn("TARTCI_ROLE=light host (m1) or a disposable VM", result.stderr)
 
-    def _run_hook(self, role: str) -> tuple[subprocess.CompletedProcess, bool]:
+    def _run_hook(self, role: str, extra_env: dict | None = None,
+                  failing_gate: bool = False) -> tuple[subprocess.CompletedProcess, bool]:
         """Run the real pre-push hook in a fixture whose diff-cover script is a sentinel."""
         with tempfile.TemporaryDirectory() as td:
             # Fixture paths are built from single components: a "tools/..."
@@ -1485,8 +1486,13 @@ class GateHostSkipTests(unittest.TestCase):
             tartci = _fake_tartci(pathlib.Path(td), f"TARTCI_ROLE={role}", "TARTCI_SERVES_GATE=1")
             env = dict(os.environ, PULP_TARTCI_BIN=str(tartci), PULP_DISABLE_PREPUSH_GATES="1",
                        PULP_SKIP_PR_BATCH_ADVICE="1")
-            for key in ("PULP_SKIP_DIFF_COVER", "PULP_SKIP_PREPUSH", "GIT_DIR", "GIT_WORK_TREE"):
+            for key in ("PULP_SKIP_DIFF_COVER", "PULP_DISABLE_PREPUSH_DIFF_COVER",
+                        "PULP_SKIP_PREPUSH", "GIT_DIR", "GIT_WORK_TREE"):
                 env.pop(key, None)
+            if failing_gate:
+                env.pop("PULP_DISABLE_PREPUSH_GATES", None)
+                (scripts / "version_bump_check.py").write_text("raise SystemExit(1)\n", encoding="utf-8")
+            env.update(extra_env or {})
             sha = subprocess.check_output([*git, "rev-parse", "HEAD"], text=True, encoding="utf-8").strip()
             result = subprocess.run(
                 ["bash", str(hooks / PRE_PUSH.name), "origin", "none"], cwd=root,
@@ -1502,6 +1508,37 @@ class GateHostSkipTests(unittest.TestCase):
         self.assertIn("Run tools/scripts/local_diff_cover.sh from", result.stderr)
         self.assertIn("[pre-push] gates clean except diff coverage: NOT CHECKED", result.stderr)
         self.assertNotIn("[pre-push] gates clean.", result.stderr)
+
+    def test_gate_host_with_skip_diff_cover_reports_not_checked_and_allows_push(self) -> None:
+        for knob in ("PULP_SKIP_DIFF_COVER", "PULP_DISABLE_PREPUSH_DIFF_COVER"):
+            with self.subTest(knob=knob):
+                result, ran = self._run_hook("dedicated-builder", {knob: "1"})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(ran, result.stderr)
+                self.assertIn("diff coverage: NOT CHECKED", result.stderr)
+                self.assertNotIn("[gate-host] REFUSED", result.stderr)
+                self.assertNotIn("blocking push", result.stderr)
+
+    def test_gate_host_without_knobs_still_blocks_nothing_but_tells_the_human(self) -> None:
+        result, _ = self._run_hook("dedicated-builder")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[gate-host] REFUSED pre-push diff-coverage", result.stderr)
+
+    def test_gate_host_with_knobs_still_blocks_on_another_failing_gate(self) -> None:
+        # Negative control: the same fixture with a genuinely failing gate must block.
+        result, _ = self._run_hook(
+            "dedicated-builder",
+            {"PULP_SKIP_DIFF_COVER": "1", "PULP_DISABLE_PREPUSH_DIFF_COVER": "1"},
+            failing_gate=True)
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("blocking push", result.stderr)
+        self.assertIn("is not the failure", result.stderr)
+
+    def test_gate_host_without_knobs_and_another_failing_gate_blocks(self) -> None:
+        result, _ = self._run_hook("dedicated-builder", failing_gate=True)
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[gate-host] REFUSED", result.stderr)
+        self.assertIn("blocking push", result.stderr)
 
     def test_control_prepush_hook_reaches_diff_cover_on_a_light_host(self) -> None:
         # Proves the fixture reaches the diff-cover call at all, so the refusal
