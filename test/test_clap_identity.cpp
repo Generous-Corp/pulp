@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <filesystem>
@@ -12,13 +13,8 @@ using namespace pulp::host;
 namespace fs = std::filesystem;
 namespace {
 struct Fixture {
-    fs::path directory =
-        fs::temp_directory_path() /
-        ("pulp-clap-identity-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    Fixture() {
-        fs::create_directory(directory);
-    }
+    fs::path directory = pulp::test::make_unique_temp_dir("pulp-clap-identity");
+    Fixture() = default;
     ~Fixture() {
         std::error_code ec;
         fs::remove_all(directory, ec);
