@@ -25,7 +25,7 @@ def main():
     print(consumer.stdout, end='')
     assert consumer.returncode == 0, consumer.stderr
     expected = [list(map(float, line.split()))
-                for line in (directory / 'expected.tsv').read_text().splitlines()]
+                for line in (directory / 'expected.tsv').read_text(encoding="utf-8").splitlines()]
     base = dict(path=str(directory / 'graph.pulpgraph'), operation='probe',
                 input=str(directory / 'input.wav'), source_node='source', source_port='audio',
                 destination_node='downstream', destination_port='audio', block_frames=64)
@@ -74,33 +74,33 @@ def main():
     missing = dict(base)
     del missing['input']
     compare(missing, 'missing_option')
-    document = json.loads((directory / 'graph.pulpgraph').read_text())
+    document = json.loads((directory / 'graph.pulpgraph').read_text(encoding="utf-8"))
     for bad_count in (-1, 2147483647, 1.5):
         oversized = json.loads(json.dumps(document))
         oversized['nodes'][0]['num_output_ports'] = bad_count
         path = directory / 'oversized.pulpgraph'
-        path.write_text(json.dumps(oversized))
+        path.write_text(json.dumps(oversized), encoding="utf-8")
         compare(dict(base, path=str(path)), 'graph_limit')
     unsupported = json.loads(json.dumps(document))
     unsupported['nodes'][0]['type'] = 'plugin'
     path = directory / 'unsupported.pulpgraph'
-    path.write_text(json.dumps(unsupported))
+    path.write_text(json.dumps(unsupported), encoding="utf-8")
     compare(dict(base, path=str(path)), 'unsupported_node')
     for node in document['nodes']:
         if node['name'] == 'downstream':
             node['name'] = 'source'
     ambiguous = directory / 'ambiguous.pulpgraph'
-    ambiguous.write_text(json.dumps(document))
+    ambiguous.write_text(json.dumps(document), encoding="utf-8")
     compare(dict(base, path=str(ambiguous)), 'ambiguous_node')
     malformed = directory / 'malformed.pulpgraph'
-    malformed.write_text('{broken')
+    malformed.write_text('{broken', encoding="utf-8")
     compare(dict(base, path=str(malformed)), 'invalid_graph')
-    document = json.loads((directory / 'graph.pulpgraph').read_text())
+    document = json.loads((directory / 'graph.pulpgraph').read_text(encoding="utf-8"))
     for node in document['nodes']:
         if node['name'] == 'source':
             node['gain'] = 3e38
     overflow = directory / 'overflow.pulpgraph'
-    overflow.write_text(json.dumps(document))
+    overflow.write_text(json.dumps(document), encoding="utf-8")
     def float_wave(name, value):
         data = struct.pack('<133f', *([value] * 133))
         fmt = struct.pack('<HHIIHH', 3, 1, 48000, 192000, 4, 32)
