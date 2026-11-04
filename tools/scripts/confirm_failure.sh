@@ -59,6 +59,18 @@
 # in both lanes. Without this lane every interpreted test in the tree is
 # un-negative-controllable by the one instrument the repo mandates for it.
 #
+# A failing test proves nothing when the broken code never ran. In the compiled
+# lane that is a break that does not compile; in the --python lane it is a break
+# that no longer parses (SyntaxError, IndentationError) or no longer imports:
+# the test then dies at import, which reads exactly like an assertion failure.
+# So after the break, --python byte-compiles the edited .py in memory, and, when
+# the unbroken module could be loaded standalone at baseline, loads the broken
+# one the same way. Either failure is INCONCLUSIVE, never CONFIRMED. The load
+# executes the module's top level once more, as the test itself would, in a
+# child process with a time limit; a module that cannot be loaded standalone
+# at baseline (relative imports, required environment) gets the parse check
+# only, and the run says so.
+#
 # --no-build is mutually exclusive with --build-dir/--target/--jobs/--object:
 # a caller must not be able to think a build happened when none did.
 #
@@ -386,6 +398,62 @@ purge_pycache() {
         -exec rm -rf {} + 2>/dev/null || true
 }
 
+# Parse the edited file without writing bytecode. Prints the error on failure.
+python_parses() {
+    python3 -I - "$FILE" <<'PY'
+import sys
+path = sys.argv[1]
+try:
+    with open(path, "rb") as stream:
+        compile(stream.read(), path, "exec", dont_inherit=True)
+except (SyntaxError, ValueError) as exc:
+    print(f"{type(exc).__name__}: {exc}")
+    sys.exit(1)
+PY
+}
+
+# Load the edited file standalone in a child process with a time limit.
+# Exit 0 loaded, 1 raised while loading (the error is printed), 3 timed out.
+python_loads() {
+    python3 -I - "$FILE" <<'PY'
+import os, signal, subprocess, sys
+path = os.path.abspath(sys.argv[1])
+probe = r"""
+import importlib.util, os, sys
+path = sys.argv[1]
+sys.path.insert(0, os.path.dirname(path))
+name = "_confirm_failure_probe_" + os.path.splitext(os.path.basename(path))[0]
+spec = importlib.util.spec_from_file_location(name, path)
+module = importlib.util.module_from_spec(spec)
+sys.modules[name] = module
+spec.loader.exec_module(module)
+"""
+env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+timeout = float(os.environ.get("CONFIRM_FAILURE_PYTHON_LOAD_TIMEOUT", "60"))
+process = subprocess.Popen(
+    [sys.executable, "-c", probe, path], cwd=os.path.dirname(path), env=env,
+    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    text=True, start_new_session=True)
+try:
+    stdout, stderr = process.communicate(timeout=timeout)
+except subprocess.TimeoutExpired:
+    # The module may have spawned descendants. Kill the whole process group,
+    # then reap the probe so a timed-out import cannot leak into later phases.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.communicate()
+    print(f"timed out after {timeout:g} seconds")
+    sys.exit(3)
+result = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+if result.returncode != 0:
+    lines = (result.stderr or result.stdout).strip().splitlines()
+    print(lines[-1] if lines else f"exit {result.returncode}")
+    sys.exit(1)
+PY
+}
+
 run_test() {
     [ -n "$TEST_LOG_DIR" ] ||
         TEST_LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/confirm-failure.XXXXXX")"
@@ -420,6 +488,16 @@ invalidate
 build_and_verify_recompile "baseline" || die_inconclusive "could not build a clean baseline"
 if ! run_test baseline; then
     die_inconclusive "the test already fails before any edit; fix that first"
+fi
+PYTHON_SOURCE=0
+LOAD_PROBE=0
+if [ "$PYTHON_MODE" -eq 1 ] && [ "${FILE##*.}" = "py" ]; then
+    PYTHON_SOURCE=1
+    if python_loads >/dev/null 2>&1; then
+        LOAD_PROBE=1
+    else
+        say "baseline: $BASE does not load standalone, so the broken module gets the parse check only"
+    fi
 fi
 BASELINE_BINARY="$(binary_fingerprint)"
 if [ "$BASELINE_BINARY" = "absent" ]; then
@@ -497,6 +575,21 @@ if [ "$BUILD_STATUS" -eq 2 ]; then
     exit 2
 fi
 
+BREAK_UNRUNNABLE=""
+if [ "$BUILD_STATUS" -eq 0 ] && [ "$PYTHON_SOURCE" -eq 1 ]; then
+    if ! PARSE_ERROR="$(python_parses 2>&1)"; then
+        BREAK_UNRUNNABLE="no longer parses ($PARSE_ERROR)"
+    elif [ "$LOAD_PROBE" -eq 1 ]; then
+        LOAD_ERROR="$(python_loads 2>&1)"
+        LOAD_STATUS=$?
+        [ "$LOAD_STATUS" -eq 0 ] || BREAK_UNRUNNABLE="no longer imports ($LOAD_ERROR)"
+    fi
+    if [ -n "$BREAK_UNRUNNABLE" ]; then
+        say "broken: $BASE $BREAK_UNRUNNABLE"
+        BUILD_STATUS=1
+    fi
+fi
+
 BROKEN_PASSES=0
 BROKEN_TEST_LOG=""
 if [ "$BUILD_STATUS" -eq 0 ]; then
@@ -523,6 +616,11 @@ if ! run_test restored; then
 fi
 
 # ── 4. Verdict ───────────────────────────────────────────────────────────────
+if [ -n "$BREAK_UNRUNNABLE" ]; then
+    die_inconclusive "the broken $BASE $BREAK_UNRUNNABLE, so a failing test would
+    only show that it could not load the module, not that it checks the fix.
+    Write a --break that still parses and imports (change a value or a branch)"
+fi
 if [ "$BUILD_STATUS" -eq 1 ]; then
     die_inconclusive "the break does not compile, so the test never ran against
     broken code. Write a --break that still builds (change a value or a branch,

@@ -1991,6 +1991,27 @@
         ]
       },
       {
+        "name": "graph",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "operation",
+            "kind": "positional",
+            "required": true
+          },
+          {
+            "name": "file",
+            "kind": "positional",
+            "required": true
+          },
+          {
+            "name": "--json",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
         "name": "harness",
         "disposition": "candidate-shared-later",
         "arguments": [
@@ -4919,6 +4940,10 @@
         "disposition": "pulp-owned"
       },
       {
+        "name": "pulp_graph",
+        "disposition": "candidate-shared-later"
+      },
+      {
         "name": "pulp_inspect_pending_requests",
         "disposition": "candidate-shared-later"
       },
@@ -5011,7 +5036,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.499.5",
+        "version": "0.500.0",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -5026,13 +5051,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.499.5",
+        "catalog_version": "0.500.0",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.499.5",
+        "version": "0.500.0",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [
