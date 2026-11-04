@@ -484,13 +484,13 @@ bool SignalGraph::ParameterBlockSnapshot::append_to(
 }
 
 bool SignalGraph::register_custom_node_type(CustomNodeType type) {
-    if (refuse_spectral_mutation_())
-        return false;
     if (!type.is_valid_registration()) return false;
     // Scans nodes_ and mutates custom_node_types_; serialize against a concurrent
     // prepare()/mutator. custom_node_type() reads custom_node_types_ lock-free and
     // assumes the caller holds this mutex (true for every internal caller below).
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return false;
     for (const auto& definition : sample_region_definitions_) {
         for (const auto& member : definition.members) {
             if (member.type_id == type.type_id && member.version == type.version)
@@ -526,8 +526,6 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
 
 bool SignalGraph::register_custom_node_type(CustomNodeType type,
                                             SampleKernelDescriptor sample_kernel) {
-    if (refuse_spectral_mutation_())
-        return false;
     // A scalar-paired type must not declare the event lane. A region MEMBER is
     // quotiented out of the executable topology and an ANCHOR has its event
     // binding dropped at compile, so either way the callback would be registered
@@ -542,6 +540,8 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type,
         type.default_name = type.type_id;
 
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return false;
     const auto key = custom_node_key(type.type_id, type.version);
     const auto existing_scalar = sample_kernel_types_.find(key);
     const auto existing_custom = custom_node_types_.find(key);
@@ -1025,12 +1025,12 @@ bool register_builtin_sample_region_types(SignalGraph& graph) {
 }
 
 bool SignalGraph::set_node_parameter(NodeId id, uint32_t param_id, float value) {
-    if (refuse_spectral_mutation_())
-        return false;
     // Scans nodes_ via node(); serialize against a concurrent mutator/prepare.
     // Forwards to the plugin slot's own (independently synchronized) parameter
     // store — no GraphNode plain field is written here.
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return false;
     if (sample_region_for_node_locked_(id) != 0)
         return false;
     auto* n = node_mut_locked_(id);
@@ -1346,8 +1346,6 @@ SignalGraph::evaluate_optional_runtime_budget(
 }
 
 void SignalGraph::release() {
-    if (refuse_spectral_mutation_())
-        return;
     // Serialize against concurrent control-thread mutators / prepare() for the
     // same two surfaces prepare() guards: the nodes_ iteration below and the
     // snapshot-publication state (live_slot_).
@@ -1357,6 +1355,8 @@ void SignalGraph::release() {
     // the pure-snapshot readers (inject_midi / extract_midi / node_latency_samples)
     // never take this mutex at all.
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return;
     ++authoring_generation_;
 
     cancel_swap_edit_locked_();
@@ -1468,12 +1468,12 @@ bool SignalGraph::ExecutionSnapshot::inject_exact_parameter_events(
 }
 
 void SignalGraph::clear() {
-    if (refuse_spectral_mutation_())
-        return;
     // Wipes nodes_/connections_ + invalidate_live_locked_(); serialize against a
     // concurrent mutator/prepare. invalidate_live_locked_() drives only the non-blocking
     // prune, so holding the mutex across it is deadlock-free.
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return;
     cancel_swap_edit_locked_();
     connections_.clear();
     connection_identities_.clear();
@@ -1488,8 +1488,6 @@ void SignalGraph::clear() {
 }
 
 bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
-    if (refuse_spectral_mutation_())
-        return false;
     // Write the UI-thread-owned scalar on GraphNode so it survives future
     // compile_() calls. Also reflect into the live snapshot's runtime through
     // a per-runtime atomic so the change takes effect without a re-prepare.
@@ -1502,6 +1500,8 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     // drain mechanism and cannot invert lock order with release()'s reader wait.
     {
         GraphMutationLock mutation_lock(*this);
+        if (refuse_spectral_mutation_())
+            return false;
         if (sample_region_for_node_locked_(id) != 0)
             return false;
         auto* n = node_mut_locked_(id);

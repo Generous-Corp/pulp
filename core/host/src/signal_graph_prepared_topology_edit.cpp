@@ -1270,8 +1270,6 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
 SignalGraph::PreparedTopologyEdit::Result
 SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
                                                      int max_block_size) {
-    if (owner_->refuse_spectral_mutation_())
-        return last_result_ = Result::PreflightFailed;
     if (committed_)
         return last_result_ = Result::AlreadyCommitted;
     if (mutation_failed_)
@@ -1288,6 +1286,8 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
     // private candidate. The owner's authoring graph and live publication remain
     // unchanged unless the candidate succeeds and commit() is called.
     GraphMutationLock owner_lock(*owner_);
+    if (owner_->refuse_spectral_mutation_())
+        return last_result_ = Result::PreflightFailed;
     if (!base_is_current_locked_() || owner_->in_swap_edit_)
         return last_result_ = Result::StaleBase;
     if (const auto rejection = baseline_removal_rejection_locked_())

@@ -3,6 +3,7 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 namespace {
@@ -468,4 +469,24 @@ TEST_CASE("Mailbox refusal preserves ingress and egress exactly once",
     REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::None);
     REQUIRE(target.graph.extract_midi(target.midi_out, extracted));
     REQUIRE(extracted.empty());
+}
+
+TEST_CASE("Active spectral controllers refuse teardown and graph loading",
+          "[host][spectral-transition][spectral-load-refusal]") {
+    ControllerGraph target, control;
+    const auto node_count = target.graph.nodes().size();
+    target.graph.release();
+    target.graph.clear();
+    REQUIRE(target.graph.nodes().size() == node_count);
+    pulp::host::SignalGraph ordinary;
+    ordinary.add_input_node(1);
+    ordinary.add_output_node(1);
+    const auto json = pulp::host::GraphSerializer::to_json(ordinary);
+    const auto result = pulp::host::GraphSerializer::from_json(target.graph, json);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("spectral") != std::string::npos);
+    REQUIRE(target.graph.nodes().size() == node_count);
+    target.process();
+    control.process();
+    REQUIRE(target.output == control.output);
 }

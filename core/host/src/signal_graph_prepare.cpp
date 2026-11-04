@@ -1580,11 +1580,11 @@ bool SignalGraph::prepare_impl_(double sample_rate, int max_block_size,
 }
 
 void SignalGraph::set_limits(GraphLimits limits) {
-    if (refuse_spectral_mutation_())
-        return;
     // Mutates limits_ (read by validate_generated_graph under the lock) and drives
     // invalidate_live_locked_(); serialize against a concurrent prepare()/mutator.
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_())
+        return;
     cancel_swap_edit_locked_();
     limits_ = limits;
     invalidate_live_locked_();

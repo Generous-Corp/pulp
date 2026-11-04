@@ -454,8 +454,6 @@ void SignalGraph::begin_swap_edit() {
 
 SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
                                                   int max_block_size) {
-    if (refuse_spectral_mutation_())
-        return SwapResult::NeedsEagerPrepare;
     struct ObserverCall {
         NodeId id = 0;
         std::shared_ptr<PluginSlot> old_slot;
@@ -465,6 +463,8 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
     std::vector<ObserverCall> observer_calls;
 
     GraphMutationLock lock(*this);
+    if (refuse_spectral_mutation_())
+        return SwapResult::NeedsEagerPrepare;
     if (!in_swap_edit_) return SwapResult::NotInSwapEdit;
 
     // MidiOutput publication is still owned by the live snapshot. Refuse this
@@ -768,9 +768,9 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
 }
 
 void SignalGraph::abort_swap_edit() {
+    GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return;
-    GraphMutationLock lock(*this);
     if (!in_swap_edit_) return;
     cancel_swap_edit_locked_();
     invalidate_live_locked_();
