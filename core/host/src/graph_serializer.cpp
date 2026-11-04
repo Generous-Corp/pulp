@@ -48,7 +48,11 @@ inline double get_double(const V& v) {
     return 0.0;
 }
 
-constexpr int kFormatVersion = 3;
+// v4 adds the Processor persistence envelope.  The bounded serializer slice
+// keeps the v2/v3 writers byte stable and teaches the reader the explicit
+// v3 -> v4 migration; Processor emission is added by the follow-on runtime
+// lane once the public registry contract is available.
+constexpr int kFormatVersion = 4;
 constexpr std::size_t kMaxSerializedSampleRegionConnections = 2'048;
 constexpr std::size_t kMaxSerializedNodes = 512;
 constexpr std::size_t kMaxSerializedConnections = 16'384;
@@ -62,11 +66,13 @@ struct GraphMigrationEntry {
 bool migrate_graph_v1_to_v2(const std::string& source_json,
                             std::string& migrated_json);
 bool migrate_graph_v2_to_v3(const std::string& source_json, std::string& migrated_json);
+bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrated_json);
 
 std::vector<GraphMigrationEntry>& graph_migrations() {
     static std::vector<GraphMigrationEntry> migrations = {
         {1, 2, migrate_graph_v1_to_v2},
         {2, 3, migrate_graph_v2_to_v3},
+        {3, 4, migrate_graph_v3_to_v4},
     };
     return migrations;
 }
@@ -162,6 +168,14 @@ bool migrate_graph_v2_to_v3(const std::string& source_json, std::string& migrate
     const bool comma = body_end != std::string::npos && migrated_json[body_end] != '{';
     migrated_json.insert(end, std::string(comma ? "," : "") + "\"sample_regions\":[]");
     return replace_format_version(migrated_json, 2, 3);
+}
+
+bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrated_json) {
+    // v4 is an additive envelope. A v3 graph without Processor records is
+    // already structurally valid and must not be rewritten on disk by this
+    // compatibility migration; only its schema version advances in memory.
+    migrated_json = source_json;
+    return replace_format_version(migrated_json, 3, 4);
 }
 
 const GraphMigrationEntry* find_graph_migration(int from_version) {
@@ -955,7 +969,10 @@ std::string GraphSerializer::to_json(
         if (!prove_sample_region_parser_shape(shape).accepted)
             return {};
     }
-    const int version = regions.empty() ? 2 : kFormatVersion;
+    // Preserve canonical bytes for existing ordinary and sample-region files;
+    // v4 is selected by the future Processor writer, while the reader accepts
+    // region-bearing v4 files through the migration above.
+    const int version = regions.empty() ? 2 : 3;
     root.addMember("format_version", (int64_t)version);
 
     // Nodes
