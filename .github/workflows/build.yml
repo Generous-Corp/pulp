@@ -2059,6 +2059,8 @@ jobs:
           path: |
             ~/Library/Caches/ccache
             ~/Library/Caches/Pulp/fetchcontent-src
+            ~/.cargo/registry
+            ~/.cargo/git
 
       # Namespace macOS runners come up with a stale Homebrew config.
       # Without this `brew update`, any subsequent `brew install` fails
@@ -2349,9 +2351,12 @@ jobs:
               sleep $(( delay * attempt ))
             fi
           done
-          # Not fatal: the build's own cargo invocation still tries the
-          # registry, which is exactly what happened before this step existed.
-          echo "::warning::could not fetch ${manifest%/*}/Cargo.lock after 3 attempts; the pulp-rs build and its ctests will try crates.io again"
+          # Keep the step nonfatal so the build reports the missing crate with
+          # its normal context, but fail closed: later cargo invocations must
+          # not silently retry crates.io without a bound.
+          echo "::warning::could not fetch ${manifest%/*}/Cargo.lock after 3 attempts; later cargo invocations will run offline and fail if crates are missing"
+          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
+          echo "CARGO_NET_OFFLINE=true after fetch exhaustion"
 
       # Save scope is deliberately narrower than restore scope: GitHub-hosted
       # Linux/Windows only, and only on a push to main.
