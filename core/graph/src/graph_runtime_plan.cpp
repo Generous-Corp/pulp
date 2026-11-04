@@ -158,16 +158,14 @@ GraphRuntimePlanResult build_graph_runtime_plan(
             case GraphRuntimeConnectionKind::Automation:
                 break;
             case GraphRuntimeConnectionKind::Trigger:
-                return fail(GraphRuntimePlanErrorCode::UnsupportedTrigger, i,
-                            spec.source_node,
+                return fail(GraphRuntimePlanErrorCode::UnsupportedTrigger, i, spec.source_node,
                             "typed triggers require a prepared producer/consumer pair");
             default:
-                return fail(GraphRuntimePlanErrorCode::InvalidConnectionKind, i,
-                            spec.source_node, "unknown graph connection kind");
+                return fail(GraphRuntimePlanErrorCode::InvalidConnectionKind, i, spec.source_node,
+                            "unknown graph connection kind");
             }
             if (spec.feedback && !carries_audio(spec)) {
-                return fail(GraphRuntimePlanErrorCode::NonAudioFeedback, i,
-                            spec.source_node,
+                return fail(GraphRuntimePlanErrorCode::NonAudioFeedback, i, spec.source_node,
                             "only audio connections support previous-block feedback");
             }
             const auto source_index = find_node_index(lookup, spec.source_node);

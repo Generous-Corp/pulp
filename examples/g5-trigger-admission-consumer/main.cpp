@@ -21,20 +21,20 @@ int main() {
             (expected != GraphRuntimePlanErrorCode::None &&
              (result.plan.node_count() != 0 || result.plan.connection_count() != 0))) {
             std::cerr << "admission mismatch kind=" << static_cast<int>(kind)
-                      << " feedback=" << feedback << " error="
-                      << static_cast<int>(result.error.code) << '\n';
+                      << " feedback=" << feedback
+                      << " error=" << static_cast<int>(result.error.code) << '\n';
             return false;
         }
         return true;
     };
     bool passed = true;
-    for (auto kind : {GraphRuntimeConnectionKind::Audio,
-                      GraphRuntimeConnectionKind::Event,
+    for (auto kind : {GraphRuntimeConnectionKind::Audio, GraphRuntimeConnectionKind::Event,
                       GraphRuntimeConnectionKind::Automation}) {
         passed &= check(kind, false, GraphRuntimePlanErrorCode::None);
-        passed &= check(kind, true, kind == GraphRuntimeConnectionKind::Audio
-                                      ? GraphRuntimePlanErrorCode::None
-                                      : GraphRuntimePlanErrorCode::NonAudioFeedback);
+        passed &= check(kind, true,
+                        kind == GraphRuntimeConnectionKind::Audio
+                            ? GraphRuntimePlanErrorCode::None
+                            : GraphRuntimePlanErrorCode::NonAudioFeedback);
     }
     passed &= check(GraphRuntimeConnectionKind::Trigger, false,
                     GraphRuntimePlanErrorCode::UnsupportedTrigger);

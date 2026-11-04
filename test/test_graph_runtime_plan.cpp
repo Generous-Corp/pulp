@@ -495,8 +495,7 @@ TEST_CASE("GraphRuntimePlan only admits audio feedback in every build mode",
         spec.event_input_ports = 1;
         spec.event_output_ports = 1;
     }
-    for (auto kind : {GraphRuntimeConnectionKind::Audio,
-                      GraphRuntimeConnectionKind::Event,
+    for (auto kind : {GraphRuntimeConnectionKind::Audio, GraphRuntimeConnectionKind::Event,
                       GraphRuntimeConnectionKind::Automation}) {
         auto edge = connect(1, 0, 2, 0);
         edge.kind = kind;
