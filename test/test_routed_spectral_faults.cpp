@@ -115,14 +115,16 @@ TEST_CASE("Missing frame replacement advances once and preserves the sibling pay
     auto* edge = f.bank.find(f.stage)->input;
     const auto sibling = f.bank.find(f.sibling)->input;
     const std::vector<std::complex<float>> saved(sibling->bins.begin(), sibling->bins.end());
-    edge->stamps[0].epoch = 99;
+    edge->stamps[1].epoch = 99;
     f.process(f.stage, input, output);
     REQUIRE(f.bank.find(f.stage)->sequence == 8);
     REQUIRE(f.bank.find(f.stage)->first_error == pulp::host::SpectralError::MissingFrame);
     REQUIRE(f.bank.find(f.stage)->errors == 1);
     REQUIRE(std::equal(saved.begin(), saved.end(), sibling->bins.begin()));
     const auto* replaced = f.bank.find(f.wet)->input;
-    for (size_t i = 0; i < replaced->bins_per_frame; ++i)
+    REQUIRE(std::equal(saved.begin(), saved.begin() + replaced->bins_per_frame,
+                       replaced->bins.begin()));
+    for (size_t i = replaced->bins_per_frame; i < 2 * replaced->bins_per_frame; ++i)
         REQUIRE(replaced->bins[i] == std::complex<float>{});
 }
 
@@ -169,8 +171,10 @@ struct ControllerGraph {
     pulp::audio::BufferView<const float> iv{ip, 1, 64};
     pulp::audio::BufferView<float> ov{op, 1, 64};
     pulp::host::NodeId midi_in = 0, midi_out = 0, custom = 0;
-    ControllerGraph(bool with_midi = false, bool with_custom = false) {
+    ControllerGraph(bool with_midi = false, bool with_custom = false, bool optimizations = false) {
         using namespace pulp::host;
+        graph.set_parallel_routing_enabled(optimizations);
+        graph.set_anticipation_enabled(optimizations);
         const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
         const auto in = graph.add_input_node(1), out = graph.add_output_node(1);
         const auto a = *graph.add_spectral_analysis(shape, "analysis").value;
@@ -746,4 +750,34 @@ TEST_CASE("Spectral pinned execution refusal is named at every handoff phase",
     REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::None);
     REQUIRE_FALSE(edit->committed_execution_snapshot());
     REQUIRE(target.graph.spectral_error() == SpectralError::SpectralPinnedExecutionUnsupported);
+}
+
+TEST_CASE("Spectral preparation excludes alternate executors despite optimization requests",
+          "[host][spectral-transition][spectral-serial-eligibility]") {
+    using namespace pulp::host;
+    ControllerGraph target(false, false, true), control;
+    {
+        auto snapshot = SpectralControllerTestAccess::reader(target.graph);
+        REQUIRE(snapshot);
+        REQUIRE(snapshot->pdc_execution_domain ==
+                decltype(snapshot->pdc_execution_domain)::RoutedSerial);
+        REQUIRE(snapshot->routed.serial.valid);
+        REQUIRE_FALSE(snapshot->routed.parallel.valid);
+        REQUIRE_FALSE(snapshot->anticipation.valid);
+        const auto& plan = snapshot->routed.serial.snapshot.plan();
+        const auto& delays =
+            snapshot->routed.serial.snapshot.buffer_assignment().connection_delay_samples;
+        REQUIRE(delays.size() == plan.connections.size());
+        for (std::size_t i = 0; i < plan.connections.size(); ++i)
+            if (pulp::graph::is_spectral(plan.connections[i]))
+                REQUIRE(delays[i] == 0);
+    }
+    for (int block = 0; block < 12; ++block) {
+        target.graph.set_parallel_routing_enabled(block % 2 == 0);
+        target.graph.set_anticipation_enabled(block % 2 != 0);
+        target.process();
+        control.process();
+        REQUIRE(target.output == control.output);
+        REQUIRE(target.graph.routed_walk_fallbacks() == 0);
+    }
 }

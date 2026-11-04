@@ -240,9 +240,16 @@ TEST_CASE("Spectral public admission rejects malformed geometry and graph edges"
     auto b = *graph.add_spectral_analysis(identity, "other analysis").value;
     auto c = *graph.add_spectral_synthesis(identity, "synthesis").value;
     auto other = *foreign.add_spectral_analysis(identity, "foreign").value;
-    REQUIRE_FALSE(graph.connect(other.frames, c.frames));
+    const auto foreign_port = graph.connect(other.frames, c.frames);
+    REQUIRE(foreign_port.code == GraphResult::Code::UnknownPort);
+    REQUIRE_FALSE(foreign_port.rule.empty());
     REQUIRE(graph.connect(a.frames, c.frames));
-    REQUIRE_FALSE(graph.connect(b.frames, c.frames));
+    const auto join = graph.connect(b.frames, c.frames);
+    REQUIRE(join.code == GraphResult::Code::Duplicate);
+    REQUIRE_FALSE(join.rule.empty());
+    const auto cycle = graph.connect(c.audio[0], a.audio[0]);
+    REQUIRE(cycle.code == GraphResult::Code::IllegalCycle);
+    REQUIRE_FALSE(cycle.rule.empty());
     REQUIRE_FALSE(graph.connect(a.frames, c.frames));
     REQUIRE_FALSE(graph.prepare(48000, 64)); // orphan analysis
     REQUIRE(graph.remove_node(b.node));
@@ -302,15 +309,15 @@ TEST_CASE("Named spectral ports reject forged kinds before recording an edge",
         auto source = graph.node(analysis.node)->out("frames");
         auto destination = graph.node(synthesis.node)->in("frames");
         source.kind = PortKind::Audio;
-        const auto mismatched = edit ? edit->connect(source, destination)
-                                     : graph.connect(source, destination);
+        const auto mismatched =
+            edit ? edit->connect(source, destination) : graph.connect(source, destination);
         REQUIRE(mismatched.code == GraphResult::Code::KindMismatch);
         REQUIRE((edit ? edit->connections() : graph.connections()).empty());
         for (const auto kind : {PortKind::Audio, PortKind::Sidechain, PortKind::Midi,
                                 PortKind::Event, PortKind::Control, PortKind::Param}) {
             source.kind = destination.kind = kind;
-            const auto result = edit ? edit->connect(source, destination)
-                                     : graph.connect(source, destination);
+            const auto result =
+                edit ? edit->connect(source, destination) : graph.connect(source, destination);
             REQUIRE(result.code == GraphResult::Code::KindMismatch);
             REQUIRE_FALSE(result.rule.empty());
             REQUIRE((edit ? edit->connections() : graph.connections()).empty());

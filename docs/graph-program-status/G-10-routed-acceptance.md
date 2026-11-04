@@ -36,7 +36,7 @@ Installed fixture: `examples/g10-routed-consumer`. Guarded engine owner:
 | 15. Finite guarded synthesis and transactional history | Guarded transaction suite and combined nonfinite-return mutation detected. | Inverse, OLA, quotient and partial-commit guards removed independently; retain earlier history and finite-output oracle. |
 | 16. Arithmetic/resource limits | Origin bound, u64 sequence wrap prevention and 64 MiB cap each mutation-confirmed; oversized test allocation stays below 100 MiB if cap is bypassed. | Output-clock bound, allocation-failure injection and unchanged active output independently. |
 | 17. Tail/drain composition | Installed prefix/tail silence and nested impulse control. | Nontrivial mask/DC/interior-bin finite tails and early-stop mutations. Codec EOF-source integration itself remains outside R admission. |
-| 18. Serial dispatch and callback resource audit | Toggle controls, no fallback, C++ new probe over reset/activation/callbacks. | Parallel/anticipation eligibility mutations; independent allocation/lock/I/O planted controls. Timing claims require the separate roadmap callback matrix. |
+| 18. Serial dispatch and callback resource audit | Toggle controls, no fallback, C++ new probe over reset/activation/callbacks; installed-consumer RTSan independently detects planted malloc, mutex lock and write calls. | Parallel/anticipation eligibility mutations and broader resource scenario coverage. Timing claims require the separate roadmap callback matrix. |
 
 ## Additional mandatory inventories
 
@@ -130,3 +130,27 @@ explicitly old-epoch records across reset, reports drops and age, and publishes
 cleared error state with the fresh epoch after draining. It does not relabel old
 records as current. Exact parameter ingress and early access-gate reopening are
 still separate outstanding obligations.
+
+## Installed callback resource probe
+
+At `402499d924a8a2e63a5b858501bf3ddd7b95181c`, the installed-only public fixture
+is 101 non-generated glue lines. Its callback wrapper uses the compiler's
+`clang::nonblocking` attribute when supported. The Release consumer was built
+with upstream LLVM 21.1.8 and `-fsanitize=realtime` for compilation and linking.
+The executable imports `__rtsan_realtime_enter`/`exit` and links the macOS RTSan
+runtime. It consumes only installed headers and `Pulp::host`.
+
+Three separate production mutations in `SpectralRuntimeBank::Node::process`
+were confirmed: a `malloc`/`free` pair, a pthread mutex lock/unlock pair, and
+`write(-1, "x", 1)`. For each, ordinary functional controls stayed green;
+RTSan rejected the installed callback with the corresponding unsafe-library-call
+diagnostic. Restored source rebuilt and passed both controls. The workflow
+copied the freshly rebuilt host archive into a disposable qualification SDK,
+printed matching source/installed archive hashes, and relinked the consumer in
+each baseline/broken/restored phase. This deliberately modified SDK is test
+material, not a release artifact or an immutable release receipt.
+
+Coverage is the fixture's N=256, H=63, C=1, fixed/large/irregular callbacks,
+independent identity/mask fan-out and dry PDC. It establishes resource-instrument
+sensitivity and clean tested callbacks, not the roadmap's paced timing matrix,
+all supported geometries, transition resource coverage, or full RT qualification.
