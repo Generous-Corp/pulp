@@ -871,7 +871,8 @@ def _test_include_closure(root: Path, rel: str, *, unreadable: set[str] | None =
                 unreadable.add(cur)
             continue
         seen.append(cur)
-        for name in INCLUDE.findall(strip_c_comments(text, keep_strings=True)):
+        include_text = strip_c_comments(text, keep_strings=True) if unreadable is not None else text
+        for name in INCLUDE.findall(include_text):
             for base in (os.path.dirname(cur), "test", "test/support"):
                 cand = os.path.normpath(os.path.join(base, name))
                 if cand.startswith("test/") and (root / cand).is_file():
