@@ -841,9 +841,12 @@ class SpawnScanTests(unittest.TestCase):
         self.assertLessEqual(runners, set(sti.SPAWN_FUNCTIONS))
 
     def test_every_listed_loader_still_exists_in_core_host(self) -> None:
-        host = "\n".join((HERE.parents[1] / "core/host/include/pulp/host" / name).read_text(encoding="utf-8")
+        root = HERE.parents[1]
+        host = "\n".join((root / "core/host/include/pulp/host" / name).read_text(encoding="utf-8")
                          for name in ("plugin_slot.hpp", "scanner.hpp", "dl_shim.hpp", "node_pack.hpp",
                                       "signal_graph_runtime.hpp", "graph_serializer.hpp"))
+        host += "\n" + "\n".join((root / "core/host/src" / name).read_text(encoding="utf-8")
+                                  for name in ("plugin_slot.cpp", "plugin_slot_clap.cpp", "scanner_clap.cpp"))
         for api in sti.LOAD_APIS:
             name = re.sub(r"\\s\*\\\($", "", api).split("::")[-1]
             self.assertRegex(host, r"\b%s\s*\(" % re.escape(name), api)
