@@ -1299,25 +1299,45 @@ def carry_unconfigured_entries(current: dict, checked_in: dict, inventory: dict,
     return sorted(set(carried))
 
 
-def retain_scanned_clean_entries(current: dict, checked_in: dict) -> None:
+def retain_scanned_clean_entries(current: dict, checked_in: dict, root: Path,
+                                 scanned: dict[str, dict]) -> list[str]:
     """Refresh old dependency records whose executable was scanned clean.
 
     A removed final dependency leaves no compiled entry, but the executable
     is still configured and scanned. Keep its name with a fresh empty record
     so the unseen-entry guard does not mistake that transition for a missing
     test. Never copy old dependency metadata or infer a scan from the old list.
+    The scanners skip unreadable sources; those are not evidence of a clean
+    executable. Return errors instead of normalizing such a record.
     """
     if not set(EXECUTABLE_SCANS) <= set(current.get("executables_scanned_for") or []):
-        return
-    scanned = set(current.get("executables_scanned") or [])
+        return []
+    scanned_names = set(current.get("executables_scanned") or [])
     entries = current.get("executables")
     if entries is None:
-        return
+        return []
+    problems = []
     for name in checked_in.get("executables") or {}:
-        if name in scanned and name not in entries:
-            entries[name] = {"kind": "compiled", "data": "none", "inputs": [],
-                             "sources": [], "undeclared_sources": []}
+        if name not in scanned_names or name in entries:
+            continue
+        sources = (scanned.get(name) or {}).get("sources") or []
+        if not sources:
+            problems.append(f"{name}: no indexed sources to scan")
+            continue
+        unreadable = []
+        for source in sources:
+            try:
+                with (root / source).open("rb") as stream:
+                    stream.read(1)
+            except OSError:
+                unreadable.append(source)
+        if unreadable:
+            problems.append(f"{name}: unreadable indexed sources: {', '.join(unreadable)}")
+            continue
+        entries[name] = {"kind": "compiled", "data": "none", "inputs": [],
+                         "sources": [], "undeclared_sources": []}
     current["executables"] = dict(sorted(entries.items()))
+    return problems
 
 
 def entries_write_would_delete(current: dict, checked_in: dict) -> list[str]:
@@ -1544,7 +1564,12 @@ def main(argv: list[str]) -> int:
     except (OSError, json.JSONDecodeError):
         checked_in = {"tests": {}}
     current = build_list(inventory, root, build_dir)
-    retain_scanned_clean_entries(current, checked_in)
+    clean_errors = retain_scanned_clean_entries(current, checked_in, root,
+                                                test_executables(build_dir) or {})
+    if clean_errors:
+        print("script-test-inputs: cannot refresh compiled entries: " + "; ".join(clean_errors),
+              file=sys.stderr)
+        return 2
     off_profile = outside_gate_profile_build(build_dir, inventory, root)
     # A stale configure blocks writes, but --check must still judge the
     # inventory against the current CTest evidence. Returning SKIP (77) here

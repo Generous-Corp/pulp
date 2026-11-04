@@ -1105,6 +1105,28 @@ class CompiledDataTests(unittest.TestCase):
             self.assertEqual(restored["executables"]["pulp-test-d"],
                              before["executables"]["pulp-test-d"])
 
+    def test_an_unreadable_indexed_source_cannot_be_normalized_to_clean(self) -> None:
+        for missing in (True, False):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as tmp:
+                repo = Repo(Path(tmp)); compiled_evidence(repo)
+                source = write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
+                self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+                list_path = repo.root / sti.DEFAULT_LIST
+                before = list_path.read_bytes()
+                if missing:
+                    source.unlink()
+                else:
+                    source.chmod(0)
+                try:
+                    for mode in ("--write", "--check"):
+                        proc = self.run_tool(repo, mode)
+                        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+                        self.assertIn("unreadable indexed sources: test/test_d.cpp", proc.stderr)
+                        self.assertEqual(list_path.read_bytes(), before)
+                finally:
+                    if not missing:
+                        source.chmod(0o600)
+
     def test_detected_sources_lists_only_what_a_signal_matched(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)
