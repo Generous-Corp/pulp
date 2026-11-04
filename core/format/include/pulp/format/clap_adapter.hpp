@@ -23,6 +23,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -285,6 +286,16 @@ struct PulpClapPlugin {
     // Lives for the plugin's lifetime once created; surfaced through
     // get_extension(kClapAraFactoryExtension).
     std::unique_ptr<AraDocumentController> ara_controller;
+    // The editor-host contract GUI (clap_contract_gui.cpp), type-erased so this
+    // header and clap_adapter.cpp need no knowledge of it. Declared after
+    // processor and store, so a GUI the host never destroyed goes before the
+    // processor that owns its editor factory. Outside the GUI block, so its
+    // offset does not depend on PULP_CLAP_GUI.
+    std::shared_ptr<void> contract_gui;
+    // The processor's editor factory, read once by clap_init() on the main
+    // thread: get_extension() may run on any thread, and editor_factory() is
+    // main-thread only.
+    EditorFactory* editor_factory = nullptr;
 
     // Editor state (created on GUI create, destroyed on GUI destroy).
     // `bridge` owns the view tree and dispatches Processor lifecycle

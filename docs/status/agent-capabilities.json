@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 87,
+  "manifest_revision": 89,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -12962,6 +12962,28 @@
               "chebyshev2_highpass(int order, float stop_freq_hz, float stop_atten_db, float sample_rate)",
               "elliptic_lowpass(int order, float freq_hz, float passband_ripple_db, float stopband_attn_db, float sample_rate)",
               "elliptic_highpass(int order, float freq_hz, float passband_ripple_db, float stopband_attn_db, float sample_rate)"
+            ],
+            "enums": []
+          }
+        ],
+        "indexed_control.hpp": [
+          {
+            "class": "MapClipT",
+            "qualified_name": "pulp::signal::MapClipT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process(SampleType input)",
+              "configure(SampleType input_min, SampleType input_max, SampleType output_min, SampleType output_max)"
+            ],
+            "enums": []
+          },
+          {
+            "class": "IndexedControlT",
+            "qualified_name": "pulp::signal::IndexedControlT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process(double index)",
+              "set_table(std::span<const SampleType> table)"
             ],
             "enums": []
           }

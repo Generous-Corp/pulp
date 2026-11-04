@@ -2759,6 +2759,7 @@
   "pulp-test-child-process-standard-input",
   "pulp-test-clap-ara-extension",
   "pulp-test-clap-bundle-entry",
+  "pulp-test-clap-contract-editor",
   "pulp-test-clap-editor-audio-continuity",
   "pulp-test-clap-entry",
   "pulp-test-clap-host-validation",
@@ -5515,6 +5516,14 @@
     "tools/scripts/framework_neutrality_check.py",
     "tools/scripts/test_cmajor_external_extra.py",
     "tools/validation"
+   ],
+   "kind": "python"
+  },
+  "g9-hostile-fixture-regression": {
+   "entry": "tools/validation/test_g9_hostile_fixture.py",
+   "inputs": [
+    "tools/validation/g9_hostile_fixture.py",
+    "tools/validation/test_g9_hostile_fixture.py"
    ],
    "kind": "python"
   },

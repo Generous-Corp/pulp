@@ -643,6 +643,13 @@ operation allowlist, `docs/reference/cli.md`, and
 test on the installed CLI path; the MCP wrapper must not expose file-writing
 operations such as `fmt`.
 
+The graph `probe` MCP operation resolves its matched sibling `pulp-cpp` from
+the running MCP image, so an installed SDK consumer works outside a checkout
+and cannot select a different CLI through PATH. It preserves CLI refusal
+status in `isError` and uses bounded child execution. Keep the public consumer,
+actual installed CLI/MCP parity test, and source-before-PDC/mixing semantics
+together when changing the probe report.
+
 `pulp bake <input.pulpgraph> -o <output.pulpbake> --sign-key <file>` loads and
 prepares the graph, lowers it to the bounded baked-plan format, and writes the
 Ed25519-signed artifact atomically. `pulp bake verify <artifact> --trust <file>`

@@ -16,6 +16,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/parametric_eq.hpp": "Pulp::signal",
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
     "pulp/signal/smoothed_value.hpp": "Pulp::signal",
+    "pulp/signal/indexed_control.hpp": "Pulp::signal",
     "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
     "pulp/host/signal_graph.hpp": "Pulp::host",
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
@@ -183,6 +184,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "Offline owned-value spectral stream encoding and strict decoding. This is "
             "persistence infrastructure, not a generator-facing DSP transform, graph "
             "routing contract, Processor serializer, or synthesis capability."
+        ),
+    },
+    {
+        "include": "pulp/signal/indexed_control.hpp",
+        "fingerprint": "sha256:c25979e2e1c3b30cef33b022b908411bed087824f1407777e68d0809ed27632a",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Bounded scalar mapping and caller-indexed table reads support one G-5 "
+            "workflow; they do not establish a graph event transport or independent "
+            "generator-facing capability contract."
         ),
     },
     {
