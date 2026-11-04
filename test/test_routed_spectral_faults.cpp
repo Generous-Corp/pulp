@@ -901,3 +901,46 @@ TEST_CASE("Failed or cancelled candidates paused around validation cannot change
         }
     }
 }
+
+TEST_CASE("Output clock exhaustion stops publication before arithmetic overflows",
+          "[host][spectral-fault][spectral-output-clock]") {
+    FaultGraph f;
+    std::array<float, 512> input{}, output{};
+    auto* node = f.bank.find(f.analysis);
+    node->output_clock = std::numeric_limits<std::int64_t>::max() - 1;
+    const auto sequence = node->sequence;
+    f.process(f.analysis, input, output);
+    REQUIRE(node->first_error == pulp::host::SpectralError::ChronologyExhausted);
+    REQUIRE(node->sequence == sequence);
+    REQUIRE(node->outputs.front()->count == 0);
+    REQUIRE(node->outputs.front()->fatal);
+}
+
+TEST_CASE("Failed candidate at the last transition serial cannot consume or wrap it",
+          "[host][spectral-transition][spectral-failed-exhaustion]") {
+    using namespace pulp::host;
+    ControllerGraph target, control;
+    SpectralControllerTestAccess::exhaust(target.graph);
+    SpectralControllerTestAccess::exhaust(control.graph);
+    {
+        auto candidate = target.graph.begin_prepared_topology_edit();
+        REQUIRE(candidate);
+        REQUIRE(candidate->prepare(44100, 64) !=
+                SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    }
+    REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == UINT32_MAX);
+    for (int block = 0; block < 12; ++block) {
+        target.process();
+        control.process();
+        REQUIRE(target.output == control.output);
+        REQUIRE_FALSE(SpectralControllerTestAccess::terminal(target.graph));
+    }
+    pulp::format::ProcessContext reset;
+    reset.transport_jump = true;
+    target.process(&reset);
+    control.process(&reset);
+    REQUIRE(target.output == control.output);
+    REQUIRE(SpectralControllerTestAccess::terminal(target.graph));
+    REQUIRE(target.graph.spectral_error() == SpectralError::EpochExhausted);
+    REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == UINT32_MAX);
+}
