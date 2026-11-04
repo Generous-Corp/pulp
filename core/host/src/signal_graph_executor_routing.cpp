@@ -28,7 +28,7 @@ namespace pulp::host {
 ConnectionClass classify(const Connection& c) {
     ConnectionClass cls;
     cls.kind = c.spectral ? graph::GraphRuntimeConnectionKind::Spectral
-               : c.midi ? graph::GraphRuntimeConnectionKind::Event
+               : c.midi   ? graph::GraphRuntimeConnectionKind::Event
                : (c.automation || c.audio_rate_modulation)
                    ? graph::GraphRuntimeConnectionKind::Automation
                    : graph::GraphRuntimeConnectionKind::Audio;
@@ -240,9 +240,12 @@ gr::GraphRuntimeNodeKind map_kind(NodeType type) noexcept {
         case NodeType::AudioOutput: return gr::GraphRuntimeNodeKind::AudioOutput;
         case NodeType::MidiInput: return gr::GraphRuntimeNodeKind::MidiInput;
         case NodeType::MidiOutput: return gr::GraphRuntimeNodeKind::MidiOutput;
-        case NodeType::SpectralAnalysis: return gr::GraphRuntimeNodeKind::SpectralAnalysis;
-        case NodeType::SpectralStage: return gr::GraphRuntimeNodeKind::SpectralStage;
-        case NodeType::SpectralSynthesis: return gr::GraphRuntimeNodeKind::SpectralSynthesis;
+        case NodeType::SpectralAnalysis:
+            return gr::GraphRuntimeNodeKind::SpectralAnalysis;
+        case NodeType::SpectralStage:
+            return gr::GraphRuntimeNodeKind::SpectralStage;
+        case NodeType::SpectralSynthesis:
+            return gr::GraphRuntimeNodeKind::SpectralSynthesis;
         default: return gr::GraphRuntimeNodeKind::Processor;  // Gain / Plugin
     }
 }
@@ -326,7 +329,8 @@ ExecutorPlanShape make_executor_plan_shape(
             spec.spectral_input_ports = node.type != NodeType::SpectralAnalysis;
             spec.spectral_output_ports = node.type != NodeType::SpectralSynthesis;
             if (node.type == NodeType::SpectralSynthesis)
-                spec.latency_samples = node.spectral_identity->fft_size() + node.spectral_identity->hop();
+                spec.latency_samples =
+                    node.spectral_identity->fft_size() + node.spectral_identity->hop();
         }
         shape.nodes.push_back(spec);
     }
@@ -602,9 +606,11 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
         }
         if (src == nullptr) return false;
         if (src->spectral_identity) {
-            if (!binders.spectral_for || parallel_safe) return false;
+            if (!binders.spectral_for || parallel_safe)
+                return false;
             auto binding = binders.spectral_for(id);
-            if (!binding.process) return false;
+            if (!binding.process)
+                return false;
             bindings.push_back(binding);
         } else if (src->type == NodeType::Gain) {
             std::atomic<float>* atomic = gain_for ? gain_for(id) : nullptr;
@@ -687,7 +693,7 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                 efn ? *efn : CustomNodeEventProcessFn{}});
             bindings.push_back(fmt::GraphRuntimeNodeBinding{
                 id, custom_binding, &custom_ctx->back(), /*required=*/false});
-        } else {  // AudioInput / AudioOutput / MidiInput / MidiOutput — null
+        } else { // AudioInput / AudioOutput / MidiInput / MidiOutput — null
             // binding: AudioInput/AudioOutput are executor kind dispatch, and
             // MidiInput/MidiOutput run as no-op nodes (the executor's MIDI gather
             // fills a MidiOutput's input; the host pre-fills a MidiInput's output

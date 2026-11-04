@@ -58,7 +58,8 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
             routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
         return;
     }
-    if (cg->spectral) cg->spectral->begin_block();
+    if (cg->spectral)
+        cg->spectral->begin_block();
 
     SampleRegionExecutionDomain::Admission sample_region_admission;
     // Snapshot-owned instrumentation never survives a transport discontinuity
@@ -118,15 +119,22 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                 if (i < diagnostics.size()) {
                     diagnostics[i] = {};
                     if (auto* state = cg->spectral->find(cg->ordered_runtime[i].id))
-                        diagnostics[i] = {state->id, state->root, state->epoch,
-                            state->first_error == SpectralError::None ? state->sequence : state->first_error_sequence,
-                            state->errors, state->first_error_position, state->origin,
-                            static_cast<std::uint8_t>(state->first_error)};
+                        diagnostics[i] = {state->id,
+                                          state->root,
+                                          state->epoch,
+                                          state->first_error == SpectralError::None
+                                              ? state->sequence
+                                              : state->first_error_sequence,
+                                          state->errors,
+                                          state->first_error_position,
+                                          state->origin,
+                                          static_cast<std::uint8_t>(state->first_error)};
                 }
             }
             const std::int64_t graph_ns = graph_measurer ? graph_measurer->last_elapsed_ns() : 0;
             store.inject_block(std::span<const std::int64_t>(scratch, n), graph_ns,
-                               static_cast<std::uint32_t>(num_samples), cg->sample_rate, diagnostics);
+                               static_cast<std::uint32_t>(num_samples), cg->sample_rate,
+                               diagnostics);
         }
     } telemetry_record_guard{cg, graph_load_.get(), num_samples};
 

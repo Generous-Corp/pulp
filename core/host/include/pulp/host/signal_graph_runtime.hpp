@@ -149,16 +149,23 @@ class SignalGraph : public format::AudioWorkgroupClient {
 
     SignalGraph() = default;
 
-    SpectralResult<SpectralAnalysisPorts> add_spectral_analysis(
-        SpectralIdentity identity, const std::string& name);
-    SpectralResult<SpectralStagePorts> add_spectral_stage(
-        SpectralIdentity identity, QualifiedSpectralStage stage, const std::string& name);
-    SpectralResult<SpectralSynthesisPorts> add_spectral_synthesis(
-        SpectralIdentity identity, const std::string& name);
+    SpectralResult<SpectralAnalysisPorts> add_spectral_analysis(SpectralIdentity identity,
+                                                                const std::string& name);
+    SpectralResult<SpectralStagePorts> add_spectral_stage(SpectralIdentity identity,
+                                                          QualifiedSpectralStage stage,
+                                                          const std::string& name);
+    SpectralResult<SpectralSynthesisPorts> add_spectral_synthesis(SpectralIdentity identity,
+                                                                  const std::string& name);
     GraphResult connect(SpectralOutputPort source, SpectralInputPort dest) {
         return connect(source.handle, dest.handle);
     }
-    enum class SpectralTransitionState : std::uint8_t { Idle, Staged, Activated, Rejected, Finalized };
+    enum class SpectralTransitionState : std::uint8_t {
+        Idle,
+        Staged,
+        Activated,
+        Rejected,
+        Finalized
+    };
     SpectralTransitionState spectral_transition_state() const noexcept;
     SpectralError finalize_spectral_transition();
     /// Control thread only, after the host has stopped calling process().
@@ -1394,23 +1401,33 @@ class SignalGraph : public format::AudioWorkgroupClient {
     bool spectral_terminal_ = false;
 
     class SnapshotAccess {
-    public:
+      public:
         explicit SnapshotAccess(runtime::Slot<CompiledGraph>::ReadGuard guard)
             : legacy_(std::move(guard)), value_(legacy_.get()) {}
         SnapshotAccess(const SignalGraph* owner, CompiledGraph* value, bool access)
             : owner_(owner), value_(value), access_(access) {}
         ~SnapshotAccess() {
             if (owner_) {
-                if (access_) owner_->spectral_accesses_.fetch_sub(1, std::memory_order_seq_cst);
+                if (access_)
+                    owner_->spectral_accesses_.fetch_sub(1, std::memory_order_seq_cst);
                 owner_->spectral_readers_.fetch_sub(1, std::memory_order_seq_cst);
             }
         }
         SnapshotAccess(const SnapshotAccess&) = delete;
-        CompiledGraph* get() const noexcept { return value_; }
-        CompiledGraph* operator->() const noexcept { return value_; }
-        CompiledGraph& operator*() const noexcept { return *value_; }
-        explicit operator bool() const noexcept { return value_ != nullptr; }
-    private:
+        CompiledGraph* get() const noexcept {
+            return value_;
+        }
+        CompiledGraph* operator->() const noexcept {
+            return value_;
+        }
+        CompiledGraph& operator*() const noexcept {
+            return *value_;
+        }
+        explicit operator bool() const noexcept {
+            return value_ != nullptr;
+        }
+
+      private:
         runtime::Slot<CompiledGraph>::ReadGuard legacy_;
         const SignalGraph* owner_ = nullptr;
         CompiledGraph* value_ = nullptr;
@@ -1418,23 +1435,29 @@ class SignalGraph : public format::AudioWorkgroupClient {
     };
     SnapshotAccess read_snapshot_(bool access = false) const noexcept;
     bool refuse_spectral_mutation_() const noexcept {
-        if (!spectral_mode_.load(std::memory_order_acquire)) return false;
+        if (!spectral_mode_.load(std::memory_order_acquire))
+            return false;
         spectral_error_.store(spectral_access_closed_.load(std::memory_order_seq_cst)
-            ? SpectralError::TransitionPending : SpectralError::UnsupportedOperation,
-            std::memory_order_relaxed);
+                                  ? SpectralError::TransitionPending
+                                  : SpectralError::UnsupportedOperation,
+                              std::memory_order_relaxed);
         return true;
     }
     bool spectral_mailboxes_pending_(const CompiledGraph&) const noexcept;
     SpectralError offer_spectral_candidate_locked_(std::unique_ptr<SignalGraph>&,
-        std::shared_ptr<CompiledGraph>, std::uint64_t);
+                                                   std::shared_ptr<CompiledGraph>, std::uint64_t);
     void adopt_candidate_authoring_locked_(SignalGraph&);
     friend struct SpectralControllerTestAccess;
-    struct SpectralBoundary { int active; int offered; };
+    struct SpectralBoundary {
+        int active;
+        int offered;
+    };
     SpectralBoundary capture_spectral_boundary_() noexcept;
     void process_spectral_boundary_(SpectralBoundary, audio::BufferView<float>&,
-        const audio::BufferView<const float>&, int, const format::ProcessContext*);
-    void process_spectral_(audio::BufferView<float>&, const audio::BufferView<const float>&,
-                            int, const format::ProcessContext*);
+                                    const audio::BufferView<const float>&, int,
+                                    const format::ProcessContext*);
+    void process_spectral_(audio::BufferView<float>&, const audio::BufferView<const float>&, int,
+                           const format::ProcessContext*);
 
     // Canonical-executor routing (control toggle, read relaxed on the audio
     // thread). DEFAULT ON: the routed executor is the primary inter-node backend

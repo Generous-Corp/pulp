@@ -37,7 +37,8 @@ std::array<std::vector<float>, 2> render(int partition) {
         input[ch][0] = 0.75f;
     }
     for (int pos = 0; pos < length;) {
-        const int count = std::min(length - pos, partition == 0 ? 1 + (pos * 17 % 4096) : partition);
+        const int count =
+            std::min(length - pos, partition == 0 ? 1 + (pos * 17 % 4096) : partition);
         const float* in[] = {input[0].data() + pos, input[1].data() + pos};
         REQUIRE(analysis.analyze_guarded(in, count, [&](std::complex<float>* const* frames, int) {
             const std::complex<float>* ptrs[] = {frames[0], frames[1]};
@@ -46,14 +47,16 @@ std::array<std::vector<float>, 2> render(int partition) {
         const int prefix = std::clamp(synthesis.latency_samples() - pos, 0, count);
         float* out[] = {output[0].data() + pos + prefix, output[1].data() + pos + prefix};
         int consumed = -1;
-        REQUIRE(synthesis.read_output_guarded(out, count - prefix, consumed) == SpectralSplitResult::Ok);
+        REQUIRE(synthesis.read_output_guarded(out, count - prefix, consumed) ==
+                SpectralSplitResult::Ok);
         REQUIRE(consumed == count - prefix);
         pos += count;
     }
     for (int ch = 0; ch < 2; ++ch) {
         double signal = 0, error = 0;
         const int latency = c.fft_size + c.analysis_hop;
-        for (int t = 0; t < latency; ++t) REQUIRE(output[ch][t] == 0.0f);
+        for (int t = 0; t < latency; ++t)
+            REQUIRE(output[ch][t] == 0.0f);
         for (int t = 0; t < length - latency; ++t) {
             const double delta = output[ch][t + latency] - input[ch][t];
             signal += input[ch][t] * input[ch][t];
@@ -108,7 +111,8 @@ TEST_CASE("Guarded synthesis rejects an entire frame without changing prior hist
     float* a[] = {actual[0].data(), actual[1].data()};
     float* b[] = {expected[0].data(), expected[1].data()};
     int read = 0;
-    REQUIRE(subject.read_output_guarded(a, available + 1, read) == SpectralSplitResult::OutputUnderrun);
+    REQUIRE(subject.read_output_guarded(a, available + 1, read) ==
+            SpectralSplitResult::OutputUnderrun);
     REQUIRE(read == available);
     REQUIRE(control.read_output_guarded(b, available, read) == SpectralSplitResult::Ok);
     REQUIRE(actual == expected);
@@ -140,7 +144,8 @@ TEST_CASE("Guarded split bounds storage and refuses invalid input before ingesti
     std::vector<std::complex<float>> zeros(129);
     const std::complex<float>* frames[] = {zeros.data(), zeros.data()};
     int accepted = 0;
-    while (engine.synthesize_frame_guarded(frames) == SpectralSplitResult::Ok) ++accepted;
+    while (engine.synthesize_frame_guarded(frames) == SpectralSplitResult::Ok)
+        ++accepted;
     REQUIRE(accepted > 0);
     REQUIRE(accepted < guarded->ring_size);
     REQUIRE(engine.synthesize_frame_guarded(frames) == SpectralSplitResult::CapacityExceeded);

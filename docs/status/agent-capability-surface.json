@@ -389,7 +389,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/live_dsp_telemetry.hpp",
-      "fingerprint": "sha256:5c4a877f2d611bb0971ea5c9e42e2c68a06b490f1805c689c584cc4c58452f77",
+      "fingerprint": "sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5",
       "include": "pulp/audio/live_dsp_telemetry.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1234,7 +1234,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_prepared_topology_edit.hpp",
-      "fingerprint": "sha256:3e3c1f7d469686e2c4b1439acee556093257b43023ef047ee2863138b31678dd",
+      "fingerprint": "sha256:d767dc471aac26e84dc4aaad1d286167b993b38bb259cebfe6367c86dc19886c",
       "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1245,7 +1245,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:1c9623c4e9b5445d4488d4b6a6b3e19fbecc41c8d8fede09b73108fd53a6e2ac",
+      "fingerprint": "sha256:7e6e9a7d417035db9e3ceb30f8db5b46c8fb1c1884b2b213e57cb44cab9f0bac",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1256,7 +1256,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/spectral_graph.hpp",
-      "fingerprint": "sha256:4e769c66364541d0be9fa46ccf1d82d6c5e1556850cac936754e0859fd0ba20a",
+      "fingerprint": "sha256:7184acce0063ba69aab4c271f79a4e65ca3e04fc01e68de2f27f84aa173b3e7a",
       "include": "pulp/host/spectral_graph.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4459,7 +4459,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_frame_engine.hpp",
-      "fingerprint": "sha256:457be4c2ccfdf316e0e834f1e6fecf51bd489e82d1ee8181939e949c4722f22d",
+      "fingerprint": "sha256:652c2aa1bf00f6b2935bbb6b27bdfe3a5466668a596ab6b1d15fa315d0721d91",
       "include": "pulp/signal/spectral_frame_engine.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

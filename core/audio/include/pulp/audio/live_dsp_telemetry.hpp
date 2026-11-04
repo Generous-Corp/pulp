@@ -204,7 +204,9 @@ public:
     void inject_block(std::span<const std::int64_t> node_ns, std::int64_t graph_elapsed_ns,
                       std::uint32_t frame_count, double sample_rate,
                       std::span<const LiveDspSpectralDiagnostic> spectral = {}) noexcept;
-    std::span<LiveDspSpectralDiagnostic> spectral_scratch() noexcept { return spectral_scratch_; }
+    std::span<LiveDspSpectralDiagnostic> spectral_scratch() noexcept {
+        return spectral_scratch_;
+    }
 
     /// AUDIO THREAD. A pre-allocated node_count()-sized scratch for the caller to
     /// fill with per-node elapsed values before calling inject_block() over it —

@@ -159,8 +159,7 @@ template <class Connection>
 constexpr bool carries_audio(const Connection& c) noexcept {
     return c.kind == GraphRuntimeConnectionKind::Audio;
 }
-template <class Connection>
-constexpr bool is_spectral(const Connection& c) noexcept {
+template <class Connection> constexpr bool is_spectral(const Connection& c) noexcept {
     return c.kind == GraphRuntimeConnectionKind::Spectral;
 }
 

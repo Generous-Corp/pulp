@@ -1,8 +1,8 @@
+#include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
-#include <array>
-#include <cmath>
 
 namespace {
 std::vector<float> render(int partition, float gain) {
@@ -35,7 +35,8 @@ std::vector<float> render(int partition, float gain) {
     graph.set_canonical_executor_routing_enabled(false);
     constexpr int total = 8192;
     std::vector<float> input(total), output(total);
-    for (int t = 0; t < 6000; ++t) input[t] = static_cast<float>(0.2 * std::sin(t * 0.117));
+    for (int t = 0; t < 6000; ++t)
+        input[t] = static_cast<float>(0.2 * std::sin(t * 0.117));
     input[0] = 1;
     input[5011] = 1;
     for (int pos = 0; pos < total;) {
@@ -55,7 +56,8 @@ std::vector<float> render(int partition, float gain) {
         energy += wanted * wanted;
     }
     REQUIRE(error / energy < 1e-10);
-    for (int t = 0; t < 319; ++t) REQUIRE(output[t] == 0);
+    for (int t = 0; t < 319; ++t)
+        REQUIRE(output[t] == 0);
     REQUIRE(graph.routed_walk_fallbacks() == 0);
     return output;
 }
@@ -90,12 +92,14 @@ TEST_CASE("Spectral replacement stages activation before authoring finalization"
     float* op[] = {output.data()};
     pulp::audio::BufferView<const float> iv(ip, 1, 64);
     pulp::audio::BufferView<float> ov(op, 1, 64);
-    for (int i = 0; i < 12; ++i) graph.process(ov, iv, 64);
+    for (int i = 0; i < 12; ++i)
+        graph.process(ov, iv, 64);
     REQUIRE(std::abs(output[0] - 0.25f) < 1e-6f);
     auto edit = graph.begin_prepared_topology_edit();
     REQUIRE(edit);
     REQUIRE(edit->disconnect(analysis.node, 0, synthesis.node, 0));
-    const auto token = *QualifiedSpectralStage::real_mask_v1(identity, std::vector<float>(129, 0.5f)).value;
+    const auto token =
+        *QualifiedSpectralStage::real_mask_v1(identity, std::vector<float>(129, 0.5f)).value;
     const auto stage = edit->add_spectral_stage(identity, token, "mask");
     REQUIRE(stage);
     REQUIRE(edit->connect(analysis.frames, stage.value->frames_in));
@@ -113,14 +117,16 @@ TEST_CASE("Spectral replacement stages activation before authoring finalization"
     REQUIRE(graph.spectral_transition_state() == SignalGraph::SpectralTransitionState::Staged);
     graph.process(ov, iv, 64);
     REQUIRE(graph.spectral_transition_state() == SignalGraph::SpectralTransitionState::Activated);
-    for (float value : output) REQUIRE(value == 0);
+    for (float value : output)
+        REQUIRE(value == 0);
     pulp::midi::MidiBuffer events;
     REQUIRE_FALSE(graph.inject_midi(in, events));
     REQUIRE(graph.spectral_error() == SpectralError::TransitionPending);
     REQUIRE_FALSE(graph.begin_prepared_topology_edit());
     REQUIRE(graph.finalize_spectral_transition() == SpectralError::None);
     REQUIRE(graph.nodes().size() == 5);
-    for (int i = 0; i < 12; ++i) graph.process(ov, iv, 64);
+    for (int i = 0; i < 12; ++i)
+        graph.process(ov, iv, 64);
     REQUIRE(std::abs(output[0] - 0.125f) < 1e-6f);
     REQUIRE(graph.stop_spectral_controller() == SpectralError::None);
     graph.release();
@@ -136,8 +142,13 @@ TEST_CASE("Spectral fanout owns disjoint masks and aligns a dry nested path",
     const auto analysis = *graph.add_spectral_analysis(identity, "analysis").value;
     const auto identity_token = *QualifiedSpectralStage::identity_v1(identity).value;
     const auto first = *graph.add_spectral_stage(identity, identity_token, "identity").value;
-    const auto mute = *graph.add_spectral_stage(identity,
-        *QualifiedSpectralStage::real_mask_v1(identity, std::vector<float>(129, 0)).value, "mute").value;
+    const auto mute =
+        *graph
+             .add_spectral_stage(
+                 identity,
+                 *QualifiedSpectralStage::real_mask_v1(identity, std::vector<float>(129, 0)).value,
+                 "mute")
+             .value;
     const auto silence = *graph.add_spectral_synthesis(identity, "silent branch").value;
     const auto wet = *graph.add_spectral_synthesis(identity, "wet").value;
     const auto nested = *graph.add_spectral_analysis(identity, "nested analysis").value;
@@ -176,7 +187,8 @@ TEST_CASE("Spectral fanout owns disjoint masks and aligns a dry nested path",
     REQUIRE(telemetry.available);
     REQUIRE_FALSE(telemetry.spectral.empty());
     for (const auto& diagnostic : telemetry.spectral) {
-        if (diagnostic.node == 0) continue;
+        if (diagnostic.node == 0)
+            continue;
         REQUIRE(diagnostic.epoch != 0);
         REQUIRE(diagnostic.first_error == 0);
     }
@@ -193,7 +205,7 @@ TEST_CASE("Spectral public admission rejects malformed geometry and graph edges"
     std::vector<float> mask(129, 1);
     REQUIRE_FALSE(QualifiedSpectralStage::real_mask_v1(identity, std::span(mask).first(128)));
     for (const float invalid : {-0.1f, 1.1f, std::numeric_limits<float>::infinity(),
-                               std::numeric_limits<float>::quiet_NaN()}) {
+                                std::numeric_limits<float>::quiet_NaN()}) {
         mask[5] = invalid;
         REQUIRE_FALSE(QualifiedSpectralStage::real_mask_v1(identity, mask));
     }

@@ -178,10 +178,13 @@ void SignalGraph::publish_prepared_stats_locked_(const CompiledGraph& cg) {
     prepared_connection_count_.store(stats.connection_count, std::memory_order_relaxed);
     prepared_total_ports_.store(stats.total_ports, std::memory_order_relaxed);
     prepared_max_block_size_.store(stats.max_block_size, std::memory_order_relaxed);
-    prepared_node_audio_buffer_bytes_.store(stats.node_audio_buffer_bytes, std::memory_order_relaxed);
-    prepared_automation_buffer_bytes_.store(stats.automation_buffer_bytes, std::memory_order_relaxed);
+    prepared_node_audio_buffer_bytes_.store(stats.node_audio_buffer_bytes,
+                                            std::memory_order_relaxed);
+    prepared_automation_buffer_bytes_.store(stats.automation_buffer_bytes,
+                                            std::memory_order_relaxed);
     prepared_delay_buffer_bytes_.store(stats.delay_buffer_bytes, std::memory_order_relaxed);
-    prepared_total_buffer_bytes_.store(stats.total_prepared_buffer_bytes, std::memory_order_relaxed);
+    prepared_total_buffer_bytes_.store(stats.total_prepared_buffer_bytes,
+                                       std::memory_order_relaxed);
 }
 
 void SignalGraph::compute_latencies_for_(
@@ -355,9 +358,10 @@ bool SignalGraph::build_routing_snapshot_locked_(CompiledGraph& cg, bool paralle
                         : nullptr,
             };
         },
-        .spectral_for = [&cg](NodeId id) {
-            return cg.spectral ? cg.spectral->binding(id) : format::GraphRuntimeNodeBinding{};
-        },
+        .spectral_for =
+            [&cg](NodeId id) {
+                return cg.spectral ? cg.spectral->binding(id) : format::GraphRuntimeNodeBinding{};
+            },
     };
     if (!build_executor_snapshot(cg.executable_nodes, cg.connections, binders, plugin_ctx,
                                  cg.routed.plugin_scratch, out, parallel_safe, &custom_ctx)) {
@@ -405,14 +409,17 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     }
     auto cg = std::make_shared<CompiledGraph>();
     cg->execution_generation = authoring_generation_;
-    if (std::any_of(nodes_.begin(), nodes_.end(), [](const auto& n) { return n.spectral_identity.has_value(); })) {
+    if (std::any_of(nodes_.begin(), nodes_.end(),
+                    [](const auto& n) { return n.spectral_identity.has_value(); })) {
         cg->spectral = std::make_shared<SpectralRuntimeBank>();
         const auto error = cg->spectral->prepare(nodes_, connections_, sample_rate, max_block_size);
         spectral_error_.store(error, std::memory_order_relaxed);
-        if (error != SpectralError::None) return nullptr;
+        if (error != SpectralError::None)
+            return nullptr;
     }
     cg->max_block_size = max_block_size;
-    if (!cg->spectral) cg->legacy_processing_lifetime = processing_handle_lifetime_;
+    if (!cg->spectral)
+        cg->legacy_processing_lifetime = processing_handle_lifetime_;
     cg->sample_rate = sample_rate;
     cg->sample_region_bank = prepared_sample_region_bank_;
     cg->sample_regions = prepared_sample_regions_;
@@ -908,7 +915,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     }
 
     compute_latencies_for_(*cg, cg->connections, prepared_plugin_meta_);
-    if (cg->total_latency_samples < 0) return nullptr;
+    if (cg->total_latency_samples < 0)
+        return nullptr;
 
     // Build the canonical-executor routing for this snapshot when the topology
     // is eligible. The Gain bindings resolve to THIS snapshot's own gain atomics
@@ -995,8 +1003,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         // node lists are SHARED with the serial path (identical plan). On any
         // failure the parallel path stays invalid and process() falls back.
         cg->routed.parallel.valid = false;
-        if (!cg->spectral && cg->routed.serial.valid && parallel_routing_enabled_.load(std::memory_order_relaxed) &&
-            max_block_size > 0) {
+        if (!cg->spectral && cg->routed.serial.valid &&
+            parallel_routing_enabled_.load(std::memory_order_relaxed) && max_block_size > 0) {
             // Parallel-safe routed snapshot: same resolver set as the serial
             // path (via build_routing_snapshot_locked_) but a reuse-free buffer
             // assignment so concurrent same-level nodes never alias a recycled
@@ -1049,9 +1057,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             std::any_of(cg->connection_delays.begin(), cg->connection_delays.end(),
                         [](const ConnectionDelay& delay) { return delay.delay_samples > 0; });
         if (cg->spectral) {
-            if (!cg->routed.serial.valid) return nullptr;
+            if (!cg->routed.serial.valid)
+                return nullptr;
             cg->pdc_execution_domain = PdcExecutionDomain::RoutedSerial;
-            cg->total_latency_samples = cg->routed.serial.snapshot.buffer_assignment().total_latency_samples;
+            cg->total_latency_samples =
+                cg->routed.serial.snapshot.buffer_assignment().total_latency_samples;
         } else if (has_pdc) {
             if (cg->routed.parallel.valid &&
                 parallel_routing_enabled_.load(std::memory_order_relaxed)) {
@@ -1072,8 +1082,9 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         // Recomputed every compile: with no active anticipation no node is forced
         // exterior, so the counter must read 0 rather than keep a prior value.
         transport_suppressed_for_anticipation_.store(0, std::memory_order_relaxed);
-        if (!cg->spectral && mode == CompileMode::Normal && cg->routed.serial.valid && cg->processors.empty() &&
-            anticipation_enabled_.load(std::memory_order_relaxed) && max_block_size > 0) {
+        if (!cg->spectral && mode == CompileMode::Normal && cg->routed.serial.valid &&
+            cg->processors.empty() && anticipation_enabled_.load(std::memory_order_relaxed) &&
+            max_block_size > 0) {
             std::vector<NodeId> exact_parameter_input_nodes;
             exact_parameter_input_nodes.reserve(exact_parameter_event_claims_.size());
             for (const auto& [id, owner] : exact_parameter_event_claims_) {
@@ -1370,10 +1381,11 @@ bool SignalGraph::prepare_impl_(double sample_rate, int max_block_size,
         spectral_error_.store(SpectralError::UnsupportedOperation, std::memory_order_relaxed);
         return false;
     }
-    const bool wants_spectral = std::any_of(nodes_.begin(), nodes_.end(),
-        [](const auto& node) { return node.spectral_identity.has_value(); });
-    if (wants_spectral && (processing_handle_lifetime_.use_count() != 1 || live_slot_.has_value()
-                           || spectral_terminal_)) {
+    const bool wants_spectral = std::any_of(nodes_.begin(), nodes_.end(), [](const auto& node) {
+        return node.spectral_identity.has_value();
+    });
+    if (wants_spectral && (processing_handle_lifetime_.use_count() != 1 || live_slot_.has_value() ||
+                           spectral_terminal_)) {
         spectral_error_.store(SpectralError::RequiresStoppedController, std::memory_order_relaxed);
         return false;
     }
@@ -1568,7 +1580,8 @@ bool SignalGraph::prepare_impl_(double sample_rate, int max_block_size,
 }
 
 void SignalGraph::set_limits(GraphLimits limits) {
-    if (refuse_spectral_mutation_()) return;
+    if (refuse_spectral_mutation_())
+        return;
     // Mutates limits_ (read by validate_generated_graph under the lock) and drives
     // invalidate_live_locked_(); serialize against a concurrent prepare()/mutator.
     GraphMutationLock mutation_lock(*this);

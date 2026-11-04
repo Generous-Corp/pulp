@@ -154,7 +154,8 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     }
 
     base_authoring_generation_ = owner.authoring_generation_;
-    base_live_ = owner.spectral_mode_.load(std::memory_order_acquire) ? nullptr : owner.live_slot_.live();
+    base_live_ =
+        owner.spectral_mode_.load(std::memory_order_acquire) ? nullptr : owner.live_slot_.live();
     base_canonical_routing_ =
         owner.canonical_executor_routing_enabled_.load(std::memory_order_relaxed);
     base_parallel_routing_ = owner.parallel_routing_enabled_.load(std::memory_order_relaxed);
@@ -405,7 +406,8 @@ std::size_t SignalGraph::PreparedTopologyEdit::prune_unused_custom_node_types() 
 }
 
 std::size_t SignalGraph::PreparedTopologyEdit::custom_node_type_count() const {
-    if (!candidate_) return 0;
+    if (!candidate_)
+        return 0;
     GraphMutationLock candidate_lock(*candidate_);
     return candidate_->custom_node_types_.size();
 }
@@ -744,8 +746,9 @@ std::vector<SampleRegionDescriptor> SignalGraph::PreparedTopologyEdit::sample_re
 
 SampleRegionParameterContract
 SignalGraph::PreparedTopologyEdit::sample_region_parameter_contract() const {
-    return candidate_ ? SampleRegionParameterContract::from_regions(candidate_->sample_region_definitions_)
-                      : SampleRegionParameterContract{};
+    return candidate_
+               ? SampleRegionParameterContract::from_regions(candidate_->sample_region_definitions_)
+               : SampleRegionParameterContract{};
 }
 
 SampleRegionResult SignalGraph::PreparedTopologyEdit::bind_sample_region_parameters(
@@ -984,7 +987,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             });
         };
         if (unsupported(owner_->nodes_) || unsupported(candidate_->nodes_)) {
-            owner_->spectral_error_.store(SpectralError::UnsupportedTransactionalReplacement, std::memory_order_relaxed);
+            owner_->spectral_error_.store(SpectralError::UnsupportedTransactionalReplacement,
+                                          std::memory_order_relaxed);
             return last_result_ = Result::PreflightFailed;
         }
     }
@@ -992,7 +996,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
     if (const auto rejection = sample_region_preparation_result_(sample_rate, max_block_size))
         return last_result_ = *rejection;
     const auto old_keepalive = owner_->spectral_mode_.load(std::memory_order_acquire)
-        ? std::shared_ptr<CompiledGraph>{} : owner_->live_slot_.live();
+                                   ? std::shared_ptr<CompiledGraph>{}
+                                   : owner_->live_slot_.live();
     const auto* old = old_keepalive.get();
     const bool candidate_has_midi_output =
         std::any_of(candidate_->nodes_.begin(), candidate_->nodes_.end(),
@@ -1001,8 +1006,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         old != nullptr &&
         std::any_of(old->shapes.begin(), old->shapes.end(),
                     [](const auto& entry) { return entry.second.type == NodeType::MidiOutput; });
-    if (!owner_->spectral_mode_.load(std::memory_order_acquire)
-        && (candidate_has_midi_output || live_has_midi_output)) {
+    if (!owner_->spectral_mode_.load(std::memory_order_acquire) &&
+        (candidate_has_midi_output || live_has_midi_output)) {
         return last_result_ = Result::MidiOutputSnapshotLocalRequired;
     }
 
@@ -1265,7 +1270,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
 SignalGraph::PreparedTopologyEdit::Result
 SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
                                                      int max_block_size) {
-    if (owner_->refuse_spectral_mutation_()) return last_result_ = Result::PreflightFailed;
+    if (owner_->refuse_spectral_mutation_())
+        return last_result_ = Result::PreflightFailed;
     if (committed_)
         return last_result_ = Result::AlreadyCommitted;
     if (mutation_failed_)
@@ -1406,7 +1412,8 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
 
     GraphMutationLock owner_lock(*owner_);
     if (prepared_snapshot_->spectral && !owner_->spectral_mode_.load(std::memory_order_acquire)) {
-        owner_->spectral_error_.store(SpectralError::RequiresStoppedController, std::memory_order_relaxed);
+        owner_->spectral_error_.store(SpectralError::RequiresStoppedController,
+                                      std::memory_order_relaxed);
         return last_result_ = Result::PreflightFailed;
     }
     const auto fail_before_commit = [&](Result result) {
@@ -1434,7 +1441,8 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
             }
             owner_->node_load_.reserve(owner_->node_load_.size() + incoming);
         }
-        if (!owner_->spectral_mode_.load(std::memory_order_acquire)) owner_->live_slot_.prepare_publish();
+        if (!owner_->spectral_mode_.load(std::memory_order_acquire))
+            owner_->live_slot_.prepare_publish();
 
         if (candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed) &&
             prepared_snapshot_->routed.parallel.valid &&
@@ -1456,9 +1464,11 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     }
 
     if (owner_->spectral_mode_.load(std::memory_order_acquire)) {
-        const auto result = owner_->offer_spectral_candidate_locked_(candidate_, prepared_snapshot_, base_authoring_generation_);
+        const auto result = owner_->offer_spectral_candidate_locked_(candidate_, prepared_snapshot_,
+                                                                     base_authoring_generation_);
         owner_->spectral_error_.store(result, std::memory_order_relaxed);
-        if (result != SpectralError::None) return last_result_ = Result::PreflightFailed;
+        if (result != SpectralError::None)
+            return last_result_ = Result::PreflightFailed;
         prepared_snapshot_.reset();
         committed_ = true;
         return last_result_ = Result::Staged;
@@ -1505,8 +1515,7 @@ void SignalGraph::adopt_candidate_authoring_locked_(SignalGraph& candidate) {
             }
             auto current = it++;
             auto node = candidate.node_load_.extract(current);
-            [[maybe_unused]] const auto inserted =
-                this->node_load_.insert(std::move(node));
+            [[maybe_unused]] const auto inserted = this->node_load_.insert(std::move(node));
             assert(inserted.inserted);
         }
     }
@@ -1529,8 +1538,7 @@ void SignalGraph::adopt_candidate_authoring_locked_(SignalGraph& candidate) {
     this->next_id_ = candidate.next_id_;
     this->limits_ = candidate.limits_;
     this->prepared_plugin_meta_ = std::move(candidate.prepared_plugin_meta_);
-    this->exact_parameter_event_claims_ =
-        std::move(candidate.exact_parameter_event_claims_);
+    this->exact_parameter_event_claims_ = std::move(candidate.exact_parameter_event_claims_);
     this->canonical_executor_routing_enabled_.store(
         candidate.canonical_executor_routing_enabled_.load(std::memory_order_relaxed),
         std::memory_order_relaxed);
@@ -1538,12 +1546,10 @@ void SignalGraph::adopt_candidate_authoring_locked_(SignalGraph& candidate) {
         candidate.parallel_routing_enabled_.load(std::memory_order_relaxed),
         std::memory_order_relaxed);
     this->anticipation_enabled_.store(
-        candidate.anticipation_enabled_.load(std::memory_order_relaxed),
-        std::memory_order_relaxed);
+        candidate.anticipation_enabled_.load(std::memory_order_relaxed), std::memory_order_relaxed);
     this->transport_suppressed_for_anticipation_.store(
         candidate.transport_suppressed_for_anticipation_.load(std::memory_order_relaxed),
         std::memory_order_relaxed);
-
 }
 
 } // namespace pulp::host

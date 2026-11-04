@@ -9,7 +9,8 @@ namespace pulp::host {
 SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHandle& source,
                                                                   const PortHandle& destination) {
     GraphMutationLock lock(*this);
-    if (refuse_spectral_mutation_()) return EdgeProbeStatus::UnsupportedExecution;
+    if (refuse_spectral_mutation_())
+        return EdgeProbeStatus::UnsupportedExecution;
     if (in_swap_edit_)
         return EdgeProbeStatus::Busy;
     const auto cg = read_snapshot_(true);
@@ -69,7 +70,8 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHand
 
 void SignalGraph::detach_audio_edge_probe() {
     GraphMutationLock lock(*this);
-    if (refuse_spectral_mutation_()) return;
+    if (refuse_spectral_mutation_())
+        return;
     if (const auto cg = read_snapshot_(true)) {
         cg->audio_edge_probe.reset();
         cg->audio_edge_probe_identity = {};

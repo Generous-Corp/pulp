@@ -74,7 +74,8 @@ LiveSwapAdmission evaluate_live_swap_admission(
 SignalGraph::SwapResult
 SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
     GraphMutationLock mutation_lock(*this);
-    if (refuse_spectral_mutation_()) return SwapResult::NeedsEagerPrepare;
+    if (refuse_spectral_mutation_())
+        return SwapResult::NeedsEagerPrepare;
     if (!in_swap_edit_) return SwapResult::NotInSwapEdit;
 
     const auto catalog_it = scanned_plugin_catalog_.find(token.value);
@@ -425,7 +426,8 @@ SignalGraph::staged_node_loads_locked_() const {
 }
 
 void SignalGraph::begin_swap_edit() {
-    if (refuse_spectral_mutation_()) return;
+    if (refuse_spectral_mutation_())
+        return;
     GraphMutationLock lock(*this);
     if (in_swap_edit_) {
         runtime::log_error("SignalGraph: begin_swap_edit() while a swap edit is "
@@ -452,7 +454,8 @@ void SignalGraph::begin_swap_edit() {
 
 SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
                                                   int max_block_size) {
-    if (refuse_spectral_mutation_()) return SwapResult::NeedsEagerPrepare;
+    if (refuse_spectral_mutation_())
+        return SwapResult::NeedsEagerPrepare;
     struct ObserverCall {
         NodeId id = 0;
         std::shared_ptr<PluginSlot> old_slot;
@@ -765,7 +768,8 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
 }
 
 void SignalGraph::abort_swap_edit() {
-    if (refuse_spectral_mutation_()) return;
+    if (refuse_spectral_mutation_())
+        return;
     GraphMutationLock lock(*this);
     if (!in_swap_edit_) return;
     cancel_swap_edit_locked_();

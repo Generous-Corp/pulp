@@ -54,9 +54,12 @@ class SignalGraph::ExecutionSnapshot {
     friend class PreparedTopologyEdit;
     ExecutionSnapshot(SignalGraph& owner,
                       std::shared_ptr<SignalGraph::CompiledGraph> snapshot) noexcept
-        : owner_(&owner), snapshot_(std::move(snapshot)), processing_lease_(owner.processing_handle_lifetime_) {
-        if (owner.spectral_mode_.load(std::memory_order_acquire) || (snapshot_ && snapshot_->spectral)) {
-            owner.spectral_error_.store(SpectralError::SpectralPinnedExecutionUnsupported, std::memory_order_relaxed);
+        : owner_(&owner), snapshot_(std::move(snapshot)),
+          processing_lease_(owner.processing_handle_lifetime_) {
+        if (owner.spectral_mode_.load(std::memory_order_acquire) ||
+            (snapshot_ && snapshot_->spectral)) {
+            owner.spectral_error_.store(SpectralError::SpectralPinnedExecutionUnsupported,
+                                        std::memory_order_relaxed);
             snapshot_.reset();
             processing_lease_.reset();
         }

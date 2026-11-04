@@ -175,9 +175,9 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
-    {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:4e769c66364541d0be9fa46ccf1d82d6c5e1556850cac936754e0859fd0ba20a', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
+    {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:7184acce0063ba69aab4c271f79a4e65ca3e04fc01e68de2f27f84aa173b3e7a', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
 
-    {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:5c4a877f2d611bb0971ea5c9e42e2c68a06b490f1805c689c584cc4c58452f77', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
+    {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
 
     {
         "include": "pulp/audio/impulse_response.hpp",
@@ -298,7 +298,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/spectral_frame_engine.hpp",
-        "fingerprint": "sha256:457be4c2ccfdf316e0e834f1e6fecf51bd489e82d1ee8181939e949c4722f22d",
+        "fingerprint": "sha256:652c2aa1bf00f6b2935bbb6b27bdfe3a5466668a596ab6b1d15fa315d0721d91",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

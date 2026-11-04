@@ -62,25 +62,33 @@ class SignalGraph::PreparedTopologyEdit {
     std::size_t custom_node_type_count() const;
 
     NodeId add_input_node(int channels, const std::string& name = "Input");
-    SpectralResult<SpectralAnalysisPorts> add_spectral_analysis(SpectralIdentity identity, const std::string& name) {
-        if (prepare_attempted_ || committed_) return {std::nullopt, SpectralError::Busy};
+    SpectralResult<SpectralAnalysisPorts> add_spectral_analysis(SpectralIdentity identity,
+                                                                const std::string& name) {
+        if (prepare_attempted_ || committed_)
+            return {std::nullopt, SpectralError::Busy};
         return candidate_->add_spectral_analysis(identity, name);
     }
     SpectralResult<SpectralStagePorts> add_spectral_stage(SpectralIdentity identity,
-        QualifiedSpectralStage stage, const std::string& name) {
-        if (prepare_attempted_ || committed_) return {std::nullopt, SpectralError::Busy};
+                                                          QualifiedSpectralStage stage,
+                                                          const std::string& name) {
+        if (prepare_attempted_ || committed_)
+            return {std::nullopt, SpectralError::Busy};
         return candidate_->add_spectral_stage(identity, std::move(stage), name);
     }
-    SpectralResult<SpectralSynthesisPorts> add_spectral_synthesis(SpectralIdentity identity, const std::string& name) {
-        if (prepare_attempted_ || committed_) return {std::nullopt, SpectralError::Busy};
+    SpectralResult<SpectralSynthesisPorts> add_spectral_synthesis(SpectralIdentity identity,
+                                                                  const std::string& name) {
+        if (prepare_attempted_ || committed_)
+            return {std::nullopt, SpectralError::Busy};
         return candidate_->add_spectral_synthesis(identity, name);
     }
     GraphResult connect(SpectralOutputPort source, SpectralInputPort destination) {
-        if (prepare_attempted_ || committed_) return {GraphResult::Code::UnknownPort, 0, 0, "edit is immutable", {}};
+        if (prepare_attempted_ || committed_)
+            return {GraphResult::Code::UnknownPort, 0, 0, "edit is immutable", {}};
         return candidate_->connect(source, destination);
     }
     GraphResult connect(const PortHandle& source, const PortHandle& destination) {
-        if (prepare_attempted_ || committed_) return {GraphResult::Code::UnknownPort, 0, 0, "edit is immutable", {}};
+        if (prepare_attempted_ || committed_)
+            return {GraphResult::Code::UnknownPort, 0, 0, "edit is immutable", {}};
         return candidate_->connect(source, destination);
     }
     NodeId add_output_node(int channels, const std::string& name = "Output");
@@ -150,7 +158,8 @@ class SignalGraph::PreparedTopologyEdit {
     Result prepare_quiesced(double sample_rate, int max_block_size);
     Result commit();
     ExecutionSnapshot committed_execution_snapshot() const noexcept {
-        if (owner_->spectral_mode_.load(std::memory_order_acquire)) return {};
+        if (owner_->spectral_mode_.load(std::memory_order_acquire))
+            return {};
         return ExecutionSnapshot(*owner_, committed_snapshot_);
     }
     Result last_result() const noexcept { return last_result_; }

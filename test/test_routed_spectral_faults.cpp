@@ -1,8 +1,9 @@
-#include <catch2/catch_test_macros.hpp>
-#include <pulp/host/signal_graph.hpp>
-#include <pulp/format/processor.hpp>
 #include "../core/host/src/spectral_graph_internal.hpp"
+#include "support/thread_progress.hpp"
 #include <array>
+#include <catch2/catch_test_macros.hpp>
+#include <pulp/format/processor.hpp>
+#include <pulp/host/signal_graph.hpp>
 
 namespace {
 struct FaultGraph {
@@ -13,20 +14,25 @@ struct FaultGraph {
         using namespace pulp::host;
         const auto identity = *SpectralIdentity::make(256, hop, 1, 48000).value;
         const auto a = *graph.add_spectral_analysis(identity, "analysis").value;
-        const auto b = *graph.add_spectral_stage(identity,
-            *QualifiedSpectralStage::identity_v1(identity).value, "identity").value;
+        const auto b =
+            *graph
+                 .add_spectral_stage(identity, *QualifiedSpectralStage::identity_v1(identity).value,
+                                     "identity")
+                 .value;
         const auto c = *graph.add_spectral_synthesis(identity, "wet").value;
         const auto d = *graph.add_spectral_synthesis(identity, "sibling").value;
         REQUIRE(graph.connect(a.frames, b.frames_in));
         REQUIRE(graph.connect(b.frames_out, c.frames));
         REQUIRE(graph.connect(a.frames, d.frames));
-        REQUIRE(bank.prepare(graph.nodes(), graph.connections(), 48000, block)
-                == SpectralError::None);
-        analysis = a.node; stage = b.node; wet = c.node; sibling = d.node;
+        REQUIRE(bank.prepare(graph.nodes(), graph.connections(), 48000, block) ==
+                SpectralError::None);
+        analysis = a.node;
+        stage = b.node;
+        wet = c.node;
+        sibling = d.node;
         bank.reset(17);
     }
-    void process(pulp::host::NodeId id, std::span<const float> input,
-                 std::span<float> output) {
+    void process(pulp::host::NodeId id, std::span<const float> input, std::span<float> output) {
         const float* ip[] = {input.data()};
         float* op[] = {output.data()};
         pulp::format::GraphRuntimeNodeProcessContext ctx;
@@ -37,7 +43,7 @@ struct FaultGraph {
         REQUIRE(pulp::host::SpectralRuntimeBank::Node::process(block, ctx, bank.find(id)));
     }
 };
-}
+} // namespace
 
 TEST_CASE("Routed late synthesis failure preserves prefix and independent sibling",
           "[host][spectral-fault][spectral-fatal-prefix]") {
@@ -66,10 +72,13 @@ TEST_CASE("Routed late synthesis failure preserves prefix and independent siblin
         for (int i = 0; i < 512; ++i) {
             const auto* node = bad.bank.find(bad.wet);
             const auto cutoff = node->fatal_origin == std::numeric_limits<std::int64_t>::max()
-                ? node->fatal_origin : std::max<std::int64_t>(0, node->fatal_origin) + 320;
+                                    ? node->fatal_origin
+                                    : std::max<std::int64_t>(0, node->fatal_origin) + 320;
             REQUIRE(std::isfinite(wet[i]));
-            if (block * 512 + i < cutoff) REQUIRE(wet[i] == expected[i]);
-            else REQUIRE(wet[i] == 0.0f);
+            if (block * 512 + i < cutoff)
+                REQUIRE(wet[i] == expected[i]);
+            else
+                REQUIRE(wet[i] == 0.0f);
         }
     }
     REQUIRE(bad.bank.find(bad.wet)->first_error == pulp::host::SpectralError::SynthesisOverflow);
@@ -91,7 +100,8 @@ TEST_CASE("Frame capacity failure carries a fatal marker without a payload slot"
     REQUIRE(f.bank.find(f.wet)->input->fatal);
     REQUIRE(f.bank.find(f.stage)->sequence == 1);
     f.process(f.wet, input, output);
-    for (float value : output) REQUIRE(value == 0);
+    for (float value : output)
+        REQUIRE(value == 0);
 }
 
 TEST_CASE("Missing frame replacement advances once and preserves the sibling payload",
@@ -111,29 +121,41 @@ TEST_CASE("Missing frame replacement advances once and preserves the sibling pay
     REQUIRE(f.bank.find(f.stage)->errors == 1);
     REQUIRE(std::equal(saved.begin(), saved.end(), sibling->bins.begin()));
     const auto* replaced = f.bank.find(f.wet)->input;
-    for (size_t i = 0; i < replaced->bins_per_frame; ++i) REQUIRE(replaced->bins[i] == std::complex<float>{});
+    for (size_t i = 0; i < replaced->bins_per_frame; ++i)
+        REQUIRE(replaced->bins[i] == std::complex<float>{});
 }
 
-#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <latch>
+#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <thread>
 
 namespace pulp::host {
 // Private seam exercises the same capture/transition functions as process().
 // It exposes no executable stage registration or callback-time test hook.
 struct SpectralControllerTestAccess {
-    static auto capture(SignalGraph& g) { return g.capture_spectral_boundary_(); }
+    static auto capture(SignalGraph& g) {
+        return g.capture_spectral_boundary_();
+    }
     static void render(SignalGraph& g, SignalGraph::SpectralBoundary boundary,
                        audio::BufferView<float>& out, const audio::BufferView<const float>& in,
                        const format::ProcessContext* transport) {
-        g.process_spectral_boundary_(boundary, out, in, static_cast<int>(out.num_samples()), transport);
+        g.process_spectral_boundary_(boundary, out, in, static_cast<int>(out.num_samples()),
+                                     transport);
     }
-    static auto reader(SignalGraph& g) { return g.read_snapshot_(); }
-    static auto epoch(SignalGraph& g) { return g.spectral_transition_serial_; }
-    static void exhaust(SignalGraph& g) { g.spectral_transition_serial_ = UINT32_MAX; }
-    static bool terminal(SignalGraph& g) { return g.spectral_terminal_; }
+    static auto reader(SignalGraph& g) {
+        return g.read_snapshot_();
+    }
+    static auto epoch(SignalGraph& g) {
+        return g.spectral_transition_serial_;
+    }
+    static void exhaust(SignalGraph& g) {
+        g.spectral_transition_serial_ = UINT32_MAX;
+    }
+    static bool terminal(SignalGraph& g) {
+        return g.spectral_terminal_;
+    }
 };
-}
+} // namespace pulp::host
 namespace {
 struct ControllerGraph {
     pulp::host::SignalGraph graph;
@@ -160,21 +182,24 @@ struct ControllerGraph {
         }
         REQUIRE(graph.prepare(48000, 64));
         input.fill(0.25f);
-        for (int i = 0; i < 12; ++i) graph.process(ov, iv, 64);
+        for (int i = 0; i < 12; ++i)
+            graph.process(ov, iv, 64);
     }
     auto edit(int block = 64) {
         auto candidate = graph.begin_prepared_topology_edit();
         REQUIRE(candidate);
-        REQUIRE(candidate->prepare(48000, block)
-            == pulp::host::SignalGraph::PreparedTopologyEdit::Result::Prepared);
+        REQUIRE(candidate->prepare(48000, block) ==
+                pulp::host::SignalGraph::PreparedTopologyEdit::Result::Prepared);
         return candidate;
     }
     void process(const pulp::format::ProcessContext* transport = nullptr) {
-        if (transport) graph.process(ov, iv, 64, *transport);
-        else graph.process(ov, iv, 64);
+        if (transport)
+            graph.process(ov, iv, 64, *transport);
+        else
+            graph.process(ov, iv, 64);
     }
 };
-}
+} // namespace
 
 TEST_CASE("Offer after boundary capture cannot steal the active reset",
           "[host][spectral-transition][spectral-barrier]") {
@@ -186,25 +211,34 @@ TEST_CASE("Offer after boundary capture cannot steal the active reset",
     target.input.fill(0);
     control.input.fill(0);
     std::latch captured{1}, offered{1};
+    bool offered_in_time = false;
     std::thread render([&] {
         const auto boundary = SpectralControllerTestAccess::capture(target.graph);
         captured.count_down();
-        offered.wait();
+        offered_in_time = pulp::test::wait_for_condition([&] { return offered.try_wait(); });
+        if (!offered_in_time)
+            return;
         SpectralControllerTestAccess::render(target.graph, boundary, target.ov, target.iv, &reset);
     });
-    captured.wait();
+    const bool captured_in_time =
+        pulp::test::wait_for_condition([&] { return captured.try_wait(); });
     const auto result = candidate->commit();
     offered.count_down();
     render.join();
+    REQUIRE(captured_in_time);
+    REQUIRE(offered_in_time);
     REQUIRE(result == SignalGraph::PreparedTopologyEdit::Result::Staged);
     control.process(&reset);
     REQUIRE(target.output == control.output);
-    for (float value : target.output) REQUIRE(value == 0);
+    for (float value : target.output)
+        REQUIRE(value == 0);
     REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == 2);
-    REQUIRE(target.graph.spectral_transition_state() == SignalGraph::SpectralTransitionState::Staged);
+    REQUIRE(target.graph.spectral_transition_state() ==
+            SignalGraph::SpectralTransitionState::Staged);
     target.process();
     REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == 3);
-    REQUIRE(target.graph.spectral_transition_state() == SignalGraph::SpectralTransitionState::Activated);
+    REQUIRE(target.graph.spectral_transition_state() ==
+            SignalGraph::SpectralTransitionState::Activated);
     {
         auto reader = SpectralControllerTestAccess::reader(target.graph);
         REQUIRE(reader);
@@ -227,12 +261,14 @@ TEST_CASE("Rejected candidates preserve active reset history and consume no epoc
         target.process(&reset);
         control.process(&reset);
         REQUIRE(target.output == control.output);
-        REQUIRE(SpectralControllerTestAccess::epoch(target.graph)
-                == SpectralControllerTestAccess::epoch(control.graph));
-        REQUIRE(target.graph.spectral_transition_state() == SignalGraph::SpectralTransitionState::Rejected);
+        REQUIRE(SpectralControllerTestAccess::epoch(target.graph) ==
+                SpectralControllerTestAccess::epoch(control.graph));
+        REQUIRE(target.graph.spectral_transition_state() ==
+                SignalGraph::SpectralTransitionState::Rejected);
         REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::CapacityExceeded);
         for (int block = 0; block < 10; ++block) {
-            target.process(); control.process();
+            target.process();
+            control.process();
             REQUIRE(target.output == control.output);
         }
     }
@@ -249,7 +285,8 @@ TEST_CASE("Successful offer and seek share one epoch while exhaustion is termina
     target.process(&seek);
     REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == 2);
     REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::None);
-    for (int i = 0; i < 12; ++i) target.process();
+    for (int i = 0; i < 12; ++i)
+        target.process();
     const auto uninterrupted = target.output;
     SpectralControllerTestAccess::exhaust(target.graph);
     candidate = target.edit();
@@ -261,7 +298,8 @@ TEST_CASE("Successful offer and seek share one epoch while exhaustion is termina
     target.process(&seek);
     REQUIRE(SpectralControllerTestAccess::terminal(target.graph));
     REQUIRE(target.graph.spectral_error() == SpectralError::EpochExhausted);
-    for (float value : target.output) REQUIRE(value == 0);
+    for (float value : target.output)
+        REQUIRE(value == 0);
     REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == UINT32_MAX);
 }
 
@@ -278,7 +316,8 @@ TEST_CASE("Spectral render reset and activation allocate no callback storage",
     {
         pulp::test::RtAllocationProbe probe;
         target.process(&reset);
-        for (int i = 0; i < 300; ++i) target.process();
+        for (int i = 0; i < 300; ++i)
+            target.process();
         allocations = probe.allocation_count();
     }
     REQUIRE(allocations == 0);
@@ -311,7 +350,8 @@ TEST_CASE("Built-in identity preserves zero without invoking a contract guard",
     f.process(f.stage, input, output);
     REQUIRE(f.bank.find(f.stage)->first_error == pulp::host::SpectralError::None);
     f.process(f.wet, input, output);
-    for (float value : output) REQUIRE((value == 0 && !std::signbit(value)));
+    for (float value : output)
+        REQUIRE((value == 0 && !std::signbit(value)));
 }
 
 TEST_CASE("Activated block size is visible before authoring finalization",
@@ -329,7 +369,7 @@ TEST_CASE("Activated block size is visible before authoring finalization",
 
 namespace {
 class ProviderProbe final : public pulp::format::Processor {
-public:
+  public:
     pulp::format::PluginDescriptor descriptor() const override {
         pulp::format::PluginDescriptor d;
         d.name = "spectral-provider-probe";
@@ -342,11 +382,13 @@ public:
     }
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const pulp::format::PrepareContext&) override {}
-    void process(pulp::audio::BufferView<float>& out,
-                 const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&,
-                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override { out.clear(); }
+    void process(pulp::audio::BufferView<float>& out, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        out.clear();
+    }
 };
-}
+} // namespace
 TEST_CASE("A live spectral graph refuses processor input provider mutation",
           "[host][spectral-transition][spectral-provider]") {
     using namespace pulp::host;
@@ -358,8 +400,10 @@ TEST_CASE("A live spectral graph refuses processor input provider mutation",
     const auto processor = graph.add_processor_node(std::make_unique<ProviderProbe>());
     REQUIRE(processor != 0);
     int context = 0;
-    pulp::format::AudioInputBusProvider provider{&context,
-        [](void*, size_t, size_t, pulp::audio::BufferView<const float>&) noexcept { return false; }};
+    pulp::format::AudioInputBusProvider provider{
+        &context, [](void*, size_t, size_t, pulp::audio::BufferView<const float>&) noexcept {
+            return false;
+        }};
     REQUIRE(graph.set_processor_audio_input_provider(processor, provider));
     REQUIRE(graph.prepare(48000, 64));
     REQUIRE_FALSE(graph.set_processor_audio_input_provider(processor, provider));
@@ -406,7 +450,8 @@ TEST_CASE("Mailbox refusal preserves ingress and egress exactly once",
     REQUIRE(candidate->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
     REQUIRE_FALSE(target.graph.inject_midi(target.midi_in, events));
     target.process();
-    REQUIRE(target.graph.spectral_transition_state() == SignalGraph::SpectralTransitionState::Rejected);
+    REQUIRE(target.graph.spectral_transition_state() ==
+            SignalGraph::SpectralTransitionState::Rejected);
     REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::PendingMailboxData);
     candidate = target.edit();
     REQUIRE(candidate->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);

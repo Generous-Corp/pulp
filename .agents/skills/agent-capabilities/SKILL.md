@@ -1723,3 +1723,12 @@ When a DSP change modifies a fingerprinted signal header such as
 and surface counters against the protected base, and refresh the two sequencer
 exposure evidence needles before running the gates. This keeps the generated
 contract and its evidence rows aligned with the new header bytes.
+
+## Routed spectral infrastructure headers
+
+The runtime-only `pulp/host/spectral_graph.hpp` belongs in the explicit reviewed
+host tuple and minimal-target table. Its typed ports and coherent telemetry are
+infrastructure, not an advertised notation/catalog capability. A changed legacy
+telemetry header graduates through a reviewed registry row; never rewrite the
+frozen legacy baseline. After public header formatting, refresh fingerprints
+before regenerating the manifest and consumption census.

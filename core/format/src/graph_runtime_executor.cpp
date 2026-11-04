@@ -120,7 +120,8 @@ void gather_node_inputs(const graph::GraphRuntimePlan& plan,
         const auto conn_index =
             plan.inbound_connection_indices[node.first_inbound_connection + c];
         const auto& conn = plan.connections[conn_index];
-        if (!graph::carries_audio(conn)) continue;
+        if (!graph::carries_audio(conn))
+            continue;
         if (conn.dest_port >= node.input_ports)
             continue;
         if (resolved && ports[conn.dest_port].mode != Mode::Sum)
@@ -952,7 +953,8 @@ void GraphRuntimeBufferPool::unbind() noexcept {
 void GraphRuntimeBufferPool::clear_history() noexcept {
     std::fill(storage_.begin(), storage_.end(), 0.0f);
     for (auto& ring : ring_) {
-        if (!ring.state) continue;
+        if (!ring.state)
+            continue;
         std::fill(ring.state->storage.begin(), ring.state->storage.end(), 0.0f);
         ring.state->write_pos = 0;
     }

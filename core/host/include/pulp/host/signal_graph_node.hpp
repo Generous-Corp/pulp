@@ -19,13 +19,13 @@ namespace pulp::host {
 // ── Node types ──────────────────────────────────────────────────────────
 
 enum class NodeType {
-    AudioInput,    // System audio input
-    AudioOutput,   // System audio output
-    Plugin,        // Plugin slot (VST3/AU/CLAP)
-    Gain,          // Simple gain utility
-    MidiInput,     // System MIDI input
-    MidiOutput,    // System MIDI output
-    Custom,        // String-keyed extension node
+    AudioInput,  // System audio input
+    AudioOutput, // System audio output
+    Plugin,      // Plugin slot (VST3/AU/CLAP)
+    Gain,        // Simple gain utility
+    MidiInput,   // System MIDI input
+    MidiOutput,  // System MIDI output
+    Custom,      // String-keyed extension node
     SpectralAnalysis,
     SpectralStage,
     SpectralSynthesis,

@@ -291,7 +291,7 @@ struct GraphRuntimeExecutorResult {
 /// Per-worker scratch for a parallel executor is a separate concern and must
 /// not be overloaded onto this shared pool.
 class GraphRuntimeBufferPool {
-public:
+  public:
     /// Render-owner reset of prepared audio/PDC storage without reallocating.
     void clear_history() noexcept;
     GraphRuntimeBufferPool() = default;

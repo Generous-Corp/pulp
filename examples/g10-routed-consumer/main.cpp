@@ -1,11 +1,12 @@
-#include <pulp/host/signal_graph.hpp>
 #include <cmath>
 #include <iostream>
+#include <pulp/host/signal_graph.hpp>
 #include <stdexcept>
 #include <vector>
 
 void require(bool value, const char* message) {
-    if (!value) throw std::runtime_error(message);
+    if (!value)
+        throw std::runtime_error(message);
 }
 
 auto render(int partition) {
@@ -15,11 +16,18 @@ auto render(int partition) {
     const auto in = graph.add_input_node(1);
     const auto out = graph.add_output_node(2);
     const auto analysis = *graph.add_spectral_analysis(shape, "analysis").value;
-    const auto first = *graph.add_spectral_stage(shape,
-        *QualifiedSpectralStage::identity_v1(shape).value, "identity").value;
-    const auto second = *graph.add_spectral_stage(shape,
-        *QualifiedSpectralStage::real_mask_v1(shape, std::vector<float>(129, 0.5f)).value,
-        "mask").value;
+    const auto first =
+        *graph
+             .add_spectral_stage(shape, *QualifiedSpectralStage::identity_v1(shape).value,
+                                 "identity")
+             .value;
+    const auto second =
+        *graph
+             .add_spectral_stage(
+                 shape,
+                 *QualifiedSpectralStage::real_mask_v1(shape, std::vector<float>(129, 0.5f)).value,
+                 "mask")
+             .value;
     const auto synthesis = *graph.add_spectral_synthesis(shape, "wet").value;
     const auto sibling = *graph.add_spectral_synthesis(shape, "sibling").value;
     auto connect = [&](auto a, auto b) { require(bool(graph.connect(a, b)), "named connection"); };
@@ -43,7 +51,8 @@ auto render(int partition) {
     graph.set_canonical_executor_routing_enabled(false);
     constexpr int total = 8192, length = 6000;
     std::vector<float> input(total), wet(total), other(total);
-    for (int i = 0; i < length; ++i) input[i] = 0.2f * std::sin(i * 0.117f);
+    for (int i = 0; i < length; ++i)
+        input[i] = 0.2f * std::sin(i * 0.117f);
     input[0] = input[5011] = 1;
     for (int pos = 0; pos < total;) {
         const int count = std::min(total - pos, partition ? partition : 1 + pos * 17 % 4096);

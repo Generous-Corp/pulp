@@ -155,7 +155,8 @@ bool LiveDspTelemetryStore::prepare(const LiveDspTelemetryConfig& config,
 
     ring_headers_.assign(ring_blocks_, BlockHeader{});
     ring_node_ns_.assign(static_cast<std::size_t>(ring_blocks_) * node_count_, 0);
-    ring_spectral_.assign(config.spectral_diagnostics ? static_cast<size_t>(ring_blocks_) * node_count_ : 0, {});
+    ring_spectral_.assign(
+        config.spectral_diagnostics ? static_cast<size_t>(ring_blocks_) * node_count_ : 0, {});
     spectral_scratch_.assign(config.spectral_diagnostics ? node_count_ : 0, {});
 
     window_ns_.assign(static_cast<std::size_t>(node_count_) * window_blocks_, 0);
@@ -187,7 +188,8 @@ LiveDspTelemetryBlockWriter LiveDspTelemetryStore::begin_block(std::uint32_t fra
     }
 
     const auto previous = observed_blocks_.load(std::memory_order_relaxed);
-    const auto observed = previous == std::numeric_limits<std::uint64_t>::max() ? previous : previous + 1;
+    const auto observed =
+        previous == std::numeric_limits<std::uint64_t>::max() ? previous : previous + 1;
     observed_blocks_.store(observed, std::memory_order_relaxed);
     const std::uint64_t w = write_index_.load(std::memory_order_relaxed);
     const std::uint64_t r = read_index_.load(std::memory_order_acquire);
@@ -215,22 +217,21 @@ LiveDspTelemetryBlockWriter LiveDspTelemetryStore::begin_block(std::uint32_t fra
     }
 
     if (!ring_spectral_.empty())
-        std::fill_n(ring_spectral_.data() + static_cast<size_t>(slot) * node_count_,
-                    node_count_, LiveDspSpectralDiagnostic{});
+        std::fill_n(ring_spectral_.data() + static_cast<size_t>(slot) * node_count_, node_count_,
+                    LiveDspSpectralDiagnostic{});
     return LiveDspTelemetryBlockWriter{this, slot, frame_count, sample_rate};
 }
 
-void LiveDspTelemetryStore::inject_block(std::span<const std::int64_t> node_ns,
-                                         std::int64_t graph_elapsed_ns,
-                                         std::uint32_t frame_count,
-                                         double sample_rate,
-                                         std::span<const LiveDspSpectralDiagnostic> spectral) noexcept {
+void LiveDspTelemetryStore::inject_block(
+    std::span<const std::int64_t> node_ns, std::int64_t graph_elapsed_ns, std::uint32_t frame_count,
+    double sample_rate, std::span<const LiveDspSpectralDiagnostic> spectral) noexcept {
     if ((!enabled_.load(std::memory_order_relaxed) && ring_spectral_.empty()) || node_count_ == 0) {
         return;
     }
 
     const auto previous = observed_blocks_.load(std::memory_order_relaxed);
-    const auto observed = previous == std::numeric_limits<std::uint64_t>::max() ? previous : previous + 1;
+    const auto observed =
+        previous == std::numeric_limits<std::uint64_t>::max() ? previous : previous + 1;
     observed_blocks_.store(observed, std::memory_order_relaxed);
     const std::uint64_t w = write_index_.load(std::memory_order_relaxed);
     const std::uint64_t r = read_index_.load(std::memory_order_acquire);
@@ -388,7 +389,8 @@ void LiveDspTelemetryStore::drain() noexcept {
     snapshot_.blocks_drained = drained_;
     snapshot_.blocks_dropped = dropped_.load(std::memory_order_relaxed);
     const auto observed = observed_blocks_.load(std::memory_order_relaxed);
-    snapshot_.age_blocks = observed >= snapshot_.observed_block ? observed - snapshot_.observed_block : 0;
+    snapshot_.age_blocks =
+        observed >= snapshot_.observed_block ? observed - snapshot_.observed_block : 0;
     snapshot_.graph_over_budget_blocks = over_budget_blocks_;
     ++snapshot_.sequence_number;
 }

@@ -169,8 +169,8 @@ GraphRuntimePlanResult build_graph_runtime_plan(
 
             const auto& source = result.plan.nodes[source_index];
             const auto source_ports = is_spectral(spec) ? source.spectral_output_ports
-                                      : is_event(spec) ? source.event_output_ports
-                                                     : source.output_ports;
+                                      : is_event(spec)  ? source.event_output_ports
+                                                        : source.output_ports;
             if (spec.source_port >= source_ports) {
                 return fail(GraphRuntimePlanErrorCode::SourcePortOutOfRange, i,
                             spec.source_node,
@@ -185,8 +185,8 @@ GraphRuntimePlanResult build_graph_runtime_plan(
             if (!is_automation_conn(spec)) {
                 const auto& dest = result.plan.nodes[dest_index];
                 const auto dest_ports = is_spectral(spec) ? dest.spectral_input_ports
-                                        : is_event(spec) ? dest.event_input_ports
-                                                       : dest.input_ports;
+                                        : is_event(spec)  ? dest.event_input_ports
+                                                          : dest.input_ports;
                 if (spec.dest_port >= dest_ports) {
                     return fail(GraphRuntimePlanErrorCode::DestinationPortOutOfRange, i,
                                 spec.dest_node,

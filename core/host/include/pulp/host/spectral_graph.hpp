@@ -5,13 +5,17 @@
 
 namespace pulp::host {
 
+using graph::QualifiedSpectralStage;
 using graph::SpectralError;
 using graph::SpectralIdentity;
-using graph::QualifiedSpectralStage;
 template <typename T> using SpectralResult = graph::SpectralResult<T>;
 
-struct SpectralInputPort { PortHandle handle; };
-struct SpectralOutputPort { PortHandle handle; };
+struct SpectralInputPort {
+    PortHandle handle;
+};
+struct SpectralOutputPort {
+    PortHandle handle;
+};
 struct SpectralAnalysisPorts {
     NodeId node = 0;
     std::vector<PortHandle> audio;

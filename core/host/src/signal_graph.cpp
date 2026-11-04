@@ -484,7 +484,8 @@ bool SignalGraph::ParameterBlockSnapshot::append_to(
 }
 
 bool SignalGraph::register_custom_node_type(CustomNodeType type) {
-    if (refuse_spectral_mutation_()) return false;
+    if (refuse_spectral_mutation_())
+        return false;
     if (!type.is_valid_registration()) return false;
     // Scans nodes_ and mutates custom_node_types_; serialize against a concurrent
     // prepare()/mutator. custom_node_type() reads custom_node_types_ lock-free and
@@ -525,7 +526,8 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
 
 bool SignalGraph::register_custom_node_type(CustomNodeType type,
                                             SampleKernelDescriptor sample_kernel) {
-    if (refuse_spectral_mutation_()) return false;
+    if (refuse_spectral_mutation_())
+        return false;
     // A scalar-paired type must not declare the event lane. A region MEMBER is
     // quotiented out of the executable topology and an ANCHOR has its event
     // binding dropped at compile, so either way the callback would be registered
@@ -1023,7 +1025,8 @@ bool register_builtin_sample_region_types(SignalGraph& graph) {
 }
 
 bool SignalGraph::set_node_parameter(NodeId id, uint32_t param_id, float value) {
-    if (refuse_spectral_mutation_()) return false;
+    if (refuse_spectral_mutation_())
+        return false;
     // Scans nodes_ via node(); serialize against a concurrent mutator/prepare.
     // Forwards to the plugin slot's own (independently synchronized) parameter
     // store — no GraphNode plain field is written here.
@@ -1098,7 +1101,8 @@ int SignalGraph::prepared_max_block_size() const noexcept {
 }
 
 std::atomic<float>* SignalGraph::live_gain_atomic(NodeId id) const noexcept {
-    if (refuse_spectral_mutation_()) return nullptr;
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->runtime.find(id);
     if (it == live_slot_.live()->runtime.end()) return nullptr;
@@ -1106,7 +1110,8 @@ std::atomic<float>* SignalGraph::live_gain_atomic(NodeId id) const noexcept {
 }
 
 PluginSlot* SignalGraph::live_plugin_slot(NodeId id) const noexcept {
-    if (refuse_spectral_mutation_()) return nullptr;
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->plugins.find(id);
     if (it == live_slot_.live()->plugins.end()) return nullptr;
@@ -1114,7 +1119,8 @@ PluginSlot* SignalGraph::live_plugin_slot(NodeId id) const noexcept {
 }
 
 const CustomNodeProcessFn* SignalGraph::live_custom_processor(NodeId id) const noexcept {
-    if (refuse_spectral_mutation_()) return nullptr;
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->custom_processors.find(id);
     if (it == live_slot_.live()->custom_processors.end()) return nullptr;
@@ -1123,7 +1129,8 @@ const CustomNodeProcessFn* SignalGraph::live_custom_processor(NodeId id) const n
 
 const CustomNodeTransportProcessFn* SignalGraph::live_custom_transport_processor(
     NodeId id) const noexcept {
-    if (refuse_spectral_mutation_()) return nullptr;
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->custom_transport_processors.find(id);
     if (it == live_slot_.live()->custom_transport_processors.end()) return nullptr;
@@ -1132,7 +1139,8 @@ const CustomNodeTransportProcessFn* SignalGraph::live_custom_transport_processor
 
 const CustomNodeEventProcessFn* SignalGraph::live_custom_event_processor(
     NodeId id) const noexcept {
-    if (refuse_spectral_mutation_()) return nullptr;
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->custom_event_processors.find(id);
     if (it == live_slot_.live()->custom_event_processors.end()) return nullptr;
@@ -1152,7 +1160,8 @@ int SignalGraph::live_custom_latency_samples(NodeId id) const noexcept {
 
 const CustomNodeParamProcessFn* SignalGraph::live_custom_param_processor(
     NodeId id) const noexcept {
-    if (refuse_spectral_mutation_()) return nullptr;
+    if (refuse_spectral_mutation_())
+        return nullptr;
     if (!live_slot_.live()) return nullptr;
     auto it = live_slot_.live()->custom_param_processors.find(id);
     if (it == live_slot_.live()->custom_param_processors.end()) return nullptr;
@@ -1161,7 +1170,8 @@ const CustomNodeParamProcessFn* SignalGraph::live_custom_param_processor(
 
 std::shared_ptr<const void> SignalGraph::live_snapshot_handle_locked_() const noexcept {
     assert_graph_mutation_locked_();
-    if (refuse_spectral_mutation_()) return {};
+    if (refuse_spectral_mutation_())
+        return {};
     return live_slot_.live();  // aliases the live CompiledGraph as an opaque keepalive
 }
 
@@ -1336,7 +1346,8 @@ SignalGraph::evaluate_optional_runtime_budget(
 }
 
 void SignalGraph::release() {
-    if (refuse_spectral_mutation_()) return;
+    if (refuse_spectral_mutation_())
+        return;
     // Serialize against concurrent control-thread mutators / prepare() for the
     // same two surfaces prepare() guards: the nodes_ iteration below and the
     // snapshot-publication state (live_slot_).
@@ -1445,20 +1456,20 @@ bool SignalGraph::ExecutionSnapshot::inject_parameter_events(
     NodeId plugin_node,
     const state::ParameterEventQueue& events) const noexcept {
     return snapshot_ != nullptr && !snapshot_->spectral &&
-           SignalGraph::inject_parameter_events_into_snapshot_(
-               *snapshot_, plugin_node, events);
+           SignalGraph::inject_parameter_events_into_snapshot_(*snapshot_, plugin_node, events);
 }
 
 bool SignalGraph::ExecutionSnapshot::inject_exact_parameter_events(
     NodeId plugin_node, const state::ParameterEventQueue& events,
     SnapshotParameterIngressPasskey) const noexcept {
     return snapshot_ != nullptr && !snapshot_->spectral &&
-           SignalGraph::inject_exact_parameter_events_into_snapshot_(
-               *snapshot_, plugin_node, events);
+           SignalGraph::inject_exact_parameter_events_into_snapshot_(*snapshot_, plugin_node,
+                                                                     events);
 }
 
 void SignalGraph::clear() {
-    if (refuse_spectral_mutation_()) return;
+    if (refuse_spectral_mutation_())
+        return;
     // Wipes nodes_/connections_ + invalidate_live_locked_(); serialize against a
     // concurrent mutator/prepare. invalidate_live_locked_() drives only the non-blocking
     // prune, so holding the mutex across it is deadlock-free.
@@ -1477,7 +1488,8 @@ void SignalGraph::clear() {
 }
 
 bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
-    if (refuse_spectral_mutation_()) return false;
+    if (refuse_spectral_mutation_())
+        return false;
     // Write the UI-thread-owned scalar on GraphNode so it survives future
     // compile_() calls. Also reflect into the live snapshot's runtime through
     // a per-runtime atomic so the change takes effect without a re-prepare.
