@@ -1098,6 +1098,7 @@
       "pulp/signal/spectral_delay_matrix.hpp",
       "pulp/signal/spectral_envelope_shifter.hpp",
       "pulp/signal/spectral_feature_frontends.hpp",
+      "pulp/signal/spectral_frame_codec.hpp",
       "pulp/signal/spectral_frame_engine.hpp",
       "pulp/signal/spectral_gate_blur.hpp",
       "pulp/signal/spectral_mask_processor.hpp",
