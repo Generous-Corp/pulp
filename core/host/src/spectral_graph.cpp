@@ -265,8 +265,29 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
         nodes.push_back(std::move(state));
     }
     for (const auto& c : connections) {
-        if (c.feedback)
-            return SpectralError::InvalidConnection;
+        if (c.feedback) {
+            // Preserve independent audio loops, but reject any feedback cycle
+            // whose forward path crosses a spectral analysis/synthesis boundary.
+            using Visit = std::pair<NodeId, bool>;
+            std::vector<Visit> pending{{c.dest_node, find(c.dest_node) != nullptr}};
+            std::vector<Visit> visited;
+            while (!pending.empty()) {
+                const auto current = pending.back();
+                pending.pop_back();
+                if (std::find(visited.begin(), visited.end(), current) != visited.end())
+                    continue;
+                visited.push_back(current);
+                if (current.first == c.source_node && current.second)
+                    return SpectralError::InvalidConnection;
+                for (const auto& edge : connections) {
+                    if (edge.source_node != current.first || edge.midi || edge.automation ||
+                        edge.audio_rate_modulation)
+                        continue;
+                    pending.emplace_back(edge.dest_node,
+                                         current.second || find(edge.dest_node) != nullptr);
+                }
+            }
+        }
         auto* source = find(c.source_node);
         auto* destination = find(c.dest_node);
         if (!c.spectral) {

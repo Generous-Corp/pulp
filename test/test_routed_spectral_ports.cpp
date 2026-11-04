@@ -227,3 +227,37 @@ TEST_CASE("Spectral public admission rejects malformed geometry and graph edges"
     REQUIRE(graph.spectral_error() == SpectralError::UnsupportedOperation);
     REQUIRE_FALSE(graph.prepare(48000, 64));
 }
+
+TEST_CASE("Independent audio feedback survives spectral preparation",
+          "[host][spectral-ports][spectral-feedback]") {
+    using namespace pulp::host;
+    for (bool crosses_spectral : {false, true}) {
+        SignalGraph graph;
+        const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
+        const auto in = graph.add_input_node(1), out = graph.add_output_node(1);
+        const auto a = *graph.add_spectral_analysis(identity, "analysis").value;
+        const auto s = *graph.add_spectral_synthesis(identity, "synthesis").value;
+        const auto before = graph.add_gain_node("before");
+        const auto after = graph.add_gain_node("after");
+        REQUIRE(graph.connect(in, 0, before, 0));
+        REQUIRE(graph.connect(graph.node(before)->out("audio"), a.audio[0]));
+        REQUIRE(graph.connect(a.frames, s.frames));
+        REQUIRE(graph.connect(s.audio[0], graph.node(out)->in("audio")));
+        if (crosses_spectral) {
+            REQUIRE(graph.connect(s.audio[0], graph.node(after)->in("audio")));
+        } else {
+            REQUIRE(graph.connect(before, 0, after, 0));
+        }
+        REQUIRE(graph.connect_feedback(after, 0, before, 0));
+        REQUIRE(graph.prepare(48000, 64) == !crosses_spectral);
+        if (!crosses_spectral) {
+            std::array<float, 64> input{}, output{};
+            const float* ip[] = {input.data()};
+            float* op[] = {output.data()};
+            graph.process({op, 1, 64}, {ip, 1, 64}, 64);
+            for (float value : output)
+                REQUIRE(value == 0);
+            REQUIRE(graph.routed_walk_fallbacks() == 0);
+        }
+    }
+}
