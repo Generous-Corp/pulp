@@ -185,13 +185,56 @@ class ScopedEnvUnset {
     std::optional<std::string> prev_;
 };
 
-/// Editors are refused in CI and headless environments; a test that opens
-/// one clears those variables for its scope.
+/// Set an environment variable for a scope, then put back what was there
+/// (unset included).
+class ScopedEnvSet {
+  public:
+    ScopedEnvSet(const char* name, const char* value) : name_(name) {
+        if (const char* prev = std::getenv(name))
+            prev_ = std::string(prev);
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), value);
+#else
+        ::setenv(name_.c_str(), value, 1);
+#endif
+    }
+    ~ScopedEnvSet() {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), prev_ ? prev_->c_str() : "");
+#else
+        if (prev_)
+            ::setenv(name_.c_str(), prev_->c_str(), 1);
+        else
+            ::unsetenv(name_.c_str());
+#endif
+    }
+    ScopedEnvSet(const ScopedEnvSet&) = delete;
+    ScopedEnvSet& operator=(const ScopedEnvSet&) = delete;
+
+  private:
+    std::string name_;
+    std::optional<std::string> prev_;
+};
+
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#define PULP_TEST_EDITOR_NEEDS_DISPLAY 1
+#else
+#define PULP_TEST_EDITOR_NEEDS_DISPLAY 0
+#endif
+
+/// Editors are refused in CI and headless environments, and on X11 platforms
+/// without a display; a test that opens one clears those variables for its
+/// scope. The recording editors never reach a display server, so a
+/// placeholder DISPLAY is enough.
 struct EditorEnvironment {
     ScopedEnvUnset disable_editor{"PULP_DISABLE_PLUGIN_EDITOR"};
     ScopedEnvUnset headless{"PULP_HEADLESS"};
     ScopedEnvUnset test_mode{"PULP_TEST_MODE"};
     ScopedEnvUnset ci{"CI"};
+#if PULP_TEST_EDITOR_NEEDS_DISPLAY
+    ScopedEnvSet display{"DISPLAY", ":99"};
+    ScopedEnvUnset wayland{"WAYLAND_DISPLAY"};
+#endif
 };
 
 /// The main thread's event loop, for an editor's own idle tick. On Apple
