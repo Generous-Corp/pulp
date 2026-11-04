@@ -16,6 +16,7 @@ using namespace live_swap_detail;
 
 bool SignalGraph::set_node_live_swap_policy(NodeId id, NodeLiveSwapPolicy policy) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return false;
     auto* n = node_mut_locked_(id);
     if (!n || n->type != NodeType::Plugin)
         return false;
@@ -26,6 +27,7 @@ bool SignalGraph::set_node_live_swap_policy(NodeId id, NodeLiveSwapPolicy policy
 
 bool SignalGraph::set_node_hosted_editor_open(NodeId id, bool open) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return false;
     auto* n = node_mut_locked_(id);
     if (!n || n->type != NodeType::Plugin)
         return false;

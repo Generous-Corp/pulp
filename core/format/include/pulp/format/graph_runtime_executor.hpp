@@ -1,4 +1,5 @@
 #pragma once
+#include <pulp/graph/spectral_frame.hpp>
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/process_block.hpp>
@@ -99,6 +100,8 @@ struct GraphRuntimeNodeProcessContext {
     // Borrowed, final plain-domain dense lanes for this node. The executor owns
     // both descriptors and samples; they remain valid only for this callback.
     std::span<const AudioRateModulationView> node_audio_rate_modulations;
+    const graph::SpectralFrameBatchView* spectral_input = nullptr;
+    std::span<graph::SpectralFrameBatchView* const> spectral_outputs;
 };
 
 using GraphRuntimeNodeProcessFn = bool (*)(
@@ -140,6 +143,8 @@ struct GraphRuntimeNodeBinding {
     // fans out or the source keeps its output across blocks. Hosted plug-in
     // slots and native cores, which pass inputs on as mutable, leave it false.
     bool reads_inputs_only = false;
+    const graph::SpectralFrameBatchView* spectral_input = nullptr;
+    std::span<graph::SpectralFrameBatchView* const> spectral_outputs;
 };
 
 /// Control-thread-built graph snapshot for GraphRuntimeExecutor.
@@ -287,6 +292,8 @@ struct GraphRuntimeExecutorResult {
 /// not be overloaded onto this shared pool.
 class GraphRuntimeBufferPool {
 public:
+    /// Render-owner reset of prepared audio/PDC storage without reallocating.
+    void clear_history() noexcept;
     GraphRuntimeBufferPool() = default;
     GraphRuntimeBufferPool(const GraphRuntimeBufferPool& other);
     GraphRuntimeBufferPool& operator=(const GraphRuntimeBufferPool& other);

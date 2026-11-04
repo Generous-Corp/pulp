@@ -67,6 +67,7 @@ void populate_named_ports(GraphNode& node) {
 // graph_mutation_mutex_ contract in signal_graph.hpp.
 NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return 0;
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::AudioInput;
@@ -80,6 +81,7 @@ NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
 
 NodeId SignalGraph::add_output_node(int channels, const std::string& name) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return 0;
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::AudioOutput;
@@ -93,6 +95,7 @@ NodeId SignalGraph::add_output_node(int channels, const std::string& name) {
 
 NodeId SignalGraph::add_plugin_node(const PluginInfo& info) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return 0;
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::Plugin;
@@ -110,6 +113,7 @@ NodeId SignalGraph::add_plugin_node(const PluginInfo& info) {
 NodeId SignalGraph::add_unresolved_plugin_node(const PluginInfo& info, int num_inputs,
                                                int num_outputs, const std::string& name) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return 0;
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::Plugin;
@@ -128,6 +132,7 @@ NodeId SignalGraph::add_unresolved_plugin_node(const PluginInfo& info, int num_i
 NodeId SignalGraph::add_plugin_node(std::unique_ptr<PluginSlot> slot, int num_inputs,
                                     int num_outputs, const std::string& name) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return 0;
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::Plugin;
@@ -159,6 +164,7 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
         return 0;
 
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return 0;
     if (std::any_of(processor_nodes_.begin(), processor_nodes_.end(), [&](const auto& entry) {
             return entry.second && entry.second->instance == instance;
         })) {
@@ -217,6 +223,7 @@ bool SignalGraph::set_processor_audio_input_provider(
 
 NodeId SignalGraph::add_gain_node(const std::string& name) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return 0;
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::Gain;
@@ -231,6 +238,7 @@ NodeId SignalGraph::add_gain_node(const std::string& name) {
 
 NodeId SignalGraph::add_midi_input_node(const std::string& name) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return 0;
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::MidiInput;
@@ -244,6 +252,7 @@ NodeId SignalGraph::add_midi_input_node(const std::string& name) {
 
 NodeId SignalGraph::add_midi_output_node(const std::string& name) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return 0;
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::MidiOutput;
@@ -294,6 +303,7 @@ NodeId SignalGraph::add_unresolved_custom_node(std::string_view type_id, int ver
     // The single locked leaf for the add_custom_node family — serializes the
     // nodes_ push against a concurrent prepare()/mutator.
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return 0;
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::Custom;
@@ -312,6 +322,7 @@ bool SignalGraph::remove_node(NodeId id) {
     // Serialize the nodes_ erase against a concurrent compile_()/node() scan on a
     // host thread (see add_gain_node for the lock-ordering rationale).
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return false;
     if (sample_region_for_node_locked_(id) != 0)
         return false;
     auto it =
@@ -332,6 +343,7 @@ bool SignalGraph::remove_node(NodeId id) {
 
 bool SignalGraph::connect(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return false;
     if (prepared_edit_origin_ == nullptr &&
         (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
@@ -339,6 +351,13 @@ bool SignalGraph::connect(NodeId source, PortIndex source_port, NodeId dest, Por
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n)
         return false;
+    // Numeric audio connections cannot identify a frame edge. Frame ports use
+    // the named typed overload, which validates identity and producer count.
+    if ((src_n->spectral_identity && src_n->type != NodeType::SpectralSynthesis)
+        || (dst_n->spectral_identity && dst_n->type != NodeType::SpectralAnalysis)) {
+        spectral_error_.store(SpectralError::InvalidConnection, std::memory_order_relaxed);
+        return false;
+    }
     if (!has_output_port(*src_n, source_port))
         return false;
     if (!has_input_port(*dst_n, dest_port))
@@ -356,6 +375,7 @@ bool SignalGraph::connect(NodeId source, PortIndex source_port, NodeId dest, Por
 
 bool SignalGraph::connect_midi(NodeId source, NodeId dest) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return false;
     if (prepared_edit_origin_ == nullptr &&
         (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
@@ -379,6 +399,7 @@ bool SignalGraph::connect_sidechain(NodeId source, PortIndex source_port, NodeId
     // bus. We reject other destinations early so callers fail loudly
     // instead of silently routing into a regular audio port.
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return false;
     if (prepared_edit_origin_ == nullptr &&
         (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
@@ -413,6 +434,7 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port, NodeI
                                      uint32_t dest_param_id, float range_lo, float range_hi,
                                      float smoothing_ms, AutomationMix mix) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return false;
     if (prepared_edit_origin_ == nullptr &&
         (sample_region_for_node_locked_(src) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
@@ -478,6 +500,7 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     // Holds graph_mutation_mutex_ across audio_rate_modulation_lane() below, which
     // is a lock-free helper that assumes the caller holds it (it scans nodes_).
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return false;
     if (prepared_edit_origin_ == nullptr &&
         (sample_region_for_node_locked_(src) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
@@ -592,6 +615,7 @@ bool SignalGraph::audio_rate_modulation_lane_locked_(const Connection& connectio
 bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port, NodeId dest,
                                    PortIndex dest_port) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return false;
     if (prepared_edit_origin_ == nullptr &&
         (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
@@ -615,10 +639,13 @@ bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port, NodeId 
 bool SignalGraph::disconnect(NodeId source, PortIndex source_port, NodeId dest,
                              PortIndex dest_port) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return false;
     if (prepared_edit_origin_ == nullptr &&
         (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
     Connection target{source, source_port, dest, dest_port};
+    if (const auto* n = node(source))
+        target.spectral = n->spectral_identity && n->type != NodeType::SpectralSynthesis;
     auto it = std::find(connections_.begin(), connections_.end(), target);
     if (it == connections_.end())
         return false;
@@ -630,6 +657,7 @@ bool SignalGraph::disconnect(NodeId source, PortIndex source_port, NodeId dest,
 bool SignalGraph::disconnect_modulation(NodeId source, PortIndex source_port, NodeId dest,
                                         uint32_t dest_param_id, bool audio_rate) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return false;
     if (prepared_edit_origin_ == nullptr &&
         (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
@@ -782,6 +810,7 @@ PortHandle GraphNode::out(std::string_view port) const {
 
 GraphResult SignalGraph::connect(const PortHandle& source, const PortHandle& dest) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_spectral_mutation_()) return {GraphResult::Code::UnknownPort, 0, 0, "spectral mutation refused", {}};
     const GraphNode* src = node(source.node);
     const GraphNode* dst = node(dest.node);
     if (!src || !dst)
@@ -822,10 +851,21 @@ GraphResult SignalGraph::connect(const PortHandle& source, const PortHandle& des
         return {GraphResult::Code::KindMismatch, dest.node, dp->index,
                 "port kind mismatch: '" + source.name + "' to '" + dest.name + "'",
                 "connect ports with the same kind"};
+    if ((sp->owner && (sp->owner != source.owner || sp->incarnation != source.incarnation))
+        || (dp->owner && (dp->owner != dest.owner || dp->incarnation != dest.incarnation)))
+        return {GraphResult::Code::UnknownPort, dest.node, dp->index, "stale or foreign port handle", "obtain this graph's current port"};
+    if (sp->kind == PortKind::Spectral) {
+        if (!src->spectral_identity || !dst->spectral_identity || src->spectral_identity != dst->spectral_identity)
+            return {GraphResult::Code::KindMismatch, dest.node, dp->index, "spectral identity mismatch", {}};
+        for (const auto& edge : connections_)
+            if (edge.spectral && edge.dest_node == dest.node)
+                return {GraphResult::Code::Duplicate, dest.node, dp->index, "spectral joins are unsupported", {}};
+    }
     if (would_create_cycle(source.node, dest.node))
         return {GraphResult::Code::IllegalCycle, dest.node, dp->index,
                 "illegal instantaneous cycle", "insert a feedback delay"};
     Connection c{source.node, sp->index, dest.node, dp->index};
+    c.spectral = sp->kind == PortKind::Spectral;
     for (const auto& existing : connections_)
         if (existing == c)
             return {GraphResult::Code::Duplicate, dest.node, dp->index, "duplicate connection",

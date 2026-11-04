@@ -80,7 +80,7 @@ struct SpectralFrameEngineConfig {
 
 enum class SpectralSplitResult : std::uint8_t {
     Ok, NotPrepared, InvalidBlock, InvalidFrame, ChronologyExhausted,
-    CapacityExceeded, NonfiniteSynthesis, OutputUnderrun
+    CapacityExceeded, NonfiniteSynthesis, OutputUnderrun, StreamStopped
 };
 
 inline constexpr int kSpectralFrameEngineMinimumFftSize = 256;
@@ -303,6 +303,26 @@ public:
     int num_bins() const { return num_bins_; }
     int channels() const { return config_.channels; }
 
+    /// Logical retained allocations, using actual container capacities and the
+    /// selected FFT provider's backing-store charge (excluding allocator metadata).
+    std::uint64_t retained_storage_bytes() const noexcept {
+        CheckedRetainedByteCharge charge(kTargetAddressMaximumBytes);
+        std::uint64_t fft_bytes = 0;
+        if (!checked_fft_retained_bytes<SampleType>(config_.fft_size, kTargetAddressMaximumBytes, fft_bytes)
+            || !charge.add_retained_bytes(fft_bytes)
+            || !charge.add<SampleType>(window_.capacity())
+            || !charge.add<SampleType>(input_ring_.capacity())
+            || !charge.add<SampleType>(output_ring_.capacity())
+            || !charge.add<SampleType>(norm_ring_.capacity())
+            || !charge.add<SampleType>(time_buf_.capacity())
+            || !charge.add<SampleType>(guarded_numerator_.capacity())
+            || !charge.add<SampleType>(guarded_norm_.capacity())
+            || !charge.add<std::complex<SampleType>>(frames_.capacity())
+            || !charge.add<std::complex<SampleType>*>(frame_ptrs_.capacity()))
+            return std::numeric_limits<std::uint64_t>::max();
+        return charge.total();
+    }
+
     /// Checked split analysis refuses the whole block before ingest on a clock
     /// or block-limit error. Frame borrows expire when the callback returns.
     template <typename Fn>
@@ -325,6 +345,7 @@ public:
     SpectralSplitResult synthesize_frame_guarded(
         const std::complex<SampleType>* const* frames) noexcept {
         if (!config_.guarded_split || num_bins_ == 0) return SpectralSplitResult::NotPrepared;
+        if (guarded_stopped_) return SpectralSplitResult::StreamStopped;
         const int n = config_.fft_size;
         constexpr auto limit = std::numeric_limits<std::int64_t>::max();
         if (synth_pos_ > limit - n) return SpectralSplitResult::ChronologyExhausted;
@@ -372,6 +393,15 @@ public:
         available_ = std::max(available_, synth_pos_);
         synth_pos_ += config_.analysis_hop;
         return SpectralSplitResult::Ok;
+    }
+
+    /// After a fatal frame at the current origin, prior samples are final:
+    /// this frame cannot contribute before its origin. Retain that prefix and
+    /// prohibit further synthesis until reset; no failing frame is committed.
+    void stop_synthesis_guarded() noexcept {
+        if (!config_.guarded_split) return;
+        available_ = std::max(available_, synth_pos_);
+        guarded_stopped_ = true;
     }
 
     /// Pop a finite prefix and return its length. On failure the caller keeps
@@ -542,6 +572,7 @@ public:
         out_count_ = 0;
         deferred_frames_ = nullptr;
         deferred_next_channel_ = 0;
+        guarded_stopped_ = false;
     }
 
 private:
@@ -674,6 +705,7 @@ private:
     std::vector<SampleType> time_buf_;                  // fft_size
     std::vector<SampleType> guarded_numerator_; // channels * fft_size
     std::vector<SampleType> guarded_norm_;      // fft_size
+    bool guarded_stopped_ = false;
 
     int input_pos_ = 0;
     std::int64_t samples_fed_ = 0;

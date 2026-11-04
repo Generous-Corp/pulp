@@ -40,6 +40,7 @@ struct Connection {
     float automation_range_hi     = 1.0f;  // plain param domain
     float automation_smoothing_ms = 0.0f;  // per-source pre-mix slew
     AutomationMix automation_mix  = AutomationMix::Replace;
+    bool spectral = false;
 
     bool operator==(const Connection& o) const {
         return source_node == o.source_node && source_port == o.source_port
@@ -47,6 +48,7 @@ struct Connection {
             && automation == o.automation
             && audio_rate_modulation == o.audio_rate_modulation
             && sidechain == o.sidechain
+            && spectral == o.spectral
             && ((automation || audio_rate_modulation)
                 ? automation_param_id == o.automation_param_id : true);
     }

@@ -579,6 +579,9 @@ catch_discover_tests(pulp-test-dspx06-graph-timing)
 # prepare()/reset() must come back at full strength, delayed by the reported
 # latency. Rendered through RenderScenario, so it shares the audio test support.
 add_executable(pulp-test-spectral-stream-start test_spectral_frame_engine_stream_start.cpp)
+add_executable(pulp-test-routed-spectral-ports test_routed_spectral_ports.cpp test_routed_spectral_faults.cpp harness/rt_allocation_probe.cpp)
+target_link_libraries(pulp-test-routed-spectral-ports PRIVATE pulp::host Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-routed-spectral-ports)
 target_link_libraries(pulp-test-spectral-stream-start PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-spectral-stream-start)
 

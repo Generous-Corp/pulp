@@ -103,7 +103,8 @@ GraphRuntimePlanResult build_graph_runtime_plan(
             if (spec.input_ports > limits.max_ports_per_node ||
                 spec.output_ports > limits.max_ports_per_node ||
                 spec.event_input_ports > limits.max_ports_per_node ||
-                spec.event_output_ports > limits.max_ports_per_node) {
+                spec.event_output_ports > limits.max_ports_per_node ||
+                spec.spectral_input_ports > 1 || spec.spectral_output_ports > 1) {
                 return fail(GraphRuntimePlanErrorCode::InvalidNodePortCount, i, spec.id,
                             "graph node exceeds the per-node port limit");
             }
@@ -111,6 +112,7 @@ GraphRuntimePlanResult build_graph_runtime_plan(
             total_ports += spec.output_ports;
             total_ports += spec.event_input_ports;
             total_ports += spec.event_output_ports;
+            total_ports += spec.spectral_input_ports + spec.spectral_output_ports;
             if (total_ports > limits.max_total_ports) {
                 return fail(GraphRuntimePlanErrorCode::TooManyPorts, i, spec.id,
                             "graph exceeds the total port limit");
@@ -131,6 +133,8 @@ GraphRuntimePlanResult build_graph_runtime_plan(
                 0,
                 0,
             });
+            result.plan.nodes.back().spectral_input_ports = spec.spectral_input_ports;
+            result.plan.nodes.back().spectral_output_ports = spec.spectral_output_ports;
         }
 
         std::sort(lookup.begin(), lookup.end(), [](const auto& a, const auto& b) {
@@ -164,7 +168,8 @@ GraphRuntimePlanResult build_graph_runtime_plan(
             }
 
             const auto& source = result.plan.nodes[source_index];
-            const auto source_ports = is_event(spec) ? source.event_output_ports
+            const auto source_ports = is_spectral(spec) ? source.spectral_output_ports
+                                      : is_event(spec) ? source.event_output_ports
                                                      : source.output_ports;
             if (spec.source_port >= source_ports) {
                 return fail(GraphRuntimePlanErrorCode::SourcePortOutOfRange, i,
@@ -179,7 +184,8 @@ GraphRuntimePlanResult build_graph_runtime_plan(
             // output port, so the source check above still holds.
             if (!is_automation_conn(spec)) {
                 const auto& dest = result.plan.nodes[dest_index];
-                const auto dest_ports = is_event(spec) ? dest.event_input_ports
+                const auto dest_ports = is_spectral(spec) ? dest.spectral_input_ports
+                                        : is_event(spec) ? dest.event_input_ports
                                                        : dest.input_ports;
                 if (spec.dest_port >= dest_ports) {
                     return fail(GraphRuntimePlanErrorCode::DestinationPortOutOfRange, i,

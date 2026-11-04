@@ -888,7 +888,7 @@ std::string GraphSerializer::to_json(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
     for (const auto& node : graph.nodes()) {
-        if (graph.is_processor_node(node.id)) {
+        if (graph.is_processor_node(node.id) || node.spectral_identity) {
             return {};
         }
     }

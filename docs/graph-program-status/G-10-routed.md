@@ -60,4 +60,25 @@ the remaining obligations below remain open until independently evidenced.
 - Every acceptance row: passing control, production mutation detected by
   confirm_failure, restored green; callback matrix qualification is separate.
 
-No build, mutation, callback, consumer, or PR receipt has yet been recorded.
+## Working evidence (not delivery qualification)
+
+The routed focused suite has passed 32,060 assertions across 11 cases. It covers
+named independent identity/mask execution, fixed/irregular partitions, fan-out,
+nested dry PDC, staged replacement, barrier-controlled late offers, rejected
+candidate/reset preservation, reader backpressure, exhaustion, fatal-prefix
+preservation, missing-frame replacement, capacity markers and C++ allocation
+probing. Additional chronology and zero-preservation controls are being added.
+The guarded engine suite passed 28,120 assertions across three cases.
+
+A guarded synthesis production mutation was detected and restored green at the
+initial engine revision. It is not current-head routed mutation qualification.
+The full build initially found an ambiguous generated prepared-edit connect
+probe; its explicit method cast is repaired and the full build is running again.
+The first gates attempt stopped at generated script-family drift. An independent
+advisory review is running. No clean installed-SDK execution, complete mutation
+matrix, callback timing qualification, gate pass, pushed head or PR is claimed.
+
+The 83-line standalone public consumer and documentation example are present.
+Notation/catalog coverage and the full 44.1/48/96 kHz by 32/64/128/256 callback
+qualification matrix remain unqualified. The allocation probe detects C++ new;
+it is not a lock/I/O audit, malloc interposer or timing receipt.

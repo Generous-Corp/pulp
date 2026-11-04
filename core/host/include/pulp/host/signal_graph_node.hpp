@@ -4,6 +4,7 @@
 
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
+#include <pulp/graph/spectral_frame.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -25,9 +26,12 @@ enum class NodeType {
     MidiInput,     // System MIDI input
     MidiOutput,    // System MIDI output
     Custom,        // String-keyed extension node
+    SpectralAnalysis,
+    SpectralStage,
+    SpectralSynthesis,
 };
 
-enum class PortKind : uint8_t { Audio, Sidechain, Midi, Event, Control, Param };
+enum class PortKind : uint8_t { Audio, Sidechain, Midi, Event, Control, Param, Spectral };
 
 struct PortHandle {
     NodeId node = 0;
@@ -35,6 +39,8 @@ struct PortHandle {
     bool output = false;
     std::string name;
     PortKind kind = PortKind::Audio;
+    std::uint64_t owner = 0;
+    std::uint64_t incarnation = 0;
 };
 
 struct GraphResult {
@@ -174,6 +180,9 @@ struct GraphNode {
 
     std::vector<PortHandle> input_ports;
     std::vector<PortHandle> output_ports;
+
+    std::optional<graph::SpectralIdentity> spectral_identity;
+    std::optional<graph::QualifiedSpectralStage> spectral_stage;
 
     PortHandle in(std::string_view port) const;
     PortHandle out(std::string_view port) const;

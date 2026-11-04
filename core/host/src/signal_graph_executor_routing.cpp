@@ -27,7 +27,8 @@ namespace pulp::host {
 // callers need not re-read the Connection.
 ConnectionClass classify(const Connection& c) {
     ConnectionClass cls;
-    cls.kind = c.midi ? graph::GraphRuntimeConnectionKind::Event
+    cls.kind = c.spectral ? graph::GraphRuntimeConnectionKind::Spectral
+               : c.midi ? graph::GraphRuntimeConnectionKind::Event
                : (c.automation || c.audio_rate_modulation)
                    ? graph::GraphRuntimeConnectionKind::Automation
                    : graph::GraphRuntimeConnectionKind::Audio;
@@ -41,6 +42,7 @@ bool connection_affects_latency(const Connection& c) {
     const ConnectionClass cls = classify(c);
     if (cls.feedback) return false;
     return cls.kind == graph::GraphRuntimeConnectionKind::Audio ||
+           cls.kind == graph::GraphRuntimeConnectionKind::Spectral ||
            (cls.kind == graph::GraphRuntimeConnectionKind::Automation && cls.audio_rate);
 }
 
@@ -238,6 +240,9 @@ gr::GraphRuntimeNodeKind map_kind(NodeType type) noexcept {
         case NodeType::AudioOutput: return gr::GraphRuntimeNodeKind::AudioOutput;
         case NodeType::MidiInput: return gr::GraphRuntimeNodeKind::MidiInput;
         case NodeType::MidiOutput: return gr::GraphRuntimeNodeKind::MidiOutput;
+        case NodeType::SpectralAnalysis: return gr::GraphRuntimeNodeKind::SpectralAnalysis;
+        case NodeType::SpectralStage: return gr::GraphRuntimeNodeKind::SpectralStage;
+        case NodeType::SpectralSynthesis: return gr::GraphRuntimeNodeKind::SpectralSynthesis;
         default: return gr::GraphRuntimeNodeKind::Processor;  // Gain / Plugin
     }
 }
@@ -247,6 +252,9 @@ bool node_eligible(const GraphNode& node) noexcept {
         case NodeType::AudioInput:
         case NodeType::AudioOutput:
         case NodeType::Gain:
+        case NodeType::SpectralAnalysis:
+        case NodeType::SpectralStage:
+        case NodeType::SpectralSynthesis:
         // MidiInput / MidiOutput carry no audio and run as no-op nodes on the
         // routed path; the host bridges their mailboxes around process_routed,
         // and the executor's MIDI gather routes events between them and plugins.
@@ -314,6 +322,12 @@ ExecutorPlanShape make_executor_plan_shape(
         }
         spec.persistent_output =
             node.type == NodeType::Plugin || node.type == NodeType::Custom;
+        if (node.spectral_identity) {
+            spec.spectral_input_ports = node.type != NodeType::SpectralAnalysis;
+            spec.spectral_output_ports = node.type != NodeType::SpectralSynthesis;
+            if (node.type == NodeType::SpectralSynthesis)
+                spec.latency_samples = node.spectral_identity->fft_size() + node.spectral_identity->hop();
+        }
         shape.nodes.push_back(spec);
     }
 
@@ -587,7 +601,12 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             if (n.id == id) { src = &n; break; }
         }
         if (src == nullptr) return false;
-        if (src->type == NodeType::Gain) {
+        if (src->spectral_identity) {
+            if (!binders.spectral_for || parallel_safe) return false;
+            auto binding = binders.spectral_for(id);
+            if (!binding.process) return false;
+            bindings.push_back(binding);
+        } else if (src->type == NodeType::Gain) {
             std::atomic<float>* atomic = gain_for ? gain_for(id) : nullptr;
             // Contract is "bit-identical or fail": a Gain with no live atomic
             // would silently fall back to unity gain and diverge.

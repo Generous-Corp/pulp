@@ -9,9 +9,10 @@ namespace pulp::host {
 SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHandle& source,
                                                                   const PortHandle& destination) {
     GraphMutationLock lock(*this);
+    if (refuse_spectral_mutation_()) return EdgeProbeStatus::UnsupportedExecution;
     if (in_swap_edit_)
         return EdgeProbeStatus::Busy;
-    const auto& cg = live_slot_.live();
+    const auto cg = read_snapshot_(true);
     if (!cg)
         return EdgeProbeStatus::Unprepared;
     if (!canonical_executor_routing_enabled() || parallel_routing_enabled() ||
@@ -68,7 +69,8 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHand
 
 void SignalGraph::detach_audio_edge_probe() {
     GraphMutationLock lock(*this);
-    if (const auto& cg = live_slot_.live()) {
+    if (refuse_spectral_mutation_()) return;
+    if (const auto cg = read_snapshot_(true)) {
         cg->audio_edge_probe.reset();
         cg->audio_edge_probe_identity = {};
     }
@@ -76,19 +78,19 @@ void SignalGraph::detach_audio_edge_probe() {
 
 bool SignalGraph::read_audio_edge_probe(graph::GraphRuntimeProbeSample& sample) {
     GraphMutationLock lock(*this);
-    const auto& cg = live_slot_.live();
+    const auto cg = read_snapshot_(true);
     return cg && cg->audio_edge_probe && cg->audio_edge_probe->samples.try_pop(sample);
 }
 
 std::uint64_t SignalGraph::audio_edge_probe_dropped() const {
     GraphMutationLock lock(*this);
-    const auto& cg = live_slot_.live();
+    const auto cg = read_snapshot_(true);
     return cg && cg->audio_edge_probe ? cg->audio_edge_probe->samples.dropped() : 0;
 }
 
 SignalGraph::EdgeProbeStatus SignalGraph::audio_edge_probe_status() const {
     GraphMutationLock lock(*this);
-    const auto& cg = live_slot_.live();
+    const auto cg = read_snapshot_(true);
     if (!cg)
         return EdgeProbeStatus::Unprepared;
     return cg->audio_edge_probe && cg->audio_edge_probe->samples.attached()
@@ -98,7 +100,7 @@ SignalGraph::EdgeProbeStatus SignalGraph::audio_edge_probe_status() const {
 
 SignalGraph::EdgeProbeIdentity SignalGraph::audio_edge_probe_identity() const {
     GraphMutationLock lock(*this);
-    const auto& cg = live_slot_.live();
+    const auto cg = read_snapshot_(true);
     return cg && cg->audio_edge_probe ? cg->audio_edge_probe_identity : EdgeProbeIdentity{};
 }
 
@@ -226,7 +228,7 @@ SignalGraph::query_custom_node_diagnostics(CustomNodeDiagnosticHandle handle, st
     // Slot::live() is a shared_ptr control-thread owner, not the RT atomic raw
     // pointer. Copy under the same mutation lock used by publication/reclamation.
     // No reader pin is acquired under this lock (release waits for those pins).
-    const auto live = live_slot_.live();
+    const auto live = read_snapshot_();
     if (!live || !found->custom_instance) {
         result.availability = CustomNodeDiagnosticAvailability::NotPrepared;
         return result;

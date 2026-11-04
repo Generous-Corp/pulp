@@ -38,7 +38,7 @@ std::uint64_t next_nonzero_mailbox_sequence(std::atomic<std::uint64_t>& counter)
 bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) noexcept {
     // Pin the live snapshot for the whole dereference. Without the guard a
     // concurrent prepare()/release()/invalidate could retire+free `cg` mid-use.
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_(true);
     auto* cg = read_guard.get();
     if (!cg)
         return false;
@@ -67,7 +67,7 @@ bool SignalGraph::inject_parameter_events(NodeId id, const state::ParameterEvent
     // Same reader-pinned, single-writer publication discipline as inject_midi.
     // The fixed-capacity writer scratch and TripleBuffer were prepared with the
     // snapshot, so this path performs no allocation.
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_(true);
     auto* cg = read_guard.get();
     if (!cg)
         return false;
@@ -123,7 +123,7 @@ bool SignalGraph::inject_exact_parameter_events_into_snapshot_(
 }
 
 bool SignalGraph::seed_midi_input_sequence_for_test(NodeId id, std::uint64_t predecessor) noexcept {
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_(true);
     auto* cg = read_guard.get();
     if (!cg)
         return false;
@@ -139,7 +139,7 @@ bool SignalGraph::seed_midi_input_sequence_for_test(NodeId id, std::uint64_t pre
 }
 
 std::uint64_t SignalGraph::midi_input_sequence_for_test(NodeId id) const noexcept {
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_(true);
     auto* cg = read_guard.get();
     if (!cg)
         return 0;
@@ -186,7 +186,7 @@ SignalGraph::append_parameter_mailbox_events_(void* runtime,
 bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
     // Pin the live snapshot for the whole dereference (see inject_midi). const
     // method: Slot::read() only touches the slot's mutable reader counter.
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_(true);
     auto* cg = read_guard.get();
     if (!cg)
         return false;
@@ -232,7 +232,7 @@ bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
 
 int SignalGraph::node_latency_samples(NodeId id) const {
     // Pin the live snapshot for the whole dereference (see inject_midi).
-    auto read_guard = live_slot_.read();
+    auto read_guard = read_snapshot_(true);
     const auto* cg = read_guard.get();
     if (!cg)
         return 0;

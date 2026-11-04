@@ -2,6 +2,7 @@
 // This translation unit owns candidate construction and publication preparation;
 // the public SignalGraph API and the legacy reference walk remain unchanged.
 #include "signal_graph_internal.hpp"
+#include "spectral_graph_internal.hpp"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -131,8 +132,7 @@ void SignalGraph::clear_prepared_stats_locked_() {
     transport_suppressed_for_anticipation_.store(0, std::memory_order_relaxed);
 }
 
-void SignalGraph::publish_prepared_stats_locked_(const CompiledGraph& cg) {
-    assert_graph_mutation_locked_();
+SignalGraph::PreparedStats SignalGraph::stats_for_snapshot_(const CompiledGraph& cg) {
     std::size_t total_ports = 0;
     for (const auto& [_, shape] : cg.shapes) {
         total_ports += static_cast<std::size_t>(std::max(0, shape.num_input_ports));
@@ -155,15 +155,33 @@ void SignalGraph::publish_prepared_stats_locked_(const CompiledGraph& cg) {
 
     const std::size_t total_buffer_bytes = node_audio_bytes + automation_bytes + delay_bytes;
 
-    prepared_node_count_.store(cg.runtime.size(), std::memory_order_relaxed);
-    prepared_ordered_node_count_.store(cg.ordered_runtime.size(), std::memory_order_relaxed);
-    prepared_connection_count_.store(cg.connections.size(), std::memory_order_relaxed);
-    prepared_total_ports_.store(total_ports, std::memory_order_relaxed);
-    prepared_max_block_size_.store(cg.max_block_size, std::memory_order_relaxed);
-    prepared_node_audio_buffer_bytes_.store(node_audio_bytes, std::memory_order_relaxed);
-    prepared_automation_buffer_bytes_.store(automation_bytes, std::memory_order_relaxed);
-    prepared_delay_buffer_bytes_.store(delay_bytes, std::memory_order_relaxed);
-    prepared_total_buffer_bytes_.store(total_buffer_bytes, std::memory_order_relaxed);
+    PreparedStats result;
+    result.snapshot_generation = cg.execution_generation;
+    result.node_count = cg.runtime.size();
+    result.ordered_node_count = cg.ordered_runtime.size();
+    result.connection_count = cg.connections.size();
+    result.total_ports = total_ports;
+    result.max_block_size = cg.max_block_size;
+    result.node_audio_buffer_bytes = node_audio_bytes;
+    result.automation_buffer_bytes = automation_bytes;
+    result.delay_buffer_bytes = delay_bytes;
+    result.total_prepared_buffer_bytes = total_buffer_bytes;
+    result.spectral_buffer_bytes = cg.spectral ? cg.spectral->charged_bytes : 0;
+    return result;
+}
+
+void SignalGraph::publish_prepared_stats_locked_(const CompiledGraph& cg) {
+    assert_graph_mutation_locked_();
+    const auto stats = stats_for_snapshot_(cg);
+    prepared_node_count_.store(stats.node_count, std::memory_order_relaxed);
+    prepared_ordered_node_count_.store(stats.ordered_node_count, std::memory_order_relaxed);
+    prepared_connection_count_.store(stats.connection_count, std::memory_order_relaxed);
+    prepared_total_ports_.store(stats.total_ports, std::memory_order_relaxed);
+    prepared_max_block_size_.store(stats.max_block_size, std::memory_order_relaxed);
+    prepared_node_audio_buffer_bytes_.store(stats.node_audio_buffer_bytes, std::memory_order_relaxed);
+    prepared_automation_buffer_bytes_.store(stats.automation_buffer_bytes, std::memory_order_relaxed);
+    prepared_delay_buffer_bytes_.store(stats.delay_buffer_bytes, std::memory_order_relaxed);
+    prepared_total_buffer_bytes_.store(stats.total_prepared_buffer_bytes, std::memory_order_relaxed);
 }
 
 void SignalGraph::compute_latencies_for_(
@@ -206,6 +224,15 @@ void SignalGraph::compute_latencies_for_(
         if (auto cit = cg.custom_latency_samples.find(id); cit != cg.custom_latency_samples.end()) {
             added = cit->second;
         }
+        if (cg.spectral) {
+            if (const auto* spectral = cg.spectral->find(id);
+                spectral && spectral->type == NodeType::SpectralSynthesis)
+                added = spectral->identity.fft_size() + spectral->identity.hop();
+            if (rt.input_latency + added > std::numeric_limits<int>::max()) {
+                cg.total_latency_samples = -1;
+                return;
+            }
+        }
         rt.output_latency = rt.input_latency + added;
     }
 
@@ -234,7 +261,7 @@ void SignalGraph::compute_latencies_for_(
         }
         // Non-feedback edges that carry no latency-aligned audio (MIDI, sparse
         // automation) get no delay line — single-sourced via classify().
-        if (!connection_affects_latency(c))
+        if (c.spectral || !connection_affects_latency(c))
             continue;
 
         int64_t want = dst_it->second.input_latency - src_it->second.output_latency;
@@ -328,6 +355,9 @@ bool SignalGraph::build_routing_snapshot_locked_(CompiledGraph& cg, bool paralle
                         : nullptr,
             };
         },
+        .spectral_for = [&cg](NodeId id) {
+            return cg.spectral ? cg.spectral->binding(id) : format::GraphRuntimeNodeBinding{};
+        },
     };
     if (!build_executor_snapshot(cg.executable_nodes, cg.connections, binders, plugin_ctx,
                                  cg.routed.plugin_scratch, out, parallel_safe, &custom_ctx)) {
@@ -374,7 +404,15 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         return nullptr;
     }
     auto cg = std::make_shared<CompiledGraph>();
+    cg->execution_generation = authoring_generation_;
+    if (std::any_of(nodes_.begin(), nodes_.end(), [](const auto& n) { return n.spectral_identity.has_value(); })) {
+        cg->spectral = std::make_shared<SpectralRuntimeBank>();
+        const auto error = cg->spectral->prepare(nodes_, connections_, sample_rate, max_block_size);
+        spectral_error_.store(error, std::memory_order_relaxed);
+        if (error != SpectralError::None) return nullptr;
+    }
     cg->max_block_size = max_block_size;
+    if (!cg->spectral) cg->legacy_processing_lifetime = processing_handle_lifetime_;
     cg->sample_rate = sample_rate;
     cg->sample_region_bank = prepared_sample_region_bank_;
     cg->sample_regions = prepared_sample_regions_;
@@ -862,6 +900,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         }
         if (!infos.empty()) {
             audio::LiveDspTelemetryConfig tcfg;
+            tcfg.spectral_diagnostics = cg->spectral != nullptr;
             cg->live_dsp_telemetry.prepare(tcfg, infos);
             cg->live_dsp_telemetry.set_enabled(
                 desired_live_dsp_telemetry_enabled_.load(std::memory_order_relaxed));
@@ -869,6 +908,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     }
 
     compute_latencies_for_(*cg, cg->connections, prepared_plugin_meta_);
+    if (cg->total_latency_samples < 0) return nullptr;
 
     // Build the canonical-executor routing for this snapshot when the topology
     // is eligible. The Gain bindings resolve to THIS snapshot's own gain atomics
@@ -955,7 +995,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         // node lists are SHARED with the serial path (identical plan). On any
         // failure the parallel path stays invalid and process() falls back.
         cg->routed.parallel.valid = false;
-        if (cg->routed.serial.valid && parallel_routing_enabled_.load(std::memory_order_relaxed) &&
+        if (!cg->spectral && cg->routed.serial.valid && parallel_routing_enabled_.load(std::memory_order_relaxed) &&
             max_block_size > 0) {
             // Parallel-safe routed snapshot: same resolver set as the serial
             // path (via build_routing_snapshot_locked_) but a reuse-free buffer
@@ -1008,7 +1048,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         const bool has_pdc =
             std::any_of(cg->connection_delays.begin(), cg->connection_delays.end(),
                         [](const ConnectionDelay& delay) { return delay.delay_samples > 0; });
-        if (has_pdc) {
+        if (cg->spectral) {
+            if (!cg->routed.serial.valid) return nullptr;
+            cg->pdc_execution_domain = PdcExecutionDomain::RoutedSerial;
+            cg->total_latency_samples = cg->routed.serial.snapshot.buffer_assignment().total_latency_samples;
+        } else if (has_pdc) {
             if (cg->routed.parallel.valid &&
                 parallel_routing_enabled_.load(std::memory_order_relaxed)) {
                 cg->pdc_execution_domain = PdcExecutionDomain::RoutedParallel;
@@ -1028,7 +1072,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         // Recomputed every compile: with no active anticipation no node is forced
         // exterior, so the counter must read 0 rather than keep a prior value.
         transport_suppressed_for_anticipation_.store(0, std::memory_order_relaxed);
-        if (mode == CompileMode::Normal && cg->routed.serial.valid && cg->processors.empty() &&
+        if (!cg->spectral && mode == CompileMode::Normal && cg->routed.serial.valid && cg->processors.empty() &&
             anticipation_enabled_.load(std::memory_order_relaxed) && max_block_size > 0) {
             std::vector<NodeId> exact_parameter_input_nodes;
             exact_parameter_input_nodes.reserve(exact_parameter_event_claims_.size());
@@ -1162,7 +1206,7 @@ int SignalGraph::pump_anticipation(int max_blocks) {
         // The pin is released by the guard's destructor before the busy flag
         // clears, so a prepare() waiting on the reader drain cannot observe a
         // stale pin from a pump that has already finished.
-        auto read_guard = live_slot_.read();
+        auto read_guard = read_snapshot_();
         if (auto* cg = read_guard.get()) {
             if (cg->anticipation.valid && max_blocks > 0) {
                 rendered = cg->anticipation.lane.render_ahead(max_blocks);
@@ -1322,6 +1366,17 @@ bool SignalGraph::prepare_impl_(double sample_rate, int max_block_size,
     // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
     // never invert order with the reader-drain handshake.
     GraphMutationLock mutation_lock(*this);
+    if (spectral_mode_.load(std::memory_order_acquire)) {
+        spectral_error_.store(SpectralError::UnsupportedOperation, std::memory_order_relaxed);
+        return false;
+    }
+    const bool wants_spectral = std::any_of(nodes_.begin(), nodes_.end(),
+        [](const auto& node) { return node.spectral_identity.has_value(); });
+    if (wants_spectral && (processing_handle_lifetime_.use_count() != 1 || live_slot_.has_value()
+                           || spectral_terminal_)) {
+        spectral_error_.store(SpectralError::RequiresStoppedController, std::memory_order_relaxed);
+        return false;
+    }
     ++authoring_generation_;
     last_prepare_custom_failure_node_ = 0;
 
@@ -1497,11 +1552,23 @@ bool SignalGraph::prepare_impl_(double sample_rate, int max_block_size,
         return false;
     total_latency_samples_.store(cg->total_latency_samples, std::memory_order_relaxed);
     publish_prepared_stats_locked_(*cg);
-    live_slot_.publish(std::move(cg));
+    if (cg->spectral && prepared_edit_origin_ == nullptr) {
+        if (diagnostic_graph_identity_ > std::numeric_limits<std::uint32_t>::max()) {
+            spectral_error_.store(SpectralError::EpochExhausted, std::memory_order_relaxed);
+            return false;
+        }
+        spectral_slots_[0] = std::move(cg);
+        spectral_active_.store(0, std::memory_order_seq_cst);
+        spectral_render_generation_ = authoring_generation_;
+        spectral_mode_.store(true, std::memory_order_release);
+    } else {
+        live_slot_.publish(std::move(cg));
+    }
     return true;
 }
 
 void SignalGraph::set_limits(GraphLimits limits) {
+    if (refuse_spectral_mutation_()) return;
     // Mutates limits_ (read by validate_generated_graph under the lock) and drives
     // invalidate_live_locked_(); serialize against a concurrent prepare()/mutator.
     GraphMutationLock mutation_lock(*this);

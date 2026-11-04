@@ -235,6 +235,7 @@ struct ExecutorSnapshotBinders {
     // parameter-event mailbox. Empty means this snapshot has no injected
     // parameter events (for example baked/external routing callers).
     std::function<ParameterEventInjectionBinding(NodeId)> parameter_events_for;
+    std::function<format::GraphRuntimeNodeBinding(NodeId)> spectral_for;
 };
 
 // Build the executor snapshot (plan + bindings) for an eligible topology,
