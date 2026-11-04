@@ -325,7 +325,7 @@ class ProtectedLinuxFallbackTests(unittest.TestCase):
         checkout = next(
             step
             for step in self.linux["steps"]
-            if step.get("uses") == "actions/checkout@v7"
+            if step.get("uses", "").startswith("actions/checkout@v7")
         )
         checkout_ref = " ".join(checkout["with"]["ref"].split())
         self.assertIn(
