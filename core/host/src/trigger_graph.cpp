@@ -1,6 +1,7 @@
 #include "signal_graph_internal.hpp"
 
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/format/process_context.hpp>
+#include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/trigger_graph.hpp>
 
 #include <algorithm>

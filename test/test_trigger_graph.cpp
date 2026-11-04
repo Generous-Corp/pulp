@@ -3,8 +3,8 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
-#include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
+#include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/trigger_graph.hpp>
 #include <vector>
 
