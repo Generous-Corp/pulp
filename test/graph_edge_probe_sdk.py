@@ -8,7 +8,7 @@ import struct
 
 
 def run(command, cwd, input_text=None):
-    return subprocess.run(command, cwd=cwd, input=input_text, text=True,
+    return subprocess.run(command, cwd=cwd, input=input_text, text=True, encoding="utf-8",
                           capture_output=True, timeout=45, check=False)
 
 
