@@ -41,6 +41,13 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
     // readers can pin the same way.
     auto read_guard = read_snapshot_();
     if (typed_trigger_authoring_.load(std::memory_order_acquire)) {
+        // Authoring can unpublish the live generation while retaining the typed
+        // marker. Preserve the ordinary null-snapshot fail-closed silence in
+        // that window instead of leaving stale output untouched.
+        if (!read_guard) {
+            process_snapshot_impl(output, input, num_samples, transport, nullptr);
+            return;
+        }
         (void)process_trigger_snapshot_(output, input, num_samples, transport, read_guard.get());
         return;
     }

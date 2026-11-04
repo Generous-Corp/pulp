@@ -395,6 +395,18 @@ TEST_CASE("Removing typed factories restores ordinary graph preparation", "[trig
     CHECK(block.output[0] == 0.75f);
 }
 
+TEST_CASE("Typed process silences after live snapshot invalidation", "[trigger]") {
+    Fixture fixture;
+    Block block;
+    block.output.fill(91);
+    REQUIRE(fixture.graph.add_gain_node() != 0);
+
+    // Authoring invalidates the published generation while retaining the typed
+    // authoring marker. The ordinary null-snapshot path must still clear output.
+    fixture.graph.process(block.out, block.in, 1);
+    CHECK(block.output[0] == 0);
+}
+
 TEST_CASE("Typed contraction preserves both members external audio ports", "[trigger]") {
     SignalGraph graph;
     auto input = graph.add_input_node(2);
