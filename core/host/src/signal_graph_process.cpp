@@ -55,6 +55,12 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
     }
 
     SampleRegionExecutionDomain::Admission sample_region_admission;
+    // Snapshot-owned instrumentation never survives a transport discontinuity
+    // or a switch to a backend this source-side serial tap does not observe.
+    if (cg->audio_edge_probe &&
+        ((transport && transport->reset_requested) || !canonical_executor_routing_enabled() ||
+         parallel_routing_enabled() || anticipation_enabled()))
+        cg->audio_edge_probe->samples.detach();
     if (cg->sample_region_bank) {
         sample_region_admission = cg->sample_region_bank->domain().try_admit(
             cg->sample_region_bank->binding_generation());
@@ -387,7 +393,8 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                     return executor_.process_routed(
                         block, cg->routed.serial.snapshot, cg->routed.serial.pool,
                         has_midi ? &cg->routed.midi : nullptr,
-                        has_automation ? &cg->routed.automation : nullptr);
+                        has_automation ? &cg->routed.automation : nullptr, {}, {}, {}, {}, {},
+                        cg->audio_edge_probe.get());
                 });
                 if (dispatch == RoutedDispatchResult::success) {
                     return;

@@ -319,12 +319,12 @@ jobs:
     timeout-minutes: 10
     name: yamllint + actionlint + structural parse
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.12'
 

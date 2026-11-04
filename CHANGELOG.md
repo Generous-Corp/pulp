@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1500"></a>
+## [1.50.0] - 2026-11-03
+
+- release/version bump ([#11474](https://github.com/Generous-Corp/pulp/pull/11474))
+- feature/editor ui package hook ([#11446](https://github.com/Generous-Corp/pulp/pull/11446))
+- agent/g10g11 cookbook ([#11458](https://github.com/Generous-Corp/pulp/pull/11458))
+- codex/windows native standalone fix 20261103 ([#11459](https://github.com/Generous-Corp/pulp/pull/11459))
+
 <a id="v1490"></a>
 ## [1.49.0] - 2026-11-03
 
@@ -12127,6 +12135,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.50.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.50.0
 [1.49.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.49.0
 [1.48.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.48.0
 [1.47.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.47.0

@@ -37,7 +37,7 @@ jobs:
       matrix: ${{ steps.legs.outputs.matrix }}
       deferred: ${{ steps.legs.outputs.deferred }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           sparse-checkout: tools/scripts/windows_runner_selector.py
           sparse-checkout-cone-mode: false
@@ -140,7 +140,7 @@ jobs:
     name: ${{ matrix.leg }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: false
 
@@ -366,7 +366,7 @@ jobs:
 
       - name: Upload installed-SDK GPU-audio lifecycle receipt
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: control-shipping-${{ matrix.leg }}-gpu-audio-lifecycle
           if-no-files-found: error
@@ -409,7 +409,7 @@ jobs:
             --output '${{ matrix.leg }}.native-shipping-leg.json'
 
       - name: Upload native scanner reports
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: control-shipping-${{ matrix.leg }}
           if-no-files-found: error
@@ -424,7 +424,7 @@ jobs:
     runs-on: ubuntu-latest
     name: consolidated evidence
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           lfs: false
       - uses: actions/download-artifact@v8
@@ -448,7 +448,7 @@ jobs:
             "${deferred_args[@]}"
         shell: bash
       - name: Upload consolidated evidence
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: control-shipping-native-evidence
           if-no-files-found: error
