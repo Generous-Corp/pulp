@@ -15,7 +15,9 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 
+#include <cstdint>
 #include <memory>
+#include <thread>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -294,6 +296,45 @@ TEST_CASE("a ParamPort's parameter list is its own and outlives the store",
     REQUIRE(gain->name == "Gain");
     REQUIRE(params[1].name == "Mix");
     REQUIRE(port.info(kMix) == &params[1]);
+}
+
+namespace pulp::format::detail {
+// Defined in editor_host.cpp: listener registrations reset so far.
+std::uint64_t param_port_listener_resets();
+} // namespace pulp::format::detail
+
+TEST_CASE("each ParamPort listener registration is reset exactly once",
+          "[editor-host][param-port]") {
+    using pulp::format::detail::param_port_listener_resets;
+    Fixture f;
+    SECTION("disconnect, then the subscription") {
+        StateStoreParamPort port(f.store);
+        auto subscription = port.add_listener([](ParamID, float) {});
+        const auto before = param_port_listener_resets();
+        port.disconnect();
+        subscription.reset();
+        REQUIRE(param_port_listener_resets() - before == 1);
+    }
+    SECTION("the subscription, then disconnect") {
+        StateStoreParamPort port(f.store);
+        auto subscription = port.add_listener([](ParamID, float) {});
+        const auto before = param_port_listener_resets();
+        subscription.reset();
+        port.disconnect();
+        REQUIRE(param_port_listener_resets() - before == 1);
+    }
+    SECTION("both at once, on two threads") {
+        constexpr int kRounds = 500;
+        const auto before = param_port_listener_resets();
+        for (int round = 0; round < kRounds; ++round) {
+            StateStoreParamPort port(f.store);
+            auto subscription = port.add_listener([](ParamID, float) {});
+            std::thread disconnector([&port] { port.disconnect(); });
+            subscription.reset();
+            disconnector.join();
+        }
+        REQUIRE(param_port_listener_resets() - before == kRounds);
+    }
 }
 
 TEST_CASE("a disconnected ParamPort outlives its store", "[editor-host][param-port]") {

@@ -208,7 +208,14 @@ class StateStoreParamPort final : public ParamPort {
     /// let go of the store, which may be destroyed once this returns. Waits
     /// for a store call already in progress on another thread to finish; the
     /// port never calls the store while holding its own lock. Any thread;
-    /// idempotent.
+    /// idempotent; never from inside one of this port's own store callbacks.
+    ///
+    /// Residual risk, accepted: that wait hangs a host that disconnects (for
+    /// example by disposing of the plug-in) off the main thread while holding
+    /// a lock its own main-thread parameter callback needs. Not waiting would
+    /// let that callback reach the departing instance after it is gone. A wait
+    /// longer than about a second is logged once, so such a hang can be told
+    /// apart.
     void disconnect();
     /// False after `disconnect()`.
     bool connected() const;

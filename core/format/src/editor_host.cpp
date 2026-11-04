@@ -3,16 +3,59 @@
 
 #include <pulp/format/editor_host.hpp>
 
+#include <pulp/runtime/log.hpp>
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/store.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <utility>
 #include <vector>
 #include <unordered_map>
 namespace pulp::format {
+
+namespace detail {
+
+namespace {
+std::atomic<std::uint64_t> g_param_port_listener_resets{0};
+}
+
+// Listener tokens a StateStoreParamPort has reset, process-wide. For tests
+// that prove each registration is reset exactly once.
+std::uint64_t param_port_listener_resets() {
+    return g_param_port_listener_resets.load();
+}
+
+} // namespace detail
+
+namespace {
+
+// Store calls the port is making on this thread. disconnect() waits for the
+// port's store calls to finish, so it must not run inside one on the same
+// thread.
+thread_local int t_port_store_calls = 0;
+
+// One listener registration, reset exactly once: by the subscription that
+// owns it or by disconnect(), whichever claims it first. Both may run at once
+// on different threads.
+struct Registration {
+    explicit Registration(state::ListenerToken t) : token(std::move(t)) {}
+    void reset_once() {
+        if (claimed.exchange(true))
+            return;
+        token.reset();
+        detail::g_param_port_listener_resets.fetch_add(1);
+    }
+    state::ListenerToken token;
+    std::atomic<bool> claimed{false};
+};
+
+} // namespace
 
 // The port's state, shared with its subscriptions so one can be cancelled
 // after the port is gone.
@@ -32,7 +75,7 @@ struct StateStoreParamPort::Link {
     state::StateStore* store = nullptr;
     mutable int users = 0;
     std::unordered_map<state::ParamID, int> held;
-    std::vector<std::shared_ptr<state::ListenerToken>> tokens;
+    std::vector<std::shared_ptr<Registration>> tokens;
     // The parameter list as it was when the port was made, so the pointers
     // params() and info() hand out stay valid for the port's lifetime, store
     // or no store.
@@ -48,7 +91,9 @@ struct StateStoreParamPort::Link {
             current = store;
             ++users;
         }
+        ++t_port_store_calls;
         use(*current);
+        --t_port_store_calls;
         std::lock_guard lock(mutex);
         if (--users == 0)
             idle.notify_all();
@@ -133,31 +178,32 @@ void StateStoreParamPort::end(state::ParamID id) {
 }
 
 ParamSubscription StateStoreParamPort::add_listener(Listener listener) {
-    std::shared_ptr<state::ListenerToken> token;
+    std::shared_ptr<Registration> registration;
     const bool connected = link_->with_store([&](state::StateStore& store) {
         // Main-thread delivery coalesces audio-thread writes to their latest
         // value; Reconcile replays the current value after a state restore so
         // an editor's cached control positions follow the restored state.
-        token = std::make_shared<state::ListenerToken>(
+        registration = std::make_shared<Registration>(
             store.add_listener(std::move(listener), state::ListenerThread::Main,
                                state::ListenerRestoreBehavior::Reconcile));
     });
-    if (!connected || !token)
+    if (!connected || !registration)
         return {};
     {
         std::lock_guard lock(link_->mutex);
-        link_->tokens.push_back(token);
+        link_->tokens.push_back(registration);
     }
     std::weak_ptr<Link> weak = link_;
     // A token holds its store's listener registry weakly, so resetting it is
-    // safe after the store is gone.
-    return ParamSubscription([weak, token] {
+    // safe after the store is gone. disconnect() may be resetting the same
+    // registration on another thread; reset_once() lets only one of them.
+    return ParamSubscription([weak, registration] {
         if (auto link = weak.lock()) {
             std::lock_guard lock(link->mutex);
             auto& tokens = link->tokens;
-            tokens.erase(std::remove(tokens.begin(), tokens.end(), token), tokens.end());
+            tokens.erase(std::remove(tokens.begin(), tokens.end(), registration), tokens.end());
         }
-        token->reset();
+        registration->reset_once();
     });
 }
 
@@ -181,13 +227,33 @@ void StateStoreParamPort::release_all() {
 void StateStoreParamPort::disconnect() {
     state::StateStore* store = nullptr;
     std::unordered_map<state::ParamID, int> ledger;
-    std::vector<std::shared_ptr<state::ListenerToken>> tokens;
+    std::vector<std::shared_ptr<Registration>> tokens;
+    // Inside one of this thread's own store calls the wait below would wait
+    // for itself (the lock is recursive, so it would not even block first).
+    assert(t_port_store_calls == 0 && "StateStoreParamPort::disconnect() inside a store call");
+    const bool may_wait = t_port_store_calls == 0;
+    if (!may_wait)
+        runtime::log_error("editor host: a port was disconnected from inside one of its own store "
+                           "calls; not waiting for it");
     {
         std::unique_lock lock(link_->mutex);
         store = std::exchange(link_->store, nullptr);
         // No new store call can start; let the ones already inside finish,
-        // so nothing touches the store once this returns.
-        link_->idle.wait(lock, [this] { return link_->users == 0; });
+        // so nothing touches the store once this returns. This wait is a
+        // known, accepted risk: it can only hang a host that disposes off the
+        // main thread while holding a lock its own main-thread parameter
+        // callback needs. Not waiting (or waiting with a bound) would instead
+        // let a gesture call into the departing instance run after it is gone.
+        const auto idle = [this] { return link_->users == 0; };
+        if (may_wait && !link_->idle.wait_for(lock, std::chrono::seconds(1), idle)) {
+            static std::atomic<bool> reported{false};
+            if (!reported.exchange(true))
+                runtime::log_error("editor host: disconnecting an editor's port is waiting for a "
+                                   "parameter call still running on another thread; a host that "
+                                   "holds a lock that call needs while it disposes of the plug-in "
+                                   "will hang here");
+            link_->idle.wait(lock, idle);
+        }
         ledger = std::move(link_->held);
         link_->held.clear();
         tokens = std::move(link_->tokens);
@@ -198,8 +264,8 @@ void StateStoreParamPort::disconnect() {
     for (const auto& [id, count] : ledger)
         for (int i = 0; i < count; ++i)
             store->release_gesture(id);
-    for (auto& token : tokens)
-        token->reset();
+    for (auto& registration : tokens)
+        registration->reset_once();
 }
 
 bool StateStoreParamPort::connected() const {
