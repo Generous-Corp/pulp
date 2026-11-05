@@ -37,6 +37,8 @@ foreach(_variant A B None Plain)
     endif()
     if(_variant STREQUAL "A")
         set(_ui UI pulp-test-ui-package-a)
+        # The UI package plug-in's standalone, whose link must stay view-free.
+        list(APPEND _formats Standalone)
     elseif(_variant STREQUAL "B")
         set(_ui UI pulp-test-ui-package-b)
     elseif(_variant STREQUAL "None")
@@ -122,16 +124,19 @@ endif()
 # default editor, which links Pulp's view layer. Only its configured target
 # graph is read, so it is not built.
 pulp_add_plugin(PulpEditorUiViewControl
-    FORMATS           CLAP
+    FORMATS           CLAP Standalone
     PLUGIN_NAME       "Pulp Editor UI View Control"
     BUNDLE_ID         "dev.pulp.test.editor-ui-package-view-control"
     MANUFACTURER      "Pulp"
     VERSION           "1.0.0"
     CATEGORY          Effect
 )
+# Its Standalone is built when Pulp has its GPU stack, as the positive control
+# for the built-binary check below; nothing else of it is.
 get_property(_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(_t IN LISTS _targets)
-    if(_t MATCHES "^PulpEditorUiViewControl_")
+    if(_t MATCHES "^PulpEditorUiViewControl_" AND
+       NOT (_t STREQUAL "PulpEditorUiViewControl_Standalone" AND PULP_HAS_SKIA))
         set_target_properties(${_t} PROPERTIES EXCLUDE_FROM_ALL TRUE)
     endif()
 endforeach()
@@ -154,6 +159,12 @@ foreach(_variant A B None Plain ViewControl)
         "set(${_variant}_SOURCES [==[${_sources}]==])\n"
         "set(${_variant}_PACKAGE [==[${_package}]==])\n")
 endforeach()
+# The standalone of the UI package plug-in, and the default-editor control's.
+foreach(_variant A ViewControl)
+    pulp_link_closure(PulpEditorUi${_variant}_Standalone TARGETS_OUT _closure)
+    string(REPLACE "PulpEditorUi${_variant}" "<plugin>" _closure "${_closure}")
+    string(APPEND _record_content "set(${_variant}_STANDALONE_CLOSURE [==[${_closure}]==])\n")
+endforeach()
 # The AU component of the UI package plug-in, checked like its CLAP module.
 if(TARGET PulpEditorUiA_AU)
     pulp_link_closure(PulpEditorUiA_AU TARGETS_OUT _closure)
@@ -173,6 +184,27 @@ add_test(NAME editor-ui-package-links-no-view
         -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ui_package_links_no_view.cmake)
 set_tests_properties(editor-ui-package-links-no-view PROPERTIES
     LABELS "format;editor-host;cmake" TIMEOUT 60)
+
+# What the UI package plug-in's standalone binary actually carries: no Dawn and
+# no GPU window host, read from its symbol table rather than from target names.
+# The default-editor control's standalone must carry Dawn, which shows the check
+# can see it; it exists only when Pulp has its GPU stack.
+if(CMAKE_NM AND NOT WIN32 AND TARGET PulpEditorUiA_Standalone)
+    set(_gpu_check ${CMAKE_CURRENT_SOURCE_DIR}/check_binary_has_no_gpu.cmake)
+    add_test(NAME editor-ui-package-standalone-carries-no-gpu
+        COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DBINARY=$<TARGET_FILE:PulpEditorUiA_Standalone> -DEXPECT=absent -P ${_gpu_check})
+    set_tests_properties(editor-ui-package-standalone-carries-no-gpu PROPERTIES
+        LABELS "format;editor-host;cmake" TIMEOUT 120)
+    if(PULP_HAS_SKIA AND TARGET PulpEditorUiViewControl_Standalone)
+        add_test(NAME editor-ui-package-standalone-gpu-check-control
+            COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                -DBINARY=$<TARGET_FILE:PulpEditorUiViewControl_Standalone> -DEXPECT=present
+                -P ${_gpu_check})
+        set_tests_properties(editor-ui-package-standalone-gpu-check-control PROPERTIES
+            LABELS "format;editor-host;cmake" TIMEOUT 120)
+    endif()
+endif()
 
 # The editor hook stays inside its module: the built UI package module exports
 # none of the hook symbols, checked on every platform with an nm (Linux

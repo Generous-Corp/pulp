@@ -1,5 +1,7 @@
 {
  "executable_targets": {
+  "Pulp Editor UI A": "PulpEditorUiA_Standalone",
+  "Pulp Editor UI View Control": "PulpEditorUiViewControl_Standalone",
   "Pulp Test (dev) Plugin": "PulpBundleNameQuoting_Standalone",
   "Pulp UI Script Fixture": "PulpUiScriptFixture_Standalone",
   "pulp-cli-run-fixture": "pulp-test-cli-run-fixture",
@@ -2695,6 +2697,8 @@
   }
  },
  "executables_scanned": [
+  "Pulp Editor UI A",
+  "Pulp Editor UI View Control",
   "Pulp Test (dev) Plugin",
   "Pulp UI Script Fixture",
   "pulp-browser-capture-launcher-fixture",
@@ -2753,6 +2757,7 @@
   "pulp-test-au-plugin-state",
   "pulp-test-au-v2-cocoa-shipping",
   "pulp-test-au-v2-cocoa-ui",
+  "pulp-test-au-v2-contract-adapters",
   "pulp-test-au-v2-contract-view",
   "pulp-test-au-v2-instrument-rt",
   "pulp-test-au-v2-param-display",
@@ -3336,6 +3341,7 @@
   "pulp-test-spectral-guarded-split",
   "pulp-test-spectral-morph",
   "pulp-test-spectral-stream-start",
+  "pulp-test-standalone-contract-editor",
   "pulp-test-standalone-recording",
   "pulp-test-standalone-rt",
   "pulp-test-state",
