@@ -110,7 +110,9 @@ Vellum's mirror is a copy of named Pulp files at one Pulp commit, recorded in an
 export receipt. Until Pulp's copy of a file is frozen, a Pulp change to it is
 either carried by the next re-export or deliberately left behind, and the diff
 alone does not say which. `vellum_freeze_check.py --receipt-mode`, run by the
-required "Vellum freeze" check, makes that a recorded decision.
+required "Vellum freeze" check from the change's own scripts and by "Vellum
+trusted freeze" from the protected base's scripts, makes that a recorded
+decision.
 
 It reads the receipt copy pinned under `.github/vellum-export-receipt/` at the
 change's base commit and requires an added event stating `vellum_inherits` for

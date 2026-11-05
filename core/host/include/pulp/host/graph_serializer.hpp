@@ -16,6 +16,7 @@
 // either upgrade deterministically or fail with an explicit load error.
 
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/processor_restore.hpp>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -54,6 +55,10 @@ enum class GraphPluginScanMode {
 };
 
 struct GraphLoadOptions {
+    // Optional exact-version registry used to restore v4 Processor records.
+    // When absent, Processor records are reported as unsupported.
+    ProcessorRestoreRegistry* processor_registry = nullptr;
+    std::vector<ProcessorTypeKey> processor_allowlist;
     // Extra directories whose bundles may be loaded, e.g. a project's own
     // plugin folder. Each is matched after symlink resolution.
     std::vector<std::string> plugin_roots;

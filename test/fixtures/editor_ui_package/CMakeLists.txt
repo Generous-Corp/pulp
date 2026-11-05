@@ -22,7 +22,19 @@ foreach(_pkg a b)
         PULP_EDITOR_FACTORY_HEADER "ui_package_${_pkg}.hpp")
 endforeach()
 
+# The UI package plug-in A and the UI none plug-in also build an AU v2
+# component, so the AU contract view factory is exercised in a real module.
+set(_au_variants "")
+if(APPLE AND PULP_HAS_AUSDK)
+    set(_au_variants A None)
+endif()
+
 foreach(_variant A B None Plain)
+    set(_formats CLAP)
+    string(SUBSTRING "${_variant}" 0 1 _code)
+    if(_variant IN_LIST _au_variants)
+        list(APPEND _formats AU)
+    endif()
     if(_variant STREQUAL "A")
         set(_ui UI pulp-test-ui-package-a)
     elseif(_variant STREQUAL "B")
@@ -34,17 +46,37 @@ foreach(_variant A B None Plain)
     endif()
     pulp_add_plugin(PulpEditorUi${_variant}
         ${_ui}
-        FORMATS           CLAP
+        FORMATS           ${_formats}
         PLUGIN_NAME       "Pulp Editor UI ${_variant}"
-        BUNDLE_ID         "dev.pulp.test.editor-ui-package"
+        BUNDLE_ID         "dev.pulp.test.editor-ui-package-${_variant}"
         MANUFACTURER      "Pulp"
         VERSION           "1.0.0"
         CATEGORY          Effect
+        PLUGIN_CODE       "PEu${_code}"
+        MANUFACTURER_CODE "PlEu"
     )
+    if(TARGET PulpEditorUi${_variant}_AU)
+        target_compile_definitions(PulpEditorUi${_variant}_AU PRIVATE
+            PULP_FIXTURE_AU_CLASS=PulpEditorUi${_variant}AU)
+    endif()
 endforeach()
 
+if(_au_variants)
+    add_executable(pulp-test-editor-ui-package-au-host editor_ui_package_au_host.mm)
+    target_link_libraries(pulp-test-editor-ui-package-au-host PRIVATE
+        "-framework AppKit" "-framework AudioToolbox" "-framework AudioUnit")
+    add_dependencies(pulp-test-editor-ui-package-au-host PulpEditorUiA_AU PulpEditorUiNone_AU)
+    add_test(NAME editor-ui-package-au-contract-view
+        COMMAND pulp-test-editor-ui-package-au-host
+            "$<TARGET_BUNDLE_DIR:PulpEditorUiA_AU>" "$<TARGET_BUNDLE_DIR:PulpEditorUiNone_AU>")
+    set_tests_properties(editor-ui-package-au-contract-view PROPERTIES
+        LABELS "format;editor-host;auv2" TIMEOUT 60
+        ENVIRONMENT_MODIFICATION
+            "CI=unset:;PULP_HEADLESS=unset:;PULP_TEST_MODE=unset:;PULP_DISABLE_PLUGIN_EDITOR=unset:")
+endif()
+
 add_executable(pulp-test-editor-ui-package-host editor_ui_package_host.cpp)
-target_link_libraries(pulp-test-editor-ui-package-host PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(pulp-test-editor-ui-package-host PRIVATE clap ${CMAKE_DL_LIBS})
 add_dependencies(pulp-test-editor-ui-package-host
     PulpEditorUiA_CLAP PulpEditorUiB_CLAP PulpEditorUiNone_CLAP PulpEditorUiPlain_CLAP)
 
@@ -54,8 +86,37 @@ add_test(NAME editor-ui-package-per-plugin-factory
         "$<TARGET_FILE:PulpEditorUiB_CLAP>=editor:b"
         "$<TARGET_FILE:PulpEditorUiNone_CLAP>=editor:none"
         "$<TARGET_FILE:PulpEditorUiPlain_CLAP>=editor:none")
+# The host also opens each UI package plug-in's GUI through the contract,
+# which plug-in editors refuse in CI and headless environments, and on X11
+# platforms without a display. The tagged editors never reach a display server,
+# so a placeholder DISPLAY is enough there.
+set(_editor_env
+    "CI=unset:;PULP_HEADLESS=unset:;PULP_TEST_MODE=unset:;PULP_DISABLE_PLUGIN_EDITOR=unset:")
+set(_x11 FALSE)
+if(UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN)
+    set(_x11 TRUE)
+endif()
+if(_x11)
+    set(_display_env "${_editor_env};DISPLAY=set::99;WAYLAND_DISPLAY=unset:")
+else()
+    set(_display_env "${_editor_env}")
+endif()
 set_tests_properties(editor-ui-package-per-plugin-factory PROPERTIES
-    LABELS "format;editor-host" TIMEOUT 60)
+    LABELS "format;editor-host" TIMEOUT 60
+    ENVIRONMENT_MODIFICATION "${_display_env}")
+
+# The production refusal still holds: on X11 platforms the same host with no
+# display gets no GUI from the UI package plug-ins, and says so.
+if(_x11)
+    add_test(NAME editor-ui-package-no-display-refusal-control
+        COMMAND pulp-test-editor-ui-package-host
+            "$<TARGET_FILE:PulpEditorUiA_CLAP>=editor:a"
+            "$<TARGET_FILE:PulpEditorUiB_CLAP>=editor:b")
+    set_tests_properties(editor-ui-package-no-display-refusal-control PROPERTIES
+        LABELS "format;editor-host" TIMEOUT 60
+        ENVIRONMENT_MODIFICATION "${_editor_env};DISPLAY=unset:;WAYLAND_DISPLAY=unset:"
+        PASS_REGULAR_EXPRESSION "FAIL [^\n]*offers no GUI")
+endif()
 
 # Positive control for the view-free check: the same processor with the
 # default editor, which links Pulp's view layer. Only its configured target
@@ -93,6 +154,12 @@ foreach(_variant A B None Plain ViewControl)
         "set(${_variant}_SOURCES [==[${_sources}]==])\n"
         "set(${_variant}_PACKAGE [==[${_package}]==])\n")
 endforeach()
+# The AU component of the UI package plug-in, checked like its CLAP module.
+if(TARGET PulpEditorUiA_AU)
+    pulp_link_closure(PulpEditorUiA_AU TARGETS_OUT _closure)
+    string(REPLACE "PulpEditorUiA" "<plugin>" _closure "${_closure}")
+    string(APPEND _record_content "set(AU_CLOSURE [==[${_closure}]==])\n")
+endif()
 file(WRITE "${_record}" "${_record_content}")
 
 add_test(NAME editor-ui-package-none-links-nothing

@@ -190,6 +190,12 @@ jobs:
             --source-head "$PR_HEAD" \
             --verify-authority \
             --output "$RUNNER_TEMP/vellum-recovery-outbox.json"
+          run_validator python3 "$trusted_root/tools/scripts/vellum_freeze_check.py" \
+            --receipt-mode \
+            --repo "$proposed_tree" \
+            --base "$PR_BASE" \
+            --head "$proposed_head" \
+            --output "$RUNNER_TEMP/vellum-recovery-receipt-drift.json"
           run_validator python3 "$trusted_root/tools/scripts/vellum_expansion_watch_check.py" \
             --repo "$proposed_tree" \
             --base "$PR_BASE" \

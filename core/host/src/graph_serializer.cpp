@@ -1,6 +1,7 @@
 // GraphSerializer implementation: SignalGraph <-> .pulpgraph JSON.
 
 #include <pulp/host/graph_serializer.hpp>
+#include <pulp/host/processor_restore.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/runtime/log.hpp>
 
@@ -48,7 +49,11 @@ inline double get_double(const V& v) {
     return 0.0;
 }
 
-constexpr int kFormatVersion = 3;
+// v4 adds the Processor persistence envelope.  The bounded serializer slice
+// keeps the v2/v3 writers byte stable and teaches the reader the explicit
+// v3 -> v4 migration; Processor emission is added by the follow-on runtime
+// lane once the public registry contract is available.
+constexpr int kFormatVersion = 4;
 constexpr std::size_t kMaxSerializedSampleRegionConnections = 2'048;
 constexpr std::size_t kMaxSerializedNodes = 512;
 constexpr std::size_t kMaxSerializedConnections = 16'384;
@@ -62,11 +67,13 @@ struct GraphMigrationEntry {
 bool migrate_graph_v1_to_v2(const std::string& source_json,
                             std::string& migrated_json);
 bool migrate_graph_v2_to_v3(const std::string& source_json, std::string& migrated_json);
+bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrated_json);
 
 std::vector<GraphMigrationEntry>& graph_migrations() {
     static std::vector<GraphMigrationEntry> migrations = {
         {1, 2, migrate_graph_v1_to_v2},
         {2, 3, migrate_graph_v2_to_v3},
+        {3, 4, migrate_graph_v3_to_v4},
     };
     return migrations;
 }
@@ -162,6 +169,14 @@ bool migrate_graph_v2_to_v3(const std::string& source_json, std::string& migrate
     const bool comma = body_end != std::string::npos && migrated_json[body_end] != '{';
     migrated_json.insert(end, std::string(comma ? "," : "") + "\"sample_regions\":[]");
     return replace_format_version(migrated_json, 2, 3);
+}
+
+bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrated_json) {
+    // v4 is an additive envelope. A v3 graph without Processor records is
+    // already structurally valid and must not be rewritten on disk by this
+    // compatibility migration; only its schema version advances in memory.
+    migrated_json = source_json;
+    return replace_format_version(migrated_json, 3, 4);
 }
 
 const GraphMigrationEntry* find_graph_migration(int from_version) {
@@ -810,6 +825,32 @@ std::string b64_encode(const std::vector<uint8_t>& bytes) {
     return out;
 }
 
+// Validate the wire form and calculate its exact decoded size before the
+// decoder allocates either its cleaned input or output buffer.
+std::optional<std::size_t> b64_decoded_size(std::string_view encoded) {
+    std::size_t length = 0;
+    std::size_t padding = 0;
+    bool saw_padding = false;
+    for (const char c : encoded) {
+        if (c == '\n' || c == '\r' || c == ' ' || c == '\t')
+            continue;
+        const bool alphabet = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                              (c >= '0' && c <= '9') || c == '+' || c == '/';
+        if (c == '=') {
+            saw_padding = true;
+            ++padding;
+            if (padding > 2)
+                return std::nullopt;
+        } else if (!alphabet || saw_padding) {
+            return std::nullopt;
+        }
+        ++length;
+    }
+    if (length % 4 != 0 || (padding != 0 && length < 4))
+        return std::nullopt;
+    return (length / 4) * 3 - padding;
+}
+
 std::optional<std::vector<uint8_t>> b64_decode(std::string_view s) {
     static int8_t kT[256];
     static bool init = false;
@@ -887,10 +928,11 @@ bool GraphSerializer::register_migration(int from_version,
 std::string GraphSerializer::to_json(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
+    bool has_processors = false;
     for (const auto& node : graph.nodes()) {
-        if (graph.is_processor_node(node.id)) {
+        if (node.spectral_identity)
             return {};
-        }
+        has_processors |= graph.is_processor_node(node.id);
     }
     auto root = choc::value::createObject("PulpGraph");
     const auto regions = graph.sample_regions();
@@ -955,7 +997,10 @@ std::string GraphSerializer::to_json(
         if (!prove_sample_region_parser_shape(shape).accepted)
             return {};
     }
-    const int version = regions.empty() ? 2 : kFormatVersion;
+    // Preserve canonical bytes for existing ordinary and sample-region files;
+    // v4 is selected by the future Processor writer, while the reader accepts
+    // region-bearing v4 files through the migration above.
+    const int version = has_processors ? 4 : (regions.empty() ? 2 : 3);
     root.addMember("format_version", (int64_t)version);
 
     // Nodes
@@ -964,7 +1009,8 @@ std::string GraphSerializer::to_json(
         const auto& n = *n_ptr;
         auto node_obj = choc::value::createObject("Node");
         node_obj.addMember("id",   (int64_t)n.id);
-        node_obj.addMember("type", node_type_str(n.type));
+        node_obj.addMember("type",
+                           graph.is_processor_node(n.id) ? "processor" : node_type_str(n.type));
         node_obj.addMember("name", n.name);
         node_obj.addMember("num_input_ports",  (int64_t)n.num_input_ports);
         node_obj.addMember("num_output_ports", (int64_t)n.num_output_ports);
@@ -1010,6 +1056,31 @@ std::string GraphSerializer::to_json(
         nodes_arr.addArrayElement(node_obj);
     }
     root.addMember("nodes", nodes_arr);
+
+    if (has_processors) {
+        auto processors = choc::value::createEmptyArray();
+        for (const auto& n : graph.nodes()) {
+            if (!graph.is_processor_node(n.id))
+                continue;
+            const auto instance = graph.processor_node_instance(n.id);
+            if (!instance)
+                return {};
+            const auto& d = instance->descriptor();
+            auto p = choc::value::createObject("Processor");
+            p.addMember("node_id", (int64_t)n.id);
+            p.addMember("type_id", instance->graph_type_id().empty()
+                                       ? d.bundle_id
+                                       : std::string(instance->graph_type_id()));
+            p.addMember("type_version", (int64_t)instance->graph_type_version());
+            p.addMember("state_schema_version", (int64_t)instance->graph_state_schema_version());
+            p.addMember("input_channels", (int64_t)d.default_input_channels());
+            p.addMember("output_channels", (int64_t)d.default_output_channels());
+            p.addMember("parameters_b64", b64_encode(instance->state_store().serialize()));
+            p.addMember("custom_b64", b64_encode(instance->processor().serialize_plugin_state()));
+            processors.addArrayElement(p);
+        }
+        root.addMember("processors", processors);
+    }
 
     // Connections
     auto conns_arr = choc::value::createEmptyArray();
@@ -1245,6 +1316,13 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json,
                                                        const GraphLoadOptions& options) {
     LoadResult result;
+    {
+        SignalGraph::GraphMutationLock lock(graph);
+        if (graph.refuse_spectral_mutation_()) {
+            result.error = "active spectral controller refuses graph loading; stop it first";
+            return result;
+        }
+    }
     graph.clear();
     PluginNodeResolver plugin_resolver(options);
 
@@ -1524,6 +1602,108 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
 
     // Pass 1: instantiate every node, build old-id → new-id map.
     std::unordered_map<NodeId, NodeId> id_map;
+    std::unordered_map<NodeId, std::shared_ptr<format::ProcessorNodeInstance>> restored_processors;
+    if (root.hasObjectMember("processors")) {
+        if (!options.processor_registry) {
+            result.error = "Processor records require a ProcessorRestoreRegistry";
+            return result;
+        }
+        const auto& records_json = root["processors"];
+        if (!records_json.isArray() || records_json.size() > ProcessorRestoreRegistry::max_nodes) {
+            result.error = "invalid processors envelope";
+            return result;
+        }
+        std::vector<std::vector<std::uint8_t>> parameter_blobs, custom_blobs;
+        std::vector<ProcessorRestoreRecord> records;
+        std::size_t decoded_total = 0;
+        parameter_blobs.reserve(records_json.size());
+        custom_blobs.reserve(records_json.size());
+        records.reserve(records_json.size());
+        for (uint32_t i = 0; i < records_json.size(); ++i) {
+            const auto& p = records_json[i];
+            const auto bounded_encoded = [](std::string_view encoded) {
+                constexpr std::size_t max_encoded =
+                    ((ProcessorRestoreRegistry::max_state_part_bytes + 2) / 3) * 4 + 8;
+                return encoded.size() <= max_encoded;
+            };
+            const auto parameters_text = std::string_view(p["parameters_b64"].getString());
+            const auto custom_text = std::string_view(p["custom_b64"].getString());
+            if (!bounded_encoded(parameters_text) || !bounded_encoded(custom_text)) {
+                result.error = "Processor state encoding exceeds limits";
+                return result;
+            }
+            const auto parameter_size = b64_decoded_size(parameters_text);
+            const auto custom_size = b64_decoded_size(custom_text);
+            if (!parameter_size || !custom_size) {
+                result.error = "invalid Processor state encoding";
+                return result;
+            }
+            if (*parameter_size > ProcessorRestoreRegistry::max_state_part_bytes ||
+                *custom_size > ProcessorRestoreRegistry::max_state_part_bytes ||
+                *parameter_size > ProcessorRestoreRegistry::max_total_state_bytes - decoded_total ||
+                *custom_size > ProcessorRestoreRegistry::max_total_state_bytes - decoded_total -
+                                   *parameter_size) {
+                result.error = "Processor state exceeds aggregate limit";
+                return result;
+            }
+            auto parameters = b64_decode(parameters_text);
+            auto custom = b64_decode(custom_text);
+            if (!parameters || !custom) {
+                result.error = "invalid Processor state encoding";
+                return result;
+            }
+            if (parameters->size() > ProcessorRestoreRegistry::max_state_part_bytes ||
+                custom->size() > ProcessorRestoreRegistry::max_state_part_bytes ||
+                parameters->size() >
+                    ProcessorRestoreRegistry::max_total_state_bytes - decoded_total) {
+                result.error = "Processor state exceeds limits";
+                return result;
+            }
+            decoded_total += parameters->size();
+            if (custom->size() > ProcessorRestoreRegistry::max_total_state_bytes - decoded_total) {
+                result.error = "Processor state exceeds limits";
+                return result;
+            }
+            decoded_total += custom->size();
+            const auto node_id_value = p["node_id"].getInt64();
+            const auto type_version_value = p["type_version"].getInt64();
+            const auto envelope_version_value = p["state_schema_version"].getInt64();
+            const auto input_channels_value = p["input_channels"].getInt64();
+            const auto output_channels_value = p["output_channels"].getInt64();
+            if (node_id_value <= 0 ||
+                static_cast<std::uint64_t>(node_id_value) >
+                    std::numeric_limits<std::uint32_t>::max() ||
+                type_version_value <= 0 || type_version_value > std::numeric_limits<int>::max() ||
+                envelope_version_value <= 0 ||
+                envelope_version_value > std::numeric_limits<int>::max() ||
+                input_channels_value < 0 ||
+                input_channels_value > std::numeric_limits<int>::max() ||
+                output_channels_value < 0 ||
+                output_channels_value > std::numeric_limits<int>::max()) {
+                result.error = "invalid Processor record range";
+                return result;
+            }
+            parameter_blobs.push_back(std::move(*parameters));
+            custom_blobs.push_back(std::move(*custom));
+            records.push_back(
+                {static_cast<std::uint32_t>(node_id_value),
+                 {std::string(p["type_id"].getString()), static_cast<int>(type_version_value)},
+                 static_cast<int>(envelope_version_value),
+                 static_cast<int>(input_channels_value),
+                 static_cast<int>(output_channels_value),
+                 parameter_blobs.back(),
+                 custom_blobs.back()});
+        }
+        const auto restored =
+            options.processor_registry->restore_batch(records, options.processor_allowlist);
+        if (!restored.ok()) {
+            result.error = std::string("Processor restore failed: ") +
+                           processor_restore_code_name(restored.code);
+            return result;
+        }
+        for (auto& item : restored.processors)
+            restored_processors.emplace(item.node_id, std::move(item.instance));
+    }
     std::unordered_set<NodeId> seen_persisted_node_ids;
     std::unordered_map<NodeId, std::pair<NodeId, std::vector<uint8_t>>> deferred_state;
     std::unordered_set<NodeId> unresolved_plugin_nodes;
@@ -1534,26 +1714,60 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             const auto& nv = nodes[i];
             const auto old_id_value = nv["id"].getInt64();
             const NodeId old_id = (NodeId)old_id_value;
-            if (has_region_records &&
-                (old_id_value <= 0 ||
-                 static_cast<std::uint64_t>(old_id_value) > std::numeric_limits<NodeId>::max() ||
-                 !seen_persisted_node_ids.insert(old_id).second)) {
+            if (old_id_value <= 0 ||
+                static_cast<std::uint64_t>(old_id_value) > std::numeric_limits<NodeId>::max() ||
+                !seen_persisted_node_ids.insert(old_id).second) {
                 graph.clear();
                 result.error = "invalid or duplicate node id in sample region graph";
                 return result;
             }
             const std::string name(nv["name"].getString());
             const std::string type_s(nv["type"].getString());
+            const float gain = nv.hasObjectMember("gain") ? (float)get_double(nv["gain"]) : 1.0f;
+            NodeId new_id = 0;
             if (type_s == "processor") {
-                graph.clear();
-                result.error = "Processor nodes are runtime-owned and unsupported by .pulpgraph v1";
-                return result;
+                if (!root.hasObjectMember("processors")) {
+                    graph.clear();
+                    result.error =
+                        "Processor nodes are runtime-owned and unsupported by .pulpgraph v1";
+                    return result;
+                }
+                const auto restored = restored_processors.find(old_id);
+                if (restored == restored_processors.end()) {
+                    graph.clear();
+                    result.error = "Processor node missing restore record";
+                    return result;
+                }
+                auto instance = std::move(restored->second);
+                restored_processors.erase(restored);
+                const auto& descriptor = instance->descriptor();
+                const auto persisted_inputs = nv["num_input_ports"].getInt64();
+                const auto persisted_outputs = nv["num_output_ports"].getInt64();
+                if (persisted_inputs != descriptor.default_input_channels() ||
+                    persisted_outputs != descriptor.default_output_channels()) {
+                    graph.clear();
+                    result.error = "Processor node port shape does not match restore descriptor";
+                    return result;
+                }
+                new_id = graph.add_processor_node(std::move(instance), name);
+                if (new_id == 0) {
+                    graph.clear();
+                    result.error = "failed to add restored Processor node";
+                    return result;
+                }
+                id_map[old_id] = new_id;
+                graph.set_node_gain(new_id, gain);
+                if (nv.hasObjectMember("layout")) {
+                    const auto& pos = nv["layout"];
+                    result.editor_layout[new_id] = {(float)get_double(pos["x"]),
+                                                    (float)get_double(pos["y"])};
+                }
+                continue;
             }
             NodeType t = NodeType::Custom;
             const bool known_type = parse_type(type_s, t);
             const int in_ch  = (int)nv["num_input_ports"].getInt64();
             const int out_ch = (int)nv["num_output_ports"].getInt64();
-            const float gain = nv.hasObjectMember("gain") ? (float)get_double(nv["gain"]) : 1.0f;
             std::string node_shape_error;
             if (!validate_generated_node_shape(
                     t, type_s, in_ch, out_ch, node_shape_error)) {
@@ -1563,7 +1777,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 return result;
             }
 
-            NodeId new_id = 0;
             switch (t) {
                 case NodeType::AudioInput:  new_id = graph.add_input_node(out_ch, name); break;
                 case NodeType::AudioOutput: new_id = graph.add_output_node(in_ch, name); break;
@@ -1687,6 +1900,11 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 }
             }
         }
+    }
+    if (!restored_processors.empty()) {
+        graph.clear();
+        result.error = "Processor restore record has no matching processor node";
+        return result;
     }
 
     // v3 region-bearing graphs are installed as one locked authoring mutation.

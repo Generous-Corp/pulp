@@ -272,7 +272,18 @@ if(PULP_HAS_SKIA)
     # whole import library creates LNK2038/LNK1319 conflicts.  The SDK instead
     # carries a thunk-only archive made from its ARM64EC members with those
     # directives removed.
-    if(WIN32 AND CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64EC")
+    # CMake may report ARM64 for an ARM64EC compiler because the target is
+    # selected by the explicit /arm64EC flag rather than the generator
+    # platform. Use Pulp's shared detector so that the EC runtime closure is
+    # present in both forms; checking the raw compiler architecture alone
+    # silently drops this archive and leaves the final plugin with unresolved
+    # STL thunk symbols.
+    if(WIN32)
+        pulp_windows_target_is_arm64ec(_pulp_canvas_arm64ec)
+    else()
+        set(_pulp_canvas_arm64ec FALSE)
+    endif()
+    if(_pulp_canvas_arm64ec)
         set(PULP_ARM64EC_STL_THUNKS "" CACHE FILEPATH
             "Sanitized ARM64EC STL thunk archive for static-runtime consumers")
         if(NOT EXISTS "${PULP_ARM64EC_STL_THUNKS}")
@@ -288,6 +299,7 @@ if(PULP_HAS_SKIA)
         endif()
         target_link_libraries(pulp-canvas PUBLIC pulp-arm64ec-stl-thunks)
     endif()
+    unset(_pulp_canvas_arm64ec)
     target_compile_definitions(pulp-canvas PUBLIC PULP_HAS_SKIA=1)
     target_include_directories(pulp-canvas PRIVATE ${SKIA_INCLUDE_DIRS})
 

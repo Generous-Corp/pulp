@@ -11,6 +11,7 @@
 #include <AudioUnitSDK/MusicDeviceBase.h>
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/contract_editor_session.hpp>
 #include <pulp/format/au_v2_common.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
@@ -197,6 +198,9 @@ private:
     // Declared after processor_ so reverse member destruction retires retained
     // editor handles before either referenced object is released.
     runtime::AliveToken owner_alive_;
+    // Contract editors the host still holds. Declared after processor_ so its
+    // destruction invalidates them while the processor and store_ exist.
+    ContractSessionRegistry contract_sessions_;
 
     // Immutable plugin metadata, cached once in the constructor. Owns the bus
     // name strings that the per-block `ProcessBusBufferInfo`s view — copying it

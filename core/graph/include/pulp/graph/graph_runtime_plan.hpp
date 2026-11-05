@@ -17,6 +17,9 @@ enum class GraphRuntimeNodeKind : std::uint8_t {
     MidiInput,
     MidiOutput,
     Custom,
+    SpectralAnalysis,
+    SpectralStage,
+    SpectralSynthesis,
 };
 
 struct GraphRuntimeLimits {
@@ -47,6 +50,8 @@ struct GraphRuntimeNodeSpec {
     // fan-in paths of differing latency time-align. Zero for nodes that add no
     // latency (audio I/O, gain).
     std::uint32_t latency_samples = 0;
+    std::uint32_t spectral_input_ports = 0;
+    std::uint32_t spectral_output_ports = 0;
 };
 
 // Parameter automation carried on a connection: the source audio output drives
@@ -81,6 +86,10 @@ enum class GraphRuntimeConnectionKind : std::uint8_t {
     Audio,
     Event,
     Automation,
+    Spectral,
+    // Reserved typed trigger lane. The planner refuses it until a prepared
+    // producer/consumer pair can execute it; it is never a MIDI Event edge.
+    Trigger,
 };
 
 struct GraphRuntimeConnectionSpec {
@@ -119,6 +128,8 @@ struct GraphRuntimeNodePlan {
     std::uint32_t audio_inbound_connection_count = 0;
     std::uint32_t single_audio_inbound_connection = 0xFFFFFFFFu;
     std::uint64_t audio_inbound_port_mask = 0;
+    std::uint32_t spectral_input_ports = 0;
+    std::uint32_t spectral_output_ports = 0;
 };
 
 struct GraphRuntimeConnectionPlan {
@@ -150,6 +161,9 @@ constexpr bool is_automation_conn(const Connection& c) noexcept {
 template <class Connection>
 constexpr bool carries_audio(const Connection& c) noexcept {
     return c.kind == GraphRuntimeConnectionKind::Audio;
+}
+template <class Connection> constexpr bool is_spectral(const Connection& c) noexcept {
+    return c.kind == GraphRuntimeConnectionKind::Spectral;
 }
 
 struct GraphRuntimePlan {
@@ -184,6 +198,9 @@ enum class GraphRuntimePlanErrorCode : std::uint8_t {
     DestinationPortOutOfRange,
     CycleDetected,
     AllocationFailed,
+    UnsupportedTrigger,
+    NonAudioFeedback,
+    InvalidConnectionKind,
 };
 
 struct GraphRuntimePlanError {

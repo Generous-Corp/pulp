@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261104-graph-probe-watch",
+  "created_at": "2026-11-04T06:39:49Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "The Pulp audio graph probe adds bounded offline observation options to the existing CLI and MCP inventory. It does not change framework, rendering, import or packaging authority.",
+  "tests": [
+    "cmake-graph-edge-probe-sdk-consumer",
+    "python3 tools/scripts/cli_sync_check.py",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

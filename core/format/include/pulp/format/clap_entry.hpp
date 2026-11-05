@@ -17,6 +17,12 @@
 #include <pulp/format/param_group_projection.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/clap_adapter.hpp>
+// A WebCLAP module has no native window to embed an editor in, and its
+// curated source list (PulpWclap.cmake) carries no editor-host contract.
+#if !(defined(PULP_WCLAP) && PULP_WCLAP)
+#define PULP_CLAP_CONTRACT_GUI 1
+#include <pulp/format/clap_contract_gui.hpp>
+#endif
 #if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/gpu_host_select.hpp>
@@ -904,11 +910,23 @@ inline const clap_plugin_gui_t gui_ext = {
 // ── Extension dispatch ─────────────────────────────────────────────────
 inline const void* get_static_extension(const clap_plugin_t* plugin, const char* id) {
     if (!id) return nullptr;
-#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
     if (strcmp(id, CLAP_EXT_GUI) == 0) {
+        // A processor with an editor factory opens its editor through the
+        // editor-host contract; create_view() stays the path without one.
+#if defined(PULP_CLAP_CONTRACT_GUI)
+        if (const auto* contract = clap_adapter::contract_gui_extension(plugin))
+            return contract;
+#endif
+#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI
         if (pulp::format::detail::editor_launch_blocked_by_environment()) return nullptr;
         return &gui_ext;
+#else
+        return nullptr;
+#endif
     }
+#if defined(PULP_CLAP_CONTRACT_GUI)
+    if (strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0)
+        return clap_adapter::contract_timer_extension(plugin);
 #endif
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &audio_ports_ext;
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG) == 0)

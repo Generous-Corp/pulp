@@ -66,6 +66,14 @@ struct LiveDspTelemetryConfig {
     /// A block whose graph load reaches this fraction is counted "over budget"
     /// and attributed to its most expensive node.
     float graph_overload_load = 1.0f;
+    bool spectral_diagnostics = false;
+};
+
+struct LiveDspSpectralDiagnostic {
+    std::uint64_t node = 0, root = 0, epoch = 0, expected_sequence = 0;
+    std::uint64_t errors = 0;
+    std::int64_t first_error_position = 0, latest_origin = 0;
+    std::uint8_t first_error = 0;
 };
 
 /// Per-node rolling summary produced by drain().
@@ -106,6 +114,10 @@ struct LiveDspTelemetrySnapshot {
     float last_graph_load = 0.0f;
 
     std::vector<LiveDspNodeSummary> nodes;  ///< reused; never reallocated after prepare()
+    std::vector<LiveDspSpectralDiagnostic> spectral;
+    std::uint64_t observed_block = 0;
+    std::uint64_t observed_drops = 0;
+    std::uint64_t age_blocks = 0; ///< Lower bound at the drain's observation point.
 };
 
 class LiveDspTelemetryStore;
@@ -190,7 +202,11 @@ public:
     /// measured per-node timings (e.g. the graph's persistent load measurers,
     /// which cover every execution path) and for deterministic tests / replay.
     void inject_block(std::span<const std::int64_t> node_ns, std::int64_t graph_elapsed_ns,
-                      std::uint32_t frame_count, double sample_rate) noexcept;
+                      std::uint32_t frame_count, double sample_rate,
+                      std::span<const LiveDspSpectralDiagnostic> spectral = {}) noexcept;
+    std::span<LiveDspSpectralDiagnostic> spectral_scratch() noexcept {
+        return spectral_scratch_;
+    }
 
     /// AUDIO THREAD. A pre-allocated node_count()-sized scratch for the caller to
     /// fill with per-node elapsed values before calling inject_block() over it —
@@ -220,6 +236,7 @@ private:
     void publish_block(std::uint32_t ring_slot, std::int64_t graph_elapsed_ns) noexcept;
 
     struct BlockHeader {
+        std::uint64_t observed_block = 0, observed_drops = 0;
         std::uint32_t frame_count = 0;
         double sample_rate = 0.0;
         std::int64_t available_ns = 0;
@@ -238,9 +255,11 @@ private:
     std::atomic<std::uint64_t> write_index_{0};
     std::atomic<std::uint64_t> read_index_{0};
     std::atomic<std::uint64_t> dropped_{0};
+    std::atomic<std::uint64_t> observed_blocks_{0};
 
     std::vector<BlockHeader> ring_headers_;   // [ring_blocks_]
     std::vector<std::int64_t> ring_node_ns_;  // [ring_blocks_ * node_count_]
+    std::vector<LiveDspSpectralDiagnostic> ring_spectral_, spectral_scratch_;
 
     // Drain-side rolling windows (one ring of the last window_blocks_ samples per node).
     std::vector<std::int64_t> window_ns_;     // [node_count_ * window_blocks_]

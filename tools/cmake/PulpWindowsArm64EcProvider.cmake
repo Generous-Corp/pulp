@@ -63,9 +63,17 @@ function(pulp_windows_validate_arm64ec_provider)
             "unproven static provider")
     endif()
 
+    if(NOT CMAKE_CXX_COMPILER_VERSION)
+        message(FATAL_ERROR
+            "Pulp: ARM64EC/ARM64X provider validation requires "
+            "CMAKE_CXX_COMPILER_VERSION so the MSVC STL/CRT ABI can be "
+            "checked before linking")
+    endif()
+
     set(_command "${Python3_EXECUTABLE}" "${PULP_WINDOWS_ARM64EC_PROVIDER_VALIDATOR}"
         --target "${_target}"
-        --metadata "${PULP_WINDOWS_ARM64EC_PROVIDER_METADATA}")
+        --metadata "${PULP_WINDOWS_ARM64EC_PROVIDER_METADATA}"
+        --consumer-compiler-version "${CMAKE_CXX_COMPILER_VERSION}")
     foreach(_archive IN LISTS PULP_WINDOWS_ARM64EC_PROVIDER_ARCHIVES)
         if(NOT EXISTS "${_archive}")
             message(FATAL_ERROR

@@ -1,0 +1,255 @@
+# Routed spectral acceptance audit
+
+Status: **PARTIAL — acceptance is not established by the existing PR.**
+
+Authority: [admission](https://github.com/danielraffel/pulp-planning/blob/3920bf5bfa24f1ec9cd030a43dac13c212ca7a76/graph-program-status/G-10.md) and [lowering design](https://github.com/danielraffel/pulp-planning/blob/148602040cf0dce7f38d9353e1c3229778468bae/graph-program-status/g10-routed-lowering-design-20261103.md).
+
+This audit retains the design's eighteen acceptance rows in their original order.
+A passing sample test or one mutation does not close a row containing several
+independent requirements. The prior delivery head is
+`0404350f416ed400e003eb299e7ab161304a94ba`; its receipts remain historical evidence,
+not automatically proof for future source revisions. No row below is declared
+fully qualified until its positive and independent production-negative controls
+are paired with restored-green receipts.
+
+Primary executable: `pulp-test-routed-spectral-ports`, from
+`test/test_routed_spectral_ports.cpp` and `test/test_routed_spectral_faults.cpp`.
+Installed fixture: `examples/g10-routed-consumer`. Guarded engine owner:
+`pulp-test-spectral-guarded-split`.
+
+| Row | Existing evidence | Exact evidence still needed |
+|---|---|---|
+| 1. Installed edges and explicit unsupported modes | Installed consumer passed; removing lowering breaks it while the old adapter passes. | Independently mutate pinned-mode and unsupported-operation refusals; retain public error assertions. |
+| 2. Partition reconstruction, impulses and N+H | Fixed/irregular and maximum blocks reconstruct; prefix mutation detected. | Separate analysis-double-latency and underrun-read mutations; explicit peak location/tolerance and zero-frame callback controls. |
+| 3. Dry/wet, upstream U, nested/fan-out PDC | Nested dry/fan-out waveform control. | U propagation, frame-edge audio delay and alternative-latency sum mutations are now independently confirmed; retain exact-head installed refresh. |
+| 4. Frame tuples, startup and epochs | Full tuple/partition equality, startup grid, drop/reorder and old-bank-epoch mutations confirmed; prior origin-stride and transition increment controls. | Extend full tuple oracle through controller seek/replacement, rather than bank reset alone. |
+| 5. Independent validation predicates | All thirteen factory geometry/config predicates independently mutation-confirmed; named generic/prepared-edit handle-kind bypass confirmed. | Remaining graph predicates: stale handles, joins, cycles, automation and candidate revalidation independently. |
+| 6. Borrow lifetime, fan-out ownership and capacity | Sibling preservation and maximal 66-frame batch; F-1 mutation detected. | Writable alias and deferred borrowed-pointer-copy mutations are confirmed; branch output across maximal batch remains covered by installed and internal controls. |
+| 7. Candidate isolation and reader lifetime | Rejected candidate/reset comparison and reader Busy backpressure. | Premature retirement and retired-object reset mutations confirmed with continued rendering; destructive active reprepare and shared-engine mutations remain. |
+| 8. Failed/cancelled candidate versus concurrent reset | Boundary-barrier and failed-offer controls; late-offer mutation detected. | Before/after-validation failure, cancellation and stale-generation schedules; shared-allocator mutation with sample/tuple/topology oracle. |
+| 9. Successful offer/reset and failure without reset | Offer+seek/exhaustion controls and epoch mutation. | Candidate-side serial consumption, retired-object reset and double increment independently confirmed; full controller tuple oracle remains. |
+| 10. Namespace uniqueness and exhaustion | Distinct controller namespaces and namespace-reuse mutation confirmed; synthetic maximum transition serial control. | Transition wrap and failed-candidate serial consumption independently confirmed, including failed preparation at maximum serial. |
+| 11. Closed catalog and config revalidation | Public opaque factories; invalid gain controls. | Public construction/registration escape control, candidate revalidation bypasses and unknown internal catalog ID refusal. |
+| 12. Zero-preservation qualification and runtime guard | Constant identity mutation detected by zero-input control. | Independently remove runtime zero guard and qualification oracle, retaining an outer control that detects escape. |
+| 13. Bad-slot replacement and duplicate chronology | Missing-frame and unsolicited duplicate controls; duplicate guard mutation detected. | Independently omit zero replacement, replace for every duplicate and overwrite accepted payload. |
+| 14. Fatal prefix, siblings and partition-invariant onset | Fatal-prefix and capacity-marker controls; cutoff mutation detected. | Executor-false/full-block-clear, lost full-edge marker and partitioned onset mutations. |
+| 15. Finite guarded synthesis and transactional history | Guarded transaction suite and combined nonfinite-return mutation detected. | Partial commit is independently confirmed through full rejected-frame support; inverse, OLA and quotient guards still need independent controls. |
+| 16. Arithmetic/resource limits | Origin bound, u64 sequence wrap prevention and 64 MiB cap each mutation-confirmed; oversized test allocation stays below 100 MiB if cap is bypassed. | Output-clock bound independently confirmed; bounded allocation-failure injection and unchanged active output remain. |
+| 17. Tail/drain composition | Installed prefix/tail silence and nested impulse control. | Nontrivial mask/DC/interior-bin tail control and omitted zero-synthesis mutation confirmed. Codec EOF-source integration remains outside R admission. |
+| 18. Serial dispatch and callback resource audit | Toggle controls, no fallback, C++ new probe over reset/activation/callbacks; installed-consumer RTSan independently detects planted malloc, mutex lock and write calls. | Parallel/anticipation eligibility mutations and broader resource scenario coverage. Timing claims require the separate roadmap callback matrix. |
+
+## Additional mandatory inventories
+
+- Enumerate every host `live_slot_` access/publication and raw snapshot dispatch;
+  classify it as audio-only, controller-routed or explicitly refused. A handful
+  of setter tests is not that inventory.
+- Exercise exact parameter ingress and retained handles across offer, rejection,
+  activation and finalization; independently plant old-slot routing, early gate
+  reopen and skipped mailbox preservation. Existing MIDI preservation does not
+  prove the exact-parameter path.
+- Prove coherent telemetry while timing is disabled, sticky errors, publication
+  drop/age, and reset versus already-published old-epoch records.
+- Preserve explicit save/load/bake refusal and source separation from the offline
+  codec. The installed fixture must remain at most 200 non-generated glue lines.
+
+Notation/catalog authoring remains PARTIAL as explicitly permitted by the design.
+Offline arithmetic does not establish paced realtime timing, malloc/lock/I/O
+freedom, or full G-10/A3 completion. Missing proof stays open; it is not waived by
+an unarmed PR, a clean advisory review, or a test-count total.
+
+## Snapshot-access source inventory
+
+Inspection at `0404350f416ed400e003eb299e7ab161304a94ba`, before the qualification
+fixes. This is source classification, not concurrency mutation proof. The search
+scope is every `live_slot_` occurrence under `core/host`, plus every
+`process_snapshot_impl` caller; declarations and comments are not accesses.
+
+| Source / access family | Classification and controlling condition |
+|---|---|
+| `signal_graph_runtime.hpp`: prepared-state query | Controller-aware: spectral mode OR legacy slot presence. |
+| `spectral_graph.cpp`: `read_snapshot_` | Controller-routed: spectral reader/reclamation/access gates and active slot; legacy `Slot::read` only outside spectral mode. |
+| `spectral_graph.cpp`: three spectral add factories | Explicitly refuse live spectral mode or a populated legacy slot before authoring mutation. |
+| `signal_graph_authoring.cpp`: processor input-provider setter | Explicit refusal under mutation lock for either live representation. |
+| `signal_graph.cpp`: raw gain/plugin/custom processor getters and opaque snapshot handle | Explicit spectral refusal; opaque handle acquisition holds mutation lock. Legacy pointers are not spectral handles. |
+| `signal_graph.cpp`: release/unpublish/wait | Explicit spectral refusal under mutation lock. |
+| `signal_graph_prepare.cpp`: invalidation | Legacy unpublish; public callers require mutation refusal. Caller inventory/mutation coverage remains required. |
+| `signal_graph_prepare.cpp`: MIDI/parameter mailbox reuse during compile | Candidate-local or audio-only legacy slot. Active spectral candidate preparation has a separate graph and no active legacy slot. |
+| `signal_graph_prepare.cpp`: prepare prologue/publication | Active spectral reprepare refuses. Initial spectral entry requires stopped legacy controller and no retained processing handles. Candidate spectral snapshot publishes only into its private legacy slot; initial controller publishes into spectral slot zero. |
+| `signal_graph_prepared_topology_edit.cpp`: constructor, base-current check, old keepalive | Spectral branches avoid legacy live slot; candidate generation and access gate govern current-base eligibility. |
+| `signal_graph_prepared_topology_edit.cpp`: rollback | Legacy lifecycle rollback only when `quiesced_lifecycles_dirty_`; spectral plugin/custom replacement refuses before lifecycle preparation. |
+| `signal_graph_prepared_topology_edit.cpp`: prepared snapshot extraction | Private candidate legacy slot, not active controller slot. |
+| `signal_graph_prepared_topology_edit.cpp`: reserve/publish | Spectral commit offers candidate and returns Staged before legacy adoption/publication. |
+| `signal_graph_live_swap.cpp`: stage/prepare/abort | Explicit spectral refusal under mutation lock; internal preparation helpers are reached through these entries. |
+| `signal_graph_live_swap.cpp`: begin swap | Qualification fix moves spectral refusal under the mutation lock. Ordinary-entry positive control and spectral refusal/output/candidate-generation control pass (28 assertions). The exact concurrent-entry schedule remains to be mutation-qualified. |
+| `signal_graph_process.cpp`: ordinary dispatch | Routes spectral mode through `process_spectral_`; audio-only dispatch uses guarded snapshot. |
+| `signal_graph_process.cpp`: both pinned snapshot process overloads | Explicitly clear/refuse a spectral snapshot. Retained legacy processing handles prevent initial spectral entry. |
+| `spectral_graph.cpp`: render dispatch | Controller chooses/resets target at serialized boundary, then calls the existing `process_snapshot_impl`; no second executor. |
+
+The forged-kind regression exposed a defect: generic named connect
+compares supplied kinds to each other and catalog kinds to each other, but does
+not compare the supplied kinds with the named catalog ports. The shared validator
+now does both comparisons. The controlled pre-fix run passed two mismatched-kind
+control assertions then accepted the forged pair; the repaired generic and
+prepared-edit cases pass 42 assertions. Independent removal/restoration proof is
+confirmed. Geometry/mask refusal controls pass 46 assertions. The following
+fifteen production mutations each passed baseline, failed after a witnessed
+recompile, and passed after exact source restoration at qualification commit
+`cc86da1c7f453c4fedb5523fa709c07d47dd5083`:
+
+- Named-handle kind versus catalog check; legacy swap-entry spectral refusal.
+- FFT size minimum, maximum and power-of-two predicates independently.
+- Hop minimum and maximum independently.
+- Channel minimum and maximum independently.
+- Sample-rate finite and positive predicates independently.
+- Mask length, finite gain, minimum gain and maximum gain independently.
+
+These used `tools/scripts/confirm_failure.sh --file <production source> --break
+<single-predicate removal> --build-dir build --target
+pulp-test-routed-spectral-ports --object <affected translation unit> --test
+'./build/test/pulp-test-routed-spectral-ports <tag>' --keep-logs`. Tags were
+`[spectral-handle-validation]`, `[spectral-swap-refusal]` and `[spectral-refusal]`.
+The identity/mask source is `core/graph/include/pulp/graph/spectral_frame.hpp`;
+each listed predicate was replaced by `false` separately. This closes those
+specific factory predicates, not every graph/catalog validation obligation in
+row 5 or row 11. A separate advisory review of the same committed fixes reported
+no actionable finding; it is not a counted PR verdict.
+
+The next batch, at `ac5d11c27964c0c6acb02c1024528aa0b1a11112`, independently
+confirmed ten more production mutations with the same baseline/broken/restored
+workflow: reuse a controller namespace; permit u64 sequence wrap; bypass retained
+storage charging; drop a published frame; reorder published stamps; retain an
+old bank epoch on reset; overwrite the sticky first-error record; retain its
+error across reset; admit conversion while a legacy processing handle survives;
+and omit the named pinned-execution diagnostic. All ten compiled, failed their
+specific controls, and restored green. The complete routed executable then
+passed **33,604 assertions in 30 cases**. Independent advisory review of the new
+diagnostic and controls reported no actionable finding.
+
+The untimed telemetry control also demonstrates a full publication ring retains
+explicitly old-epoch records across reset, reports drops and age, and publishes
+cleared error state with the fresh epoch after draining. It does not relabel old
+records as current. Exact parameter ingress and early access-gate reopening are
+still separate outstanding obligations.
+
+## Installed callback resource probe
+
+At `402499d924a8a2e63a5b858501bf3ddd7b95181c`, the installed-only public fixture
+is 101 non-generated glue lines. Its callback wrapper uses the compiler's
+`clang::nonblocking` attribute when supported. The Release consumer was built
+with upstream LLVM 21.1.8 and `-fsanitize=realtime` for compilation and linking.
+The executable imports `__rtsan_realtime_enter`/`exit` and links the macOS RTSan
+runtime. It consumes only installed headers and `Pulp::host`.
+
+Three separate production mutations in `SpectralRuntimeBank::Node::process`
+were confirmed: a `malloc`/`free` pair, a pthread mutex lock/unlock pair, and
+`write(-1, "x", 1)`. For each, ordinary functional controls stayed green;
+RTSan rejected the installed callback with the corresponding unsafe-library-call
+diagnostic. Restored source rebuilt and passed both controls. The workflow
+copied the freshly rebuilt host archive into a disposable qualification SDK,
+printed matching source/installed archive hashes, and relinked the consumer in
+each baseline/broken/restored phase. This deliberately modified SDK is test
+material, not a release artifact or an immutable release receipt.
+
+Coverage is the fixture's N=256, H=63, C=1, fixed/large/irregular callbacks,
+independent identity/mask fan-out and dry PDC. It establishes resource-instrument
+sensitivity and clean tested callbacks, not the roadmap's paced timing matrix,
+all supported geometries, transition resource coverage, or full RT qualification.
+
+## Further routing and lifetime qualification
+
+At `d7add6ce8088381f91cc5d8311582ec37856b35e`, twelve additional independent
+production mutations were confirmed with compiled baseline/broken/restored
+controls: analysis latency double-counting, omitted upstream latency,
+alternative-path latency summation, frame-edge audio-delay allocation, foreign
+port owner, joined frame inputs, spectral cycle, writable fan-out alias,
+omitted missing-frame zero replacement, executor false on branch failure,
+whole-block clearing on branch failure, and lost full-edge fatal marker.
+Removing only the outer parallel and anticipation guards was **not confirmed**:
+independent inner eligibility checks still refused dispatch. Those two attempts
+are not evidence of mutation sensitivity and row 18 remains open.
+
+Commit `29c3322c9085441f65452c6fa33a627155dac11a` adds controls for a reader acquired after offer but before
+activation, failed/cancelled candidate isolation, seek before and after candidate
+validation, and finite selective-mask/DC/interior-bin tail support. These pass
+as part of 38,608 assertions in 36 cases; their destructive lifetime and tail
+mutations remain outstanding.
+
+An installed-only external probe demonstrated that the public snapshot binder
+accepted an arbitrary spectral callback (`accepted=1`, `snapshot_valid=1`). The
+resolver is now an opaque value whose callable constructor is accessible only
+to `SignalGraph`. Normal graph preparation uses the existing snapshot builder.
+The public consumer and unit control both reject callable construction; the
+closed catalog is not replaced with another registration mechanism. This fixes
+the observed registration escape but does not establish the independent
+malformed-candidate and unknown-catalog-ID obligations in row 11.
+
+The resolver access-control mutation is independently **CONFIRMED**: changing
+only its private callable-constructor section to public compiles, then fails
+both the five-assertion unit trait control and the installed-only consumer's
+runtime trait check. Both pass before the mutation and after exact restoration.
+The installed control copied the current public header and freshly built archive
+into the disposable qualification SDK and relinked the consumer each phase.
+
+## Parameter-ingress source classification
+
+The exact-parameter path has two distinct boundaries. Live generic injection in
+`signal_graph_mailbox.cpp` obtains `read_snapshot_(true)` and refuses an exact
+owner's node. Exact-generation injection in `ExecutionSnapshot` requires a
+passkey mintable only by `detail::TimelineAutomationDelivery`, and explicitly
+requires `!snapshot_->spectral`. The delivery implementation calls only that
+pinned entry point. Spectral candidate handles refuse at preparation, offer,
+activation and finalization; a retained legacy processing lease prevents initial
+conversion. Therefore no supported exact-generation parameter ingress is admitted
+for this routed slice. This is a source inventory and an explicit unsupported
+mode, not proof that exact-parameter preservation or a forced gate bypass has
+been mutation-qualified. Those executable controls remain open.
+
+The complete governed `pulp build --all` passed after the public resolver layout
+change. The full routed suite after the two additional exhaustion controls passed
+38,658 assertions in 38 cases. Documentation checks passed with 305 warnings;
+processing-model terminology, capability freshness and sequencer exposure checks
+passed. An independent advisory review of the resolver change together with the
+generated capability refresh found no actionable defects. None of these results
+is a counted PR verdict or full first-slice acceptance.
+
+At `004dab3993fee953aa65219e34d937c21666d8b4`, seven more production mutations
+were independently confirmed with restored-green controls: remove the output
+clock bound; permit transition-serial wrap; omit synthesis of zero-bin frames;
+reset the retired arena during activation; bypass reader-pinned retirement;
+increment transition serial twice; and consume a serial during ordinary
+candidate preparation. The last mutation was checked against failed/cancelled
+candidate isolation, before/after-validation seek, and failure at maximum serial.
+An initial mutation-script ambiguity stopped before editing; narrowing its
+anchor to the ordinary preparation function produced the confirmed result.
+
+These close the named independent predicates, not the original shared-CAS race
+schedule, shared-engine/destructive-reprepare controls, or the complete tuple
+oracle through controller replacement. The selective-mask tail oracle detects
+omitted zero synthesis; offline codec EOF-source integration remains outside this
+routed slice's admission.
+
+The prepare-time mask revalidation control corrupts a mutable local token's owned
+payload after a valid factory call, then prepares a copied graph through the
+production bank. Valid endpoint gains pass; NaN/Inf, negative and above-one gains
+return `InvalidMask`. Independent removal of the preparation finite, minimum and
+maximum predicates was confirmed, with restored-green controls, at
+`467b46e14c749837fb292ad4bbf116c08f728aec`. These checks
+are independent of the earlier factory predicate mutations. Unknown catalog ID
+and malformed configuration length still require separate internal controls.
+
+## Borrow and whole-frame transaction controls
+
+A production mutation deferred copying analysis frames until the engine had
+finished emitting the callback batch, retaining its last borrowed pointer and
+using it to overwrite every published slot. The real routed signal control
+failed; baseline and restored source passed. This confirms that immediate copy
+into graph-owned edge storage matters beyond the existing writable-fan-out
+alias mutation.
+
+The first planted early-commit mutation passed the prior guarded transaction
+test: that test read only the prefix before the rejected frame's future support.
+The test now advances eight more valid hops and compares the full available
+history to a control engine. It passes 28,134 assertions in three guarded-engine
+cases, and the same production mutation now fails the transaction case before
+restoring green. The witnessed failure of the earlier oracle is retained as
+part of the evidence; it was not counted as a confirmed mutation.

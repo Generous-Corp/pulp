@@ -850,25 +850,61 @@ def source_signals(root: Path, rel: str, defines: list[str]) -> list[str]:
     return hits
 
 
-def _test_include_closure(root: Path, rel: str) -> list[str]:
-    """`rel` and every header under test/ it reaches through quoted includes."""
+def _test_include_closure(root: Path, rel: str, *, unreadable: set[str] | None = None,
+                          build_dir: Path | None = None) -> list[str]:
+    """`rel` and every header under test/ it reaches through quoted includes.
+
+    The optional diagnostic set makes an incomplete closure explicit to
+    callers that need proof of a clean scan. That validation also follows
+    generated sources and quoted absolute/local includes inside the checkout
+    or the configured build directory. It never follows a path outside those
+    roots or lets a binary-directory token escape its configured directory.
+    The ordinary process scan remains limited to test/ headers.
+    """
+    source_root = root.resolve()
+    binary_root = build_dir.resolve() if build_dir is not None else None
+    if unreadable is not None and rel.startswith(BINARY_DIR_TOKEN + "/"):
+        generated = binary_root / rel[len(BINARY_DIR_TOKEN) + 1:] if binary_root else None
+        if generated is None or not generated.resolve().is_relative_to(binary_root):
+            unreadable.add(rel)
+            return []
+        rel = str(generated.resolve())
     seen: list[str] = []
     stack = [rel]
     while stack:
         cur = stack.pop()
         if cur in seen:
             continue
+        if unreadable is not None:
+            resolved = (root / cur).resolve()
+            if not (resolved.is_relative_to(source_root)
+                    or binary_root is not None and resolved.is_relative_to(binary_root)):
+                unreadable.add(cur)
+                continue
         try:
             text = (root / cur).read_text(encoding="utf-8", errors="replace")
         except OSError:
+            if unreadable is not None:
+                unreadable.add(cur)
             continue
         seen.append(cur)
-        for name in INCLUDE.findall(text):
+        include_text = strip_c_comments(text, keep_strings=True) if unreadable is not None else text
+        for name in INCLUDE.findall(include_text):
             for base in (os.path.dirname(cur), "test", "test/support"):
                 cand = os.path.normpath(os.path.join(base, name))
-                if cand.startswith("test/") and (root / cand).is_file():
+                if unreadable is not None:
+                    resolved = (root / cand).resolve()
+                    contained = (resolved.is_relative_to(source_root)
+                                 or binary_root is not None and resolved.is_relative_to(binary_root))
+                    if contained and resolved.is_file():
+                        stack.append(_rel(resolved, root) or str(resolved))
+                        break
+                elif cand.startswith("test/") and (root / cand).is_file():
                     stack.append(cand)
                     break
+            else:
+                if unreadable is not None:
+                    unreadable.add(f'{cur}: unresolved quoted include "{name}"')
     return seen
 
 
@@ -1299,6 +1335,48 @@ def carry_unconfigured_entries(current: dict, checked_in: dict, inventory: dict,
     return sorted(set(carried))
 
 
+def retain_scanned_clean_entries(current: dict, checked_in: dict, root: Path,
+                                 scanned: dict[str, dict], build_dir: Path | None = None) -> list[str]:
+    """Refresh old dependency records whose executable was scanned clean.
+
+    A removed final dependency leaves no compiled entry, but the executable
+    is still configured and scanned. Keep its name with a fresh empty record
+    so the unseen-entry guard does not mistake that transition for a missing
+    test. Never copy old dependency metadata or infer a scan from the old list.
+    The scanners skip unreadable sources and headers; those are not evidence
+    of a clean executable. Current indexed sources and the old record's
+    dependency sources must remain readable. Removing a formerly recorded
+    source still requires investigation, as it did under the deletion guard.
+    """
+    if not set(EXECUTABLE_SCANS) <= set(current.get("executables_scanned_for") or []):
+        return []
+    scanned_names = set(current.get("executables_scanned") or [])
+    entries = current.get("executables")
+    if entries is None:
+        return []
+    problems = []
+    for name in checked_in.get("executables") or {}:
+        if name not in scanned_names or name in entries:
+            continue
+        sources = (scanned.get(name) or {}).get("sources") or []
+        if not sources:
+            problems.append(f"{name}: no indexed sources to scan")
+            continue
+        previous = checked_in["executables"][name]
+        scan_sources = (set(sources) | set(previous.get("sources") or [])
+                        | set(previous.get("spawning_sources") or []))
+        unreadable: set[str] = set()
+        for source in sorted(scan_sources):
+            _test_include_closure(root, source, unreadable=unreadable, build_dir=build_dir)
+        if unreadable:
+            problems.append(f"{name}: unreadable scan sources: {', '.join(sorted(unreadable))}")
+            continue
+        entries[name] = {"kind": "compiled", "data": "none", "inputs": [],
+                         "sources": [], "undeclared_sources": []}
+    current["executables"] = dict(sorted(entries.items()))
+    return problems
+
+
 def entries_write_would_delete(current: dict, checked_in: dict) -> list[str]:
     """Checked-in test and executable names absent from what --write would
     write, after unconfigured entries were carried. Main's list holds every
@@ -1518,6 +1596,10 @@ def main(argv: list[str]) -> int:
         print("script-test-inputs: SKIPPED: " + off_platform + ". The required gate checks the list; "
               "this is a skip, not a pass.")
         return SKIP_EXIT
+    try:
+        checked_in = json.loads(list_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        checked_in = {"tests": {}}
     current = build_list(inventory, root, build_dir)
     off_profile = outside_gate_profile_build(build_dir, inventory, root)
     # A stale configure blocks writes, but --check must still judge the
@@ -1535,13 +1617,16 @@ def main(argv: list[str]) -> int:
               "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER).",
               file=sys.stderr)
         return 2
+    if not off_profile:
+        clean_errors = retain_scanned_clean_entries(current, checked_in, root,
+                                                    test_executables(build_dir) or {}, build_dir)
+        if clean_errors:
+            print("script-test-inputs: cannot refresh compiled entries: " + "; ".join(clean_errors),
+                  file=sys.stderr)
+            return 2
     if a.write:
-        try:
-            previous = json.loads(list_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            previous = {}
-        carried = carry_unconfigured_entries(current, previous, inventory, root, build_dir)
-        dropped = entries_write_would_delete(current, previous)
+        carried = carry_unconfigured_entries(current, checked_in, inventory, root, build_dir)
+        dropped = entries_write_would_delete(current, checked_in)
         if dropped and not a.allow_delete:
             print("script-test-inputs: refusing to write: it would delete "
                   f"{len(dropped)} checked-in entr{'y' if len(dropped) == 1 else 'ies'} this configure "
@@ -1569,10 +1654,6 @@ def main(argv: list[str]) -> int:
             print("script-test-inputs: note: no --build-dir, so an entry generated into a build tree "
                   f"could not be recorded as {BINARY_DIR_TOKEN}; pass --build-dir alongside --inventory-json")
         return 0
-    try:
-        checked_in = json.loads(list_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        checked_in = {"tests": {}}
     if off_profile:
         # Script entries are filtered to the gate's registrations and still
         # compare; this build's compiled entries cannot, so they are left out

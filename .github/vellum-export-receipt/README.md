@@ -27,8 +27,11 @@ Pulp paths Vellum's newest mirror export copied.
 The check reads both files at the base commit of a change, so editing them
 takes effect for the changes after the one that edits them. That makes an edit
 here an ownership decision for every later change: review it as one. The check
-only proves the copy is self-consistent and that its `pulp_sha` is real Pulp
-history; it does not yet compare the copy with Vellum's blob. Re-pin by copying
+proves the copy is self-consistent and that its `pulp_sha` is real Pulp
+history. Where a Vellum reader token is present (the trusted lanes), it also
+requires the copy's Git blob id, at the base and at the head, to equal the one
+Vellum's `main` serves for `receipt_source`; the untrusted job has no token and
+skips that comparison. Re-pin by copying
 the new receipt, updating `export_id`, `receipt_path`, `receipt_source` and
 `receipt_sha256` together, and removing the old copy. The pin cannot be deleted
 while the guard runs.
@@ -49,3 +52,9 @@ a change event or expansion-watch event that covers it, or an export event under
   "rationale": "What changed, and why Vellum does or does not take it."
 }
 ```
+
+Two added events that state different values for one path fail as a conflict.
+To correct a landed export event, add a new one naming it in `supersedes`
+(sorted event ids). The correction may list only paths the superseded event
+also lists, and for those paths only the correction's value counts. It may list
+a path its own change leaves untouched.
