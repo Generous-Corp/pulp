@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -57,6 +58,14 @@ class SLICE_VELLUM_UI_API KnobPanel {
                              std::uint32_t& pixel_height) = 0;
     /// The current frame as PNG. Empty on failure.
     virtual std::vector<std::uint8_t> capture_png() = 0;
+
+    /// Give the panel's text field keyboard focus, or take it away.
+    virtual void set_text_focus(bool focused) = 0;
+    virtual bool text_focused() const = 0;
+    /// Type UTF-8 text into the focused field. False when it has no focus.
+    virtual bool type_text(const std::string& utf8) = 0;
+    /// The text field's contents.
+    virtual std::string text() const = 0;
 };
 
 /// The number of live `KnobPanel`s, for leak checks across reopen.

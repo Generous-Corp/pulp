@@ -5239,6 +5239,18 @@
    ],
    "kind": "python"
   },
+  "editor-host-acceptance-selftest": {
+   "entry": "tools/scripts/test_editor_host_acceptance.py",
+   "inputs": [
+    "test/editor_host_slice/rmlui_editor.cpp",
+    "tools/ci/governed-build.sh",
+    "tools/scripts/confirm_failure.sh",
+    "tools/scripts/core_vellum_direction.py",
+    "tools/scripts/editor_host_acceptance.py",
+    "tools/scripts/test_editor_host_acceptance.py"
+   ],
+   "kind": "python"
+  },
   "ensure-signing-ready": {
    "entry": "tools/scripts/test_ensure_signing_ready.sh",
    "inputs": [
