@@ -517,6 +517,12 @@ variable `FLEET_RELEASE_INTERIM_APP_ID`:
   signatures, and the legacy SSH key signs as the maintainer's account, which
   an App-made tag must not claim to be.
 
+  The tag ruleset blocks updating, deleting and force-pushing `v*` and
+  `plugin-v*` tags for everyone. When auto-release stops on "tag exists at
+  another sha, manual reconciliation required", fixing the tag means setting
+  the `protect-release-tags` ruleset to Disabled for the change and Active
+  again after.
+
 The WebCLAP deploy works the same way: the required build+proof job holds no
 secret and uploads the site as one tarball; the `deploy` job, in the `deploy`
 environment (branch `main` only), checks the tarball's digest against the build
