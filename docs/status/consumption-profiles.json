@@ -638,6 +638,7 @@
       "pulp/platform/device_capability.hpp",
       "pulp/platform/environment.hpp",
       "pulp/platform/file_dialog.hpp",
+      "pulp/platform/gpu_fwd.hpp",
       "pulp/platform/native_handle.hpp",
       "pulp/platform/permissions.hpp",
       "pulp/platform/platform.hpp",
