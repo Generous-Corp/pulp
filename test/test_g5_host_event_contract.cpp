@@ -133,6 +133,30 @@ TEST_CASE("G5 host ingress drops staged records at an epoch boundary",
     REQUIRE(ingress.end_block() == HostEventResult::Accepted);
 }
 
+TEST_CASE("G5 host ingress evicts staged records passed by a forward sample jump",
+          "[host][graph][g5][events][negative-control]") {
+    HostEventIngress<4> ingress;
+    REQUIRE(ingress.begin_block(1, 100, 4) == HostEventResult::Accepted);
+    REQUIRE(ingress.publish(midi_event(1, 110, 1, 9, pulp::midi::MidiEvent::note_on(0, 60, 1))) ==
+            HostEventResult::Accepted);
+    REQUIRE(ingress.end_block() == HostEventResult::Accepted);
+
+    // Seek/loop: the next block starts past the staged record.
+    REQUIRE(ingress.begin_block(1, 200, 4) == HostEventResult::Accepted);
+    REQUIRE(ingress.pending() == 0);
+    // Same (producer, sequence) is reusable and full capacity is available.
+    for (std::uint64_t i = 1; i <= 4; ++i)
+        REQUIRE(ingress.publish(midi_event(1, 200 + static_cast<std::int64_t>(i) - 1, i, 9,
+                                           pulp::midi::MidiEvent::note_on(0, 60, 1))) ==
+                HostEventResult::Accepted);
+    std::array<HostEventRecord, 4> projected{};
+    std::size_t count = 0;
+    REQUIRE(ingress.project(projected, count) == HostEventResult::Accepted);
+    REQUIRE(count == 4);
+    REQUIRE(ingress.pending() == 0);
+    REQUIRE(ingress.end_block() == HostEventResult::Accepted);
+}
+
 TEST_CASE("G5 MPE sidecar preserves projected sample offsets", "[host][graph][g5][mpe]") {
     HostEventIngress<4> ingress;
     REQUIRE(ingress.begin_block(1, 40, 8) == HostEventResult::Accepted);

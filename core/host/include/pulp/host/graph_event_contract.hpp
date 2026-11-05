@@ -78,6 +78,18 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
         // epoch cannot be projected into the replacement graph.
         if (epoch != epoch_)
             size_ = 0;
+        // A forward jump (seek/loop) can leave staged records behind the new
+        // window; they can never be projected and publish() refuses late
+        // records, so evict them rather than leak staging capacity.
+        if (epoch == epoch_) {
+            std::size_t keep = 0;
+            for (std::size_t i = 0; i < size_; ++i) {
+                if (records_[i].epoch == epoch &&
+                    static_cast<std::uint64_t>(records_[i].absolute_sample) >= sample_start)
+                    records_[keep++] = records_[i];
+            }
+            size_ = keep;
+        }
         epoch_ = epoch;
         sample_start_ = sample_start;
         frames_ = frames;
@@ -150,7 +162,7 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
             if (records_[i].epoch != epoch_)
                 continue;
             const auto sample = static_cast<std::uint64_t>(records_[i].absolute_sample);
-            if (sample < sample_start_ || sample >= end)
+            if (sample >= end)
                 records_[write++] = records_[i];
         }
         size_ = write;
