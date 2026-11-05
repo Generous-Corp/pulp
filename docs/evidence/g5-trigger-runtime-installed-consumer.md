@@ -81,7 +81,7 @@ Its source SHA-256 is
 Raw evidence hashes are recorded in `metadata.txt`: positive execution log
 `709e35172ec9454bc70c34d13774e4df09a384fe7509838aa59b736343e5048b`, private
 header negative log
-`9d27bfc5bc45e3754ba233f2eb243b037749b4d85acf715a6d3177420f559491`, install
+`1db16b6623fa3ec4d09ba2e814b37e89ba96c98b73a463482d40865dc35bf450`, install
 log `372ca3e3e8ab4219c2ed5de03db4b8e8b13958d239d3cfcb251822134e8f3620`, and
 manifest `12ea0903bd39a4892a969e6e443886bf3c632654653e41ef5c1cb15525c06c06`.
 These are durable raw artifacts, not prose-only claims.
