@@ -23,7 +23,8 @@ def resolve(event: str, head: str | None, args: list[str] = DEFAULT_ARGS, **extr
                 **extra})
     if head is not None:
         env["PR_HEAD_REPO"] = head
-    proc = subprocess.run([sys.executable, str(SCRIPT), *args], env=env, capture_output=True, text=True)
+    proc = subprocess.run([sys.executable, str(SCRIPT), *args], env=env, capture_output=True, text=True,
+                          encoding="utf-8")
     return proc.returncode, proc.stdout, proc.stderr
 
 
