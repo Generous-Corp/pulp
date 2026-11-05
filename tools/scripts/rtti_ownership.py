@@ -46,10 +46,27 @@ _OPERATOR_NAME = re.compile(
 _CLOSURE = re.compile(r"'lambda|\{lambda|'block|\{block|'unnamed|\{unnamed|\$_\d|\(anonymous namespace\)")
 
 
-# A known RTTI name in Mach-O spelling and its demangling. demangle() checks it
-# on every call, so a demangler that reads nothing fails instead of yielding an
-# empty owned set, which would flag nothing.
-_CONTROL = ("__ZTIN4pulp4rtti7ControlE", "typeinfo for pulp::rtti::Control")
+# The root namespaces the read symbols are spelled under: Pulp's own, and the
+# renamed mirror's. They are the roots of the mirror-edge table
+# (tools/scripts/vellum_mirror_edge_patterns.json), carried as a literal
+# because this module is vendored byte for byte into Vellum and runs where the
+# table is not shipped; test_archive_symbol_closure_check.py holds them equal.
+ROOT_NAMESPACES = ("pulp", "vellum")
+
+
+def mangled_root(root: str) -> str:
+    """The Itanium nested-name prefix of a root namespace: `N4pulp`, `N6vellum`."""
+    return f"N{len(root)}{root}"
+
+
+def controls(roots: tuple[str, ...] = ROOT_NAMESPACES) -> list[tuple[str, str]]:
+    """A known RTTI name per root, in Mach-O spelling, and its demangling.
+
+    demangle() checks them on every call, so a demangler that reads nothing,
+    or cannot read a root's spelling, fails instead of yielding an empty owned
+    set, which would flag nothing.
+    """
+    return [(f"__ZTI{mangled_root(root)}4rtti7ControlE", f"typeinfo for {root}::rtti::Control") for root in roots]
 
 
 class DemangleError(RuntimeError):
@@ -77,20 +94,21 @@ def demangle(names: set[str], cxxfilt: str | None = None) -> dict[str, str]:
     # GitHub-hosted macOS) strips one by default on Darwin, which leaves an
     # Itanium "_Z..." name undemangled and every RTTI owner unread. -n
     # (--no-strip-underscore) turns that off in llvm-cxxfilt and GNU c++filt.
-    # The control rides in the same batch and must come back demangled: a tool
+    # The controls ride in the same batch and must come back demangled: a tool
     # that ignores -n, or passes names through untouched, still answers one
     # line per name, so the line count alone cannot tell it from a real read.
-    control, expected = _CONTROL
-    itanium = [name[1:] if name.startswith("__Z") else name for name in [control, *ordered]]
+    checks = controls()
+    itanium = [name[1:] if name.startswith("__Z") else name for name in [*(c for c, _ in checks), *ordered]]
     proc = subprocess.run([tool, "-n"], input="\n".join(itanium), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", check=False)
     out = proc.stdout.splitlines()
-    if proc.returncode != 0 or len(out) != len(ordered) + 1:
+    if proc.returncode != 0 or len(out) != len(ordered) + len(checks):
         raise DemangleError(f"{tool} did not demangle {len(ordered)} names one-to-one")
-    if out[0] != expected:
-        raise DemangleError(f"{tool} demangled the control {control!r} to {out[0]!r}, "
-                            f"not {expected!r}; its output cannot be read")
-    return dict(zip(ordered, out[1:]))
+    for (control, expected), got in zip(checks, out):
+        if got != expected:
+            raise DemangleError(f"{tool} demangled the control {control!r} to {got!r}, "
+                                f"not {expected!r}; its output cannot be read")
+    return dict(zip(ordered, out[len(checks):]))
 
 
 def _top_level(text: str, stop: str) -> int:
