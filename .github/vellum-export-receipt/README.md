@@ -14,9 +14,15 @@ Pulp paths Vellum's newest mirror export copied.
   inheritance decision, because it is not edited in Pulp: a change to one
   fails unless a change event it adds covers the path's transferred slice with
   disposition `framework-backport` or `emergency-exception`. `frozen_paths`
-  lists exactly the paths of the transferred slices in
-  `.github/vellum-ownership.json`; `test_vellum_receipt_drift.py` holds the
-  two equal.
+  lists the paths of the transferred slices in
+  `.github/vellum-ownership.json`, minus the paths the owner has unfrozen;
+  `test_vellum_receipt_drift.py` holds the two equal through its
+  `owner-unfreezes.json` record, which names each exact path, the URL of the
+  freeze owner's approval comment, and that comment's author; an unrecorded
+  pin deletion fails. The author is recorded evidence, not checked against
+  GitHub. A transferred slice cannot change, so an
+  unfrozen path keeps its slice and leaves only the pin. Its edits still need
+  a change event for that slice, with an explicit `vellum_inherits`.
 
 The check reads both files at the base commit of a change, so editing them
 takes effect for the changes after the one that edits them. That makes an edit

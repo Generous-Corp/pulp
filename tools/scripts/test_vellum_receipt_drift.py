@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -722,6 +723,80 @@ class FrozenCliTests(unittest.TestCase):
             fixture.close()
 
 
+OWNER_UNFREEZES_PATH = ".github/vellum-export-receipt/owner-unfreezes.json"
+OWNER_UNFREEZES_SCHEMA = "pulp.vellum.owner-unfreezes.v2"
+# The freeze owner, as GitHub spells the login (the ownership map writes it
+# "@danielraffel").
+OWNER_LOGIN = "danielraffel"
+APPROVAL_URL_RE = re.compile(
+    r"^https://github\.com/Generous-Corp/pulp/pull/[1-9][0-9]*#issuecomment-[1-9][0-9]*$"
+)
+
+
+def owner_unfrozen_paths(raw: bytes, transferred: set[str]) -> set[str]:
+    """Validate the owner-controlled unfreeze record and return its exact paths.
+
+    The record is the only source of pin removals the consistency test accepts.
+    Each entry names one exact transferred-slice path, the URL of the owner's
+    approval comment on a Pulp pull request, and ``approved_by``, the comment's
+    author, which must be the freeze owner. Anything else raises ValueError, so
+    a pin deletion without a recorded approval cannot pass. The comment's author
+    is recorded evidence: this offline check does not query GitHub for it.
+    """
+    value = json.loads(raw)
+    if not isinstance(value, dict) or value.get("schema") != OWNER_UNFREEZES_SCHEMA:
+        raise ValueError("owner-unfreezes: wrong schema")
+    paths: set[str] = set()
+    for index, row in enumerate(value.get("unfreezes", [])):
+        where = f"owner-unfreezes[{index}]"
+        if not isinstance(row, dict) or set(row) != {"path", "approval_url", "approved_by"}:
+            raise ValueError(f"{where}: needs exactly path, approval_url, approved_by")
+        if row["approved_by"] != OWNER_LOGIN:
+            raise ValueError(f"{where}: approved_by must be the freeze owner {OWNER_LOGIN}")
+        if not isinstance(row["approval_url"], str) or not APPROVAL_URL_RE.fullmatch(
+            row["approval_url"]
+        ):
+            raise ValueError(f"{where}: approval_url must be a Pulp pull request comment URL")
+        if row["path"] not in transferred:
+            raise ValueError(f"{where}: path is not an exact transferred-slice path")
+        if row["path"] in paths:
+            raise ValueError(f"{where}: repeated path")
+        paths.add(row["path"])
+    return paths
+
+
+class OwnerUnfreezeRecordTests(unittest.TestCase):
+    TRANSFERRED = {"a/x.hpp", "a/y.hpp"}
+
+    def record(self, **row):
+        base = {"path": "a/x.hpp",
+                "approval_url": "https://github.com/Generous-Corp/pulp/pull/1#issuecomment-2",
+                "approved_by": OWNER_LOGIN}
+        base.update(row)
+        return json.dumps({"schema": OWNER_UNFREEZES_SCHEMA, "unfreezes": [base]}).encode()
+
+    def test_recorded_path_is_accepted(self):
+        self.assertEqual(owner_unfrozen_paths(self.record(), self.TRANSFERRED), {"a/x.hpp"})
+
+    def test_unrecorded_pin_deletion_fails_consistency(self):
+        # A path missing from the pin but absent from the record is not accepted.
+        recorded = owner_unfrozen_paths(self.record(), self.TRANSFERRED)
+        pin_after_unrecorded_deletion = ["a/x.hpp"]  # a/y.hpp deleted, no record
+        expected = [p for p in sorted(self.TRANSFERRED) if p not in recorded]
+        self.assertNotEqual(pin_after_unrecorded_deletion, expected)
+
+    def test_record_rejects_forged_entries(self):
+        for bad in (self.record(path="a/z.hpp"), self.record(path="a"),
+                    self.record(approved_by="someone-else"),
+                    self.record(approved_by="@danielraffel"),
+                    self.record(approval_url="trust me"),
+                    self.record(approval_url="https://github.com/Generous-Corp/pulp/pull/1"),
+                    self.record(approval_url="https://github.com/other/pulp/pull/1#issuecomment-2"),
+                    self.record(approval_url="https://github.com/Generous-Corp/pulp/pull/1#issuecomment-2x")):
+            with self.assertRaises(ValueError):
+                owner_unfrozen_paths(bad, self.TRANSFERRED)
+
+
 class CommittedPinTests(unittest.TestCase):
     def test_committed_pin_and_receipt_are_consistent(self):
         pin = drift.parse_pin((REPO / drift.PIN_PATH).read_bytes())
@@ -739,7 +814,10 @@ class CommittedPinTests(unittest.TestCase):
             if item["state"] == "framework-authoritative-transferred"
             for path in item["paths"]
         })
-        self.assertEqual(list(pin.frozen_paths), transferred)
+        unfrozen = owner_unfrozen_paths((REPO / OWNER_UNFREEZES_PATH).read_bytes(),
+                                        set(transferred))
+        self.assertEqual(list(pin.frozen_paths),
+                         [path for path in transferred if path not in unfrozen])
 
 
 if __name__ == "__main__":

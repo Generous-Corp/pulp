@@ -117,7 +117,6 @@
     "core/view/include/pulp/view/screenshot_compare.hpp",
     "core/view/include/pulp/view/svg_fragment.hpp",
     "core/view/include/pulp/view/svg_path_widget.hpp",
-    "core/view/include/pulp/view/value_source.hpp",
     "core/view/include/pulp/view/widget_painter.hpp",
     "core/view/include/pulp/view/window_host.hpp",
     "core/view/platform/mac/accessibility_mac.mm",
