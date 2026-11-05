@@ -37,7 +37,9 @@ struct PluginInfo {
     std::string version;
     std::string path;          // Full path to the plugin bundle/binary
     std::string unique_id;     // Format-specific unique ID (FUID, bundle ID, etc.)
-    PluginFormat format;
+    // Deterministic default: Processor nodes never set it, and the graph
+    // serializer writes it, so an indeterminate value broke JSON roundtrips.
+    PluginFormat format = PluginFormat::VST3;
     bool is_instrument = false;
     bool is_effect = true;
     int num_inputs = 2;

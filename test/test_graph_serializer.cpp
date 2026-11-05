@@ -21,6 +21,7 @@
 #include <cstring>
 #include <cmath>
 #include <memory>
+#include <new>
 #include <numeric>
 #include <set>
 #include <string_view>
@@ -2945,4 +2946,17 @@ TEST_CASE("X3 expands reusable descriptors with isolated state and deterministic
     const auto future_result = GraphSerializer::from_json(future, unknown_version);
     REQUIRE(future_result.ok);
     REQUIRE(missing_custom_types_contain(future_result, "test.reusable_gain@99"));
+}
+
+TEST_CASE("PluginInfo format is deterministic when default-constructed",
+          "[host][graph-serializer]") {
+    // Processor nodes never assign PluginInfo::format but the serializer writes
+    // it; an indeterminate value made graph JSON roundtrips differ ("vst3" vs
+    // "unknown"). Construct over poisoned storage so the test fails if the
+    // member initializer is removed.
+    alignas(pulp::host::PluginInfo) unsigned char storage[sizeof(pulp::host::PluginInfo)];
+    std::memset(storage, 0xFF, sizeof(storage));
+    auto* info = new (storage) pulp::host::PluginInfo;
+    CHECK(info->format == pulp::host::PluginFormat::VST3);
+    info->~PluginInfo();
 }
