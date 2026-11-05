@@ -159,7 +159,7 @@ class CliTests(unittest.TestCase):
         proc = subprocess.run(
             [sys.executable, str(SCRIPT)],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
             check=False,
             env=environ,
         )
@@ -487,7 +487,7 @@ class PushDiffIntegrationTests(unittest.TestCase):
 
     def _git(self, *args: str) -> str:
         proc = subprocess.run(
-            ["git", *args], cwd=self.work, capture_output=True, text=True, check=True
+            ["git", *args], cwd=self.work, capture_output=True, text=True, encoding="utf-8", check=True
         )
         return proc.stdout.strip()
 
@@ -511,14 +511,14 @@ class PushDiffIntegrationTests(unittest.TestCase):
         self._git("symbolic-ref", "HEAD", "refs/heads/main")
 
         (self.work / "docs").mkdir()
-        (self.work / "docs" / "README.md").write_text("seed\n")
+        (self.work / "docs" / "README.md").write_text("seed\n", encoding="utf-8")
         self._git("add", "docs/README.md")
         self._git("commit", "-qm", "seed")
         self._git("push", "-q", "origin", "main")
         self.before = self._git("rev-parse", "HEAD")
 
         (self.work / "core").mkdir()
-        (self.work / "core" / "x.cpp").write_text("int main() { return 0; }\n")
+        (self.work / "core" / "x.cpp").write_text("int main() { return 0; }\n", encoding="utf-8")
         self._git("add", "core/x.cpp")
         self._git("commit", "-qm", "core change")
         self._git("push", "-q", "origin", "main")
@@ -536,7 +536,7 @@ class PushDiffIntegrationTests(unittest.TestCase):
                 base,
                 "--json",
             ],
-            cwd=self.work, capture_output=True, text=True, check=False,
+            cwd=self.work, capture_output=True, text=True, encoding="utf-8", check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return json.loads(proc.stdout)
@@ -563,7 +563,7 @@ class PushDiffIntegrationTests(unittest.TestCase):
         # docs merge from a core merge. With `origin/main` both look identical
         # (empty -> fail-closed -> build), so the skip never fires on main.
         before = self._git("rev-parse", "HEAD")
-        (self.work / "docs" / "README.md").write_text("docs only\n")
+        (self.work / "docs" / "README.md").write_text("docs only\n", encoding="utf-8")
         self._git("commit", "-qam", "docs change")
         self._git("push", "-q", "origin", "main")
         self._git("fetch", "-q", "origin", "main")
@@ -634,7 +634,7 @@ class StackedMergeGroupIntegrationTests(unittest.TestCase):
 
     def _git(self, cwd: Path, *args: str) -> str:
         proc = subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+            ["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", check=True
         )
         return proc.stdout.strip()
 
@@ -698,7 +698,7 @@ class StackedMergeGroupIntegrationTests(unittest.TestCase):
                        MERGE_GROUP_BASE_SHA=group_base,
                        MERGE_GROUP_BASE_REF=base_ref)
         proc = subprocess.run([sys.executable, str(SCRIPT)], cwd=work, env=environ,
-                              capture_output=True, text=True, check=False)
+                              capture_output=True, text=True, encoding="utf-8", check=False)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc.stdout.strip()
 
@@ -710,7 +710,7 @@ class StackedMergeGroupIntegrationTests(unittest.TestCase):
             [sys.executable, str(REPO_ROOT / "tools" / "scripts" / "classify_changes.py"),
              "--mode=diff", "--comparison=trees", "--base", base, "--json"],
             cwd=work, env={**os.environ, "GITHUB_OUTPUT": ""},
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, encoding="utf-8", check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return json.loads(proc.stdout)
@@ -800,7 +800,7 @@ class ShallowExactTreeIntegrationTests(unittest.TestCase):
                 ["git", "commit", "-qm", "base"], cwd=source, check=True
             )
             base = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], cwd=source, text=True
+                ["git", "rev-parse", "HEAD"], cwd=source, text=True, encoding="utf-8"
             ).strip()
             (source / "middle.txt").write_text("unneeded history\n", encoding="utf-8")
             subprocess.run(["git", "add", "middle.txt"], cwd=source, check=True)
@@ -837,7 +837,7 @@ class ShallowExactTreeIntegrationTests(unittest.TestCase):
                 ],
                 cwd=shallow,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8",
                 check=True,
             )
             payload = __import__("json").loads(result.stdout)
@@ -849,7 +849,7 @@ class ShallowExactTreeIntegrationTests(unittest.TestCase):
                     subprocess.check_output(
                         ["git", "rev-list", "--count", ref],
                         cwd=shallow,
-                        text=True,
+                        text=True, encoding="utf-8",
                     ).strip(),
                     "1",
                 )
