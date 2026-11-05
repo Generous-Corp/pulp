@@ -18,6 +18,12 @@ single source of truth for that model.
 | **cross-platform-check** | nightly (07:17 UTC) on `main`, plus `workflow_dispatch`; x86-64 Linux, arm64 Linux, x86-64 Linux and arm64 Linux on GitHub-hosted runners, x86-64 Windows on the self-hosted Windows x64 lane (GitHub-hosted only with `PULP_ALLOW_HOSTED_WINDOWS=1`) | advisory (failures on `main` file a per-platform tracking issue; dispatches from other branches run in parallel, one concurrency group per ref) | no | core tests, excludes `validation` + `slow` **only** — so the timing group does run here, off the reference platform. **The only lane that runs the Windows ctest suite** |
 | **Windows on a PR** (`windows` check) | every PR | advisory | no | **nothing on Windows.** On `pull_request` the `windows` check is an Ubuntu aggregate job that exits green with "Windows runs in nightly/explicit validation, not on the PR head": no Windows compile, zero tests. The `build.yml` `Windows (x64)` build + ctest leg is skipped on `pull_request` and `merge_group` (it runs on `workflow_dispatch` on the self-hosted Windows x64 lane, and hosted only when opted in: `allow_hosted_windows=true` or `PULP_ALLOW_HOSTED_WINDOWS=1`, which also adds it to a push to `main`), and the compile-only `Windows MSVC release-path gate`, `Windows MIDI Services SDK compile-gate` and `Windows BLE compile-gate` are skipped on `pull_request`, `merge_group` and push, running only on a `workflow_dispatch` that opts in to hosted Windows. The one PR-time Windows job is `Windows CLI compile (MSVC)` (`windows-cli-compile.yml`): compile-only, `pulp-cli` and `pulp-mcp` only, and only when `windows_cli_compile_scope.py` says the change can reach them. A green `windows` on a PR is not evidence that Windows compiles or passes tests |
 
+A fork pull request, including one whose fork was deleted, never takes a
+self-hosted runner from a variable: every lane above that a pull request can
+start, the sanitizer and coverage lanes included, routes it to the lane's
+GitHub-hosted fallback. See [local-ci.md](local-ci.md) for the rule and its
+lint.
+
 The required gate is **serialized on self-hosted macOS runners** and takes
 about 40 min (median 39.8 min of wall-clock over 45 sampled `pull_request`
 runs). Keeping it

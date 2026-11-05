@@ -117,6 +117,7 @@
     "pulp-smf-interchange",
     "pulp-smf-interop",
     "pulp-standalone",
+    "pulp-standalone-contract",
     "pulp-standalone-native",
     "pulp-state",
     "pulp-timebase",

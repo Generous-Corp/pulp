@@ -1724,6 +1724,15 @@ and surface counters against the protected base, and refresh the two sequencer
 exposure evidence needles before running the gates. This keeps the generated
 contract and its evidence rows aligned with the new header bytes.
 
+## Routed spectral infrastructure headers
+
+The runtime-only `pulp/host/spectral_graph.hpp` belongs in the explicit reviewed
+host tuple and minimal-target table. Its typed ports and coherent telemetry are
+infrastructure, not an advertised notation/catalog capability. A changed legacy
+telemetry header graduates through a reviewed registry row; never rewrite the
+frozen legacy baseline. After public header formatting, refresh fingerprints
+before regenerating the manifest and consumption census.
+
 ## Bounded indexed control utilities
 
 `pulp/signal/indexed_control.hpp` contains a caller-indexed control table reader
@@ -1733,3 +1742,26 @@ it does not advertise graph event transport or a standalone generator-facing
 capability. The G-5 fixture covers external index pause/reverse, strict trigger
 timing, and tested block partitions. Refresh the header fingerprint with
 `agent_capability_rederive.py` when this utility changes.
+
+## A new installed archive for the view-free Standalone host is not capability surface
+
+`pulp-standalone-contract` is the view-free Standalone host library. Adding it
+to `PULP_SDK_TARGETS` in `PulpInstallRules.cmake` installs no new public header
+under a covered root, so there is nothing to classify. Because it is a STATIC
+archive, its stem still goes into `release_product_matrix.json` in the same
+change, or `test_installed_sdk_archives_match_release_matrix` fails.
+
+## Typed trigger runtime exposure
+
+`pulp/host/trigger_graph.hpp` is reviewed runtime infrastructure, not a new
+generator-facing capability. Register its minimal installed owner as
+`Pulp::host`; refresh the existing `signal_graph_runtime.hpp` and
+`custom_node_events.hpp` binding fingerprints when their bytes change. A new
+borrowed-buffer validity helper requires reviewing `pulp/audio/buffer.hpp` as
+infrastructure owned by `Pulp::audio`, rather than rewriting its frozen legacy
+baseline fingerprint. Re-derive against the protected base after integration.
+
+The `CustomNodeEventBlock::triggers` field also touches sequencer-owned exposure:
+maintain the pending bounded-trigger-runtime row with installed SDK evidence
+and explicit product-control gaps. Neither that pointer nor the header ledger
+admits arbitrary Custom trigger producers or claims complete G-5 support.

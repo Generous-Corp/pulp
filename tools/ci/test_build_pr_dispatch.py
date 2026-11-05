@@ -325,6 +325,8 @@ class LinuxRoutingTest(unittest.TestCase):
                if not k.startswith(("GITHUB_", "PULP_", "EXPLICIT_", "NAMESPACE_"))}
         env.update({
             "REQUESTED_PROVIDER": "github-hosted", "GITHUB_EVENT_NAME": event,
+            # A same-repository pull request's payload names its own repository.
+            "PR_HEAD_REPO": REPO if event == "pull_request" else "",
             "GITHUB_REPOSITORY": REPO, "GITHUB_WORKSPACE": str(ROOT),
             "WORKFLOW_REF": f"{REPO}/.github/workflows/build.yml@refs/heads/topic",
             "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON": explicit,
@@ -442,6 +444,8 @@ class RoutingParityTest(LinuxRoutingTest):
                 if not k.startswith(("GITHUB_", "PULP_", "EXPLICIT_", "NAMESPACE_"))}
         base.update({
             "REQUESTED_PROVIDER": "github-hosted", "GITHUB_EVENT_NAME": event,
+            # A same-repository pull request's payload names its own repository.
+            "PR_HEAD_REPO": REPO if event == "pull_request" else "",
             "GITHUB_REPOSITORY": REPO, "GITHUB_WORKSPACE": str(ROOT),
             "WORKFLOW_REF": f"{REPO}/.github/workflows/build.yml@refs/heads/topic",
             "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON": "", "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON": "",
@@ -879,16 +883,16 @@ RESOLVER_INPUTS = ("allow_hosted_windows", "linux_runner_selector_json", "local_
 # the step is safe to run on a pull request's code. A new step on this path,
 # or one that newly reads an input, fails the test until it is added here.
 PR_DISPATCH_ALLOWLIST: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
-    ("resolve-provider", "actions/checkout@v7"): ((), "checks out the dispatched branch to read the resolver scripts"),
+    ("resolve-provider", "actions/checkout@v7.0.1"): ((), "checks out the dispatched branch to read the resolver scripts"),
     ("resolve-provider", "resolve"): (RESOLVER_INPUTS, "routes legs; on this path every operator input is blanked (RoutingParityTest)"),
     ("classify", "Bind the pull-request dispatch to its head"): (("pr_number",), "the fail-closed bind; read-only token passed to its reads only"),
-    ("classify", "actions/checkout@v7"): ((), "checks out the bound merge sha"),
+    ("classify", "actions/checkout@v7.0.1"): ((), "checks out the bound merge sha"),
     ("classify", "classify"): (("pr_number",), "diffs the bound merge against its merged base; read-only"),
-    ("protected-receipt-reuse", "actions/checkout@v7"): ((), "reads the reuse scripts; the decision itself is merge_group-only"),
+    ("protected-receipt-reuse", "actions/checkout@v7.0.1"): ((), "reads the reuse scripts; the decision itself is merge_group-only"),
     ("protected-receipt-reuse", "reuse"): ((), "merge_group-only logic; on a dispatch it passes the matrix through"),
     ("build", "Mark job start for the reuse replay record"): ((), "writes a timestamp to the job's own env"),
     ("build", "Seed the checkout from the host git mirror (tartci macOS)"): ((), "reads the host mirror as a PR-head job does"),
-    ("build", "actions/checkout@v7"): ((), "checks out the merge sha classify bound"),
+    ("build", "actions/checkout@v7.0.1"): ((), "checks out the merge sha classify bound"),
     ("build", "Verify the tested merge ref"): (("pr_number",), "re-checks the bound sha and its parents; outputs only"),
     ("build", TESTED_STEP): ((), "names the tested ref and sha for the jobs API; echo only"),
     ("build", "Fetch protected capability base"): ((), "fetches the merged base read-only"),
@@ -935,7 +939,7 @@ PR_DISPATCH_ALLOWLIST: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
     ("macos", "Record that no suite ran, for reuse replay"): ((), "writes a local record; its upload is skipped on this path"),
     ("linux", "Linux leg outcome (advisory)"): ((), "reads this run's jobs"),
     ("windows", "Windows leg outcome (advisory)"): (("pr_number", "run_windows"), "passes a pr_number dispatch as it does a PR"),
-    ("ci-cause", "actions/checkout@v7"): ((), "sparse checkout of the cause script"),
+    ("ci-cause", "actions/checkout@v7.0.1"): ((), "sparse checkout of the cause script"),
     ("ci-cause", "Name the cause of each failed job"): ((), "advisory; reads this run's logs, writes annotations"),
 }
 DIAGNOSTIC_UPLOADS = {"Upload ctest logs and JUnit report"}

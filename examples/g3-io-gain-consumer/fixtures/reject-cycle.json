@@ -1,0 +1,292 @@
+{
+  "document_schema": "pulp.graph.authored-io-gain.v1",
+  "edges": {
+    "[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"gain\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"output\",\"port\":\"audio\"},null]": {
+      "channel_map": [
+        [
+          "L",
+          "L"
+        ],
+        [
+          "R",
+          "R"
+        ]
+      ],
+      "destination": {
+        "direction": "in",
+        "kind": "audio",
+        "node": "output",
+        "port": "audio"
+      },
+      "lane": "audio",
+      "source": {
+        "direction": "out",
+        "kind": "audio",
+        "node": "gain",
+        "port": "audio"
+      }
+    },
+    "[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"input\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"gain\",\"port\":\"audio\"},null]": {
+      "channel_map": [
+        [
+          "L",
+          "L"
+        ],
+        [
+          "R",
+          "R"
+        ]
+      ],
+      "destination": {
+        "direction": "in",
+        "kind": "audio",
+        "node": "gain",
+        "port": "audio"
+      },
+      "lane": "audio",
+      "source": {
+        "direction": "out",
+        "kind": "audio",
+        "node": "input",
+        "port": "audio"
+      }
+    },
+    "[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"loop-a\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"loop-b\",\"port\":\"audio\"},null]": {
+      "channel_map": [
+        [
+          "L",
+          "L"
+        ],
+        [
+          "R",
+          "R"
+        ]
+      ],
+      "destination": {
+        "direction": "in",
+        "kind": "audio",
+        "node": "loop-b",
+        "port": "audio"
+      },
+      "lane": "audio",
+      "source": {
+        "direction": "out",
+        "kind": "audio",
+        "node": "loop-a",
+        "port": "audio"
+      }
+    },
+    "[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"loop-b\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"loop-a\",\"port\":\"audio\"},null]": {
+      "channel_map": [
+        [
+          "L",
+          "L"
+        ],
+        [
+          "R",
+          "R"
+        ]
+      ],
+      "destination": {
+        "direction": "in",
+        "kind": "audio",
+        "node": "loop-a",
+        "port": "audio"
+      },
+      "lane": "audio",
+      "source": {
+        "direction": "out",
+        "kind": "audio",
+        "node": "loop-b",
+        "port": "audio"
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "channels": [
+        "L",
+        "R"
+      ],
+      "endpoint": {
+        "direction": "out",
+        "kind": "audio",
+        "node": "input",
+        "port": "audio"
+      },
+      "key": "main-in",
+      "kind": "audio",
+      "role": "input"
+    },
+    {
+      "channels": [
+        "L",
+        "R"
+      ],
+      "endpoint": {
+        "direction": "in",
+        "kind": "audio",
+        "node": "output",
+        "port": "audio"
+      },
+      "key": "main-out",
+      "kind": "audio",
+      "role": "output"
+    }
+  ],
+  "nodes": {
+    "gain": {
+      "config": {},
+      "implementation": "pulp.builtin.gain.v1",
+      "initial_state": {
+        "mode": "default",
+        "revision": "gain.v1"
+      },
+      "kind": "gain",
+      "kind_contract": "gain.v1",
+      "parameter_bindings": {},
+      "policies": {},
+      "ports": {
+        "in": {
+          "audio": {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "contract": "audio-port.v1",
+            "kind": "audio"
+          }
+        },
+        "out": {
+          "audio": {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "contract": "audio-port.v1",
+            "kind": "audio"
+          }
+        }
+      }
+    },
+    "input": {
+      "config": {},
+      "implementation": "pulp.builtin.audio-input.v1",
+      "initial_state": {
+        "mode": "default",
+        "revision": "io.v1"
+      },
+      "kind": "audio_input",
+      "kind_contract": "io.v1",
+      "parameter_bindings": {},
+      "policies": {},
+      "ports": {
+        "in": {},
+        "out": {
+          "audio": {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "contract": "audio-port.v1",
+            "kind": "audio"
+          }
+        }
+      }
+    },
+    "loop-a": {
+      "config": {},
+      "implementation": "pulp.builtin.gain.v1",
+      "initial_state": {
+        "mode": "default",
+        "revision": "gain.v1"
+      },
+      "kind": "gain",
+      "kind_contract": "gain.v1",
+      "parameter_bindings": {},
+      "policies": {},
+      "ports": {
+        "in": {
+          "audio": {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "contract": "audio-port.v1",
+            "kind": "audio"
+          }
+        },
+        "out": {
+          "audio": {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "contract": "audio-port.v1",
+            "kind": "audio"
+          }
+        }
+      }
+    },
+    "loop-b": {
+      "config": {},
+      "implementation": "pulp.builtin.gain.v1",
+      "initial_state": {
+        "mode": "default",
+        "revision": "gain.v1"
+      },
+      "kind": "gain",
+      "kind_contract": "gain.v1",
+      "parameter_bindings": {},
+      "policies": {},
+      "ports": {
+        "in": {
+          "audio": {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "contract": "audio-port.v1",
+            "kind": "audio"
+          }
+        },
+        "out": {
+          "audio": {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "contract": "audio-port.v1",
+            "kind": "audio"
+          }
+        }
+      }
+    },
+    "output": {
+      "config": {},
+      "implementation": "pulp.builtin.audio-output.v1",
+      "initial_state": {
+        "mode": "default",
+        "revision": "io.v1"
+      },
+      "kind": "audio_output",
+      "kind_contract": "io.v1",
+      "parameter_bindings": {},
+      "policies": {},
+      "ports": {
+        "in": {
+          "audio": {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "contract": "audio-port.v1",
+            "kind": "audio"
+          }
+        },
+        "out": {}
+      }
+    }
+  },
+  "profile": "pulp.graph.identity.v1"
+}

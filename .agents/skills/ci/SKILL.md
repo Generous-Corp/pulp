@@ -4489,6 +4489,11 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   validated (e.g. via `shipyard pr`), push with `PULP_SKIP_DIFF_COVER=1 git push`
   and it completes in seconds. (Learned 2026-07-07 after ~an hour lost mis-blaming
   MTU/SSH for a diff-cover build during a deps-bump push.)
+  On a tartci gate host (m3, `TARTCI_ROLE` not `light`) the hook refuses the
+  build and reports `diff coverage: NOT CHECKED`; that refusal is never what
+  blocks the push (with `PULP_SKIP_DIFF_COVER=1` or
+  `PULP_DISABLE_PREPUSH_DIFF_COVER=1` it prints one informational line). A
+  blocked push on m3 is another gate (often `format_changed`) named above it.
 - **Continuous sensor:** `tools/scripts/install_host_vitals_sensor.sh` installs a
   per-user launchd agent (`com.pulp.host-vitals`, 60 s) that publishes the latest
   reading to `~/.local/state/pulp/host_vitals.json` and a rotating
@@ -4565,6 +4570,15 @@ falls through to hosted `macos-15`. That is useful defense in depth for the
 checked-in workflow, but it is not access control: pull-request workflow YAML is
 part of the contributor-controlled merge commit and can remove its own guard.
 Repo variables also resolve for fork runs.
+
+A deleted fork counts as a fork. Its head repository is null, so
+`head.repo.full_name != github.repository` must be the test, never "non-empty
+and foreign", and never `!head.repo.fork` (`!null` is true). A job a pull
+request can start that reads a self-hosted-capable variable into `runs-on`
+gates it on `head.repo.full_name == github.repository`. A
+`resolve_runs_on.py` call passes `PR_HEAD_REPO`; without it the resolver sends
+same-repository pull requests to the hosted fallback too.
+`fork_runner_guard_check.py` enforces both.
 
 The external trust boundary lives outside PR-controlled YAML. Pulp now ships two
 distinct protected Proxmox provider roles in addition to the existing generic

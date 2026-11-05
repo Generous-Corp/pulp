@@ -2011,6 +2011,30 @@
           {
             "name": "--output",
             "kind": "option"
+          },
+          {
+            "name": "--input",
+            "kind": "option"
+          },
+          {
+            "name": "--source-node",
+            "kind": "option"
+          },
+          {
+            "name": "--source-port",
+            "kind": "option"
+          },
+          {
+            "name": "--destination-node",
+            "kind": "option"
+          },
+          {
+            "name": "--destination-port",
+            "kind": "option"
+          },
+          {
+            "name": "--block-frames",
+            "kind": "option"
           }
         ],
         "subcommands": []
@@ -5040,7 +5064,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.501.2",
+        "version": "0.503.6",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -5055,13 +5079,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.501.2",
+        "catalog_version": "0.503.6",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.501.2",
+        "version": "0.503.6",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

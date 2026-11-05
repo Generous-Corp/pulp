@@ -300,6 +300,10 @@ files). No coverage context is required; every other pull request, schedule
 and dispatch runs as before. `tools/scripts/test_bump_fastpath.py` checks the
 guard on every job.
 
+`coverage.yml` routes a fork pull request, including one whose fork was
+deleted, to GitHub-hosted runners on every leg; the gate's verdict for a fork is
+unchanged.
+
 ### Action-major pins in the gate workflows
 
 The gate workflows (`version-skill-check.yml`, `coverage.yml`) run their scripts

@@ -95,6 +95,23 @@ Covered as defense in depth by `tools/scripts/test_fork_pr_runner_routing.py`
 (ctest: `fork-pr-runner-routing`), which runs the resolver the workflow actually
 embeds; that test does not prove the runners are inaccessible.
 
+A pull request whose fork was deleted is a fork too. Its
+`github.event.pull_request.head.repo.full_name` is null, so a check that only
+treats a non-empty, foreign head as a fork lets it read the runner variables;
+`!github.event.pull_request.head.repo.fork` passes it the same way, because
+`!null` is true. Every place that routes pull requests therefore counts a
+missing head repository as a fork:
+
+- build.yml's resolver and coverage.yml;
+- `tools/scripts/resolve_runs_on.py`, which sends any fork pull request to its
+  GitHub-hosted fallback and needs `PR_HEAD_REPO` from its caller;
+- every job that reads a self-hosted-capable variable straight into `runs-on`,
+  through the expression
+  `(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.X || '"<hosted label>"'`.
+
+`tools/scripts/fork_runner_guard_check.py` (workflow-lint, `gates.sh`) fails a
+workflow that drops either.
+
 ## The physical Intel lane is advisory and isolated
 
 The Intel Mac mini serves `nightly-intel.yml` through an ephemeral JIT

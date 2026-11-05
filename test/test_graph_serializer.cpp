@@ -21,6 +21,7 @@
 #include <cstring>
 #include <cmath>
 #include <memory>
+#include <new>
 #include <numeric>
 #include <set>
 #include <string_view>
@@ -586,11 +587,10 @@ TEST_CASE("GraphSerializer preserves unresolved region type versions and refuses
     REQUIRE(version_pos != std::string::npos);
     future.replace(version_pos, std::string("\"format_version\": 3").size(),
                    "\"format_version\": 4");
-    SignalGraph rejected;
-    const auto refusal = GraphSerializer::from_json(rejected, future);
-    REQUIRE_FALSE(refusal.ok);
-    REQUIRE(refusal.error.find("unsupported graph format_version 4") != std::string::npos);
-    REQUIRE(rejected.nodes().empty());
+    SignalGraph migrated;
+    const auto migrated_result = GraphSerializer::from_json(migrated, future);
+    REQUIRE(migrated_result.ok);
+    REQUIRE(migrated.sample_regions().size() == fixture.graph.sample_regions().size());
 }
 
 TEST_CASE("GraphSerializer validates unresolved region topology",
@@ -1307,7 +1307,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
 
     SignalGraph future_version;
     auto future_result = GraphSerializer::from_json(future_version, R"({
-  "format_version": 4,
+  "format_version": 5,
   "nodes": [
     {
       "id": 1,
@@ -1320,7 +1320,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
   "connections": []
 })");
     REQUIRE_FALSE(future_result.ok);
-    REQUIRE(future_result.error.find("unsupported graph format_version 4") != std::string::npos);
+    REQUIRE(future_result.error.find("unsupported graph format_version 5") != std::string::npos);
     REQUIRE(future_version.nodes().empty());
 }
 
@@ -1355,7 +1355,7 @@ TEST_CASE("GraphSerializer dispatches graph format migrations before materializi
             const auto pos = migrated_json.find("\"format_version\": 0");
             if (pos == std::string::npos) return false;
             migrated_json.replace(pos, std::string("\"format_version\": 0").size(),
-                                  "\"format_version\": 3");
+                                  "\"format_version\": 4");
             return true;
         }));
 
@@ -1389,7 +1389,7 @@ TEST_CASE("GraphSerializer rejects graph migrations that do not advance versions
 
 TEST_CASE("GraphSerializer rejects invalid graph migration registrations",
           "[host][serializer][migration]") {
-    REQUIRE(GraphSerializer::current_format_version() == 3);
+    REQUIRE(GraphSerializer::current_format_version() == 4);
     REQUIRE_FALSE(GraphSerializer::register_migration(
         2, 2,
         [](const std::string& source_json, std::string& migrated_json) {
@@ -2861,11 +2861,14 @@ class RuntimeOnlyProcessor final : public pulp::format::Processor {
 };
 } // namespace
 
-TEST_CASE("GraphSerializer refuses runtime-owned Processor nodes",
+TEST_CASE("GraphSerializer emits runtime-owned Processor v4 records",
           "[host][serializer][processor-node]") {
     SignalGraph graph;
     REQUIRE(graph.add_processor_node(std::make_unique<RuntimeOnlyProcessor>()) != 0);
-    REQUIRE(GraphSerializer::to_json(graph).empty());
+    const auto emitted = GraphSerializer::to_json(graph);
+    REQUIRE_FALSE(emitted.empty());
+    REQUIRE(emitted.find("\"format_version\"") != std::string::npos);
+    REQUIRE(emitted.find("\"processors\"") != std::string::npos);
 
     constexpr auto encoded = R"json({
       "format_version": 2,
@@ -2943,4 +2946,17 @@ TEST_CASE("X3 expands reusable descriptors with isolated state and deterministic
     const auto future_result = GraphSerializer::from_json(future, unknown_version);
     REQUIRE(future_result.ok);
     REQUIRE(missing_custom_types_contain(future_result, "test.reusable_gain@99"));
+}
+
+TEST_CASE("PluginInfo format is deterministic when default-constructed",
+          "[host][graph-serializer]") {
+    // Processor nodes never assign PluginInfo::format but the serializer writes
+    // it; an indeterminate value made graph JSON roundtrips differ ("vst3" vs
+    // "unknown"). Construct over poisoned storage so the test fails if the
+    // member initializer is removed.
+    alignas(pulp::host::PluginInfo) unsigned char storage[sizeof(pulp::host::PluginInfo)];
+    std::memset(storage, 0xFF, sizeof(storage));
+    auto* info = new (storage) pulp::host::PluginInfo;
+    CHECK(info->format == pulp::host::PluginFormat::VST3);
+    info->~PluginInfo();
 }

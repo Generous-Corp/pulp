@@ -424,7 +424,8 @@
       "pulp/graph/graph_runtime_plan.hpp",
       "pulp/graph/graph_runtime_probe.hpp",
       "pulp/graph/graph_runtime_queue.hpp",
-      "pulp/graph/graph_types.hpp"
+      "pulp/graph/graph_types.hpp",
+      "pulp/graph/spectral_frame.hpp"
     ],
     "core/host/include": [
       "pulp/host/anticipation_eligibility.hpp",
@@ -497,6 +498,7 @@
       "pulp/host/offline_signal_graph_host.hpp",
       "pulp/host/parameter_event_queue.hpp",
       "pulp/host/plugin_slot.hpp",
+      "pulp/host/processor_restore.hpp",
       "pulp/host/processor_signal_graph_binding.hpp",
       "pulp/host/sample_region_authoring.hpp",
       "pulp/host/sample_region_parameters.hpp",
@@ -518,10 +520,12 @@
       "pulp/host/signal_graph_prepared_topology_edit.hpp",
       "pulp/host/signal_graph_runtime.hpp",
       "pulp/host/signal_graph_subgraph.hpp",
+      "pulp/host/spectral_graph.hpp",
       "pulp/host/timeline_device_resolver.hpp",
       "pulp/host/timeline_graph_binding.hpp",
       "pulp/host/timeline_offline_graph.hpp",
-      "pulp/host/timeline_offline_renderer.hpp"
+      "pulp/host/timeline_offline_renderer.hpp",
+      "pulp/host/trigger_graph.hpp"
     ],
     "core/interchange/include": [
       "pulp/interchange/capability.hpp",
@@ -1103,6 +1107,7 @@
       "pulp/signal/spectral_delay_matrix.hpp",
       "pulp/signal/spectral_envelope_shifter.hpp",
       "pulp/signal/spectral_feature_frontends.hpp",
+      "pulp/signal/spectral_frame_codec.hpp",
       "pulp/signal/spectral_frame_engine.hpp",
       "pulp/signal/spectral_gate_blur.hpp",
       "pulp/signal/spectral_mask_processor.hpp",
@@ -1626,7 +1631,7 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 84,
+        "installed_target_count": 85,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -1742,6 +1747,10 @@
           },
           {
             "exported_as": "Pulp::gpu-device",
+            "closure_node_count": 41
+          },
+          {
+            "exported_as": "Pulp::standalone-contract",
             "closure_node_count": 41
           },
           {
@@ -7011,6 +7020,96 @@
             "pulp-format",
             "pulp-view",
             "yogacore"
+          ]
+        },
+        "standalone-contract": {
+          "target": "pulp-standalone-contract",
+          "exported_as": "Pulp::standalone-contract",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "",
+          "closure": {
+            "node_count": 41,
+            "pulp_targets": [
+              "pulp-audio",
+              "pulp-events",
+              "pulp-format-core",
+              "pulp-foundation",
+              "pulp-graph",
+              "pulp-midi",
+              "pulp-music",
+              "pulp-native-components",
+              "pulp-platform",
+              "pulp-runtime",
+              "pulp-sample-bank-manifest",
+              "pulp-signal",
+              "pulp-simd",
+              "pulp-state",
+              "pulp-timebase"
+            ],
+            "third_party_targets": [
+              "ausdk",
+              "everest",
+              "hwy",
+              "lv2-headers",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-standalone-contract",
+              "pulp-tracing",
+              "vst3-sdk"
+            ]
+          },
+          "external_dependencies": {
+            "count": 26,
+            "third_party_targets": [
+              "ausdk",
+              "everest",
+              "hwy",
+              "lv2-headers",
+              "mbedcrypto",
+              "mbedtls",
+              "mbedx509",
+              "p256m",
+              "pulp-cpp-httplib",
+              "pulp-standalone-contract",
+              "pulp-tracing",
+              "vst3-sdk"
+            ],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [
+              "Accelerate",
+              "AppKit",
+              "AudioToolbox",
+              "Cocoa",
+              "CoreAudio",
+              "CoreBluetooth",
+              "CoreFoundation",
+              "CoreMIDI",
+              "CoreServices",
+              "Foundation",
+              "Security",
+              "UniformTypeIdentifiers",
+              "UserNotifications"
+            ],
+            "system_libraries": [
+              "bsm"
+            ]
+          },
+          "public_headers": {
+            "roots": [
+              "core/canvas/include",
+              "core/format/include",
+              "core/view/audio/include",
+              "core/view/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "framework:AppKit",
+            "pulp-format-core"
           ]
         },
         "standalone-native": {

@@ -1,5 +1,7 @@
 {
  "executable_targets": {
+  "Pulp Editor UI A": "PulpEditorUiA_Standalone",
+  "Pulp Editor UI View Control": "PulpEditorUiViewControl_Standalone",
   "Pulp Test (dev) Plugin": "PulpBundleNameQuoting_Standalone",
   "Pulp UI Script Fixture": "PulpUiScriptFixture_Standalone",
   "pulp-cli-run-fixture": "pulp-test-cli-run-fixture",
@@ -1659,6 +1661,13 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-graph-identity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-graph-plugin-resolution": {
    "data": "none",
    "inputs": [],
@@ -1674,30 +1683,6 @@
     "test/test_graph_plugin_resolution.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": []
-  },
-  "pulp-test-signal-graph-subgraph": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "runtime_targets": [],
-   "sources": [],
-   "spawning_sources": [
-    "test/test_signal_graph_subgraph.cpp"
-   ],
-   "spawns": "none",
-   "undeclared_sources": []
-  },
-  "pulp-test-graph-identity": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "runtime_targets": [],
-   "sources": [],
-   "spawning_sources": [
-    "test/test_graph_identity.cpp"
-   ],
-   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-group-app-host": {
@@ -2380,6 +2365,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-routed-spectral-ports": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_routed_spectral_faults.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-sample-region-runtime": {
    "data": "none",
    "inputs": [],
@@ -2472,6 +2469,13 @@
    "spawns": "undeclared",
    "undeclared_sources": []
   },
+  "pulp-test-signal-graph-subgraph": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-signal-graph-x9-modular-instrument": {
    "data": "none",
    "inputs": [],
@@ -2482,6 +2486,21 @@
     "test/test_signal_graph_x9_modular_instrument.cpp"
    ],
    "spawns": "undeclared",
+   "undeclared_sources": []
+  },
+  "pulp-test-spectral-codec": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_spectral_frame_codec.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/spectral-frame-codec/asymmetric.hex",
+    "test/fixtures/spectral-frame-codec/zero.hex"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_spectral_frame_codec.cpp"
+   ],
    "undeclared_sources": []
   },
   "pulp-test-streaming-model-contract": {
@@ -2678,6 +2697,8 @@
   }
  },
  "executables_scanned": [
+  "Pulp Editor UI A",
+  "Pulp Editor UI View Control",
   "Pulp Test (dev) Plugin",
   "Pulp UI Script Fixture",
   "pulp-browser-capture-launcher-fixture",
@@ -3009,7 +3030,6 @@
   "pulp-test-graphic-eq",
   "pulp-test-group-app-audio",
   "pulp-test-group-app-audio-support",
-  "pulp-test-signal-graph-subgraph",
   "pulp-test-group-app-host",
   "pulp-test-group-app-midi",
   "pulp-test-group-app-signal",
@@ -3083,6 +3103,7 @@
   "pulp-test-group-timeline-playback",
   "pulp-test-group-timeline-session",
   "pulp-test-group-timeline-view",
+  "pulp-test-group-trigger-graph",
   "pulp-test-group-view-host",
   "pulp-test-group-view-host-audio-devices",
   "pulp-test-group-view-host-format",
@@ -3221,6 +3242,7 @@
   "pulp-test-reloadable-shell",
   "pulp-test-render-loop",
   "pulp-test-render-scenario",
+  "pulp-test-routed-spectral-ports",
   "pulp-test-routing-primitives",
   "pulp-test-runtime",
   "pulp-test-runtime-effect-names-gpu",
@@ -3280,6 +3302,7 @@
   "pulp-test-signal-graph-named-ports",
   "pulp-test-signal-graph-offline-parity",
   "pulp-test-signal-graph-pulpsynth-automation",
+  "pulp-test-signal-graph-subgraph",
   "pulp-test-signal-graph-x9-modular-instrument",
   "pulp-test-signal-harmony-engine",
   "pulp-test-signal-leslie",
@@ -3310,10 +3333,12 @@
   "pulp-test-skia-surface-readback-macos",
   "pulp-test-smf-interchange",
   "pulp-test-sos-cascade",
+  "pulp-test-spectral-codec",
   "pulp-test-spectral-cross-synthesis",
   "pulp-test-spectral-feature-frontends",
   "pulp-test-spectral-feature-frontends-no-exceptions",
   "pulp-test-spectral-gate-blur",
+  "pulp-test-spectral-guarded-split",
   "pulp-test-spectral-morph",
   "pulp-test-spectral-stream-start",
   "pulp-test-standalone-contract-editor",
@@ -3355,6 +3380,8 @@
   "pulp-test-timeline-smf",
   "pulp-test-tracing",
   "pulp-test-transition-cost",
+  "pulp-test-trigger-admission",
+  "pulp-test-trigger-runtime",
   "pulp-test-true-peak-limiter",
   "pulp-test-udev-monitor",
   "pulp-test-unique-temp-dir",
@@ -6878,6 +6905,7 @@
     "core/render",
     "core/view/platform/mac/window_host_mac.mm",
     "core/view/src/editor_bridge.cpp",
+    "core/view/src/plugin_frame_renderer.cpp",
     "core/view/src/view.cpp",
     "core/view/src/widget_bridge.cpp",
     "core/view/src/widget_bridge/bridge_dispatch.cpp",
@@ -13540,6 +13568,20 @@
    ],
    "kind": "python"
   },
+  "windows-arm64ec-provider-validator-selftest": {
+   "entry": "tools/windows/test_validate_arm64ec_provider.py",
+   "inputs": [
+    "tools/windows/test_validate_arm64ec_provider.py"
+   ],
+   "kind": "python"
+  },
+  "windows-arm64ec-thunk-tool-selftest": {
+   "entry": "tools/windows/test_build_arm64ec_stl_thunks.py",
+   "inputs": [
+    "tools/windows/test_build_arm64ec_stl_thunks.py"
+   ],
+   "kind": "python"
+  },
   "windows-posix-shims-selftest": {
    "entry": "tools/scripts/test_windows_posix_shims.py",
    "inputs": [
@@ -13629,20 +13671,6 @@
    "entry": "tools/scripts/test_check_yoga_oracle_pin.py",
    "inputs": [
     "tools/scripts/test_check_yoga_oracle_pin.py"
-   ],
-   "kind": "python"
-  },
-  "windows-arm64ec-provider-validator-selftest": {
-   "entry": "tools/windows/test_validate_arm64ec_provider.py",
-   "inputs": [
-    "tools/windows/test_validate_arm64ec_provider.py"
-   ],
-   "kind": "python"
-  },
-  "windows-arm64ec-thunk-tool-selftest": {
-   "entry": "tools/windows/test_build_arm64ec_stl_thunks.py",
-   "inputs": [
-    "tools/windows/test_build_arm64ec_stl_thunks.py"
    ],
    "kind": "python"
   }

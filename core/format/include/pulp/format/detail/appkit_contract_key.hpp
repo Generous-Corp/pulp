@@ -4,6 +4,10 @@
 // only: shared by the macOS hosts that offer keys to a contract editor (the AU
 // v2 contract view and the standalone contract window).
 
+// The body is guarded so a non-Objective-C++ include (the public-header
+// self-containment gate, on Linux too) sees an empty header.
+#if defined(__OBJC__) && defined(__APPLE__)
+
 #import <AppKit/AppKit.h>
 
 #include <pulp/format/editor_host.hpp>
@@ -87,3 +91,5 @@ inline EditorKeyEvent appkit_contract_key_event(unsigned short key_code, NSStrin
 }
 
 } // namespace pulp::format::detail
+
+#endif // __OBJC__ && __APPLE__
