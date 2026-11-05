@@ -154,6 +154,7 @@ SAFE_PATH_LINT="$ROOT/tools/scripts/safe_path_guard_lint.py"
 TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
 PYTHON_FLOOR_SYNTAX="$ROOT/tools/scripts/python_floor_syntax_check.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
+FORK_RUNNER_GUARD="$ROOT/tools/scripts/fork_runner_guard_check.py"
 SCHEDULE_BACKSTOP="$ROOT/tools/scripts/schedule_backstop_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
 UNBOUNDED_WAIT_LINT="$ROOT/tools/scripts/unbounded_wait_lint.py"
@@ -871,6 +872,15 @@ if [ -f "$FORK_GUARD" ]; then
     echo "" >&2
     echo "▸ scheduled-workflow fork-guard check" >&2
     if ! "$PYTHON" "$FORK_GUARD"; then
+        fail=1
+    fi
+fi
+
+# A fork pull request, deleted or not, never gets a variable-selected runner.
+if [ -f "$FORK_RUNNER_GUARD" ]; then
+    echo "" >&2
+    echo "▸ fork-runner guard check" >&2
+    if ! "$PYTHON" "$FORK_RUNNER_GUARD"; then
         fail=1
     fi
 fi

@@ -130,7 +130,7 @@ pulp_test_data(pulp-test-design-import-native-materializer NO_DEFINE
     SOURCES test_design_import_native_materializer.cpp
     PATHS
         core/view/include core/canvas/include core/runtime/include core/platform/include
-        core/events/include core/state/include core/audio/include core/midi/include
+        core/events/include core/state/include core/dataplane/include core/audio/include core/midi/include
         core/signal/include core/host/include
         core/music/include/pulp/music/pitch.hpp
         test/fixtures/import-fidelity/assets/fader_ref.png

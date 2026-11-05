@@ -5,7 +5,7 @@ native view: gain reduction, output levels, a readout, a modulation ring's
 position. Without this seam every plugin UI that shows a meter re-rolls the same
 reader-polled-on-the-frame-clock plumbing.
 
-Headers: [`value_source.hpp`](../../core/view/include/pulp/view/value_source.hpp)
+Headers: [`value_source.hpp`](../../core/dataplane/include/pulp/dataplane/value_source.hpp)
 (the channels) and
 [`value_source_binding.hpp`](../../core/view/include/pulp/view/value_source_binding.hpp)
 (the view-side bindings).

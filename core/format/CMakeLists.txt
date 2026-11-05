@@ -78,6 +78,7 @@ target_sources(pulp-format-core PRIVATE
     src/host_quirks.cpp
     src/host_parameter_edit.cpp
     src/editor_host.cpp
+    src/value_channel_visual_port.cpp
     src/editor_package.cpp
     src/contract_editor_session.cpp
     src/main_thread_timer.cpp
@@ -134,6 +135,8 @@ target_link_libraries(pulp-format-core
         pulp::runtime
         pulp::timebase
         pulp::native-components
+        # Processor::value_channels() and the default editor ports.
+        pulp::dataplane
 )
 
 # PUBLIC, and required rather than merely tidy. Three things depend on it:

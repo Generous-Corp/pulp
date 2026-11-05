@@ -5,6 +5,7 @@
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/view_bridge.hpp>
+#include <pulp/format/editor_owner.hpp>
 #include <pulp/runtime/exceptions.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
@@ -477,8 +478,42 @@ std::size_t ViewBridge::sync_design_frames_from_host() {
     return synced;
 }
 
+bool ViewBridge::notify_owner_released() noexcept {
+    if (owner_release_notified_ || !view_raw_ || owner_is_alive())
+        return false;
+    owner_release_notified_ = true;
+    // Collect first, then deliver: the callback contract forbids changing the
+    // tree, and a stable list keeps a careless callback from skipping views.
+    std::vector<view::View*> views;
+    PULP_TRY {
+        const auto collect = [&views](auto& self, view::View* v) -> void {
+            if (!v)
+                return;
+            views.push_back(v);
+            for (std::size_t i = 0; i < v->child_count(); ++i)
+                self(self, v->child_at(i));
+        };
+        collect(collect, view_raw_);
+        for (auto& s : secondaries_)
+            collect(collect, s.view.get());
+    }
+    PULP_CATCH_ALL {}
+    for (auto* v : views) {
+        auto* observer = dynamic_cast<EditorOwnerObserver*>(v);
+        if (!observer)
+            continue;
+        PULP_TRY {
+            observer->on_owner_released();
+        }
+        PULP_CATCH_ALL {}
+    }
+    return true;
+}
+
 void ViewBridge::close() {
     if (!view_raw_) return;
+    // A tree that outlived its owner hears so before it is torn down.
+    notify_owner_released();
     if (attached_) {
         if (owner_is_alive()) {
             PULP_TRY { processor_.on_view_closed(*view_raw_); }
@@ -512,6 +547,7 @@ void ViewBridge::close() {
     uses_script_ui_ = false;
     uses_auto_ui_ = false;
     released_ = false;
+    owner_release_notified_ = false;
     secondaries_.clear();
 }
 

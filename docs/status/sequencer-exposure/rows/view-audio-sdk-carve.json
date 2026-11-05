@@ -16,7 +16,7 @@
       "needles": ["class EqCurveView : public View"]
     },
     {
-      "path": "core/view/audio/include/pulp/view/visualization_bridge.hpp",
+      "path": "core/dataplane/include/pulp/dataplane/visualization_bridge.hpp",
       "needles": ["struct SpectrumData", "struct WaveformData"]
     },
     {
@@ -40,7 +40,7 @@
         },
         {
           "kind": "sdk_header",
-          "path": "core/view/audio/include/pulp/view/visualization_bridge.hpp",
+          "path": "core/dataplane/include/pulp/dataplane/visualization_bridge.hpp",
           "needles": ["struct SpectrumData", "struct WaveformData"]
         },
         {

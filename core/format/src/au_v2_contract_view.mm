@@ -49,6 +49,7 @@
 
 #include <pulp/format/au_v2_common.hpp>
 #include <pulp/format/contract_editor_session.hpp>
+#include <pulp/format/detail/appkit_contract_key.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
@@ -71,75 +72,7 @@ namespace pulp::format::au {
 /// The contract's key event for an AppKit key event.
 EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
                                   NSEventModifierFlags flags, bool is_down, bool is_repeat) {
-    EditorKeyEvent event;
-    event.is_down = is_down;
-    event.is_repeat = is_repeat;
-    switch (key_code) {
-    case 49:
-        event.key = EditorKey::space;
-        break;
-    case 36:
-    case 76:
-        event.key = EditorKey::enter;
-        break;
-    case 48:
-        event.key = EditorKey::tab;
-        break;
-    case 51:
-        event.key = EditorKey::backspace;
-        break;
-    case 53:
-        event.key = EditorKey::escape;
-        break;
-    case 117:
-        event.key = EditorKey::delete_forward;
-        break;
-    case 123:
-        event.key = EditorKey::left;
-        break;
-    case 124:
-        event.key = EditorKey::right;
-        break;
-    case 125:
-        event.key = EditorKey::down;
-        break;
-    case 126:
-        event.key = EditorKey::up;
-        break;
-    case 115:
-        event.key = EditorKey::home;
-        break;
-    case 119:
-        event.key = EditorKey::end;
-        break;
-    case 116:
-        event.key = EditorKey::page_up;
-        break;
-    case 121:
-        event.key = EditorKey::page_down;
-        break;
-    default:
-        break;
-    }
-    if (characters.length > 0) {
-        const unichar first = [characters characterAtIndex:0];
-        // Function keys arrive as private-use code points; they carry no text.
-        if (first < 0xF700 || first > 0xF8FF)
-            event.character = static_cast<char32_t>(first);
-    }
-    if (event.key == EditorKey::space)
-        event.character = U' ';
-    std::uint8_t mods = 0;
-    if ((flags & NSEventModifierFlagShift) != 0)
-        mods |= editor_modifier_shift;
-    if ((flags & NSEventModifierFlagControl) != 0)
-        mods |= editor_modifier_control;
-    if ((flags & NSEventModifierFlagOption) != 0)
-        mods |= editor_modifier_alt;
-    if ((flags & NSEventModifierFlagCommand) != 0)
-        mods |= editor_modifier_command;
-    event.modifiers = mods;
-    return event;
+    return detail::appkit_contract_key_event(key_code, characters, flags, is_down, is_repeat);
 }
 
 } // namespace pulp::format::au
@@ -293,6 +226,14 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 @end
 
 namespace pulp::format::au {
+
+ContractEditorSession* contract_view_session(void* ns_view) {
+    id view = (__bridge id)ns_view;
+    if (view == nil || ![view isKindOfClass:[PULP_AU_CONTRACT_HOST_VIEW_CLASS class]])
+        return nullptr;
+    auto* session = [(PULP_AU_CONTRACT_HOST_VIEW_CLASS*)view session];
+    return session != nullptr && session->editor() != nullptr ? session : nullptr;
+}
 
 namespace {
 

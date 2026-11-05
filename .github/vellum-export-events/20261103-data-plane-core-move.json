@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "event_id": "20261103-data-plane-core-move",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-03T08:11:16Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/view/include/pulp/view/design_param_binding.hpp",
+    "core/view/include/pulp/view/host_surfaces.hpp",
+    "core/view/include/pulp/view/scripted_ui.hpp",
+    "core/view/include/pulp/view/value_channel_json.hpp",
+    "core/view/include/pulp/view/value_channel_set.hpp",
+    "core/view/include/pulp/view/value_channel_telemetry.hpp",
+    "core/view/include/pulp/view/view.hpp",
+    "core/view/src/host_surfaces.cpp",
+    "core/view/src/value_channel_json.cpp",
+    "core/view/src/value_channel_set.cpp",
+    "core/view/src/value_channel_telemetry.cpp",
+    "core/view/src/value_source.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "The editor data plane (host parameter surfaces, value sources, value channels and their telemetry and JSON projection) moves from core/view into the UI-free Pulp module core/dataplane. The sources leave core/view; the pulp/view headers become forwarding headers that re-export the pulp::dataplane names into pulp::view, and view.hpp, scripted_ui.hpp and design_param_binding.hpp take their forward declarations from <pulp/dataplane/fwd.hpp>. The combined re-export carries pulp-dataplane as a temporary mirror unit for one export, so Vellum inherits the moved sources and the forwarders until its view-core binds vellum::value."
+}

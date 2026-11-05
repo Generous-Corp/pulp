@@ -61,6 +61,14 @@ class RtInstrumentProcessor : public format::Processor {
             g_last_rt_processor = nullptr;
     }
 
+    struct SeenMidi {
+        std::array<std::uint8_t, 3> bytes{};
+        std::int32_t offset = 0;
+    };
+    // Events delivered to the most recent process() call, in delivery order.
+    std::array<SeenMidi, 32> seen_midi{};
+    std::size_t seen_midi_count = 0;
+
     std::array<UInt8, 1024> observed_sysex{};
     std::size_t observed_sysex_size = 0;
 
@@ -97,6 +105,14 @@ class RtInstrumentProcessor : public format::Processor {
         // byte-for-byte delivery, including reuse of the pooled payload after
         // the shorter program message. The packets are shape-only fixtures,
         // not decoded Nodal dumps.
+        seen_midi_count = 0;
+        for (const auto& ev : midi_in) {
+            if (seen_midi_count == seen_midi.size())
+                break;
+            auto& slot = seen_midi[seen_midi_count++];
+            slot.bytes = {ev.data()[0], ev.data()[1], ev.data()[2]};
+            slot.offset = ev.sample_offset;
+        }
         bool valid_program_dump = false;
         for (const auto& sysex : midi_in.sysex()) {
             observed_sysex_size = sysex.data.size();
@@ -307,6 +323,69 @@ TEST_CASE("AU v2 instrument delivers MusicDeviceSysEx to the audio processor",
     REQUIRE(instrument.SysEx(valid_dump.data(), static_cast<UInt32>(valid_dump.size())) ==
             kAudio_ParamError);
     REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+
+    instrument.DoCleanup();
+}
+
+TEST_CASE("AU v2 instrument delivers non-note channel-voice MIDI to the processor",
+          "[au][au-v2][instrument][midi]") {
+    ScopedFactoryRegistration registration(create_rt_instrument);
+
+    constexpr double kSampleRate = 48000.0;
+    constexpr UInt32 kChannels = 2;
+    constexpr UInt32 kFrames = 256;
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(make_float_format(kSampleRate, kChannels)) ==
+            noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    timestamp.mSampleTime = 0;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(g_last_rt_processor != nullptr);
+
+    struct Sent {
+        UInt32 status, d1, d2, offset;
+    };
+    // Ascending offsets so the processor sees delivery order after sorting.
+    const std::array<Sent, 9> sent{{
+        {0xB0, 1, 100, 4},      // mod wheel, ch 0
+        {0xB1, 64, 127, 8},     // sustain, ch 1
+        {0xB2, 0, 3, 12},       // bank select MSB, ch 2
+        {0xB2, 32, 5, 16},      // bank select LSB, ch 2
+        {0xC2, 9, 0, 20},       // program change, ch 2
+        {0xE3, 0x10, 0x60, 24}, // pitch bend, ch 3
+        {0xD4, 70, 0, 28},      // channel pressure, ch 4
+        {0xA5, 60, 80, 32},     // polyphonic pressure, ch 5
+        {0x96, 62, 90, 36},     // note on, ch 6 (existing path, unchanged)
+    }};
+    for (const auto& m : sent)
+        REQUIRE(instrument.MIDIEvent(m.status, m.d1, m.d2, m.offset) == noErr);
+
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    const auto& seen = *g_last_rt_processor;
+    REQUIRE(seen.seen_midi_count == sent.size());
+    for (std::size_t i = 0; i < sent.size(); ++i) {
+        INFO("event " << i);
+        CHECK(seen.seen_midi[i].bytes[0] == sent[i].status);
+        CHECK(seen.seen_midi[i].bytes[1] == sent[i].d1);
+        CHECK(seen.seen_midi[i].bytes[2] == sent[i].d2);
+        CHECK(seen.seen_midi[i].offset == static_cast<std::int32_t>(sent[i].offset));
+    }
+
+    // Velocity-0 note-on is still delivered as a note-off.
+    REQUIRE(instrument.MIDIEvent(0x90, 60, 0, 2) == noErr);
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(seen.seen_midi_count == 1);
+    CHECK(seen.seen_midi[0].bytes[0] == 0x80);
+    CHECK(seen.seen_midi[0].bytes[1] == 60);
 
     instrument.DoCleanup();
 }

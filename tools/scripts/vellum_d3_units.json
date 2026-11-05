@@ -8,6 +8,7 @@
     {"name": "render-2d", "targets": ["pulp-render"]},
     {"name": "render-3d", "alias_of": "render-2d"},
     {"name": "state-core", "targets": ["pulp-state"]},
+    {"name": "dataplane", "targets": ["pulp-dataplane"], "retire_after": "the first export after Vellum's view-core binds vellum::value instead of the pulp::dataplane value sources and host surfaces"},
     {"name": "design-ir", "carried_by": "view-core"},
     {"name": "view-core", "targets": ["pulp-view-core"], "pulp_kept": {
       "targets": ["pulp-view-tooling"],
@@ -18,7 +19,6 @@
         "core/view/include/pulp/view/inspector_window.hpp",
         "core/view/src/editor_bridge.cpp",
         "core/view/include/pulp/view/editor_bridge.hpp",
-        "core/view/src/host_param_surface.cpp",
         "core/view/include/pulp/view/host_param_surface.hpp",
         "core/view/src/script_inspector_bridge.cpp",
         "core/view/include/pulp/view/script_inspector_bridge.hpp",

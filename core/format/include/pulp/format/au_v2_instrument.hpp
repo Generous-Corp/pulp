@@ -104,6 +104,12 @@ public:
                           AudioUnitElement inElement, Float32 inValue,
                           UInt32 inBufferOffsetInFrames) override;
 
+    // Value text for discrete parameters (value labels); continuous parameters
+    // are served through the ParameterStringFromValue / ...ValueFromString
+    // properties handled in GetProperty.
+    OSStatus GetParameterValueStrings(AudioUnitScope inScope, AudioUnitParameterID inParameterID,
+                                      CFArrayRef* outStrings) override;
+
     // Serve the Pulp editor-context property (so the Cocoa view factory can
     // reach this instance's Processor + StateStore) and advertise the Cocoa
     // view to the host (kAudioUnitProperty_CocoaUI). Without these the host
@@ -129,6 +135,16 @@ public:
                           UInt8 inVelocity, UInt32 inStartFrame) override;
     OSStatus HandleNoteOff(UInt8 inChannel, UInt8 inNoteNumber,
                            UInt8 inVelocity, UInt32 inStartFrame) override;
+
+    /// Every non-note channel-voice message (control change, program change,
+    /// pitch bend, channel and polyphonic pressure). AUMIDIBase routes these
+    /// to per-type handlers whose defaults drop the message, so without this
+    /// override a host's mod wheel, sustain, bank select, program change,
+    /// pitch bend and aftertouch never reach the Processor. Notes keep going
+    /// through HandleNoteOn/HandleNoteOff (including velocity-0 note-on as
+    /// note-off), so their behaviour is unchanged.
+    OSStatus HandleNonNoteEvent(UInt8 inStatus, UInt8 inChannel, UInt8 inData1, UInt8 inData2,
+                                UInt32 inStartFrame) override;
 
     /// System-exclusive payload (F0 … F7). MusicDeviceBase delivers this
     /// callback through the ``kMusicDeviceSysExSelect`` selector. AU v2 does

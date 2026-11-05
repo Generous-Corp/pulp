@@ -132,6 +132,7 @@ set(_PULP_WEBUI_INCLUDES
     ${_PULP_WEBUI_ROOT}/core/simd/include
     ${_PULP_WEBUI_ROOT}/core/audio/include
     ${_PULP_WEBUI_ROOT}/core/state/include
+    ${_PULP_WEBUI_ROOT}/core/dataplane/include
     ${_PULP_WEBUI_ROOT}/core/midi/include
     ${_PULP_WEBUI_ROOT}/core/canvas/include
     ${_PULP_WEBUI_ROOT}/core/render/include

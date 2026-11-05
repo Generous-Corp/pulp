@@ -7,6 +7,7 @@
 /.github/CODEOWNERS
 /.github/workflows/
 /.github/vellum-ownership.json
+/.github/vellum-export-receipt/
 /.github/vellum-change-events/
 /.github/vellum-expansion-watch/
 /.github/vellum-expansion-watch-events/
