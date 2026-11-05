@@ -76,8 +76,10 @@ namespace {
 // min + i*step, so an Integer with a non-zero min or a stride above 1 (or an
 // unlabelled 0..127 integer) must stay Generic rather than become a menu.
 bool is_index_valued_param(const state::ParamInfo& info) {
-    if (!state::is_discrete_param(info)) return false;
-    if (info.kind != state::ParamKind::Enum && info.value_labels.empty()) return false;
+    if (!state::is_discrete_param(info))
+        return false;
+    if (info.kind != state::ParamKind::Enum && info.value_labels.empty())
+        return false;
     const float step = info.range.step;
     return info.range.min == 0.0f && (step == 0.0f || step == 1.0f);
 }
