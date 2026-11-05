@@ -4,11 +4,14 @@
 #include <AudioToolbox/AudioUnitUtilities.h>
 
 #include <pulp/format/au_v2_common.hpp>
+#include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/param_group_projection.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/events/plugin_main_thread.hpp>
+
+#include <Block.h>
 
 #include <algorithm>
 #include <condition_variable>
@@ -226,6 +229,67 @@ OSStatus fill_supports_mpe(bool supports_mpe, AudioUnitScope scope, void* out_da
         return kAudioUnitErr_InvalidProperty;
     *static_cast<UInt32*>(out_data) = 1;
     return noErr;
+}
+
+RenderContextObserverProperty::~RenderContextObserverProperty() {
+    // A C-style cast: void* <-> block pointer has no named-cast form, and
+    // keeping the member a plain pointer keeps the header ARC-neutral.
+    if (block_)
+        Block_release((AURenderContextObserver)block_);
+}
+
+void RenderContextObserverProperty::bind(Processor* processor) {
+    client_ = dynamic_cast<AudioWorkgroupClient*>(processor);
+    if (!client_ || block_)
+        return;
+    auto* client = client_;
+    AURenderContextObserver observer = ^(const AudioUnitRenderContext* context) {
+      // Realtime render thread, before a render whose workgroup changed.
+      // Copy only the workgroup value; the context struct is
+      // callback-scoped. No os_retain/os_release (see the class comment).
+      client->set_audio_workgroup_from_render_context(
+          context ? reinterpret_cast<void*>(context->workgroup) : nullptr);
+      // The context contract requires auxiliary threads to leave the old
+      // workgroup and join the new one within this call; the client's
+      // barrier returns only after every worker has done so.
+      (void)client->prepare_audio_workgroup_for_render();
+    };
+    block_ = (void*)Block_copy(observer);
+}
+
+OSStatus RenderContextObserverProperty::property_info(AudioUnitScope scope,
+                                                      AudioUnitElement element, UInt32& out_size,
+                                                      bool& out_writable) const {
+    if (scope != kAudioUnitScope_Global)
+        return kAudioUnitErr_InvalidScope;
+    if (element != 0)
+        return kAudioUnitErr_InvalidElement;
+    if (!block_)
+        return kAudioUnitErr_InvalidProperty;
+    out_size = sizeof(AURenderContextObserver);
+    out_writable = false;
+    return noErr;
+}
+
+OSStatus RenderContextObserverProperty::get(AudioUnitScope scope, AudioUnitElement element,
+                                            void* out_data) const {
+    if (scope != kAudioUnitScope_Global)
+        return kAudioUnitErr_InvalidScope;
+    if (element != 0)
+        return kAudioUnitErr_InvalidElement;
+    if (!block_ || !out_data)
+        return kAudioUnitErr_InvalidProperty;
+    *static_cast<AURenderContextObserver*>(out_data) = (AURenderContextObserver)block_;
+    return noErr;
+}
+
+void RenderContextObserverProperty::prepare_for_render() const noexcept {
+    if (client_)
+        (void)client_->prepare_audio_workgroup_for_render();
+}
+
+void RenderContextObserverProperty::clear_after_render_resources() const noexcept {
+    clear_audio_workgroup_after_render_resources(client_);
 }
 
 OSStatus fill_parameter_clump_name(const state::StateStore& store,
