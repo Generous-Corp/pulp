@@ -2915,3 +2915,23 @@ processor-provider mutation must refuse in spectral mode even when the legacy
 `live_slot_` is empty. Query prepared geometry from the active snapshot.
 Keep graph persistence and arbitrary stage registration refused; PARTIAL status
 does not establish notation coverage or realtime timing qualification.
+
+## Bounded typed trigger runtime
+
+Use `prepare_trigger_plan()` and `try_install_prepared_trigger_plan()` for the
+framework onset/envelope pair in `pulp/host/trigger_graph.hpp`. Generic `prepare()`
+and retained execution snapshots cannot advance its controller-owned epoch,
+sample cursor or sequence. Trigger records are not MIDI events. The admitted
+serial plan includes bounded framework modulation/lowpass factories; opaque
+Custom callbacks, hosted Processor/MIDI ingress, sample regions, parallel or
+anticipated execution, and mixed spectral plans remain refused. Test both
+spectral-first and trigger-first authoring and measure refusal allocations
+outside the assertion framework's scope.
+
+Reserve all generation storage before allocating a candidate, including the
+framework audio-state vector and temporary compiler storage. A retained old
+snapshot keeps its reservation until its last owner releases it. Preflight
+invalid channel views before dereferencing pointers or mutating output, clock,
+or envelope state. The public consumer in
+`examples/g5-trigger-runtime-consumer` proves this bounded SDK seam; it does not
+establish complete G-5 coverage or realtime timing qualification.

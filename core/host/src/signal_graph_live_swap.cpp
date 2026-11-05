@@ -76,7 +76,8 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
     GraphMutationLock mutation_lock(*this);
     if (refuse_spectral_mutation_())
         return SwapResult::NeedsEagerPrepare;
-    if (!in_swap_edit_) return SwapResult::NotInSwapEdit;
+    if (!in_swap_edit_)
+        return SwapResult::NotInSwapEdit;
 
     const auto catalog_it = scanned_plugin_catalog_.find(token.value);
     if (!token || catalog_it == scanned_plugin_catalog_.end()) {
@@ -429,6 +430,9 @@ void SignalGraph::begin_swap_edit() {
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return;
+    if (!trigger_producers_.empty() || !trigger_envelopes_.empty() || !trigger_audio_.empty() ||
+        !trigger_edges_.empty())
+        return;
     if (in_swap_edit_) {
         runtime::log_error("SignalGraph: begin_swap_edit() while a swap edit is "
                            "already open — refused (nesting unsupported)");
@@ -464,6 +468,9 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
 
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
+        return SwapResult::NeedsEagerPrepare;
+    if (!trigger_producers_.empty() || !trigger_envelopes_.empty() || !trigger_audio_.empty() ||
+        !trigger_edges_.empty())
         return SwapResult::NeedsEagerPrepare;
     if (!in_swap_edit_) return SwapResult::NotInSwapEdit;
 
@@ -771,7 +778,8 @@ void SignalGraph::abort_swap_edit() {
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return;
-    if (!in_swap_edit_) return;
+    if (!in_swap_edit_)
+        return;
     cancel_swap_edit_locked_();
     invalidate_live_locked_();
 }

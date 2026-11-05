@@ -101,6 +101,13 @@ std::shared_ptr<void> make_custom_instance(const CustomNodeType& type) {
 
 void SignalGraph::invalidate_live_locked_() {
     assert_graph_mutation_locked_();
+    if (nodes_.empty()) {
+        trigger_producers_.clear();
+        trigger_envelopes_.clear();
+        trigger_audio_.clear();
+        trigger_edges_.clear();
+        typed_trigger_authoring_.store(false, std::memory_order_release);
+    }
     ++authoring_generation_;
     // During a swap-edit the OWNER thread's allow-set mutations must NOT
     // silence the live snapshot — it keeps playing the old compiled graph until
@@ -113,6 +120,7 @@ void SignalGraph::invalidate_live_locked_() {
     // Drop the live snapshot; process() will return silence until prepare()
     // is called again. This is the simple, safe semantic: UI-thread edits
     // always require a re-prepare before audio resumes.
+    invalidate_trigger_binding_();
     live_slot_.unpublish();
     total_latency_samples_.store(0, std::memory_order_relaxed);
     clear_prepared_stats_locked_();
@@ -406,7 +414,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         runtime::log_error("SignalGraph: connection identity metadata is out of sync");
         return nullptr;
     }
-    auto cg = std::make_shared<CompiledGraph>();
+    auto cg = std::make_shared<CompiledGraph>(!compiling_trigger_state_);
     cg->execution_generation = authoring_generation_;
     if (std::any_of(nodes_.begin(), nodes_.end(),
                     [](const auto& n) { return n.spectral_identity.has_value(); })) {
@@ -519,6 +527,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                "recompiled without re-capturing plugin metadata (2.2b H2)");
     }
 #endif
+    if (!compile_trigger_pair_(*cg))
+        return nullptr;
     cg->order = processing_order_for(cg->executable_nodes, cg->connections);
     if (cg->order.size() != cg->executable_nodes.size())
         return nullptr;
@@ -573,8 +583,13 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         }
         auto [runtime_it, inserted] = cg->runtime.emplace(n.id, std::move(rt));
         (void)inserted;
-        prepare_midi_block_storage(runtime_it->second.midi_in, runtime_it->second.midi_in_ump);
-        prepare_midi_block_storage(runtime_it->second.midi_out, runtime_it->second.midi_out_ump);
+        // Typed plans reject MIDI nodes and callbacks before compilation. Do not
+        // duplicate unused MIDI/SysEx arenas in their bounded generations.
+        if (!compiling_trigger_state_) {
+            prepare_midi_block_storage(runtime_it->second.midi_in, runtime_it->second.midi_in_ump);
+            prepare_midi_block_storage(runtime_it->second.midi_out,
+                                       runtime_it->second.midi_out_ump);
+        }
         if (n.type == NodeType::MidiInput) {
             // Keep mailbox identity across a live snapshot recompile so an
             // injection published between its build and publication cannot fall
@@ -913,6 +928,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         }
     }
 
+    bind_trigger_pair_(*cg);
     compute_latencies_for_(*cg, cg->connections, prepared_plugin_meta_);
     if (cg->total_latency_samples < 0)
         return nullptr;
@@ -1267,6 +1283,13 @@ std::vector<HostParamInfo> SignalGraph::cached_or_live_params_locked_(const Grap
 // reason) on any rejection; true if the graph passes every gate.
 bool SignalGraph::preflight_locked_(int max_block_size) {
     assert_graph_mutation_locked_();
+    // Typed factories can only enter through their explicit prepared pair.
+    // Generic topology-edit clones do not carry the controller or event ledger.
+    if (!compiling_trigger_state_ &&
+        std::any_of(nodes_.begin(), nodes_.end(), [](const auto& node) {
+            return node.custom_type_id.starts_with("pulp.trigger.");
+        }))
+        return false;
     // Scalar-only kernels have no block execution fallback.
     if (sample_region_definitions_.empty() && has_sample_kernel_nodes_locked_())
         return false;
@@ -1376,6 +1399,10 @@ bool SignalGraph::prepare_impl_(double sample_rate, int max_block_size,
     // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
     // never invert order with the reader-drain handshake.
     GraphMutationLock mutation_lock(*this);
+    if ((!trigger_producers_.empty() || !trigger_envelopes_.empty() || !trigger_audio_.empty() ||
+         !trigger_edges_.empty()) &&
+        !compiling_trigger_state_)
+        return false;
     if (spectral_mode_.load(std::memory_order_acquire)) {
         spectral_error_.store(SpectralError::UnsupportedOperation, std::memory_order_relaxed);
         return false;
