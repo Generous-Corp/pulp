@@ -288,9 +288,11 @@ class RttiOwnershipTest(unittest.TestCase):
         # Both the ELF spelling and the Mach-O one (extra underscore) demangle.
         self.assertEqual(set(names.values()), {"typeinfo for content::Registry"})
 
-    def test_controls_follow_the_mirror_edge_roots(self) -> None:
-        table = json.loads((Path(__file__).with_name("vellum_mirror_edge_patterns.json")).read_text(encoding="utf-8"))
-        self.assertEqual(rtti_ownership.ROOT_NAMESPACES, tuple(table["roots"]["namespace"]))
+    def test_there_is_one_control_per_root(self) -> None:
+        # Vellum, which vendors this module, holds ROOT_NAMESPACES equal to
+        # the mirror-edge table's roots.
+        self.assertEqual(rtti_ownership.ROOT_NAMESPACES, ("pulp", "vellum"))
+        self.assertEqual(rtti_ownership.mangled_root("vellum"), "N6vellum")
         self.assertEqual(rtti_ownership.controls(), [
             ("__ZTIN4pulp4rtti7ControlE", "typeinfo for pulp::rtti::Control"),
             ("__ZTIN6vellum4rtti7ControlE", "typeinfo for vellum::rtti::Control")])

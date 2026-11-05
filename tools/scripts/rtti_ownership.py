@@ -50,7 +50,7 @@ _CLOSURE = re.compile(r"'lambda|\{lambda|'block|\{block|'unnamed|\{unnamed|\$_\d
 # renamed mirror's. They are the roots of the mirror-edge table
 # (tools/scripts/vellum_mirror_edge_patterns.json), carried as a literal
 # because this module is vendored byte for byte into Vellum and runs where the
-# table is not shipped; test_archive_symbol_closure_check.py holds them equal.
+# table is not shipped; Vellum's inertness test holds them equal to its copy.
 ROOT_NAMESPACES = ("pulp", "vellum")
 
 
