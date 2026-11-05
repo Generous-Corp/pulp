@@ -156,7 +156,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn("filters its trigger with paths:", out)
 
     def test_workflow_with_conditional_job_fails(self):
-        runs_on = "    runs-on: ${{ fromJSON(vars.PULP_DRIFT_FAST_RUNS_ON_JSON || '\"ubuntu-latest\"') }}\n"
+        runs_on = re.search(r"^    runs-on: .*\n", drift_fast.WORKFLOW.read_text(encoding="utf-8"), re.M).group(0)
         text = drift_fast.WORKFLOW.read_text(encoding="utf-8").replace(
             runs_on, "    if: github.event_name == 'merge_group'\n" + runs_on
         )
@@ -169,7 +169,7 @@ class ContractTests(unittest.TestCase):
         # what GitHub parses; it must be the hosted label, as JSON.
         text = drift_fast.WORKFLOW.read_text(encoding="utf-8")
         match = re.search(
-            r"runs-on: \$\{\{ fromJSON\(vars\.PULP_DRIFT_FAST_RUNS_ON_JSON \|\| '([^']*)'\) \}\}", text)
+            r"runs-on: \$\{\{ fromJSON\(.*vars\.PULP_DRIFT_FAST_RUNS_ON_JSON \|\| '([^']*)'\) \}\}", text)
         self.assertIsNotNone(match, "drift-fast must route through PULP_DRIFT_FAST_RUNS_ON_JSON")
         self.assertEqual(json.loads(match.group(1)), "ubuntu-latest")
         self.assertEqual(text.count("runs-on:"), 1)
