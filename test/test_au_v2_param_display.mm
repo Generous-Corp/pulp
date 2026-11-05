@@ -876,4 +876,18 @@ TEST_CASE("AU v2 instrument serves parameter value text like the effect",
     CFArrayRef none = nullptr;
     REQUIRE(inst.GetParameterValueStrings(kAudioUnitScope_Global, 1, &none) ==
             kAudioUnitErr_InvalidPropertyValue);
+
+    // (6) Hosts reach the list through AudioUnitGetProperty, which AUBase
+    // validates with GetPropertyInfo first: that asks with a null array.
+    size = 0;
+    writable = true;
+    REQUIRE(inst.DispatchGetPropertyInfo(kAudioUnitProperty_ParameterValueStrings,
+                                         kAudioUnitScope_Global, 2, size, writable) == noErr);
+    REQUIRE(size == sizeof(CFArrayRef));
+    REQUIRE_FALSE(writable);
+    REQUIRE(inst.DispatchGetPropertyInfo(kAudioUnitProperty_ParameterValueStrings,
+                                         kAudioUnitScope_Global, 1, size, writable) != noErr);
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    REQUIRE(effect.DispatchGetPropertyInfo(kAudioUnitProperty_ParameterValueStrings,
+                                           kAudioUnitScope_Global, 2, size, writable) == noErr);
 }
