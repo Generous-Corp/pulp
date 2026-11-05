@@ -1,5 +1,5 @@
 name: Set up Namespace macOS cache
-description: Wire Namespace cache volumes for Homebrew, ccache, Pulp FetchContent sources, and Gradle state.
+description: Wire Namespace cache volumes for Homebrew, ccache, Cargo, Pulp FetchContent sources, and Gradle state.
 runs:
   using: composite
   steps:
@@ -10,5 +10,7 @@ runs:
         path: |
           ~/Library/Caches/ccache
           ~/Library/Caches/Pulp/fetchcontent-src
+          ~/.cargo/registry
+          ~/.cargo/git
           ~/.gradle/caches
           ~/.gradle/wrapper

@@ -15,10 +15,10 @@ The outer envelope version and embedded StateStore schema are independent;
 both require exact matches against their respective descriptor/store versions.
 The restore path never invokes parameter migrations.
 
-This is not `.pulpgraph` v4 persistence. GraphSerializer still refuses Processor
-nodes, and the consumer checks that boundary. State capture/coherence, JSON and
-base64 validation, migrations, graph edge/region validation, preparation, and
-atomic publication remain separate work. No CLI/MCP loadability is claimed.
+The consumer also proves bounded `.pulpgraph` v4 Processor emission and
+transactional deserialize round-trip. State capture/coherence, JSON and base64
+validation, migrations, graph edge/region validation, preparation, and atomic
+publication remain separate work. No CLI/MCP loadability is claimed.
 
 Copy this directory outside the Pulp checkout, install a Release SDK containing
 the change, and configure with its package directory:

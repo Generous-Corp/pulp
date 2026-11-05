@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1610"></a>
+## [1.61.0] - 2026-11-05
+
+- release/version bump ([#11544](https://github.com/Generous-Corp/pulp/pull/11544))
+- codex/g7 receipt package 20261104 ([#11540](https://github.com/Generous-Corp/pulp/pull/11540))
+- release/version bump ([#11541](https://github.com/Generous-Corp/pulp/pull/11541))
+- fix/windows provider provenance 20261104 ([#11537](https://github.com/Generous-Corp/pulp/pull/11537))
+- fix/prepush gate host diffcover not checked ([#11536](https://github.com/Generous-Corp/pulp/pull/11536))
+
 <a id="v1600"></a>
 ## [1.60.0] - 2026-11-04
 
@@ -12222,6 +12231,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.61.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.61.0
 [1.60.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.60.0
 [1.59.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.59.0
 [1.58.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.58.0
