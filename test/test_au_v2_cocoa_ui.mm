@@ -130,6 +130,7 @@ TEST_CASE("AU v2 editor pins the design viewport per the shared resize contract"
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/format/au_v2_common.hpp>
+#include <pulp/format/editor_owner.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/alive_token.hpp>
 #include <pulp/state/store.hpp>
@@ -137,6 +138,8 @@ TEST_CASE("AU v2 editor pins the design viewport per the shared resize contract"
 #include <pulp/view/view.hpp>
 
 #include <cstdlib>
+#include <cstring>
+#include <new>
 #include <optional>
 #include <string>
 #include <vector>
@@ -340,6 +343,229 @@ TEST_CASE("AU v2 editor views close and deallocate when the host drops them",
     g_editor_view = nullptr;
     AudioComponentInstanceDispose(au);
     g_fake_au_ctx_source = nullptr;
+}
+
+namespace {
+
+// ── Editor that outlives its audio unit ─────────────────────────────────
+//
+// Hosts (Logic among them) keep an editor view after disposing the audio
+// unit and free it later, or free it first. Either way the view must
+// deallocate and release its whole tree, every observer view must hear
+// EditorOwnerObserver::on_owner_released() exactly once when the instance
+// went first, and nothing may touch the dead Processor or StateStore. The instance here lives
+// in raw storage that is poisoned after destruction, so any later read
+// through it faults instead of passing on stale memory.
+
+struct OwnerProbeCounts {
+    int released = 0;
+    int destroyed = 0;
+};
+
+class OwnerProbeView : public pulp::view::View, public pulp::format::EditorOwnerObserver {
+  public:
+    explicit OwnerProbeView(OwnerProbeCounts& counts) : counts_(counts) {}
+    ~OwnerProbeView() override {
+        ++counts_.destroyed;
+    }
+    void on_owner_released() override {
+        ++counts_.released;
+    }
+
+  private:
+    OwnerProbeCounts& counts_;
+};
+
+class OwnerProbeProcessor : public pulp::format::Processor {
+  public:
+    // Null counts: no create_view(), so the bridge builds its own AutoUi
+    // editor whose widgets bind to the StateStore.
+    explicit OwnerProbeProcessor(OwnerProbeCounts* counts) : counts_(counts) {}
+    int opened = 0;
+    int closed = 0;
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {"OwnerProbe", "Acme", "com.acme.ownerprobe", "1.0.0",
+                pulp::format::PluginCategory::Effect};
+    }
+    void define_parameters(pulp::state::StateStore& s) override {
+        s.add_parameter({1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}});
+        s.add_parameter({2, "Mix", "%", {0.0f, 100.0f, 50.0f}});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    std::unique_ptr<pulp::view::View> create_view() override {
+        if (!counts_)
+            return nullptr;
+        auto root = std::make_unique<OwnerProbeView>(*counts_);
+        root->add_child(std::make_unique<OwnerProbeView>(*counts_));
+        return root;
+    }
+    void on_view_opened(pulp::view::View&) override {
+        ++opened;
+    }
+    void on_view_closed(pulp::view::View&) override {
+        ++closed;
+    }
+
+  private:
+    OwnerProbeCounts* counts_ = nullptr;
+};
+
+// The audio unit's state in poisonable storage, destroyed in the adapter's
+// order: retire the owner token, then the Processor, then the StateStore.
+class DisposableInstance {
+  public:
+    explicit DisposableInstance(OwnerProbeCounts* counts) {
+        store_ = new (store_storage_) pulp::state::StateStore();
+        processor_ = new (processor_storage_) OwnerProbeProcessor(counts);
+        processor_->set_state_store(store_);
+        processor_->define_parameters(*store_);
+    }
+    ~DisposableInstance() {
+        dispose();
+    }
+    pulp::format::au::PulpEditorContext context() {
+        pulp::format::au::PulpEditorContext ctx{};
+        ctx.processor = processor_;
+        ctx.store = store_;
+        ctx.owner_alive = alive_.capture();
+        return ctx;
+    }
+    OwnerProbeProcessor& processor() {
+        return *processor_;
+    }
+    bool disposed() const {
+        return processor_ == nullptr;
+    }
+    void dispose() {
+        if (!processor_)
+            return;
+        alive_.retire();
+        processor_->~OwnerProbeProcessor();
+        store_->~StateStore();
+        std::memset(processor_storage_, 0xA5, sizeof(processor_storage_));
+        std::memset(store_storage_, 0xA5, sizeof(store_storage_));
+        processor_ = nullptr;
+        store_ = nullptr;
+    }
+
+  private:
+    alignas(OwnerProbeProcessor) unsigned char processor_storage_[sizeof(OwnerProbeProcessor)];
+    alignas(pulp::state::StateStore) unsigned char store_storage_[sizeof(pulp::state::StateStore)];
+    OwnerProbeProcessor* processor_ = nullptr;
+    pulp::state::StateStore* store_ = nullptr;
+    pulp::runtime::AliveToken alive_;
+};
+
+void pump_main(double seconds) {
+    @autoreleasepool {
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
+    }
+}
+
+struct OwnerLifetimeResult {
+    bool deallocated = false;
+    int closed = -1; // on_view_closed count, read before any dispose
+};
+
+// Open one editor on a fresh fake audio unit, then dispose the instance and
+// free the view in the requested order.
+OwnerLifetimeResult run_owner_lifetime(OwnerProbeCounts* counts, bool dispose_first,
+                                       OSType subtype) {
+    OwnerLifetimeResult result;
+    auto* instance = new DisposableInstance(counts);
+    FakeEditorAU source;
+    source.ctx = instance->context();
+    g_fake_au_ctx_source = &source;
+    AudioComponentDescription desc{kAudioUnitType_Effect, subtype, 'Acme', 0, 0};
+    AudioComponent comp = AudioComponentRegister(&desc, CFSTR("Acme: OwnerProbe"), 1, fake_factory);
+    REQUIRE(comp != nullptr);
+    AudioUnit au = nullptr;
+    REQUIRE(AudioComponentInstanceNew(comp, &au) == noErr);
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 480, 320)
+                                                   styleMask:NSWindowStyleMaskTitled
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+    REQUIRE(window != nil);
+    Class factory_class = NSClassFromString(@"PulpAUCocoaViewFactory_Test");
+    REQUIRE(factory_class != nil);
+    const int deallocs_before = g_view_deallocs;
+    NSView* view = nil;
+    @autoreleasepool {
+        id<AUCocoaUIBase> factory = [[factory_class alloc] init];
+        view = [[factory uiViewForAudioUnit:au withSize:NSMakeSize(480, 320)] retain];
+        [factory release];
+        REQUIRE(view != nil);
+        PulpTestDeallocSentinel* sentinel = [[PulpTestDeallocSentinel alloc] init];
+        static char kSentinelKey;
+        objc_setAssociatedObject(view, &kSentinelKey, sentinel, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [sentinel release];
+        [window.contentView addSubview:view];
+    }
+    pump_main(0.05);
+    REQUIRE(instance->processor().opened == 1);
+    const auto free_view = [&] {
+        @autoreleasepool {
+            [view removeFromSuperview];
+            [view release];
+            view = nil;
+        }
+        pump_main(0.05);
+    };
+    if (dispose_first) {
+        instance->dispose();
+        pump_main(0.1); // the host keeps ticking an orphaned editor
+        free_view();
+    } else {
+        free_view();
+        result.closed = instance->processor().closed;
+        instance->dispose();
+        pump_main(0.05);
+    }
+    result.deallocated = g_view_deallocs == deallocs_before + 1;
+    [window close];
+    pump_main(0.02);
+    AudioComponentInstanceDispose(au);
+    g_fake_au_ctx_source = nullptr;
+    delete instance;
+    return result;
+}
+
+} // namespace
+
+TEST_CASE("AU v2 editor freed after its audio unit releases its tree and hears the owner go once",
+          "[auv2][cocoa][editor][lifetime][owner]") {
+    EditorEnvironment env;
+    OwnerProbeCounts counts;
+    const auto result = run_owner_lifetime(&counts, /*dispose_first=*/true, 'OwD1');
+    CHECK(result.deallocated);
+    // Both views in the tree heard it exactly once, then were destroyed: the
+    // tree is released instead of leaked for the life of the process.
+    CHECK(counts.released == 2);
+    CHECK(counts.destroyed == 2);
+}
+
+TEST_CASE("AU v2 editor freed before its audio unit closes normally and never hears the owner go",
+          "[auv2][cocoa][editor][lifetime][owner]") {
+    EditorEnvironment env;
+    OwnerProbeCounts counts;
+    const auto result = run_owner_lifetime(&counts, /*dispose_first=*/false, 'OwR1');
+    CHECK(result.deallocated);
+    CHECK(result.closed == 1);
+    CHECK(counts.released == 0);
+    CHECK(counts.destroyed == 2);
+}
+
+TEST_CASE("AU v2 default editor bound to the store is released after its audio unit",
+          "[auv2][cocoa][editor][lifetime][owner]") {
+    // No create_view(): the bridge builds the AutoUi editor, whose widgets
+    // bind to the StateStore that is already destroyed when the view goes.
+    EditorEnvironment env;
+    CHECK(run_owner_lifetime(nullptr, /*dispose_first=*/true, 'OwD2').deallocated);
+    CHECK(run_owner_lifetime(nullptr, /*dispose_first=*/false, 'OwR2').deallocated);
 }
 
 namespace {

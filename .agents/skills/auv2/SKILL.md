@@ -784,6 +784,26 @@ host, about 108 MB per GPU editor open/close in a neutral AU host.
   the host drops them" builds real editors through the factory against an
   in-process fake AU, and checks the view deallocates, `on_view_closed` fires,
   and the close lands before NSView's own `-dealloc` starts.
+- A host may dispose the unit and free the view later (Logic does). The
+  ownership then finds `processor_alive` retired: it skips the resize-handler
+  reset, and the bridge first calls `EditorOwnerObserver::on_owner_released()`
+  (`pulp/format/editor_owner.hpp`) once on every view in the tree that
+  implements it, and then closes with every Processor and StateStore call
+  skipped. Do not reintroduce the old workaround of `bridge.release()`
+  (leaking the bridge and the whole view tree for the process lifetime to
+  avoid touching the freed store). A view that reads its Processor or store
+  directly must implement `EditorOwnerObserver` and stop in
+  `on_owner_released()`; the editor idle pump delivers
+  it on its first tick after the unit retires, and `close()` at the latest.
+- A test that pumps the run loop from `main()` without draining its own
+  autorelease pool keeps every closed editor alive: AppKit autoreleases the
+  view into the outermost pool (text input context, display cycle). Wrap each
+  pump in `@autoreleasepool` before concluding a view never deallocates.
+- Gate: `test_au_v2_cocoa_ui.mm` "AU v2 editor freed after its audio unit ..."
+  and "... freed before its audio unit ..." build real editors against an
+  in-process fake AU whose Processor and StateStore are poisoned after the
+  dispose, and check the view deallocates, the tree is destroyed, and each
+  observer view hears `on_owner_released()` exactly once (never when freed first).
 
 ### Plugin-initiated resize is a Logic-only editor transaction
 
