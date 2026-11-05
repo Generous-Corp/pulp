@@ -22,11 +22,11 @@
 #include <pulp/render/gpu_surface.hpp>
 
 namespace pulp::render {
-using gpu_runtime::GpuStartupReport;
 using gpu_runtime::adapter_type_label;
 using gpu_runtime::format_gpu_adapter_line;
-using gpu_runtime::format_gpu_startup_line;
 using gpu_runtime::format_gpu_diagnostics_line;
+using gpu_runtime::format_gpu_startup_line;
+using gpu_runtime::GpuStartupReport;
 using gpu_runtime::log_gpu_diagnostics_summary;
 } // namespace pulp::render
 #else // !PULP_GPU_RUNTIME

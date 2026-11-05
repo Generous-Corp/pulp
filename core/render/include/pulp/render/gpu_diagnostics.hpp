@@ -26,21 +26,21 @@
 #include <gpu_runtime/gpu_diagnostics.hpp>
 
 namespace pulp::render {
-using gpu_runtime::GpuDiagnosticSeverity;
-using gpu_runtime::GpuDiagnosticsStats;
-using gpu_runtime::LogTextBudget;
-using gpu_runtime::SkiaLogBridgeState;
-using gpu_runtime::SkiaLogBridgeStatus;
 using gpu_runtime::emit_gpu_diagnostic;
 using gpu_runtime::gpu_diagnostics_stats;
+using gpu_runtime::GpuDiagnosticSeverity;
+using gpu_runtime::GpuDiagnosticsStats;
+using gpu_runtime::install_skia_log_bridge;
+using gpu_runtime::install_skia_log_bridge_if_enabled;
 using gpu_runtime::kGpuDiagnosticMessageLimit;
 using gpu_runtime::kSkiaLogTextLimit;
-using gpu_runtime::to_string;
-using gpu_runtime::skia_log_bridge_state;
+using gpu_runtime::LogTextBudget;
 using gpu_runtime::skia_log_bridge_available;
 using gpu_runtime::skia_log_bridge_enabled;
-using gpu_runtime::install_skia_log_bridge_if_enabled;
-using gpu_runtime::install_skia_log_bridge;
+using gpu_runtime::skia_log_bridge_state;
+using gpu_runtime::SkiaLogBridgeState;
+using gpu_runtime::SkiaLogBridgeStatus;
+using gpu_runtime::to_string;
 } // namespace pulp::render
 #else // !PULP_GPU_RUNTIME
 

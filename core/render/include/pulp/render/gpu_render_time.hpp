@@ -7,12 +7,12 @@
 #include <gpu_runtime/gpu_render_time.hpp>
 
 namespace pulp::render {
+using gpu_runtime::gpu_render_ns_to_ms;
+using gpu_runtime::gpu_surface_disabled_toggles;
 using gpu_runtime::GpuFramesInFlight;
 using gpu_runtime::GpuRenderTimeTracker;
 using gpu_runtime::kDawnTimestampQuantizationToggle;
 using gpu_runtime::kGpuRenderNanosecondsPerMillisecond;
-using gpu_runtime::gpu_surface_disabled_toggles;
-using gpu_runtime::gpu_render_ns_to_ms;
 } // namespace pulp::render
 #else // !PULP_GPU_RUNTIME
 

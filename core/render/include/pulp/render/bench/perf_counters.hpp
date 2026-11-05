@@ -11,11 +11,11 @@
 #include <gpu_runtime/bench/perf_counters.hpp>
 
 namespace pulp::render::bench {
-using gpu_runtime::bench::PerfCounters;
 using gpu_runtime::bench::now_us;
+using gpu_runtime::bench::PerfCounters;
 } // namespace pulp::render::bench
 #endif // GPU_RUNTIME_BENCHMARK
-#else // !PULP_GPU_RUNTIME
+#else  // !PULP_GPU_RUNTIME
 
 /// @file perf_counters.hpp
 /// Benchmark perf counters for copy/upload/readback costs.

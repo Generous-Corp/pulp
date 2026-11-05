@@ -27,8 +27,8 @@
 
 namespace pulp::render {
 using gpu_runtime::DawnProcInstaller;
-using gpu_runtime::set_dawn_proc_installer;
 using gpu_runtime::ensure_dawn_procs;
+using gpu_runtime::set_dawn_proc_installer;
 } // namespace pulp::render
 #else // !PULP_GPU_RUNTIME
 
