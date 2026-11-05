@@ -271,6 +271,61 @@ void require_group_clump_surface(Adapter& adapter)
             kAudioUnitErr_InvalidPropertyValue);
 }
 
+// Instrument-category processor with one continuous param (custom text) and one
+// labelled Enum, for the value-text surface of the instrument adapter.
+class ValueTextProcessor : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AuValueText",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au.valuetext",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Instrument,
+            .input_buses = {},
+            .output_buses = {{"Out", 2}},
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        pulp::state::ParamInfo semis{.id = 1, .name = "Semis", .range = {0.0f, 10.0f, 0.0f, 0.0f}};
+        semis.to_string = [](float v) { return std::to_string(static_cast<int>(v)) + " st"; };
+        store.add_parameter(semis);
+
+        pulp::state::ParamInfo mode{.id = 2,
+                                    .name = "Mode",
+                                    .range = {0.0f, 2.0f, 1.0f, 1.0f},
+                                    .kind = pulp::state::ParamKind::Enum};
+        mode.value_labels = {"Off", "Slow", "Fast"};
+        store.add_parameter(mode);
+    }
+
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+};
+
+std::unique_ptr<pulp::format::Processor> make_value_text_processor() {
+    return std::make_unique<ValueTextProcessor>();
+}
+
+struct ScopedValueTextFactory {
+    ScopedValueTextFactory() : previous(pulp::format::registered_factory()) {
+        pulp::format::register_plugin(make_value_text_processor);
+    }
+    ~ScopedValueTextFactory() {
+        pulp::format::register_plugin(previous);
+    }
+    pulp::format::ProcessorFactory previous;
+};
+
+std::string cf_to_string(CFStringRef cf) {
+    char buf[64] = {0};
+    REQUIRE(CFStringGetCString(cf, buf, sizeof(buf), kCFStringEncodingUTF8));
+    return buf;
+}
+
 }  // namespace
 
 TEST_CASE("AU v2 projects validated groups through every adapter clump surface",
@@ -736,4 +791,89 @@ TEST_CASE("AU v2 ParameterValueFromString parses via from_string",
     REQUIRE(effect.GetProperty(kAudioUnitProperty_ParameterValueFromString,
                                kAudioUnitScope_Global, 0, &plain) == noErr);
     REQUIRE_THAT(plain.outValue, WithinAbs(0.5f, 1e-6f));
+}
+
+TEST_CASE("AU v2 instrument serves parameter value text like the effect",
+          "[au][au-v2][params][display][instrument]") {
+    ScopedValueTextFactory factory;
+    pulp::format::au::PulpAUInstrument inst(nullptr);
+
+    // (1) Hosts only ask for text when the parameter advertises it.
+    for (AudioUnitParameterID id : {1u, 2u}) {
+        AudioUnitParameterInfo info{};
+        REQUIRE(inst.GetParameterInfo(kAudioUnitScope_Global, id, info) == noErr);
+        REQUIRE((info.flags & kAudioUnitParameterFlag_ValuesHaveStrings) != 0);
+    }
+
+    // (2) Both conversion properties are advertised, read-only, right size.
+    UInt32 size = 0;
+    bool writable = true;
+    REQUIRE(inst.GetPropertyInfo(kAudioUnitProperty_ParameterStringFromValue,
+                                 kAudioUnitScope_Global, 0, size, writable) == noErr);
+    REQUIRE(size == sizeof(AudioUnitParameterStringFromValue));
+    REQUIRE_FALSE(writable);
+    size = 0;
+    writable = true;
+    REQUIRE(inst.GetPropertyInfo(kAudioUnitProperty_ParameterValueFromString,
+                                 kAudioUnitScope_Global, 0, size, writable) == noErr);
+    REQUIRE(size == sizeof(AudioUnitParameterValueFromString));
+    REQUIRE_FALSE(writable);
+
+    // (3) value -> text, including the inValue == nullptr "current value" form.
+    Float32 three = 3.0f;
+    AudioUnitParameterStringFromValue sfv{};
+    sfv.inParamID = 1;
+    sfv.inValue = &three;
+    REQUIRE(inst.GetProperty(kAudioUnitProperty_ParameterStringFromValue, kAudioUnitScope_Global, 0,
+                             &sfv) == noErr);
+    REQUIRE(cf_to_string(sfv.outString) == "3 st");
+    CFRelease(sfv.outString);
+
+    Float32 one = 1.0f;
+    AudioUnitParameterStringFromValue label{};
+    label.inParamID = 2;
+    label.inValue = &one;
+    REQUIRE(inst.GetProperty(kAudioUnitProperty_ParameterStringFromValue, kAudioUnitScope_Global, 0,
+                             &label) == noErr);
+    REQUIRE(cf_to_string(label.outString) == "Slow");
+    CFRelease(label.outString);
+
+    AudioUnitParameterStringFromValue current{};
+    current.inParamID = 2;
+    current.inValue = nullptr; // default value of Mode is 1 -> "Slow"
+    REQUIRE(inst.GetProperty(kAudioUnitProperty_ParameterStringFromValue, kAudioUnitScope_Global, 0,
+                             &current) == noErr);
+    REQUIRE(cf_to_string(current.outString) == "Slow");
+    CFRelease(current.outString);
+
+    // (4) text -> value.
+    CFStringRef fast = CFSTR("Fast");
+    AudioUnitParameterValueFromString vfs{};
+    vfs.inParamID = 2;
+    vfs.inString = fast;
+    REQUIRE(inst.GetProperty(kAudioUnitProperty_ParameterValueFromString, kAudioUnitScope_Global, 0,
+                             &vfs) == noErr);
+    REQUIRE_THAT(vfs.outValue, WithinAbs(2.0f, 0.001f));
+
+    CFStringRef nope = CFSTR("Nope");
+    AudioUnitParameterValueFromString bad{};
+    bad.inParamID = 2;
+    bad.inString = nope;
+    REQUIRE(inst.GetProperty(kAudioUnitProperty_ParameterValueFromString, kAudioUnitScope_Global, 0,
+                             &bad) == kAudioUnitErr_InvalidPropertyValue);
+
+    // (5) Discrete value list is served; a continuous parameter has none.
+    CFArrayRef strings = nullptr;
+    REQUIRE(inst.GetParameterValueStrings(kAudioUnitScope_Global, 2, &strings) == noErr);
+    REQUIRE(strings != nullptr);
+    REQUIRE(CFArrayGetCount(strings) == 3);
+    const char* expected[] = {"Off", "Slow", "Fast"};
+    for (CFIndex i = 0; i < 3; ++i)
+        REQUIRE(cf_to_string(static_cast<CFStringRef>(CFArrayGetValueAtIndex(strings, i))) ==
+                expected[i]);
+    CFRelease(strings);
+
+    CFArrayRef none = nullptr;
+    REQUIRE(inst.GetParameterValueStrings(kAudioUnitScope_Global, 1, &none) ==
+            kAudioUnitErr_InvalidPropertyValue);
 }

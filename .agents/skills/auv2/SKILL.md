@@ -1183,7 +1183,10 @@ Pulp gates it on `range.step >= 1`). A CONTINUOUS param with a custom
    For StringFromValue the host owns/releases `outString` (create with +1
    retain); `inValue == nullptr` means "use the current value".
    Guard from_string with `std::isfinite`. Test:
-   `test/test_au_v2_param_display.mm`.
+   `test/test_au_v2_param_display.mm`. The effect and the instrument adapter
+   both serve this surface (flag, both properties, `GetParameterValueStrings`);
+   an adapter that advertises the flag without answering the properties, or
+   answers without the flag, shows bare numbers in the host.
 3. Every string the adapter shows must parse back. All formats share
    `format_parameter_text` / `parse_parameter_text`; a Toggle or Enum without
    `value_labels` is shown as its number ("0", "1"), so the parser accepts that

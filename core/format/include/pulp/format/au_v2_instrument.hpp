@@ -104,6 +104,12 @@ public:
                           AudioUnitElement inElement, Float32 inValue,
                           UInt32 inBufferOffsetInFrames) override;
 
+    // Value text for discrete parameters (value labels); continuous parameters
+    // are served through the ParameterStringFromValue / ...ValueFromString
+    // properties handled in GetProperty.
+    OSStatus GetParameterValueStrings(AudioUnitScope inScope, AudioUnitParameterID inParameterID,
+                                      CFArrayRef* outStrings) override;
+
     // Serve the Pulp editor-context property (so the Cocoa view factory can
     // reach this instance's Processor + StateStore) and advertise the Cocoa
     // view to the host (kAudioUnitProperty_CocoaUI). Without these the host
