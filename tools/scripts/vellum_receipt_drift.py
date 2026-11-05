@@ -20,6 +20,13 @@ the path and states ``vellum_inherits`` explicitly. Three event kinds count:
   It is the only vehicle for an exported path that is in neither a transferred
   slice nor a watch family.
 
+Two events that state different values for one path conflict, and the check
+fails. The one way to settle a conflict is an export event that names the
+earlier export event it corrects in ``supersedes``: for the paths it lists, the
+superseded event's value no longer counts and the correcting event's value
+does. It may list only paths every superseded event lists, so it corrects a
+recorded decision and cannot claim a path nobody decided.
+
 Paths the pin lists as frozen owe no inheritance decision, because a frozen
 path is not edited in Pulp at all: its authoritative copy is Vellum's. A change
 to a frozen path fails unless a change event added by the same change covers it
@@ -388,15 +395,25 @@ def _parse_utc(value: Any, where: str) -> None:
         raise ReceiptDriftError(f"{where}: expected an ISO-8601 UTC timestamp") from exc
 
 
-def validate_export_event(value: Any, path: str, pin: Pin) -> tuple[list[str], bool]:
-    event = _exact_keys(
-        value,
-        {
-            "schema_version", "event_id", "kind", "created_at", "receipt_export_id",
-            "paths", "vellum_inherits", "rationale",
-        },
-        path,
-    )
+@dataclasses.dataclass(frozen=True)
+class ExportEvent:
+    event_id: str
+    paths: tuple[str, ...]
+    inherits: bool
+    supersedes: tuple[str, ...]
+
+
+EXPORT_EVENT_KEYS = frozenset({
+    "schema_version", "event_id", "kind", "created_at", "receipt_export_id",
+    "paths", "vellum_inherits", "rationale",
+})
+
+
+def validate_export_event(value: Any, path: str, pin: Pin) -> ExportEvent:
+    keys = set(EXPORT_EVENT_KEYS)
+    if isinstance(value, dict) and "supersedes" in value:
+        keys.add("supersedes")
+    event = _exact_keys(value, keys, path)
     if type(event["schema_version"]) is not int or event["schema_version"] != 1:
         raise ReceiptDriftError(f"{path}: schema_version must be 1")
     event_id = event["event_id"]
@@ -418,7 +435,44 @@ def validate_export_event(value: Any, path: str, pin: Pin) -> tuple[list[str], b
         raise ReceiptDriftError(f"{path}: vellum_inherits must be true or false")
     if not isinstance(event["rationale"], str) or len(event["rationale"].strip()) < 24:
         raise ReceiptDriftError(f"{path}: rationale must explain the decision")
-    return paths, event["vellum_inherits"]
+    supersedes: list[str] = []
+    if "supersedes" in event:
+        supersedes = _sorted_unique(event["supersedes"], f"{path}.supersedes", allow_empty=False)
+        for item in supersedes:
+            if not EVENT_ID_RE.fullmatch(item) or item == event_id:
+                raise ReceiptDriftError(
+                    f"{path}: supersedes must name other export events by event_id"
+                )
+    return ExportEvent(event_id, tuple(paths), event["vellum_inherits"], tuple(supersedes))
+
+
+def _apply_supersession(
+    repo: pathlib.Path,
+    head: str,
+    pin: Pin,
+    decisions: dict[str, dict[str, bool]],
+    correcting: list[tuple[str, ExportEvent]],
+) -> None:
+    """Drop each superseded export event's value for the paths its correction lists."""
+    for path, event in correcting:
+        for superseded_id in event.supersedes:
+            superseded_path = f"{EXPORT_EVENT_DIRECTORY}/{superseded_id}.json"
+            raw = _blob(repo, head, superseded_path, MAX_EVENT_BYTES)
+            if raw is None:
+                raise ReceiptDriftError(
+                    f"{path}: supersedes {superseded_id}, which is not an export event"
+                )
+            superseded = validate_export_event(
+                _strict_json(raw, superseded_path), superseded_path, pin
+            )
+            unclaimed = [item for item in event.paths if item not in superseded.paths]
+            if unclaimed:
+                raise ReceiptDriftError(
+                    f"{path}: lists paths {superseded_id} does not decide: "
+                    + ", ".join(unclaimed)
+                )
+            for item in event.paths:
+                decisions.get(item, {}).pop(superseded_path, None)
 
 
 def _slice_matches(path: str, pattern: str) -> bool:
@@ -454,7 +508,8 @@ def collect_decisions(
     slice_paths: dict[str, list[str]],
 ) -> tuple[dict[str, set[bool]], list[str]]:
     """Each owed path's stated inheritance values, and the events read."""
-    decisions: dict[str, set[bool]] = {path: set() for path in owed}
+    decisions: dict[str, dict[str, bool]] = {path: {} for path in owed}
+    correcting: list[tuple[str, ExportEvent]] = []
     events: list[str] = []
     for status, path in changes:
         directory = posixpath.dirname(path)
@@ -466,15 +521,22 @@ def collect_decisions(
             raw = _blob(repo, head, path, MAX_EVENT_BYTES)
             if raw is None:
                 raise ReceiptDriftError(f"{path}: cannot read the added export event")
-            claimed, inherits = validate_export_event(_strict_json(raw, path), path, pin)
-            stray = [item for item in claimed if item not in owed]
+            event = validate_export_event(_strict_json(raw, path), path, pin)
+            # A correction may name a path this change leaves alone: the path's
+            # decision was recorded earlier, and _apply_supersession proves it.
+            stray = [] if event.supersedes else [
+                item for item in event.paths if item not in owed
+            ]
             if stray:
                 raise ReceiptDriftError(
                     f"{path}: claims paths this change does not owe a decision for: "
                     + ", ".join(stray)
                 )
-            for item in claimed:
-                decisions[item].add(inherits)
+            for item in event.paths:
+                if item in decisions:
+                    decisions[item][path] = event.inherits
+            if event.supersedes:
+                correcting.append((path, event))
             events.append(path)
             continue
         if directory not in (CHANGE_EVENT_DIRECTORY, WATCH_EVENT_DIRECTORY) or status != "A":
@@ -517,9 +579,10 @@ def collect_decisions(
                 item for item in owed if any(watch._matches(item, p) for p in patterns)
             ]
         for item in covered:
-            decisions[item].add(inherits)
+            decisions[item][path] = inherits
         events.append(path)
-    return decisions, events
+    _apply_supersession(repo, head, pin, decisions, correcting)
+    return {path: set(values.values()) for path, values in decisions.items()}, events
 
 
 def check(repo: pathlib.Path, base: str, head: str) -> dict[str, Any]:

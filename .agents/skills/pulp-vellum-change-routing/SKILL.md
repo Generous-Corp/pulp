@@ -459,7 +459,13 @@ Traps:
   whether the next re-export carries them.
 - Two added events that cover one path with different values fail as a
   conflict. A broad watch event with `false` and a precise export event with
-  `true` for the same path is a conflict, not an override.
+  `true` for the same path is a conflict, not an override. Neither order nor
+  specificity settles it; only an export event with `supersedes:
+  ["<event_id>"]` does. For the paths it lists, the named export event's value
+  stops counting and the correction's value counts. Ranges that span several
+  landed changes (a re-export reconciliation, `--base <old export merge>`) hit
+  this when two PRs each passed alone. A correction may list a path its own
+  change leaves untouched, but only paths every superseded event lists.
 - An export event may list only paths this change owes a decision for; a stray
   path fails, so an event cannot pre-authorise later edits.
 - A frozen path (the pin's `frozen_paths`, exactly the transferred slices'
@@ -478,10 +484,14 @@ Traps:
   exported (another platform's source) owes nothing.
 - The receipt's `pulp_sha` must be a commit in the checkout and an ancestor of
   the head, so the workflow's full-history checkout is load-bearing.
-- Receipt mode runs in the untrusted "Vellum freeze" job only, which executes
-  the change's own copy of the script. The trusted gate does not run it yet;
-  adding it there in the same change would call a flag the base copy lacks and
-  fail that change's merge group.
+- Receipt mode runs twice: in the untrusted "Vellum freeze" job from the
+  change's own scripts, and in every privileged lane (the trusted gate's PR and
+  merge-group jobs, and freeze recovery) from the BASE checkout's scripts
+  against the proposed tree. A change that edits a frozen path and rewrites
+  `vellum_receipt_drift.py` to pass therefore still fails "Vellum trusted
+  freeze". A new rule in the receipt scripts takes effect in the trusted lanes
+  only after it lands, so data that relies on the rule (a `supersedes`
+  correction) must ship in a later change than the rule.
 - The pin is data a reviewer must read. A change to `frozen_paths` or a swapped
   receipt is only parsed for shape and self-consistency, and takes effect for
   every later change, so review a pin edit as an ownership decision. Nothing yet

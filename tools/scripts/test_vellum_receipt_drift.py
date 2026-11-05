@@ -336,6 +336,68 @@ class ReceiptDriftTests(unittest.TestCase):
         self.assertEqual((report["status"], report["conflicting"]),
                          ("fail", ["core/state/src/s.cpp"]))
 
+    def _land_range_conflict(self, path: str) -> str:
+        """Two landed changes that disagree over one path, as a re-export range sees them."""
+        self.fixture.write(path, "// added\n")
+        self.fixture.write(f"{drift.EXPORT_EVENT_DIRECTORY}/20261101-claims-true.json",
+                           export_event("20261101-claims-true", [path], True))
+        self.fixture.commit("first change")
+        self.fixture.write("core/canvas/include/pulp/canvas/a.hpp", "// edited\n")
+        self.fixture.write(".github/vellum-expansion-watch-events/20261102-w.json",
+                           {"capability_families": ["render-assets-and-backends"],
+                            "vellum_inherits": False})
+        return self.fixture.commit("second change")
+
+    def test_range_conflict_between_landed_changes_fails(self):
+        path = "core/canvas/include/pulp/canvas/added.hpp"
+        self._land_range_conflict(path)
+        report = self.fixture.check()
+        self.assertEqual((report["status"], report["conflicting"]), ("fail", [path]))
+
+    def test_superseding_export_event_settles_a_range_conflict(self):
+        path = "core/canvas/include/pulp/canvas/added.hpp"
+        landed = self._land_range_conflict(path)
+        self.fixture.write(
+            f"{drift.EXPORT_EVENT_DIRECTORY}/20261103-correction.json",
+            export_event("20261103-correction", [path], False,
+                         supersedes=["20261101-claims-true"]))
+        head = self.fixture.commit("correct the first decision")
+        # The whole range now carries one value for the path.
+        report = drift.check(self.fixture.root, self.fixture.base, head)
+        self.assertEqual((report["status"], report["conflicting"]), ("pass", []))
+        # The correction alone touches no exported path and still passes.
+        alone = drift.check(self.fixture.root, landed, head)
+        self.assertEqual((alone["status"], alone["owed"]), ("pass", {}))
+
+    def test_correction_cannot_claim_a_path_the_superseded_event_never_decided(self):
+        path = "core/canvas/include/pulp/canvas/added.hpp"
+        self._land_range_conflict(path)
+        self.fixture.write(
+            f"{drift.EXPORT_EVENT_DIRECTORY}/20261103-correction.json",
+            export_event("20261103-correction", [path, "core/state/src/s.cpp"], False,
+                         supersedes=["20261101-claims-true"]))
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "does not decide"):
+            self.fixture.check()
+
+    def test_correction_must_name_an_existing_export_event(self):
+        path = "core/canvas/include/pulp/canvas/added.hpp"
+        self._land_range_conflict(path)
+        self.fixture.write(
+            f"{drift.EXPORT_EVENT_DIRECTORY}/20261103-correction.json",
+            export_event("20261103-correction", [path], False,
+                         supersedes=["20261101-not-there"]))
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "not an export event"):
+            self.fixture.check()
+
+    def test_correction_cannot_supersede_itself(self):
+        self.fixture.write("core/state/src/s.cpp", "// edited\n")
+        self.fixture.write(
+            f"{drift.EXPORT_EVENT_DIRECTORY}/20261103-correction.json",
+            export_event("20261103-correction", ["core/state/src/s.cpp"], False,
+                         supersedes=["20261103-correction"]))
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "other export events"):
+            self.fixture.check()
+
     def test_change_event_covers_its_transferred_slice(self):
         self.fixture.write("core/canvas/src/a.cpp", "// edited\n")
         event = {"kind": "change", "slices": ["canvas-kernel"], "vellum_inherits": True}

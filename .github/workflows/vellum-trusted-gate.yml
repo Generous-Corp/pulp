@@ -231,6 +231,15 @@ jobs:
             --source-head "$PR_HEAD" \
             --verify-authority \
             --output "$RUNNER_TEMP/vellum-trusted-outbox.json"
+          # Receipt mode from the base checkout: a frozen or exported path the
+          # PR edits must carry its decision, and the PR cannot switch the
+          # check off by editing the receipt scripts it also changes.
+          run_validator python3 "$trusted_root/tools/scripts/vellum_freeze_check.py" \
+            --receipt-mode \
+            --repo "$proposed_tree" \
+            --base "$PR_BASE" \
+            --head "$proposed_head" \
+            --output "$RUNNER_TEMP/vellum-trusted-receipt-drift.json"
           if [ -f "$trusted_root/tools/scripts/vellum_expansion_watch_check.py" ]; then
             run_validator python3 \
               "$trusted_root/tools/scripts/vellum_expansion_watch_check.py" \
@@ -344,6 +353,12 @@ jobs:
             --source-head "$MERGE_HEAD" \
             --verify-authority \
             --output "$RUNNER_TEMP/vellum-merge-outbox.json"
+          python3 "$trusted_root/tools/scripts/vellum_freeze_check.py" \
+            --receipt-mode \
+            --repo "$proposed_tree" \
+            --base "$MERGE_BASE" \
+            --head "$MERGE_HEAD" \
+            --output "$RUNNER_TEMP/vellum-merge-receipt-drift.json"
           if [ -f "$trusted_root/tools/scripts/vellum_expansion_watch_check.py" ]; then
             python3 "$trusted_root/tools/scripts/vellum_expansion_watch_check.py" \
               --repo "$proposed_tree" \
