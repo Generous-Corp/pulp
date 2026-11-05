@@ -154,6 +154,18 @@ bool file_dialog_save_copy_via_backend(
 }
 }  // namespace detail
 
+std::vector<std::string> FileDialog::choose_folders_with(const Backend& backend,
+                                                         const std::string& title,
+                                                         const std::string& default_path) {
+    if (backend.choose_folders)
+        return backend.choose_folders(title, default_path);
+    if (backend.choose_folder) {
+        if (auto one = backend.choose_folder(title, default_path))
+            return {*one};
+    }
+    return {};
+}
+
 bool FileDialog::has_backend() {
     // Report "true" only on platforms where a real native dialog impl is
     // compiled in. macOS ships file_dialog_mac.mm; iOS does not have a
@@ -214,6 +226,14 @@ std::optional<std::string> FileDialog::choose_folder(
     std::lock_guard lock(g_backend_mu);
     if (!g_backend_installed || !g_backend.choose_folder) return std::nullopt;
     return g_backend.choose_folder(title, default_path);
+}
+
+std::vector<std::string> FileDialog::choose_folders(const std::string& title,
+                                                    const std::string& default_path) {
+    std::lock_guard lock(g_backend_mu);
+    if (!g_backend_installed)
+        return {};
+    return choose_folders_with(g_backend, title, default_path);
 }
 
 #endif // !defined(__APPLE__) || iOS

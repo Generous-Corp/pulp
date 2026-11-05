@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/platform/popup_menu.hpp>
+#include <pulp/platform/reveal_in_file_manager.hpp>
 
 #include "support/unique_temp_dir.hpp"
 #include <filesystem>
@@ -94,6 +95,61 @@ TEST_CASE("FileDialog save_copy writes while the selected destination is owned",
     fs::remove_all(root);
 }
 
+TEST_CASE("FileDialog choose_folders routes to the multi-folder handler when present",
+          "[platform][file-dialog][choose-folders]") {
+    FileDialog::Backend backend;
+    int single_calls = 0;
+    backend.choose_folder = [&](const std::string&,
+                                const std::string&) -> std::optional<std::string> {
+        ++single_calls;
+        return "/single";
+    };
+    backend.choose_folders = [](const std::string& title, const std::string& dir) {
+        REQUIRE(title == "Pick roots");
+        REQUIRE(dir == "/start");
+        return std::vector<std::string>{"/a", "/b", "/c"};
+    };
+    const auto folders = FileDialog::choose_folders_with(backend, "Pick roots", "/start");
+    REQUIRE(folders == std::vector<std::string>{"/a", "/b", "/c"});
+    REQUIRE(single_calls == 0);
+}
+
+TEST_CASE("FileDialog choose_folders falls back to the single-folder handler",
+          "[platform][file-dialog][choose-folders]") {
+    FileDialog::Backend backend;
+    backend.choose_folder = [](const std::string&,
+                               const std::string&) -> std::optional<std::string> {
+        return "/only";
+    };
+    REQUIRE(FileDialog::choose_folders_with(backend, "t", "") == std::vector<std::string>{"/only"});
+
+    // Cancelled single-folder dialog and a backend with no folder handler
+    // both read as "nothing chosen", never as a phantom entry.
+    backend.choose_folder = [](const std::string&,
+                               const std::string&) -> std::optional<std::string> {
+        return std::nullopt;
+    };
+    REQUIRE(FileDialog::choose_folders_with(backend, "t", "").empty());
+    REQUIRE(FileDialog::choose_folders_with(FileDialog::Backend{}, "t", "").empty());
+}
+
+TEST_CASE("reveal_in_file_manager reports a missing path without touching the shell",
+          "[platform][reveal]") {
+    using pulp::platform::RevealOutcome;
+    const auto root = pulp::test::make_unique_temp_dir("pulp-reveal-missing");
+    REQUIRE(std::filesystem::is_directory(root));
+    REQUIRE(pulp::platform::reveal_in_file_manager(root / "no-such-file.wav") ==
+            RevealOutcome::not_found);
+    REQUIRE(pulp::platform::reveal_in_file_manager(std::filesystem::path{}) ==
+            RevealOutcome::not_found);
+    std::filesystem::remove_all(root);
+
+    REQUIRE(std::string(pulp::platform::to_string(RevealOutcome::revealed)) == "revealed");
+    REQUIRE(std::string(pulp::platform::to_string(RevealOutcome::opened_containing_folder)) ==
+            "opened_containing_folder");
+    REQUIRE(std::string(pulp::platform::to_string(RevealOutcome::unsupported)) == "unsupported");
+}
+
 #if !defined(__APPLE__)
 // Non-Apple: dialog methods route through the backend. Without one,
 // every method returns an explicit no-selection. With a fake backend
@@ -115,6 +171,8 @@ TEST_CASE("FileDialog non-Apple: no backend -> explicit no-selection",
 
     auto folder = FileDialog::choose_folder("t", "");
     REQUIRE_FALSE(folder.has_value());
+
+    REQUIRE(FileDialog::choose_folders("t", "").empty());
 }
 
 TEST_CASE("FileDialog non-Apple: installed backend without handlers fails closed",
