@@ -492,11 +492,13 @@ Traps:
   freeze". A new rule in the receipt scripts takes effect in the trusted lanes
   only after it lands, so data that relies on the rule (a `supersedes`
   correction) must ship in a later change than the rule.
-- The pin is data a reviewer must read. A change to `frozen_paths` or a swapped
-  receipt is only parsed for shape and self-consistency, and takes effect for
-  every later change, so review a pin edit as an ownership decision. Nothing yet
-  checks the receipt copy against Vellum's blob; the trusted gate, which holds a
-  Vellum reader token, is where that check belongs.
+- The pin is data a reviewer must read. A change to `frozen_paths` takes effect
+  for every later change, so review a pin edit as an ownership decision. A
+  swapped receipt copy fails the trusted lanes: with `VELLUM_READER_TOKEN` set,
+  receipt mode requires each pinned copy's blob id (base and head) to equal
+  Vellum main's `receipt_source`, and an unreachable Vellum fails rather than
+  matches. The untrusted job has no token, so a local or "Vellum freeze" run
+  reports `receipt_source: unchecked` and passes that part.
 
 ## The "Vellum freeze" CI job runs two checks, and the second is the one that fails
 
