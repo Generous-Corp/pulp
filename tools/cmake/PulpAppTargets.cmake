@@ -4,8 +4,73 @@
 # Both `_pulp_add_standalone` (the standalone audio-host shell used by
 # `pulp_add_plugin(... FORMATS standalone)`) and `pulp_add_app`
 # (generic non-plugin Pulp apps) live here.
+# Pulp's standalone hosts (pulp::standalone, pulp::standalone-native and the
+# view-free pulp::standalone-contract) are three builds of one StandaloneApp, so
+# a target linking the contract host and a view host gets two definitions of
+# every StandaloneApp member and the linker silently keeps whichever archive
+# comes first. Fails configure when `target`'s link closure holds both.
+function(_pulp_check_standalone_hosts target)
+    if(NOT TARGET "${target}")
+        return()
+    endif()
+    set(_seen "")
+    set(_frontier "${target}")
+    set(_view_hosts "")
+    set(_contract FALSE)
+    while(_frontier)
+        set(_next "")
+        foreach(_current IN LISTS _frontier)
+            get_target_property(_aliased "${_current}" ALIASED_TARGET)
+            if(_aliased)
+                set(_current "${_aliased}")
+            endif()
+            if(_current IN_LIST _seen)
+                continue()
+            endif()
+            list(APPEND _seen "${_current}")
+            if(_current MATCHES "(^|::|-)standalone-contract$")
+                set(_contract TRUE)
+            elseif(_current MATCHES "(^|::|-)standalone(-native)?$")
+                list(APPEND _view_hosts "${_current}")
+            endif()
+            set(_entries "")
+            get_target_property(_type "${_current}" TYPE)
+            get_target_property(_imported "${_current}" IMPORTED)
+            if(NOT _type STREQUAL "INTERFACE_LIBRARY" AND NOT _imported)
+                get_target_property(_direct "${_current}" LINK_LIBRARIES)
+                if(_direct)
+                    list(APPEND _entries ${_direct})
+                endif()
+            endif()
+            get_target_property(_interface "${_current}" INTERFACE_LINK_LIBRARIES)
+            if(_interface)
+                list(APPEND _entries ${_interface})
+            endif()
+            foreach(_entry IN LISTS _entries)
+                string(REGEX REPLACE "^\\$<LINK_ONLY:(.*)>$" "\\1" _entry "${_entry}")
+                if(TARGET "${_entry}" AND NOT _entry IN_LIST _seen)
+                    list(APPEND _next "${_entry}")
+                endif()
+            endforeach()
+        endforeach()
+        set(_frontier "${_next}")
+    endwhile()
+    if(_contract AND _view_hosts)
+        list(REMOVE_DUPLICATES _view_hosts)
+        list(JOIN _view_hosts ", " _view_text)
+        message(FATAL_ERROR
+            "${target} links both pulp::standalone-contract (the view-free standalone of a "
+            "UI <package> plug-in) and ${_view_text}. They are two builds of the same "
+            "StandaloneApp; link one. A UI package plug-in's standalone gets the view-free "
+            "host, so it must not also link Pulp's view standalone.")
+    endif()
+endfunction()
+
 function(_pulp_add_standalone target name bundle_id version processor_factory)
     if(NOT PULP_${target}_STANDALONE_TARGET)
+        if(PULP_${target}_VIEW_FREE_STANDALONE)
+            message(FATAL_ERROR "pulp_add_plugin(${target}): Standalone requested for a UI package plug-in, but this Pulp SDK does not export the view-free Pulp::standalone-contract")
+        endif()
         message(FATAL_ERROR "pulp_add_plugin(${target}): Standalone requested but Pulp::standalone is unavailable")
     endif()
 
@@ -32,6 +97,9 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             "pulp_add_plugin(${target}): declared inspector shipping component is unavailable; configure/install Pulp with Inspector support")
     endif()
     target_link_libraries(${target}_Standalone PRIVATE ${target}_Core ${_standalone_target})
+    # Checked once the directory is done, when every link has been added.
+    cmake_language(DEFER DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        CALL _pulp_check_standalone_hosts "${target}_Standalone")
     _pulp_dev_shared_ui_attach(${target} ${target}_Standalone _pulp_dev_shared)
     if(PULP_${target}_CONTROL_CAPABILITIES)
         set(_control_factory_source
@@ -163,7 +231,11 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             CACHE INTERNAL "" FORCE)
     endif()
     _pulp_apply_ui_script_definition(${target}_Standalone "${PULP_${target}_UI_SCRIPT}")
-    _pulp_apply_view_mac_objc_suffix(${target}_Standalone)
+    # The view layer's per-binary Objective-C classes; a view-free standalone
+    # (UI <package>) has no view layer for them.
+    if(NOT PULP_${target}_VIEW_FREE_STANDALONE)
+        _pulp_apply_view_mac_objc_suffix(${target}_Standalone)
+    endif()
     target_include_directories(${target}_Standalone PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set_target_properties(${target}_Standalone PROPERTIES
         OUTPUT_NAME "${name}"

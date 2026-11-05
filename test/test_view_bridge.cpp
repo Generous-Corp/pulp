@@ -19,6 +19,7 @@
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/editor_owner.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/view_bridge.hpp>
@@ -1678,9 +1679,9 @@ TEST_CASE("every hosted format adapter builds its editor from hosted_editor()",
     }
 
     // Negative control: prove the scan can actually observe the thing it
-    // asserts. The standalone host genuinely does hand-assemble the flag, so a
+    // asserts. The standalone view layer genuinely does hand-assemble the flag, so a
     // scan that reports "clean" for it is a scan that is not reading anything.
-    const auto standalone = repo_root / "core/format/src/standalone.cpp";
+    const auto standalone = repo_root / "core/format/src/standalone_view_layer.cpp";
     REQUIRE(fs::exists(standalone));
     std::ifstream standalone_in(standalone);
     REQUIRE(standalone_in.good());
@@ -2058,6 +2059,98 @@ TEST_CASE("scripted editor teardown-order matrix rejects every stale callback",
         f.processor.reset();
         f.store.reset();
         SUCCEED("native host released its callback before every referenced owner");
+    }
+}
+
+// A view tree can outlive the instance that owns it. Each observer view hears
+// EditorOwnerObserver::on_owner_released() exactly once, on the main thread,
+// before anything tears the tree down, and never while the owner is alive.
+namespace {
+struct OwnerReleaseCounts {
+    int released = 0;
+    int destroyed = 0;
+};
+class OwnerReleaseView : public view::View, public format::EditorOwnerObserver {
+  public:
+    explicit OwnerReleaseView(OwnerReleaseCounts& counts) : counts_(counts) {}
+    ~OwnerReleaseView() override {
+        ++counts_.destroyed;
+    }
+    void on_owner_released() override {
+        ++counts_.released;
+    }
+
+  private:
+    OwnerReleaseCounts& counts_;
+};
+std::unique_ptr<view::View> owner_release_tree(OwnerReleaseCounts& counts) {
+    auto root = std::make_unique<OwnerReleaseView>(counts);
+    auto group = std::make_unique<OwnerReleaseView>(counts);
+    group->add_child(std::make_unique<OwnerReleaseView>(counts));
+    root->add_child(std::move(group));
+    return root;
+}
+} // namespace
+
+TEST_CASE("editor tree hears its owner go exactly once, before teardown",
+          "[view_bridge][idle-pump][owner-lifetime][lifecycle]") {
+    OwnerReleaseCounts counts;
+    runtime::AliveToken owner_alive;
+    auto processor = std::make_unique<StubProcessor>();
+    auto store = std::make_unique<state::StateStore>();
+    processor->define_parameters(*store);
+    processor->custom_view = owner_release_tree(counts);
+    auto bridge = std::make_unique<format::ViewBridge>(*processor, *store, owner_alive.capture());
+    REQUIRE(bridge->open());
+    bridge->notify_attached();
+    auto pump = format::make_editor_idle_pump(*bridge);
+    pump();
+    CHECK_FALSE(bridge->notify_owner_released()); // owner alive: nothing to say
+    CHECK(counts.released == 0);
+
+    SECTION("the idle pump delivers it on the first tick after the owner retires") {
+        owner_alive.retire();
+        processor.reset();
+        store.reset();
+        pump();
+        CHECK(counts.released == 3);
+        pump();
+        CHECK_FALSE(bridge->notify_owner_released());
+        bridge.reset(); // teardown neither repeats it nor calls the dead owner
+        CHECK(counts.released == 3);
+        CHECK(counts.destroyed == 3);
+    }
+
+    SECTION("close delivers it when no tick ran first") {
+        owner_alive.retire();
+        processor.reset();
+        store.reset();
+        bridge->close();
+        CHECK(counts.released == 3);
+        CHECK(counts.destroyed == 3);
+    }
+
+    SECTION("an adapter that knows first delivers it before the processor dies") {
+        int closed_before = processor->closed_count;
+        bridge->notify_processor_destroyed();
+        CHECK(counts.released == 3);
+        CHECK(processor->closed_count == closed_before);
+        processor.reset();
+        store.reset();
+        pump();
+        bridge.reset();
+        CHECK(counts.released == 3);
+        CHECK(counts.destroyed == 3);
+    }
+
+    SECTION("a tree closed while its owner lives never hears it") {
+        bridge->close();
+        CHECK(processor->closed_count == 1);
+        CHECK(counts.released == 0);
+        CHECK(counts.destroyed == 3);
+        owner_alive.retire();
+        pump();
+        CHECK(counts.released == 0);
     }
 }
 

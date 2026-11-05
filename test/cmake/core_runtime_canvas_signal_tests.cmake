@@ -1120,6 +1120,15 @@ if(PULP_HAS_SKIA)
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 endif()
 
+# Standalone app hosting an editor-host contract editor in its own window,
+# headless: a screenshot-only launch, so no audio device is created.
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-test-standalone-contract-editor test_standalone_contract_editor.mm)
+    target_link_libraries(pulp-test-standalone-contract-editor PRIVATE
+        pulp::standalone Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-standalone-contract-editor)
+endif()
+
 # Test signal source (sine tone, file playback)
 pulp_add_test_suite(pulp-test-test-signal GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone)
@@ -1189,6 +1198,20 @@ pulp_add_test_suite(pulp-test-stft GROUP pulp-test-group-core-signal
 pulp_add_test_suite(pulp-test-visualization
     SOURCES test_visualization.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::view)
+# The benchmark-only VisualizationBridge API, compiled (never linked) with
+# PULP_BENCHMARK in every build so the opt-in benchmark consumers cannot rot.
+if(TARGET pulp-render)
+    add_library(pulp-visualization-bench-consumer-check OBJECT
+        fixtures/benchmark_consumer/visualization_bench_consumer.cpp)
+    target_link_libraries(pulp-visualization-bench-consumer-check
+        PRIVATE pulp::view-audio pulp::render)
+    target_compile_definitions(pulp-visualization-bench-consumer-check PRIVATE PULP_BENCHMARK)
+endif()
+# The bridge's own PULP_BENCHMARK body, compiled (never linked) the same way.
+add_library(pulp-visualization-bench-source-check OBJECT
+    ${CMAKE_SOURCE_DIR}/core/dataplane/src/visualization_bridge.cpp)
+target_link_libraries(pulp-visualization-bench-source-check PRIVATE pulp::dataplane-audio)
+target_compile_definitions(pulp-visualization-bench-source-check PRIVATE PULP_BENCHMARK)
 
 # Clipboard tests
 pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform

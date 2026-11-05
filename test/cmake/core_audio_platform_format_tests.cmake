@@ -879,6 +879,44 @@ if("${_pulp_core_only_links}" MATCHES "pulp(::|-)format-view"
 endif()
 unset(_pulp_core_only_links)
 
+# The default VisualPort over a processor's ValueChannelSet, against
+# pulp::format-core alone. NO_PCH because the shared test PCH is built with the
+# view headers on its include path.
+pulp_add_test_suite(pulp-test-value-channel-visual-port NO_PCH
+    LIBRARIES pulp::format-core)
+
+# The two format-core-only targets must reach no view, canvas or render target
+# through any edge. Run after the whole configure so a link a later directory
+# adds is seen; the walk reads resolved link properties, so a PRIVATE link to a
+# static archive (which still lands on the link line) is counted.
+include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpConsumerClosure.cmake)
+function(_pulp_assert_format_core_consumers_ui_free)
+    # Controls: the walk must follow edges (view-core reaches canvas) and must
+    # see the data plane these consumers are supposed to reach.
+    pulp_consumer_link_closure(_control pulp-view-core)
+    if(NOT "pulp-canvas" IN_LIST _control)
+        message(FATAL_ERROR
+            "format-core consumer closure: the walk did not reach pulp-canvas from "
+            "pulp-view-core, so it cannot be trusted to find a UI edge")
+    endif()
+    pulp_consumer_link_closure(_closure
+        pulp-test-format-core-only-consumer pulp-test-value-channel-visual-port)
+    if(NOT "pulp-dataplane" IN_LIST _closure)
+        message(FATAL_ERROR
+            "format-core consumer closure: pulp-dataplane is not reached, so the "
+            "VisualPort proof is not exercising the data plane: ${_closure}")
+    endif()
+    foreach(_target IN LISTS _closure)
+        if(_target MATCHES "^pulp-(view|canvas|render)")
+            message(FATAL_ERROR
+                "format-core consumer closure reaches ${_target}; the data plane and "
+                "the editor-host contract must link no UI layer: ${_closure}")
+        endif()
+    endforeach()
+endfunction()
+cmake_language(DEFER DIRECTORY ${CMAKE_SOURCE_DIR}
+    CALL _pulp_assert_format_core_consumers_ui_free)
+
 # Reviewed process API calls: each of these starts only system tools or a
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
 pulp_test_spawns(pulp-test-nsis-installer NONE REASON "runs the system makensis, nothing the tree builds")

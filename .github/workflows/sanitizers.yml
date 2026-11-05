@@ -97,6 +97,9 @@ jobs:
           TSAN_RUNS_ON_JSON: ${{ vars.PULP_SANITIZER_TSAN_RUNS_ON_JSON }}
           UBSAN_RUNS_ON_JSON: ${{ vars.PULP_SANITIZER_UBSAN_RUNS_ON_JSON }}
           RTSAN_RUNS_ON_JSON: ${{ vars.PULP_SANITIZER_RTSAN_RUNS_ON_JSON }}
+          # resolve_runs_on.py sends a fork (or deleted-fork) pull request to
+          # its hosted fallback; it needs the head repository to tell.
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           set -euo pipefail
           resolve() {

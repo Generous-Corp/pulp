@@ -28,6 +28,32 @@ from vellum_closure import (
 )
 
 
+
+# Edges from the two view umbrellas that the allowlist may admit, by exact
+# name and debt. None is admitted: the data plane is a mirrored unit, so no
+# view-umbrella edge needs a debt, and a prefix entry that could match one of
+# their edges never passes.
+VIEW_UMBRELLA_SOURCES = ("pulp-view-native->", "pulp-view-platform->")
+VIEW_UMBRELLA_ADMITTED_EDGES: set[tuple[str, str]] = set()
+
+
+def view_umbrella_edge_admissions(entries):
+    """Ids of allowlist entries that would admit a view-umbrella edge unexpectedly."""
+    offending = []
+    for entry in entries:
+        match = entry.get("match", "")
+        if entry.get("match_type", "exact") == "prefix":
+            if match.startswith(VIEW_UMBRELLA_SOURCES) or any(
+                source.startswith(match) for source in VIEW_UMBRELLA_SOURCES
+            ):
+                offending.append(entry["id"])
+            continue
+        if not match.startswith(VIEW_UMBRELLA_SOURCES):
+            continue
+        if entry.get("kind") != "edge" or (match, entry.get("debt_id")) not in VIEW_UMBRELLA_ADMITTED_EDGES:
+            offending.append(entry["id"])
+    return offending
+
 class ClosurePolicyTests(unittest.TestCase):
     def test_policy_matches_boundaries(self):
         self.assertTrue(policy_target_forbidden("pulp::audio"))
@@ -916,7 +942,7 @@ class MirroredLinkTests(unittest.TestCase):
                          ["pulp-events", "pulp-platform", "pulp-runtime", "pulp-simd",
                           "pulp-gpu-device", "?pulp-skia-chromium-raw-ptr-compat",
                           "pulp-canvas", "pulp-bundled-fonts", "?pulp-bundled-noto-color-emoji", "pulp-render",
-                          "pulp-state", "pulp-view-core", "pulp-design-import",
+                          "pulp-state", "pulp-dataplane", "pulp-view-core", "pulp-design-import",
                           "pulp-view-script", "pulp-view-platform", "pulp-jsx-runtime-materialized-contract",
                           "pulp-jsx-runtime-materialized-emitter"])
 
@@ -1014,12 +1040,71 @@ class MirroredLinkTests(unittest.TestCase):
     def test_view_platform_is_carried_by_the_audio_free_target(self):
         # pulp-view-native is the Pulp-kept umbrella that adds the audio widgets;
         # the view-platform unit carries pulp-view-platform, and no allowlist
-        # entry admits an audio edge from either.
+        # entry admits an edge from either.
         from vellum_closure import unit_manifest_targets
         self.assertEqual(unit_manifest_targets(self.UNITS, "view-platform"), ["pulp-view-platform"])
         entries = load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")
         self.assertEqual([e["id"] for e in entries if e["debt_id"] == "P4-view-audio"], [])
-        self.assertEqual([e["id"] for e in entries if e.get("match", "").startswith(("pulp-view-native->", "pulp-view-platform->"))], [])
+        self.assertEqual(view_umbrella_edge_admissions(entries), [])
+
+    def test_view_umbrella_guard_refuses_every_bypass(self):
+        base = {"owner": "o", "debt_id": "d", "kind": "edge", "exit_criterion": "x"}
+        bypasses = [
+            {"id": "prefix-all", "match": "pulp-view-platform->", "match_type": "prefix"},
+            {"id": "prefix-audio", "match": "pulp-view-platform->pulp-a", "match_type": "prefix"},
+            {"id": "prefix-above", "match": "pulp-view-", "match_type": "prefix"},
+            {"id": "native-host", "match": "pulp-view-native->pulp-host"},
+            {"id": "platform-format", "match": "pulp-view-platform->pulp-format"},
+            {"id": "platform-audio", "match": "pulp-view-platform->pulp-view-audio"},
+            {"id": "dataplane-as-prefix", "match": "pulp-view-platform->pulp-dataplane",
+             "match_type": "prefix"},
+            {"id": "dataplane-wrong-debt", "match": "pulp-view-platform->pulp-dataplane",
+             "debt_id": "other"},
+        ]
+        for bypass in bypasses:
+            with self.subTest(bypass=bypass["id"]):
+                entry = {**base, **bypass}
+                self.assertEqual(view_umbrella_edge_admissions([entry]), [bypass["id"]])
+        exact = {**base, "id": "m2", "debt_id": "M2-dataplane",
+                 "match": "pulp-view-platform->pulp-dataplane"}
+        self.assertEqual(view_umbrella_edge_admissions([exact]), ["m2"])
+        # Debts from other mirrored targets are outside this guard.
+        other = {**base, "id": "core", "match": "pulp-view-core->pulp-dataplane"}
+        self.assertEqual(view_umbrella_edge_admissions([other]), [])
+
+    def test_view_core_data_plane_link_is_carried_by_a_mirrored_unit(self):
+        # Pulp's view-core links pulp-dataplane. The mirror carries that link
+        # only because the dataplane unit owns the target, earlier than
+        # view-core; without it the mirrored view-core could not link, and
+        # export-check refuses the closure. The unit is temporary and says when
+        # it leaves.
+        from vellum_closure import unit_manifest_layout, unmirrored_link_violations
+        layout = unit_manifest_layout(REPO_ROOT / "tools/scripts/vellum_d3_units.json")
+        names = [row["name"] for row in layout]
+        dataplane = next(row for row in layout if row["name"] == "dataplane")
+        self.assertEqual(dataplane["targets"], ["pulp-dataplane"])
+        self.assertIn("vellum::value", dataplane.get("retire_after", ""))
+        self.assertLess(names.index("state-core"), names.index("dataplane"))
+        self.assertLess(names.index("dataplane"), names.index("view-core"))
+        mirrored = {t for row in layout for t in row["targets"]}
+        link = {"targets": [{"name": "pulp-view-core", "link_targets": ["pulp-dataplane"]}]}
+        self.assertEqual(unmirrored_link_violations(link, mirrored, None, set()), [])
+        self.assertEqual(
+            unmirrored_link_violations(link, mirrored - {"pulp-dataplane"}, None, set()),
+            ["unmirrored Pulp target pulp-view-core -> pulp-dataplane"])
+        entries = load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")
+        self.assertEqual([e["id"] for e in entries if e.get("debt_id") == "M2-dataplane"], [])
+
+    def test_retire_after_must_name_the_export(self):
+        from vellum_closure import unit_manifest_layout
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "units.json"
+            for bad in ("", "   ", 3):
+                path.write_text(json.dumps({"schema": "pulp.vellum.d3-units.v1", "units": [
+                    {"name": "foundation", "targets": ["pulp-runtime"], "retire_after": bad}]}),
+                    encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, "retire_after"):
+                    unit_manifest_layout(path)
 
     def test_empty_allowlist_loads_and_malformed_entries_fail(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1305,7 +1390,9 @@ class ClosureMentionTests(unittest.TestCase):
         debts = {entry["id"] for entry in ledger["entries"]}
         self.assertEqual(table["approved_exceptions"], [{
             "rule": "mirror-pulp-kept-include", "path": "core/view/include/pulp/view/widgets.hpp",
-            "line": "#include <pulp/view/audio_widgets.hpp>", "debt": "vellum-header-audio-widgets-include"}])
+            "line": "#include <pulp/view/audio_widgets.hpp>", "debt": "vellum-header-audio-widgets-include"}, {
+            "rule": "mirror-pulp-kept-include", "path": "core/view/include/vellum/view/widgets.hpp",
+            "line": "#include <vellum/view/audio_widgets.hpp>", "debt": "vellum-header-audio-widgets-include"}])
         self.assertLessEqual({row["debt"] for row in table["approved_exceptions"]}, debts)
         widgets = "core/view/include/pulp/view/widgets.hpp"
         debt_line = (REPO_ROOT / widgets).read_text(encoding="utf-8").splitlines().index(
@@ -2125,6 +2212,100 @@ class ClosureCtestWiringTests(unittest.TestCase):
         for test in ("pulp.vellum-closure-gate", "pulp.vellum-view-core-pulp-kept"):
             self.assertIn("FIXTURES_REQUIRED pulp-vellum-closure-manifest", props(test), test)
             self.assertNotIn("DEPENDS", props(test), test)
+
+
+class MirrorEdgeRootTests(unittest.TestCase):
+    """The edge rules follow the table's roots, so a renamed mirror is still scanned."""
+
+    SPELLINGS = (("pulp",), ("vellum",), ("pulp", "vellum"))
+
+    def setUp(self):
+        import vellum_mirror_edge_table as generator
+        self.generator = generator
+        self.table = json.loads((REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8"))
+
+    def spelled(self, names):
+        return self.generator.generate(REPO_ROOT, {kind: names for kind in self.generator.ROOT_KINDS})
+
+    def rules(self, table):
+        return {**table["content_patterns"], **table["path_patterns"]}
+
+    def test_the_shipped_table_reads_both_spellings(self):
+        # Pulp source and today's mirror spell pulp; the renamed mirror spells vellum.
+        both = ("pulp", "vellum")
+        self.assertEqual(self.generator.table_roots(self.table),
+                         {"namespace": both, "include": both, "target": both})
+        self.assertEqual(self.generator.render(self.spelled(both)),
+                         (REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8"))
+
+    def test_a_renamed_seam_debt_line_is_exempt_only_through_its_respelled_row(self):
+        from vellum_closure import closure_mention_violations, mirror_edge_table
+        widgets = "core/view/include/vellum/view/widgets.hpp"
+        debt_line = "#include <vellum/view/audio_widgets.hpp>"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / widgets
+            path.parent.mkdir(parents=True)
+            path.write_text(f"#pragma once\n{debt_line}\n", encoding="utf-8")
+            scan = {"source_root": td, "files": [widgets]}
+            table = mirror_edge_table()
+            self.assertEqual(closure_mention_violations(scan, table), [])
+            # Without the respelled row the renamed line is refused, as the
+            # pulp-spelled row alone cannot exempt it.
+            pulp_only = dict(table, exceptions={row for row in table["exceptions"] if "vellum" not in row[1]})
+            self.assertEqual(closure_mention_violations(scan, pulp_only),
+                             [f"mirror-pulp-kept-include mention {widgets}:2: {debt_line}"])
+            # The respelled row exempts that exact line of that file only.
+            path.write_text("#include <vellum/view/register_audio_widgets.hpp>\n", encoding="utf-8")
+            self.assertTrue(closure_mention_violations(scan, table))
+            other = "core/view/include/vellum/view/view.hpp"
+            (Path(td) / other).write_text(f"{debt_line}\n", encoding="utf-8")
+            self.assertTrue(closure_mention_violations({"source_root": td, "files": [other]}, table))
+
+    def test_every_rule_has_controls(self):
+        controls = self.table["controls"]
+        self.assertEqual(set(controls), set(self.rules(self.table)))
+        for rule, texts in controls.items():
+            self.assertTrue(texts, rule)
+
+    def test_every_control_matches_its_rule_under_every_spelling(self):
+        for names in self.SPELLINGS:
+            table = self.spelled(names)
+            for rule, pattern in self.rules(table).items():
+                compiled = re.compile(pattern)
+                templates = table["controls"].get(rule, [])
+                with self.subTest(spelling=names, rule=rule):
+                    self.assertTrue(templates, f"{rule} has no control, so nothing proves it can match")
+                for template in templates:
+                    for name in names:
+                        text = self.generator.instantiate(template, name)
+                        with self.subTest(spelling=names, rule=rule, control=text):
+                            self.assertTrue(compiled.search(text))
+
+    def test_a_respelled_table_spells_no_other_root(self):
+        for rule, pattern in self.rules(self.spelled(("vellum",))).items():
+            self.assertNotIn("pulp", pattern.lower(), rule)
+
+    def test_the_gate_refuses_a_renamed_edge_under_the_renamed_table(self):
+        from vellum_closure import closure_mention_violations, mirror_edge_table
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "table.json"
+            path.write_text(self.generator.render(self.spelled(("pulp", "vellum"))), encoding="utf-8")
+            table = mirror_edge_table(path)
+            (Path(td) / "x.cpp").write_text("#include <vellum/midi/midi_event.hpp>\n", encoding="utf-8")
+            (Path(td) / "y.cpp").write_text("#include <pulp/midi/midi_event.hpp>\n", encoding="utf-8")
+            for rel in ("x.cpp", "y.cpp"):
+                found = closure_mention_violations({"source_root": td, "files": [rel]}, table)
+                self.assertTrue(any(v.startswith("mirror-product-include") for v in found), (rel, found))
+            # The shipped table reads both spellings.
+            found = closure_mention_violations({"source_root": td, "files": ["x.cpp"]})
+            self.assertTrue(any(v.startswith("mirror-product-include") for v in found), found)
+
+    def test_roots_are_validated(self):
+        for roots in ({}, {"namespace": ["pulp"], "include": ["pulp"]},
+                      {"namespace": [], "include": ["pulp"], "target": ["pulp"]},
+                      {"namespace": ["pu|lp"], "include": ["pulp"], "target": ["pulp"]}):
+            with self.subTest(roots=roots), self.assertRaises(SystemExit):
+                self.generator.table_roots({"roots": roots})
 
 
 if __name__ == "__main__":

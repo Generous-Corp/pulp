@@ -87,13 +87,28 @@ class VellumEditor final : public format::Editor, public format::EditorAutomatio
         return this;
     }
 
+    // A focused text field owns the keyboard: it takes every key, so Space
+    // types a space instead of reaching the host's transport. With no field
+    // focused, every key goes to the host.
+    format::KeyDisposition offer_key(const format::EditorKeyEvent& event) override {
+        if (!panel_->text_focused())
+            return format::KeyDisposition::forward;
+        if (event.is_down && event.character >= 0x20 && event.character != 0x7f)
+            panel_->type_text(utf8(event.character));
+        return format::KeyDisposition::consumed;
+    }
+
     // ── automation ──
     bool capture_png(std::vector<std::uint8_t>& png) override {
         png = panel_->capture_png();
         return !png.empty();
     }
-    // Request grammar for the slice: "drag <dy>".
+    // Request grammar for the slice: "drag <dy>", "focus text", "blur text".
     bool inject_input(std::string_view request, std::string& error) override {
+        if (request == "focus text" || request == "blur text") {
+            panel_->set_text_focus(request == "focus text");
+            return true;
+        }
         if (request.rfind("drag ", 0) == 0) {
             panel_->drag_knob(std::strtof(std::string(request.substr(5)).c_str(), nullptr));
             return true;
@@ -102,11 +117,41 @@ class VellumEditor final : public format::Editor, public format::EditorAutomatio
         return false;
     }
     bool observe(std::string_view, std::string& reply) override {
-        reply = "{\"knob\":" + std::to_string(panel_->knob_value()) + "}";
+        reply = "{\"knob\":" + std::to_string(panel_->knob_value()) + ",\"text\":\"" +
+                json_escape(panel_->text()) + "\"}";
         return true;
     }
 
   private:
+    static std::string utf8(char32_t c) {
+        std::string out;
+        if (c < 0x80) {
+            out += static_cast<char>(c);
+        } else if (c < 0x800) {
+            out += static_cast<char>(0xc0 | (c >> 6));
+            out += static_cast<char>(0x80 | (c & 0x3f));
+        } else if (c < 0x10000) {
+            out += static_cast<char>(0xe0 | (c >> 12));
+            out += static_cast<char>(0x80 | ((c >> 6) & 0x3f));
+            out += static_cast<char>(0x80 | (c & 0x3f));
+        } else {
+            out += static_cast<char>(0xf0 | (c >> 18));
+            out += static_cast<char>(0x80 | ((c >> 12) & 0x3f));
+            out += static_cast<char>(0x80 | ((c >> 6) & 0x3f));
+            out += static_cast<char>(0x80 | (c & 0x3f));
+        }
+        return out;
+    }
+    static std::string json_escape(const std::string& text) {
+        std::string out;
+        for (char c : text) {
+            if (c == '"' || c == '\\')
+                out += '\\';
+            out += c;
+        }
+        return out;
+    }
+
     // Show the panel's latest frame in the host's view.
     void present() {
         if (!layer_view_)

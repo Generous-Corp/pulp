@@ -17,7 +17,7 @@
   "planted_negative_controls": [
     "SpectralMaskProcessor is not a format::Processor and cannot satisfy add_processor_node",
     "ProcessorNode has no typed complex-frame adapter",
-    "runtime ProcessorNode serialization is intentionally unavailable"
+    "runtime ProcessorNode serialization is outside the G-10 typed-frame surface"
   ],
   "typed_frame_gap": "A public adapter contract is missing for block-to-frame scheduling, ownership, latency, and frame-stage composition.",
   "build_gate": "N/A: no production implementation was specified; typed-frame contract is missing",

@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -96,6 +97,16 @@ struct SubgraphExpansionResult {
 SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphTemplate& definition,
                                              std::string instance_identity,
                                              std::uint32_t instance_index = 0);
+
+// Connect two exposed ports without reaching into the instance's node handles.
+// The source must be an exposed output and the destination an exposed input of
+// the same kind. Validation happens before graph mutation; graph-level cycle,
+// duplicate, and stale-handle failures are returned with a subgraph boundary
+// diagnostic.
+GraphResult connect_subgraph_ports(SignalGraph& graph, const SubgraphInstance& source,
+                                   std::string_view source_port,
+                                   const SubgraphInstance& destination,
+                                   std::string_view destination_port);
 
 // Restore only declared parameter paths. Identity and node topology remain
 // stable. Every entry is validated (known path, finite value within the

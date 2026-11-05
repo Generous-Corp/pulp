@@ -20,10 +20,6 @@ target_sources(pulp-view-core PRIVATE
     src/asset_manager.cpp
     src/script_event_dispatch.cpp
     src/gesture.cpp
-    src/value_channel_json.cpp
-    src/value_channel_set.cpp
-    src/value_channel_telemetry.cpp
-    src/value_source.cpp
     src/value_source_binding.cpp
     src/view.cpp
     src/view_lifecycle.cpp
@@ -41,7 +37,6 @@ target_sources(pulp-view-core PRIVATE
     src/continuous_frames.cpp
     src/chart_shader_presets.cpp
     src/custom_shader_host.cpp
-    src/host_surfaces.cpp
     src/yoga_measurement_internal.cpp
     src/yoga_layout.cpp
     src/grid_layout.cpp
@@ -142,13 +137,12 @@ target_sources(pulp-view-core PRIVATE
     src/bubble_message.cpp
 )
 
-# Pulp-kept plugin-host and editor facilities: the component inspector, the
-# editor bridge, and the StateStore-backed HostParamSurface adapter. They stay
-# outside pulp-view-core's extractable closure; their public headers keep their
-# installed paths, and the view umbrellas link this target. The abstract
-# HostParamSurface contract (host_surfaces.cpp) stays in view-core.
+# Pulp-kept plugin-host and editor facilities: the component inspector and the
+# editor bridge. They stay outside pulp-view-core's extractable closure; their
+# public headers keep their installed paths, and the view umbrellas link this
+# target. The HostParamSurface contract and its StateStore-backed adapter live
+# in core/dataplane.
 target_sources(pulp-view-tooling PRIVATE
-    src/host_param_surface.cpp
     src/editor_bridge.cpp
     src/editor_bridge_scaffold.cpp
     src/inspector.cpp
@@ -175,7 +169,6 @@ target_sources(pulp-view-audio PRIVATE
     audio/src/eq_curve_view.cpp
     audio/src/graph_scale.cpp
     audio/src/widgets/visualizers.cpp
-    audio/src/visualization_bridge.cpp
     audio/src/waveform_gpu_primitives.cpp
     audio/src/waveform_gpu_render_controller.cpp
     audio/src/waveform_headless_render_backend.cpp

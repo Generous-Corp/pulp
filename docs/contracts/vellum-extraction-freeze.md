@@ -110,7 +110,9 @@ Vellum's mirror is a copy of named Pulp files at one Pulp commit, recorded in an
 export receipt. Until Pulp's copy of a file is frozen, a Pulp change to it is
 either carried by the next re-export or deliberately left behind, and the diff
 alone does not say which. `vellum_freeze_check.py --receipt-mode`, run by the
-required "Vellum freeze" check, makes that a recorded decision.
+required "Vellum freeze" check from the change's own scripts and by "Vellum
+trusted freeze" from the protected base's scripts, makes that a recorded
+decision.
 
 It reads the receipt copy pinned under `.github/vellum-export-receipt/` at the
 change's base commit and requires an added event stating `vellum_inherits` for
@@ -122,7 +124,10 @@ event covers its capability families' selections, and an export event under
 README describes the event schema and how to re-pin a newer receipt.
 
 Paths the pin lists as frozen owe no decision, because they are not edited in
-Pulp: the pin freezes exactly the transferred slices' paths. A change to a
+Pulp: the pin freezes the transferred slices' paths, minus any the owner has
+unfrozen. Transferred slices are immutable, so an unfrozen path keeps its
+slice: it leaves only the pin, and an edit to it then owes an ordinary change
+event for that slice with an explicit `vellum_inherits`. A change to a
 frozen path fails unless a change event it adds covers the path's slice with
 disposition `framework-backport` (bringing a named Vellum commit back) or
 `emergency-exception`; a `pulp-only` event does not unfreeze it. Like the rest

@@ -210,6 +210,15 @@ bool SignalGraph::is_processor_node(NodeId id) const {
     return processor_nodes_.contains(id);
 }
 
+std::shared_ptr<format::ProcessorNodeInstance>
+SignalGraph::processor_node_instance(NodeId id) const {
+    GraphMutationLock mutation_lock(*this);
+    const auto it = processor_nodes_.find(id);
+    if (it == processor_nodes_.end() || !it->second)
+        return {};
+    return it->second->instance;
+}
+
 bool SignalGraph::set_processor_audio_input_provider(
     NodeId id, format::AudioInputBusProvider provider) noexcept {
     GraphMutationLock mutation_lock(*this);
@@ -348,6 +357,14 @@ bool SignalGraph::remove_node(NodeId id) {
     }
     nodes_.erase(it);
     processor_nodes_.erase(id);
+    trigger_producers_.erase(id);
+    trigger_envelopes_.erase(id);
+    trigger_audio_.erase(id);
+    std::erase_if(trigger_edges_,
+                  [id](const auto& edge) { return edge.producer == id || edge.consumer == id; });
+    typed_trigger_authoring_.store(!trigger_producers_.empty() || !trigger_envelopes_.empty() ||
+                                       !trigger_audio_.empty(),
+                                   std::memory_order_release);
     invalidate_live_locked_();
     return true;
 }

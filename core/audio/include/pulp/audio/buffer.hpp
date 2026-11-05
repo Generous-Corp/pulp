@@ -69,6 +69,17 @@ public:
     /// @copydoc channel_ptr(std::size_t)
     const SampleType* channel_ptr(std::size_t index) const { return channels_[index] + sample_offset_; }
 
+    /// Check channel storage before a caller dereferences a borrowed host view.
+    /// This checks pointer presence, not the lifetime or allocation extent.
+    bool has_valid_channels() const noexcept {
+        if (num_channels_ != 0 && channels_ == nullptr)
+            return false;
+        for (std::size_t channel = 0; channel < num_channels_; ++channel)
+            if (channels_[channel] == nullptr)
+                return false;
+        return true;
+    }
+
     std::size_t num_channels() const { return num_channels_; }
     std::size_t num_samples() const { return num_samples_; }
 

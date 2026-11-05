@@ -78,5 +78,11 @@ is configured.
 - `PeakMeterVisualPort` stands in for the data-plane channel set.
 - The RmlUi editor maps a drag on the knob's document box to a gesture itself.
   The real binding layer reads the element's box from the document.
-- `knob_led.rml` and `knob_led.golden.png` are copies of the RmlUi module's
-  test fixtures.
+- `knob_led.rml`, `empty.rml` and `knob_led.golden.png` are copies of the
+  RmlUi module's test fixtures.
+- `rmlui_vellum_renderer_main.cpp` (acceptance item 3c) draws the knob document
+  through `VellumRmlUi::VellumRenderer` on an offscreen `SkiaDawnSurface` and
+  requires at most 1% of pixels to differ from the soft renderer by more than 16
+  in any channel; the empty document and the knob at gain 0.2 must fail that
+  rule. It builds only when the installed SDK carries the `VellumRenderer`
+  component; otherwise a marker test records its absence and 3c is SKIP.

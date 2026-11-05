@@ -147,6 +147,7 @@ def _verify_producer_disposition(
     } != {
         "A3-first-visible-product-evidence",
         "pulp-view-mac-window-host",
+        "pulp-view-windows-frame-timing",
     }:
         errors.append("producer evidence does not expose every post-base non-A2T product producer")
 

@@ -116,16 +116,51 @@ error. Things that are easy to get wrong:
 - Every processor in the binary that does not override `editor_factory()` gets
   the package factory, including inner processors a wrapper composes. Hosts ask
   only the top-level processor.
-- VST3 and CLAP open a non-null `editor_factory()` through
-  `ContractEditorSession` (`contract_editor_session.hpp`, `pulp-format-core`) before
-  they consider `create_view()`. A new format adapter should map its editor API
+- VST3, CLAP and the standalone app open a non-null `editor_factory()`
+  through `ContractEditorSession` (`contract_editor_session.hpp`,
+  `pulp-format-core`) before they consider `create_view()`. A UI-package AU v2
+  serves it from `au_v2_contract_view.mm`. The standalone window
+  (`standalone_contract_editor_mac.mm`) drives the tick from its own event loop
+  (`IdleSource::host_driven`). Its headless run captures through
+  `EditorAutomation::capture_png()` and fails when the editor offers no capture.
+  A forwarded Space toggles `StandaloneTestInputHost::set_playing`. A new format adapter should map its editor API
   onto that session rather than re-implementing gesture release, the idle tick
   or size negotiation.
 - The hook calls the package function lazily, on the first `editor_factory()`
   call, never at load, so an AU bundle's early registrar never builds UI state.
+- A UI-package Standalone links `pulp::standalone-contract`, not
+  `pulp::standalone`: the same `StandaloneApp`, built from the core sources plus
+  `standalone_view_layer_none.cpp` instead of `standalone_view_layer.cpp`, so it
+  links no Pulp view, canvas, render or GPU-device code and the package's Dawn
+  (Vellum's provider) is the only one in the process. `dawn_binding_census.py`
+  counts it. Anything the standalone does that needs a Pulp view (the
+  `create_view()` window and Settings chrome, the musical typing keyboard, the
+  Audio Inspector, in-app updates) belongs in `standalone_view_layer.cpp` behind
+  one of `StandaloneApp`'s view-layer hooks, never in `standalone.cpp`; the
+  view-free library fails to link otherwise. View-layer members are owned
+  through a deleter the view layer supplies (`ViewLayerPtr`), so the core never
+  names their destructors. The per-binary view Objective-C cluster is skipped for
+  such a Standalone (`PULP_<target>_VIEW_FREE_STANDALONE`).
+  `editor-ui-package-links-no-view` checks the closure, and building the
+  fixture's `PulpEditorUiA_Standalone` proves the link.
 - A test that installs a hook with `install_plugin_editor_factory_hook()` must
   clear it (`nullptr`) before it ends, or every later test in the grouped
   binary sees a factory on a headless processor.
+
+### The editor-host acceptance test is one command
+
+`python3 tools/scripts/editor_host_acceptance.py --vellum-prefix <vellum-sdk>`
+configures a build with `PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX`, builds
+`pulp-editor-host-slice`, runs the `editor-host-slice` ctest label and the
+core -> Vellum direction check, and prints one verdict per item of the plan's
+acceptance test. The SDK must be installed and built with the mirror and RmlUi.
+An item passes only when every named harness line (`[kind/format] ok: ...`) or
+ctest result it lists was seen to pass. Items this tree cannot run yet are
+SKIP with a reason and never PASS. When a harness check is renamed, update the
+runner's `ITEMS` in the same change, or the item fails as "not reported".
+`tools/scripts/test_editor_host_acceptance.py` (the
+`editor-host-acceptance-selftest` ctest, always registered) covers the verdict
+logic.
 
 ### Native scripted UI is not a WebView
 
@@ -546,6 +581,26 @@ implementation would fire
 the plugin would leak host-window-dependent resources. `ViewBridge`
 guarantees balance **only when the adapter honors the two-step
 protocol** (`open()` then `notify_attached()`).
+
+### An editor can outlive its instance: tell the tree, then close normally
+
+Hosts may dispose the plug-in instance and free its editor view later (Logic
+does). The owner token (`owner_alive_`) retires first; from then on
+`close()` already skips `on_view_closed`, the processor's scripted session and
+every StateStore call, so the bridge closes and frees the tree normally. Do not
+"protect" the dead store by leaking the bridge (`bridge.release()`): that kept
+the whole view tree for the process lifetime.
+
+Views that read the instance directly opt into
+`format::EditorOwnerObserver` (`pulp/format/editor_owner.hpp`).
+`ViewBridge::notify_owner_released()` calls `on_owner_released()` once per
+open editor on each observer view, root first, and only after the owner
+retired: the editor idle pump on its first tick after the retire,
+`notify_processor_destroyed()` while the Processor is still whole, and
+`close()` at the latest. An adapter that learns of the dispose first should
+call `notify_processor_destroyed()`. Between the retire and the next idle
+tick an AppKit-driven repaint can still reach a view, so a view that reads the
+instance from `paint()` keeps its own guard as well.
 
 ### Release open parameter gestures on editor teardown
 
@@ -1284,6 +1339,16 @@ library build. A stale header would then fail to compile against the
 fresh lib instead of segfaulting at first paint.
 
 ## Value channels reach the editor through the ViewBridge, and must be re-attached on reload
+
+`ValueChannelSet`, the value sources and the host parameter surfaces live in
+the UI-free `core/dataplane` module (namespace `pulp::dataplane`). The
+`<pulp/view/...>` headers forward to it with using-declarations, so
+`pulp::view::ValueChannelSet` is the same class. Forward-declare these types by
+including `<pulp/dataplane/fwd.hpp>`: a `namespace pulp::view { class
+ValueChannelSet; }` declaration now conflicts with the using-declaration and
+fails to compile. An editor on the editor-host contract reads the same channels
+through `format::ValueChannelVisualPort`, the default `VisualPort`, with no view
+layer linked.
 
 A processor publishes non-parameter values — gain reduction, an envelope, a
 spectrum — via `Processor::value_channels()`, and a scripted UI binds them with

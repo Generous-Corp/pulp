@@ -1,0 +1,55 @@
+{
+  "id": "deleted-fork-runner-routing",
+  "title": "Fork and deleted-fork pull requests never take a variable-selected runner",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "deleted-fork-runner-routing-20261104",
+  "owned_paths": [
+    ".github/workflows/gcc-compile-gate.yml",
+    "docs/status/sequencer-exposure/rows/deleted-fork-runner-routing.json",
+    "tools/scripts/fork_runner_guard_check.py",
+    "tools/scripts/test_fork_runner_guard_check.py"
+  ],
+  "evidence": [
+    {
+      "path": ".github/workflows/gcc-compile-gate.yml",
+      "needles": [
+        "github.event.pull_request.head.repo.full_name == github.repository) && vars.PULP_LOCAL_GCC_RUNS_ON_JSON"
+      ]
+    },
+    {
+      "path": "tools/scripts/test_fork_runner_guard_check.py",
+      "needles": [
+        "test_every_workflow_in_the_repository_passes"
+      ]
+    },
+    {
+      "path": "docs/guides/local-ci.md",
+      "needles": [
+        "A pull request whose fork was deleted is a fork too."
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This changes only which runner a CI job lands on for fork pull requests, its documentation, and a lint; no SDK header, target, symbol, or installed artifact changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI command, flag, or output contract changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No runtime operation, executor binding, grant, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The change routes CI runners and does not publish a design-time capability."
+    }
+  }
+}

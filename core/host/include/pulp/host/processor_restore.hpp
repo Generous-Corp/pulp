@@ -93,8 +93,8 @@ struct ProcessorRestoreResult {
 ///
 /// This is NOT a graph-file loader or a live graph transaction: it does not
 /// capture state, parse JSON/base64, migrate, prepare, validate graph edges, or
-/// publish. GraphSerializer still cannot persist Processor nodes. Applications
-/// can add a successful batch to an isolated candidate via add_processor_node().
+/// publish. GraphSerializer owns the v4 file envelope; applications can add a
+/// successful batch to an isolated candidate via add_processor_node().
 /// A later failure must discard that candidate without changing the live graph.
 class ProcessorRestoreRegistry {
   public:

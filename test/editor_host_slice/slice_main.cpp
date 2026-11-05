@@ -227,6 +227,25 @@ void exercise_editor(format::HeadlessHost& host, format::EditorFactory& factory,
         check(png == read_file(SLICE_GOLDEN_PNG),
               "the frame at gain 0.75 equals the module's golden image byte for byte");
 #endif
+#if SLICE_EMPTY_DOCUMENT
+        {
+            // The negative control: the same comparison must reject a frame of
+            // the module's empty document, and accept the knob document again
+            // once it is back.
+            std::string error;
+            std::vector<std::uint8_t> empty;
+            check(editor->automation()->inject_input("document empty.rml", error) &&
+                      editor->automation()->capture_png(empty) && empty.size() > 8,
+                  "an empty document renders");
+            check(empty != read_file(SLICE_GOLDEN_PNG),
+                  "an empty document's frame does not equal the golden image");
+            std::vector<std::uint8_t> again;
+            check(editor->automation()->inject_input("document knob_led.rml", error) &&
+                      editor->automation()->capture_png(again) &&
+                      again == read_file(SLICE_GOLDEN_PNG),
+                  "the knob document's frame equals the golden image again");
+        }
+#endif
 
         // ── resize ──
         check(!editor->set_size({10, 10, 1.0}), "an undersized set_size is refused");
@@ -243,6 +262,25 @@ void exercise_editor(format::HeadlessHost& host, format::EditorFactory& factory,
         check(editor->offer_key({format::EditorKey::space, U' ', 0, true, false}) ==
                   format::KeyDisposition::forward,
               "Space with no focused field is forwarded to the host");
+#if SLICE_TEXT_FIELD
+        {
+            std::string error;
+            check(editor->automation()->inject_input("focus text", error),
+                  "the editor's text field takes focus");
+            check(editor->offer_key({format::EditorKey::space, U' ', 0, true, false}) ==
+                      format::KeyDisposition::consumed,
+                  "Space is consumed when a text field has focus");
+            std::string reply;
+            check(editor->automation()->observe("state", reply) &&
+                      reply.find("\"text\":\" \"") != std::string::npos,
+                  "the focused text field received the Space");
+            check(editor->automation()->inject_input("blur text", error),
+                  "the editor's text field gives up focus");
+            check(editor->offer_key({format::EditorKey::space, U' ', 0, true, false}) ==
+                      format::KeyDisposition::forward,
+                  "Space is forwarded again once the field loses focus");
+        }
+#endif
 
         // ── close ──
         editor->detach();

@@ -57,8 +57,45 @@ int main() try {
     // four samples are reflected in the externally reported total.
     require(graph.node_latency_samples(delayed) == 0, "node-input-latency");
 
+    const auto latency = graph.prepared_latency_snapshot();
+    require(latency.has_value(), "latency-snapshot");
+    require(latency->total_latency_samples == 4, "snapshot-total-pdc");
+    const auto delayed_value = latency->node(delayed);
+    const auto dry_value = latency->node(dry);
+    const auto output_value = latency->node(output);
+    require(delayed_value.has_value() && delayed_value->input_latency_samples == 0 &&
+                delayed_value->output_latency_samples == 4,
+            "delayed-node-input-output");
+    require(dry_value.has_value() && dry_value->input_latency_samples == 0 &&
+                dry_value->output_latency_samples == 0,
+            "dry-node-input-output");
+    require(output_value.has_value() && output_value->input_latency_samples == 4 &&
+                output_value->output_latency_samples == 4,
+            "output-node-input-output");
+
+    const pulp::host::Connection delayed_edge{delayed, 0, output, 0};
+    const pulp::host::Connection dry_edge{dry, 0, output, 0};
+    require(latency->connection_delay(delayed_edge) == 0, "delayed-branch-no-pdc");
+    require(latency->connection_delay(dry_edge) == 4, "dry-branch-pdc");
+
+    // Planted connection negative: endpoint identities absent from the
+    // prepared snapshot never produce a fabricated zero-delay answer.
+    require(!latency->connection_delay(pulp::host::Connection{999999, 0, output, 0}).has_value(),
+            "unknown-connection-nullopt");
+
     // Planted negative: an unknown node never yields a fabricated latency entry.
     require(graph.node_latency_samples(999999) == 0, "unknown-node-zero");
+    require(!latency->node(999999).has_value(), "unknown-node-nullopt");
+
+    // A copied map remains stable, while a topology mutation retires the
+    // published prepared snapshot until the next prepare().
+    require(graph.disconnect(input, 0, dry, 0), "disconnect-for-mutation");
+    require(!graph.prepared_latency_snapshot().has_value(),
+            "mutation-invalidates-prepared-snapshot");
+    require(latency->total_latency_samples == 4 && latency->connections.size() == 4,
+            "copied-snapshot-stable-after-mutation");
+    require(graph.prepare(48000.0, 64), "reprepare-after-mutation");
+    require(graph.prepared_latency_snapshot().has_value(), "reprepared-latency-snapshot");
     std::cout << "g7-latency-pdc PASS total_latency_samples=" << graph.latency_samples()
               << " delayed_node_input_latency_samples=" << graph.node_latency_samples(delayed)
               << '\n';

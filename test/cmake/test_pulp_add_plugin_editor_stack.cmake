@@ -117,9 +117,46 @@ _configure(uiau "add_library(Pau_AU INTERFACE)\n_pulp_warn_ui_package_formats(Pa
 if(_text MATCHES "do not open editor-host contract editors yet")
     message(FATAL_ERROR "uiau: warned about AU, which opens contract editors:\n${_text}")
 endif()
+_configure(uistandalone "add_library(Psa_Standalone INTERFACE)\n_pulp_warn_ui_package_formats(Psa ui-pkg)" _result _text)
+if(_text MATCHES "do not open editor-host contract editors yet")
+    message(FATAL_ERROR "uistandalone: warned about Standalone, which opens contract editors:\n${_text}")
+endif()
 _configure(uinowarn "_pulp_warn_ui_package_formats(Pnone ui-pkg)" _result _text)
 if(_text MATCHES "do not open editor-host contract editors yet")
     message(FATAL_ERROR "uinowarn: warned with no format targets:\n${_text}")
 endif()
 _expect_rejected(uigpufull "UI ui-pkg GPU_UI FULL_EDITOR" "UI ui-pkg cannot be combined with GPU_UI, FULL_EDITOR")
+
+# One standalone host per binary: the view-free contract host beside a view
+# host is two builds of StandaloneApp, so configure refuses it, directly or
+# through a library that brings one in.
+set(_hosts
+    "add_library(pulp-standalone INTERFACE)\nadd_library(pulp::standalone ALIAS pulp-standalone)\n"
+    "add_library(pulp-standalone-native INTERFACE)\nadd_library(pulp-standalone-contract INTERFACE)\n"
+    "add_library(pulp::standalone-contract ALIAS pulp-standalone-contract)\n"
+    "add_library(Phost_Standalone INTERFACE)\n")
+string(JOIN "" _hosts ${_hosts})
+foreach(_case
+        "bothhosts|target_link_libraries(Phost_Standalone INTERFACE pulp::standalone-contract pulp::standalone)|fail"
+        "nativeandcontract|target_link_libraries(Phost_Standalone INTERFACE pulp-standalone-native pulp::standalone-contract)|fail"
+        "transitivehost|add_library(extra INTERFACE)\ntarget_link_libraries(extra INTERFACE pulp::standalone)\ntarget_link_libraries(Phost_Standalone INTERFACE pulp::standalone-contract extra)|fail"
+        "contractonly|target_link_libraries(Phost_Standalone INTERFACE pulp::standalone-contract)|pass"
+        "viewonly|target_link_libraries(Phost_Standalone INTERFACE pulp::standalone)|pass")
+    string(REPLACE "|" ";" _parts "${_case}")
+    list(GET _parts 0 _name)
+    list(GET _parts 1 _links)
+    list(GET _parts 2 _want)
+    _configure(${_name} "${_hosts}${_links}\n_pulp_check_standalone_hosts(Phost_Standalone)" _result _text)
+    if(_want STREQUAL "fail")
+        if(_result EQUAL 0)
+            message(FATAL_ERROR "${_name}: configure accepted two standalone hosts:\n${_text}")
+        endif()
+        string(FIND "${_text}" "links both pulp::standalone-contract" _at)
+        if(_at LESS 0)
+            message(FATAL_ERROR "${_name}: failed without the two-hosts diagnostic:\n${_text}")
+        endif()
+    elseif(NOT _result EQUAL 0)
+        message(FATAL_ERROR "${_name}: one standalone host was refused:\n${_text}")
+    endif()
+endforeach()
 message(STATUS "editor-stack selection: all cases passed")

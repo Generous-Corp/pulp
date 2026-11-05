@@ -1,0 +1,46 @@
+All available test cases:
+  Multi-backend FFT and non-uniform convolver hot paths are allocation-free
+  after setup
+      [fft][rt-safety][signal]
+  Prepared phase and half-band helpers are allocation-free while processing
+      [rt-safety][signal]
+  ProcessorChain and wavetable playback are allocation-free after setup
+      [rt-safety][signal]
+  Stateless math signal helpers are allocation-free
+      [rt-safety][signal]
+  Prepared freeze and pitched delay helpers are allocation-free while
+  processing
+      [freeze][rt-safety][signal]
+  Prepared storage-backed signal helpers are allocation-free while processing
+      [rt-safety][signal]
+  Oversampler does not copy a std::function callback per sample
+      [oversampling][rt-safety][signal]
+  Prepared finite pitch-time stream is allocation-free through EOF
+      [pitch-time][rt-safety][signal][streaming]
+  Prepared finite stretch builder steps allocate nothing
+      [finite-stretch][pitch-time][rt-safety][signal]
+  Prepared delay effect helpers are allocation-free while processing
+      [rt-safety][signal]
+  FFT and simple convolver hot paths are allocation-free after setup
+      [fft][rt-safety][signal]
+  Spectral design and SIMD utility hot paths are allocation-free after setup
+      [rt-safety][signal]
+  Prepared spectral envelope shifter is allocation-free while processing
+      [rt-safety][signal][spectral]
+  Prepared DryWetMixer push and mix are allocation-free within capacity
+      [rt-safety][signal]
+  Prepared spectral analysis helpers are allocation-free while processing
+      [rt-safety][signal][spectral]
+  Dynamics and filter signal helpers are allocation-free after configuration
+      [rt-safety][signal]
+  Prepared realtime pitch/time processor is allocation-free while processing
+      [rt-safety][signal][spectral]
+  Scalar signal helpers are allocation-free after configuration
+      [rt-safety][signal]
+  Oversampler process is allocation-free after configuration
+      [oversampling][rt-safety][signal]
+  Envelope smoothing and resampler hot paths are allocation-free after setup
+      [rt-safety][signal]
+  Oversampler process_block is allocation-free after configuration
+      [oversampling][rt-safety][signal]
+21 test cases

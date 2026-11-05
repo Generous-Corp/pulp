@@ -240,8 +240,9 @@ jobs:
           # ephemeral lane uses pulp-coverage-vm-macos.
           # Repository variables resolve for fork PRs. Never let an untrusted
           # fork select a self-hosted Tart machine; run its macOS work on a
-          # disposable GitHub-hosted image instead.
-          if [ -n "${PR_HEAD_REPO}" ] && [ "${PR_HEAD_REPO}" != "${THIS_REPO}" ]; then
+          # disposable GitHub-hosted image instead. A pull request with no head
+          # repository (its fork was deleted) is a fork too.
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && { [ -z "${PR_HEAD_REPO}" ] || [ "${PR_HEAD_REPO}" != "${THIS_REPO}" ]; }; then
             macos='"macos-15"'
             android_kotlin='"macos-15"'
           else

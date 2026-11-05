@@ -161,12 +161,14 @@ OSStatus PulpAUInstrument::GetParameterInfo(AudioUnitScope inScope,
                                             AudioUnitParameterID inParameterID,
                                             AudioUnitParameterInfo& outParameterInfo)
 {
-    // false: this adapter serves neither GetParameterValueStrings nor the
-    // ParameterStringFromValue / ...ValueFromString properties, so advertising
-    // ValuesHaveStrings would point the host at a door nobody answers.
-    return fill_parameter_info(store_, inScope, inParameterID,
-                               outParameterInfo,
-                               /*advertise_value_strings=*/false);
+    return fill_parameter_info(store_, inScope, inParameterID, outParameterInfo,
+                               /*advertise_value_strings=*/true);
+}
+
+OSStatus PulpAUInstrument::GetParameterValueStrings(AudioUnitScope inScope,
+                                                    AudioUnitParameterID inParameterID,
+                                                    CFArrayRef* outStrings) {
+    return fill_parameter_value_strings(store_, inScope, inParameterID, outStrings);
 }
 
 OSStatus PulpAUInstrument::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope inScope,
@@ -191,6 +193,22 @@ OSStatus PulpAUInstrument::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitSc
     if (inID == kAudioUnitProperty_CocoaUI && g_cocoa_view_info_filler) {
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         outDataSize = sizeof(AudioUnitCocoaViewInfo);
+        outWritable = false;
+        return noErr;
+    }
+    // The target ParamID travels inside the in/out struct, so support is
+    // advertised at global scope and the parameter is validated in GetProperty.
+    if (inID == kAudioUnitProperty_ParameterStringFromValue) {
+        if (inScope != kAudioUnitScope_Global)
+            return kAudioUnitErr_InvalidScope;
+        outDataSize = sizeof(AudioUnitParameterStringFromValue);
+        outWritable = false;
+        return noErr;
+    }
+    if (inID == kAudioUnitProperty_ParameterValueFromString) {
+        if (inScope != kAudioUnitScope_Global)
+            return kAudioUnitErr_InvalidScope;
+        outDataSize = sizeof(AudioUnitParameterValueFromString);
         outWritable = false;
         return noErr;
     }
@@ -222,6 +240,20 @@ OSStatus PulpAUInstrument::GetProperty(AudioUnitPropertyID inID, AudioUnitScope 
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         if (!outData) return kAudioUnitErr_InvalidProperty;
         return g_cocoa_view_info_filler(outData) ? noErr : kAudioUnitErr_InvalidProperty;
+    }
+    if (inID == kAudioUnitProperty_ParameterStringFromValue) {
+        if (inScope != kAudioUnitScope_Global)
+            return kAudioUnitErr_InvalidScope;
+        if (!outData)
+            return kAudioUnitErr_InvalidProperty;
+        return parameter_string_from_value(store_, outData);
+    }
+    if (inID == kAudioUnitProperty_ParameterValueFromString) {
+        if (inScope != kAudioUnitScope_Global)
+            return kAudioUnitErr_InvalidScope;
+        if (!outData)
+            return kAudioUnitErr_InvalidProperty;
+        return parameter_value_from_string(store_, outData);
     }
     return MusicDeviceBase::GetProperty(inID, inScope, inElement, outData);
 }
@@ -310,6 +342,15 @@ OSStatus PulpAUInstrument::HandleNoteOff(UInt8 inChannel, UInt8 inNoteNumber,
     auto me = midi::MidiEvent::note_off(inChannel, inNoteNumber, inVelocity);
     me.sample_offset = static_cast<int32_t>(inStartFrame);
     midi_in_queue_.try_push(me);
+    return noErr;
+}
+
+OSStatus PulpAUInstrument::HandleNonNoteEvent(UInt8 inStatus, UInt8 inChannel, UInt8 inData1,
+                                              UInt8 inData2, UInt32 inStartFrame) {
+    auto me = decode_midi_event(static_cast<uint8_t>(inStatus), static_cast<uint8_t>(inChannel),
+                                static_cast<uint8_t>(inData1), static_cast<uint8_t>(inData2));
+    me.sample_offset = static_cast<int32_t>(inStartFrame);
+    midi_in_queue_.try_push(me); // lock-free; dropped if full (flood backstop)
     return noErr;
 }
 

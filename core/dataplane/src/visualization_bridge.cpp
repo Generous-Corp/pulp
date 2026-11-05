@@ -1,34 +1,39 @@
-// visualization_bridge.cpp — out-of-line VisualizationBridge::process().
-//
-// The public header (pulp/view/visualization_bridge.hpp) forward-declares
-// pulp::render::bench::PerfCounters so view consumers don't pull the
-// render include tree when PULP_BENCHMARK is on. The PerfCounters fields
-// (atomic<double>::fetch_add) still need
-// the full type, so the process() body lives here and only pulp-view's
-// translation unit sees the render header — consumers of
-// pulp::view::VisualizationBridge still don't need to link pulp::render.
+// Out-of-line VisualizationBridge::process() and poll().
 
-#include <pulp/view/visualization_bridge.hpp>
+#include <pulp/dataplane/visualization_bridge.hpp>
 
 #ifdef PULP_BENCHMARK
-#include <pulp/render/bench/perf_counters.hpp>
+#include <chrono>
 #endif
 
 #include <algorithm>
 #include <cmath>
 
-namespace pulp::view {
+namespace pulp::dataplane {
+
+#ifdef PULP_BENCHMARK
+namespace {
+double bench_now_us() noexcept {
+    using clock = std::chrono::steady_clock;
+    return std::chrono::duration<double, std::micro>(clock::now().time_since_epoch()).count();
+}
+
+// Adds the microseconds since `since_us` to a sink accumulator; a null
+// accumulator is not recorded.
+void bench_add(std::atomic<double>* total, double since_us) noexcept {
+    if (total != nullptr)
+        total->fetch_add(bench_now_us() - since_us, std::memory_order_relaxed);
+}
+} // namespace
+#endif
 
 void VisualizationBridge::process(const float* const* channels, int num_channels,
                                   int num_samples) noexcept {
     auto publish_meter = [this](const signal::MultiChannelMeterData& data) {
 #ifdef PULP_BENCHMARK
-        const double t0 = render::bench::now_us();
+        const double t0 = bench_now_us();
         meter_buf_.write(data);
-        if (bench_counters_) {
-            bench_counters_->triplebuffer_publish_total_us.fetch_add(render::bench::now_us() - t0,
-                                                                     std::memory_order_relaxed);
-        }
+        bench_add(bench_sink_.triplebuffer_publish_total_us, t0);
 #else
         meter_buf_.write(data);
 #endif
@@ -96,14 +101,11 @@ void VisualizationBridge::process(const float* const* channels, int num_channels
         return;
     }
 #ifdef PULP_BENCHMARK
-    const double copy_start = render::bench::now_us();
+    const double copy_start = bench_now_us();
 #endif
     (void)capture_.write(block, requested_frames);
 #ifdef PULP_BENCHMARK
-    if (bench_counters_) {
-        bench_counters_->audio_copy_total_us.fetch_add(render::bench::now_us() - copy_start,
-                                                       std::memory_order_relaxed);
-    }
+    bench_add(bench_sink_.audio_copy_total_us, copy_start);
 #endif
 }
 
@@ -246,14 +248,11 @@ bool VisualizationBridge::poll() {
                 std::isfinite(db) ? static_cast<float>(db) : config_.spectrum_floor_db;
         }
 #ifdef PULP_BENCHMARK
-        const double publish_start = render::bench::now_us();
+        const double publish_start = bench_now_us();
 #endif
         spectrum_buf_.write(spec);
 #ifdef PULP_BENCHMARK
-        if (bench_counters_) {
-            bench_counters_->triplebuffer_publish_total_us.fetch_add(
-                render::bench::now_us() - publish_start, std::memory_order_relaxed);
-        }
+        bench_add(bench_sink_.triplebuffer_publish_total_us, publish_start);
 #endif
     }
 
@@ -268,18 +267,15 @@ bool VisualizationBridge::poll() {
             wd.samples[i] = waveform_ring_[(waveform_pos_ + i) % waveform_length_];
         }
 #ifdef PULP_BENCHMARK
-        const double publish_start = render::bench::now_us();
+        const double publish_start = bench_now_us();
 #endif
         waveform_buf_.write(wd);
 #ifdef PULP_BENCHMARK
-        if (bench_counters_) {
-            bench_counters_->triplebuffer_publish_total_us.fetch_add(
-                render::bench::now_us() - publish_start, std::memory_order_relaxed);
-        }
+        bench_add(bench_sink_.triplebuffer_publish_total_us, publish_start);
 #endif
     }
 
     return spectrum_changed || waveform_changed;
 }
 
-} // namespace pulp::view
+} // namespace pulp::dataplane

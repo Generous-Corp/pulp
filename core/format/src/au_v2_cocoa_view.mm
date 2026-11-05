@@ -90,17 +90,11 @@ struct PulpAUEditorOwnership {
         gpu_surface_binding.reset();
         // A host may dispose the audio unit before it releases the view, so
         // the view's dealloc can run after the Processor and its StateStore are
-        // gone. Closing the bridge then would tear down the view tree and the
-        // scripted UI session, both of which unregister from that store. With
-        // the owner gone, keep the bridge's objects alive instead: the host
-        // still tears down its native surfaces, and nothing touches the freed
-        // store.
-        if (bridge && !owner_alive) {
-            pulp::runtime::log_warn(
-                "AU v2 editor: view outlived its audio unit; leaving the editor's "
-                "view tree unreleased to avoid touching the freed parameter store");
-            (void)bridge.release();
-        }
+        // gone. The bridge tells the tree first (EditorOwnerObserver), and
+        // its teardown then skips every Processor and StateStore call, so the
+        // tree is released normally instead of leaking for the process lifetime.
+        if (bridge && !owner_alive)
+            bridge->notify_owner_released();
     }
 };
 
