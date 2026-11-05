@@ -126,6 +126,33 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::uint64_t snapshot_generation = 0;
     };
 
+    // Immutable, control-thread view of the latency analysis captured by a
+    // prepared graph snapshot. Entries are emitted in snapshot order (the
+    // deterministic processing order for nodes, and authored connection order
+    // for edges). This is an introspection value only; it is not an audio
+    // callback or realtime API.
+    struct PreparedNodeLatency {
+        NodeId node_id = 0;
+        std::int64_t input_latency_samples = 0;
+        std::int64_t output_latency_samples = 0;
+    };
+
+    struct PreparedConnectionDelay {
+        Connection connection{};
+        std::int64_t delay_samples = 0;
+    };
+
+    struct PreparedLatencySnapshot {
+        std::int64_t total_latency_samples = 0;
+        std::vector<PreparedNodeLatency> nodes;
+        std::vector<PreparedConnectionDelay> connections;
+
+        // Value lookups deliberately return nullopt for unknown identities;
+        // zero is a valid latency and must not be used as a miss sentinel.
+        std::optional<PreparedNodeLatency> node(NodeId id) const;
+        std::optional<std::int64_t> connection_delay(const Connection& connection) const;
+    };
+
     struct RuntimeBudgetReport {
         runtime::RuntimeBudgetDecision decision{};
         runtime::RuntimeBudgetFrameStats frame_stats{};
@@ -843,6 +870,12 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Latency arriving at a specific node's input (samples). Returns 0 when
     // the node is unknown or the graph is not prepared.
     int node_latency_samples(NodeId id) const;
+
+    // Copy the deterministic latency/PDC analysis from the currently prepared
+    // snapshot. Returns nullopt when topology has been mutated or prepare()
+    // has not yet published a snapshot. Control-thread only: copying the
+    // vectors is intentionally outside the audio callback surface.
+    std::optional<PreparedLatencySnapshot> prepared_latency_snapshot() const;
 
     // Set a single parameter value on a Plugin node at the graph level. The
     // call is forwarded to PluginSlot::set_parameter(). Returns false if the

@@ -1,0 +1,21 @@
+G-7 exact-head receipt
+source_git_sha=8ecb5db3c9c0323ed065d7b9055e217ba715b292
+receipt_package_git_sha=da24589115dee2326152c92eb97087655ec44812
+source_git_dirty=false
+profile=forge-dev
+platform=darwin-arm64
+sdk_provenance_sha256=4335a1fb583b56590a34253bcbe6564189942b9f59ef27cbc46429f43012cb4f
+sdk_path=/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/8ecb5db3c9c0323ed065d7b9055e217ba715b292/11a0d651ba9e
+consumer_build=/Volumes/Workshop/Code/agent-worktrees/g7-exact-receipt-consumer-build
+consumer_target=pulp-g7-latency-pdc-consumer
+consumer_test_target=g7-latency-pdc-consumer
+consumer_command=cmake configure with Pulp_DIR=<sdk>/lib/cmake/Pulp; cmake --build --target pulp-g7-latency-pdc-consumer --parallel 4; ctest --test-dir <consumer_build> --output-on-failure --tests-regex '^g7-latency-pdc-consumer$'
+consumer_result=1/1 PASS
+direct_command=<consumer_build>/pulp-g7-latency-pdc-consumer
+direct_result=g7-latency-pdc PASS total_latency_samples=4 delayed_node_input_latency_samples=0
+consumer_receipt_sha256=8a24976fa451f4d1637220cce6b46bd82ead17f8002e0d39a2a7301bc4f47544
+consumer_binary_sha256=f62e930aee3b31d77d6e00249f3dcf68cbd1dc2655bb3806906fa139f268beed
+repeatability=three direct runs cmp-identical
+host_focused_command=pulp-test-host-signal-graph --reporter compact
+host_focused_result=144 cases, 12416 assertions, exit 0
+controls=unknown node and connection negatives; copied snapshot stable; mutation invalidates fresh query; reprepare restores
