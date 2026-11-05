@@ -644,6 +644,7 @@
       "pulp/platform/platform.hpp",
       "pulp/platform/popup_menu.hpp",
       "pulp/platform/progress_parser.hpp",
+      "pulp/platform/reveal_in_file_manager.hpp",
       "pulp/platform/win/registry.hpp",
       "pulp/platform/win32_sane.hpp"
     ],
