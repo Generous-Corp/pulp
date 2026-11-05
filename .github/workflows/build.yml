@@ -2352,11 +2352,10 @@ jobs:
             fi
           done
           # Keep the step nonfatal so the build reports the missing crate with
-          # its normal context, but fail closed: later cargo invocations must
-          # not silently retry crates.io without a bound.
-          echo "::warning::could not fetch ${manifest%/*}/Cargo.lock after 3 attempts; later cargo invocations will run offline and fail if crates are missing"
-          echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
-          echo "CARGO_NET_OFFLINE=true after fetch exhaustion"
+          # its normal context. Never declare offline here: the crates are not
+          # known to be on disk, and a VM that lost DNS for a couple of minutes
+          # must be able to recover once the network returns.
+          echo "::warning::could not fetch ${manifest%/*}/Cargo.lock after 3 attempts; the build will try again"
 
       # Save scope is deliberately narrower than restore scope: GitHub-hosted
       # Linux/Windows only, and only on a push to main.

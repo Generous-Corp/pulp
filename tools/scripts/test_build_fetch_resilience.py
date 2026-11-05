@@ -141,9 +141,9 @@ class CargoFetchStep(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(len(calls), 3)
         self.assertIn("could not fetch", proc.stdout)
-        # Exhaustion must fail closed: later cargo calls cannot retry crates.io
-        # without a bound after this step gives up.
-        self.assertIn("CARGO_NET_OFFLINE=true", github_env.splitlines())
+        # Never declare offline when the crates are not known to be on disk:
+        # later cargo calls must be able to recover once the network returns.
+        self.assertNotIn("CARGO_NET_OFFLINE", github_env)
 
     def test_opt_in_offline_after_a_successful_fetch(self) -> None:
         proc, github_env, _ = _run_cargo_step(fail_attempts=1, offline_var="1")
