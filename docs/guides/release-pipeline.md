@@ -522,7 +522,12 @@ secret and uploads the site as one tarball; the `deploy` job, in the `deploy`
 environment (branch `main` only), checks the tarball's digest against the build
 job's output, refuses any member that is not a regular file or directory under
 `public/` (the build job's runner is routable, so the tarball is untrusted),
-unpacks it into an empty directory and runs only the pinned wrangler action. The live unfurl check is repository code, so it is a third job
+unpacks it into an empty directory, writes wrangler's config from the workflow
+text, and runs only the pinned wrangler action. What this cannot stop: a
+build runner routed elsewhere can still put a `_worker.js` (or any page) in
+`public/`, and Cloudflare deploys it as the site's edge code. The check keeps
+the build runner from reaching the deploy job's token, not from shaping the
+site. The live unfurl check is repository code, so it is a third job
 with no secret.
 
 `WorkflowSecretEnvironments` in `tools/scripts/test_workflow_lint.py` pins which

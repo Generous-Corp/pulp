@@ -64,6 +64,13 @@ class WebclapRelevanceTests(unittest.TestCase):
         self.assertNotIn("actions/checkout", deploy)
         self.assertIn("needs.build-prove-deploy.outputs.site_sha256", deploy)
         self.assertNotIn("secrets.", workflow.split("\n  unfurl-check:\n", 1)[1])
+        # The deploy job writes wrangler's config from the workflow text; it
+        # must say what the checked-in wrangler.toml says.
+        toml = (Path(__file__).resolve().parents[2] / "examples/web-demos/wclap-build/cloudflare/wrangler.toml").read_text(encoding="utf-8")
+        settings = re.findall(r"(?m)^((?:name|pages_build_output_dir|compatibility_date) = \S+)$", toml)
+        self.assertEqual(len(settings), 3)
+        for setting in settings:
+            self.assertIn(f"'{setting}'", deploy)
         build = workflow.split("\n  build-prove-deploy:\n", 1)[1].split("\n  deploy:\n", 1)[0]
         self.assertNotIn("secrets.", build)
 

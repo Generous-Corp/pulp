@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import unittest
 from pathlib import Path
 
@@ -404,17 +405,61 @@ REPOSITORY_SECRETS: dict[str, str] = {
 # The only actions a NO_REPO_CODE job may use, pinned as the workflows pin them.
 NO_REPO_CODE_ACTIONS = (
     "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
-    "actions/download-artifact@v8",
+    "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
     "cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0",
 )
-# Shell that would fetch or run repository or network code in such a job.
-NO_REPO_CODE_RUN = (
-    r"\bgit\s+(clone|fetch|checkout|pull)\b",
-    r"\bgh\s+(repo\s+clone|run\s+download)\b",
-    r"\b(curl|wget)\b[^\n]*\|\s*(ba|z)?sh\b",
-    r"\b(bash|sh|python3?|node|npx|npm)\s+\.?/?(tools|scripts|examples|core|\.github)/",
-    r"(^|\s)\./",
-)
+# Commands a credential-holding job's shell may run: no interpreter, no
+# package manager, nothing that fetches or executes other code.
+ALLOWED_COMMANDS = {
+    "gh", "git", "tar", "sha256sum", "find", "mkdir", "test", "echo", "printf",
+    "cut", "awk", "grep", "set", "exit", "true", "false", "local", "return",
+    "[", "[[", "case", "esac", "fi", "done", "for", "}", "python3 -c",
+}
+_COMMAND_SEPARATORS = {"|", "||", "&&", ";", ";;", "(", "()", "\n", "&", "|&", "$("}
+_TRANSPARENT = {"if", "then", "else", "elif", "do", "while", "until", "!", "{", "time"}
+
+
+def disallowed_commands(script: str, functions: frozenset[str] = frozenset()) -> list[str]:
+    """First words of the commands in `script` that ALLOWED_COMMANDS lacks.
+
+    Tokenizes with shell quoting, so separators inside quotes, regexes and
+    awk programs are not commands. A word that names a function the script
+    defines is allowed.
+    """
+    lines = [line for line in script.replace("\\\n", " ").splitlines()
+             if not line.strip().startswith("#")]
+    text = "\n".join(line for line in lines
+                     if not re.match(r"^\s*[\w|*.-]+\)", line))
+    lexer = shlex.shlex(text, posix=True, punctuation_chars="();<>|&\n")
+    lexer.whitespace = " \t"
+    lexer.commenters = ""
+    lexer.whitespace_split = True
+    tokens = list(lexer)
+    functions = set(functions) | set(re.findall(r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\)", text))
+    found = []
+    expect = True
+    for i, tok in enumerate(tokens):
+        if tok in _COMMAND_SEPARATORS or tok.endswith("$"):
+            expect = True
+            continue
+        if not expect:
+            continue
+        if tok in functions and tokens[i + 1:i + 2] in (["("], ["()"]):
+            continue  # the definition itself
+        if tok in _TRANSPARENT or re.match(r"^[A-Za-z_][A-Za-z0-9_]*\+?=", tok) or tok in (")", "<", ">"):
+            continue
+        expect = False
+        word = "python3 -c" if tok == "python3" and tokens[i + 1:i + 2] == ["-c"] else tok
+        if word not in ALLOWED_COMMANDS and word not in functions:
+            found.append(word)
+    # Command substitutions inside double quotes are one word to the lexer.
+    for inner in re.findall(r"\$\(([^()]*)\)", text):
+        found += [w for w in disallowed_commands(inner, frozenset(functions)) if w not in found]
+    if "`" in text:
+        found.append("`")
+    return found
+
+
 PULL_REQUEST_EVENTS = {"pull_request", "pull_request_target", "merge_group"}
 SECRET_RE = re.compile(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
 DYNAMIC_SECRETS_RE = re.compile(r"secrets\s*\[|toJSON\(\s*secrets\s*\)|secrets:\s*inherit")
@@ -495,16 +540,17 @@ class WorkflowSecretEnvironments(unittest.TestCase):
                 if uses and not uses.startswith(NO_REPO_CODE_ACTIONS):
                     offenders.append(f"{wf}:{job_name}: uses {uses}")
                 run = str(step.get("run") or "")
-                for pattern in NO_REPO_CODE_RUN:
-                    if re.search(pattern, run):
-                        offenders.append(f"{wf}:{job_name}: run matches {pattern}")
+                offenders += [f"{wf}:{job_name}: runs {word}" for word in disallowed_commands(run)]
         self.assertEqual(offenders, [])
 
     def test_the_no_repo_code_check_is_live(self) -> None:
-        # Control: each forbidden shape is caught by the patterns above.
-        for run in ("git clone https://x", "gh repo clone o/r", "gh run download 1",
-                    "curl -sL https://x | sh", "bash ./tools/x.sh", "python3 tools/scripts/x.py"):
-            self.assertTrue(any(re.search(p, run) for p in NO_REPO_CODE_RUN), run)
+        # Control: each forbidden shape is caught, and allowed shell is not.
+        for run in ("node x.mjs", "python3 tools/scripts/x.py", "source x", ". x.sh",
+                    "npx wrangler", "make", "bash ./x.sh", "./x", "echo a | sh",
+                    'echo "$(npm i x)"', "echo `node x`", "f() { curl -s y; }\nf"):
+            self.assertNotEqual(disallowed_commands(run), [], run)
+        self.assertEqual(disallowed_commands('set -e\nx=$(sha256sum "$f" | cut -d" " -f1)\n'
+                                             'if [ -z "$x" ]; then echo no >&2; exit 1; fi'), [])
         self.assertFalse("./local-action".startswith(NO_REPO_CODE_ACTIONS))
 
 

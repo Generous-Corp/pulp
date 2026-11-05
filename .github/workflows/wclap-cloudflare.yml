@@ -12,8 +12,8 @@
 #
 # Cloudflare is WebCLAP's canonical host because it can send the COOP/COEP
 # headers that cross-origin isolation (threads + SharedArrayBuffer) requires;
-# GitHub Pages cannot. Until the two secrets below exist the deploy step is
-# skipped and this workflow is a build+proof gate only.
+# GitHub Pages cannot. Until the two secrets exist in the `deploy` environment
+# the deploy job's steps are skipped and this workflow is a build+proof gate only.
 name: WebCLAP Cloudflare
 
 permissions:
@@ -57,6 +57,8 @@ concurrency:
 
 jobs:
   build-prove-deploy:
+    # The name is the required status check's context, so it keeps "deploy"
+    # although the deploy itself is now the separate `deploy` job below.
     name: Build + prove + (owner-gated) deploy
     # Scheduled-workflow fork guard: forks should not burn a weekly cron.
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
@@ -605,7 +607,7 @@ jobs:
     steps:
       - name: Download the proved deploy dir
         if: ${{ env.HAS_CF_TOKEN == 'true' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: wclap-cloudflare-site
           path: ${{ runner.temp }}/artifact
@@ -643,6 +645,11 @@ jobs:
             echo "::error::unpacked site has entries besides public/ or symlinks: $extra $links" >&2
             exit 1
           fi
+          # Wrangler's config comes from this file, never from the tarball.
+          # Keep it equal to examples/web-demos/wclap-build/cloudflare/wrangler.toml
+          # (test_webclap_relevance.py compares them).
+          printf '%s\n' 'name = "pulp-wclap-demos"' 'pages_build_output_dir = "public"' \
+            'compatibility_date = "2026-07-09"' > "$RUNNER_TEMP/site/wrangler.toml"
           echo "SITE_DIR=$RUNNER_TEMP/site" >> "$GITHUB_ENV"
 
       - name: Deploy to Cloudflare Pages
