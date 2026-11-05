@@ -108,9 +108,14 @@ std::unique_ptr<format::Processor> make_synth_without_midi() {
 }
 
 struct Rig {
-    explicit Rig(format::ProcessorFactory factory) : host(factory), out(2, kBlock) {
+    explicit Rig(format::ProcessorFactory factory, std::size_t midi_capacity = 1024)
+        : host(factory), out(2, kBlock) {
         host.prepare(48000.0, kBlock, 0, 2);
-        midi_out.reserve(1024);
+        midi_out.reserve(midi_capacity);
+        // A small capacity is the point of the overflow cases: refuse events
+        // instead of growing, as the adapters' fixed buffers do.
+        if (midi_capacity < 1024)
+            midi_out.set_realtime_capacity_limit(true);
     }
     static constexpr std::size_t kBlock = 256;
 
@@ -299,4 +304,78 @@ TEST_CASE("concurrent request_panic calls are serviced without loss or crash",
     CHECK(g_synth->panic_calls > 0);
     // Requests collapse into serviced panics; never more services than requests.
     CHECK(g_synth->panic_calls <= 80000);
+}
+
+TEST_CASE("a panic larger than the MIDI buffer is carried over the next blocks, not lost",
+          "[format][panic][overflow]") {
+    Rig rig(make_synth_with_midi, /*midi_capacity=*/40);
+    for (std::uint8_t note = 60; note < 70; ++note)
+        rig.run_note_on(note); // 10 held
+
+    g_synth->request_panic();
+    auto state = g_synth->panic_state();
+    std::vector<midi::MidiEvent> all;
+    std::size_t blocks = 0;
+    rig.run();
+    ++blocks;
+    all.insert(all.end(), rig.midi_out.begin(), rig.midi_out.end());
+    // 10 note-offs + 80 messages = 90 events into room for 40.
+    CHECK(rig.midi_out.size() == 40);
+    CHECK(state->carrying());
+    CHECK(state->deferred_events() == 50);
+    CHECK(g_synth->panic_calls == 1); // voices are reset once, not per block
+
+    while (state->carrying() && blocks < 10) {
+        rig.run();
+        ++blocks;
+        all.insert(all.end(), rig.midi_out.begin(), rig.midi_out.end());
+    }
+    CHECK(blocks == 3);
+    CHECK_FALSE(state->carrying());
+    CHECK(g_synth->panic_calls == 1);
+
+    // Everything arrived exactly once, in order: ten note-offs, then each
+    // channel message once.
+    REQUIRE(all.size() == 10 + midi::panic_message_count(midi::PanicScope{}));
+    for (std::size_t i = 0; i < 10; ++i) {
+        CHECK(all[i].message.isNoteOff());
+        CHECK(all[i].note() == 60 + i);
+    }
+    std::array<midi::MidiEvent, midi::kMaxPanicMessages> expected;
+    const auto n = midi::panic_messages(midi::PanicScope{}, expected);
+    REQUIRE(n == all.size() - 10);
+    for (std::size_t i = 0; i < n; ++i) {
+        CHECK(all[10 + i].data()[0] == expected[i].data()[0]);
+        CHECK(all[10 + i].data()[1] == expected[i].data()[1]);
+        CHECK(all[10 + i].data()[2] == expected[i].data()[2]);
+    }
+
+    // Finished: nothing further, and the counter keeps its total.
+    CHECK(rig.run() == 0.0f);
+    CHECK(rig.midi_out.empty());
+    CHECK(state->deferred_events() > 0);
+}
+
+TEST_CASE("a panic that fits reports nothing deferred", "[format][panic][overflow]") {
+    Rig rig(make_synth_with_midi);
+    rig.run_note_on(60);
+    g_synth->request_panic();
+    rig.run();
+    auto state = g_synth->panic_state();
+    CHECK_FALSE(state->carrying());
+    CHECK(state->deferred_events() == 0);
+}
+
+TEST_CASE("a new request during a carried panic keeps the harder mode",
+          "[format][panic][overflow]") {
+    Rig rig(make_synth_with_midi, /*midi_capacity=*/40);
+    rig.run_note_on(60);
+    g_synth->request_panic(PanicMode::immediate);
+    rig.run(); // 1 note-off + 39 of 80 messages; carrying as immediate
+    auto state = g_synth->panic_state();
+    REQUIRE(state->carrying());
+
+    g_synth->request_panic(PanicMode::release);
+    rig.run();
+    CHECK(g_synth->last_mode == PanicMode::immediate);
 }

@@ -114,3 +114,18 @@ notes the plug-in sent. The state lives in a side table rather than a
 A bypassed AU v2 effect skips `process()`, so a request raised while bypassed
 is serviced on the first block after bypass is released. Formats not listed
 (LV2, AAX, web) do not service requests: `serviced` is false there.
+
+### A panic bigger than one block's MIDI buffer
+
+A full panic is up to 80 channel messages plus one note-off per held note, and
+an adapter's per-block MIDI buffer has a fixed capacity. When the buffer fills,
+`service_panic()` writes what fits and keeps the rest: notes not yet ended stay
+in the tracker, and the channel messages resume at the first one not written.
+The following blocks continue the panic without a new request, and the plug-in's
+voices are reset once, when the request is first serviced. A new request during
+a carried panic keeps the harder of the two modes.
+
+`PanicOutcome::events_deferred` and `complete` describe one block, and
+`PanicState::deferred_events()` is a running total readable from any thread
+(the audio thread does not log). A total that keeps rising on a large held set
+means the adapter's MIDI buffer is small for the panic.

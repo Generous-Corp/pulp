@@ -56,8 +56,15 @@ struct PanicOutcome {
     PanicMode mode = PanicMode::immediate;
     /// Events written to the MIDI output buffer.
     std::size_t events_emitted = 0;
-    /// Events the buffer refused (capacity), so a caller can report truncation.
-    std::size_t events_dropped = 0;
+    /// Events the buffer had no room for this block. They are not lost: the
+    /// panic carries over and the next blocks send them (see `complete`).
+    std::size_t events_deferred = 0;
+    /// True when the whole panic has been written. False means the MIDI output
+    /// buffer filled and `service_panic()` continues the panic on the next
+    /// blocks without a new request.
+    bool complete = true;
+    /// This block continued a panic begun in an earlier block.
+    bool carried = false;
 };
 
 /// Lock-free panic request and output-note state for one Processor. Created off
@@ -83,6 +90,20 @@ class PanicState {
             return false;
         mode = static_cast<PanicMode>(taken);
         return true;
+    }
+
+    /// A panic whose MIDI did not fit in one block and is still being sent.
+    bool carrying() const noexcept {
+        return carry_.load(std::memory_order_acquire) != 0;
+    }
+
+    /// Total events that did not fit the MIDI output buffer in some block and
+    /// were deferred to a later one. Readable from any thread; a persistently
+    /// rising value means the adapter's per-block MIDI buffer is too small for
+    /// the panic (a full panic is up to `midi::kMaxPanicMessages` events plus
+    /// one note-off per held note).
+    std::uint64_t deferred_events() const noexcept {
+        return deferred_total_.load(std::memory_order_relaxed);
     }
 
     bool pending() const noexcept {
@@ -120,35 +141,75 @@ class PanicState {
 
     /// Write the panic into `out` (audio thread): note-offs for the held
     /// notes, then the channel messages for `mode`, all at `sample_offset`.
-    /// Clears the note tracker. Appends only; it never clears `out`.
+    /// Appends only; it never clears `out`. If `out` fills, what was written
+    /// stays written and the rest is remembered: notes not yet ended stay in
+    /// the tracker, and the channel messages resume at the first one not
+    /// written. The next `service_panic()` call continues from there.
     PanicOutcome emit_midi(PanicMode mode, midi::MidiBuffer& out,
                            std::int32_t sample_offset = 0) noexcept {
         PanicOutcome outcome;
         outcome.serviced = true;
         outcome.mode = mode;
+        bool full = false;
         const auto put = [&](const midi::MidiEvent& event) {
-            if (out.add(event))
+            if (!full && out.add(event)) {
                 ++outcome.events_emitted;
-            else
-                ++outcome.events_dropped;
+                return true;
+            }
+            full = true;
+            ++outcome.events_deferred;
+            return false;
         };
         midi::for_each_held_note(emitted_, 0xFFFFu, [&](std::uint8_t ch, std::uint8_t note) {
             auto event = midi::MidiEvent::note_off(ch, note);
             event.sample_offset = sample_offset;
-            put(event);
+            if (put(event))
+                emitted_.process(event); // ended: no longer held downstream
         });
         const auto scope =
             mode == PanicMode::immediate ? midi::PanicScope{} : midi::PanicScope::release_only();
         std::array<midi::MidiEvent, midi::kMaxPanicMessages> messages;
         const auto count = midi::panic_messages(scope, messages, sample_offset);
-        for (std::size_t i = 0; i < count; ++i)
-            put(messages[i]);
-        emitted_.reset();
+        std::size_t next = message_cursor_;
+        for (; next < count; ++next) {
+            if (!put(messages[next]))
+                break;
+        }
+        // Everything after the first refused message is deferred too.
+        outcome.events_deferred += next < count ? count - next - 1 : 0;
+        message_cursor_ = static_cast<std::uint16_t>(next < count ? next : 0);
+        outcome.complete = !full;
+        if (full) {
+            const auto wanted = static_cast<std::uint8_t>(mode);
+            if (carry_.load(std::memory_order_relaxed) < wanted)
+                carry_.store(wanted, std::memory_order_release);
+            deferred_total_.fetch_add(outcome.events_deferred, std::memory_order_relaxed);
+        } else {
+            carry_.store(0, std::memory_order_release);
+            emitted_.reset();
+        }
         return outcome;
+    }
+
+    /// Mode of a panic still being sent (audio thread).
+    bool take_carry(PanicMode& mode) noexcept {
+        const auto carried = carry_.load(std::memory_order_acquire);
+        if (carried == 0)
+            return false;
+        mode = static_cast<PanicMode>(carried);
+        return true;
+    }
+
+    /// Start the message sequence from the top (a new request arrived).
+    void restart_messages() noexcept {
+        message_cursor_ = 0;
     }
 
   private:
     std::atomic<std::uint8_t> pending_{0};
+    std::atomic<std::uint8_t> carry_{0};
+    std::atomic<std::uint64_t> deferred_total_{0};
+    std::uint16_t message_cursor_ = 0; // audio thread only
     std::atomic<bool> attached_{false};
     std::atomic<bool> midi_out_{false};
     midi::MidiKeyboardState emitted_;
@@ -156,22 +217,39 @@ class PanicState {
 
 /// Service a pending panic request (audio thread, before process()). `Proc` is
 /// any type with `void on_panic(PanicMode)`, i.e. a `Processor`. The plug-in's
-/// own voices are always reset; MIDI is written only when the state's adapter
-/// reported MIDI output. Returns `serviced == false` when nothing was pending.
+/// own voices are reset once per request; MIDI is written only when the state's
+/// adapter reported MIDI output, and a panic too large for one block's MIDI
+/// buffer continues over the following blocks without a new request. Returns
+/// `serviced == false` when nothing was pending or carried.
 template <typename Proc>
 inline PanicOutcome service_panic(Proc& processor, PanicState& state, midi::MidiBuffer& midi_out,
                                   std::int32_t sample_offset = 0) noexcept {
     PanicMode mode = PanicMode::immediate;
-    if (!state.take(mode))
-        return {};
-    processor.on_panic(mode);
+    const bool fresh = state.take(mode);
+    bool carried = false;
+    if (!fresh) {
+        if (!state.take_carry(mode))
+            return {};
+        carried = true;
+    } else {
+        state.restart_messages();
+        // A new request while an earlier panic is still being sent keeps the
+        // harder of the two.
+        PanicMode carried_mode = PanicMode::release;
+        if (state.take_carry(carried_mode) &&
+            static_cast<std::uint8_t>(carried_mode) > static_cast<std::uint8_t>(mode))
+            mode = carried_mode;
+        processor.on_panic(mode);
+    }
     if (!state.capabilities().midi_out) {
         PanicOutcome outcome;
         outcome.serviced = true;
         outcome.mode = mode;
         return outcome;
     }
-    return state.emit_midi(mode, midi_out, sample_offset);
+    auto outcome = state.emit_midi(mode, midi_out, sample_offset);
+    outcome.carried = carried;
+    return outcome;
 }
 
 } // namespace pulp::format
