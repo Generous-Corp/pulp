@@ -819,10 +819,13 @@ exception: its `ScriptedUiSession` destructor flushes deferred gesture releases
 through the Processor's `StateStore`. In `PulpAUEditorOwnership::teardown`, if
 `AliveToken::try_acquire(processor_alive)` fails, log
 `AU v2 editor: view outlived its audio unit` and release the bridge instead of
-calling `notify_owner_released()` or destroying it. The native
-`PluginViewHost` still tears down; keeping the bridge and view tree process-live
-prevents a freed-store access. The `ui-script-plugin-editor-au` fixture with
-`MallocScribble=1` covers this owner-disposed ordering.
+calling `notify_owner_released()` or destroying it. This retention applies only
+when the bridge owns that scripted session; custom and AutoUi trees have no such
+destructor and must notify their observers before normal bridge close. The
+native `PluginViewHost` still tears down; keeping a scripted bridge and view
+tree process-live prevents a freed-store access. The
+`ui-script-plugin-editor-au` fixture with `MallocScribble=1` covers this
+owner-disposed ordering, while `test_au_v2_cocoa_ui.mm` covers custom-tree close.
 
 ### Plugin-initiated resize is a Logic-only editor transaction
 

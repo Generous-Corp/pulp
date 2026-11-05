@@ -607,10 +607,12 @@ bridge-owned `ScriptedUiSession` destructor flushes deferred gesture releases
 through `StateStore`, so `PulpAUEditorOwnership` must first try an
 `AliveToken::Lease`. When that lease fails, log
 `AU v2 editor: view outlived its audio unit` and release the bridge rather than
-calling `notify_owner_released()` or destroying it. The native host is still
-released; the bridge and view tree remain process-live so their teardown cannot
-touch the freed store. Keep this exception scoped to that AU v2 ownership
-wrapper; ordinary ViewBridge adapters still use the owner-observer close path.
+calling `notify_owner_released()` or destroying it. This applies only when the
+bridge owns that scripted session; custom and AutoUi trees notify observers and
+close normally. The native host is still released; a retained scripted bridge
+and view tree remain process-live so their teardown cannot touch the freed
+store. Keep this exception scoped to that AU v2 ownership wrapper; ordinary
+ViewBridge adapters still use the owner-observer close path.
 
 ### Release open parameter gestures on editor teardown
 

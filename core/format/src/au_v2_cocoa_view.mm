@@ -93,14 +93,19 @@ struct PulpAUEditorOwnership {
         // gone. ViewBridge::close() skips its direct owner calls after the
         // token retires, but an owned ScriptedUiSession still flushes its
         // deferred gesture releases through that StateStore during destruction.
-        // Keep the bridge alive when the lease cannot be acquired; destroying
-        // it here would read the freed store. The native host is still released
-        // below, and the owner-scoped bridge can be reclaimed with the process.
+        // Keep a bridge-owned scripted session alive when the lease cannot be
+        // acquired; destroying that session would read the freed store. A
+        // custom/AutoUi tree has no bridge-owned session, so notify its views
+        // and close it normally without touching the retired Processor.
         if (bridge && !owner_alive) {
-            pulp::runtime::log_warn(
-                "AU v2 editor: view outlived its audio unit; leaving the editor's "
-                "view tree unreleased to avoid touching the freed parameter store");
-            (void)bridge.release();
+            if (bridge->scripted_ui()) {
+                pulp::runtime::log_warn(
+                    "AU v2 editor: view outlived its audio unit; leaving the editor's "
+                    "view tree unreleased to avoid touching the freed parameter store");
+                (void)bridge.release();
+            } else {
+                bridge->notify_owner_released();
+            }
         }
     }
 };
