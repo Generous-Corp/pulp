@@ -229,6 +229,38 @@ which is what a host reads as "no" and matches leaving it unimplemented.
 Add the property to **all three** classes when touching this. A helper wired
 into only the instrument leaves an `aumf`/`aumi` MPE plug-in silently
 unreachable, and no test that exercises one class catches it.
+### Host workgroup: `kAudioUnitProperty_RenderContextObserver`
+
+A processor that runs auxiliary realtime threads (a worker pool, an emulator
+thread that feeds the next callback) implements `AudioWorkgroupClient`, and
+needs the host's render workgroup so those threads are scheduled with the
+render thread. AUv3 hosts get it through `-renderContextObserver`; AU v2 hosts
+read `kAudioUnitProperty_RenderContextObserver` (property 60, global scope,
+read-only, value type `AURenderContextObserver`). All three AU v2 classes answer
+it through `RenderContextObserverProperty` in `au_v2_common.hpp`, which mirrors
+the AUv3 block exactly:
+
+- The OS calls the block on the render thread before a render whose workgroup
+  changed. It forwards the **borrowed** workgroup (never `os_retain`) to
+  `set_audio_workgroup_from_render_context` and runs
+  `prepare_audio_workgroup_for_render()`, whose barrier must finish leave/join
+  on every worker before the block returns.
+- Every `Render` calls `prepare_for_render()` first (idempotent guard).
+- `Cleanup` calls `clear_after_render_resources()` **before**
+  `processor_->release()`, so workers leave the workgroup while the threads
+  still exist.
+- It is advertised only for an `AudioWorkgroupClient` processor; others answer
+  `kAudioUnitErr_InvalidProperty` ("no auxiliary realtime threads").
+
+Gotchas: the block is created once with `Block_copy` and owned by the
+property; `GetProperty` hands out the pointer without transferring ownership.
+`static_cast` between `void*` and a block pointer does not compile; the member
+is a plain `void*` (ARC-neutral header) with C-style casts in the `.cpp`.
+Before this property existed, an AU v2 plug-in's auxiliary threads never saw
+a workgroup at all; a processor that must also run on older SDKs keeps its own
+no-workgroup fallback (e.g. `pulp::audio::AudioWorkgroup`'s realtime policy)
+until a publication arrives.
+
 ## Contract editors (`au_v2_contract_view.mm`)
 
 A plug-in that declares `pulp_add_plugin(... UI <package>)` is view-free, since
