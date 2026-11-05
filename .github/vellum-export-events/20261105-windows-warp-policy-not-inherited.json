@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20261105-windows-warp-policy-not-inherited",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-05T00:00:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/view/platform/win/software_adapter_policy.hpp"
+  ],
+  "vellum_inherits": false,
+  "supersedes": [
+    "20261104-windows-warp-policy-inheritance"
+  ],
+  "rationale": "Corrects 20261104-windows-warp-policy-inheritance. The header's only includer is core/view/platform/win/plugin_view_host_win.cpp, which is in no exported closure: the 20261102-0f616a440cec receipt carries only accessibility_win_fragment_topology.{cpp,hpp} from this directory, and the closure generator (tools/scripts/vellum_closure.py) follows exported targets and their include edges. The next re-export therefore does not carry this file, matching the arm64ec watch event's false."
+}
