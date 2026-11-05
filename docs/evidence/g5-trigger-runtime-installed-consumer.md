@@ -7,13 +7,14 @@ promote the full G-5 event plane or realtime qualification.
 
 ## Provenance
 
-- Source head: `1e591dfe1de462dbca5b39f31ebf2be5c3082ae1` (`origin/main` at
-  receipt time).
+- Source head: `fc29b7b842dd9890570e88085ec5df8f6f65910f` (`origin/main` at
+  receipt time). The receipt branch merge head is
+  `e0e84dbdbdd7e1e8a8e0396dfe7bf50a8d6ef503`.
 - Release build: `pulp build` completed successfully. The configured cache
   reports `CMAKE_BUILD_TYPE:STRING=Release`.
-- Installed prefix: `/Volumes/Workshop/Code/agent-worktrees/pulp-g5-installed-consumer-receipt-20261104/receipt-20261104-201512/prefix`.
+- Installed prefix: `/Volumes/Workshop/Code/agent-worktrees/pulp-g5-installed-consumer-receipt-20261104/g5-installed-prefix-20261105-211142`.
 - Prefix manifest: 3,637 files, 599,604,009 bytes, manifest SHA-256
-  `a39d6dfdf0fc30c2f2a1e5badc85ffda8623c6379ca7280642b2ee17a466ae34`.
+  `12ea0903bd39a4892a969e6e443886bf3c632654653e41ef5c1cb15525c06c06`.
 - Installed `trigger_graph.hpp` SHA-256:
   `c553cd4a35d13a5d4cd6822f5ef8bc254c5f1a3613ea1ff269ddfb1bcf40bccb`.
   The source file has the same content hash.
@@ -25,12 +26,11 @@ promote the full G-5 event plane or realtime qualification.
   The source file has the same content hash.
 
 The external positive consumer was copied to
-`/Volumes/Workshop/Code/agent-worktrees/pulp-g5-trigger-runtime-consumer-external-20261104`;
-its source-tree manifest SHA-256 is
-`aa7963df5a9a7ee123fe71584c11e7c6d1da8e727f629334620d46c5487edebe`.
-The copied `main.cpp` and `CMakeLists.txt` content hashes are respectively
-`e49ea1e7be3f39b19a7a41e0ef25de7c531315d48e5192cb460b5bbdf05a9bbc` and
-`59ac5e976e0198b04ebec72f55d57e3ee749878af95d7f0388de7abeb1eab48b`.
+`/Volumes/Workshop/Code/agent-worktrees/pulp-g5-trigger-runtime-consumer-external-20261105`;
+its durable source-tree manifest SHA-256 is
+`be15201fa92d729b0032af0969fd6b1d4be19b0bafef000d2448deaacf79b1c8`.
+The raw command logs and install manifest are checked in under
+[`g5-trigger-runtime-installed-consumer-raw/`](g5-trigger-runtime-installed-consumer-raw/).
 
 ## Commands and results
 
@@ -49,7 +49,7 @@ ctest --test-dir "$CONSUMER/build" --output-on-failure
 ```
 
 The external configure and build completed with exit status 0. CTest reported
-`1/1` passed in `0.15 sec`, and direct execution printed:
+`1/1` passed in `0.18 sec`, and direct execution printed:
 
 ```text
 PASS: typed onset, ties, envelope, modulation and lowpass audio
@@ -58,7 +58,7 @@ PASS: typed onset, ties, envelope, modulation and lowpass audio
 The consumer binary SHA-256 was
 `4f46f2d6765ac21489d170e5de93ca2e37f0d9a13bfe767ed0cb074bc40e0a9b`.
 
-## Planted-negative control
+## Planted-negative controls
 
 An independent copy changed one expected output sample from `0.125f` to
 `0.25f`; no Pulp source or installed SDK file changed. The negative consumer
@@ -69,12 +69,22 @@ and printed the measured samples, beginning:
 0 0.125 0.125 0.09375 0.171875 0.148438 0.105469 0.0683594
 ```
 
-The negative copied source-tree manifest SHA-256 was
-`7f22a271f1df917d3575b956c7308cb31ddc0db61f15161b4625441b7fb597dd`, and its
-binary SHA-256 was
-`60e1e87a5ab8cbc42a49e7cce6908aa61c484bb91d28a8f4b0d2958ad6ca586f`.
-This is a break-confirming output oracle, not a mutation test of the Pulp
-runtime implementation.
+The private-header negative uses source-only
+`core/host/src/plugin_slot_vst3_internal.hpp`, which is absent from the
+installed prefix. The external copy includes
+`#include <pulp/host/plugin_slot_vst3_internal.hpp>`; the prefix absence check
+passes and the consumer compile fails with exit `1` and
+`fatal error: 'pulp/host/plugin_slot_vst3_internal.hpp' file not found`.
+Its source SHA-256 is
+`a71b07b45745648635633901cef61878a5b05e9a03122fa7b8b94bb3c082b21b`.
+
+Raw evidence hashes are recorded in `metadata.txt`: positive execution log
+`709e35172ec9454bc70c34d13774e4df09a384fe7509838aa59b736343e5048b`, private
+header negative log
+`9d27bfc5bc45e3754ba233f2eb243b037749b4d85acf715a6d3177420f559491`, install
+log `372ca3e3e8ab4219c2ed5de03db4b8e8b13958d239d3cfcb251822134e8f3620`, and
+manifest `12ea0903bd39a4892a969e6e443886bf3c632654653e41ef5c1cb15525c06c06`.
+These are durable raw artifacts, not prose-only claims.
 
 ## Boundary retained
 

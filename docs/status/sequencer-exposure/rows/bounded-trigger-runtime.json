@@ -8,6 +8,11 @@
     "core/host/include/pulp/host/custom_node_events.hpp",
     "core/host/include/pulp/host/trigger_graph.hpp",
     "docs/evidence/g5-trigger-runtime-installed-consumer.md",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/metadata.txt",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/positive.log",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/private-negative.log",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/install.log",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/prefix-manifest.sha256",
     "docs/status/sequencer-exposure/rows/bounded-trigger-runtime.json"
   ],
   "evidence": [
@@ -34,7 +39,7 @@
     {
       "path": "docs/evidence/g5-trigger-runtime-installed-consumer.md",
       "needles": [
-        "Source head: `1e591dfe1de462dbca5b39f31ebf2be5c3082ae1`",
+        "Source head: `fc29b7b842dd9890570e88085ec5df8f6f65910f`",
         "PASS: typed onset, ties, envelope, modulation and lowpass audio",
         "PARTIAL"
       ]
@@ -73,6 +78,7 @@
           "needles": [
             "manifest SHA-256",
             "Planted-negative control",
+            "private-header negative",
             "host timestamp"
           ]
         }
