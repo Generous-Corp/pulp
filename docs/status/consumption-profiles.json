@@ -300,6 +300,7 @@
       "pulp/format/editor_host.hpp",
       "pulp/format/editor_host_kind.hpp",
       "pulp/format/editor_idle_pump.hpp",
+      "pulp/format/editor_owner.hpp",
       "pulp/format/editor_package.hpp",
       "pulp/format/editor_prewarm.hpp",
       "pulp/format/editor_ui.hpp",

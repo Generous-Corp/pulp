@@ -209,7 +209,20 @@ public:
     /// thread only (same as the pump and teardown).
     void notify_processor_destroyed() noexcept {
         if (owner_alive_) owner_alive_->store(false, std::memory_order_release);
+        notify_owner_released();
     }
+
+    /// Tell every view in the editor tree that the plug-in instance owning it
+    /// is gone, by calling EditorOwnerObserver::on_owner_released() on each
+    /// view that implements it (editor_owner.hpp), root first.
+    /// Delivered at most once per open editor, and only once the owner has
+    /// retired: a no-op while it is alive, after the first delivery, and with
+    /// no editor open. The editor idle pump calls this on its first tick after
+    /// the owner retires, and notify_processor_destroyed() and close() call it
+    /// as well, so a tree that outlives its instance hears it on the main
+    /// thread before anything tears it down. Main thread only. Returns whether
+    /// this call delivered the notification.
+    bool notify_owner_released() noexcept;
 
     /// Whether the adapter instance that owns both Processor and StateStore is
     /// still alive. Unlike alive_token(), this fails closed as soon as the
@@ -414,6 +427,7 @@ private:
     bool uses_script_ui_ = false;
     bool uses_auto_ui_ = false;  ///< true when the editor is the AutoUi default
     bool attached_ = false;  ///< true between notify_attached() and close()
+    bool owner_release_notified_ = false; ///< see notify_owner_released()
     bool released_ = false;  ///< true after release_view() transfers ownership
     uint64_t last_reload_generation_ = 0;  ///< editor-reload generation last applied (1.9)
     uint64_t last_state_restore_revision_ = 0;
