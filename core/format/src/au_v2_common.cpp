@@ -71,6 +71,17 @@ midi::MidiEvent decode_midi_event(uint8_t inStatus,
 
 namespace {
 
+// AU `Indexed` means the value IS an index into GetParameterValueStrings, so
+// the range must be 0..N-1 with step 1. The value list is built as
+// min + i*step, so an Integer with a non-zero min or a stride above 1 (or an
+// unlabelled 0..127 integer) must stay Generic rather than become a menu.
+bool is_index_valued_param(const state::ParamInfo& info) {
+    if (!state::is_discrete_param(info)) return false;
+    if (info.kind != state::ParamKind::Enum && info.value_labels.empty()) return false;
+    const float step = info.range.step;
+    return info.range.min == 0.0f && (step == 0.0f || step == 1.0f);
+}
+
 // Set while the HOST writes a parameter (SetParameter). The store's UI-push
 // listener fires inline on the same thread, so it consults this to skip
 // echoing the host's own write back at it. Thread-local: the guard is scoped
@@ -187,9 +198,10 @@ OSStatus fill_parameter_info(const state::StateStore& store,
         out_info.unit = kAudioUnitParameterUnit_Percent;
     } else if (state::is_boolean_param(*param)) {
         out_info.unit = kAudioUnitParameterUnit_Boolean;
-    } else if (state::is_discrete_param(*param)) {
-        // An enumerated choice (not a quantized continuous value, which stays
-        // Generic): Indexed tells hosts to show a menu built from
+    } else if (is_index_valued_param(*param)) {
+        // An enumerated choice whose value really is an index (0..N-1, step 1;
+        // a quantized continuous or offset/strided Integer stays Generic):
+        // Indexed tells hosts to show a menu built from
         // GetParameterValueStrings instead of a numeric slider.
         out_info.unit = kAudioUnitParameterUnit_Indexed;
     } else {

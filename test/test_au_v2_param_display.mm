@@ -298,6 +298,24 @@ class ValueTextProcessor : public pulp::format::Processor {
                                     .kind = pulp::state::ParamKind::Enum};
         mode.value_labels = {"Off", "Slow", "Fast"};
         store.add_parameter(mode);
+
+        // Integer with a negative min: value != menu index, must stay Generic.
+        store.add_parameter({.id = 3,
+                             .name = "Transpose",
+                             .range = {-12.0f, 12.0f, 0.0f, 1.0f},
+                             .kind = pulp::state::ParamKind::Integer});
+        // Integer 0..N-1, step 1, with labels: a real index, may be Indexed.
+        pulp::state::ParamInfo steps{.id = 4,
+                                     .name = "Steps",
+                                     .range = {0.0f, 2.0f, 0.0f, 1.0f},
+                                     .kind = pulp::state::ParamKind::Integer};
+        steps.value_labels = {"One", "Two", "Three"};
+        store.add_parameter(steps);
+        // Unlabelled 0..127 Integer: numeric control, not a 128-entry menu.
+        store.add_parameter({.id = 5,
+                             .name = "Program",
+                             .range = {0.0f, 127.0f, 0.0f, 1.0f},
+                             .kind = pulp::state::ParamKind::Integer});
     }
 
     void prepare(const pulp::format::PrepareContext&) override {}
@@ -907,4 +925,17 @@ TEST_CASE("AU v2 labelled Enum parameters report the Indexed unit",
     AudioUnitParameterInfo semis{};
     REQUIRE(inst.GetParameterInfo(kAudioUnitScope_Global, 1, semis) == noErr);
     REQUIRE(semis.unit == kAudioUnitParameterUnit_Generic);
+
+    // Integer kinds are Indexed only when the value is a real 0-based index.
+    AudioUnitParameterInfo transpose{};
+    REQUIRE(inst.GetParameterInfo(kAudioUnitScope_Global, 3, transpose) == noErr);
+    REQUIRE(transpose.unit == kAudioUnitParameterUnit_Generic);
+
+    AudioUnitParameterInfo steps{};
+    REQUIRE(inst.GetParameterInfo(kAudioUnitScope_Global, 4, steps) == noErr);
+    REQUIRE(steps.unit == kAudioUnitParameterUnit_Indexed);
+
+    AudioUnitParameterInfo program{};
+    REQUIRE(inst.GetParameterInfo(kAudioUnitScope_Global, 5, program) == noErr);
+    REQUIRE(program.unit == kAudioUnitParameterUnit_Generic);
 }
