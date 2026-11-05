@@ -18,8 +18,7 @@ using DrbgEntropySource = int (*)(void* context, unsigned char* output, std::siz
 
 /// Seeds `drbg` with the full personalization string; its length comes from
 /// the string itself, so respelling the string cannot truncate or overrun it.
-inline int seed_license_v2_drbg(mbedtls_ctr_drbg_context& drbg,
-                                DrbgEntropySource entropy,
+inline int seed_license_v2_drbg(mbedtls_ctr_drbg_context& drbg, DrbgEntropySource entropy,
                                 void* entropy_context) {
     return mbedtls_ctr_drbg_seed(
         &drbg, entropy, entropy_context,

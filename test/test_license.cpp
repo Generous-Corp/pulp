@@ -1172,12 +1172,13 @@ namespace {
 // Deterministic entropy, so two DRBGs seeded alike produce the same bytes.
 int counting_entropy(void* state, unsigned char* output, std::size_t length) {
     auto& next = *static_cast<unsigned*>(state);
-    for (std::size_t i = 0; i < length; ++i) output[i] = static_cast<unsigned char>(next++);
+    for (std::size_t i = 0; i < length; ++i)
+        output[i] = static_cast<unsigned char>(next++);
     return 0;
 }
 
-std::array<unsigned char, 32> draw_after_seed(
-    const std::function<int(mbedtls_ctr_drbg_context&, unsigned*)>& seed) {
+std::array<unsigned char, 32>
+draw_after_seed(const std::function<int(mbedtls_ctr_drbg_context&, unsigned*)>& seed) {
     mbedtls_ctr_drbg_context drbg;
     mbedtls_ctr_drbg_init(&drbg);
     unsigned entropy_state = 7;
@@ -1197,8 +1198,7 @@ std::array<unsigned char, 32> draw_with_personalization(const char* text, std::s
 
 } // namespace
 
-TEST_CASE("v2 licence DRBG is seeded with the whole personalization string",
-          "[license][crypto]") {
+TEST_CASE("v2 licence DRBG is seeded with the whole personalization string", "[license][crypto]") {
     using pulp::runtime::detail::kLicenseV2DrbgPersonalization;
     const auto seeded = draw_after_seed([](mbedtls_ctr_drbg_context& drbg, unsigned* state) {
         return pulp::runtime::detail::seed_license_v2_drbg(drbg, counting_entropy, state);
@@ -1211,4 +1211,3 @@ TEST_CASE("v2 licence DRBG is seeded with the whole personalization string",
     CHECK(seeded != draw_with_personalization(personalization.c_str(), personalization.size() - 1));
     CHECK(seeded != draw_with_personalization(personalization.c_str(), 0));
 }
-
