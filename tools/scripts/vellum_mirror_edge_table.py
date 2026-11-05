@@ -214,19 +214,37 @@ def derived_rules(root: Path, roots: dict[str, tuple[str, ...]]) -> dict[str, st
     }
 
 
-def approved_exceptions(root: Path, content_patterns: dict[str, str]) -> list[dict[str, str]]:
-    """Each seam-debt line that a content rule matches, by rule, path and exact line."""
+def respell_exception(path: str, line: str, spelling: str) -> tuple[str, str]:
+    """A seam-debt path and line as a mirror renamed to `spelling` carries them:
+    the `include/<root>/` path segment, include directives and the namespace."""
+    root = re.escape(SOURCE_INCLUDE_ROOT)
+    path = re.sub(rf"(/include/){root}/", rf"\g<1>{spelling}/", path)
+    line = re.sub(rf"([<\"]){root}/", rf"\g<1>{spelling}/", line)
+    line = re.sub(rf"\b{root}::", f"{spelling}::", line)
+    return path, line
+
+
+def approved_exceptions(root: Path, content_patterns: dict[str, str],
+                        spellings: tuple[str, ...] = (SOURCE_INCLUDE_ROOT,)) -> list[dict[str, str]]:
+    """Each seam-debt line that a content rule matches, by rule, path and exact line.
+
+    The ledger records a line as this checkout spells it. A mirror renamed to
+    another root carries the same line respelled, so each row is emitted once
+    per spelling the table's roots name.
+    """
     ledger = json.loads((root / SEAM_DEBTS).read_text(encoding="utf-8"))
     rules = {name: re.compile(pattern) for name, pattern in content_patterns.items()}
     exceptions: list[dict[str, str]] = []
     for entry in ledger.get("entries", []):
-        path = str(entry.get("file", ""))
-        lines = (root / path).read_text(encoding="utf-8").splitlines()
+        source_path = str(entry.get("file", ""))
+        lines = (root / source_path).read_text(encoding="utf-8").splitlines()
         debt_lines = [line for line in lines if any(re.search(p, line) for p in entry.get("patterns", []))]
-        for line in debt_lines:
-            for name, rule in rules.items():
-                if rule.search(line):
-                    exceptions.append({"rule": name, "path": path, "line": line, "debt": str(entry["id"])})
+        for source_line in debt_lines:
+            for spelling in spellings:
+                path, line = respell_exception(source_path, source_line, spelling)
+                for name, rule in rules.items():
+                    if rule.search(line):
+                        exceptions.append({"rule": name, "path": path, "line": line, "debt": str(entry["id"])})
     return sorted(exceptions, key=lambda row: (row["path"], row["rule"], row["line"]))
 
 
@@ -241,7 +259,9 @@ def generate(root: Path, roots: dict[str, tuple[str, ...]] | None = None) -> dic
     table["content_patterns"][KEPT_INCLUDE] = rules[KEPT_INCLUDE]
     table["content_patterns"][KEPT_SYMBOL] = rules[KEPT_SYMBOL]
     table["path_patterns"][KEPT_FILE] = rules[KEPT_FILE]
-    table["approved_exceptions"] = approved_exceptions(root, table["content_patterns"])
+    roots = table_roots(table)
+    spellings = tuple(dict.fromkeys(roots["include"] + roots["namespace"]))
+    table["approved_exceptions"] = approved_exceptions(root, table["content_patterns"], spellings)
     return table
 
 
