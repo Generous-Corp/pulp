@@ -32,14 +32,19 @@
 /// that shims the behaviour for older SDKs can key its removal on this.
 #define PULP_FORMAT_HAS_EDITOR_BACKGROUND 1
 
+// Forward-declared, never included: `pulp-wclap-dsp` compiles core/format
+// without the data-plane include path (the wasm DSP build has no editor), so
+// pulling in value_channel_set.hpp here breaks that target. A pointer return
+// needs only the declaration. pulp::view::ValueChannelSet names the same class
+// as pulp::dataplane::ValueChannelSet.
+namespace pulp::dataplane {
+class ValueChannelSet;
+}
+
 namespace pulp::view {
 class ScriptedUiSession;
 class View;
-// Forward-declared, never included: `pulp-wclap-dsp` compiles core/format
-// WITHOUT core/view on the include path (the wasm DSP build has no UI layer),
-// so pulling in value_channel_set.hpp here breaks that target. A pointer
-// return needs only the declaration.
-class ValueChannelSet;
+using dataplane::ValueChannelSet;
 }
 
 namespace pulp::format {

@@ -77,8 +77,13 @@ set(PULP_LINK_FLOOR_TIER_sequencer-editor
 # reads as a proven link and is not one. The default view stack reaches neither
 # `timeline` nor `timeline_editor`; a plugin that genuinely carries the editor
 # states so with REQUIRE.
+#
+# `dataplane` is the UI-free editor data plane (host parameter surfaces and the
+# value channels a processor publishes). pulp-format-core links it because
+# Processor::value_channels() and the default editor ports are part of the
+# format contract, so every format adapter reaches it.
 set(PULP_LINK_FLOOR_TIER_sequencer-plugin
-    platform simd runtime music timebase audio midi format)
+    platform simd runtime music timebase audio midi format dataplane)
 
 # A loadable sequencer plugin that owns the document, editor kernel, and concrete
 # piano-roll view. `timeline_view` intentionally brings the base view and canvas
@@ -86,7 +91,7 @@ set(PULP_LINK_FLOOR_TIER_sequencer-plugin
 # plugin claiming the tier still names all three feature modules in REQUIRE.
 set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
     platform simd runtime music timebase timeline timeline_editor timeline_view
-    canvas view audio midi format)
+    canvas view audio midi format dataplane)
 
 # ── Debt ─────────────────────────────────────────────────────────────────────
 # What a target's link closure drags in beyond its tier, recorded per target.

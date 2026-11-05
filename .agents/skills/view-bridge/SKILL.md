@@ -582,6 +582,26 @@ the plugin would leak host-window-dependent resources. `ViewBridge`
 guarantees balance **only when the adapter honors the two-step
 protocol** (`open()` then `notify_attached()`).
 
+### An editor can outlive its instance: tell the tree, then close normally
+
+Hosts may dispose the plug-in instance and free its editor view later (Logic
+does). The owner token (`owner_alive_`) retires first; from then on
+`close()` already skips `on_view_closed`, the processor's scripted session and
+every StateStore call, so the bridge closes and frees the tree normally. Do not
+"protect" the dead store by leaking the bridge (`bridge.release()`): that kept
+the whole view tree for the process lifetime.
+
+Views that read the instance directly opt into
+`format::EditorOwnerObserver` (`pulp/format/editor_owner.hpp`).
+`ViewBridge::notify_owner_released()` calls `on_owner_released()` once per
+open editor on each observer view, root first, and only after the owner
+retired: the editor idle pump on its first tick after the retire,
+`notify_processor_destroyed()` while the Processor is still whole, and
+`close()` at the latest. An adapter that learns of the dispose first should
+call `notify_processor_destroyed()`. Between the retire and the next idle
+tick an AppKit-driven repaint can still reach a view, so a view that reads the
+instance from `paint()` keeps its own guard as well.
+
 ### Release open parameter gestures on editor teardown
 
 An editor closed **mid-drag** (the user closes the plugin window without
@@ -1319,6 +1339,16 @@ library build. A stale header would then fail to compile against the
 fresh lib instead of segfaulting at first paint.
 
 ## Value channels reach the editor through the ViewBridge, and must be re-attached on reload
+
+`ValueChannelSet`, the value sources and the host parameter surfaces live in
+the UI-free `core/dataplane` module (namespace `pulp::dataplane`). The
+`<pulp/view/...>` headers forward to it with using-declarations, so
+`pulp::view::ValueChannelSet` is the same class. Forward-declare these types by
+including `<pulp/dataplane/fwd.hpp>`: a `namespace pulp::view { class
+ValueChannelSet; }` declaration now conflicts with the using-declaration and
+fails to compile. An editor on the editor-host contract reads the same channels
+through `format::ValueChannelVisualPort`, the default `VisualPort`, with no view
+layer linked.
 
 A processor publishes non-parameter values — gain reduction, an envelope, a
 spectrum — via `Processor::value_channels()`, and a scripted UI binds them with

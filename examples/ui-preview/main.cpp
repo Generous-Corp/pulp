@@ -319,7 +319,9 @@ int run_benchmark(const BenchmarkConfig& cfg) {
 
     pulp::render::bench::PerfCounters counters;
     counters.reset();
-    bridge.set_bench_counters(&counters);
+    // The bridge reports its audio-copy and publish timings into the same
+    // snapshot as the GPU buckets.
+    bridge.set_bench_sink({&counters.audio_copy_total_us, &counters.triplebuffer_publish_total_us});
 
     // Deterministic stereo sine sweep input. One audio block per
     // frame; 256 samples/block at 44.1 kHz is ~5.8 ms of audio per

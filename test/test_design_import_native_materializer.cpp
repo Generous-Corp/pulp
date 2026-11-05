@@ -127,8 +127,8 @@ fs::path write_asset_file(const fs::path& path) {
 [[maybe_unused]] std::vector<fs::path> materialized_include_roots() {
     const fs::path root(PULP_REPO_ROOT);
     std::vector<fs::path> roots;
-    for (const char* module : {"view", "canvas", "runtime", "platform", "events", "state", "audio",
-                               "midi", "signal", "host"}) {
+    for (const char* module : {"view", "canvas", "runtime", "platform", "events", "state",
+                               "dataplane", "audio", "midi", "signal", "host"}) {
         roots.push_back(root / "core" / module / "include");
     }
     return roots;

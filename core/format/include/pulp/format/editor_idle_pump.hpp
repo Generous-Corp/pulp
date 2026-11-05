@@ -23,7 +23,11 @@ inline std::function<void()> make_editor_idle_pump(ViewBridge& bridge) {
     auto alive = bridge.alive_token();
     return [bridge_ptr, alive]() {
         if (!alive->load(std::memory_order_acquire)) return;
-        if (!bridge_ptr->owner_is_alive()) return;
+        if (!bridge_ptr->owner_is_alive()) {
+            // The instance is gone; tell the tree once and pump nothing else.
+            bridge_ptr->notify_owner_released();
+            return;
+        }
         bridge_ptr->pump_store_listeners();
         if (bridge_ptr->poll_state_restore()) {
             if (auto* v = bridge_ptr->view()) v->request_repaint();

@@ -38,6 +38,16 @@ from pathlib import Path
 # intended to be included standalone).
 SKIP_FRAGMENTS = ("/external/", "/build", "/_deps/", "_gen.hpp", ".gen.hpp")
 
+# Public headers owned by a target other than their module's canonical
+# ``pulp-<module>`` target. Such a header is checked with a translation unit of
+# its owner, so it sees exactly the include closure a consumer of that target
+# gets. A module whose include root serves two targets lists the second one's
+# headers here.
+HEADER_OWNER_TARGETS = {
+    "core/dataplane/include/pulp/dataplane/audio_bridge.hpp": "pulp-dataplane-audio",
+    "core/dataplane/include/pulp/dataplane/visualization_bridge.hpp": "pulp-dataplane-audio",
+}
+
 # Match a module root like "core/<module>" so a header's flags can be borrowed
 # from a translation unit compiled in the same module.
 MODULE_RE = re.compile(r"(^|/)(core/[a-z0-9_]+)/")
@@ -132,10 +142,8 @@ def load_module_flags(cc_path: Path) -> dict[str, tuple[list[str], str]]:
     return by_module
 
 
-def module_target_score(
-    args: list[str], module: str, directory: str = ".", explicit_output: str = ""
-) -> int:
-    """Rank a compile entry by how directly its object belongs to ``module``."""
+def object_path(args: list[str], directory: str = ".", explicit_output: str = "") -> str:
+    """The normalized object path a compile entry writes."""
     output = explicit_output
     for index, arg in enumerate(args[:-1]):
         if arg == "-o" or arg.lower() == "/fo":
@@ -152,9 +160,15 @@ def module_target_score(
     normalized_output = output.replace("\\", "/")
     normalized_directory = directory.replace("\\", "/").rstrip("/")
     if normalized_output.startswith("/") or re.match(r"^[A-Za-z]:/", normalized_output):
-        normalized = posixpath.normpath(normalized_output)
-    else:
-        normalized = posixpath.normpath(f"{normalized_directory}/{normalized_output}")
+        return posixpath.normpath(normalized_output)
+    return posixpath.normpath(f"{normalized_directory}/{normalized_output}")
+
+
+def module_target_score(
+    args: list[str], module: str, directory: str = ".", explicit_output: str = ""
+) -> int:
+    """Rank a compile entry by how directly its object belongs to ``module``."""
+    normalized = object_path(args, directory, explicit_output)
     module_name = module.rsplit("/", 1)[-1].replace("_", "-")
     canonical_marker = f"CMakeFiles/pulp-{module_name}.dir/"
     if canonical_marker in normalized:
@@ -162,6 +176,36 @@ def module_target_score(
     if f"{module}/CMakeFiles/" in normalized:
         return 1
     return 0
+
+
+def load_target_flags(cc_path: Path, targets: set[str]) -> dict[str, tuple[list[str], str]]:
+    """target name -> (filtered compile flags, working directory).
+
+    Picks a C++ translation unit whose object lies in ``CMakeFiles/<target>.dir``.
+    """
+    entries = json.loads(cc_path.read_text(encoding="utf-8"))
+    found: dict[str, tuple[list[str], str]] = {}
+    for e in entries:
+        f = e.get("file", "")
+        if Path(f).suffix.lower() not in {".cc", ".cpp", ".cxx", ".mm"}:
+            continue
+        args = e.get("arguments")
+        if args is None:
+            args = split_compile_command(e.get("command", ""))
+        directory = e.get("directory", ".")
+        normalized = object_path(args, directory, e.get("output", ""))
+        for target in targets:
+            if target not in found and f"CMakeFiles/{target}.dir/" in normalized:
+                found[target] = (filter_args(args, f), directory)
+    return found
+
+
+def owner_target_of(header: Path, repo_root: Path) -> str | None:
+    try:
+        rel = header.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return None
+    return HEADER_OWNER_TARGETS.get(rel)
 
 
 def filter_args(args: list[str], src_file: str) -> list[str]:
@@ -265,14 +309,25 @@ def main() -> int:
         print("No public headers to check.")
         return 0
 
+    by_target = load_target_flags(args.compile_commands, set(HEADER_OWNER_TARGETS.values()))
+
     failures: list[tuple[Path, str]] = []
     skipped = 0
     for h in headers:
-        mod = module_of(str(h))
-        if not mod or mod not in by_module:
-            skipped += 1
-            continue
-        flags, cwd = by_module[mod]
+        owner = owner_target_of(h, repo_root)
+        if owner is not None:
+            if owner not in by_target:
+                # A registered owner with no compile entry is a stale registry or a
+                # wrong build, never a reason to fall back to the module's flags.
+                failures.append((h, f"owner target {owner} has no C++ compile entry"))
+                continue
+            flags, cwd = by_target[owner]
+        else:
+            mod = module_of(str(h))
+            if not mod or mod not in by_module:
+                skipped += 1
+                continue
+            flags, cwd = by_module[mod]
         err = check_header(h, flags, cwd, args.compiler)
         if err:
             failures.append((h, err))

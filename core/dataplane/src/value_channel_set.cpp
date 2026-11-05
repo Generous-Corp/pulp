@@ -1,21 +1,23 @@
-#include <pulp/view/value_channel_set.hpp>
+#include <pulp/dataplane/value_channel_set.hpp>
 
 #include <algorithm>
 
-namespace pulp::view {
+namespace pulp::dataplane {
 
 std::uint64_t ValueChannelSet::generation_identity() const noexcept {
-    return detail::value_channel_telemetry_control_identity(
-        telemetry_control_.get());
+    return detail::value_channel_telemetry_control_identity(telemetry_control_.get());
 }
 
 const char* ValueChannelSet::describe(DeclareError e) noexcept {
     switch (e) {
-        case DeclareError::ok: return "declared";
-        case DeclareError::empty_name: return "channel name was empty";
-        case DeclareError::duplicate_name: return "a channel with that name is already declared";
-        case DeclareError::reserved_character:
-            return "channel name contains ':', which is reserved for the value: prefix";
+    case DeclareError::ok:
+        return "declared";
+    case DeclareError::empty_name:
+        return "channel name was empty";
+    case DeclareError::duplicate_name:
+        return "a channel with that name is already declared";
+    case DeclareError::reserved_character:
+        return "channel name contains ':', which is reserved for the value: prefix";
     }
     return "unknown declaration error";
 }
@@ -24,17 +26,21 @@ ValueChannelSet::Entry* ValueChannelSet::add_entry(std::string name, std::string
                                                    float neutral, ValueChannelShape shape,
                                                    DeclareError* error) {
     const auto fail = [&](DeclareError e) -> Entry* {
-        if (error) *error = e;
+        if (error)
+            *error = e;
         return nullptr;
     };
 
-    if (name.empty()) return fail(DeclareError::empty_name);
+    if (name.empty())
+        return fail(DeclareError::empty_name);
     // ':' separates the "value:" namespace from the key on the JS side, so a
     // name containing one would resolve ambiguously there.
-    if (name.find(':') != std::string::npos) return fail(DeclareError::reserved_character);
+    if (name.find(':') != std::string::npos)
+        return fail(DeclareError::reserved_character);
     const auto clash = std::find_if(infos_.begin(), infos_.end(),
                                     [&](const ValueChannelInfo& i) { return i.name == name; });
-    if (clash != infos_.end()) return fail(DeclareError::duplicate_name);
+    if (clash != infos_.end())
+        return fail(DeclareError::duplicate_name);
 
     // Keep the sidecar and ordered declaration vectors in one transaction. The
     // first declaration creates the sidecar before its metadata can be indexed;
@@ -61,15 +67,17 @@ ValueChannelSet::Entry* ValueChannelSet::add_entry(std::string name, std::string
             telemetry_control_.reset();
         throw;
     }
-    if (error) *error = DeclareError::ok;
+    if (error)
+        *error = DeclareError::ok;
     return entries_.back().get();
 }
 
 ScalarSource* ValueChannelSet::declare_scalar(std::string name, std::string unit, float neutral,
                                               DeclareError* error) {
-    auto* entry = add_entry(std::move(name), std::move(unit), neutral,
-                            ValueChannelShape::scalar, error);
-    if (!entry) return nullptr;
+    auto* entry =
+        add_entry(std::move(name), std::move(unit), neutral, ValueChannelShape::scalar, error);
+    if (!entry)
+        return nullptr;
     entry->telemetry = detail::make_scalar_telemetry_state();
     entry->scalar = std::make_unique<ScalarSource>();
     entry->scalar->telemetry_ = detail::scalar_telemetry_writer(entry->telemetry.get());
@@ -78,9 +86,10 @@ ScalarSource* ValueChannelSet::declare_scalar(std::string name, std::string unit
 
 MeterSource* ValueChannelSet::declare_meter(std::string name, std::string unit, float neutral,
                                             DeclareError* error) {
-    auto* entry = add_entry(std::move(name), std::move(unit), neutral,
-                            ValueChannelShape::meter, error);
-    if (!entry) return nullptr;
+    auto* entry =
+        add_entry(std::move(name), std::move(unit), neutral, ValueChannelShape::meter, error);
+    if (!entry)
+        return nullptr;
     entry->telemetry = detail::make_meter_telemetry_state();
     entry->meter = std::make_unique<MeterSource>();
     entry->meter->telemetry_ = detail::meter_telemetry_writer(entry->telemetry.get());
@@ -89,9 +98,10 @@ MeterSource* ValueChannelSet::declare_meter(std::string name, std::string unit, 
 
 VectorSource* ValueChannelSet::declare_vector(std::string name, std::string unit, float neutral,
                                               DeclareError* error) {
-    auto* entry = add_entry(std::move(name), std::move(unit), neutral,
-                            ValueChannelShape::vector, error);
-    if (!entry) return nullptr;
+    auto* entry =
+        add_entry(std::move(name), std::move(unit), neutral, ValueChannelShape::vector, error);
+    if (!entry)
+        return nullptr;
     entry->telemetry = detail::make_vector_telemetry_state();
     entry->vector = std::make_unique<VectorSource>();
     entry->vector->telemetry_ = detail::vector_telemetry_writer(entry->telemetry.get());
@@ -100,17 +110,17 @@ VectorSource* ValueChannelSet::declare_vector(std::string name, std::string unit
 
 EventSource* ValueChannelSet::declare_events(std::string name, std::string unit,
                                              DeclareError* error) {
-    auto* entry = add_entry(std::move(name), std::move(unit), 0.0f,
-                            ValueChannelShape::events, error);
-    if (!entry) return nullptr;
+    auto* entry =
+        add_entry(std::move(name), std::move(unit), 0.0f, ValueChannelShape::events, error);
+    if (!entry)
+        return nullptr;
     entry->telemetry = detail::make_event_telemetry_state();
     entry->events = std::make_unique<EventSource>();
     entry->events->telemetry_ = detail::event_telemetry_writer(entry->telemetry.get());
     return entry->events.get();
 }
 
-std::ptrdiff_t ValueChannelSet::index_of(std::string_view name,
-                                         ValueChannelShape shape) const {
+std::ptrdiff_t ValueChannelSet::index_of(std::string_view name, ValueChannelShape shape) const {
     // Exact match remains deliberate: a shape mismatch is a miss rather than
     // a wrong-typed hit, so a binding can never silently read another source.
     const auto indexed =
@@ -157,4 +167,4 @@ ValueChannelTelemetryAttachment ValueChannelSet::attach_telemetry() const {
     return ValueChannelTelemetryAttachment(telemetry_control_, std::move(states), infos_);
 }
 
-}  // namespace pulp::view
+} // namespace pulp::dataplane
