@@ -141,7 +141,8 @@ class CargoFetchStep(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(len(calls), 3)
         self.assertIn("could not fetch", proc.stdout)
-        # Never declare offline when the crates are not on disk.
+        # Never declare offline when the crates are not known to be on disk:
+        # later cargo calls must be able to recover once the network returns.
         self.assertNotIn("CARGO_NET_OFFLINE", github_env)
 
     def test_opt_in_offline_after_a_successful_fetch(self) -> None:

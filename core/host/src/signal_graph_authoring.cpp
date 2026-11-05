@@ -348,6 +348,14 @@ bool SignalGraph::remove_node(NodeId id) {
     }
     nodes_.erase(it);
     processor_nodes_.erase(id);
+    trigger_producers_.erase(id);
+    trigger_envelopes_.erase(id);
+    trigger_audio_.erase(id);
+    std::erase_if(trigger_edges_,
+                  [id](const auto& edge) { return edge.producer == id || edge.consumer == id; });
+    typed_trigger_authoring_.store(!trigger_producers_.empty() || !trigger_envelopes_.empty() ||
+                                       !trigger_audio_.empty(),
+                                   std::memory_order_release);
     invalidate_live_locked_();
     return true;
 }

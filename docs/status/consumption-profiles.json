@@ -522,7 +522,8 @@
       "pulp/host/timeline_device_resolver.hpp",
       "pulp/host/timeline_graph_binding.hpp",
       "pulp/host/timeline_offline_graph.hpp",
-      "pulp/host/timeline_offline_renderer.hpp"
+      "pulp/host/timeline_offline_renderer.hpp",
+      "pulp/host/trigger_graph.hpp"
     ],
     "core/interchange/include": [
       "pulp/interchange/capability.hpp",
