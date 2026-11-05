@@ -6099,7 +6099,7 @@ the reading job declares `environment:`. Gotchas:
 - A tag-push run executes the TAGGED commit's workflow file, so an environment
   that admits `v*` tags is only as safe as the tag ruleset's `creation` rule.
 - Adding a secret-reading job: classify the secret in
-  `tools/scripts/test_workflow_secret_environments.py` (workflow-lint runs it),
+  `WorkflowSecretEnvironments` in `tools/scripts/test_workflow_lint.py`,
   or it fails.
 - Referencing an environment that does not exist yet auto-creates it with NO
   branch policy; set the policy before putting a secret in it.

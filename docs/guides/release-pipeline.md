@@ -515,8 +515,7 @@ tag-triggered workflows never start. `auto-release.yml` uses the `fleet-release`
 GitHub App when `FLEET_RELEASE_APP_ID` is set (the App is the only bypass actor
 of the `v*` tag ruleset, so nothing else can create a release tag), otherwise the
 `RELEASE_BOT_TOKEN` PAT with a warning, and fails before checkout when it has
-neither. `tools/scripts/test_workflow_secret_environments.py` (run by
-workflow-lint) pins which environment each credential is read from and that no
+neither. `WorkflowSecretEnvironments` in `tools/scripts/test_workflow_lint.py` pins which environment each credential is read from and that no
 pull-request job names an environment. `CODECOV_TOKEN` (upload-only) and the
 read-only `VELLUM_READER_APP_PRIVATE_KEY` stay repository secrets because
 pull-request and merge-group jobs read them.
