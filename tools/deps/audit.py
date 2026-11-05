@@ -34,10 +34,11 @@ It verifies two classes of invariant:
    License OR GPLv3". A name being present says nothing about the text being
    right.
 
-4. **Renderer agreement** (``--strict``, temporary) — Vellum's pinned
-   macOS universal Skia/Dawn archive digest and Skia release, read at the
-   Vellum commit the manifest's Skia entry names, must equal Pulp's. It is
-   removed once both repositories read one shared renderer lock.
+4. **Renderer agreement** (``--strict``) — gpu-runtime's renderer lock
+   (``gpu-runtime/renderer-lock.json`` in the Vellum repository), read at the
+   exact commit Pulp pins gpu-runtime to, must name Pulp's macOS universal
+   Skia/Dawn archive digest and Skia release. The lock is the one place the
+   renderer pin is written; Pulp's manifest must agree with it.
 """
 
 from __future__ import annotations
@@ -1047,15 +1048,17 @@ def find_uncovered_declarations(
     return uncovered
 
 
-# ── Vellum renderer drift (temporary) ──────────────────────────────────────
+# ── Shared renderer lock agreement ─────────────────────────────────────────
 #
-# Vellum embeds the same macOS universal Skia/Dawn archive as Pulp but pins it in
-# its own CMake module, so the two renderer pins can drift apart silently. Until
-# both repositories read one shared renderer lock, --strict reads Vellum's pin at
-# the exact commit named in the manifest's Skia entry and requires it to name
-# Pulp's archive digest and Skia release. The comparison is fail-closed: a pin
-# that cannot be read is a failure, never a skipped check.
+# gpu-runtime's renderer-lock.json is the one place the Skia/Dawn milestone and
+# the skia-builder digests are written; Pulp's manifest repeats them for its own
+# fetch, so --strict reads the lock at the exact commit Pulp pins gpu-runtime to
+# and requires it to name Pulp's archive digest and Skia release. The comparison
+# is fail-closed: a lock that cannot be read is a failure, never a skipped check.
+# A spec whose path is a CMake module (the pre-lock layout) is still read with
+# the regexes below.
 VELLUM_DRIFT_FIELD = "vellum_renderer_drift_check"
+GPU_RUNTIME_ENTRY = "vellum-gpu-runtime"
 VELLUM_CHECKOUT_ENV = "PULP_VELLUM_CHECKOUT"
 VELLUM_ARCHIVE_SHA_RE = re.compile(
     r'set\(\s*_vellum_expected_archive_sha256\s+"([0-9A-Fa-f]{64})"\s*\)')
@@ -1101,7 +1104,7 @@ def read_vellum_pin_source(repository: str, commit: str, path: str) -> str:
 
 
 def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, list[str]]:
-    """Compare Vellum's renderer pin with Pulp's Skia entry.
+    """Compare gpu-runtime's renderer lock (or Vellum's older pin) with Pulp's Skia entry.
 
     Returns (status, problems): status is "not-configured" when the Skia entry
     declares no comparison, "match" when both pins agree, and "mismatch" or
@@ -1139,14 +1142,29 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, 
     except VellumPinUnavailable as error:
         return "unavailable", [f"Vellum renderer pin unreadable at {commit}: {error}"]
     where = f"{repository} @ {commit} {path}"
-    digests = set(VELLUM_ARCHIVE_SHA_RE.findall(source))
-    tags = set(VELLUM_TUPLE_RE.findall(source))
-    if len(digests) != 1 or len(tags) != 1:
-        return "unavailable", [
-            f"{where} does not declare exactly one _vellum_expected_archive_sha256 "
-            f"and one 'chrome/mNNN macOS universal tuple' (found digests={sorted(digests)}, "
-            f"tags={sorted(tags)})"]
-    vellum_sha, vellum_tag = digests.pop().lower(), tags.pop()
+    if path.endswith(".json"):
+        try:
+            lock = json.loads(source)
+            platform = lock["platforms"][spec.get("lock_platform", "macos-arm64")]
+            vellum_sha, vellum_tag = str(platform["sha256"]).lower(), str(lock["milestone"])
+        except (ValueError, KeyError, TypeError) as error:
+            return "unavailable", [f"{where} is not a renderer lock with that platform: {error!r}"]
+    else:
+        digests = set(VELLUM_ARCHIVE_SHA_RE.findall(source))
+        tags = set(VELLUM_TUPLE_RE.findall(source))
+        if len(digests) != 1 or len(tags) != 1:
+            return "unavailable", [
+                f"{where} does not declare exactly one _vellum_expected_archive_sha256 "
+                f"and one 'chrome/mNNN macOS universal tuple' (found digests={sorted(digests)}, "
+                f"tags={sorted(tags)})"]
+        vellum_sha, vellum_tag = digests.pop().lower(), tags.pop()
+    runtime = next((dep for dep in manifest if dep.get("name") == GPU_RUNTIME_ENTRY), None)
+    if runtime is not None:
+        pinned = ((runtime.get("upstream") or {}).get("commit") or "").lower()
+        if pinned != commit.lower():
+            problems.append(
+                f"the renderer lock is read at {commit}, but Pulp pins {GPU_RUNTIME_ENTRY} "
+                f"at {pinned or 'nothing'}; they must be the same commit")
     if vellum_sha != pulp_sha.lower():
         problems.append(
             f"archive digest differs: Vellum {vellum_sha} ({where}) vs Pulp {pulp_sha} "

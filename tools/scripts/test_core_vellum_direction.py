@@ -161,14 +161,26 @@ class CoreVellumDirectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as empty:
             self.assertEqual(self._run(pathlib.Path(empty)), 2)
 
-    def test_repository_passes_with_its_allowlist(self):
-        include_boundary.ALLOWED["core-vellum"].update(self.repo_include_allowed)
-        direction.ALLOWED_CMAKE.update(self.repo_cmake_allowed)
+    def test_repository_has_no_vellum_edge_and_no_allowlist(self):
+        self.assertEqual(self.repo_include_allowed, {})
+        self.assertEqual(self.repo_cmake_allowed, {})
         self.assertEqual(self._run(REPO), 0)
 
-    def test_repository_fails_without_its_allowlist(self):
-        # Control: the known edge is real, so the scan of the real tree can see it.
-        self.assertEqual(self._run(REPO), 1)
+    def test_the_real_provider_with_a_vellum_include_fails(self):
+        # Control: the scan reads the real GPU-audio sources, so the include the
+        # retired D15 provider carried would be refused again.
+        provider = "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp"
+        text = (REPO / provider).read_text(encoding="utf-8")
+        self._write(provider, "#include <vellum/graphics/dawn_bootstrap.hpp>\n" + text)
+        self.assertEqual(self._run(), 1)
+
+    def test_gpu_runtime_targets_are_not_vellum_edges(self):
+        self._write("core/gpu_audio/CMakeLists.txt",
+                    "target_link_libraries(pulp-gpu-audio PRIVATE VellumGpuRuntime::Device)\n")
+        self.assertEqual(self._run(), 0)
+        self._write("core/gpu_audio/CMakeLists.txt",
+                    "target_link_libraries(pulp-gpu-audio PRIVATE Vellum::Gpu)\n")
+        self.assertEqual(self._run(), 1)
 
 
 if __name__ == "__main__":

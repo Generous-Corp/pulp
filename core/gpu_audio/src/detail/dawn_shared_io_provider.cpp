@@ -13,9 +13,9 @@
 #include "dawn/native/DawnNative.h"
 #include "webgpu/webgpu_cpp.h"
 
-#if defined(PULP_GPU_AUDIO_HAS_VELLUM_D15)
-#include <vellum/graphics/dawn_bootstrap.hpp>
-#include <vellum/graphics/dawn_native_bootstrap.hpp>
+#if defined(PULP_GPU_AUDIO_HAS_GPU_RUNTIME)
+#include <gpu_runtime/dawn_bootstrap.hpp>
+#include <gpu_runtime/dawn_native_bootstrap.hpp>
 #endif
 
 #include <algorithm>
@@ -65,43 +65,42 @@ ProcBootstrap& proc_bootstrap() {
     return state;
 }
 
-#if defined(PULP_GPU_AUDIO_HAS_VELLUM_D15)
-// The installed Vellum coordinator owns the process state machine.  Pulp only
-// supplies this callback for the test-only proc-table interposer; production
-// creation uses vellum::app_host::register_native_dawn_bootstrap below.  Both
-// routes therefore pass through Vellum's revision/re-entry/exception boundary.
-struct VellumOverrideBootstrap {
+#if defined(PULP_GPU_AUDIO_HAS_GPU_RUNTIME)
+// gpu-runtime's coordinator owns the image's proc table. Pulp supplies this
+// callback only for the test-only proc-table interposer; production uses the
+// native bootstrap. Both pass through the coordinator's revision, re-entry and
+// exception boundary.
+struct OverrideBootstrap {
     std::string expected;
     const DawnProcTable* override = nullptr;
 };
 
-vellum::graphics::DawnBootstrapResult
-install_vellum_override(const vellum::graphics::DawnBootstrapRequest& request, void* opaque,
-                        std::string* error) {
-    const auto* context = static_cast<const VellumOverrideBootstrap*>(opaque);
+gpu_runtime::DawnBootstrapResult install_override(const gpu_runtime::DawnBootstrapRequest& request,
+                                                  void* opaque, std::string* error) {
+    const auto* context = static_cast<const OverrideBootstrap*>(opaque);
     const auto header = revision(dawn::kDawnVersion.data());
     const auto proc = revision(dawnProcGetVersion());
     const DawnProcTable& native = dawn::native::GetProcs();
     const auto native_revision = revision(native.version);
     const auto* selected =
         context == nullptr || context->override == nullptr ? &native : context->override;
-    if (context == nullptr || request.abi_version != vellum::graphics::kDawnBootstrapAbiVersion ||
+    if (context == nullptr || request.abi_version != gpu_runtime::kDawnBootstrapAbiVersion ||
         request.expected_dawn_revision != context->expected || header.empty() || header != proc ||
         header != native_revision || header != context->expected ||
         revision(selected->version) != header) {
         if (error != nullptr)
             *error = "provider_identity_mismatch";
-        return vellum::graphics::DawnBootstrapResult::identity_mismatch;
+        return gpu_runtime::DawnBootstrapResult::identity_mismatch;
     }
     dawnProcSetProcs(selected);
-    return vellum::graphics::DawnBootstrapResult::ready;
+    return gpu_runtime::DawnBootstrapResult::ready;
 }
 #endif
 
 bool install_exact_proc_table(const std::string& expected, const void* override_for_testing,
                               std::string& reason) {
-#if defined(PULP_GPU_AUDIO_HAS_VELLUM_D15)
-    const auto header = vellum::app_host::native_dawn_revision();
+#if defined(PULP_GPU_AUDIO_HAS_GPU_RUNTIME)
+    const auto header = gpu_runtime::native_dawn_revision();
     if (header.empty() || (!expected.empty() && expected != header)) {
         reason = "provider_identity_mismatch";
         return false;
@@ -110,20 +109,20 @@ bool install_exact_proc_table(const std::string& expected, const void* override_
     std::string coordinator_error;
     bool registered = false;
     if (override_for_testing != nullptr) {
-        VellumOverrideBootstrap context{
+        OverrideBootstrap context{
             .expected = header,
             .override = static_cast<const DawnProcTable*>(override_for_testing),
         };
-        registered = vellum::graphics::register_dawn_bootstrap(
-            {.abi_version = vellum::graphics::kDawnBootstrapAbiVersion,
-             .callback = &install_vellum_override,
+        registered = gpu_runtime::register_dawn_bootstrap(
+            {.abi_version = gpu_runtime::kDawnBootstrapAbiVersion,
+             .callback = &install_override,
              .context = &context},
             header, &coordinator_error);
     } else {
-        registered = vellum::app_host::register_native_dawn_bootstrap(&coordinator_error);
+        registered = gpu_runtime::register_native_dawn_bootstrap({}, &coordinator_error);
     }
-    if (!registered || !vellum::graphics::dawn_bootstrap_is_registered(&coordinator_error)) {
-        reason = coordinator_error.empty() ? "vellum_dawn_bootstrap_failed" : coordinator_error;
+    if (!registered || !gpu_runtime::dawn_bootstrap_is_registered(&coordinator_error)) {
+        reason = coordinator_error.empty() ? "dawn_bootstrap_failed" : coordinator_error;
         return false;
     }
 

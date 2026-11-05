@@ -1,5 +1,22 @@
 #pragma once
 
+#if defined(PULP_GPU_RUNTIME)
+// This build's device layer is gpu-runtime's (tools/cmake/PulpGpuRuntime.cmake):
+// these are its types and functions under their Pulp names, so a Pulp object
+// and a gpu-runtime object are one and the same.
+#if defined(PULP_BENCHMARK) && !defined(GPU_RUNTIME_BENCHMARK)
+#error "PULP_BENCHMARK needs a gpu-runtime built with GPU_RUNTIME_BENCHMARK"
+#endif
+#if defined(GPU_RUNTIME_BENCHMARK)
+#include <gpu_runtime/bench/perf_counters.hpp>
+
+namespace pulp::render::bench {
+using gpu_runtime::bench::PerfCounters;
+using gpu_runtime::bench::now_us;
+} // namespace pulp::render::bench
+#endif // GPU_RUNTIME_BENCHMARK
+#else // !PULP_GPU_RUNTIME
+
 /// @file perf_counters.hpp
 /// Benchmark perf counters for copy/upload/readback costs.
 ///
@@ -158,3 +175,5 @@ struct PerfCounters {
 } // namespace pulp::render::bench
 
 #endif // PULP_BENCHMARK
+
+#endif // PULP_GPU_RUNTIME

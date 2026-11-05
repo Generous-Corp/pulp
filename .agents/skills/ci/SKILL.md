@@ -65,10 +65,11 @@ on a real PR. Do them in order.
      relative path through a `vellum/` directory) or a CMake file under `core/`
      names `find_package(Vellum`, a `Vellum::`/`vellum::` target, or fetches or
      adds a Vellum tree. Pulp core knows nothing about Vellum; the connection
-     belongs in an integration package. The only allowlisted edge is the opt-in
-     D15 GPU-audio provider, pinned by exact count, and it goes away when the
-     shared GPU runtime lands. Its source half is `include_boundary.py
-     --boundary core-vellum`.
+     belongs in an integration package. Nothing is allowlisted. gpu-runtime
+     (`VellumGpuRuntime::*`, fetched by `tools/cmake/PulpGpuRuntime.cmake`) is
+     the neutral device layer, not a Vellum edge: it depends on neither repo,
+     and its target names do not match the check. Its source half is
+     `include_boundary.py --boundary core-vellum`.
    - **change events** (`vellum_freeze_check.py`) — a range touching a path in
      a transferred slice of `.github/vellum-ownership.json` (e.g.
      `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a

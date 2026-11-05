@@ -43,16 +43,11 @@ _BRACKET_OPEN_RE = re.compile(r"\[(=*)\[")
 _BRACKET_ARGUMENT_RE = re.compile(r"\s*\[(=*)\[(.*?)\]\1\]", re.S)
 _FIRST_ARGUMENT_RE = re.compile(r'''\s*(?:"((?:\\.|[^"\\])*)"|([^\s()]+))''', re.S)
 
-# (file, reference) -> (count, reason). The opt-in D15 GPU-audio provider
-# imports Vellum's installed GPU runtime and Dawn headers. The block is removed
-# when the shared GPU runtime (gpu-runtime) lands and owns the Dawn device; the
-# matching include edge is allowlisted in include_boundary.py.
-_D15 = "D15 provider; removed when the shared GPU runtime lands"
-ALLOWED_CMAKE: dict[tuple[str, str], tuple[int, str]] = {
-    ("core/gpu_audio/CMakeLists.txt", "find_package(Vellum"): (1, _D15),
-    ("core/gpu_audio/CMakeLists.txt", "Vellum::Gpu"): (10, _D15),
-    ("core/gpu_audio/CMakeLists.txt", "Vellum::DawnHeaders"): (4, _D15),
-}
+# (file, reference) -> (count, reason). Empty: core/ has no known Vellum edge.
+# gpu-runtime (VellumGpuRuntime::*, tools/cmake/PulpGpuRuntime.cmake) is the
+# neutral device layer published from the Vellum repository; it depends on
+# neither Pulp nor Vellum, and its target names do not match TARGET_RE.
+ALLOWED_CMAKE: dict[tuple[str, str], tuple[int, str]] = {}
 
 
 def strip_cmake_comment(line: str) -> str:

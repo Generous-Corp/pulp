@@ -2181,16 +2181,34 @@ https://www.apache.org/licenses/LICENSE-2.0
 
 ---
 
-## Vellum D15 GPU provider
+## vellum-gpu-runtime
+
+gpu-runtime, the GPU device layer Pulp's macOS device targets forward to: a
+self-contained subproject of the Vellum repository (`gpu-runtime/`), pinned to
+commit `14bd4c5e430bc8da6b4204f1daa8a1bdbc6b7f3a`. It adds no third-party code to a Pulp build; its Dawn is
+the Skia toolchain's, covered under Dawn and Skia above.
+
+MIT License
 
 Copyright (c) 2026 Daniel Raffel
 
-MIT License. The opt-in macOS D15 development SDK redistributes Vellum's
-`libvellum-gpu.dylib`. Its exact MIT license, current renderer third-party
-notices, dependency identities, and current release-provenance limitation ship
-with that SDK under `share/doc/Pulp/third-party/Vellum/`. The provider remains
-ineligible for a production Pulp release until the upstream builder supplies an
-exhaustive attested transitive source and license manifest.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ---
 

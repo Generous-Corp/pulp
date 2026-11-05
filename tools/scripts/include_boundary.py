@@ -102,20 +102,6 @@ ALLOWED["view-core"].update({
     ("core/view/src/reload_exports.cpp", "pulp/view/audio_widgets.hpp"):
         "hot-reload export set retains the audio displays",
 })
-# The opt-in D15 GPU-audio provider registers its Dawn bootstrap through the
-# installed Vellum coordinator. This edge is removed when the shared GPU runtime
-# (gpu-runtime) lands and owns the one-per-process Dawn bootstrap; the matching
-# CMake edge is allowlisted in core_vellum_direction.py.
-ALLOWED["core-vellum"].update({
-    ("core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
-     "vellum/graphics/dawn_bootstrap.hpp"):
-        "D15 provider; removed when the shared GPU runtime lands",
-    ("core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
-     "vellum/graphics/dawn_native_bootstrap.hpp"):
-        "D15 provider; removed when the shared GPU runtime lands",
-})
-
-
 def _inside(path: pathlib.Path, dirs: list[pathlib.Path]) -> bool:
     return any(path == d or d in path.parents for d in dirs)
 
