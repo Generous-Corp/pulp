@@ -2514,7 +2514,10 @@ runtime bridge, and (when `PULP_BUILD_WEBVIEW=ON`) the optional
 `ScriptedUiSession`, `WidgetBridge`, or `@pulp/react` but must not load a browser
 runtime should link `pulp::view-native`; `pulp_add_plugin(... NATIVE_UI)` selects
 that composition for every requested format and uses
-`pulp::standalone-native` for Standalone. `pulp::view-native` is a composition
+`pulp::standalone-native` for Standalone. `pulp::standalone-contract` is the
+standalone app without any view layer, which `pulp_add_plugin(... UI <package>)`
+links for Standalone: it opens the package's editor through the editor-host
+contract and carries no Pulp view, canvas, render or Dawn code. `pulp::view-native` is a composition
 over `pulp::view-platform`, which holds the native scripted view stack and the
 one `detect_webview_backend()` definition with no audio, MIDI or
 recognition-pack dependency; the `pulp::view-native` umbrella adds

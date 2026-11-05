@@ -238,7 +238,14 @@ function(pulp_add_plugin target)
 
     _pulp_normalize_ui_script_path(_PULP_UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_UI_SCRIPT}")
     set(PULP_${target}_UI_SCRIPT "${_PULP_UI_SCRIPT}" CACHE INTERNAL "")
-    if(PLUGIN_NATIVE_UI)
+    if(PLUGIN_UI AND NOT PLUGIN_UI STREQUAL "none")
+        # UI <package> implies a view-free link for the standalone too: its
+        # editor is the package's, so Pulp's view, render and Dawn stay out of
+        # the app, and a package that draws with Dawn brings the only copy.
+        set(PULP_${target}_VIEW_TARGET "${_PULP_VIEW_TARGET}" CACHE INTERNAL "")
+        set(PULP_${target}_STANDALONE_TARGET "${_PULP_CONTRACT_STANDALONE_TARGET}" CACHE INTERNAL "")
+        set(PULP_${target}_VIEW_FREE_STANDALONE TRUE CACHE INTERNAL "")
+    elseif(PLUGIN_NATIVE_UI)
         if(NOT _PULP_NATIVE_VIEW_TARGET OR NOT _PULP_NATIVE_STANDALONE_TARGET)
             message(FATAL_ERROR
                 "pulp_add_plugin(${target} NATIVE_UI): this Pulp SDK does not export the native-only view/standalone targets")
@@ -248,6 +255,9 @@ function(pulp_add_plugin target)
     else()
         set(PULP_${target}_VIEW_TARGET "${_PULP_VIEW_TARGET}" CACHE INTERNAL "")
         set(PULP_${target}_STANDALONE_TARGET "${_PULP_STANDALONE_TARGET}" CACHE INTERNAL "")
+    endif()
+    if(NOT PLUGIN_UI OR PLUGIN_UI STREQUAL "none")
+        set(PULP_${target}_VIEW_FREE_STANDALONE FALSE CACHE INTERNAL "")
     endif()
     set(PULP_${target}_CONTENT_CAPABILITIES "${PLUGIN_CONTENT_CAPABILITIES}" CACHE INTERNAL "")
     set(PULP_${target}_CONTENT_KINDS "${PLUGIN_CONTENT_KINDS}" CACHE INTERNAL "")
