@@ -49,6 +49,9 @@ jobs:
         env:
           MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
           EVENT_NAME: ${{ github.event_name }}
+          # resolve_runs_on.py sends a fork (or deleted-fork) pull request to
+          # its hosted fallback; it needs the head repository to tell.
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           ALLOW_HOSTED_WINDOWS_VAR: ${{ vars.PULP_ALLOW_HOSTED_WINDOWS || '' }}
           WINDOWS_X64_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON || '' }}
         run: |

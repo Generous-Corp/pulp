@@ -1678,9 +1678,9 @@ TEST_CASE("every hosted format adapter builds its editor from hosted_editor()",
     }
 
     // Negative control: prove the scan can actually observe the thing it
-    // asserts. The standalone host genuinely does hand-assemble the flag, so a
+    // asserts. The standalone view layer genuinely does hand-assemble the flag, so a
     // scan that reports "clean" for it is a scan that is not reading anything.
-    const auto standalone = repo_root / "core/format/src/standalone.cpp";
+    const auto standalone = repo_root / "core/format/src/standalone_view_layer.cpp";
     REQUIRE(fs::exists(standalone));
     std::ifstream standalone_in(standalone);
     REQUIRE(standalone_in.good());

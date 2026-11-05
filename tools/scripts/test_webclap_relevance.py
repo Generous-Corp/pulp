@@ -48,7 +48,9 @@ class WebclapRelevanceTests(unittest.TestCase):
             Path(__file__).resolve().parents[2] / ".github" / "workflows" / "wclap-cloudflare.yml"
         ).read_text(encoding="utf-8")
         match = re.search(
-            r"runs-on: \$\{\{ fromJSON\(vars\.PULP_WCLAP_RUNS_ON_JSON \|\| '([^']*)'\) \}\}", workflow)
+            r"runs-on: \$\{\{ fromJSON\(\(github\.event_name != 'pull_request' \|\| "
+            r"github\.event\.pull_request\.head\.repo\.full_name == github\.repository\) "
+            r"&& vars\.PULP_WCLAP_RUNS_ON_JSON \|\| '([^']*)'\) \}\}", workflow)
         self.assertIsNotNone(match, "the job must route through PULP_WCLAP_RUNS_ON_JSON")
         self.assertEqual(json.loads(match.group(1)), "ubuntu-latest")
         self.assertEqual(workflow.count("runs-on:"), 1)

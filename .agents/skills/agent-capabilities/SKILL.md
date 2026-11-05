@@ -1743,6 +1743,14 @@ capability. The G-5 fixture covers external index pause/reverse, strict trigger
 timing, and tested block partitions. Refresh the header fingerprint with
 `agent_capability_rederive.py` when this utility changes.
 
+## A new installed archive for the view-free Standalone host is not capability surface
+
+`pulp-standalone-contract` is the view-free Standalone host library. Adding it
+to `PULP_SDK_TARGETS` in `PulpInstallRules.cmake` installs no new public header
+under a covered root, so there is nothing to classify. Because it is a STATIC
+archive, its stem still goes into `release_product_matrix.json` in the same
+change, or `test_installed_sdk_archives_match_release_matrix` fails.
+
 ## Typed trigger runtime exposure
 
 `pulp/host/trigger_graph.hpp` is reviewed runtime infrastructure, not a new
