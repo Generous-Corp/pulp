@@ -1742,3 +1742,18 @@ it does not advertise graph event transport or a standalone generator-facing
 capability. The G-5 fixture covers external index pause/reverse, strict trigger
 timing, and tested block partitions. Refresh the header fingerprint with
 `agent_capability_rederive.py` when this utility changes.
+
+## Typed trigger runtime exposure
+
+`pulp/host/trigger_graph.hpp` is reviewed runtime infrastructure, not a new
+generator-facing capability. Register its minimal installed owner as
+`Pulp::host`; refresh the existing `signal_graph_runtime.hpp` and
+`custom_node_events.hpp` binding fingerprints when their bytes change. A new
+borrowed-buffer validity helper requires reviewing `pulp/audio/buffer.hpp` as
+infrastructure owned by `Pulp::audio`, rather than rewriting its frozen legacy
+baseline fingerprint. Re-derive against the protected base after integration.
+
+The `CustomNodeEventBlock::triggers` field also touches sequencer-owned exposure:
+maintain the pending bounded-trigger-runtime row with installed SDK evidence
+and explicit product-control gaps. Neither that pointer nor the header ledger
+admits arbitrary Custom trigger producers or claims complete G-5 support.
