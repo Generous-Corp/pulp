@@ -55,6 +55,10 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
             // names without a per-block copy (which would allocate on the audio
             // thread).
             descriptor_ = processor_->descriptor();
+            // The effect delivers MIDI output through the host callback exactly
+            // when the descriptor declares it (aumf with produces_midi).
+            panic_state_ = processor_->panic_state();
+            panic_state_->attach(descriptor_.produces_midi);
             has_sidechain_element_ = effect_has_sidechain_element(descriptor_);
             // Discover the plug-in's bundled factory presets. Empty for a
             // plug-in that ships none, and for any build not loaded from a
@@ -1273,7 +1277,11 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     }
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
+        if (panic_state_)
+            service_panic(*processor_, *panic_state_, midi_out);
         processor_->process(process_buffers, midi_in, midi_out, ctx);
+        if (panic_state_)
+            panic_state_->observe_midi_out(midi_out);
     }
 
     // The host ORs kAudioUnitRenderAction_OutputIsSilence into ioActionFlags via

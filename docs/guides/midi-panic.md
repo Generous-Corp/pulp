@@ -97,7 +97,20 @@ allocate or lock. The default does nothing.
 An adapter attaches with `PanicState::attach(midi_out)`, calls
 `service_panic(processor, state, midi_out)` before `process()` and
 `state.observe_midi_out(midi_out)` after, so the note-offs cover exactly the
-notes the plug-in sent. `HeadlessHost` does this; the plug-in format adapters
-are wired in a following change, and until then `serviced` is false in them.
-The state lives in a side table rather than a `Processor` data member, so
-`sizeof(Processor)` is unchanged.
+notes the plug-in sent. The state lives in a side table rather than a
+`Processor` data member, so `sizeof(Processor)` is unchanged.
+
+| Host | `serviced` | `midi_out` |
+|---|---|---|
+| `HeadlessHost` | yes | the descriptor's `produces_midi` |
+| CLAP | yes | `produces_midi` |
+| VST3 | yes | `produces_midi` |
+| AU v2 effect (`aufx` / `aumf`) | yes | `produces_midi` (an `aufx` declares none, so voices only) |
+| AU v2 MIDI processor | yes | `produces_midi` |
+| AU v2 instrument (`aumu`) | yes | no: the adapter has no host MIDI output path yet |
+| AU v3 | yes | `produces_midi`, delivered through the host's `MIDIOutputEventBlock` when it installs one |
+| Standalone app | yes | no: there is no MIDI output device path |
+
+A bypassed AU v2 effect skips `process()`, so a request raised while bypassed
+is serviced on the first block after bypass is released. Formats not listed
+(LV2, AAX, web) do not service requests: `serviced` is false there.

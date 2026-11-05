@@ -357,7 +357,8 @@ hung-note bug can be reproduced and its fix asserted without a DAW: hold a
 note, call `request_panic()`, and the next block is silent (the plug-in's
 `on_panic()` ran) and, when the descriptor declares `produces_midi`, `midi_out`
 carries note-offs for the notes the plug-in left held plus the channel panic
-messages. A processor with no MIDI output gets the voice reset only. The plug-in
-format adapters do not service requests yet, so `panic_capabilities().serviced`
-is false there; do not use the headless result to claim a DAW behaviour. Test:
+messages. A processor with no MIDI output gets the voice reset only. The CLAP, VST3,
+AU v2, AU v3 and standalone adapters service requests too, but LV2, AAX and the
+web adapters do not (`panic_capabilities().serviced` is false there), and a
+headless result says nothing about how a DAW routes the MIDI that comes out. Test:
 `test/test_midi_panic_processor.cpp`.

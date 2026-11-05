@@ -38,6 +38,7 @@
 #include <clap/ext/tail.h>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/midi/panic.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
@@ -5413,4 +5414,113 @@ TEST_CASE("CLAP latency change on an inactive plugin reports without a restart",
     REQUIRE(g_request_restart_count == 0);
 
     g_lat_plugin = nullptr;
+}
+
+// ── Processor panic (Processor::request_panic) ──────────────────────────
+
+namespace {
+
+// Holds one note on channel 2 downstream, and counts on_panic calls.
+class PanicEchoProcessor : public Processor {
+  public:
+    explicit PanicEchoProcessor(bool produces_midi) : produces_midi_(produces_midi) {}
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "PanicEchoCLAP";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.clap.panic";
+        d.version = "1.0.0";
+        d.produces_midi = produces_midi_;
+        return d;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void on_panic(PanicMode mode) override {
+        ++panic_calls;
+        last_mode = mode;
+    }
+    void process(audio::BufferView<float>&, const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer& midi_out, const ProcessContext&) override {
+        if (!sent_note_) {
+            sent_note_ = true;
+            auto note = midi::MidiEvent::note_on(2, 64, 100);
+            note.sample_offset = 4;
+            midi_out.add(note);
+        }
+    }
+    int panic_calls = 0;
+    PanicMode last_mode = PanicMode::release;
+
+  private:
+    bool produces_midi_;
+    bool sent_note_ = false;
+};
+
+PanicEchoProcessor* g_panic_echo = nullptr;
+
+std::unique_ptr<Processor> make_panic_echo_midi() {
+    auto up = std::make_unique<PanicEchoProcessor>(true);
+    g_panic_echo = up.get();
+    return up;
+}
+std::unique_ptr<Processor> make_panic_echo_silent() {
+    auto up = std::make_unique<PanicEchoProcessor>(false);
+    g_panic_echo = up.get();
+    return up;
+}
+
+} // namespace
+
+TEST_CASE("CLAP services a panic request and emits the MIDI panic on out_events", "[clap][panic]") {
+    Harness h(make_panic_echo_midi);
+    REQUIRE(g_panic_echo != nullptr);
+    CHECK(g_panic_echo->panic_capabilities().serviced);
+    CHECK(g_panic_echo->panic_capabilities().midi_out);
+
+    InputEventList none;
+    OutputEventList first;
+    h.run(none, &first); // the plug-in leaves a note held downstream
+    REQUIRE(first.size() == 1);
+
+    g_panic_echo->request_panic();
+    OutputEventList out;
+    h.run(none, &out);
+    CHECK(g_panic_echo->panic_calls == 1);
+    CHECK(g_panic_echo->last_mode == PanicMode::immediate);
+
+    auto midis = out.by_type<clap_event_midi_t>(CLAP_EVENT_MIDI);
+    REQUIRE(midis.size() == 1 + midi::panic_message_count(midi::PanicScope{}));
+    // First the note-off for the note it left held (channel 2, note 64) ...
+    CHECK(midis[0]->data[0] == 0x82);
+    CHECK(midis[0]->data[1] == 64);
+    // ... then the channel messages; the full panic carries CC 120 on every channel.
+    std::size_t all_sound_off = 0, all_notes_off = 0;
+    for (std::size_t i = 1; i < midis.size(); ++i) {
+        if ((midis[i]->data[0] & 0xF0) == 0xB0 && midis[i]->data[1] == 120)
+            ++all_sound_off;
+        if ((midis[i]->data[0] & 0xF0) == 0xB0 && midis[i]->data[1] == 123)
+            ++all_notes_off;
+    }
+    CHECK(all_sound_off == 16);
+    CHECK(all_notes_off == 16);
+
+    // Consumed: the next block emits nothing.
+    OutputEventList later;
+    h.run(none, &later);
+    CHECK(later.size() == 0);
+}
+
+TEST_CASE("CLAP without MIDI output services a panic as a voice reset only", "[clap][panic]") {
+    Harness h(make_panic_echo_silent);
+    REQUIRE(g_panic_echo != nullptr);
+    CHECK(g_panic_echo->panic_capabilities().serviced);
+    CHECK_FALSE(g_panic_echo->panic_capabilities().midi_out);
+
+    g_panic_echo->request_panic(PanicMode::release);
+    InputEventList none;
+    OutputEventList out;
+    h.run(none, &out);
+    CHECK(g_panic_echo->panic_calls == 1);
+    CHECK(g_panic_echo->last_mode == PanicMode::release);
+    CHECK(out.size() == 0);
 }

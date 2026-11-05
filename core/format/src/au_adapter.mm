@@ -117,6 +117,8 @@ struct AUBridge {
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
     std::unique_ptr<Processor> processor;
+    // Panic requests (Processor::request_panic), serviced before each block.
+    std::shared_ptr<pulp::format::PanicState> panic_state;
     // Keeps a host setFullState: off the processor while the render block is
     // inside process(). Declared after processor so it outlives every render
     // that consults it.
@@ -388,6 +390,10 @@ struct ScopedAuV3HostWriting {
         }
         return nil;
     }
+    // MIDI output reaches the host through MIDIOutputEventBlock when it
+    // installs one; the descriptor flag is the adapter's claim.
+    _bridge.panic_state = _bridge.processor->panic_state();
+    _bridge.panic_state->attach(_bridge.processor->descriptor().produces_midi);
     _bridge.processor->set_state_store(&_bridge.store);
     _bridge.processor->define_parameters(_bridge.store);
     pulp::format::request_editor_prewarm(*_bridge.processor);
@@ -1666,7 +1672,11 @@ struct ScopedAuV3HostWriting {
             // the scope because it calls the host's MIDIOutputEventBlock (a
             // framework block outside our control).
             pulp::runtime::ScopedNoAlloc no_alloc_guard;
+            if (bridge->panic_state)
+                pulp::format::service_panic(*bridge->processor, *bridge->panic_state, midi_out);
             bridge->processor->process(process_buffers, midi_in, midi_out, ctx);
+            if (bridge->panic_state)
+                bridge->panic_state->observe_midi_out(midi_out);
         }
 
         // Return trigger / momentary params (panic, reset, tap) to their

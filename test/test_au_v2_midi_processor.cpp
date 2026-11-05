@@ -15,6 +15,7 @@
 #include <pulp/format/registry.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/midi/panic.hpp>
 
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioToolbox/AudioToolbox.h>
@@ -714,4 +715,43 @@ TEST_CASE("AU v2 MIDI processor converts parameter values to and from text",
     REQUIRE(live.unit.GetProperty(kAudioUnitProperty_ParameterValueFromString,
                                   kAudioUnitScope_Global, 0, &vfs) == noErr);
     REQUIRE(vfs.outValue == -7.0f);
+}
+
+// Processor::request_panic is serviced by the adapter before the block, and
+// where the host installed a MIDI-output callback the panic reaches it: a
+// note-off for the note the plug-in left held, then the channel messages.
+TEST_CASE("AU v2 MIDI processor services a panic request onto the host MIDI output",
+          "[au][au-v2][midi-processor][panic]") {
+    ScopedFactoryRegistration registration;
+    LiveMidiProcessor live;
+    REQUIRE(g_live_processor != nullptr);
+    CHECK(g_live_processor->panic_capabilities().serviced);
+    CHECK(g_live_processor->panic_capabilities().midi_out);
+
+    REQUIRE(live.unit.MIDIEvent(0x91, 60, 100, 0) == noErr); // held downstream
+    REQUIRE(live.render() == noErr);
+    REQUIRE(g_capture.packets.size() == 1);
+
+    g_capture = MidiOutputCapture{};
+    g_live_processor->request_panic();
+    REQUIRE(live.render() == noErr);
+
+    std::vector<std::vector<std::uint8_t>> expected;
+    expected.push_back({0x81, 60, 0}); // note-off, channel 1, key that was held
+    std::array<midi::MidiEvent, midi::kMaxPanicMessages> messages;
+    const auto count = midi::panic_messages(midi::PanicScope{}, messages);
+    for (std::size_t i = 0; i < count; ++i)
+        expected.push_back({messages[i].data()[0], messages[i].data()[1], messages[i].data()[2]});
+
+    REQUIRE(g_capture.packets.size() == expected.size());
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        INFO("packet " << i);
+        // Short messages are 3 bytes; pitch bend and CC keep all three.
+        CHECK(g_capture.packets[i].bytes == expected[i]);
+    }
+
+    // Consumed once.
+    g_capture = MidiOutputCapture{};
+    REQUIRE(live.render() == noErr);
+    CHECK(g_capture.packets.empty());
 }

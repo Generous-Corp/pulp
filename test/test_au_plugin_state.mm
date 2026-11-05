@@ -602,6 +602,27 @@ TEST_CASE("AU adapters retire editor owner tokens before processor/store teardow
     }
 }
 
+TEST_CASE("AU v3 attaches to panic requests; MIDI out follows produces_midi", "[au][auv3][panic]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+    AudioComponentDescription desc{};
+    desc.componentType = kAudioUnitType_Effect;
+    desc.componentSubType = 'TstE';
+    desc.componentManufacturer = 'Plup';
+    NSError* error = nil;
+    PulpAudioUnit* unit = [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                                      options:0
+                                                                        error:&error];
+    REQUIRE(unit != nil);
+    REQUIRE(g_last_effect_processor != nullptr);
+
+    // The test effect declares no MIDI output: requests are serviced, but there
+    // is nothing for the host's MIDIOutputEventBlock to carry.
+    const auto caps = g_last_effect_processor->panic_capabilities();
+    CHECK(caps.serviced);
+    CHECK(caps.midi_out == g_last_effect_processor->descriptor().produces_midi);
+    [unit release];
+}
+
 TEST_CASE("AU adapters survive repeated allocate render deallocate destroy cycles",
           "[au][lifecycle][churn]") {
     ScopedFactoryRegistration registration(create_effect_processor);
