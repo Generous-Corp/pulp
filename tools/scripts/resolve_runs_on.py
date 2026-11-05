@@ -39,6 +39,19 @@ The script supports two modes, selected by `--mode`:
     sanitizer jobs pick their own platform and the repo var is the single
     switch.
 
+### Fork pull requests
+
+Repository variables resolve for fork pull requests, so a selector read from
+one could put a fork's code on a self-hosted runner. For a pull-request event
+(`GITHUB_EVENT_NAME`) whose head repository (`PR_HEAD_REPO`, from
+`github.event.pull_request.head.repo.full_name`) is not `GITHUB_REPOSITORY`,
+every mode ignores the dispatch input and every variable and returns its
+GitHub-hosted fallback (`--default-label`, or `--github-hosted-label`;
+nothing in optional-namespace mode). A missing head repository counts as a
+fork: a deleted fork's head is null. So a pull-request caller must pass
+`PR_HEAD_REPO`, or its own pull requests route to the hosted fallback too.
+A fallback that is not a GitHub-hosted label is refused.
+
 Output: a JSON string/array suitable for the GHA `runs-on:` key, printed
 on stdout. Exit 0 on success, 1 on validation error (with human-readable
 stderr).
@@ -111,6 +124,20 @@ def _load_selector(raw: str, target_name: str) -> str:
         )
         sys.exit(1)
     return json.dumps(decoded)
+
+
+PR_EVENTS = ("pull_request", "pull_request_target", "pull_request_review", "pull_request_review_comment")
+# GitHub-hosted labels, the only fallbacks a fork pull request may get.
+HOSTED_LABEL = re.compile(r"^(?:ubuntu|macos|windows)-(?:latest|[0-9][0-9.]*)(?:-(?:arm|large|xlarge|intel))?$")
+
+
+def is_fork_pull_request(env=os.environ) -> bool:
+    """True for a pull-request event whose head is not this repository. A
+    missing head repository (the fork was deleted) counts as a fork."""
+    if (env.get("GITHUB_EVENT_NAME") or "").strip() not in PR_EVENTS:
+        return False
+    head = (env.get("PR_HEAD_REPO") or "").strip()
+    return not head or head != (env.get("GITHUB_REPOSITORY") or "").strip()
 
 
 def _env_nonempty(name: Optional[str]) -> str:
@@ -301,6 +328,21 @@ def main(argv: Optional[list[str]] = None) -> int:
                 file=sys.stderr,
             )
             return 1
+
+    if is_fork_pull_request():
+        fallback = args.github_hosted_label if args.mode == "provider" else args.default_label
+        if args.mode == "optional-namespace":
+            sys.stdout.write("")
+            return 0
+        if not fallback or not HOSTED_LABEL.match(fallback):
+            print(f"{args.target_name}: a fork pull request may only get a GitHub-hosted label, "
+                  f"and the fallback is {fallback!r}.", file=sys.stderr)
+            return 1
+        print(f"::notice::{args.target_name}: fork pull request "
+              f"({(os.environ.get('PR_HEAD_REPO') or '').strip() or 'deleted head'}); "
+              f"routing to GitHub-hosted {fallback}.", file=sys.stderr)
+        sys.stdout.write(json.dumps(fallback))
+        return 0
 
     if args.mode == "provider":
         if not args.github_hosted_label:

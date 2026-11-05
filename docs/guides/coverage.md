@@ -150,6 +150,10 @@ GitHub and Codecov. Trial it with a manual dispatch first; only make it the
 repository default after one complete refresh produces the required receipts.
 Do not hard-code a host label in this document.
 
+A pull request whose head repository is a fork, or has been deleted (no head
+repository), always runs on the hosted runner; the repository variable is
+ignored for it.
+
 When changing coverage behavior, update the workflow comments, this contract,
 `codecov.yml`, and the receipt/config contract tests in the same change. The
 machine-facing sources are authoritative in this order:

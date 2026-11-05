@@ -254,8 +254,9 @@ jobs:
           WORKFLOW_DISPATCH_MISE_CANDIDATE: ${{ inputs.mise_candidate }}
           WORKFLOW_DISPATCH_LOCAL_PROOF: ${{ inputs.local_proof }}
           LOCAL_MACOS_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '' }}
-          # Empty for anything that is not a pull request; for a PR it is the
-          # head's owner/repo, which is how the block below detects a fork.
+          # The head's owner/repo for a pull request, which is how the block
+          # below detects a fork; empty when the fork was deleted, and for
+          # every other event.
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           # BUSY threshold for macOS overflow. With one local runner,
           # BUSY >= 1 would overflow as soon as any job is in flight.
@@ -323,11 +324,13 @@ jobs:
           LINUX_EVENT_NAME = "pull_request" if PR_DISPATCH else EVENT_NAME
           REF = (os.environ.get("GITHUB_REF") or "").strip()
           WORKFLOW_REF = (os.environ.get("WORKFLOW_REF") or "").strip()
-          # A pull request whose head lives in another repository. Empty
-          # PR_HEAD_REPO means this is not a pull request at all.
+          # A pull request whose head is not this repository. A pull request
+          # with no head repository (its fork was deleted) counts as a fork.
           _pr_head_repo = (os.environ.get("PR_HEAD_REPO") or "").strip()
           _this_repo = (os.environ.get("GITHUB_REPOSITORY") or "").strip()
-          IS_FORK_PR = bool(_pr_head_repo) and _pr_head_repo != _this_repo
+          IS_FORK_PR = EVENT_NAME.startswith("pull_request") and (
+              not _pr_head_repo or _pr_head_repo != _this_repo
+          )
           # Events whose only job is to publish the GitHub-hosted Linux/Windows
           # caches. The macOS leg rides along for a different reason — see the
           # matrix assembly below.

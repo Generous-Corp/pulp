@@ -4571,6 +4571,15 @@ checked-in workflow, but it is not access control: pull-request workflow YAML is
 part of the contributor-controlled merge commit and can remove its own guard.
 Repo variables also resolve for fork runs.
 
+A deleted fork counts as a fork. Its head repository is null, so
+`head.repo.full_name != github.repository` must be the test, never "non-empty
+and foreign", and never `!head.repo.fork` (`!null` is true). A job a pull
+request can start that reads a self-hosted-capable variable into `runs-on`
+gates it on `head.repo.full_name == github.repository`. A
+`resolve_runs_on.py` call passes `PR_HEAD_REPO`; without it the resolver sends
+same-repository pull requests to the hosted fallback too.
+`fork_runner_guard_check.py` enforces both.
+
 The external trust boundary lives outside PR-controlled YAML. Pulp now ships two
 distinct protected Proxmox provider roles in addition to the existing generic
 repository-scoped pool:

@@ -325,6 +325,8 @@ class LinuxRoutingTest(unittest.TestCase):
                if not k.startswith(("GITHUB_", "PULP_", "EXPLICIT_", "NAMESPACE_"))}
         env.update({
             "REQUESTED_PROVIDER": "github-hosted", "GITHUB_EVENT_NAME": event,
+            # A same-repository pull request's payload names its own repository.
+            "PR_HEAD_REPO": REPO if event == "pull_request" else "",
             "GITHUB_REPOSITORY": REPO, "GITHUB_WORKSPACE": str(ROOT),
             "WORKFLOW_REF": f"{REPO}/.github/workflows/build.yml@refs/heads/topic",
             "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON": explicit,
@@ -442,6 +444,8 @@ class RoutingParityTest(LinuxRoutingTest):
                 if not k.startswith(("GITHUB_", "PULP_", "EXPLICIT_", "NAMESPACE_"))}
         base.update({
             "REQUESTED_PROVIDER": "github-hosted", "GITHUB_EVENT_NAME": event,
+            # A same-repository pull request's payload names its own repository.
+            "PR_HEAD_REPO": REPO if event == "pull_request" else "",
             "GITHUB_REPOSITORY": REPO, "GITHUB_WORKSPACE": str(ROOT),
             "WORKFLOW_REF": f"{REPO}/.github/workflows/build.yml@refs/heads/topic",
             "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON": "", "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON": "",
