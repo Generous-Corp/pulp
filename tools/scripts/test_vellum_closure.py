@@ -2127,5 +2127,74 @@ class ClosureCtestWiringTests(unittest.TestCase):
             self.assertNotIn("DEPENDS", props(test), test)
 
 
+class MirrorEdgeRootTests(unittest.TestCase):
+    """The edge rules follow the table's roots, so a renamed mirror is still scanned."""
+
+    SPELLINGS = (("pulp",), ("vellum",), ("pulp", "vellum"))
+
+    def setUp(self):
+        import vellum_mirror_edge_table as generator
+        self.generator = generator
+        self.table = json.loads((REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8"))
+
+    def spelled(self, names):
+        return self.generator.generate(REPO_ROOT, {kind: names for kind in self.generator.ROOT_KINDS})
+
+    def rules(self, table):
+        return {**table["content_patterns"], **table["path_patterns"]}
+
+    def test_the_shipped_table_is_spelled_pulp(self):
+        self.assertEqual(self.generator.table_roots(self.table),
+                         {"namespace": ("pulp",), "include": ("pulp",), "target": ("pulp",)})
+        self.assertEqual(self.generator.render(self.spelled(("pulp",))),
+                         (REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8"))
+
+    def test_every_rule_has_controls(self):
+        controls = self.table["controls"]
+        self.assertEqual(set(controls), set(self.rules(self.table)))
+        for rule, texts in controls.items():
+            self.assertTrue(texts, rule)
+
+    def test_every_control_matches_its_rule_under_every_spelling(self):
+        for names in self.SPELLINGS:
+            table = self.spelled(names)
+            for rule, pattern in self.rules(table).items():
+                compiled = re.compile(pattern)
+                templates = table["controls"].get(rule, [])
+                with self.subTest(spelling=names, rule=rule):
+                    self.assertTrue(templates, f"{rule} has no control, so nothing proves it can match")
+                for template in templates:
+                    for name in names:
+                        text = self.generator.instantiate(template, name)
+                        with self.subTest(spelling=names, rule=rule, control=text):
+                            self.assertTrue(compiled.search(text))
+
+    def test_a_respelled_table_spells_no_other_root(self):
+        for rule, pattern in self.rules(self.spelled(("vellum",))).items():
+            self.assertNotIn("pulp", pattern.lower(), rule)
+
+    def test_the_gate_refuses_a_renamed_edge_under_the_renamed_table(self):
+        from vellum_closure import closure_mention_violations, mirror_edge_table
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "table.json"
+            path.write_text(self.generator.render(self.spelled(("pulp", "vellum"))), encoding="utf-8")
+            table = mirror_edge_table(path)
+            (Path(td) / "x.cpp").write_text("#include <vellum/midi/midi_event.hpp>\n", encoding="utf-8")
+            (Path(td) / "y.cpp").write_text("#include <pulp/midi/midi_event.hpp>\n", encoding="utf-8")
+            for rel in ("x.cpp", "y.cpp"):
+                found = closure_mention_violations({"source_root": td, "files": [rel]}, table)
+                self.assertTrue(any(v.startswith("mirror-product-include") for v in found), (rel, found))
+            # The shipped table does not yet read the renamed spelling.
+            found = closure_mention_violations({"source_root": td, "files": ["x.cpp"]})
+            self.assertEqual(found, [])
+
+    def test_roots_are_validated(self):
+        for roots in ({}, {"namespace": ["pulp"], "include": ["pulp"]},
+                      {"namespace": [], "include": ["pulp"], "target": ["pulp"]},
+                      {"namespace": ["pu|lp"], "include": ["pulp"], "target": ["pulp"]}):
+            with self.subTest(roots=roots), self.assertRaises(SystemExit):
+                self.generator.table_roots({"roots": roots})
+
+
 if __name__ == "__main__":
     unittest.main()

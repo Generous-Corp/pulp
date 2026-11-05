@@ -132,6 +132,24 @@ class ProcessorNodeInstance final {
     const PluginDescriptor& descriptor() const noexcept {
         return descriptor_;
     }
+    int graph_type_version() const noexcept {
+        return graph_type_version_;
+    }
+    void set_graph_type_version(int version) noexcept {
+        graph_type_version_ = version;
+    }
+    std::string_view graph_type_id() const noexcept {
+        return graph_type_id_;
+    }
+    void set_graph_type_id(std::string id) {
+        graph_type_id_ = std::move(id);
+    }
+    int graph_state_schema_version() const noexcept {
+        return graph_state_schema_version_;
+    }
+    void set_graph_state_schema_version(int version) noexcept {
+        graph_state_schema_version_ = version;
+    }
     std::span<const state::ParamInfo> parameter_catalog() const noexcept {
         return parameter_catalog_;
     }
@@ -159,6 +177,9 @@ class ProcessorNodeInstance final {
     std::unique_ptr<Processor> processor_;
     PluginDescriptor descriptor_;
     std::vector<state::ParamInfo> parameter_catalog_;
+    int graph_type_version_ = 1;
+    std::string graph_type_id_;
+    int graph_state_schema_version_ = 1;
     ProcessorNode adapter_;
     bool prepared_ = false;
 };

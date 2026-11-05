@@ -21,6 +21,14 @@ generated rather than written by hand:
   kept edge may stay in a mirrored file, and an exception holds for that
   exact line only.
 
+No rule spells a namespace, include root or target prefix itself. The table's
+`roots` name them (`namespace`, `include`, `target`), each a list so a mirror
+part-way through a rename can be scanned under both spellings, and every rule
+is built from them. The table's `controls` give, per rule, text that rule must
+match, written with `@namespace@`, `@include@` and `@target@` placeholders;
+test_vellum_closure.py renders the table under each spelling and fails when a
+rule matches none of its controls or still spells a root it was not given.
+
 `--check` fails when the table differs from what its sources produce;
 `--write` regenerates it.
 """
@@ -61,6 +69,54 @@ VENDOR_INCLUDE_PREFIXES = (
 KEPT_INCLUDE = "mirror-pulp-kept-include"
 KEPT_SYMBOL = "mirror-pulp-kept-symbol"
 KEPT_FILE = "mirror-pulp-kept-file"
+ROOT_KINDS = ("namespace", "include", "target")
+# The include root the kept headers sit under in this checkout. Derived include
+# and file rules are respelled from it to the table's include roots.
+SOURCE_INCLUDE_ROOT = "pulp"
+
+
+def table_roots(table: dict) -> dict[str, tuple[str, ...]]:
+    """The namespace, include-root and target-prefix spellings the rules use."""
+    roots = table.get("roots")
+    if not isinstance(roots, dict) or set(roots) != set(ROOT_KINDS):
+        raise SystemExit(f"{TABLE}: roots must name exactly {', '.join(ROOT_KINDS)}")
+    spelled: dict[str, tuple[str, ...]] = {}
+    for kind in ROOT_KINDS:
+        names = roots[kind]
+        if not isinstance(names, list) or not names or not all(
+                isinstance(name, str) and re.fullmatch(r"[a-z][a-z0-9_]*", name) for name in names):
+            raise SystemExit(f"{TABLE}: roots.{kind} must be a non-empty list of identifiers")
+        spelled[kind] = tuple(names)
+    return spelled
+
+
+def root_pattern(names: tuple[str, ...]) -> str:
+    """One spelling as itself, several as a non-capturing alternation."""
+    escaped = [re.escape(name) for name in names]
+    return escaped[0] if len(escaped) == 1 else "(?:" + "|".join(escaped) + ")"
+
+
+def respell_include(path: str, include: str) -> str:
+    """`pulp/view/x.hpp` as a pattern under the include-root pattern `include`."""
+    head, sep, rest = path.partition("/")
+    if head != SOURCE_INCLUDE_ROOT or not sep:
+        raise SystemExit(f"kept header {path} is not under {SOURCE_INCLUDE_ROOT}/")
+    return include + re.escape("/" + rest)
+
+
+def respell_file(path: str, include: str) -> str:
+    """A mirror-relative path as a pattern, its `include/<root>/` respelled."""
+    match = re.match(r"^(core/[^/]+/include/)([^/]+/.+)$", path)
+    if not match:
+        return re.escape(path)
+    return re.escape(match.group(1)) + respell_include(match.group(2), include)
+
+
+def instantiate(template: str, spelling: str) -> str:
+    """A control written with root placeholders, under one root spelling."""
+    for kind in ROOT_KINDS:
+        template = template.replace(f"@{kind}@", spelling)
+    return template
 
 
 def kept_view_audio_headers(root: Path) -> list[Path]:
@@ -132,22 +188,23 @@ def alternation(items: list[str]) -> str:
     return "|".join(re.escape(item) for item in items)
 
 
-def derived_rules(root: Path) -> dict[str, str]:
-    includes = alternation(kept_include_paths(root))
-    files = alternation(d3_kept_files(root))
+def derived_rules(root: Path, roots: dict[str, tuple[str, ...]]) -> dict[str, str]:
+    ns, inc, target = (root_pattern(roots[kind]) for kind in ROOT_KINDS)
+    includes = "|".join(respell_include(path, inc) for path in kept_include_paths(root))
+    files = "|".join(respell_file(path, inc) for path in d3_kept_files(root))
     symbols = alternation(kept_symbols(root))
     policy = root / "tools/scripts/vellum_policy.json"
     areas = "|".join(vellum_policy.names(policy))
     stems = vellum_policy.alternation(policy)
     return {
         PRODUCT_INCLUDE: (
-            r"#\s*(?:include|import)\s*[<\"](?:pulp/(?:" + areas + r")/|" + VENDOR_INCLUDE_PREFIXES + r")"
+            r"#\s*(?:include|import)\s*[<\"](?:" + inc + r"/(?:" + areas + r")/|" + VENDOR_INCLUDE_PREFIXES + r")"
         ),
-        PRODUCT_SYMBOL: r"\bpulp::(?:" + areas + r")\b|\bpulp[-_](?:" + stems + r")\b",
+        PRODUCT_SYMBOL: r"\b" + ns + r"::(?:" + areas + r")\b|\b" + target + r"[-_](?:" + stems + r")\b",
         KEPT_INCLUDE: (
-            r"#\s*(?:include|import)\s*[<\"](?:pulp/view/(?:audio/|(?:widgets/)?(?:"
+            r"#\s*(?:include|import)\s*[<\"](?:" + inc + r"/view/(?:audio/|(?:widgets/)?(?:"
             + BASE_KEPT_VIEW_NAMES
-            + r")\.h)|pulp/state/content_registry\.h|(?:" + includes + r")[>\"])"
+            + r")\.h)|" + inc + r"/state/content_registry\.h|(?:" + includes + r")[>\"])"
         ),
         KEPT_SYMBOL: r"\b(?:" + symbols + r")\b",
         KEPT_FILE: (
@@ -173,9 +230,12 @@ def approved_exceptions(root: Path, content_patterns: dict[str, str]) -> list[di
     return sorted(exceptions, key=lambda row: (row["path"], row["rule"], row["line"]))
 
 
-def generate(root: Path) -> dict:
+def generate(root: Path, roots: dict[str, tuple[str, ...]] | None = None) -> dict:
+    """The table its sources produce, under its own roots or the given ones."""
     table = json.loads((root / TABLE).read_text(encoding="utf-8"))
-    rules = derived_rules(root)
+    if roots is not None:
+        table["roots"] = {kind: list(roots[kind]) for kind in ROOT_KINDS}
+    rules = derived_rules(root, table_roots(table))
     table["content_patterns"][PRODUCT_INCLUDE] = rules[PRODUCT_INCLUDE]
     table["content_patterns"][PRODUCT_SYMBOL] = rules[PRODUCT_SYMBOL]
     table["content_patterns"][KEPT_INCLUDE] = rules[KEPT_INCLUDE]

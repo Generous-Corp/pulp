@@ -66,4 +66,4 @@ run_step(build "${CMAKE_COMMAND}" -E env PULP_BUILD_JOBS=1
     "${CMAKE_COMMAND}" --build "${_build}")
 run_step(consumer "${_build}/pulp-processor-restore-consumer")
 run_step(ctest "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}" --output-on-failure)
-message(STATUS "G2 installed-SDK restoration proof complete; graph v4 persistence not claimed")
+message(STATUS "G2 installed-SDK restoration and graph v4 emission proof complete")
