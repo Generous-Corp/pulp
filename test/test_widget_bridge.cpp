@@ -5,6 +5,14 @@
 
 #include <array>
 
+#ifdef PULP_HAS_SKIA
+#include <pulp/canvas/skia_canvas.hpp>
+#include "include/core/SkCanvas.h"
+#include "include/core/SkColor.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkSurface.h"
+#endif
+
 TEST_CASE("WidgetBridge counts native calls used by imported UI mount and steps",
           "[view][bridge][wp0]") {
     ScriptEngine engine;
@@ -7077,3 +7085,57 @@ TEST_CASE("WidgetBridge ctor with non-null gpu_surface stores it",
 // to `catch(...)`, losing the original message. The fix: log the JS error
 // via runtime::log_error("PULP_EVAL_THROW: ...") BEFORE re-throwing so the
 // JS error reaches stderr regardless of whether the downstream catch matches.
+
+#ifdef PULP_HAS_SKIA
+TEST_CASE("Scripted raster cache refreshes after canvas command replacement",
+          "[view][subtree-cache][raster][bridge]") {
+    using namespace pulp::canvas;
+    class CountingCanvas : public pulp::view::CanvasWidget {
+      public:
+        int paints = 0;
+        void paint(Canvas& canvas) override {
+            ++paints;
+            CanvasWidget::paint(canvas);
+        }
+    } view;
+    view.set_bounds({0, 0, 64, 64});
+    pulp::view::ScriptEngine engine;
+    pulp::state::StateStore state;
+    pulp::view::WidgetBridge bridge(engine, view, state);
+    bridge.load_script("setRasterCached('', true)");
+    auto store = SkiaCanvas::create_retained_layer_store();
+    const auto replace = [&](Color color) {
+        view.clear_commands();
+        pulp::view::CanvasDrawCmd command{};
+        command.type = pulp::view::CanvasDrawCmd::Type::fill_rect;
+        command.w = command.h = 64;
+        command.color = color;
+        view.add_command(command);
+    };
+    const auto render = [&] {
+        auto info = SkImageInfo::MakeN32Premul(64, 64);
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorWHITE);
+        SkiaCanvas canvas(surface->getCanvas(), nullptr, store);
+        view.paint_all(canvas);
+        std::vector<uint8_t> pixels(64 * 64 * 4);
+        REQUIRE(surface->readPixels(info, pixels.data(), 64 * 4, 0, 0));
+        return pixels;
+    };
+    replace(Color::rgba8(20, 70, 200, 255));
+    const auto initial = render();
+    REQUIRE(render() == initial);
+    REQUIRE(view.paints == 1);
+    replace(Color::rgba8(210, 30, 60, 255));
+    const auto changed = render();
+    REQUIRE(changed != initial);
+    REQUIRE(render() == changed);
+    REQUIRE(view.paints == 2);
+    bridge.load_script("setRasterCached('', false)");
+    REQUIRE(render() == changed);
+    REQUIRE(render() == changed);
+    REQUIRE(view.paints == 4);
+}
+
+#endif // PULP_HAS_SKIA
