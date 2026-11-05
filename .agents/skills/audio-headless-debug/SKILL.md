@@ -349,3 +349,15 @@ assumption. `tone_residual_db` is the projection path and sidesteps window
 leakage entirely — prefer it to reading a windowed spectrum near a loud tone, and
 note that kaiser's deep floor holds near the tone but not at bins 1–3, where the
 DC-removal pedestal dominates regardless of window.
+
+## Reproducing a stuck note: `request_panic` is serviced by `HeadlessHost`
+
+`HeadlessHost` services `Processor::request_panic()` before every block, so a
+hung-note bug can be reproduced and its fix asserted without a DAW: hold a
+note, call `request_panic()`, and the next block is silent (the plug-in's
+`on_panic()` ran) and, when the descriptor declares `produces_midi`, `midi_out`
+carries note-offs for the notes the plug-in left held plus the channel panic
+messages. A processor with no MIDI output gets the voice reset only. The plug-in
+format adapters do not service requests yet, so `panic_capabilities().serviced`
+is false there; do not use the headless result to claim a DAW behaviour. Test:
+`test/test_midi_panic_processor.cpp`.

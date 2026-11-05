@@ -295,6 +295,9 @@ pulp_add_test_suite(pulp-test-headless GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-format-hardening GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
+# Processor-level MIDI panic: request, service, voice reset, MIDI-out emission
+pulp_add_test_suite(pulp-test-midi-panic-processor GROUP pulp-test-group-cap-format
+    LIBRARIES pulp::format pulp::midi)
 
 # Editor parameter-write provenance: host automation interleaved with editor
 # edits during an open gesture, exact begin/value/end ordering, one normalized

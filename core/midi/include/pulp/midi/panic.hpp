@@ -139,6 +139,23 @@ inline std::size_t panic_messages(const PanicScope& scope, std::span<MidiEvent> 
     return n;
 }
 
+/// Call `fn(channel, note)` for every key `keys` reports as held on the
+/// channels in `channel_mask`, in channel then note order. The allocation-free
+/// way to walk the held set when a caller writes straight into its own buffer
+/// instead of an intermediate span.
+template <typename Fn>
+inline void for_each_held_note(const MidiKeyboardState& keys, std::uint16_t channel_mask,
+                               Fn&& fn) noexcept(noexcept(fn(std::uint8_t{}, std::uint8_t{}))) {
+    for (unsigned ch = 0; ch < 16u; ++ch) {
+        if (((channel_mask >> ch) & 1u) == 0u)
+            continue;
+        for (unsigned note = 0; note < 128u; ++note) {
+            if (keys.is_note_on(static_cast<std::uint8_t>(ch), static_cast<std::uint8_t>(note)))
+                fn(static_cast<std::uint8_t>(ch), static_cast<std::uint8_t>(note));
+        }
+    }
+}
+
 /// Note-off events for exactly the notes `keys` reports as held, on the
 /// channels in `channel_mask`, in channel then note order. This is the precise
 /// form: nothing is sent for a key that is not down. Returns the count written
@@ -147,20 +164,13 @@ inline std::size_t held_note_offs(const MidiKeyboardState& keys, std::span<MidiE
                                   std::uint16_t channel_mask = 0xFFFFu,
                                   std::int32_t sample_offset = 0) noexcept {
     std::size_t n = 0;
-    for (unsigned ch = 0; ch < 16u; ++ch) {
-        if (((channel_mask >> ch) & 1u) == 0u)
-            continue;
-        for (unsigned note = 0; note < 128u; ++note) {
-            if (!keys.is_note_on(static_cast<std::uint8_t>(ch), static_cast<std::uint8_t>(note)))
-                continue;
-            if (n >= out.size())
-                return n;
-            auto event =
-                MidiEvent::note_off(static_cast<std::uint8_t>(ch), static_cast<std::uint8_t>(note));
-            event.sample_offset = sample_offset;
-            out[n++] = event;
-        }
-    }
+    for_each_held_note(keys, channel_mask, [&](std::uint8_t ch, std::uint8_t note) {
+        if (n >= out.size())
+            return;
+        auto event = MidiEvent::note_off(ch, note);
+        event.sample_offset = sample_offset;
+        out[n++] = event;
+    });
     return n;
 }
 

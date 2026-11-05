@@ -349,6 +349,7 @@
       "pulp/format/offline_render_host.hpp",
       "pulp/format/offline_sample_bounce.hpp",
       "pulp/format/offline_sample_slot_bounce.hpp",
+      "pulp/format/panic.hpp",
       "pulp/format/param_group_projection.hpp",
       "pulp/format/param_processing.hpp",
       "pulp/format/parameter_text.hpp",
