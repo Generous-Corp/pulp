@@ -38,6 +38,18 @@ class BaselineTests(unittest.TestCase):
                 self.assertIn("sample-region-compat-baseline",
                               script_input_tests([path]))
 
+    def test_web_sources_define_every_symbol_graph_serializer_uses(self):
+        # graph_serializer.cpp restores Processor records through
+        # ProcessorRestoreRegistry, so the isolated wasm profile must compile
+        # processor_restore.cpp too or pulp-wam-dsp fails at link.
+        repo = Path(__file__).resolve().parents[2]
+        listing = (repo / "tools" / "cmake" /
+                   "PulpSampleRegionWebSources.cmake").read_text(encoding="utf-8")
+        serializer = (repo / "core/host/src/graph_serializer.cpp").read_text(encoding="utf-8")
+        self.assertIn("ProcessorRestoreRegistry", serializer)
+        self.assertIn('${ROOT}/core/host/src/graph_serializer.cpp"', listing)
+        self.assertIn('${ROOT}/core/host/src/processor_restore.cpp"', listing)
+
     def test_generator_reads_linked_source_closure_from_cmake_dependinfo(self):
         repo = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as raw:

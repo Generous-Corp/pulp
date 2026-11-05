@@ -324,7 +324,11 @@ void hash_string(std::uint64_t& h, std::string_view value) {
 
 bool normalize_authored_identity_text(std::string_view input, std::string& output) {
     std::string error;
-    return normalize(input, output, error);
+    if (!normalize(input, output, error) || output.empty() || whitespace_only(output)) {
+        output.clear();
+        return false;
+    }
+    return true;
 }
 
 PortIdentityReport validate_port_identities(std::span<const PortHandle> ports,

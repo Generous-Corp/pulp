@@ -8529,6 +8529,13 @@
    ],
    "kind": "shell"
   },
+  "pulp-test-voice-identity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-ui-build-contracts": {
    "entry": "tools/ui-build/test_ui_build.py",
    "inputs": [

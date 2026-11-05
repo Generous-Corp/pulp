@@ -423,8 +423,11 @@ TEST_CASE("X9 records the runtime ProcessorNode persistence boundary",
           "[host][graph][x9][serializer][capability]") {
     ModularInstrument fixture;
     configure_modular_instrument(fixture);
+    // Graph v4 persists Processor nodes through the restore envelope: the
+    // modular fixture's ProcessorNode now serializes instead of being refused.
     const auto encoded = pulp::host::GraphSerializer::to_json(fixture.graph);
-    REQUIRE(encoded.empty());
+    REQUIRE_FALSE(encoded.empty());
+    REQUIRE(encoded.find("\"processors\"") != std::string::npos);
 
     constexpr auto serialized_processor_node = R"json({
       "format_version": 2,

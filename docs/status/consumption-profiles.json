@@ -490,6 +490,7 @@
       "pulp/host/graph_timing_contract.hpp",
       "pulp/host/graph_types.hpp",
       "pulp/host/hosted_editor_container.hpp",
+      "pulp/host/identity_text.hpp",
       "pulp/host/isolated_scanner.hpp",
       "pulp/host/native_handle_visitor.hpp",
       "pulp/host/node_pack.hpp",
@@ -523,7 +524,8 @@
       "pulp/host/timeline_graph_binding.hpp",
       "pulp/host/timeline_offline_graph.hpp",
       "pulp/host/timeline_offline_renderer.hpp",
-      "pulp/host/trigger_graph.hpp"
+      "pulp/host/trigger_graph.hpp",
+      "pulp/host/voice_identity.hpp"
     ],
     "core/interchange/include": [
       "pulp/interchange/capability.hpp",
