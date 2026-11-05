@@ -22,6 +22,10 @@
 
 namespace pulp::host {
 
+namespace detail {
+struct GraphEventLaneTestAccess;
+} // namespace detail
+
 enum class HostEventResult : std::uint8_t {
     Accepted,
     StaleEpoch,
@@ -69,6 +73,11 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
         if (epoch == 0 || frames == 0 || frames > kMaxFrames ||
             sample_start > std::numeric_limits<std::uint64_t>::max() - frames)
             return HostEventResult::OutOfRange;
+        // Staged records belong to one activation epoch. A new epoch starts
+        // with an empty staging area so a future record from the retired
+        // epoch cannot be projected into the replacement graph.
+        if (epoch != epoch_)
+            size_ = 0;
         epoch_ = epoch;
         sample_start_ = sample_start;
         frames_ = frames;
@@ -110,6 +119,8 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
         const auto end = sample_start_ + frames_;
         std::size_t matching = 0;
         for (std::size_t i = 0; i < size_; ++i) {
+            if (records_[i].epoch != epoch_)
+                continue;
             const auto sample = static_cast<std::uint64_t>(records_[i].absolute_sample);
             if (sample >= sample_start_ && sample < end)
                 ++matching;
@@ -117,6 +128,8 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
         if (matching > out.size())
             return HostEventResult::OutputCapacity;
         for (std::size_t i = 0; i < size_; ++i) {
+            if (records_[i].epoch != epoch_)
+                continue;
             const auto sample = static_cast<std::uint64_t>(records_[i].absolute_sample);
             if (sample >= sample_start_ && sample < end)
                 out[count++] = records_[i];
@@ -134,6 +147,8 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
         }
         std::size_t write = 0;
         for (std::size_t i = 0; i < size_; ++i) {
+            if (records_[i].epoch != epoch_)
+                continue;
             const auto sample = static_cast<std::uint64_t>(records_[i].absolute_sample);
             if (sample < sample_start_ || sample >= end)
                 records_[write++] = records_[i];
@@ -360,8 +375,13 @@ class GraphAuthoredEventLane final {
     GraphEventResult end_block() noexcept {
         if (!active_ || phase_ != 0 || sample_offset_ != block_frames_)
             return GraphEventResult::InvalidPhase;
-        if (cursor_ > std::numeric_limits<std::uint64_t>::max() - block_frames_)
+        if (cursor_ > std::numeric_limits<std::uint64_t>::max() - block_frames_) {
+            // The current block has completed its consumer phase. Retire the
+            // active state even when the monotonic cursor cannot advance, so
+            // the owner can reset to a new epoch instead of remaining wedged.
+            active_ = false;
             return GraphEventResult::OutOfRange;
+        }
         cursor_ += block_frames_;
         counters_.cursor = cursor_;
         active_ = false;
@@ -382,6 +402,12 @@ class GraphAuthoredEventLane final {
     }
 
   private:
+    friend struct detail::GraphEventLaneTestAccess;
+
+    void test_set_cursor_(std::uint64_t cursor) noexcept {
+        cursor_ = cursor;
+    }
+
     std::array<GraphAuthoredEvent, MaxFrames * MaxAcceptedPerSample> records_{};
     GraphEventCounters counters_{};
     std::uint64_t epoch_ = 0;

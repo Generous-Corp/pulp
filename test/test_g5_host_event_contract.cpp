@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 using pulp::host::GraphAuthoredEvent;
@@ -12,6 +13,16 @@ using pulp::host::GraphEventResult;
 using pulp::host::HostEventIngress;
 using pulp::host::HostEventRecord;
 using pulp::host::HostEventResult;
+
+namespace pulp::host::detail {
+struct GraphEventLaneTestAccess {
+    template <std::size_t MaxFrames, std::size_t MaxAcceptedPerSample>
+    static void set_cursor(GraphAuthoredEventLane<MaxFrames, MaxAcceptedPerSample>& lane,
+                           std::uint64_t cursor) {
+        lane.test_set_cursor_(cursor);
+    }
+};
+} // namespace pulp::host::detail
 
 namespace {
 HostEventRecord midi_event(std::uint64_t epoch, std::int64_t sample, std::uint64_t sequence,
@@ -104,6 +115,24 @@ TEST_CASE("G5 host ingress rejects output-capacity and sequence mutations",
     REQUIRE(ingress.pending() == 2);
 }
 
+TEST_CASE("G5 host ingress drops staged records at an epoch boundary",
+          "[host][graph][g5][events][negative-control]") {
+    HostEventIngress<4> ingress;
+    REQUIRE(ingress.begin_block(1, 100, 4) == HostEventResult::Accepted);
+    REQUIRE(ingress.publish(midi_event(1, 110, 1, 9, pulp::midi::MidiEvent::note_on(0, 60, 1))) ==
+            HostEventResult::Accepted);
+    REQUIRE(ingress.pending() == 1);
+    REQUIRE(ingress.end_block() == HostEventResult::Accepted);
+
+    REQUIRE(ingress.begin_block(2, 100, 4) == HostEventResult::Accepted);
+    std::array<HostEventRecord, 1> projected{};
+    std::size_t count = 0;
+    REQUIRE(ingress.project(projected, count) == HostEventResult::Accepted);
+    REQUIRE(count == 0);
+    REQUIRE(ingress.pending() == 0);
+    REQUIRE(ingress.end_block() == HostEventResult::Accepted);
+}
+
 TEST_CASE("G5 MPE sidecar preserves projected sample offsets", "[host][graph][g5][mpe]") {
     HostEventIngress<4> ingress;
     REQUIRE(ingress.begin_block(1, 40, 8) == HostEventResult::Accepted);
@@ -173,4 +202,25 @@ TEST_CASE("G5 graph-authored event lane has checked refusal and attempt budget",
     REQUIRE(lane.end_sample() == GraphEventResult::Accepted);
     REQUIRE(lane.end_block() == GraphEventResult::Accepted);
     REQUIRE(lane.reset(2) == GraphEventResult::Accepted);
+}
+
+TEST_CASE("G5 graph-authored lane recovers after cursor exhaustion",
+          "[host][graph][g5][events][negative-control]") {
+    GraphAuthoredEventLane<1> lane;
+    REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
+    pulp::host::detail::GraphEventLaneTestAccess::set_cursor(
+        lane, std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_sample(0) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_consumer() == GraphEventResult::Accepted);
+    REQUIRE(lane.end_sample() == GraphEventResult::Accepted);
+    REQUIRE(lane.end_block() == GraphEventResult::OutOfRange);
+    REQUIRE_FALSE(lane.active());
+    REQUIRE(lane.reset(2) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_block(2, 0, 1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_sample(0) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_consumer() == GraphEventResult::Accepted);
+    REQUIRE(lane.end_sample() == GraphEventResult::Accepted);
+    REQUIRE(lane.end_block() == GraphEventResult::Accepted);
+    REQUIRE(lane.counters().cursor == 1);
 }

@@ -181,6 +181,13 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        'include': 'pulp/host/graph_event_contract.hpp',
+        'fingerprint': 'sha256:9465b303014bca7aa8d103bb9310c208ca3d31c3ddeb098e0c864047d15769ba',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Bounded host and graph-authored event boundary contract; it is not wired into SignalGraph admission or a generator-facing capability.',
+    },
+    {
         'include': 'pulp/audio/buffer.hpp',
         'fingerprint': 'sha256:d783b077cccb2137232cfcf34924a2fada3e356467f7768fce862785fdda977d',
         'disposition': 'infrastructure',
