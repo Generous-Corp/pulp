@@ -459,15 +459,31 @@ Traps:
   whether the next re-export carries them.
 - Two added events that cover one path with different values fail as a
   conflict. A broad watch event with `false` and a precise export event with
-  `true` for the same path is a conflict, not an override.
+  `true` for the same path is a conflict, not an override. Neither order nor
+  specificity settles it; only an export event with `supersedes:
+  ["<event_id>"]` does. For the paths it lists, the named export event's value
+  stops counting and the correction's value counts. Ranges that span several
+  landed changes (a re-export reconciliation, `--base <old export merge>`) hit
+  this when two PRs each passed alone. A correction may list a path its own
+  change leaves untouched, but only paths every superseded event lists.
 - An export event may list only paths this change owes a decision for; a stray
   path fails, so an event cannot pre-authorise later edits.
-- A frozen path (the pin's `frozen_paths`, exactly the transferred slices'
-  paths) owes no `vellum_inherits` decision but cannot be edited: the report's
+- A frozen path (the pin's `frozen_paths`: the transferred slices' paths
+  minus the paths recorded with an owner ruling in
+  `.github/vellum-export-receipt/owner-unfreezes.json`) owes no
+  `vellum_inherits` decision but cannot be edited: the report's
   `frozen` list fails the check unless an added change event covering the
   path's slice has disposition `framework-backport` or `emergency-exception`.
   A directory entry in `frozen_paths` that no transferred slice covers cannot
   be unfrozen by any event; only a re-pin can.
+- Unfreezing a path on an owner ruling is a pin-only change. Removing the path
+  from its slice in `.github/vellum-ownership.json` as well fails the freeze
+  check ("transferred slice ... cannot change without a designed ownership
+  reversal"). Drop the path from `frozen_paths`, record it in
+  `owner-unfreezes.json` with the URL of the owner's own approval comment
+  and its author (`approved_by`, the owner's login; a bot-authored comment
+  quoting the owner is not the approval), and land that before the
+  change that edits the path, because the pin is read at the base commit.
 - The pin, the receipt copy and `frozen_paths` are read at the BASE commit. A
   change cannot exempt itself by editing them; a re-pin applies to the changes
   after it, and deleting the pin fails.
@@ -478,15 +494,21 @@ Traps:
   exported (another platform's source) owes nothing.
 - The receipt's `pulp_sha` must be a commit in the checkout and an ancestor of
   the head, so the workflow's full-history checkout is load-bearing.
-- Receipt mode runs in the untrusted "Vellum freeze" job only, which executes
-  the change's own copy of the script. The trusted gate does not run it yet;
-  adding it there in the same change would call a flag the base copy lacks and
-  fail that change's merge group.
-- The pin is data a reviewer must read. A change to `frozen_paths` or a swapped
-  receipt is only parsed for shape and self-consistency, and takes effect for
-  every later change, so review a pin edit as an ownership decision. Nothing yet
-  checks the receipt copy against Vellum's blob; the trusted gate, which holds a
-  Vellum reader token, is where that check belongs.
+- Receipt mode runs twice: in the untrusted "Vellum freeze" job from the
+  change's own scripts, and in every privileged lane (the trusted gate's PR and
+  merge-group jobs, and freeze recovery) from the BASE checkout's scripts
+  against the proposed tree. A change that edits a frozen path and rewrites
+  `vellum_receipt_drift.py` to pass therefore still fails "Vellum trusted
+  freeze". A new rule in the receipt scripts takes effect in the trusted lanes
+  only after it lands, so data that relies on the rule (a `supersedes`
+  correction) must ship in a later change than the rule.
+- The pin is data a reviewer must read. A change to `frozen_paths` takes effect
+  for every later change, so review a pin edit as an ownership decision. A
+  swapped receipt copy fails the trusted lanes: with `VELLUM_READER_TOKEN` set,
+  receipt mode requires each pinned copy's blob id (base and head) to equal
+  Vellum main's `receipt_source`, and an unreachable Vellum fails rather than
+  matches. The untrusted job has no token, so a local or "Vellum freeze" run
+  reports `receipt_source: unchecked` and passes that part.
 
 ## The "Vellum freeze" CI job runs two checks, and the second is the one that fails
 

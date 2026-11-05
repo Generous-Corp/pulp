@@ -46,7 +46,7 @@ list(APPEND PULP_SDK_TARGETS
     pulp-playback pulp-events
     pulp-sample-bank-manifest pulp-content pulp-state
     pulp-interchange pulp-dawproject-import pulp-dawproject-export pulp-smf-interop pulp-smf-interchange
-    pulp-audio pulp-midi pulp-signal pulp-graph
+    pulp-audio pulp-midi pulp-signal pulp-dataplane pulp-dataplane-audio pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
     pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-tooling pulp-view-platform pulp-view-native pulp-view
     pulp-standalone pulp-standalone-native pulp-standalone-contract pulp-dsl pulp-native-components
@@ -361,7 +361,7 @@ if(TARGET pulp-authoring-capsule)
     list(APPEND _pulp_sdk_header_subsystems authoring_capsule)
 endif()
 list(APPEND _pulp_sdk_header_subsystems
-    simd timeline_agent_view timeline_editor playback interchange dawproject smf events content state audio midi signal graph format sequence osc canvas
+    simd timeline_agent_view timeline_editor playback interchange dawproject smf events content state audio midi signal dataplane graph format sequence osc canvas
     render view gpu_audio native-components dsl
 )
 if(TARGET pulp-host)

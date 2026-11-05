@@ -1,0 +1,123 @@
+{
+  "id": "bounded-trigger-runtime",
+  "title": "Bounded typed trigger onset and envelope execution in SignalGraph",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "g5-trigger-runtime-exposure",
+  "owned_paths": [
+    "core/host/include/pulp/host/custom_node_events.hpp",
+    "core/host/include/pulp/host/trigger_graph.hpp",
+    "docs/evidence/g5-trigger-runtime-installed-consumer.md",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/metadata.txt",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/positive.log",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/private-negative.log",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/install.log",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/install-repair.log",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/wrong-output-negative.log",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/prefix-manifest.sha256",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/source-manifest.sha256",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/source/positive/main.cpp.txt",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/source/private-header-negative/main.cpp.txt",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/source/wrong-output-negative/main.cpp.txt",
+    "docs/status/sequencer-exposure/rows/bounded-trigger-runtime.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/custom_node_events.hpp",
+      "needles": [
+        "TriggerContext* triggers = nullptr;"
+      ]
+    },
+    {
+      "path": "core/host/src/trigger_graph.cpp",
+      "needles": [
+        "SignalGraph::prepare_trigger_plan",
+        "SignalGraph::ensure_trigger_controller_"
+      ]
+    },
+    {
+      "path": "test/test_trigger_graph.cpp",
+      "needles": [
+        "Typed and spectral preparation remain separate admission lanes",
+        "CHECK(allocation_count == 0);"
+      ]
+    },
+    {
+      "path": "docs/evidence/g5-trigger-runtime-installed-consumer.md",
+      "needles": [
+        "Historical receipt source head: `fc29b7b842dd9890570e88085ec5df8f6f65910f`",
+        "PASS: typed onset, ties, envelope, modulation and lowpass audio",
+        "PARTIAL",
+        "current live `origin/main`",
+        "wrong-output negative"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "A fresh exact-head Release install and external consumer receipt exercises trigger_graph.hpp and custom_node_events.hpp through Pulp::host. The positive consumer executes the admitted framework onset/envelope pair and bounded audio factories against the installed host library; a copied wrong-output control exits nonzero. The event-block pointer does not admit arbitrary Custom callbacks as typed producers; preparation refuses opaque Custom state and mixed spectral plans. This is a bounded typed runtime slice marked PARTIAL, not full G-5 or realtime qualification.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/custom_node_events.hpp",
+          "needles": [
+            "TriggerContext* triggers = nullptr;"
+          ]
+        },
+        {
+          "kind": "sdk_target",
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": [
+            "list(APPEND _pulp_sdk_header_subsystems host)"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "examples/g5-trigger-runtime-consumer/main.cpp",
+          "needles": [
+            "prepare_trigger_plan",
+            "try_install_prepared_trigger_plan"
+          ]
+        },
+        {
+          "kind": "doc",
+          "path": "docs/evidence/g5-trigger-runtime-installed-consumer.md",
+          "needles": [
+            "manifest SHA-256",
+            "Planted-negative control",
+            "private-header negative",
+            "host timestamp"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "This slice adds an in-process C++ SignalGraph runtime seam; no offline timeline command creates or publishes its typed plans."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool is added for typed trigger graph construction or publication."
+    },
+    "live_product_control": {
+      "disposition": "gap",
+      "rationale": "The bounded C++ seam has no product-facing typed trigger authoring or publication control. Baked graph exposure and graph topology controls require separate delivery; this row does not claim a musician can reach the new runtime.",
+      "dependencies": [
+        "baked-graph-event-plane",
+        "graph-topology-read-control"
+      ],
+      "owner": "g5-runtime-seam"
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "Trigger transport, controller publication, and runtime resource bounds are runtime infrastructure, not a new generator-facing capability. The surface ledger fingerprints the public headers without advertising full G-5 support."
+    }
+  }
+}

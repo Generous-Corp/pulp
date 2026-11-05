@@ -516,7 +516,19 @@ else()
 endif()
 add_test(NAME signal-public-headers-no-exceptions
     COMMAND pulp-test-signal-no-exceptions)
+pulp_add_test_suite(pulp-test-spectral-codec
+    SOURCES test_spectral_frame_codec.cpp
+    LIBRARIES pulp::signal pulp::runtime)
+target_compile_definitions(pulp-test-spectral-codec PRIVATE
+    SPECTRAL_CODEC_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/spectral-frame-codec")
+pulp_test_data(pulp-test-spectral-codec NO_DEFINE
+    PATHS test/fixtures/spectral-frame-codec/zero.hex
+          test/fixtures/spectral-frame-codec/asymmetric.hex)
+
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
+pulp_add_test_suite(pulp-test-spectral-guarded-split
+    SOURCES test_spectral_frame_engine_guarded.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-spectral-primitives GROUP pulp-test-group-core-signal
     SOURCES test_spectral_frame_engine.cpp test_spectral_band_mask.cpp
             test_spectral_mask_processor.cpp
@@ -1186,6 +1198,20 @@ pulp_add_test_suite(pulp-test-stft GROUP pulp-test-group-core-signal
 pulp_add_test_suite(pulp-test-visualization
     SOURCES test_visualization.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::view)
+# The benchmark-only VisualizationBridge API, compiled (never linked) with
+# PULP_BENCHMARK in every build so the opt-in benchmark consumers cannot rot.
+if(TARGET pulp-render)
+    add_library(pulp-visualization-bench-consumer-check OBJECT
+        fixtures/benchmark_consumer/visualization_bench_consumer.cpp)
+    target_link_libraries(pulp-visualization-bench-consumer-check
+        PRIVATE pulp::view-audio pulp::render)
+    target_compile_definitions(pulp-visualization-bench-consumer-check PRIVATE PULP_BENCHMARK)
+endif()
+# The bridge's own PULP_BENCHMARK body, compiled (never linked) the same way.
+add_library(pulp-visualization-bench-source-check OBJECT
+    ${CMAKE_SOURCE_DIR}/core/dataplane/src/visualization_bridge.cpp)
+target_link_libraries(pulp-visualization-bench-source-check PRIVATE pulp::dataplane-audio)
+target_compile_definitions(pulp-visualization-bench-source-check PRIVATE PULP_BENCHMARK)
 
 # Clipboard tests
 pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform

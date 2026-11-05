@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.24)
+project(PulpTriggerRuntimeConsumer LANGUAGES CXX)
+find_package(Pulp CONFIG REQUIRED COMPONENTS host)
+add_executable(pulp-trigger-runtime main.cpp)
+target_compile_features(pulp-trigger-runtime PRIVATE cxx_std_20)
+target_link_libraries(pulp-trigger-runtime PRIVATE Pulp::host)
+enable_testing()
+add_test(NAME trigger-runtime COMMAND pulp-trigger-runtime)

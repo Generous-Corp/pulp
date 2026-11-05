@@ -5,13 +5,22 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 
 import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS = ROOT / "tools/scripts"
+sys.path.insert(0, str(SCRIPTS))
+
+import test_vellum_receipt_drift as receipt_fixture  # noqa: E402  (needs the path insert)
 PINNED_TOKEN_ACTION = (
     "actions/create-github-app-token@"
     "64ab729a6294000f5aa4a4bc0b73d1f32bc45510"
@@ -21,7 +30,9 @@ PINNED_CHECKOUT_ACTION = (
     "3d3c42e5aac5ba805825da76410c181273ba90b1"
 )
 RUNNER_EXPRESSION = (
-    "${{ fromJSON(vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON "
+    "${{ fromJSON((github.event_name != 'pull_request' || "
+    "github.event.pull_request.head.repo.full_name == github.repository) "
+    "&& vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON "
     "|| '\"ubuntu-latest\"') }}"
 )
 MACPRO_SELECTOR = [
@@ -303,6 +314,107 @@ class VellumAuthorityWorkflowTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertNotIn("VELLUM_OBSERVATORY_TOKEN", serialized)
+
+
+# Every privileged lane that posts a freeze status, with the step that runs its
+# validators. Each must run receipt mode from the trusted base checkout.
+RECEIPT_LANES = (
+    ("vellum-trusted-gate.yml", "trusted-gate",
+     "Validate proposed data and publish head status"),
+    ("vellum-trusted-gate.yml", "trusted-merge-group",
+     "Revalidate exact merge result with trusted base controls"),
+    ("vellum-freeze-recovery.yml", "rerun-pr-context",
+     "Validate current protected-main candidate and publish head status"),
+)
+FROZEN = "core/state/src/s.cpp"
+NEUTERED_DRIFT = """class ReceiptDriftError(RuntimeError):
+    pass
+
+
+def check(repo, base, head):
+    return {"status": "pass", "state": "active", "owed": {}, "export_id": "neutered"}
+
+
+def describe_failure(report):
+    return ""
+"""
+
+
+def receipt_command(script: str) -> str:
+    """The workflow's receipt-mode validator invocation, continuation lines included."""
+    lines = script.splitlines()
+    starts = [
+        i for i, line in enumerate(lines)
+        if "vellum_freeze_check.py" in line
+        and "--receipt-mode" in "\n".join(lines[i:i + 3])
+    ]
+    if len(starts) != 1:
+        raise AssertionError(f"expected one receipt-mode invocation, found {len(starts)}")
+    block = []
+    for line in lines[starts[0]:]:
+        block.append(line)
+        if not line.rstrip().endswith("\\"):
+            break
+    return "\n".join(block)
+
+
+class TrustedReceiptModeTests(unittest.TestCase):
+    """A PR that edits a frozen file and neuters the receipt check still fails."""
+
+    def setUp(self) -> None:
+        self.fixture = receipt_fixture.Fixture(frozen=[FROZEN])
+        root = self.fixture.root
+        for name in ("vellum_freeze_check.py", "vellum_receipt_drift.py",
+                     "vellum_expansion_watch_check.py"):
+            self.fixture.write(f"tools/scripts/{name}", (SCRIPTS / name).read_bytes())
+        self.base = self.fixture.commit("trusted controls")
+        self.fixture.write(FROZEN, "// edited in Pulp\n")
+        self.fixture.write("tools/scripts/vellum_receipt_drift.py", NEUTERED_DRIFT)
+        self.head = self.fixture.commit("edit frozen path and neuter the check")
+        self.trusted = root / ".trusted"
+        self.proposed = root / ".proposed"
+        self.fixture.git("worktree", "add", "-q", "--detach", str(self.trusted), self.base)
+        self.fixture.git("worktree", "add", "-q", "--detach", str(self.proposed), self.head)
+        self.temp = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.temp, ignore_errors=True)
+        self.fixture.close()
+
+    def run_lane(self, command: str, trusted_root: Path) -> subprocess.CompletedProcess[str]:
+        env = dict(os.environ)
+        env.update({
+            "trusted_root": str(trusted_root),
+            "proposed_tree": str(self.proposed),
+            "proposed_head": self.head,
+            "PR_BASE": self.base,
+            "MERGE_BASE": self.base,
+            "MERGE_HEAD": self.head,
+            "RUNNER_TEMP": str(self.temp),
+        })
+        script = 'set -euo pipefail\nrun_validator() { "$@"; }\n' + command
+        return subprocess.run(["bash", "-c", script], env=env, capture_output=True,
+                              text=True, encoding="utf-8", check=False)
+
+    def test_each_privileged_lane_fails_a_neutered_frozen_edit(self) -> None:
+        for name, job, step in RECEIPT_LANES:
+            with self.subTest(workflow=name, job=job):
+                command = receipt_command(
+                    step_named(workflow(name)["jobs"][job], step)["run"]
+                )
+                self.assertIn('"$trusted_root/tools/scripts/vellum_freeze_check.py"', command)
+                self.assertIn('--repo "$proposed_tree"', command)
+                result = self.run_lane(command, self.trusted)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(FROZEN, result.stderr)
+
+    def test_control_the_neutered_scripts_would_have_passed(self) -> None:
+        # The same invocation pointed at the PR's own scripts passes, so the
+        # failure above comes from where the scripts are read, not the fixture.
+        name, job, step = RECEIPT_LANES[0]
+        command = receipt_command(step_named(workflow(name)["jobs"][job], step)["run"])
+        result = self.run_lane(command, self.proposed)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

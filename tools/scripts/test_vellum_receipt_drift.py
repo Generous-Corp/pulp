@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -336,6 +337,68 @@ class ReceiptDriftTests(unittest.TestCase):
         self.assertEqual((report["status"], report["conflicting"]),
                          ("fail", ["core/state/src/s.cpp"]))
 
+    def _land_range_conflict(self, path: str) -> str:
+        """Two landed changes that disagree over one path, as a re-export range sees them."""
+        self.fixture.write(path, "// added\n")
+        self.fixture.write(f"{drift.EXPORT_EVENT_DIRECTORY}/20261101-claims-true.json",
+                           export_event("20261101-claims-true", [path], True))
+        self.fixture.commit("first change")
+        self.fixture.write("core/canvas/include/pulp/canvas/a.hpp", "// edited\n")
+        self.fixture.write(".github/vellum-expansion-watch-events/20261102-w.json",
+                           {"capability_families": ["render-assets-and-backends"],
+                            "vellum_inherits": False})
+        return self.fixture.commit("second change")
+
+    def test_range_conflict_between_landed_changes_fails(self):
+        path = "core/canvas/include/pulp/canvas/added.hpp"
+        self._land_range_conflict(path)
+        report = self.fixture.check()
+        self.assertEqual((report["status"], report["conflicting"]), ("fail", [path]))
+
+    def test_superseding_export_event_settles_a_range_conflict(self):
+        path = "core/canvas/include/pulp/canvas/added.hpp"
+        landed = self._land_range_conflict(path)
+        self.fixture.write(
+            f"{drift.EXPORT_EVENT_DIRECTORY}/20261103-correction.json",
+            export_event("20261103-correction", [path], False,
+                         supersedes=["20261101-claims-true"]))
+        head = self.fixture.commit("correct the first decision")
+        # The whole range now carries one value for the path.
+        report = drift.check(self.fixture.root, self.fixture.base, head)
+        self.assertEqual((report["status"], report["conflicting"]), ("pass", []))
+        # The correction alone touches no exported path and still passes.
+        alone = drift.check(self.fixture.root, landed, head)
+        self.assertEqual((alone["status"], alone["owed"]), ("pass", {}))
+
+    def test_correction_cannot_claim_a_path_the_superseded_event_never_decided(self):
+        path = "core/canvas/include/pulp/canvas/added.hpp"
+        self._land_range_conflict(path)
+        self.fixture.write(
+            f"{drift.EXPORT_EVENT_DIRECTORY}/20261103-correction.json",
+            export_event("20261103-correction", [path, "core/state/src/s.cpp"], False,
+                         supersedes=["20261101-claims-true"]))
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "does not decide"):
+            self.fixture.check()
+
+    def test_correction_must_name_an_existing_export_event(self):
+        path = "core/canvas/include/pulp/canvas/added.hpp"
+        self._land_range_conflict(path)
+        self.fixture.write(
+            f"{drift.EXPORT_EVENT_DIRECTORY}/20261103-correction.json",
+            export_event("20261103-correction", [path], False,
+                         supersedes=["20261101-not-there"]))
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "not an export event"):
+            self.fixture.check()
+
+    def test_correction_cannot_supersede_itself(self):
+        self.fixture.write("core/state/src/s.cpp", "// edited\n")
+        self.fixture.write(
+            f"{drift.EXPORT_EVENT_DIRECTORY}/20261103-correction.json",
+            export_event("20261103-correction", ["core/state/src/s.cpp"], False,
+                         supersedes=["20261103-correction"]))
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "other export events"):
+            self.fixture.check()
+
     def test_change_event_covers_its_transferred_slice(self):
         self.fixture.write("core/canvas/src/a.cpp", "// edited\n")
         event = {"kind": "change", "slices": ["canvas-kernel"], "vellum_inherits": True}
@@ -559,6 +622,87 @@ class ReceiptDriftTests(unittest.TestCase):
         self.assertIn("vellum_inherits", result.stderr)
 
 
+class ReceiptSourceTests(unittest.TestCase):
+    """The pinned receipt copy must be Vellum main's receipt, byte for byte."""
+
+    SOURCE = f"provenance/mirror/receipts/{EXPORT_ID}.json"
+
+    def setUp(self) -> None:
+        self.fixture = Fixture()
+        self.local = self.fixture.git("rev-parse", f"{self.fixture.base}:{drift.PIN_DIRECTORY}/{EXPORT_ID}.json")
+        self.asked: list[str] = []
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def serve(self, sha: str, path: str | None = None):
+        def fetch(endpoint: str):
+            self.asked.append(endpoint)
+            return {"type": "file", "path": path or self.SOURCE, "sha": sha}
+        return fetch
+
+    def problems(self, fetch, *commits: str) -> list[str]:
+        return drift.receipt_copy_problems(self.fixture.root, commits or (self.fixture.base,), fetch)
+
+    def test_matching_blob_passes_and_asks_vellum_main(self):
+        self.assertEqual(self.problems(self.serve(self.local)), [])
+        self.assertEqual(self.asked, [f"repos/Generous-Corp/vellum/contents/{self.SOURCE}?ref=main"])
+
+    def test_a_copy_that_differs_from_vellum_fails(self):
+        problems = self.problems(self.serve("f" * 40))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("not Vellum's receipt", problems[0])
+
+    def test_a_receipt_vellum_does_not_hold_fails(self):
+        self.assertIn("has no file", self.problems(self.serve(self.local, path="elsewhere.json"))[0])
+
+    def test_an_unreachable_vellum_is_not_a_match(self):
+        def fetch(endpoint: str):
+            raise drift.ReceiptDriftError("network down")
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "network down"):
+            self.problems(fetch)
+
+    def test_a_head_repin_is_checked_too(self):
+        # A swapped copy in the change itself takes effect for later changes,
+        # so the head pin's copy is compared as well as the base's.
+        receipt = receipt_bytes(EXPORTED[:-1])
+        self.fixture.write(f"{drift.PIN_DIRECTORY}/{EXPORT_ID}.json", receipt)
+        self.fixture.write(drift.PIN_PATH, json.dumps(pin_value(receipt)))
+        head = self.fixture.commit("swap the copy")
+        problems = self.problems(self.serve(self.local), self.fixture.base, head)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("not Vellum's receipt", problems[0])
+
+    def test_cli_compares_only_with_a_reader_token(self):
+        head = self.fixture.commit("head")
+        script = (
+            "import sys, runpy\n"
+            f"sys.path.insert(0, {str(SCRIPTS)!r})\n"
+            "import vellum_freeze_check as f\n"
+            "served = sys.argv[1]\n"
+            "f._github_json = lambda url, token: {'type': 'file', 'path': url.split('/contents/')[1].split('?')[0], 'sha': served}\n"
+            "sys.argv = [sys.argv[0]] + sys.argv[2:]\n"
+            "raise SystemExit(f.main())\n"
+        )
+        def run(sha: str, token: str | None):
+            env = {k: v for k, v in os.environ.items() if k != "VELLUM_READER_TOKEN"}
+            if token:
+                env["VELLUM_READER_TOKEN"] = token
+            with tempfile.TemporaryDirectory() as out:
+                return subprocess.run(
+                    [sys.executable, "-c", script, sha, "--receipt-mode", "--repo", str(self.fixture.root),
+                     "--base", self.fixture.base, "--head", head,
+                     "--output", str(pathlib.Path(out) / "r.json")],
+                    capture_output=True, text=True, encoding="utf-8", env=env, check=False)
+        matched = run(self.local, "t")
+        self.assertEqual(matched.returncode, 0, matched.stdout + matched.stderr)
+        mismatch = run("f" * 40, "t")
+        self.assertEqual(mismatch.returncode, 1, mismatch.stderr)
+        self.assertIn("not Vellum's receipt", mismatch.stderr)
+        # Without a token (the untrusted lane) nothing is fetched.
+        self.assertEqual(run("f" * 40, None).returncode, 0)
+
+
 class FrozenCliTests(unittest.TestCase):
     def test_cli_names_a_frozen_edit(self):
         fixture = Fixture(frozen=["core/canvas/src/a.cpp"])
@@ -579,6 +723,80 @@ class FrozenCliTests(unittest.TestCase):
             fixture.close()
 
 
+OWNER_UNFREEZES_PATH = ".github/vellum-export-receipt/owner-unfreezes.json"
+OWNER_UNFREEZES_SCHEMA = "pulp.vellum.owner-unfreezes.v2"
+# The freeze owner, as GitHub spells the login (the ownership map writes it
+# "@danielraffel").
+OWNER_LOGIN = "danielraffel"
+APPROVAL_URL_RE = re.compile(
+    r"^https://github\.com/Generous-Corp/pulp/pull/[1-9][0-9]*#issuecomment-[1-9][0-9]*$"
+)
+
+
+def owner_unfrozen_paths(raw: bytes, transferred: set[str]) -> set[str]:
+    """Validate the owner-controlled unfreeze record and return its exact paths.
+
+    The record is the only source of pin removals the consistency test accepts.
+    Each entry names one exact transferred-slice path, the URL of the owner's
+    approval comment on a Pulp pull request, and ``approved_by``, the comment's
+    author, which must be the freeze owner. Anything else raises ValueError, so
+    a pin deletion without a recorded approval cannot pass. The comment's author
+    is recorded evidence: this offline check does not query GitHub for it.
+    """
+    value = json.loads(raw)
+    if not isinstance(value, dict) or value.get("schema") != OWNER_UNFREEZES_SCHEMA:
+        raise ValueError("owner-unfreezes: wrong schema")
+    paths: set[str] = set()
+    for index, row in enumerate(value.get("unfreezes", [])):
+        where = f"owner-unfreezes[{index}]"
+        if not isinstance(row, dict) or set(row) != {"path", "approval_url", "approved_by"}:
+            raise ValueError(f"{where}: needs exactly path, approval_url, approved_by")
+        if row["approved_by"] != OWNER_LOGIN:
+            raise ValueError(f"{where}: approved_by must be the freeze owner {OWNER_LOGIN}")
+        if not isinstance(row["approval_url"], str) or not APPROVAL_URL_RE.fullmatch(
+            row["approval_url"]
+        ):
+            raise ValueError(f"{where}: approval_url must be a Pulp pull request comment URL")
+        if row["path"] not in transferred:
+            raise ValueError(f"{where}: path is not an exact transferred-slice path")
+        if row["path"] in paths:
+            raise ValueError(f"{where}: repeated path")
+        paths.add(row["path"])
+    return paths
+
+
+class OwnerUnfreezeRecordTests(unittest.TestCase):
+    TRANSFERRED = {"a/x.hpp", "a/y.hpp"}
+
+    def record(self, **row):
+        base = {"path": "a/x.hpp",
+                "approval_url": "https://github.com/Generous-Corp/pulp/pull/1#issuecomment-2",
+                "approved_by": OWNER_LOGIN}
+        base.update(row)
+        return json.dumps({"schema": OWNER_UNFREEZES_SCHEMA, "unfreezes": [base]}).encode()
+
+    def test_recorded_path_is_accepted(self):
+        self.assertEqual(owner_unfrozen_paths(self.record(), self.TRANSFERRED), {"a/x.hpp"})
+
+    def test_unrecorded_pin_deletion_fails_consistency(self):
+        # A path missing from the pin but absent from the record is not accepted.
+        recorded = owner_unfrozen_paths(self.record(), self.TRANSFERRED)
+        pin_after_unrecorded_deletion = ["a/x.hpp"]  # a/y.hpp deleted, no record
+        expected = [p for p in sorted(self.TRANSFERRED) if p not in recorded]
+        self.assertNotEqual(pin_after_unrecorded_deletion, expected)
+
+    def test_record_rejects_forged_entries(self):
+        for bad in (self.record(path="a/z.hpp"), self.record(path="a"),
+                    self.record(approved_by="someone-else"),
+                    self.record(approved_by="@danielraffel"),
+                    self.record(approval_url="trust me"),
+                    self.record(approval_url="https://github.com/Generous-Corp/pulp/pull/1"),
+                    self.record(approval_url="https://github.com/other/pulp/pull/1#issuecomment-2"),
+                    self.record(approval_url="https://github.com/Generous-Corp/pulp/pull/1#issuecomment-2x")):
+            with self.assertRaises(ValueError):
+                owner_unfrozen_paths(bad, self.TRANSFERRED)
+
+
 class CommittedPinTests(unittest.TestCase):
     def test_committed_pin_and_receipt_are_consistent(self):
         pin = drift.parse_pin((REPO / drift.PIN_PATH).read_bytes())
@@ -596,7 +814,10 @@ class CommittedPinTests(unittest.TestCase):
             if item["state"] == "framework-authoritative-transferred"
             for path in item["paths"]
         })
-        self.assertEqual(list(pin.frozen_paths), transferred)
+        unfrozen = owner_unfrozen_paths((REPO / OWNER_UNFREEZES_PATH).read_bytes(),
+                                        set(transferred))
+        self.assertEqual(list(pin.frozen_paths),
+                         [path for path in transferred if path not in unfrozen])
 
 
 if __name__ == "__main__":

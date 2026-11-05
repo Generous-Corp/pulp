@@ -37,6 +37,20 @@
           "PULP_TRACE_SCOPE_NAMED(\"gpu\", \"gpu_present\");"
         ]
       }
+    },
+    {
+      "owner_package": "pulp-view-windows-frame-timing",
+      "introducing_revision": "4a9ddce4f80b9c574e058cbbc5c752c40367df06",
+      "introducing_parent": "14a81522737efa5afe2ec5469ff63ce386bbc64f",
+      "introducing_subject": "perf(windows): expose completed GPU timing alongside shared acquire spans",
+      "changed_paths": [
+        "core/view/src/plugin_frame_renderer.cpp"
+      ],
+      "added_producer_signatures": {
+        "core/view/src/plugin_frame_renderer.cpp": [
+          "PULP_TRACE_SCOPE_NAMED_ARGS( \"gpu\", \"gpu_acquire\", \"gpu_timing_available\", skia.gpu_render_timing_available(), \"last_gpu_render_ms\", skia.gpu_render_time_ms(), \"frames_in_flight\", skia.gpu_frames_in_flight());"
+        ]
+      }
     }
   ],
   "scope_paths": [

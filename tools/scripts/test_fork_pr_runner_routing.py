@@ -68,6 +68,15 @@ def _matrix(head_repo: str | None, *, overflow: str = "local-only",
             dispatch_selector: str = "",
             extra_env: dict[str, str] | None = None) -> list[dict]:
     """Run the real resolver and return its matrix entries."""
+    return _run_resolver(head_repo, overflow=overflow, event=event, dispatch_selector=dispatch_selector,
+                         extra_env=extra_env)[0]
+
+
+def _run_resolver(head_repo: str | None, *, overflow: str = "local-only",
+                  event: str = "pull_request",
+                  dispatch_selector: str = "",
+                  extra_env: dict[str, str] | None = None) -> tuple[list[dict], str]:
+    """Run the real resolver; return its matrix entries and its stderr."""
     env = dict(os.environ)
     env.update(
         GITHUB_EVENT_NAME=event,
@@ -96,7 +105,7 @@ def _matrix(head_repo: str | None, *, overflow: str = "local-only",
         match = re.search(r"matrix_json=(.*)", out.read_text())
         if match is None:
             raise AssertionError("resolver emitted no matrix_json")
-        return json.loads(match.group(1)).get("include", [])
+        return json.loads(match.group(1)).get("include", []), proc.stderr
 
 
 def _macos_runs_on(head_repo: str | None, *, overflow: str = "local-only",
@@ -116,6 +125,20 @@ class ForkPullRequestRunnerRouting(unittest.TestCase):
         self.assertIsNotNone(got, "fork PR lost its macOS leg entirely")
         self.assertNotIn("self-hosted", got)
         self.assertNotIn("pulp-build", got)
+
+    def test_deleted_fork_pr_never_reaches_a_self_hosted_runner(self):
+        # A pull request whose fork was deleted has no head repository: the
+        # payload's head.repo.full_name is null, so PR_HEAD_REPO is empty. It is
+        # still a fork, on every leg.
+        macos = _macos_runs_on(None)
+        self.assertIsNotNone(macos, "deleted-fork PR lost its macOS leg entirely")
+        self.assertNotIn("self-hosted", macos)
+        entries, stderr = _run_resolver(None)
+        for entry in entries:
+            with self.subTest(leg=entry.get("key")):
+                self.assertNotIn("self-hosted", entry["runs_on_json"])
+        # build.yml's own fork check fired, not only resolve_runs_on.py's.
+        self.assertIn("resolve-provider: fork pull request", stderr)
 
     def test_fork_pr_cannot_reach_the_overflow_mac_either(self):
         got = _macos_runs_on("someone-else/pulp", overflow=OVERFLOW)

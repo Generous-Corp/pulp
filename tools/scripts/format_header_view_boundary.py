@@ -53,6 +53,7 @@ VIEW_HEADERS = {
     "pulp/format/detail/standalone_audio_capture_rolling_wav.hpp",
     "pulp/format/detail/standalone_audio_capture_wav.hpp",
     "pulp/format/detail/standalone_audio_scope_json.hpp",
+    "pulp/format/detail/standalone_contract_editor.hpp",
     "pulp/format/detail/standalone_editor_chrome.hpp",
     "pulp/format/detail/standalone_environment.hpp",
     "pulp/format/detail/standalone_key_driver.hpp",

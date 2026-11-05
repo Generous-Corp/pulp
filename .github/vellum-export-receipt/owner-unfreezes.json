@@ -1,0 +1,10 @@
+{
+  "schema": "pulp.vellum.owner-unfreezes.v2",
+  "unfreezes": [
+    {
+      "path": "core/view/include/pulp/view/value_source.hpp",
+      "approval_url": "https://github.com/Generous-Corp/pulp/pull/11451#issuecomment-6612900699",
+      "approved_by": "danielraffel"
+    }
+  ]
+}

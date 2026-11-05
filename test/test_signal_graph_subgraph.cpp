@@ -19,6 +19,28 @@ SubgraphTemplate gain_template() {
     t.parameters = {{"gain", "gain", 1.0f, 0.0f, 2.0f}};
     return t;
 }
+
+SubgraphTemplate source_stage_template() {
+    SubgraphTemplate t;
+    t.identity = "test.source-stage";
+    t.nodes = {{"input", NodeType::AudioInput, 1, 1.0f}, {"gain", NodeType::Gain, 1, 1.0f}};
+    t.edges = {{"input", 0, "gain", 0}};
+    t.exposed_ports = {{"input", "input", 0, true, PortKind::Audio},
+                       {"output", "gain", 0, true, PortKind::Audio}};
+    t.parameters = {{"gain", "gain", 1.0f, 0.0f, 2.0f}};
+    return t;
+}
+
+SubgraphTemplate sink_stage_template() {
+    SubgraphTemplate t;
+    t.identity = "test.sink-stage";
+    t.nodes = {{"gain", NodeType::Gain, 1, 1.0f}, {"output", NodeType::AudioOutput, 1, 1.0f}};
+    t.edges = {{"gain", 0, "output", 0}};
+    t.exposed_ports = {{"input", "gain", 0, false, PortKind::Audio},
+                       {"output", "output", 0, false, PortKind::Audio}};
+    t.parameters = {{"gain", "gain", 1.0f, 0.0f, 2.0f}};
+    return t;
+}
 } // namespace
 
 TEST_CASE("subgraph expands with instance-local ports and parameters") {
@@ -190,4 +212,52 @@ TEST_CASE("subgraph rejects two parameters bound to one node") {
     CHECK_FALSE(expanded);
     CHECK(graph.nodes().empty());
     CHECK(expanded.instance.parameter_nodes.empty());
+}
+
+TEST_CASE("subgraph connects exposed ports by name") {
+    SignalGraph graph;
+    const auto source = instantiate_subgraph(graph, source_stage_template(), "source");
+    const auto sink = instantiate_subgraph(graph, sink_stage_template(), "sink");
+    REQUIRE(source);
+    REQUIRE(sink);
+    REQUIRE(graph.connections().size() == 2);
+
+    const auto connected =
+        connect_subgraph_ports(graph, source.instance, "output", sink.instance, "input");
+    REQUIRE(connected);
+    CHECK(graph.connections().size() == 3);
+    CHECK(graph.connections().back().source_node == source.instance.ports.at("output").node);
+    CHECK(graph.connections().back().dest_node == sink.instance.ports.at("input").node);
+}
+
+TEST_CASE("subgraph port connection negatives are planted and mutation-free") {
+    SignalGraph graph;
+    const auto source = instantiate_subgraph(graph, source_stage_template(), "source");
+    const auto sink = instantiate_subgraph(graph, sink_stage_template(), "sink");
+    REQUIRE(source);
+    REQUIRE(sink);
+    const auto before = graph.connections().size();
+
+    const auto missing =
+        connect_subgraph_ports(graph, source.instance, "missing", sink.instance, "input");
+    CHECK_FALSE(missing);
+    CHECK(missing.code == GraphResult::Code::UnknownPort);
+    CHECK(missing.message().find("subgraph boundary") != std::string::npos);
+    CHECK(graph.connections().size() == before);
+
+    const auto wrong_direction =
+        connect_subgraph_ports(graph, sink.instance, "output", source.instance, "output");
+    CHECK_FALSE(wrong_direction);
+    CHECK(wrong_direction.code == GraphResult::Code::UnknownPort);
+    CHECK(wrong_direction.message().find("not an output") != std::string::npos);
+    CHECK(graph.connections().size() == before);
+
+    auto wrong_kind = sink.instance;
+    wrong_kind.ports.at("input").kind = PortKind::Event;
+    const auto mismatched =
+        connect_subgraph_ports(graph, source.instance, "output", wrong_kind, "input");
+    CHECK_FALSE(mismatched);
+    CHECK(mismatched.code == GraphResult::Code::KindMismatch);
+    CHECK(mismatched.message().find("kinds do not match") != std::string::npos);
+    CHECK(graph.connections().size() == before);
 }

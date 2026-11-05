@@ -1,0 +1,111 @@
+{
+  "id": "graph-offline-edge-probe-tooling",
+  "title": "Bounded offline audio edge probe CLI and installed MCP parity",
+  "classification": "offline_cli_mcp",
+  "delivery_state": "pending",
+  "claim_id": "g7-offline-probe-tooling-consumer",
+  "owned_paths": [
+    "tools/cli/cmd_graph.cpp",
+    "tools/mcp/mcp_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/mcp/mcp_tools.hpp",
+    "docs/status/sequencer-exposure/rows/graph-offline-edge-probe-tooling.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/graph_edge_probe_sdk.py",
+      "needles": [
+        "graph-edge-probe installed CLI/MCP parity PASS",
+        "edge_index"
+      ]
+    },
+    {
+      "path": "tools/cli/cmd_graph.cpp",
+      "needles": [
+        "GraphSerializer::from_file"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "Uses the existing public edge probe API through a standalone Pulp::host consumer; no new public header or symbol."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Offline file input and bounded graph execution only; no live control, event edge, real-time, or executor authority is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No installed SDK capability or agent manifest entry changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "exposed",
+      "rationale": "Offline graph audio edge measurement with bounded file, graph, input, and block admission. MCP invokes the matched installed CLI sibling; refusals preserve CLI status. No timeline mutation is introduced.",
+      "evidence": [
+        {
+          "kind": "cli_handler",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": [
+            "probe"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/graph_edge_probe_sdk.py",
+          "needles": [
+            "graph-edge-probe installed CLI/MCP parity PASS"
+          ]
+        },
+        {
+          "kind": "cli_definition",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": [
+            "probe: --input file.wav --source-node NAME --source-port NAME"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_mcp": {
+      "disposition": "exposed",
+      "rationale": "Offline graph audio edge measurement with bounded file, graph, input, and block admission. MCP invokes the matched installed CLI sibling; refusals preserve CLI status. No timeline mutation is introduced.",
+      "evidence": [
+        {
+          "kind": "mcp_handler",
+          "path": "tools/mcp/mcp_tools.cpp",
+          "needles": [
+            "configure_graph_executable"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/graph_edge_probe_sdk.py",
+          "needles": [
+            "graph-edge-probe installed CLI/MCP parity PASS"
+          ]
+        },
+        {
+          "kind": "mcp_definition",
+          "path": "tools/mcp/pulp_mcp.cpp",
+          "needles": [
+            "block_frames",
+            "source_node",
+            "destination_node"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}

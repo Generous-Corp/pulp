@@ -65,3 +65,46 @@ unsupported requests, concurrent reading and callback allocation absence. These
 are macOS functional and allocation checks, not the roadmap's paced deadline or
 cross-platform realtime qualification. CLI/MCP probes, control/event capture,
 latency/PDC maps and broad plan introspection remain separate work.
+
+## Observe a saved graph offline
+
+```sh
+pulp graph probe graph.pulpgraph --input input.wav \
+  --source-node source --source-port audio \
+  --destination-node downstream --destination-port audio \
+  --block-frames 64 --json
+```
+
+Node names must be unique. The command prepares the graph, attaches the named
+edge, processes the supplied audio, and drains after each block. It emits JSON
+only, including without `--json`. It does not write the graph or audio files.
+`code` is `Attached` on success; attachment refusals retain the C++ enum spelling
+(`UnknownPort`, `MissingEdge`, `UnsupportedKind`, `UnsupportedExecution`,
+`Unprepared`, `Busy`, `Detached`). Other input failures have descriptive codes
+such as `invalid_block_frames` or `input_limit`. A refusal exits 2.
+
+Limits are a 1 MiB graph, 128 nodes, 512 connections, 1024 ports, built-in
+input/output/gain/MIDI nodes, and an audio input with 1–8 channels, 8000–192000 Hz,
+1–480000 frames, and at most 4096 blocks. Block size is 1–4096 frames, default 64.
+Plugin/custom nodes are refused. Nonfinite input or measured peak/RMS is refused
+before publishing a sample report; JSON never substitutes zero for these values.
+The command reports source-side observations, not downstream output quality.
+
+The report includes `records` (`sequence`, `timestamp_samples`, `edge_index`,
+`frames`, `peak`, `rms`), `identity`, `dropped`, input `frames` and `sample_rate`.
+The identity's graph lifetime, generation and connection counters are decimal
+strings to preserve 64-bit precision. Graph lifetime is process-local; do not
+use it as a persisted semantic fingerprint or compare it across CLI processes.
+
+The installed MCP `pulp_graph` operation `probe` accepts `path`, `input`,
+`source_node`, `source_port`, `destination_node`, `destination_port`, and optional
+integer `block_frames`. It returns the same CLI JSON as text and marks refusals
+with `isError: true`. It runs its matched sibling CLI with a 30-second deadline
+and a 2 MiB output cap, including outside a source checkout.
+
+The `examples/graph-edge-probe` standalone consumer links only installed
+`Pulp::host`. It checks a source gain of 0.5 before a downstream gain of 0.25,
+unchanged rendered audio, clocks, identity, loss and refusals. The installed
+consumer test also invokes actual CLI/MCP binaries against its saved fixture.
+This is bounded offline functional proof, not paced realtime qualification,
+control/event capture, or a complete latency/PDC map.

@@ -11,7 +11,6 @@
 namespace pulp::view {
 
 class View;
-class HostParamSurface;
 
 // Collaborator that owns the DesignFrameView sub-clusters concerned with
 // host-parameter binding: per-element scalar sources, the bind grid, and the

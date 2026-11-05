@@ -89,11 +89,36 @@ add_test(NAME editor-ui-package-per-plugin-factory
         "$<TARGET_FILE:PulpEditorUiNone_CLAP>=editor:none"
         "$<TARGET_FILE:PulpEditorUiPlain_CLAP>=editor:none")
 # The host also opens each UI package plug-in's GUI through the contract,
-# which plug-in editors refuse in CI and headless environments.
+# which plug-in editors refuse in CI and headless environments, and on X11
+# platforms without a display. The tagged editors never reach a display server,
+# so a placeholder DISPLAY is enough there.
+set(_editor_env
+    "CI=unset:;PULP_HEADLESS=unset:;PULP_TEST_MODE=unset:;PULP_DISABLE_PLUGIN_EDITOR=unset:")
+set(_x11 FALSE)
+if(UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN)
+    set(_x11 TRUE)
+endif()
+if(_x11)
+    set(_display_env "${_editor_env};DISPLAY=set::99;WAYLAND_DISPLAY=unset:")
+else()
+    set(_display_env "${_editor_env}")
+endif()
 set_tests_properties(editor-ui-package-per-plugin-factory PROPERTIES
     LABELS "format;editor-host" TIMEOUT 60
-    ENVIRONMENT_MODIFICATION
-        "CI=unset:;PULP_HEADLESS=unset:;PULP_TEST_MODE=unset:;PULP_DISABLE_PLUGIN_EDITOR=unset:")
+    ENVIRONMENT_MODIFICATION "${_display_env}")
+
+# The production refusal still holds: on X11 platforms the same host with no
+# display gets no GUI from the UI package plug-ins, and says so.
+if(_x11)
+    add_test(NAME editor-ui-package-no-display-refusal-control
+        COMMAND pulp-test-editor-ui-package-host
+            "$<TARGET_FILE:PulpEditorUiA_CLAP>=editor:a"
+            "$<TARGET_FILE:PulpEditorUiB_CLAP>=editor:b")
+    set_tests_properties(editor-ui-package-no-display-refusal-control PROPERTIES
+        LABELS "format;editor-host" TIMEOUT 60
+        ENVIRONMENT_MODIFICATION "${_editor_env};DISPLAY=unset:;WAYLAND_DISPLAY=unset:"
+        PASS_REGULAR_EXPRESSION "FAIL [^\n]*offers no GUI")
+endif()
 
 # Positive control for the view-free check: the same processor with the
 # default editor, which links Pulp's view layer. Only its configured target

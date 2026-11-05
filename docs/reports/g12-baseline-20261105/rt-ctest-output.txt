@@ -1,0 +1,7 @@
+Test project /Volumes/Workshop/Code/agent-worktrees/g12-baseline-evidence-20261105/build
+    Start 38: Prepared realtime pitch/time processor is allocation-free while processing
+1/1 Test #38: Prepared realtime pitch/time processor is allocation-free while processing ...   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.11 sec

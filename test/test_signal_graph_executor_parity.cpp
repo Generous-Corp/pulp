@@ -3855,3 +3855,137 @@ TEST_CASE("SignalGraph edge probe refuses real feedback and MIDI connections",
     REQUIRE(graph.audio_edge_probe_status() == Status::Attached);
     REQUIRE(graph.audio_edge_probe_identity().connection == identity.connection);
 }
+
+TEST_CASE("G5 evidence: existing Custom MIDI lane delivers a bounded same-block trace",
+          "[host][graph][executor][custom][midi][g5-evidence]") {
+    // Evidence only: the fixture supplies block-relative offsets. This does not
+    // implement packet epochs, cursors, late refusal, or a transport scheduler.
+    struct Trace {
+        std::array<int, 16> times{};
+        std::array<int, 16> notes{};
+        std::size_t count = 0;
+        int cursor = 0;
+        int block_start = 0;
+        int producer_calls = 0;
+        int consumer_calls = 0;
+        bool same_block = true;
+        bool legal_offsets = true;
+        bool bounded = false;
+        std::size_t capacity = 0;
+        std::size_t retained = 0;
+        std::uint32_t drops = 0;
+    };
+    constexpr std::array<int, 7> times{0, 7, 7, 31, 32, 63, 95};
+    constexpr std::array<int, 7> notes{60, 62, 61, 63, 64, 65, 66};
+    auto run = [&](const std::vector<int>& partitions, bool connected, bool flood) {
+        Trace trace;
+        SignalGraph graph;
+        pulp::host::CustomNodeType producer;
+        producer.type_id = "pulp.test.g5_existing_producer";
+        producer.version = 1;
+        producer.num_input_ports = producer.num_output_ports = 1;
+        producer.process_events = [&](pulp::audio::BufferView<float>& out,
+                                      const pulp::audio::BufferView<const float>&, int n,
+                                      const pulp::host::CustomNodeEventBlock& events) {
+            trace.block_start = trace.cursor;
+            ++trace.producer_calls;
+            if (events.out != nullptr) {
+                trace.bounded = events.out->realtime_capacity_limited();
+                trace.capacity = events.out->event_capacity();
+                if (flood) {
+                    for (std::size_t i = 0; i < trace.capacity + 3; ++i)
+                        events.out->add(pulp::midi::MidiEvent::note_on(
+                            0, static_cast<std::uint8_t>(i % 128), 100));
+                } else {
+                    for (std::size_t i = 0; i < times.size(); ++i) {
+                        if (times[i] < trace.cursor || times[i] >= trace.cursor + n)
+                            continue;
+                        auto event = pulp::midi::MidiEvent::note_on(0, notes[i], 100);
+                        event.sample_offset = times[i] - trace.cursor;
+                        events.out->add(event);
+                    }
+                }
+                trace.retained = events.out->size();
+                trace.drops = events.out->dropped_event_count();
+            }
+            trace.cursor += n;
+            for (int i = 0; i < n; ++i)
+                out.channel_ptr(0)[i] = 0.0f;
+        };
+        pulp::host::CustomNodeType consumer;
+        consumer.type_id = "pulp.test.g5_existing_consumer";
+        consumer.version = 1;
+        consumer.num_input_ports = consumer.num_output_ports = 1;
+        consumer.process_events = [&](pulp::audio::BufferView<float>& out,
+                                      const pulp::audio::BufferView<const float>&, int n,
+                                      const pulp::host::CustomNodeEventBlock& events) {
+            ++trace.consumer_calls;
+            trace.same_block &= trace.producer_calls == trace.consumer_calls;
+            if (events.in != nullptr) {
+                for (const auto& event : *events.in) {
+                    trace.legal_offsets &= event.sample_offset >= 0 && event.sample_offset < n;
+                    if (trace.count < trace.times.size()) {
+                        trace.times[trace.count] = trace.block_start + event.sample_offset;
+                        trace.notes[trace.count] = event.data()[1];
+                    }
+                    ++trace.count;
+                    if (events.out != nullptr)
+                        events.out->add(event);
+                }
+            }
+            for (int i = 0; i < n; ++i)
+                out.channel_ptr(0)[i] = 0.0f;
+        };
+        REQUIRE(graph.register_custom_node_type(producer));
+        REQUIRE(graph.register_custom_node_type(consumer));
+        const auto input = graph.add_input_node(1, "In");
+        // Reverse creation order: the event edge must order these callbacks.
+        const auto sink = graph.add_custom_node(consumer.type_id, "Consumer");
+        const auto source = graph.add_custom_node(producer.type_id, "Producer");
+        const auto output = graph.add_output_node(1, "Out");
+        const auto midi_output = graph.add_midi_output_node("MIDI Out");
+        REQUIRE(source != 0);
+        REQUIRE(sink != 0);
+        REQUIRE(graph.connect(input, 0, source, 0));
+        REQUIRE(graph.connect(input, 0, sink, 0));
+        REQUIRE(graph.connect(sink, 0, output, 0));
+        if (connected)
+            REQUIRE(graph.connect_midi(source, sink));
+        REQUIRE(graph.connect_midi(sink, midi_output));
+        graph.set_canonical_executor_routing_enabled(true);
+        REQUIRE(graph.prepare(48000.0, 96));
+        REQUIRE(graph.routed_execution_status(96).routed_path_ready());
+        graph.acquire_routed_only_execution();
+        for (const int n : partitions) {
+            run_graph_process(graph, n, {std::vector<float>(n, 0.0f)}, 1);
+            const auto egress = drain_egress(graph, midi_output);
+            REQUIRE(egress.complete == !flood);
+        }
+        REQUIRE(graph.routed_only_execution_failures() == 0);
+        graph.release_routed_only_execution();
+        return trace;
+    };
+    for (const auto& partitions :
+         std::vector<std::vector<int>>{{96}, {32, 32, 32}, {7, 25, 1, 31, 32}}) {
+        const auto trace = run(partitions, true, false);
+        REQUIRE(trace.count == times.size());
+        REQUIRE(trace.same_block);
+        REQUIRE(trace.legal_offsets);
+        REQUIRE(trace.bounded);
+        REQUIRE(trace.drops == 0);
+        for (std::size_t i = 0; i < times.size(); ++i) {
+            REQUIRE(trace.times[i] == times[i]);
+            REQUIRE(trace.notes[i] == notes[i]);
+        }
+        // Planted negative: removing the event edge starves the same consumer.
+        REQUIRE(run(partitions, false, false).count == 0);
+    }
+    const auto overflow = run({96}, true, true);
+    REQUIRE(overflow.bounded);
+    REQUIRE(overflow.capacity > 0);
+    REQUIRE(overflow.retained == overflow.capacity);
+    REQUIRE(overflow.drops == 3);
+    REQUIRE(overflow.count == overflow.capacity);
+    REQUIRE(overflow.same_block);
+    REQUIRE(overflow.legal_offsets);
+}

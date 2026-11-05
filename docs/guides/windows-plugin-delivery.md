@@ -22,9 +22,15 @@ copying the selected payload so an old module cannot win a DAW scan.
 
 ARM64EC has an additional provider and link requirement. Skia/Dawn archives
 must themselves contain an explicitly compatible EC ABI; a pure ARM64 archive
-cannot be relabeled and is the primary cause of the familiar seven unresolved
-STL thunk symbols. Configure and package guards must inspect provider
-provenance and fail closed when an ARM64EC consumer sees only ARM64 members.
+cannot be relabeled. The familiar seven unresolved `__std_*` thunk symbols can
+also be caused by an older consumer MSVC STL/CRT toolset: the provider's static
+archives retain references emitted by the toolset that built them. Pulp reads
+the producer compiler version from `msvc-toolchain.json` and compares it with
+the active consumer compiler during configure, before any plugin or SDK target
+is linked. A mismatch fails closed with the required toolset in the diagnostic;
+it must be fixed by selecting a matching or newer MSVC toolset, never by
+adding ad-hoc thunk definitions. Configure and package guards also inspect the
+provider's COFF members and reject a pure ARM64 archive before linking.
 
 After the provider is correct, MSVC still emits STL helper calls using the EC
 thunk ABI. The ARM64 import library carries compatible members but also has
@@ -104,6 +110,18 @@ Separate wall time from CPU time: a long wall-time frame with little guest CPU
 may be remote transport or scheduling, while long paint/GPU/JavaScript spans
 inside the guest are renderer work. Keep this diagnosis independent from the
 audio callback and never move tracing onto the real-time audio thread.
+
+The Windows editor host selects Skia CPU raster when Dawn identifies D3D12's
+Microsoft WARP adapter (`vendor=microsoft`, `architecture=warp`). WARP may report
+an integrated adapter type, which does not make it hardware accelerated. With
+the separately tested vector-raster provider and static-pixel cache, a live
+64-band modulation workload in Windows ARM UTM measured 417–446 ms mean frames
+on WARP versus 50–54 ms on raster. Those timings qualify that experimental
+configuration, not every SDK or native GPU. Hardware adapters retain GPU
+rendering. Set `PULP_WINDOWS_ALLOW_SOFTWARE_GPU=1` before launching the host to
+retain WARP for explicit GPU qualification or an editor that needs its GPU
+capabilities. Test policy selection and that override in the actual desktop
+session.
 
 ## Optional dependencies stay optional
 

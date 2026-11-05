@@ -31,6 +31,8 @@
 #include <pulp/host/signal_graph_execution_status.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/host/signal_graph_node.hpp>
+#include <pulp/host/trigger_graph.hpp>
+#include <pulp/host/spectral_graph.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/budget_policy.hpp>
@@ -55,6 +57,7 @@ namespace pulp::host {
 
 class GraphSerializer;
 class SignalGraph;
+class SpectralRuntimeBank;
 
 namespace detail {
 struct ExactParameterIngressOwner;
@@ -120,6 +123,35 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::size_t automation_buffer_bytes = 0;
         std::size_t delay_buffer_bytes = 0;
         std::size_t total_prepared_buffer_bytes = 0;
+        std::size_t spectral_buffer_bytes = 0;
+        std::uint64_t snapshot_generation = 0;
+    };
+
+    // Immutable, control-thread view of the latency analysis captured by a
+    // prepared graph snapshot. Entries are emitted in snapshot order (the
+    // deterministic processing order for nodes, and authored connection order
+    // for edges). This is an introspection value only; it is not an audio
+    // callback or realtime API.
+    struct PreparedNodeLatency {
+        NodeId node_id = 0;
+        std::int64_t input_latency_samples = 0;
+        std::int64_t output_latency_samples = 0;
+    };
+
+    struct PreparedConnectionDelay {
+        Connection connection{};
+        std::int64_t delay_samples = 0;
+    };
+
+    struct PreparedLatencySnapshot {
+        std::int64_t total_latency_samples = 0;
+        std::vector<PreparedNodeLatency> nodes;
+        std::vector<PreparedConnectionDelay> connections;
+
+        // Value lookups deliberately return nullopt for unknown identities;
+        // zero is a valid latency and must not be used as a miss sentinel.
+        std::optional<PreparedNodeLatency> node(NodeId id) const;
+        std::optional<std::int64_t> connection_delay(const Connection& connection) const;
     };
 
     struct RuntimeBudgetReport {
@@ -145,6 +177,31 @@ class SignalGraph : public format::AudioWorkgroupClient {
 
     SignalGraph() = default;
 
+    SpectralResult<SpectralAnalysisPorts> add_spectral_analysis(SpectralIdentity identity,
+                                                                const std::string& name);
+    SpectralResult<SpectralStagePorts> add_spectral_stage(SpectralIdentity identity,
+                                                          QualifiedSpectralStage stage,
+                                                          const std::string& name);
+    SpectralResult<SpectralSynthesisPorts> add_spectral_synthesis(SpectralIdentity identity,
+                                                                  const std::string& name);
+    GraphResult connect(SpectralOutputPort source, SpectralInputPort dest) {
+        return connect(source.handle, dest.handle);
+    }
+    enum class SpectralTransitionState : std::uint8_t {
+        Idle,
+        Staged,
+        Activated,
+        Rejected,
+        Finalized
+    };
+    SpectralTransitionState spectral_transition_state() const noexcept;
+    SpectralError finalize_spectral_transition();
+    /// Control thread only, after the host has stopped calling process().
+    SpectralError stop_spectral_controller();
+    SpectralError spectral_error() const noexcept {
+        return spectral_error_.load(std::memory_order_relaxed);
+    }
+
     // Add nodes — returns the node ID
     NodeId add_input_node(int channels, const std::string& name = "Input");
     NodeId add_output_node(int channels, const std::string& name = "Output");
@@ -165,6 +222,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
     NodeId add_processor_node(std::unique_ptr<format::Processor> processor,
                               const std::string& name = {});
     bool is_processor_node(NodeId id) const;
+    /// Returns the retained Processor instance for a runtime-owned node.
+    /// Control-thread only; the returned shared handle keeps the instance alive.
+    std::shared_ptr<format::ProcessorNodeInstance> processor_node_instance(NodeId id) const;
 
     /// Install a host-owned realtime input-bus provider on an in-process
     /// Processor node. The small POD handle is copied before prepare(); the
@@ -174,6 +234,23 @@ class SignalGraph : public format::AudioWorkgroupClient {
     bool set_processor_audio_input_provider(NodeId id,
                                             format::AudioInputBusProvider provider) noexcept;
     NodeId add_gain_node(const std::string& name = "Gain");
+    NodeId add_trigger_producer(const TriggerProducerConfig& config);
+    NodeId add_trigger_envelope(const TriggerEnvelopeConfig& config = {});
+    NodeId add_trigger_modulation();
+    NodeId add_trigger_lowpass(float coefficient = 0.5f);
+    TriggerGraphResult connect_trigger(TriggerEdge edge);
+    std::vector<TriggerEdge> trigger_edges() const;
+    TriggerPreparation prepare_trigger_plan(double sample_rate, int max_frames);
+    TriggerGraphResult
+    try_install_prepared_trigger_plan(std::unique_ptr<PreparedTriggerPlan>& candidate);
+    TriggerGraphResult try_reset_events() noexcept;
+    TriggerGraphResult process_checked(audio::BufferView<float>& output,
+                                       const audio::BufferView<const float>& input, int frames);
+    TriggerGraphResult trigger_counters(TriggerCounters& counters) const noexcept;
+    TriggerResourceReport trigger_resources() const;
+    // View expires at the next render/reset/publication boundary. Read while stopped.
+    std::span<const TriggerRecord> trigger_trace() const noexcept;
+
     NodeId add_midi_input_node(const std::string& name = "MIDI In");
     NodeId add_midi_output_node(const std::string& name = "MIDI Out");
     // Registers or replaces a custom type. If existing nodes use the same
@@ -537,7 +614,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
 
     // True once prepare() has published a live compiled snapshot.
     bool is_prepared() const noexcept {
-        return live_slot_.has_value();
+        return spectral_mode_.load(std::memory_order_acquire) || live_slot_.has_value();
     }
     // Max block size the live snapshot was prepared for (0 if not prepared).
     int prepared_max_block_size() const noexcept;
@@ -812,6 +889,12 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // the node is unknown or the graph is not prepared.
     int node_latency_samples(NodeId id) const;
 
+    // Copy the deterministic latency/PDC analysis from the currently prepared
+    // snapshot. Returns nullopt when topology has been mutated or prepare()
+    // has not yet published a snapshot. Control-thread only: copying the
+    // vectors is intentionally outside the audio callback surface.
+    std::optional<PreparedLatencySnapshot> prepared_latency_snapshot() const;
+
     // Set a single parameter value on a Plugin node at the graph level. The
     // call is forwarded to PluginSlot::set_parameter(). Returns false if the
     // node is not a Plugin node or has no loaded slot. For block-rate routing
@@ -848,6 +931,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     };
     struct MidiBlockSnapshot {
         MidiBlockSnapshot();
+        explicit MidiBlockSnapshot(bool reserve_storage);
         MidiBlockSnapshot(const MidiBlockSnapshot& other);
         MidiBlockSnapshot& operator=(const MidiBlockSnapshot& other) noexcept;
         bool set_from_midi(const midi::MidiBuffer& src, uint64_t new_sequence,
@@ -1061,6 +1145,14 @@ class SignalGraph : public format::AudioWorkgroupClient {
     };
 
     struct CompiledGraph {
+        explicit CompiledGraph(bool reserve_midi = true) : midi_publish_scratch(reserve_midi) {}
+        std::shared_ptr<detail::TriggerState> trigger_state;
+        // Keeps candidate-owned per-node measurers alive after publication.
+        std::shared_ptr<SignalGraph> trigger_preparation_owner;
+
+        std::shared_ptr<SpectralRuntimeBank> spectral;
+        std::uint64_t execution_generation = 0;
+        std::shared_ptr<int> legacy_processing_lifetime;
         // Private executable topology. For ordinary graphs this is a copy of
         // nodes_; region-bearing graphs replace each admitted region with one
         // synthetic Custom anchor while leaving public authoring state intact.
@@ -1281,6 +1373,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::unordered_map<std::string, CustomNodeDiagnosticsDescriptor> custom_node_diagnostics_;
     static std::uint64_t next_diagnostic_graph_identity_() noexcept;
     const std::uint64_t diagnostic_graph_identity_ = next_diagnostic_graph_identity_();
+    std::uint32_t spectral_transition_serial_ = 0;
+    SpectralRuntimeBank* spectral_render_target_ = nullptr;
 
     std::vector<SampleRegionDefinition> sample_region_definitions_;
     const SampleRegionParameterBinding* sample_region_parameter_binding_ = nullptr;
@@ -1350,7 +1444,107 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // the pointed-to CompiledGraph stays alive until every pinned reader
     // leaves. See runtime/slot.hpp — a pin guarantees LIFETIME, not constness:
     // the audio thread writes this snapshot's scratch buffers every block.
+    friend class PreparedTriggerPlan;
+    friend struct detail::TriggerTestAccess;
+    void trigger_test_clock_(std::uint64_t cursor, std::uint64_t sequence, std::uint64_t epoch,
+                             std::uint8_t phase, bool saturate);
+    TriggerEmitResult trigger_test_emit_(std::int64_t target, std::uint64_t epoch,
+                                         std::uint8_t port);
+    bool trigger_test_budget_(std::size_t total);
+    void trigger_test_gate_(bool held);
+    NodeId add_trigger_audio_(TriggerAudioConfig config);
+
+    std::unordered_map<NodeId, TriggerProducerConfig> trigger_producers_;
+    std::unordered_map<NodeId, TriggerEnvelopeConfig> trigger_envelopes_;
+    std::unordered_map<NodeId, TriggerAudioConfig> trigger_audio_;
+    std::vector<TriggerEdge> trigger_edges_;
+    std::atomic<bool> typed_trigger_authoring_{false};
+    std::shared_ptr<detail::TriggerController> trigger_controller_;
+    std::shared_ptr<detail::TriggerState> compiling_trigger_state_;
+    bool ensure_trigger_controller_();
+    bool compile_trigger_pair_(CompiledGraph& graph);
+    void bind_trigger_pair_(CompiledGraph& graph);
+    void invalidate_trigger_binding_() noexcept;
+    TriggerGraphResult process_trigger_snapshot_(audio::BufferView<float>& output,
+                                                 const audio::BufferView<const float>& input,
+                                                 int frames,
+                                                 const format::ProcessContext* transport,
+                                                 CompiledGraph* graph);
+    static void reset_trigger_audio_(CompiledGraph& graph) noexcept;
     runtime::Slot<CompiledGraph> live_slot_;
+    std::shared_ptr<int> processing_handle_lifetime_ = std::make_shared<int>(0);
+    std::array<std::shared_ptr<CompiledGraph>, 3> spectral_slots_;
+    std::unique_ptr<SignalGraph> spectral_candidate_authoring_;
+    std::atomic<bool> spectral_mode_{false};
+    std::atomic<int> spectral_active_{0}, spectral_pending_{-1}, spectral_ack_{-1};
+    std::atomic<bool> spectral_access_closed_{false};
+    mutable std::atomic<bool> spectral_reclaiming_{false};
+    mutable std::atomic<unsigned> spectral_readers_{0}, spectral_accesses_{0};
+    mutable std::atomic<SpectralError> spectral_error_{SpectralError::None};
+    std::uint64_t spectral_offer_generation_ = 0;
+    std::uint64_t spectral_render_generation_ = 0;
+    SpectralError spectral_ack_error_ = SpectralError::None;
+    int spectral_retired_ = -1;
+    bool spectral_terminal_ = false;
+
+    class SnapshotAccess {
+      public:
+        explicit SnapshotAccess(runtime::Slot<CompiledGraph>::ReadGuard guard)
+            : legacy_(std::move(guard)), value_(legacy_.get()) {}
+        SnapshotAccess(const SignalGraph* owner, CompiledGraph* value, bool access)
+            : owner_(owner), value_(value), access_(access) {}
+        ~SnapshotAccess() {
+            if (owner_) {
+                if (access_)
+                    owner_->spectral_accesses_.fetch_sub(1, std::memory_order_seq_cst);
+                owner_->spectral_readers_.fetch_sub(1, std::memory_order_seq_cst);
+            }
+        }
+        SnapshotAccess(const SnapshotAccess&) = delete;
+        CompiledGraph* get() const noexcept {
+            return value_;
+        }
+        CompiledGraph* operator->() const noexcept {
+            return value_;
+        }
+        CompiledGraph& operator*() const noexcept {
+            return *value_;
+        }
+        explicit operator bool() const noexcept {
+            return value_ != nullptr;
+        }
+
+      private:
+        runtime::Slot<CompiledGraph>::ReadGuard legacy_;
+        const SignalGraph* owner_ = nullptr;
+        CompiledGraph* value_ = nullptr;
+        bool access_ = false;
+    };
+    SnapshotAccess read_snapshot_(bool access = false) const noexcept;
+    bool refuse_spectral_mutation_() const noexcept {
+        if (!spectral_mode_.load(std::memory_order_acquire))
+            return false;
+        spectral_error_.store(spectral_access_closed_.load(std::memory_order_seq_cst)
+                                  ? SpectralError::TransitionPending
+                                  : SpectralError::UnsupportedOperation,
+                              std::memory_order_relaxed);
+        return true;
+    }
+    bool spectral_mailboxes_pending_(const CompiledGraph&) const noexcept;
+    SpectralError offer_spectral_candidate_locked_(std::unique_ptr<SignalGraph>&,
+                                                   std::shared_ptr<CompiledGraph>, std::uint64_t);
+    void adopt_candidate_authoring_locked_(SignalGraph&);
+    friend struct SpectralControllerTestAccess;
+    struct SpectralBoundary {
+        int active;
+        int offered;
+    };
+    SpectralBoundary capture_spectral_boundary_() noexcept;
+    void process_spectral_boundary_(SpectralBoundary, audio::BufferView<float>&,
+                                    const audio::BufferView<const float>&, int,
+                                    const format::ProcessContext*);
+    void process_spectral_(audio::BufferView<float>&, const audio::BufferView<const float>&, int,
+                           const format::ProcessContext*);
 
     // Canonical-executor routing (control toggle, read relaxed on the audio
     // thread). DEFAULT ON: the routed executor is the primary inter-node backend
@@ -1617,7 +1811,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
                       int num_samples, const format::ProcessContext* transport);
     void process_snapshot_impl(audio::BufferView<float>& output,
                                const audio::BufferView<const float>& input, int num_samples,
-                               const format::ProcessContext* transport, CompiledGraph* snapshot);
+                               const format::ProcessContext* transport, CompiledGraph* snapshot,
+                               bool trigger_admitted = false);
     static bool inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
                                            const midi::MidiBuffer& events) noexcept;
     static bool
@@ -1701,6 +1896,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     void cancel_swap_edit_locked_();
     std::vector<audio::AudioProcessLoadSnapshot> staged_node_loads_locked_() const;
     void publish_prepared_stats_locked_(const CompiledGraph& cg);
+    static PreparedStats stats_for_snapshot_(const CompiledGraph& cg);
     void clear_prepared_stats_locked_();
     void invalidate_live_locked_();
     static void

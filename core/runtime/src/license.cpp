@@ -2,6 +2,8 @@
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/http.hpp>
 
+#include "license_v2_drbg.hpp"
+
 #include <choc/containers/choc_Value.h>
 #include <choc/text/choc_JSON.h>
 
@@ -378,9 +380,7 @@ std::optional<std::string> LicenseGenerator::generate_v2(const LicenseInfo& info
         mbedtls_ctr_drbg_context drbg;
         mbedtls_entropy_init(&entropy);
         mbedtls_ctr_drbg_init(&drbg);
-        int rc = mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy,
-                                       reinterpret_cast<const uint8_t*>("pulp::license::v2"),
-                                       17);
+        int rc = detail::seed_license_v2_drbg(drbg, mbedtls_entropy_func, &entropy);
         if (rc == 0) rc = mbedtls_ctr_drbg_random(&drbg, iv, kV2IvSize);
         mbedtls_ctr_drbg_free(&drbg);
         mbedtls_entropy_free(&entropy);

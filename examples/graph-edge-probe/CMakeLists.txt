@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.24)
+project(PulpGraphEdgeProbe LANGUAGES CXX)
+find_package(Pulp CONFIG REQUIRED COMPONENTS host)
+add_executable(pulp-graph-edge-probe main.cpp)
+target_compile_features(pulp-graph-edge-probe PRIVATE cxx_std_20)
+target_link_libraries(pulp-graph-edge-probe PRIVATE Pulp::host)
+enable_testing()
+add_test(NAME graph-edge-probe-consumer COMMAND pulp-graph-edge-probe)
