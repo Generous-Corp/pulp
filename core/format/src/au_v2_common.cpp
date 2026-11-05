@@ -263,12 +263,15 @@ OSStatus fill_parameter_value_strings(const state::StateStore& store,
 {
     if (scope != kAudioUnitScope_Global)
         return kAudioUnitErr_InvalidParameter;
-    if (!out_strings) return kAudioUnitErr_InvalidPropertyValue;
 
     const auto* param = store.info(static_cast<state::ParamID>(param_id));
     if (!param) return kAudioUnitErr_InvalidParameter;
     if (!state::is_discrete_param(*param))
         return kAudioUnitErr_InvalidPropertyValue;
+    // AUBase's GetPropertyInfo asks with a null array to learn whether the
+    // parameter has a list before any host can fetch it.
+    if (!out_strings)
+        return noErr;
 
     const int count = static_cast<int>(state::param_value_count(*param));
     CFMutableArrayRef strings =

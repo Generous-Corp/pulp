@@ -465,7 +465,9 @@ OSStatus fill_parameter_clump_name(const state::StateStore& store,
 /// `GetParameterValueStrings`: the enumerated display strings for a DISCRETE
 /// parameter. Continuous parameters reach the host through
 /// `kAudioUnitProperty_ParameterStringFromValue` instead and report
-/// `kAudioUnitErr_InvalidPropertyValue` here.
+/// `kAudioUnitErr_InvalidPropertyValue` here. A null `out_strings` is the
+/// `GetPropertyInfo` availability query and returns `noErr` for a discrete
+/// parameter without allocating.
 OSStatus fill_parameter_value_strings(const state::StateStore& store,
                                       AudioUnitScope scope,
                                       AudioUnitParameterID param_id,
