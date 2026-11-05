@@ -42,8 +42,9 @@
 #include <memory>
 
 namespace pulp::format {
+class ContractEditorSession;
 class ContractSessionRegistry;
-}
+} // namespace pulp::format
 
 namespace pulp::format::au {
 
@@ -83,6 +84,12 @@ extern CocoaViewInfoFiller g_cocoa_view_info_filler;
 /// into `g_cocoa_view_info_filler` at static-init. Returns false if the factory
 /// class isn't available. `outData` must point to an `AudioUnitCocoaViewInfo`.
 bool fill_cocoa_view_info(void* outData);
+
+/// The session behind an AU v2 contract view (the NSView the contract view
+/// factory returned), or null for any other view or once it is invalidated, so
+/// an in-process host (automation, tests) can reach the editor and its
+/// EditorAutomation. Defined in `au_v2_contract_view.mm`. Main thread.
+ContractEditorSession* contract_view_session(void* ns_view);
 
 /// Decode a short MIDI status byte and two data bytes into a
 /// ``midi::MidiEvent``. Exposed at namespace scope so the AU-MIDI routing

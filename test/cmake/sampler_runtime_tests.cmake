@@ -567,3 +567,9 @@ pulp_add_test_suite(pulp-test-signal-graph-subgraph
 pulp_add_test_suite(pulp-test-graph-identity
     SOURCES test_graph_identity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+
+# G-4 authored voice-bank identity: canonical NFC wire encoding, SHA-256
+# digest, fixed eight-slot bound, and fail-closed malformed target controls.
+pulp_add_test_suite(pulp-test-voice-identity
+    SOURCES test_voice_identity.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)

@@ -7,8 +7,11 @@ promote the full G-5 event plane or realtime qualification.
 
 ## Provenance
 
-- Source head: `fc29b7b842dd9890570e88085ec5df8f6f65910f` (`origin/main` at
-  receipt time). The receipt branch merge head is
+- Historical receipt source head: `fc29b7b842dd9890570e88085ec5df8f6f65910f`.
+  This was the live `origin/main` used for the install and consumer run. The
+  current live `origin/main` is `57104fc19818c5a1939841bbb9ddce722db4b180`;
+  the intervening base change is the release version bump only and does not
+  touch the trigger runtime or consumer sources. The receipt branch merge head is
   `e0e84dbdbdd7e1e8a8e0396dfe7bf50a8d6ef503`.
 - Release build: `pulp build` completed successfully. The configured cache
   reports `CMAKE_BUILD_TYPE:STRING=Release`.
@@ -31,6 +34,9 @@ its durable source-tree manifest SHA-256 is
 `be15201fa92d729b0032af0969fd6b1d4be19b0bafef000d2448deaacf79b1c8`.
 The raw command logs and install manifest are checked in under
 [`g5-trigger-runtime-installed-consumer-raw/`](g5-trigger-runtime-installed-consumer-raw/).
+The checked-in source copies and their manifest are under
+`g5-trigger-runtime-installed-consumer-raw/source/` and
+`source-manifest.sha256` (`363013513afcc3f5179beaca6ac1c43641c8f6ab937ffa8bbd0703c5a9d51a38`).
 
 ## Commands and results
 
@@ -85,6 +91,13 @@ header negative log
 log `372ca3e3e8ab4219c2ed5de03db4b8e8b13958d239d3cfcb251822134e8f3620`, and
 manifest `12ea0903bd39a4892a969e6e443886bf3c632654653e41ef5c1cb15525c06c06`.
 These are durable raw artifacts, not prose-only claims.
+
+The wrong-output negative is also durable: its checked-in source is
+`source/wrong-output-negative/main.cpp.txt` (SHA-256
+`e526d5da84f8052660c6d6b9dbfacefdfc24a5ce6304c6ec977076c38ce348bb`), and
+`wrong-output-negative.log` records configure/build success followed by the
+expected nonzero execution and measured samples. Its log SHA-256 is
+`91a96d301eb0d60dfdc8fd22711b47b984d0dc2e844a3ee93f43be1b15d8b33a`.
 
 ## Boundary retained
 

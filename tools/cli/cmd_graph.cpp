@@ -13,17 +13,8 @@
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
 #include <pulp/host/signal_graph.hpp>
-#include <sstream>
 
 namespace {
-std::optional<std::string> read_file(const std::string& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in)
-        return std::nullopt;
-    std::ostringstream out;
-    out << in.rdbuf();
-    return out.str();
-}
 void usage() {
     std::cout << "Usage: pulp graph <inspect|validate|explain|render|probe|fmt|canonicalize> "
                  "<file.pulpgraph> [--json] [--output file.wav (render)]\n";
@@ -259,23 +250,17 @@ int cmd_graph(const std::vector<std::string>& args) {
             std::cerr << "pulp graph: unknown subcommand '" << op << "'\n";
         return 2;
     }
-    auto text = read_file(path);
-    if (!text) {
-        if (json)
-            json_error("file_unreadable", "cannot read '" + path + "'");
-        else
-            std::cerr << "pulp graph: cannot read '" << path << "'\n";
-        return 1;
-    }
     pulp::host::SignalGraph graph;
     pulp::host::GraphLoadOptions opts;
     opts.load_plugins = false;
-    auto loaded = pulp::host::GraphSerializer::from_json(graph, *text, opts);
+    auto loaded = pulp::host::GraphSerializer::from_file(graph, path, opts);
     if (!loaded.ok) {
+        const auto file_error = loaded.error.starts_with("graph file ");
         if (json)
-            json_error("invalid_graph", loaded.error);
+            json_error(file_error ? "file_unreadable" : "invalid_graph", loaded.error);
         else
-            std::cerr << "pulp graph: invalid graph: " << loaded.error << "\n";
+            std::cerr << "pulp graph: " << (file_error ? "cannot read: " : "invalid graph: ")
+                      << loaded.error << "\n";
         return 1;
     }
     if (op == "validate") {

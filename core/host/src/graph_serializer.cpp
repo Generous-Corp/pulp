@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -1311,6 +1312,47 @@ class PluginNodeResolver {
 
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json) {
     return from_json(graph, json, GraphLoadOptions{});
+}
+
+GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
+                                                       const std::filesystem::path& path,
+                                                       const GraphLoadOptions& options) {
+    LoadResult result;
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    if (ec) {
+        result.error = "graph file cannot be opened: " + path.string();
+        return result;
+    }
+    if (size > max_file_bytes) {
+        result.error = "graph file exceeds " + std::to_string(max_file_bytes) + " byte limit";
+        return result;
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        result.error = "graph file cannot be opened: " + path.string();
+        return result;
+    }
+    std::string json(static_cast<std::size_t>(size), '\0');
+    if (!json.empty())
+        input.read(json.data(), static_cast<std::streamsize>(json.size()));
+    if (!input && !input.eof()) {
+        result.error = "graph file read failed: " + path.string();
+        return result;
+    }
+    const auto count = static_cast<std::size_t>(input.gcount());
+    if (count != json.size()) {
+        result.error = "graph file changed while reading: " + path.string();
+        return result;
+    }
+    ec.clear();
+    const auto final_size = std::filesystem::file_size(path, ec);
+    if (ec || final_size != size) {
+        result.error = "graph file changed while reading: " + path.string();
+        return result;
+    }
+    return from_json(graph, json, options);
 }
 
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json,

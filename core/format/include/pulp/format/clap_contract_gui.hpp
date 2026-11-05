@@ -37,6 +37,10 @@
 #include <clap/ext/gui.h>
 #include <clap/ext/timer-support.h>
 
+namespace pulp::format {
+class ContractEditorSession;
+}
+
 namespace pulp::format::clap_adapter {
 
 /// The contract GUI extension for `plugin`, or null when its processor is not
@@ -47,5 +51,10 @@ const clap_plugin_gui_t* contract_gui_extension(const clap_plugin_t* plugin);
 /// The timer-support extension that drives a contract editor's idle tick, or
 /// null when the contract GUI does not apply to `plugin`.
 const clap_plugin_timer_support_t* contract_timer_extension(const clap_plugin_t* plugin);
+
+/// The session behind `plugin`'s open contract GUI, or null when none is open,
+/// so an in-process host (automation, tests) can reach the editor and its
+/// EditorAutomation. Main thread.
+ContractEditorSession* contract_gui_session(const clap_plugin_t* plugin);
 
 } // namespace pulp::format::clap_adapter

@@ -1,4 +1,5 @@
 #include <pulp/host/graph_identity.hpp>
+#include <pulp/host/identity_text.hpp>
 
 #include "unicode_nfc_data.hpp"
 
@@ -320,6 +321,15 @@ void hash_string(std::uint64_t& h, std::string_view value) {
 }
 
 } // namespace
+
+bool normalize_authored_identity_text(std::string_view input, std::string& output) {
+    std::string error;
+    if (!normalize(input, output, error) || output.empty() || whitespace_only(output)) {
+        output.clear();
+        return false;
+    }
+    return true;
+}
 
 PortIdentityReport validate_port_identities(std::span<const PortHandle> ports,
                                             std::span<const PortIdentityAlias> aliases) {
