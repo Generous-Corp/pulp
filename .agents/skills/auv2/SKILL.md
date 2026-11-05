@@ -811,6 +811,19 @@ host, about 108 MB per GPU editor open/close in a neutral AU host.
   dispose, and check the view deallocates, the tree is destroyed, and each
   observer view hears `on_owner_released()` exactly once (never when freed first).
 
+### Scripted AU v2 editors after owner disposal
+
+The owner-retirement path above assumes every bridge-owned object is safe to
+destroy without the Processor. A scripted AU v2 editor is a deliberate narrow
+exception: its `ScriptedUiSession` destructor flushes deferred gesture releases
+through the Processor's `StateStore`. In `PulpAUEditorOwnership::teardown`, if
+`AliveToken::try_acquire(processor_alive)` fails, log
+`AU v2 editor: view outlived its audio unit` and release the bridge instead of
+calling `notify_owner_released()` or destroying it. The native
+`PluginViewHost` still tears down; keeping the bridge and view tree process-live
+prevents a freed-store access. The `ui-script-plugin-editor-au` fixture with
+`MallocScribble=1` covers this owner-disposed ordering.
+
 ### Plugin-initiated resize is a Logic-only editor transaction
 
 AU v2 exposes no host `request_resize` callback. For Logic, the validated
