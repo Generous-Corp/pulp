@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261105-platform-reveal-and-multi-folder",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-05T00:00:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/platform/include/pulp/platform/file_dialog.hpp",
+    "core/platform/include/pulp/platform/reveal_in_file_manager.hpp",
+    "core/platform/platform/mac/file_dialog_mac.mm",
+    "core/platform/platform/mac/reveal_mac.mm",
+    "core/platform/src/file_dialog_stub.cpp",
+    "core/platform/src/reveal_in_file_manager.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Adds FileDialog::choose_folders and reveal_in_file_manager to the generic platform layer. Both are host-neutral capabilities (no view, canvas or design-import dependency) that a Vellum plug-in view host can call, so the next re-export should carry the edited and added files."
+}
