@@ -36,7 +36,7 @@ The raw command logs and install manifest are checked in under
 [`g5-trigger-runtime-installed-consumer-raw/`](g5-trigger-runtime-installed-consumer-raw/).
 The checked-in source copies and their manifest are under
 `g5-trigger-runtime-installed-consumer-raw/source/` and
-`source-manifest.sha256` (`d86b2993603381deca5d0b784f7137d11d06e0d8674f079eb3402776595990fb`).
+`source-manifest.sha256` (`363013513afcc3f5179beaca6ac1c43641c8f6ab937ffa8bbd0703c5a9d51a38`).
 
 ## Commands and results
 
@@ -93,7 +93,7 @@ manifest `12ea0903bd39a4892a969e6e443886bf3c632654653e41ef5c1cb15525c06c06`.
 These are durable raw artifacts, not prose-only claims.
 
 The wrong-output negative is also durable: its checked-in source is
-`source/wrong-output-negative/main.cpp` (SHA-256
+`source/wrong-output-negative/main.cpp.txt` (SHA-256
 `e526d5da84f8052660c6d6b9dbfacefdfc24a5ce6304c6ec977076c38ce348bb`), and
 `wrong-output-negative.log` records configure/build success followed by the
 expected nonzero execution and measured samples. Its log SHA-256 is

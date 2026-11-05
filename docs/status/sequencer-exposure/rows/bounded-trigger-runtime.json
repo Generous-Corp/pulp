@@ -16,9 +16,9 @@
     "docs/evidence/g5-trigger-runtime-installed-consumer-raw/wrong-output-negative.log",
     "docs/evidence/g5-trigger-runtime-installed-consumer-raw/prefix-manifest.sha256",
     "docs/evidence/g5-trigger-runtime-installed-consumer-raw/source-manifest.sha256",
-    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/source/positive/main.cpp",
-    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/source/private-header-negative/main.cpp",
-    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/source/wrong-output-negative/main.cpp",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/source/positive/main.cpp.txt",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/source/private-header-negative/main.cpp.txt",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/source/wrong-output-negative/main.cpp.txt",
     "docs/status/sequencer-exposure/rows/bounded-trigger-runtime.json"
   ],
   "evidence": [
