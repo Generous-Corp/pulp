@@ -30,6 +30,7 @@ target_sources(pulp-host PRIVATE
     src/plugin_slot.cpp
     src/graph_serializer.cpp
     src/graph_identity.cpp
+    src/voice_identity.cpp
     src/scan_blacklist.cpp
     src/scan_cache.cpp
     src/background_scanner.cpp

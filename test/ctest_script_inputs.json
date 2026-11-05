@@ -3393,6 +3393,7 @@
   "pulp-test-view-core-window-host-link",
   "pulp-test-visual",
   "pulp-test-visualization",
+  "pulp-test-voice-identity",
   "pulp-test-voice-modulation-sources",
   "pulp-test-voice-runtime-facade",
   "pulp-test-vst3-audio-parity",
@@ -8534,6 +8535,13 @@
     "tools/cmake/PulpTestTimeout.cmake"
    ],
    "kind": "shell"
+  },
+  "pulp-test-voice-identity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
   },
   "pulp-ui-build-contracts": {
    "entry": "tools/ui-build/test_ui_build.py",
