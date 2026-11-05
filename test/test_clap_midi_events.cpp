@@ -5516,8 +5516,11 @@ TEST_CASE("CLAP without MIDI output services a panic as a voice reset only", "[c
     CHECK(g_panic_echo->panic_capabilities().serviced);
     CHECK_FALSE(g_panic_echo->panic_capabilities().midi_out);
 
-    g_panic_echo->request_panic(PanicMode::release);
     InputEventList none;
+    OutputEventList warmup;
+    h.run(none, &warmup); // the plug-in's own first-block output, not the panic's
+
+    g_panic_echo->request_panic(PanicMode::release);
     OutputEventList out;
     h.run(none, &out);
     CHECK(g_panic_echo->panic_calls == 1);

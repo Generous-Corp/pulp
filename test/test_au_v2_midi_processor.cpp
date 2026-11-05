@@ -743,12 +743,17 @@ TEST_CASE("AU v2 MIDI processor services a panic request onto the host MIDI outp
     for (std::size_t i = 0; i < count; ++i)
         expected.push_back({messages[i].data()[0], messages[i].data()[1], messages[i].data()[2]});
 
-    REQUIRE(g_capture.packets.size() == expected.size());
-    for (std::size_t i = 0; i < expected.size(); ++i) {
-        INFO("packet " << i);
-        // Short messages are 3 bytes; pitch bend and CC keep all three.
-        CHECK(g_capture.packets[i].bytes == expected[i]);
+    // CoreMIDI may coalesce messages that share a timestamp into one packet,
+    // so compare the delivered byte stream, not the packet count.
+    std::vector<std::uint8_t> delivered, wanted;
+    for (const auto& packet : g_capture.packets) {
+        CHECK(packet.timestamp == 0);
+        delivered.insert(delivered.end(), packet.bytes.begin(), packet.bytes.end());
     }
+    for (const auto& message : expected)
+        wanted.insert(wanted.end(), message.begin(), message.end());
+    CHECK(delivered.size() == wanted.size());
+    CHECK(delivered == wanted);
 
     // Consumed once.
     g_capture = MidiOutputCapture{};
