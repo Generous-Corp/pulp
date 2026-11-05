@@ -9,6 +9,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1630"></a>
+## [1.63.0] - 2026-11-05
+
+- release/version bump ([#11557](https://github.com/Generous-Corp/pulp/pull/11557))
+- feature/g5 host ingress 20261104 ([#11556](https://github.com/Generous-Corp/pulp/pull/11556))
+- fix/vellum receipt blob check ([#11554](https://github.com/Generous-Corp/pulp/pull/11554))
+- feat/g2 v4 review repair 20261104 ([#11530](https://github.com/Generous-Corp/pulp/pull/11530))
+- feature/mirror edge namespace param ([#11550](https://github.com/Generous-Corp/pulp/pull/11550))
+- fix/vellum trusted receipt gate ([#11549](https://github.com/Generous-Corp/pulp/pull/11549))
+
 <a id="v1620"></a>
 ## [1.62.0] - 2026-11-05
 
@@ -12240,6 +12250,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.63.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.63.0
 [1.62.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.62.0
 [1.61.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.61.0
 [1.60.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.60.0
