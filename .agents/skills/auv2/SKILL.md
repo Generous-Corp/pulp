@@ -1202,6 +1202,22 @@ Pulp gates it on `range.step >= 1`). A CONTINUOUS param with a custom
    cases in `test_au_v2_param_display.mm` and `test_vst3_param_display.cpp`,
    and the text round trips in `test_clap_entry.cpp`.
 
+## Instrument MIDI: AUMIDIBase drops everything but notes unless you route it
+
+`AUMIDIBase::HandleMIDIEvent` splits a status byte and dispatches to per-type
+handlers (`HandleControlChange`, `HandleProgramChange`, `HandlePitchWheel`,
+`HandleChannelPressure`, `HandlePolyPressure`, ...) whose defaults return
+`noErr` and discard the message. The aumu adapter overrides `HandleNoteOn` /
+`HandleNoteOff` / `HandleSysEx` only, so mod wheel, sustain, bank select,
+program change, pitch bend and aftertouch silently never reached the
+Processor until it also overrode `HandleNonNoteEvent` (the SDK's single
+funnel for every non-note channel-voice message; overriding it, rather than
+`HandleMIDIEvent`, keeps the SDK's initialized check and velocity-0 note-off
+mapping). The effect adapter overrides `HandleMIDIEvent` instead. Any new AU
+v2 adapter that takes MIDI must route all channel-voice types, and its test
+must send CC, program change, bend and both pressures, not just notes. Test:
+`test/test_au_v2_instrument_rt.mm`.
+
 ## Verifying AU v2 tests locally needs the AudioUnitSDK
 
 The AU v2 test targets (`pulp-test-au-v2-*`) link `ausdk` and only get
