@@ -313,6 +313,15 @@ OSStatus PulpAUInstrument::HandleNoteOff(UInt8 inChannel, UInt8 inNoteNumber,
     return noErr;
 }
 
+OSStatus PulpAUInstrument::HandleNonNoteEvent(UInt8 inStatus, UInt8 inChannel, UInt8 inData1,
+                                              UInt8 inData2, UInt32 inStartFrame) {
+    auto me = decode_midi_event(static_cast<uint8_t>(inStatus), static_cast<uint8_t>(inChannel),
+                                static_cast<uint8_t>(inData1), static_cast<uint8_t>(inData2));
+    me.sample_offset = static_cast<int32_t>(inStartFrame);
+    midi_in_queue_.try_push(me); // lock-free; dropped if full (flood backstop)
+    return noErr;
+}
+
 OSStatus PulpAUInstrument::HandleSysEx(const UInt8* inData, UInt32 inLength) {
     if (!inData || inLength == 0)
         return noErr;
