@@ -439,6 +439,13 @@ the audio callback path. Tests live in
 `pulp-test-processor-layout-latency` plus the existing
 `pulp-test-au-v2-effect` suite.
 
+All three classes need it: the effect and the MIDI processor did, but the
+instrument's `Render` did not consume the flags, so an instrument whose
+latency moved (a latency setting, a resampler change) left the host's delay
+compensation on the old value with nothing failing. The instrument's case is
+covered in `pulp-test-au-plugin-state` ("AU v2 instrument fires
+PropertyChanged ...").
+
 ### Bypass audio must be latency-compensated (PDC alignment)
 
 The `ProcessBufferLists` bypass short-circuit must NOT `memcpy` the dry input
