@@ -7,6 +7,12 @@
   "owned_paths": [
     "core/host/include/pulp/host/custom_node_events.hpp",
     "core/host/include/pulp/host/trigger_graph.hpp",
+    "docs/evidence/g5-trigger-runtime-installed-consumer.md",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/metadata.txt",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/positive.log",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/private-negative.log",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/install.log",
+    "docs/evidence/g5-trigger-runtime-installed-consumer-raw/prefix-manifest.sha256",
     "docs/status/sequencer-exposure/rows/bounded-trigger-runtime.json"
   ],
   "evidence": [
@@ -29,12 +35,20 @@
         "Typed and spectral preparation remain separate admission lanes",
         "CHECK(allocation_count == 0);"
       ]
+    },
+    {
+      "path": "docs/evidence/g5-trigger-runtime-installed-consumer.md",
+      "needles": [
+        "Source head: `fc29b7b842dd9890570e88085ec5df8f6f65910f`",
+        "PASS: typed onset, ties, envelope, modulation and lowpass audio",
+        "PARTIAL"
+      ]
     }
   ],
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "The host header installation includes trigger_graph.hpp and custom_node_events.hpp. The public consumer executes the admitted framework onset/envelope pair and bounded audio factories against the installed host library. The event-block pointer does not admit arbitrary Custom callbacks as typed producers; preparation refuses opaque Custom state and mixed spectral plans. This is a bounded runtime slice, not full G-5 or realtime qualification.",
+      "rationale": "A fresh exact-head Release install and external consumer receipt exercises trigger_graph.hpp and custom_node_events.hpp through Pulp::host. The positive consumer executes the admitted framework onset/envelope pair and bounded audio factories against the installed host library; a copied wrong-output control exits nonzero. The event-block pointer does not admit arbitrary Custom callbacks as typed producers; preparation refuses opaque Custom state and mixed spectral plans. This is a bounded typed runtime slice marked PARTIAL, not full G-5 or realtime qualification.",
       "evidence": [
         {
           "kind": "sdk_header",
@@ -56,6 +70,16 @@
           "needles": [
             "prepare_trigger_plan",
             "try_install_prepared_trigger_plan"
+          ]
+        },
+        {
+          "kind": "doc",
+          "path": "docs/evidence/g5-trigger-runtime-installed-consumer.md",
+          "needles": [
+            "manifest SHA-256",
+            "Planted-negative control",
+            "private-header negative",
+            "host timestamp"
           ]
         }
       ],
