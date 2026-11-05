@@ -9,6 +9,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1660"></a>
+## [1.66.0] - 2026-11-05
+
+- release/version bump ([#11579](https://github.com/Generous-Corp/pulp/pull/11579))
+- feature/au instrument channel voice midi ([#11577](https://github.com/Generous-Corp/pulp/pull/11577))
+
+<a id="v1650"></a>
+## [1.65.0] - 2026-11-05
+
+- release/version bump ([#11576](https://github.com/Generous-Corp/pulp/pull/11576))
+- feature/au instrument value strings ([#11570](https://github.com/Generous-Corp/pulp/pull/11570))
+
 <a id="v1640"></a>
 ## [1.64.0] - 2026-11-05
 
@@ -12268,6 +12280,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.66.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.66.0
+[1.65.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.65.0
 [1.64.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.64.0
 [1.63.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.63.0
 [1.62.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.62.0
