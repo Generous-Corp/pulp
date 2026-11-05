@@ -87,6 +87,10 @@ FileDialog::Backend make_linux_portal_backend() {
         if (paths.empty()) return std::nullopt;
         return paths.front();
     };
+    backend.choose_folders = [](const std::string& title,
+                                const std::string&) -> std::vector<std::string> {
+        return run_chooser("OpenFile", title, {}, {{"directory", true}, {"multiple", true}});
+    };
     return backend;
 }
 
