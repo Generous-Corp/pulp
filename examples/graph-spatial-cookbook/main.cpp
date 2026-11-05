@@ -30,6 +30,28 @@ SubgraphTemplate stereo_template(bool swap_outputs) {
     return recipe;
 }
 
+SubgraphTemplate source_stage_template() {
+    SubgraphTemplate recipe;
+    recipe.identity = "cookbook.source-stage.v1";
+    recipe.nodes = {{"input", NodeType::AudioInput, 1, 1.0f}, {"gain", NodeType::Gain, 1, 1.0f}};
+    recipe.edges = {{"input", 0, "gain", 0}};
+    recipe.exposed_ports = {{"input", "input", 0, true, PortKind::Audio},
+                            {"output", "gain", 0, true, PortKind::Audio}};
+    recipe.parameters = {{"gain", "gain", 0.5f, 0.0f, 1.0f}};
+    return recipe;
+}
+
+SubgraphTemplate sink_stage_template() {
+    SubgraphTemplate recipe;
+    recipe.identity = "cookbook.sink-stage.v1";
+    recipe.nodes = {{"gain", NodeType::Gain, 1, 1.0f}, {"output", NodeType::AudioOutput, 1, 1.0f}};
+    recipe.edges = {{"gain", 0, "output", 0}};
+    recipe.exposed_ports = {{"input", "gain", 0, false, PortKind::Audio},
+                            {"output", "output", 0, false, PortKind::Audio}};
+    recipe.parameters = {{"gain", "gain", 0.25f, 0.0f, 1.0f}};
+    return recipe;
+}
+
 bool matches_impulse(const pulp::audio::Buffer<float>& audio, float left, float right) {
     if (audio.num_channels() != 2 || audio.num_samples() != 32)
         return false;
@@ -107,6 +129,49 @@ bool check_recipe(bool swap_outputs) {
     return after_reject.ok && matches_impulse(after_reject.audio, 0.0f, 1.0f);
 }
 
+bool check_composed_stages() {
+    SignalGraph graph;
+    auto source = instantiate_subgraph(graph, source_stage_template(), "source", 0);
+    auto sink = instantiate_subgraph(graph, sink_stage_template(), "sink", 1);
+    if (!source || !sink)
+        return false;
+    const auto before = graph.connections().size();
+    const auto connected =
+        connect_subgraph_ports(graph, source.instance, "output", sink.instance, "input");
+    if (!connected || graph.connections().size() != before + 1)
+        return false;
+
+    OfflineSignalGraphHost host(graph);
+    if (!host.prepare({.sample_rate = 48000.0,
+                       .block_frames = 16,
+                       .input_channels = 1,
+                       .output_channels = 1}))
+        return false;
+    std::vector<float> stimulus(32, 0.0f);
+    stimulus[8] = 1.0f;
+    float* input_ptrs[] = {stimulus.data()};
+    pulp::audio::BufferView<const float> input(input_ptrs, 1, stimulus.size());
+    const auto render = host.render({.frame_count = stimulus.size(), .input = input});
+    if (!render.ok || render.audio.num_channels() != 1 || render.audio.num_samples() != 32)
+        return false;
+    for (std::size_t frame = 0; frame < 32; ++frame) {
+        const float expected = frame == 8 ? 0.125f : 0.0f;
+        if (std::abs(render.audio.channel(0)[frame] - expected) > 1.0e-6f)
+            return false;
+    }
+
+    const auto missing =
+        connect_subgraph_ports(graph, source.instance, "missing", sink.instance, "input");
+    if (missing || missing.code != GraphResult::Code::UnknownPort ||
+        graph.connections().size() != before + 1)
+        return false;
+    const auto wrong_direction =
+        connect_subgraph_ports(graph, sink.instance, "output", source.instance, "output");
+    return !wrong_direction && wrong_direction.code == GraphResult::Code::UnknownPort &&
+           wrong_direction.message().find("subgraph boundary") != std::string::npos &&
+           graph.connections().size() == before + 1;
+}
+
 } // namespace
 
 int main() {
@@ -118,6 +183,10 @@ int main() {
         std::cerr << "planted channel swap was not rejected\n";
         return 2;
     }
-    std::cout << "static stereo recipe and planted channel swap passed\n";
+    if (!check_composed_stages()) {
+        std::cerr << "exposed-port composition or planted negatives failed\n";
+        return 3;
+    }
+    std::cout << "static stereo recipe, exposed-port composition, and planted negatives passed\n";
     return 0;
 }
