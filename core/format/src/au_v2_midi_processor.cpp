@@ -42,6 +42,7 @@ PulpAUMidiProcessor::PulpAUMidiProcessor(AudioComponentInstance ci,
 {
     if (!factory) return;
     processor_ = factory();
+    render_context_.bind(processor_.get());
     if (!processor_) return;
 
     processor_->set_state_store(&store_);
@@ -155,6 +156,8 @@ OSStatus PulpAUMidiProcessor::GetPropertyInfo(AudioUnitPropertyID inID,
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_property_info(store_, inScope, outDataSize,
                                                   outWritable);
+    if (inID == kAudioUnitProperty_RenderContextObserver)
+        return render_context_.property_info(inScope, inElement, outDataSize, outWritable);
     if (inID == kAudioUnitProperty_SupportsMPE)
         return fill_supports_mpe_property_info(descriptor_.effective_capabilities().supports_mpe,
                                                inScope, outDataSize, outWritable);
@@ -214,6 +217,8 @@ OSStatus PulpAUMidiProcessor::GetProperty(AudioUnitPropertyID inID,
         return offline_render_.get(inScope, outData);
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_name(store_, inScope, outData);
+    if (inID == kAudioUnitProperty_RenderContextObserver)
+        return render_context_.get(inScope, inElement, outData);
     if (inID == kAudioUnitProperty_SupportsMPE)
         return fill_supports_mpe(descriptor_.effective_capabilities().supports_mpe, inScope,
                                  outData);
@@ -304,6 +309,9 @@ OSStatus PulpAUMidiProcessor::Initialize()
 
 void PulpAUMidiProcessor::Cleanup()
 {
+    // Leave the host's borrowed workgroup before the processor releases the
+    // threads that joined it.
+    render_context_.clear_after_render_resources();
     if (processor_) processor_->release();
     MusicDeviceBase::Cleanup();
 }
@@ -357,6 +365,11 @@ OSStatus PulpAUMidiProcessor::Render(AudioUnitRenderActionFlags& ioActionFlags,
                                      UInt32 inNumberFrames)
 {
     (void)inTimeStamp;
+
+    // The observer completes a workgroup transition before it returns; this
+    // idempotent guard makes every render verify the current publication
+    // before any early exit, as the AUv3 render block does.
+    render_context_.prepare_for_render();
 
     // The Processor and its scratch were sized in prepare() to
     // GetMaxFramesPerSlice(). Rejecting an oversized render is the canonical AU

@@ -393,6 +393,28 @@ public:
     }
 };
 
+// An instrument that runs auxiliary realtime threads: it implements
+// AudioWorkgroupClient and records what the adapter publishes to it.
+class TestAUWorkgroupInstrumentProcessor : public TestAUInstrumentProcessor,
+                                           public pulp::format::AudioWorkgroupClient {
+  public:
+    void set_audio_workgroup(void* value) noexcept override {
+        audio_workgroup.store(value, std::memory_order_release);
+        audio_workgroup_updates.fetch_add(1, std::memory_order_relaxed);
+    }
+    void wait_for_audio_workgroup_update() noexcept override {
+        audio_workgroup_waits.fetch_add(1, std::memory_order_relaxed);
+    }
+    bool prepare_audio_workgroup_for_render() noexcept override {
+        audio_workgroup_prepares.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+    std::atomic<void*> audio_workgroup{nullptr};
+    std::atomic<int> audio_workgroup_updates{0};
+    std::atomic<int> audio_workgroup_waits{0};
+    std::atomic<int> audio_workgroup_prepares{0};
+};
+
 class TestAULayoutProcessor : public TestAUEffectProcessor {
 public:
     pulp::format::PluginDescriptor descriptor() const override {
@@ -462,6 +484,10 @@ std::unique_ptr<pulp::format::Processor> create_layout_processor() {
 
 std::unique_ptr<pulp::format::Processor> create_instrument_processor() {
     return std::make_unique<TestAUInstrumentProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_workgroup_instrument_processor() {
+    return std::make_unique<TestAUWorkgroupInstrumentProcessor>();
 }
 
 std::unique_ptr<pulp::format::Processor> create_wide_editor_processor() {
@@ -3172,6 +3198,138 @@ TEST_CASE("AU v3 render context observer forwards workgroup changes and removal"
         [unit release];
     }
     pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+// AU v2 hosts read kAudioUnitProperty_RenderContextObserver (the v2 form of
+// AUv3's renderContextObserver) and the OS calls the returned block before a
+// render whose workgroup changed. The workgroup below is deliberately not a
+// real os_object: an observer that regressed to os_retain/os_release would
+// crash here instead of passing.
+namespace {
+template <typename Unit> AURenderContextObserver get_v2_render_context_observer(Unit& unit) {
+    UInt32 size = 0;
+    bool writable = true;
+    REQUIRE(unit.DispatchGetPropertyInfo(kAudioUnitProperty_RenderContextObserver,
+                                         kAudioUnitScope_Global, 0, size, writable) == noErr);
+    REQUIRE(size == sizeof(AURenderContextObserver));
+    REQUIRE_FALSE(writable);
+    AURenderContextObserver observer = nil;
+    REQUIRE(unit.DispatchGetProperty(kAudioUnitProperty_RenderContextObserver,
+                                     kAudioUnitScope_Global, 0, &observer) == noErr);
+    REQUIRE(observer != nil);
+    // Global scope, element 0 only.
+    REQUIRE(unit.DispatchGetPropertyInfo(kAudioUnitProperty_RenderContextObserver,
+                                         kAudioUnitScope_Output, 0, size,
+                                         writable) == kAudioUnitErr_InvalidScope);
+    return observer;
+}
+
+AudioStreamBasicDescription v2_float_stereo_format() {
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags =
+        kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+    return format;
+}
+} // namespace
+
+TEST_CASE("AU v2 effect render context observer forwards workgroup changes and removal",
+          "[au][auv2][workgroup][rt-safety]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+    constexpr UInt32 kFrames = 64;
+    const auto format = v2_float_stereo_format();
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    auto* processor = g_last_effect_processor;
+    REQUIRE(processor != nullptr);
+    effect.CreateElements();
+    REQUIRE(effect.Input(0).SetStreamFormat(format) == noErr);
+    REQUIRE(effect.Output(0).SetStreamFormat(format) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    AURenderContextObserver observer = get_v2_render_context_observer(effect);
+    AudioUnitRenderContext context{};
+    context.workgroup = reinterpret_cast<os_workgroup_t>(std::uintptr_t{0x7070});
+    observer(&context);
+    REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) ==
+            reinterpret_cast<void*>(context.workgroup));
+    REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 1);
+    REQUIRE(processor->audio_workgroup_prepares.load(std::memory_order_relaxed) == 1);
+
+    // A null context is an explicit removal.
+    observer(nullptr);
+    REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) == nullptr);
+    REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 2);
+
+    observer(&context);
+    effect.DoCleanup();
+    REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) == nullptr);
+    REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 4);
+    REQUIRE(processor->audio_workgroup_waits.load(std::memory_order_relaxed) == 1);
+}
+
+TEST_CASE("AU v2 instrument render context observer reaches AudioWorkgroupClient",
+          "[au][auv2][instrument][workgroup][rt-safety]") {
+    ScopedFactoryRegistration registration(create_workgroup_instrument_processor);
+    constexpr UInt32 kFrames = 64;
+    pulp::format::au::PulpAUInstrument instrument(nullptr);
+    auto* processor =
+        dynamic_cast<TestAUWorkgroupInstrumentProcessor*>(g_last_instrument_processor);
+    REQUIRE(processor != nullptr);
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(v2_float_stereo_format()) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+
+    AURenderContextObserver observer = get_v2_render_context_observer(instrument);
+    AudioUnitRenderContext context{};
+    context.workgroup = reinterpret_cast<os_workgroup_t>(std::uintptr_t{0x7171});
+    observer(&context);
+    REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) ==
+            reinterpret_cast<void*>(context.workgroup));
+    REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 1);
+    REQUIRE(processor->audio_workgroup_prepares.load(std::memory_order_relaxed) == 1);
+
+    // Every render re-verifies the publication through the idempotent guard.
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(processor->audio_workgroup_prepares.load(std::memory_order_relaxed) == 2);
+    REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 1);
+
+    instrument.DoCleanup();
+    REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) == nullptr);
+    REQUIRE(processor->audio_workgroup_waits.load(std::memory_order_relaxed) == 1);
+}
+
+TEST_CASE("AU v2 instrument without auxiliary realtime threads leaves the observer unadvertised",
+          "[au][auv2][instrument][workgroup]") {
+    ScopedFactoryRegistration registration(create_instrument_processor);
+    pulp::format::au::PulpAUInstrument instrument(nullptr);
+    REQUIRE(g_last_instrument_processor != nullptr);
+    UInt32 size = 0;
+    bool writable = false;
+    REQUIRE(instrument.DispatchGetPropertyInfo(kAudioUnitProperty_RenderContextObserver,
+                                               kAudioUnitScope_Global, 0, size,
+                                               writable) == kAudioUnitErr_InvalidProperty);
+    AURenderContextObserver observer = nil;
+    REQUIRE(instrument.DispatchGetProperty(kAudioUnitProperty_RenderContextObserver,
+                                           kAudioUnitScope_Global, 0,
+                                           &observer) == kAudioUnitErr_InvalidProperty);
+    REQUIRE(observer == nil);
 }
 
 TEST_CASE("AU v3 per-method audit invariants",
