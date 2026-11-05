@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 183,
+  "inventory_version": 184,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 519,
-    "reviewed_headers": 271,
+    "public_headers": 520,
+    "reviewed_headers": 272,
     "legacy_unreviewed_headers": 248,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 102,
+      "infrastructure": 103,
       "legacy_unreviewed": 248,
       "unsupported_capability": 2
     },
@@ -61,8 +61,8 @@
         "unsupported_headers": 0
       },
       "midi": {
-        "public_headers": 50,
-        "reviewed_headers": 25,
+        "public_headers": 51,
+        "reviewed_headers": 26,
         "legacy_unreviewed_headers": 25,
         "unsupported_headers": 0
       },
@@ -1593,6 +1593,15 @@
         "midi.note-length-shaping"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "midi",
+      "source": "core/midi/include/pulp/midi/panic.hpp",
+      "fingerprint": "sha256:8c7d581bb16cc8d0aac5ff9e64c52a28416acd3d5c3bf5053c85c9a3d9e0afea",
+      "include": "pulp/midi/panic.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Pure MIDI 1.0 panic message generation and held-note offs used by processors and adapters; not a generator-facing capability."
     },
     {
       "domain": "midi",
