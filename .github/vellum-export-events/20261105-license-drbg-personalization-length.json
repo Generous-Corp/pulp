@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261105-license-drbg-personalization-length",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-05T07:00:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/runtime/src/license.cpp",
+    "core/runtime/src/license_v2_drbg.hpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "license.cpp is in the exported foundation unit, and license_v2_drbg.hpp is its new include, so the next re-export carries both. Vellum should inherit them: the pulp::->vellum:: rename respells this personalization literal, and the helper keeps the length passed to the DRBG tied to the string. Today's bytes and behaviour are unchanged."
+}
