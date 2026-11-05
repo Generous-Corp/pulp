@@ -359,9 +359,6 @@ SECRET_WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
 # Credential -> the environment that holds it.
 ENVIRONMENT_SECRETS: dict[str, str] = {
-    # Tags are created by the fleet-release-interim App, whose key only the
-    # template `publish-tags` job reads.
-    "FLEET_RELEASE_INTERIM_APP_PRIVATE_KEY": "release",
     # The WebCLAP deploy job, which only unpacks a digest-checked tarball.
     "CLOUDFLARE_API_TOKEN": "deploy",
     "CLOUDFLARE_ACCOUNT_ID": "deploy",
@@ -370,7 +367,7 @@ ENVIRONMENT_SECRETS: dict[str, str] = {
 }
 
 # Environments whose jobs must run no repository code.
-NO_REPO_CODE = {"release", "deploy"}
+NO_REPO_CODE = {"deploy"}
 
 # Credentials that stay repository secrets this round, with the reason.
 REPOSITORY_SECRETS: dict[str, str] = {
@@ -402,9 +399,8 @@ REPOSITORY_SECRETS: dict[str, str] = {
     "APPLE_PASSWORD": "unset",
 }
 
-# The only actions a NO_REPO_CODE job may use, pinned as the workflows pin them.
+# The only actions a NO_REPO_CODE job may use, pinned as the workflow pins them.
 NO_REPO_CODE_ACTIONS = (
-    "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
     "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
     "cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0",
 )

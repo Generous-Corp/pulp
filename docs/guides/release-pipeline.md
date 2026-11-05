@@ -497,49 +497,28 @@ Independently of manual verification, `release-reconcile.yml` re-dispatches any
 recent tag that is not published within its grace window, so a stuck release
 normally repairs itself without anyone looking (see release-watchdog.md).
 
-## Where the release credentials live
+## Where the deploy credentials live
 
-`auto-release.yml` creates tags one of two ways, chosen by the repository
-variable `FLEET_RELEASE_INTERIM_APP_ID`:
+The WebCLAP Cloudflare token is not a repository secret: a repository secret is
+readable by a run started from any pushed branch that edits a workflow. The
+required build+proof job holds no secret and uploads the site as one tarball;
+the `deploy` job, in the `deploy` environment (deployment policy: branch `main`
+only), checks the tarball's digest against the build job's output, refuses any
+member that is not a regular file or directory under `public/` (the build
+job's runner is routable, so the tarball is untrusted), unpacks it into an
+empty directory, writes wrangler's config from the workflow text, and runs only
+the pinned wrangler action. The live unfurl check is repository code, so it is
+a third job with no secret.
 
-- **Unset (legacy):** the `tag` job pushes signed tags with the
-  `RELEASE_BOT_TOKEN` PAT and `RELEASE_BOT_SSH_SIGNING_KEY`, both repository
-  secrets (version-at-land and the runner monitors read them too).
-- **Set:** the `tag` job only decides which tags to create. The
-  `publish-tags` job, in the `release` environment (deployment policy: branch
-  `main` only), mints a `fleet-release-interim` App token and creates annotated
-  tags through the GitHub API at this run's commit, after checking that the
-  commit is on `main`. It checks out nothing, so no repository code runs next to
-  the App key. That App is the only bypass actor of the `v*` and `plugin-v*`
-  tag ruleset's creation rule; the tag it creates starts the release workflows
-  as before. These tags are annotated but unsigned, with tagger
-  `fleet-release-interim[bot]`: nothing in the release pipeline verifies tag
-  signatures, and the legacy SSH key signs as the maintainer's account, which
-  an App-made tag must not claim to be.
-
-  The tag ruleset blocks updating, deleting and force-pushing `v*` and
-  `plugin-v*` tags for everyone. When auto-release stops on "tag exists at
-  another sha, manual reconciliation required", fixing the tag means setting
-  the `protect-release-tags` ruleset to Disabled for the change and Active
-  again after.
-
-The WebCLAP deploy works the same way: the required build+proof job holds no
-secret and uploads the site as one tarball; the `deploy` job, in the `deploy`
-environment (branch `main` only), checks the tarball's digest against the build
-job's output, refuses any member that is not a regular file or directory under
-`public/` (the build job's runner is routable, so the tarball is untrusted),
-unpacks it into an empty directory, writes wrangler's config from the workflow
-text, and runs only the pinned wrangler action. What this cannot stop: a
-build runner routed elsewhere can still put a `_worker.js` (or any page) in
-`public/`, and Cloudflare deploys it as the site's edge code. The check keeps
-the build runner from reaching the deploy job's token, not from shaping the
-site. The live unfurl check is repository code, so it is a third job
-with no secret.
+What this cannot stop: a build runner routed elsewhere can still put a
+`_worker.js` (or any page) in `public/`, and Cloudflare deploys it as the
+site's edge code. The check keeps the build runner from reaching the deploy
+job's token, not from shaping the site.
 
 `WorkflowSecretEnvironments` in `tools/scripts/test_workflow_lint.py` pins which
 environment each credential is read from, that no pull-request run names an
 environment, that no workflow reads secrets dynamically, and that jobs in the
-`release` and `deploy` environments check out nothing.
+`deploy` environment check out nothing and run only allowlisted commands.
 
 ## Manual release-cli backfills
 

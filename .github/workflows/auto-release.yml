@@ -45,15 +45,6 @@ jobs:
   tag:
     runs-on: ubuntu-latest
     name: Tag moved versions
-    # When vars.FLEET_RELEASE_INTERIM_APP_ID is set this job only decides
-    # which tags to create; `publish-tags` creates them. Otherwise it tags
-    # here with the release-bot PAT, as before.
-    outputs:
-      skip: ${{ steps.guard.outputs.skip }}
-      sdk_tag: ${{ (steps.windows_precheck.outputs.block == '1' || steps.capability_precheck.outputs.block == '1') && '0' || steps.versions.outputs.sdk_should_tag }}
-      sdk_after: ${{ steps.versions.outputs.sdk_after }}
-      plugin_tag: ${{ steps.versions.outputs.plugin_should_tag }}
-      plugin_after: ${{ steps.versions.outputs.plugin_after }}
 
     steps:
       - name: Checkout with range context
@@ -65,7 +56,7 @@ jobs:
           # below. actions/checkout@v5's default fetches tags along with
           # fetch-depth=0, but spell it out for clarity.
           fetch-tags: true
-          token: ${{ vars.FLEET_RELEASE_INTERIM_APP_ID == '' && secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Skip on trailer or revert
         id: guard
@@ -457,7 +448,6 @@ jobs:
 
       - name: Configure release bot SSH signing
         if: >-
-          vars.FLEET_RELEASE_INTERIM_APP_ID == '' &&
           steps.guard.outputs.skip == '0' &&
           (steps.versions.outputs.sdk_should_tag == '1' ||
            steps.versions.outputs.plugin_should_tag == '1')
@@ -467,7 +457,7 @@ jobs:
         run: bash tools/scripts/configure_release_bot_ssh_signing.sh
 
       - name: Create tags for moved surfaces
-        if: vars.FLEET_RELEASE_INTERIM_APP_ID == '' && steps.guard.outputs.skip == '0'
+        if: steps.guard.outputs.skip == '0'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
@@ -778,74 +768,3 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --title "$title" \
               --body-file body.md
-
-  # Creates the tags `tag` decided on, as the fleet-release-interim App, the
-  # only bypass actor of the v* tag ruleset's creation rule. The App key is a
-  # secret of the `release` environment (deployment policy: branch main), and
-  # this job runs no repository code: no checkout, only the pinned token
-  # action and the GitHub API, so nothing the repository contains can read
-  # the key. Tags are annotated, unsigned (nothing verifies tag signatures),
-  # tagged by the App's own bot identity, and point at this run's commit,
-  # which must be on main.
-  publish-tags:
-    needs: tag
-    if: >-
-      vars.FLEET_RELEASE_INTERIM_APP_ID != '' &&
-      needs.tag.outputs.skip == '0' &&
-      (needs.tag.outputs.sdk_tag == '1' || needs.tag.outputs.plugin_tag == '1')
-    runs-on: ubuntu-latest
-    environment: release
-    permissions: {}
-    steps:
-      - name: Mint the fleet-release-interim App token
-        id: release-app
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
-        with:
-          app-id: ${{ vars.FLEET_RELEASE_INTERIM_APP_ID }}
-          private-key: ${{ secrets.FLEET_RELEASE_INTERIM_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write
-
-      - name: Create the tags
-        shell: bash
-        env:
-          GH_TOKEN: ${{ steps.release-app.outputs.token }}
-          SDK_TAG: ${{ needs.tag.outputs.sdk_tag }}
-          SDK_AFTER: ${{ needs.tag.outputs.sdk_after }}
-          PLUGIN_TAG: ${{ needs.tag.outputs.plugin_tag }}
-          PLUGIN_AFTER: ${{ needs.tag.outputs.plugin_after }}
-        run: |
-          set -euo pipefail
-          test -n "$GH_TOKEN"
-          repo="$GITHUB_REPOSITORY"
-          # This run's commit must be on main (compare main...sha is
-          # "behind" or "identical" exactly when main contains it).
-          status=$(gh api "repos/$repo/compare/main...$GITHUB_SHA" --jq .status)
-          case "$status" in
-            behind|identical) ;;
-            *) echo "::error::$GITHUB_SHA is not on main (compare: $status)" >&2; exit 1 ;;
-          esac
-          create_tag() {
-              local tag="$1" existing target obj
-              if existing=$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha' 2>/dev/null); then
-                  target=${existing#* }
-                  if [ "${existing%% *}" = "tag" ]; then
-                      target=$(gh api "repos/$repo/git/tags/$target" --jq .object.sha)
-                  fi
-                  if [ "$target" = "$GITHUB_SHA" ]; then
-                      echo "tag $tag already at $GITHUB_SHA - no-op"; return 0
-                  fi
-                  echo "::error::tag $tag exists at $target but this run is $GITHUB_SHA; manual reconciliation required (docs/guides/versioning.md)" >&2
-                  exit 1
-              fi
-              obj=$(gh api "repos/$repo/git/tags" \
-                  -f tag="$tag" -f object="$GITHUB_SHA" -f type=commit \
-                  -f message="Release $tag (automated by auto-release.yml)" \
-                  -f 'tagger[name]=fleet-release-interim[bot]' \
-                  -f 'tagger[email]=fleet-release-interim[bot]@users.noreply.github.com' --jq .sha)
-              gh api "repos/$repo/git/refs" -f ref="refs/tags/$tag" -f sha="$obj" >/dev/null
-              echo "created $tag"
-          }
-          if [ "$SDK_TAG" = "1" ] && [ -n "$SDK_AFTER" ]; then create_tag "v${SDK_AFTER}"; fi
-          if [ "$PLUGIN_TAG" = "1" ] && [ -n "$PLUGIN_AFTER" ]; then create_tag "plugin-v${PLUGIN_AFTER}"; fi

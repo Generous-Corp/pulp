@@ -6084,16 +6084,15 @@ contains(..., matrix.platform)` on a matrix job evaluates with an empty
 `matrix` and silently skips every leg. GitHub only exposes `github`, `needs`,
 `vars`, and `inputs` to `jobs.<id>.if`.
 
-### Release credentials live in environments whose jobs run no repo code
+### Deploy credentials live in an environment whose job runs no repo code
 
 A repository secret is readable by a run started from any pushed branch that
 edits a workflow, and a job's secrets reach its runner before its first step,
-so any repository code in that job can read them. Release and deploy
-credentials are therefore secrets of `release` / `deploy` environments
+so any repository code in that job can read them. Deploy
+credentials are therefore secrets of the `deploy` environment
 (deployment policy: branch `main`), read only by jobs that check out nothing:
-`auto-release.yml` `publish-tags` (tags via the API as the
-fleet-release-interim App) and `wclap-cloudflare.yml` `deploy` (digest-checked
-tarball, pinned wrangler). Gotchas:
+`wclap-cloudflare.yml` `deploy` (digest- and shape-checked tarball, pinned
+wrangler). Gotchas:
 
 - A `pull_request` / `merge_group` run's ref is never `main`, so a job that
   names one of these environments on that event is refused (red). Gate it with
