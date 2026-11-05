@@ -1282,6 +1282,28 @@ def _receipt_mode(args: argparse.Namespace) -> int:
     except (receipt.ReceiptDriftError, FreezeError, OSError) as exc:
         print(f"vellum-freeze receipt mode: {exc}", file=sys.stderr)
         return 1
+    # The receipt copy is compared with Vellum's only where a reader token is
+    # present: the trusted lanes, which run these scripts from protected main.
+    token = os.environ.get("VELLUM_READER_TOKEN")
+    report["receipt_source"] = "unchecked: no Vellum reader token"
+    if token and report["state"] == "active":
+        try:
+            problems = receipt.receipt_copy_problems(
+                repo, (base, args.head),
+                lambda path: _github_json(f"https://api.github.com/{path}", token),
+            )
+        except (receipt.ReceiptDriftError, FreezeError, OSError) as exc:
+            print(f"vellum-freeze receipt mode: {exc}", file=sys.stderr)
+            return 1
+        if problems:
+            report["status"] = "fail"
+            report["receipt_source"] = problems
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            for problem in problems:
+                print(f"vellum-freeze receipt mode: {problem}", file=sys.stderr)
+            return 1
+        report["receipt_source"] = "matches Vellum main"
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if report["status"] != "pass":
