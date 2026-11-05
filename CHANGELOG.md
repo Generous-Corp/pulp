@@ -9,6 +9,24 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1640"></a>
+## [1.64.0] - 2026-11-05
+
+- g12 baseline evidence 20261105 ([#11573](https://github.com/Generous-Corp/pulp/pull/11573))
+- release/version bump ([#11568](https://github.com/Generous-Corp/pulp/pull/11568))
+- feature/editor host acceptance ([#11472](https://github.com/Generous-Corp/pulp/pull/11472))
+- codex/g4 voice identity 20261104 ([#11558](https://github.com/Generous-Corp/pulp/pull/11558))
+- feat/g2 notation reload 20261104 ([#11563](https://github.com/Generous-Corp/pulp/pull/11563))
+- docs/g5 receipt durable followup 20261105 ([#11564](https://github.com/Generous-Corp/pulp/pull/11564))
+- feature/mirror edge rename roots ([#11565](https://github.com/Generous-Corp/pulp/pull/11565))
+- refactor/license personalization length ([#11569](https://github.com/Generous-Corp/pulp/pull/11569))
+- codex/g11 cookbook next 20261105 ([#11571](https://github.com/Generous-Corp/pulp/pull/11571))
+- feature/unfreeze value source ([#11451](https://github.com/Generous-Corp/pulp/pull/11451))
+- feature/standalone editor contract ([#11471](https://github.com/Generous-Corp/pulp/pull/11471))
+- release/version bump ([#11562](https://github.com/Generous-Corp/pulp/pull/11562))
+- fix/deleted fork runner routing ([#11551](https://github.com/Generous-Corp/pulp/pull/11551))
+- docs/g5 installed consumer receipt 20261104 ([#11559](https://github.com/Generous-Corp/pulp/pull/11559))
+
 <a id="v1630"></a>
 ## [1.63.0] - 2026-11-05
 
@@ -12250,6 +12268,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.64.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.64.0
 [1.63.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.63.0
 [1.62.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.62.0
 [1.61.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.61.0
