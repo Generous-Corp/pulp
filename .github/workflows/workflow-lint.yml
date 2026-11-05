@@ -129,6 +129,10 @@ on:
       - 'tools/scripts/dispatch_advisory_lanes.sh'
       - 'tools/scripts/test_dispatch_advisory_lanes.py'
       - 'tools/scripts/test_fork_pr_runner_routing.py'
+      - 'tools/scripts/fork_runner_guard_check.py'
+      - 'tools/scripts/test_fork_runner_guard_check.py'
+      - 'tools/scripts/resolve_runs_on.py'
+      - 'tools/scripts/test_resolve_runs_on_fork.py'
       - 'tools/scripts/ctest_scheduling_policy.py'
       - 'tools/scripts/test_ctest_scheduling_contract.py'
       - 'tools/scripts/test_api_contracts_workflow.py'
@@ -274,6 +278,10 @@ on:
       - 'tools/scripts/dispatch_advisory_lanes.sh'
       - 'tools/scripts/test_dispatch_advisory_lanes.py'
       - 'tools/scripts/test_fork_pr_runner_routing.py'
+      - 'tools/scripts/fork_runner_guard_check.py'
+      - 'tools/scripts/test_fork_runner_guard_check.py'
+      - 'tools/scripts/resolve_runs_on.py'
+      - 'tools/scripts/test_resolve_runs_on_fork.py'
       - 'tools/scripts/ctest_scheduling_policy.py'
       - 'tools/scripts/test_ctest_scheduling_contract.py'
       - 'tools/scripts/test_api_contracts_workflow.py'
@@ -378,6 +386,10 @@ jobs:
           python3 -m pip install --quiet 'pyyaml>=6'
           python3 tools/scripts/test_scheduled_workflow_fork_guard_check.py
           python3 tools/scripts/scheduled_workflow_fork_guard_check.py
+          # A fork pull request, deleted or not, never gets a variable-selected runner.
+          python3 tools/scripts/test_fork_runner_guard_check.py
+          python3 tools/scripts/fork_runner_guard_check.py
+          python3 tools/scripts/test_resolve_runs_on_fork.py
           python3 tools/scripts/test_schedule_backstop_check.py
           python3 tools/scripts/schedule_backstop_check.py
 
