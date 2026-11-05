@@ -276,7 +276,8 @@ class RttiOwnershipTest(unittest.TestCase):
                 "import sys\n"
                 "strip = '-n' not in sys.argv[1:]\n"
                 "known = {'_ZTIN7content8RegistryE': 'typeinfo for content::Registry',\n"
-                "         '_ZTIN4pulp4rtti7ControlE': 'typeinfo for pulp::rtti::Control'}\n"
+                "         '_ZTIN4pulp4rtti7ControlE': 'typeinfo for pulp::rtti::Control',\n"
+                "         '_ZTIN6vellum4rtti7ControlE': 'typeinfo for vellum::rtti::Control'}\n"
                 "for line in sys.stdin.read().splitlines():\n"
                 "    name = line[1:] if strip and line.startswith('_') else line\n"
                 "    print(known.get(name, line))\n",
@@ -286,6 +287,37 @@ class RttiOwnershipTest(unittest.TestCase):
                 {"_ZTIN7content8RegistryE", "__ZTIN7content8RegistryE"}, str(tool))
         # Both the ELF spelling and the Mach-O one (extra underscore) demangle.
         self.assertEqual(set(names.values()), {"typeinfo for content::Registry"})
+
+    def test_there_is_one_control_per_root(self) -> None:
+        # Vellum, which vendors this module, holds ROOT_NAMESPACES equal to
+        # the mirror-edge table's roots.
+        self.assertEqual(rtti_ownership.ROOT_NAMESPACES, ("pulp", "vellum"))
+        self.assertEqual(rtti_ownership.mangled_root("vellum"), "N6vellum")
+        self.assertEqual(rtti_ownership.controls(), [
+            ("__ZTIN4pulp4rtti7ControlE", "typeinfo for pulp::rtti::Control"),
+            ("__ZTIN6vellum4rtti7ControlE", "typeinfo for vellum::rtti::Control")])
+
+    def test_every_root_control_demangles_with_the_real_tool(self) -> None:
+        real = shutil.which("c++filt") or shutil.which("llvm-cxxfilt")
+        if not real:
+            self.skipTest("needs c++filt or llvm-cxxfilt")
+        for control, expected in rtti_ownership.controls():
+            with self.subTest(control=control):
+                self.assertEqual(rtti_ownership.demangle({control}, real), {control: expected})
+        self.assertEqual(rtti_ownership.demangle({"_ZTIN7content8RegistryE"}, real),
+                         {"_ZTIN7content8RegistryE": "typeinfo for content::Registry"})
+
+    def test_a_demangler_that_cannot_read_a_root_is_refused(self) -> None:
+        # A tool that reads only the pulp spelling fails the vellum control.
+        with tempfile.TemporaryDirectory() as tmp:
+            tool = write_tool(Path(tmp) / "pulp-only", (
+                "import sys\n"
+                "known = {'_ZTIN4pulp4rtti7ControlE': 'typeinfo for pulp::rtti::Control',\n"
+                "         '_ZTIN7content8RegistryE': 'typeinfo for content::Registry'}\n"
+                "for line in sys.stdin.read().splitlines():\n"
+                "    print(known.get(line, line))\n"))
+            with self.assertRaisesRegex(rtti_ownership.DemangleError, "vellum::rtti::Control"):
+                rtti_ownership.demangle({"_ZTIN7content8RegistryE"}, tool)
 
     def test_demangle_refuses_output_that_fails_the_control(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

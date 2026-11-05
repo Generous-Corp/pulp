@@ -1305,7 +1305,9 @@ class ClosureMentionTests(unittest.TestCase):
         debts = {entry["id"] for entry in ledger["entries"]}
         self.assertEqual(table["approved_exceptions"], [{
             "rule": "mirror-pulp-kept-include", "path": "core/view/include/pulp/view/widgets.hpp",
-            "line": "#include <pulp/view/audio_widgets.hpp>", "debt": "vellum-header-audio-widgets-include"}])
+            "line": "#include <pulp/view/audio_widgets.hpp>", "debt": "vellum-header-audio-widgets-include"}, {
+            "rule": "mirror-pulp-kept-include", "path": "core/view/include/vellum/view/widgets.hpp",
+            "line": "#include <vellum/view/audio_widgets.hpp>", "debt": "vellum-header-audio-widgets-include"}])
         self.assertLessEqual({row["debt"] for row in table["approved_exceptions"]}, debts)
         widgets = "core/view/include/pulp/view/widgets.hpp"
         debt_line = (REPO_ROOT / widgets).read_text(encoding="utf-8").splitlines().index(
@@ -2143,11 +2145,36 @@ class MirrorEdgeRootTests(unittest.TestCase):
     def rules(self, table):
         return {**table["content_patterns"], **table["path_patterns"]}
 
-    def test_the_shipped_table_is_spelled_pulp(self):
+    def test_the_shipped_table_reads_both_spellings(self):
+        # Pulp source and today's mirror spell pulp; the renamed mirror spells vellum.
+        both = ("pulp", "vellum")
         self.assertEqual(self.generator.table_roots(self.table),
-                         {"namespace": ("pulp",), "include": ("pulp",), "target": ("pulp",)})
-        self.assertEqual(self.generator.render(self.spelled(("pulp",))),
+                         {"namespace": both, "include": both, "target": both})
+        self.assertEqual(self.generator.render(self.spelled(both)),
                          (REPO_ROOT / "tools/scripts/vellum_mirror_edge_patterns.json").read_text(encoding="utf-8"))
+
+    def test_a_renamed_seam_debt_line_is_exempt_only_through_its_respelled_row(self):
+        from vellum_closure import closure_mention_violations, mirror_edge_table
+        widgets = "core/view/include/vellum/view/widgets.hpp"
+        debt_line = "#include <vellum/view/audio_widgets.hpp>"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / widgets
+            path.parent.mkdir(parents=True)
+            path.write_text(f"#pragma once\n{debt_line}\n", encoding="utf-8")
+            scan = {"source_root": td, "files": [widgets]}
+            table = mirror_edge_table()
+            self.assertEqual(closure_mention_violations(scan, table), [])
+            # Without the respelled row the renamed line is refused, as the
+            # pulp-spelled row alone cannot exempt it.
+            pulp_only = dict(table, exceptions={row for row in table["exceptions"] if "vellum" not in row[1]})
+            self.assertEqual(closure_mention_violations(scan, pulp_only),
+                             [f"mirror-pulp-kept-include mention {widgets}:2: {debt_line}"])
+            # The respelled row exempts that exact line of that file only.
+            path.write_text("#include <vellum/view/register_audio_widgets.hpp>\n", encoding="utf-8")
+            self.assertTrue(closure_mention_violations(scan, table))
+            other = "core/view/include/vellum/view/view.hpp"
+            (Path(td) / other).write_text(f"{debt_line}\n", encoding="utf-8")
+            self.assertTrue(closure_mention_violations({"source_root": td, "files": [other]}, table))
 
     def test_every_rule_has_controls(self):
         controls = self.table["controls"]
@@ -2184,9 +2211,9 @@ class MirrorEdgeRootTests(unittest.TestCase):
             for rel in ("x.cpp", "y.cpp"):
                 found = closure_mention_violations({"source_root": td, "files": [rel]}, table)
                 self.assertTrue(any(v.startswith("mirror-product-include") for v in found), (rel, found))
-            # The shipped table does not yet read the renamed spelling.
+            # The shipped table reads both spellings.
             found = closure_mention_violations({"source_root": td, "files": ["x.cpp"]})
-            self.assertEqual(found, [])
+            self.assertTrue(any(v.startswith("mirror-product-include") for v in found), found)
 
     def test_roots_are_validated(self):
         for roots in ({}, {"namespace": ["pulp"], "include": ["pulp"]},
