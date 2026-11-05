@@ -1,7 +1,7 @@
 # G-5 typed-event next-slice audit
 
 Date: 2026-11-05  
-Source head: `91cd83b67bb863d268bb7b6ef52ab8573331c5a6` (`origin/main`)  
+Audit source head: `91cd83b67bb863d268bb7b6ef52ab8573331c5a6` (`origin/main` at audit time)  
 Worktree: `codex/g5-typed-events-20261104`
 
 This audit checks the admitted bounded one-producer/one-consumer trigger lane
