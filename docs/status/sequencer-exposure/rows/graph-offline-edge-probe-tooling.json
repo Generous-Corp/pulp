@@ -18,6 +18,12 @@
         "graph-edge-probe installed CLI/MCP parity PASS",
         "edge_index"
       ]
+    },
+    {
+      "path": "tools/cli/cmd_graph.cpp",
+      "needles": [
+        "GraphSerializer::from_file"
+      ]
     }
   ],
   "surfaces": {

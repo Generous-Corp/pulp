@@ -17,6 +17,7 @@
 
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/processor_restore.hpp>
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -93,7 +94,12 @@ struct GraphLoadOptions {
 };
 
 class GraphSerializer {
-public:
+  public:
+    // File loads are bounded before parsing so a caller can safely hand a
+    // user-selected .pulpgraph path to the serializer. The limit covers the
+    // encoded JSON envelope (including base64 state), not decoded payloads.
+    static constexpr std::size_t max_file_bytes = 64u * 1024u * 1024u;
+
     using MigrationFn =
         std::function<bool(const std::string& source_json,
                            std::string& destination_json)>;
@@ -133,6 +139,11 @@ public:
     static LoadResult from_json(SignalGraph& graph, const std::string& json);
     static LoadResult from_json(SignalGraph& graph, const std::string& json,
                                 const GraphLoadOptions& options);
+
+    // Read one bounded graph file, then apply the same migration and restore
+    // rules as from_json. A read or size failure leaves graph untouched.
+    static LoadResult from_file(SignalGraph& graph, const std::filesystem::path& path,
+                                const GraphLoadOptions& options = {});
 };
 
 } // namespace pulp::host

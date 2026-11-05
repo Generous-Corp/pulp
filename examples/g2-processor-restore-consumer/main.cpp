@@ -3,6 +3,8 @@
 #include <pulp/host/signal_graph.hpp>
 
 #include <array>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <unordered_map>
@@ -164,6 +166,21 @@ void positive_and_isolation() {
     GraphLoadOptions load_options;
     load_options.processor_registry = &registry;
     load_options.processor_allowlist = {key};
+    const auto graph_file =
+        std::filesystem::temp_directory_path() / "pulp-g2-processor-restore-consumer.pulpgraph";
+    {
+        std::ofstream output(graph_file, std::ios::binary | std::ios::trunc);
+        check(static_cast<bool>(output), "graph file fixture opens for writing");
+        output << graph_json;
+        check(static_cast<bool>(output), "graph file fixture writes complete JSON");
+    }
+    SignalGraph file_graph;
+    const auto file_loaded = GraphSerializer::from_file(file_graph, graph_file, load_options);
+    check(file_loaded.ok, "graph v4 reloads from a file through the installed SDK");
+    check(GraphSerializer::to_json(file_graph, file_loaded.editor_layout) == graph_json,
+          "graph file reload preserves canonical notation byte-for-byte");
+    std::filesystem::remove(graph_file);
+
     SignalGraph roundtrip_graph;
     const auto roundtrip = GraphSerializer::from_json(roundtrip_graph, graph_json, load_options);
     check(roundtrip.ok, "graph v4 Processor envelope restores through the installed SDK");
@@ -177,6 +194,14 @@ void positive_and_isolation() {
     check(roundtrip_json.find(parameter_field) != std::string::npos &&
               roundtrip_json.find(custom_field) != std::string::npos,
           "graph v4 restore preserves parameter/custom bytes");
+    SignalGraph untouched;
+    check(untouched.add_input_node(1) != 0, "graph file negative starts with a live graph");
+    const auto before_missing = untouched.nodes().size();
+    const auto missing_file = GraphSerializer::from_file(untouched, graph_file, load_options);
+    check(!missing_file.ok && missing_file.error.find("cannot be opened") != std::string::npos,
+          "missing graph file is rejected before graph mutation");
+    check(untouched.nodes().size() == before_missing,
+          "missing graph file leaves the existing graph untouched");
     auto oversized_json = graph_json;
     const auto custom_key = oversized_json.find("\"custom_b64\":");
     if (custom_key == std::string::npos) {
