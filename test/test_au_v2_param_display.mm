@@ -891,3 +891,20 @@ TEST_CASE("AU v2 instrument serves parameter value text like the effect",
     REQUIRE(effect.DispatchGetPropertyInfo(kAudioUnitProperty_ParameterValueStrings,
                                            kAudioUnitScope_Global, 2, size, writable) == noErr);
 }
+
+TEST_CASE("AU v2 labelled Enum parameters report the Indexed unit",
+          "[au][au-v2][params][metadata][instrument]") {
+    ScopedValueTextFactory factory;
+    pulp::format::au::PulpAUInstrument inst(nullptr);
+
+    AudioUnitParameterInfo mode{};
+    REQUIRE(inst.GetParameterInfo(kAudioUnitScope_Global, 2, mode) == noErr);
+    REQUIRE(mode.unit == kAudioUnitParameterUnit_Indexed);
+    REQUIRE_THAT(mode.minValue, WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(mode.maxValue, WithinAbs(2.0f, 0.001f));
+
+    // A continuous parameter with custom text is not an indexed choice.
+    AudioUnitParameterInfo semis{};
+    REQUIRE(inst.GetParameterInfo(kAudioUnitScope_Global, 1, semis) == noErr);
+    REQUIRE(semis.unit == kAudioUnitParameterUnit_Generic);
+}

@@ -187,6 +187,11 @@ OSStatus fill_parameter_info(const state::StateStore& store,
         out_info.unit = kAudioUnitParameterUnit_Percent;
     } else if (state::is_boolean_param(*param)) {
         out_info.unit = kAudioUnitParameterUnit_Boolean;
+    } else if (state::is_discrete_param(*param)) {
+        // An enumerated choice (not a quantized continuous value, which stays
+        // Generic): Indexed tells hosts to show a menu built from
+        // GetParameterValueStrings instead of a numeric slider.
+        out_info.unit = kAudioUnitParameterUnit_Indexed;
     } else {
         out_info.unit = kAudioUnitParameterUnit_Generic;
     }

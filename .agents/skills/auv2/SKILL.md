@@ -1259,7 +1259,7 @@ Two host-conformance surfaces beyond the display-string path above:
 - `GetParameterInfo` maps `range.min/max/default_value` to
   `minValue/maxValue/defaultValue` and the unit string to an
   `AudioUnitParameterUnit` (`"Hz"`→Hertz, `"dB"`→Decibels, `"%"`→Percent,
-  Boolean, else Generic). A wrong range/unit silently mis-scales every host
+  Boolean, a discrete non-boolean (Enum) parameter→Indexed so hosts build a menu from the value strings, else Generic). A wrong range/unit silently mis-scales every host
   automation lane — assert the numeric metadata, not just the
   ValuesHaveStrings flag. Test: `test/test_au_v2_param_display.mm`.
 - **Hidden / read-only / non-automatable come from the shared model, and AU has
