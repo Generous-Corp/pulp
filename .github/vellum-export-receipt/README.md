@@ -43,3 +43,9 @@ a change event or expansion-watch event that covers it, or an export event under
   "rationale": "What changed, and why Vellum does or does not take it."
 }
 ```
+
+Two added events that state different values for one path fail as a conflict.
+To correct a landed export event, add a new one naming it in `supersedes`
+(sorted event ids). The correction may list only paths the superseded event
+also lists, and for those paths only the correction's value counts. It may list
+a path its own change leaves untouched.
