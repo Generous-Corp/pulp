@@ -6,7 +6,7 @@
   "slices": [
     "retained-ui-kernel"
   ],
-  "rationale": "Moves the editor data plane out of core/view into a new UI-free Pulp module, core/dataplane (pulp::dataplane and pulp::dataplane-audio, namespace pulp::dataplane), so the editor-host contract's VisualPort and ParamPort can be backed by it with no UI library linked. value_source.hpp keeps its path as a forwarding header: it includes <pulp/dataplane/value_source.hpp> and brings each name into pulp::view with a using-declaration, so view code and widgets compile unchanged. This is a deliberate move out of the exported set, not generic UI work: the next re-export shrinks the unit set instead of carrying the forwarder, and Vellum binds its widgets to its own generic value model rather than to Pulp's data plane.",
+  "rationale": "Moves the editor data plane out of core/view into a new UI-free Pulp module, core/dataplane (pulp::dataplane and pulp::dataplane-audio, namespace pulp::dataplane), so the editor-host contract's VisualPort and ParamPort can be backed by it with no UI library linked. value_source.hpp keeps its path as a forwarding header: it includes <pulp/dataplane/value_source.hpp> and brings each name into pulp::view with a using-declaration, so view code and widgets compile unchanged. The combined re-export carries pulp-dataplane as a temporary mirror unit for one export, so Vellum inherits the moved sources and the forwarders until its view-core binds vellum::value.",
   "tests": [
     "Vellum freeze",
     "Vellum trusted freeze",
@@ -15,5 +15,5 @@
     "ctest --test-dir build -R 'pulp-format-core-only-consumer'"
   ],
   "disposition": "pulp-only",
-  "vellum_inherits": false
+  "vellum_inherits": true
 }

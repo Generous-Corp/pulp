@@ -30,14 +30,11 @@ from vellum_closure import (
 
 
 # Edges from the two view umbrellas that the allowlist may admit, by exact
-# name and debt. "OWNER DECISION 2026-11-03: the data-plane edges enter the
-# Vellum closure gate as temporary debt" admits view-platform's data-plane edge;
-# nothing else from either umbrella is admitted, and a prefix entry that could
-# match one of their edges never is.
+# name and debt. None is admitted: the data plane is a mirrored unit, so no
+# view-umbrella edge needs a debt, and a prefix entry that could match one of
+# their edges never passes.
 VIEW_UMBRELLA_SOURCES = ("pulp-view-native->", "pulp-view-platform->")
-VIEW_UMBRELLA_ADMITTED_EDGES = {
-    ("pulp-view-platform->pulp-dataplane", "M2-dataplane"),
-}
+VIEW_UMBRELLA_ADMITTED_EDGES: set[tuple[str, str]] = set()
 
 
 def view_umbrella_edge_admissions(entries):
@@ -945,7 +942,7 @@ class MirroredLinkTests(unittest.TestCase):
                          ["pulp-events", "pulp-platform", "pulp-runtime", "pulp-simd",
                           "pulp-gpu-device", "?pulp-skia-chromium-raw-ptr-compat",
                           "pulp-canvas", "pulp-bundled-fonts", "?pulp-bundled-noto-color-emoji", "pulp-render",
-                          "pulp-state", "pulp-view-core", "pulp-design-import",
+                          "pulp-state", "pulp-dataplane", "pulp-view-core", "pulp-design-import",
                           "pulp-view-script", "pulp-view-platform", "pulp-jsx-runtime-materialized-contract",
                           "pulp-jsx-runtime-materialized-emitter"])
 
@@ -1043,7 +1040,7 @@ class MirroredLinkTests(unittest.TestCase):
     def test_view_platform_is_carried_by_the_audio_free_target(self):
         # pulp-view-native is the Pulp-kept umbrella that adds the audio widgets;
         # the view-platform unit carries pulp-view-platform, and no allowlist
-        # entry admits an edge from either except the exact data-plane debt.
+        # entry admits an edge from either.
         from vellum_closure import unit_manifest_targets
         self.assertEqual(unit_manifest_targets(self.UNITS, "view-platform"), ["pulp-view-platform"])
         entries = load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")
@@ -1070,10 +1067,44 @@ class MirroredLinkTests(unittest.TestCase):
                 self.assertEqual(view_umbrella_edge_admissions([entry]), [bypass["id"]])
         exact = {**base, "id": "m2", "debt_id": "M2-dataplane",
                  "match": "pulp-view-platform->pulp-dataplane"}
-        self.assertEqual(view_umbrella_edge_admissions([exact]), [])
+        self.assertEqual(view_umbrella_edge_admissions([exact]), ["m2"])
         # Debts from other mirrored targets are outside this guard.
         other = {**base, "id": "core", "match": "pulp-view-core->pulp-dataplane"}
         self.assertEqual(view_umbrella_edge_admissions([other]), [])
+
+    def test_view_core_data_plane_link_is_carried_by_a_mirrored_unit(self):
+        # Pulp's view-core links pulp-dataplane. The mirror carries that link
+        # only because the dataplane unit owns the target, earlier than
+        # view-core; without it the mirrored view-core could not link, and
+        # export-check refuses the closure. The unit is temporary and says when
+        # it leaves.
+        from vellum_closure import unit_manifest_layout, unmirrored_link_violations
+        layout = unit_manifest_layout(REPO_ROOT / "tools/scripts/vellum_d3_units.json")
+        names = [row["name"] for row in layout]
+        dataplane = next(row for row in layout if row["name"] == "dataplane")
+        self.assertEqual(dataplane["targets"], ["pulp-dataplane"])
+        self.assertIn("vellum::value", dataplane.get("retire_after", ""))
+        self.assertLess(names.index("state-core"), names.index("dataplane"))
+        self.assertLess(names.index("dataplane"), names.index("view-core"))
+        mirrored = {t for row in layout for t in row["targets"]}
+        link = {"targets": [{"name": "pulp-view-core", "link_targets": ["pulp-dataplane"]}]}
+        self.assertEqual(unmirrored_link_violations(link, mirrored, None, set()), [])
+        self.assertEqual(
+            unmirrored_link_violations(link, mirrored - {"pulp-dataplane"}, None, set()),
+            ["unmirrored Pulp target pulp-view-core -> pulp-dataplane"])
+        entries = load_allowlist(REPO_ROOT / "tools/scripts/vellum_closure_allowlist.json")
+        self.assertEqual([e["id"] for e in entries if e.get("debt_id") == "M2-dataplane"], [])
+
+    def test_retire_after_must_name_the_export(self):
+        from vellum_closure import unit_manifest_layout
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "units.json"
+            for bad in ("", "   ", 3):
+                path.write_text(json.dumps({"schema": "pulp.vellum.d3-units.v1", "units": [
+                    {"name": "foundation", "targets": ["pulp-runtime"], "retire_after": bad}]}),
+                    encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, "retire_after"):
+                    unit_manifest_layout(path)
 
     def test_empty_allowlist_loads_and_malformed_entries_fail(self):
         with tempfile.TemporaryDirectory() as td:

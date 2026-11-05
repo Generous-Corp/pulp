@@ -1799,6 +1799,9 @@ def unit_manifest_layout(path: Path) -> list[dict]:
 
     A unit's ``owned_files`` names repository files it carries although they
     live under another unit's directory; each such file has one owner.
+    A unit's ``retire_after`` marks a temporary unit: it names the export after
+    which the unit leaves the mirror.
+
     A unit's ``optional_targets`` are targets only some configures create.
     Each is a name, or ``{"name": ..., "platforms": [CMake system names]}``
     when it belongs to the unit only on those platforms. The file order is the
@@ -1866,7 +1869,12 @@ def unit_manifest_layout(path: Path) -> list[dict]:
             if previous is not None:
                 raise SystemExit(f"D3 target {target} is owned by both {previous} and {name}; use alias_of for a source slice alias")
             target_owners[target] = name
+        retire_after = entry.get("retire_after")
+        if retire_after is not None and (not isinstance(retire_after, str) or not retire_after.strip()):
+            raise SystemExit(f"Vellum unit {name} retire_after must name the export that drops it")
         row = {"name": name, "targets": list(unit_targets), "optional": optional, "owned_files": list(owned)}
+        if retire_after is not None:
+            row["retire_after"] = retire_after
         if alias_of is not None:
             row["alias_of"] = alias_of
         if carried_by is not None:

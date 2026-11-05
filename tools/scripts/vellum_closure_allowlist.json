@@ -1,37 +1,4 @@
 {
   "schema": "pulp.vellum.closure.allowlist.v1",
-  "entries": [
-    {
-      "id": "m2-dataplane-view-core",
-      "owner": "vellum-move-m2",
-      "debt_id": "M2-dataplane",
-      "kind": "edge",
-      "match": "pulp-view-core->pulp-dataplane",
-      "exit_criterion": "Vellum's view-core binds its own vellum::value model and the re-export drops the value_source, value_channel_* and host_surfaces units, so no mirrored target links pulp-dataplane."
-    },
-    {
-      "id": "m2-dataplane-design-import",
-      "owner": "vellum-move-m2",
-      "debt_id": "M2-dataplane",
-      "kind": "edge",
-      "match": "pulp-design-import->pulp-dataplane",
-      "exit_criterion": "Vellum's view-core binds its own vellum::value model and the re-export drops the value_source, value_channel_* and host_surfaces units, so no mirrored target links pulp-dataplane."
-    },
-    {
-      "id": "m2-dataplane-view-script",
-      "owner": "vellum-move-m2",
-      "debt_id": "M2-dataplane",
-      "kind": "edge",
-      "match": "pulp-view-script->pulp-dataplane",
-      "exit_criterion": "Vellum's view-core binds its own vellum::value model and the re-export drops the value_source, value_channel_* and host_surfaces units, so no mirrored target links pulp-dataplane."
-    },
-    {
-      "id": "m2-dataplane-view-platform",
-      "owner": "vellum-move-m2",
-      "debt_id": "M2-dataplane",
-      "kind": "edge",
-      "match": "pulp-view-platform->pulp-dataplane",
-      "exit_criterion": "Vellum's view-core binds its own vellum::value model and the re-export drops the value_source, value_channel_* and host_surfaces units, so no mirrored target links pulp-dataplane."
-    }
-  ]
+  "entries": []
 }

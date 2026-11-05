@@ -18,6 +18,6 @@
     "core/view/src/value_channel_telemetry.cpp",
     "core/view/src/value_source.cpp"
   ],
-  "vellum_inherits": false,
-  "rationale": "The editor data plane (host parameter surfaces, value sources, value channels and their telemetry and JSON projection) moves from core/view into the UI-free Pulp module core/dataplane. The sources leave core/view; the pulp/view headers become forwarding headers that re-export the pulp::dataplane names into pulp::view, and view.hpp, scripted_ui.hpp and design_param_binding.hpp take their forward declarations from <pulp/dataplane/fwd.hpp>. Vellum does not take this: the next re-export drops these units from the set, and Vellum's widgets bind to its own generic value model."
+  "vellum_inherits": true,
+  "rationale": "The editor data plane (host parameter surfaces, value sources, value channels and their telemetry and JSON projection) moves from core/view into the UI-free Pulp module core/dataplane. The sources leave core/view; the pulp/view headers become forwarding headers that re-export the pulp::dataplane names into pulp::view, and view.hpp, scripted_ui.hpp and design_param_binding.hpp take their forward declarations from <pulp/dataplane/fwd.hpp>. The combined re-export carries pulp-dataplane as a temporary mirror unit for one export, so Vellum inherits the moved sources and the forwarders until its view-core binds vellum::value."
 }
