@@ -621,6 +621,87 @@ class ReceiptDriftTests(unittest.TestCase):
         self.assertIn("vellum_inherits", result.stderr)
 
 
+class ReceiptSourceTests(unittest.TestCase):
+    """The pinned receipt copy must be Vellum main's receipt, byte for byte."""
+
+    SOURCE = f"provenance/mirror/receipts/{EXPORT_ID}.json"
+
+    def setUp(self) -> None:
+        self.fixture = Fixture()
+        self.local = self.fixture.git("rev-parse", f"{self.fixture.base}:{drift.PIN_DIRECTORY}/{EXPORT_ID}.json")
+        self.asked: list[str] = []
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def serve(self, sha: str, path: str | None = None):
+        def fetch(endpoint: str):
+            self.asked.append(endpoint)
+            return {"type": "file", "path": path or self.SOURCE, "sha": sha}
+        return fetch
+
+    def problems(self, fetch, *commits: str) -> list[str]:
+        return drift.receipt_copy_problems(self.fixture.root, commits or (self.fixture.base,), fetch)
+
+    def test_matching_blob_passes_and_asks_vellum_main(self):
+        self.assertEqual(self.problems(self.serve(self.local)), [])
+        self.assertEqual(self.asked, [f"repos/Generous-Corp/vellum/contents/{self.SOURCE}?ref=main"])
+
+    def test_a_copy_that_differs_from_vellum_fails(self):
+        problems = self.problems(self.serve("f" * 40))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("not Vellum's receipt", problems[0])
+
+    def test_a_receipt_vellum_does_not_hold_fails(self):
+        self.assertIn("has no file", self.problems(self.serve(self.local, path="elsewhere.json"))[0])
+
+    def test_an_unreachable_vellum_is_not_a_match(self):
+        def fetch(endpoint: str):
+            raise drift.ReceiptDriftError("network down")
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "network down"):
+            self.problems(fetch)
+
+    def test_a_head_repin_is_checked_too(self):
+        # A swapped copy in the change itself takes effect for later changes,
+        # so the head pin's copy is compared as well as the base's.
+        receipt = receipt_bytes(EXPORTED[:-1])
+        self.fixture.write(f"{drift.PIN_DIRECTORY}/{EXPORT_ID}.json", receipt)
+        self.fixture.write(drift.PIN_PATH, json.dumps(pin_value(receipt)))
+        head = self.fixture.commit("swap the copy")
+        problems = self.problems(self.serve(self.local), self.fixture.base, head)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("not Vellum's receipt", problems[0])
+
+    def test_cli_compares_only_with_a_reader_token(self):
+        head = self.fixture.commit("head")
+        script = (
+            "import sys, runpy\n"
+            f"sys.path.insert(0, {str(SCRIPTS)!r})\n"
+            "import vellum_freeze_check as f\n"
+            "served = sys.argv[1]\n"
+            "f._github_json = lambda url, token: {'type': 'file', 'path': url.split('/contents/')[1].split('?')[0], 'sha': served}\n"
+            "sys.argv = [sys.argv[0]] + sys.argv[2:]\n"
+            "raise SystemExit(f.main())\n"
+        )
+        def run(sha: str, token: str | None):
+            env = {k: v for k, v in os.environ.items() if k != "VELLUM_READER_TOKEN"}
+            if token:
+                env["VELLUM_READER_TOKEN"] = token
+            with tempfile.TemporaryDirectory() as out:
+                return subprocess.run(
+                    [sys.executable, "-c", script, sha, "--receipt-mode", "--repo", str(self.fixture.root),
+                     "--base", self.fixture.base, "--head", head,
+                     "--output", str(pathlib.Path(out) / "r.json")],
+                    capture_output=True, text=True, encoding="utf-8", env=env, check=False)
+        matched = run(self.local, "t")
+        self.assertEqual(matched.returncode, 0, matched.stdout + matched.stderr)
+        mismatch = run("f" * 40, "t")
+        self.assertEqual(mismatch.returncode, 1, mismatch.stderr)
+        self.assertIn("not Vellum's receipt", mismatch.stderr)
+        # Without a token (the untrusted lane) nothing is fetched.
+        self.assertEqual(run("f" * 40, None).returncode, 0)
+
+
 class FrozenCliTests(unittest.TestCase):
     def test_cli_names_a_frozen_edit(self):
         fixture = Fixture(frozen=["core/canvas/src/a.cpp"])

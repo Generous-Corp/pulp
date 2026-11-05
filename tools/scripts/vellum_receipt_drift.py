@@ -38,6 +38,10 @@ The pin, the receipt copy and the slice map are always read at the BASE
 commit, so a change cannot exempt itself by editing them; a re-pin takes effect
 for the changes after it. Events are read at the head commit, since they are
 the change's own statements.
+
+``receipt_copy_problems`` proves each pinned copy is Vellum's receipt: its Git
+blob id must equal the one Vellum's main serves for ``receipt_source``. It needs
+a Vellum reader, so only the trusted lanes run it.
 """
 
 from __future__ import annotations
@@ -210,6 +214,44 @@ def parse_pin(raw: bytes) -> Pin:
     for index, path in enumerate(frozen):
         _safe_path(path, f"{PIN_PATH}.frozen_paths[{index}]", directory_ok=True)
     return Pin(export_id, value["receipt_path"], digest, tuple(frozen))
+
+
+def receipt_copy_problems(
+    repo: pathlib.Path, commits: Iterable[str], fetch: Callable[[str], Any]
+) -> list[str]:
+    """Each pinned receipt copy whose blob differs from Vellum main's receipt.
+
+    ``fetch`` takes a GitHub REST path and returns its decoded JSON; a fetch
+    failure propagates, so an unreachable Vellum never reads as a match. The
+    pin at each commit is checked, so the base pin that judges this change and
+    a head re-pin that judges the next ones are both Vellum's bytes.
+    """
+    problems: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for commit in commits:
+        raw = _blob(repo, commit, PIN_PATH, MAX_EVENT_BYTES)
+        if raw is None:
+            continue
+        pin = parse_pin(raw)
+        listing = _git(repo, "ls-tree", commit, "--", pin.receipt_path).stdout.decode()
+        fields = listing.split()
+        if len(fields) < 4 or fields[1] != "blob":
+            problems.append(f"{commit[:12]}:{pin.receipt_path} is not a pinned file")
+            continue
+        local = fields[2]
+        if (pin.export_id, local) in seen:
+            continue
+        seen.add((pin.export_id, local))
+        source = f"provenance/mirror/receipts/{pin.export_id}.json"
+        remote = fetch(f"repos/{FRAMEWORK_REPOSITORY}/contents/{source}?ref=main")
+        if not isinstance(remote, dict) or remote.get("type") != "file" or remote.get("path") != source:
+            problems.append(f"{FRAMEWORK_REPOSITORY} main has no file {source}")
+        elif remote.get("sha") != local:
+            problems.append(
+                f"{pin.receipt_path} is blob {local[:12]}, but {FRAMEWORK_REPOSITORY} main's "
+                f"{source} is {str(remote.get('sha'))[:12]}; the pinned copy is not Vellum's receipt"
+            )
+    return problems
 
 
 def parse_receipt(raw: bytes, pin: Pin) -> Receipt:
