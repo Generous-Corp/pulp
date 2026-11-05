@@ -14,9 +14,6 @@
 
 namespace pulp::view {
 class ScriptedUiSession;
-class HostActionSurface;
-class HostParamSurface;
-class StateStoreHostParamSurface;
 } // namespace pulp::view
 
 namespace pulp::format {

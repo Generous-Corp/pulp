@@ -239,6 +239,8 @@ unset(_pulp_view_target)
 
 target_link_libraries(pulp-view-core PUBLIC
     pulp::canvas pulp::events pulp::state pulp::platform
+    # The data plane, which the pulp/view/ value and host-surface headers forward to.
+    pulp::dataplane
 )
 
 # Audio-dependent view widgets are isolated in their own target. The pulp::view
@@ -246,6 +248,8 @@ target_link_libraries(pulp-view-core PUBLIC
 # surface while keeping pulp-view-core's direct PUBLIC closure audio-free.
 target_link_libraries(pulp-view-audio PUBLIC pulp::view-core)
 target_link_libraries(pulp-view-audio PUBLIC pulp::audio pulp::signal pulp::midi)
+# AudioBridge and VisualizationBridge, reachable under pulp/view/ for view code.
+target_link_libraries(pulp-view-audio PUBLIC pulp::dataplane-audio)
 target_compile_definitions(pulp-view-audio PRIVATE PULP_VIEW_HAS_AUDIO_WIDGETS=1 INTERFACE PULP_VIEW_HAS_AUDIO_WIDGETS=1)
 # Convenience only for direct in-tree consumers.  Product entry points call
 # register_audio_widgets() explicitly; the shim is intentionally not exported
@@ -539,10 +543,6 @@ if(APPLE OR PULP_HAS_SKIA)
 endif()
 
 # Link against render for native GPU bridge (Three.js, WebGPU canvas).
-# visualization_bridge.hpp forward-declares PerfCounters and the dereferencing
-# code lives in visualization_bridge.cpp, so the link stays PRIVATE regardless
-# of PULP_BENCHMARK. Downstream targets that only use view APIs do NOT need to
-# link pulp::render when PULP_BENCHMARK is enabled.
 if(TARGET pulp-render)
     # View-core consumers have received the render include and link contract
     # in Skia builds, and the plug-in editor layer in pulp-view-tooling relies

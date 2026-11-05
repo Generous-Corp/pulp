@@ -17,6 +17,7 @@ component_sets:
     - authoring_capsule
     - canvas
     - content
+    - dataplane
     - dawproject
     - dsl
     - events

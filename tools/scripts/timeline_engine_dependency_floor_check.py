@@ -165,6 +165,7 @@ LINK_CLOSURE_DEBT = {
     "playback": {"state", "signal", "sample_bank_manifest", "events"},
     "timeline_view": {
         "audio",
+        "dataplane",
         "events",
         "midi",
         "render",

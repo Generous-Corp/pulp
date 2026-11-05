@@ -1340,6 +1340,16 @@ fresh lib instead of segfaulting at first paint.
 
 ## Value channels reach the editor through the ViewBridge, and must be re-attached on reload
 
+`ValueChannelSet`, the value sources and the host parameter surfaces live in
+the UI-free `core/dataplane` module (namespace `pulp::dataplane`). The
+`<pulp/view/...>` headers forward to it with using-declarations, so
+`pulp::view::ValueChannelSet` is the same class. Forward-declare these types by
+including `<pulp/dataplane/fwd.hpp>`: a `namespace pulp::view { class
+ValueChannelSet; }` declaration now conflicts with the using-declaration and
+fails to compile. An editor on the editor-host contract reads the same channels
+through `format::ValueChannelVisualPort`, the default `VisualPort`, with no view
+layer linked.
+
 A processor publishes non-parameter values — gain reduction, an envelope, a
 spectrum — via `Processor::value_channels()`, and a scripted UI binds them with
 `bindMeter(id, "value:<name>")`. The set travels:

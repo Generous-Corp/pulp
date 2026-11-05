@@ -34,9 +34,11 @@
 // of pulp-format-core at link. That is the property worth proving, and it is
 // a link requirement rather than a compile one.
 
+#include <pulp/dataplane/value_channel_set.hpp>
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/plugin_descriptor.hpp>
+#include <pulp/format/value_channel_visual_port.hpp>
 #include <pulp/state/store.hpp>
 
 #include <cstdio>
@@ -46,7 +48,18 @@
 namespace {
 
 class CoreOnlyProcessor : public pulp::format::Processor {
-public:
+  public:
+    CoreOnlyProcessor() {
+        level = channels.declare_scalar("level", "dB");
+    }
+
+    pulp::dataplane::ValueChannelSet* value_channels() override {
+        return &channels;
+    }
+
+    pulp::dataplane::ValueChannelSet channels;
+    pulp::dataplane::ScalarSource* level = nullptr;
+
     pulp::format::PluginDescriptor descriptor() const override {
         pulp::format::PluginDescriptor d;
         d.name = "FormatCoreOnlyConsumer";
@@ -125,6 +138,20 @@ int main() {
         port.end(1);
         if (heard != 0.75f || port.get(1) != 0.75f || store.open_gesture_count() != 0) {
             std::fprintf(stderr, "the default ParamPort did not complete a gesture\n");
+            return 1;
+        }
+    }
+
+    // The data plane is reachable without a view: a value the processor
+    // publishes reads back through the default VisualPort.
+    {
+        auto& core = static_cast<CoreOnlyProcessor&>(*processor);
+        pulp::format::ValueChannelVisualPort visuals(*processor);
+        core.level->publish(-12.0f);
+        float level = 0.0f;
+        const auto index = visuals.find("level", pulp::format::VisualChannelShape::scalar);
+        if (!index || !visuals.read_scalar(*index, level) || level != -12.0f) {
+            std::fprintf(stderr, "the default VisualPort did not read the published value\n");
             return 1;
         }
     }

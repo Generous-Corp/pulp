@@ -23,7 +23,6 @@ class GpuSurface;
 
 namespace pulp::view {
 
-class ValueChannelSet;
 
 struct ScriptedUiOptions {
     std::filesystem::path script_path;

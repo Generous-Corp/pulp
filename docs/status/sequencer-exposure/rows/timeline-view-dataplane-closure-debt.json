@@ -1,0 +1,41 @@
+{
+  "id": "timeline-view-dataplane-closure-debt",
+  "title": "The timeline_view link-closure debt records the editor data plane it reaches through view-core",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "timeline-view-dataplane-closure-debt-20261103",
+  "owned_paths": [
+    "tools/scripts/timeline_engine_dependency_floor_check.py",
+    "docs/status/sequencer-exposure/rows/timeline-view-dataplane-closure-debt.json"
+  ],
+  "evidence": [
+    {
+      "path": "tools/scripts/timeline_engine_dependency_floor_check.py",
+      "needles": [
+        "\"timeline_view\": {\n        \"audio\",\n        \"dataplane\","
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline, editor or playback header, target or symbol changes. pulp-view-core now links the UI-free pulp-dataplane module (value sources, value channels, host parameter surfaces), so the timeline_view closure names one more module whose code was previously compiled inside pulp-view-core."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline command gains, loses or changes behaviour."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation is added or altered."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "A link-closure debt entry creates no product capability, grant or policy projection."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The change describes no authoring capability; it records a module the existing view-core link already reaches, without widening the timeline_view include floor."
+    }
+  }
+}
