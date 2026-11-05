@@ -30,6 +30,8 @@ class MidiBuffer;
 
 namespace pulp::host {
 
+class TriggerContext;
+
 /// The events visible to one Custom node for one block.
 ///
 /// `in` is the node's gathered inbound MIDI. A null `in` means "no events this
@@ -53,6 +55,7 @@ namespace pulp::host {
 struct CustomNodeEventBlock {
     const midi::MidiBuffer* in = nullptr;
     midi::MidiBuffer* out = nullptr;
+    TriggerContext* triggers = nullptr;
 };
 
 /// Stateless event-aware process callback.

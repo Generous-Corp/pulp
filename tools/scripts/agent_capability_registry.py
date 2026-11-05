@@ -9,6 +9,8 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    'pulp/audio/buffer.hpp': 'Pulp::audio',
+    'pulp/host/trigger_graph.hpp': 'Pulp::host',
     'pulp/host/signal_graph_executor_routing.hpp': 'Pulp::host',
     'pulp/host/spectral_graph.hpp': 'Pulp::host',
     'pulp/audio/live_dsp_telemetry.hpp': 'Pulp::audio',
@@ -178,6 +180,20 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        'include': 'pulp/audio/buffer.hpp',
+        'fingerprint': 'sha256:d783b077cccb2137232cfcf34924a2fada3e356467f7768fce862785fdda977d',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Borrowed audio views and pointer-presence validation; no ownership or allocation-extent guarantee.',
+    },
+    {
+        'include': 'pulp/host/trigger_graph.hpp',
+        'fingerprint': 'sha256:c553cd4a35d13a5d4cd6822f5ef8bc254c5f1a3613ea1ff269ddfb1bcf40bccb',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Bounded runtime typed trigger transport and framework onset/envelope factories; no complete G-5 or realtime qualification claim.',
+    },
     {
         'include': 'pulp/host/signal_graph_executor_routing.hpp',
         'fingerprint': 'sha256:e77a455304bffa7e75d94903aee89f5d61ec9155b68281eaa107b8e6facd1088',

@@ -206,6 +206,9 @@ message(STATUS "ok: retire keeps files it does not own")
 # identity. The explicit positive uses distinct fixture values to catch fallback.
 set(_provider_fixture "${WORK_DIR}/provider-selection")
 file(MAKE_DIRECTORY "${_provider_fixture}/with-metadata" "${_provider_fixture}/without-metadata")
+file(MAKE_DIRECTORY "${_provider_fixture}/without-metadata/build/win-gpu")
+file(WRITE "${_provider_fixture}/without-metadata/build/win-gpu/msvc-toolchain.json"
+    "{\n  \"producer\": {\"skia_builder_ref\": \"cccccccccccccccccccccccccccccccccccccccc\"}\n}\n")
 file(WRITE "${_provider_fixture}/with-metadata/VERSION.md"
     "**Release:** fixture-only\nSkia branch tip is `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n**skia-builder ref:** `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`\n")
 set(_provider_project [=[
@@ -236,10 +239,12 @@ foreach(_mode without-metadata with-metadata bundled)
     file(WRITE "${WORK_DIR}/template.json" "${_provider_template}")
     _finalize(_provider_json GIT_SHA "0123abcd" GIT_DIRTY FALSE)
     if(_mode STREQUAL "without-metadata")
-        foreach(_field release commit builder_ref)
+        foreach(_field release commit)
             string(JSON _field_type TYPE "${_provider_json}" skia ${_field})
             _expect("explicit provider missing ${_field} is unknown" "${_field_type}" "NULL")
         endforeach()
+        string(JSON _value GET "${_provider_json}" skia builder_ref)
+        _expect("explicit provider receipt builder" "${_value}" "cccccccccccccccccccccccccccccccccccccccc")
     elseif(_mode STREQUAL "with-metadata")
         string(JSON _value GET "${_provider_json}" skia release)
         _expect("explicit provider release" "${_value}" "fixture-only")

@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 180,
+  "inventory_version": 182,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,22 +42,22 @@
     }
   ],
   "counts": {
-    "public_headers": 518,
-    "reviewed_headers": 269,
-    "legacy_unreviewed_headers": 249,
+    "public_headers": 519,
+    "reviewed_headers": 271,
+    "legacy_unreviewed_headers": 248,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 100,
-      "legacy_unreviewed": 249,
+      "infrastructure": 102,
+      "legacy_unreviewed": 248,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
         "public_headers": 114,
-        "reviewed_headers": 17,
-        "legacy_unreviewed_headers": 97,
+        "reviewed_headers": 18,
+        "legacy_unreviewed_headers": 96,
         "unsupported_headers": 0
       },
       "midi": {
@@ -97,8 +97,8 @@
         "unsupported_headers": 0
       },
       "host": {
-        "public_headers": 12,
-        "reviewed_headers": 12,
+        "public_headers": 13,
+        "reviewed_headers": 13,
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       }
@@ -243,11 +243,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/buffer.hpp",
-      "fingerprint": "sha256:658bed3ec575d41c492d6123903ebeac6d2bfa6ebacac42ab9a165b1d1e6c51c",
+      "fingerprint": "sha256:d783b077cccb2137232cfcf34924a2fada3e356467f7768fce862785fdda977d",
       "include": "pulp/audio/buffer.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Borrowed audio views and pointer-presence validation; no ownership or allocation-extent guarantee."
     },
     {
       "domain": "audio",
@@ -1158,7 +1158,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/custom_node_events.hpp",
-      "fingerprint": "sha256:3593ccc6cb772b630fc61bec7014eb5315b5bef7e99d6047206947384c7c6006",
+      "fingerprint": "sha256:e01e87078bef719bd88de116aca4259fd465461d56fb59e34a16f5ce1e473676",
       "include": "pulp/host/custom_node_events.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1254,7 +1254,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:7e6e9a7d417035db9e3ceb30f8db5b46c8fb1c1884b2b213e57cb44cab9f0bac",
+      "fingerprint": "sha256:0b3efe0f792971b2d954efab2b38feecdcc39e36762ea5336de188fed896b1b3",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1270,6 +1270,15 @@
       "disposition": "infrastructure",
       "capability_keys": [],
       "rationale": "Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL."
+    },
+    {
+      "domain": "host",
+      "source": "core/host/include/pulp/host/trigger_graph.hpp",
+      "fingerprint": "sha256:c553cd4a35d13a5d4cd6822f5ef8bc254c5f1a3613ea1ff269ddfb1bcf40bccb",
+      "include": "pulp/host/trigger_graph.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Bounded runtime typed trigger transport and framework onset/envelope factories; no complete G-5 or realtime qualification claim."
     },
     {
       "domain": "midi",

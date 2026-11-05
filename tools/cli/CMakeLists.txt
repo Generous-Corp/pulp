@@ -95,7 +95,6 @@ add_executable(pulp-cli
     cmd_overflow.cpp
     overflow_selector.cpp
     cmd_design.cpp
-    cmd_design_subcommands.cpp
     cmd_doctor.cpp
     cmd_doctor_gpu.cpp
     cmd_gpu.cpp
@@ -148,7 +147,6 @@ add_executable(pulp-cli
     cmd_control.cpp
     ${_pulp_inspect_command_source}
     ${_pulp_tweaks_command_source}
-    design_binding.cpp
     create_build_commands.cpp
     create_targets.cpp
     package_registry.cpp
@@ -177,6 +175,17 @@ add_executable(pulp-cli
     mac_runtime_validators.cpp
     install_paths_mac.cpp
     "${_pulp_migration_index_src}")
+
+# The SDK/release profile deliberately omits the design-import authoring
+# library. Keep the `pulp design` entry point (it reports that the optional
+# feature is unavailable), but do not compile the offline handlers or binding
+# implementation that require the omitted library. Compiling those sources
+# unconditionally leaves unresolved design_tweaks symbols at link time.
+if(PULP_ENABLE_DESIGN_IMPORT)
+    target_sources(pulp-cli PRIVATE
+        cmd_design_subcommands.cpp
+        design_binding.cpp)
+endif()
 if(PULP_ENABLE_PROJECT_PACKAGE)
     target_sources(pulp-cli PRIVATE cmd_seq.cpp)
     target_link_libraries(pulp-cli PRIVATE pulp::project-package)
@@ -231,6 +240,7 @@ if(PULP_ENABLE_PROJECT_PACKAGE)
 endif()
 target_compile_definitions(pulp-cli PRIVATE
     PULP_ENABLE_PROJECT_PACKAGE=$<BOOL:${PULP_ENABLE_PROJECT_PACKAGE}>
+    PULP_ENABLE_DESIGN_IMPORT=$<BOOL:${PULP_ENABLE_DESIGN_IMPORT}>
     PULP_CLI_GPU_PROBE_TEST_FAULTS=$<BOOL:${PULP_BUILD_TESTS}>)
 if(TARGET pulp::inspect-client)
     target_link_libraries(pulp-cli PRIVATE pulp::inspect-client)

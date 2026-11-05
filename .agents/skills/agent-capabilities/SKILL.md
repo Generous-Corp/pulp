@@ -1750,3 +1750,18 @@ to `PULP_SDK_TARGETS` in `PulpInstallRules.cmake` installs no new public header
 under a covered root, so there is nothing to classify. Because it is a STATIC
 archive, its stem still goes into `release_product_matrix.json` in the same
 change, or `test_installed_sdk_archives_match_release_matrix` fails.
+
+## Typed trigger runtime exposure
+
+`pulp/host/trigger_graph.hpp` is reviewed runtime infrastructure, not a new
+generator-facing capability. Register its minimal installed owner as
+`Pulp::host`; refresh the existing `signal_graph_runtime.hpp` and
+`custom_node_events.hpp` binding fingerprints when their bytes change. A new
+borrowed-buffer validity helper requires reviewing `pulp/audio/buffer.hpp` as
+infrastructure owned by `Pulp::audio`, rather than rewriting its frozen legacy
+baseline fingerprint. Re-derive against the protected base after integration.
+
+The `CustomNodeEventBlock::triggers` field also touches sequencer-owned exposure:
+maintain the pending bounded-trigger-runtime row with installed SDK evidence
+and explicit product-control gaps. Neither that pointer nor the header ledger
+admits arbitrary Custom trigger producers or claims complete G-5 support.
