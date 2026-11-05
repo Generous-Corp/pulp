@@ -510,14 +510,19 @@ variable `FLEET_RELEASE_INTERIM_APP_ID`:
   `main` only), mints a `fleet-release-interim` App token and creates annotated
   tags through the GitHub API at this run's commit, after checking that the
   commit is on `main`. It checks out nothing, so no repository code runs next to
-  the App key. That App is the only bypass actor of the `v*` tag ruleset's
-  creation rule; the tag it creates starts the release workflows as before.
+  the App key. That App is the only bypass actor of the `v*` and `plugin-v*`
+  tag ruleset's creation rule; the tag it creates starts the release workflows
+  as before. These tags are annotated but unsigned, with tagger
+  `fleet-release-interim[bot]`: nothing in the release pipeline verifies tag
+  signatures, and the legacy SSH key signs as the maintainer's account, which
+  an App-made tag must not claim to be.
 
 The WebCLAP deploy works the same way: the required build+proof job holds no
 secret and uploads the site as one tarball; the `deploy` job, in the `deploy`
 environment (branch `main` only), checks the tarball's digest against the build
-job's output, unpacks it into an empty directory and runs only the pinned
-wrangler action. The live unfurl check is repository code, so it is a third job
+job's output, refuses any member that is not a regular file or directory under
+`public/` (the build job's runner is routable, so the tarball is untrusted),
+unpacks it into an empty directory and runs only the pinned wrangler action. The live unfurl check is repository code, so it is a third job
 with no secret.
 
 `WorkflowSecretEnvironments` in `tools/scripts/test_workflow_lint.py` pins which

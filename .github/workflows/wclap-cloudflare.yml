@@ -6,7 +6,7 @@
 # 200 under the real _headers), and — only once the owner has connected a
 # Cloudflare account (secrets present) — deploys it to Cloudflare Pages.
 # The build+proof job holds no secret: pull requests and merge groups run it.
-# The deploy is a separate job in the `automation` environment, whose
+# The deploy is a separate job in the `deploy` environment, whose
 # deployment policy admits branch main only, so the Cloudflare credentials are
 # never readable from a pull-request, merge-group or other-branch run.
 #
@@ -63,10 +63,11 @@ jobs:
     # Hosted by default. PULP_WCLAP_RUNS_ON_JSON can route this required job
     # elsewhere when GitHub cannot assign hosted runners; it is JSON and
     # parsed (an unparsed array becomes one literal label and the job queues
-    # forever). This workflow carries the Cloudflare deploy secret, so the
-    # trusted Linux runner group refuses it by policy
-    # (tools/ci/verify_linux_runner_group.py): a target has to be a pool that
-    # may hold that secret.
+    # forever). This job holds no secret, but the `deploy` job below publishes
+    # what it builds and the workflow carries the Cloudflare deploy secret, so
+    # the trusted Linux runner group refuses the workflow by policy
+    # (tools/ci/verify_linux_runner_group.py). The deploy job does not trust
+    # this job's runner: it checks the tarball's shape before unpacking it.
     runs-on: ${{ fromJSON(vars.PULP_WCLAP_RUNS_ON_JSON || '"ubuntu-latest"') }}
     outputs:
       relevant: ${{ steps.relevance.outputs.run }}
@@ -621,8 +622,27 @@ jobs:
             echo "::error::deploy tarball digest $got does not match the proved $WANT" >&2
             exit 1
           fi
+          # The build job's runner is routable (PULP_WCLAP_RUNS_ON_JSON), so the
+          # tarball is untrusted data. wrangler-action runs `npm install` in its
+          # working directory while holding the token, so nothing may land
+          # there but `public/`: only regular files and directories named
+          # public or public/..., no `..`, no links.
+          bad=$(tar -tvf "$tarball" | awk 'substr($1, 1, 1) != "-" && substr($1, 1, 1) != "d"')
+          bad+=$(tar -tf "$tarball" | awk '!/^public(\/[^\/]+)*\/?$/ || /(^|\/)\.\.(\/|$)/')
+          if [ -n "$bad" ]; then
+            echo "::error::deploy tarball has members outside public/ or non-regular entries:" >&2
+            printf '%s\n' "$bad" >&2
+            exit 1
+          fi
           mkdir -p "$RUNNER_TEMP/site"
-          tar -xf "$tarball" -C "$RUNNER_TEMP/site" --no-same-owner --no-same-permissions public
+          tar -xf "$tarball" -C "$RUNNER_TEMP/site" --no-same-owner --no-same-permissions \
+            --no-overwrite-dir public
+          extra=$(find "$RUNNER_TEMP/site" -mindepth 1 -maxdepth 1 ! -name public)
+          links=$(find "$RUNNER_TEMP/site/public" -type l)
+          if [ -n "$extra" ] || [ -n "$links" ]; then
+            echo "::error::unpacked site has entries besides public/ or symlinks: $extra $links" >&2
+            exit 1
+          fi
           echo "SITE_DIR=$RUNNER_TEMP/site" >> "$GITHUB_ENV"
 
       - name: Deploy to Cloudflare Pages

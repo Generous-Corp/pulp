@@ -401,6 +401,20 @@ REPOSITORY_SECRETS: dict[str, str] = {
     "APPLE_PASSWORD": "unset",
 }
 
+# The only actions a NO_REPO_CODE job may use, pinned as the workflows pin them.
+NO_REPO_CODE_ACTIONS = (
+    "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
+    "actions/download-artifact@v8",
+    "cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0",
+)
+# Shell that would fetch or run repository or network code in such a job.
+NO_REPO_CODE_RUN = (
+    r"\bgit\s+(clone|fetch|checkout|pull)\b",
+    r"\bgh\s+(repo\s+clone|run\s+download)\b",
+    r"\b(curl|wget)\b[^\n]*\|\s*(ba|z)?sh\b",
+    r"\b(bash|sh|python3?|node|npx|npm)\s+\.?/?(tools|scripts|examples|core|\.github)/",
+    r"(^|\s)\./",
+)
 PULL_REQUEST_EVENTS = {"pull_request", "pull_request_target", "merge_group"}
 SECRET_RE = re.compile(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
 DYNAMIC_SECRETS_RE = re.compile(r"secrets\s*\[|toJSON\(\s*secrets\s*\)|secrets:\s*inherit")
@@ -469,14 +483,29 @@ class WorkflowSecretEnvironments(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_credential_jobs_in_no_repo_code_environments_check_out_nothing(self) -> None:
+        # A job holding a release or deploy credential may use only the
+        # pinned actions below, and its shell may not fetch or run code from
+        # the repository or the network.
         offenders = []
         for wf, _, job_name, job, _ in _secret_jobs():
             if _secret_environment(job) not in NO_REPO_CODE:
                 continue
             for step in job.get("steps") or []:
-                if str(step.get("uses", "")).startswith("actions/checkout@"):
-                    offenders.append(f"{wf}:{job_name}")
+                uses = str(step.get("uses") or "")
+                if uses and not uses.startswith(NO_REPO_CODE_ACTIONS):
+                    offenders.append(f"{wf}:{job_name}: uses {uses}")
+                run = str(step.get("run") or "")
+                for pattern in NO_REPO_CODE_RUN:
+                    if re.search(pattern, run):
+                        offenders.append(f"{wf}:{job_name}: run matches {pattern}")
         self.assertEqual(offenders, [])
+
+    def test_the_no_repo_code_check_is_live(self) -> None:
+        # Control: each forbidden shape is caught by the patterns above.
+        for run in ("git clone https://x", "gh repo clone o/r", "gh run download 1",
+                    "curl -sL https://x | sh", "bash ./tools/x.sh", "python3 tools/scripts/x.py"):
+            self.assertTrue(any(re.search(p, run) for p in NO_REPO_CODE_RUN), run)
+        self.assertFalse("./local-action".startswith(NO_REPO_CODE_ACTIONS))
 
 
 if __name__ == "__main__":

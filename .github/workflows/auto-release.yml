@@ -784,8 +784,9 @@ jobs:
   # secret of the `release` environment (deployment policy: branch main), and
   # this job runs no repository code: no checkout, only the pinned token
   # action and the GitHub API, so nothing the repository contains can read
-  # the key. Tags are annotated and point at this run's commit, which must be
-  # on main.
+  # the key. Tags are annotated, unsigned (nothing verifies tag signatures),
+  # tagged by the App's own bot identity, and point at this run's commit,
+  # which must be on main.
   publish-tags:
     needs: tag
     if: >-
@@ -841,8 +842,8 @@ jobs:
               obj=$(gh api "repos/$repo/git/tags" \
                   -f tag="$tag" -f object="$GITHUB_SHA" -f type=commit \
                   -f message="Release $tag (automated by auto-release.yml)" \
-                  -f 'tagger[name]=pulp-release-bot' \
-                  -f 'tagger[email]=25807+danielraffel@users.noreply.github.com' --jq .sha)
+                  -f 'tagger[name]=fleet-release-interim[bot]' \
+                  -f 'tagger[email]=fleet-release-interim[bot]@users.noreply.github.com' --jq .sha)
               gh api "repos/$repo/git/refs" -f ref="refs/tags/$tag" -f sha="$obj" >/dev/null
               echo "created $tag"
           }
