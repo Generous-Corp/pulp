@@ -479,7 +479,11 @@ is unit-tested over several descriptors in `test_au_v2_effect.cpp` (`[channels]`
 ### MIDI output (`kAudioUnitProperty_MIDIOutputCallback`)
 
 A Processor that declares `produces_midi = true` now delivers the MIDI it writes
-to `midi_out` during `process()` back to the host on AU v2. The adapter:
+to `midi_out` during `process()` back to the host on AU v2, from all three
+classes: the effect (`ProcessBufferLists`), the MIDI processor, and the
+instrument (`PulpAUInstrument::Render`, which until then filled `midi_out` and
+dropped it, so an instrument's device MIDI or editor feedback never reached the
+host). The adapter:
 
 1. Advertises the output stream via `kAudioUnitProperty_MIDIOutputCallbackInfo`
    (a one-element `CFArrayRef` named after the plugin) and accepts the host's
