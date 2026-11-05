@@ -1,7 +1,7 @@
 # G-5 host MIDI/MPE/time-index ingress audit
 
 Audit base: Pulp `origin/main`
-`c4d846fddffc73210d00eaa59c6ae866e59dd364` (2026-11-04).
+`1e591dfe1de462dbca5b39f31ebf2be5c3082ae1` (2026-11-04).
 
 ## What is already proven
 
