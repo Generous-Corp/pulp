@@ -94,7 +94,7 @@ struct GraphLoadOptions {
 };
 
 class GraphSerializer {
-public:
+  public:
     // File loads are bounded before parsing so a caller can safely hand a
     // user-selected .pulpgraph path to the serializer. The limit covers the
     // encoded JSON envelope (including base64 state), not decoded payloads.
@@ -142,8 +142,7 @@ public:
 
     // Read one bounded graph file, then apply the same migration and restore
     // rules as from_json. A read or size failure leaves graph untouched.
-    static LoadResult from_file(SignalGraph& graph,
-                                const std::filesystem::path& path,
+    static LoadResult from_file(SignalGraph& graph, const std::filesystem::path& path,
                                 const GraphLoadOptions& options = {});
 };
 

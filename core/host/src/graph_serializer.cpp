@@ -1315,8 +1315,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
 }
 
 GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
-                                                        const std::filesystem::path& path,
-                                                        const GraphLoadOptions& options) {
+                                                       const std::filesystem::path& path,
+                                                       const GraphLoadOptions& options) {
     LoadResult result;
     std::error_code ec;
     const auto size = std::filesystem::file_size(path, ec);

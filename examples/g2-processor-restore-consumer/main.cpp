@@ -166,8 +166,8 @@ void positive_and_isolation() {
     GraphLoadOptions load_options;
     load_options.processor_registry = &registry;
     load_options.processor_allowlist = {key};
-    const auto graph_file = std::filesystem::temp_directory_path() /
-                            "pulp-g2-processor-restore-consumer.pulpgraph";
+    const auto graph_file =
+        std::filesystem::temp_directory_path() / "pulp-g2-processor-restore-consumer.pulpgraph";
     {
         std::ofstream output(graph_file, std::ios::binary | std::ios::trunc);
         check(static_cast<bool>(output), "graph file fixture opens for writing");
@@ -197,8 +197,7 @@ void positive_and_isolation() {
     SignalGraph untouched;
     check(untouched.add_input_node(1) != 0, "graph file negative starts with a live graph");
     const auto before_missing = untouched.nodes().size();
-    const auto missing_file = GraphSerializer::from_file(
-        untouched, graph_file, load_options);
+    const auto missing_file = GraphSerializer::from_file(untouched, graph_file, load_options);
     check(!missing_file.ok && missing_file.error.find("cannot be opened") != std::string::npos,
           "missing graph file is rejected before graph mutation");
     check(untouched.nodes().size() == before_missing,
