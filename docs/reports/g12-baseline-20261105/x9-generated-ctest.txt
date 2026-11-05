@@ -1,0 +1,16 @@
+Test project /Volumes/Workshop/Code/agent-worktrees/g12-baseline-evidence-20261105/build
+    Start 748: X3 reusable graph components expand with independent state
+1/5 Test #748: X3 reusable graph components expand with independent state .........   Passed    0.02 sec
+    Start 749: X9 public APIs compose a modular instrument through a live graph
+2/5 Test #749: X9 public APIs compose a modular instrument through a live graph ...   Passed    0.01 sec
+    Start 750: X9 live and offline rendering agree for the same event and input
+3/5 Test #750: X9 live and offline rendering agree for the same event and input ...   Passed    0.01 sec
+    Start 751: X9 records the runtime ProcessorNode persistence boundary
+4/5 Test #751: X9 records the runtime ProcessorNode persistence boundary ..........   Passed    0.01 sec
+    Start 752: X9 chains named serial stages through a live graph
+5/5 Test #752: X9 chains named serial stages through a live graph .................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Total Test time (real) =   0.33 sec
+exit_code=0
