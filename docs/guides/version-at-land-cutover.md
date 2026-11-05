@@ -383,7 +383,9 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
   merge queue** like any other PR. Requirements and invariants:
   - **PAT required.** PR-route runs only with `RELEASE_BOT_TOKEN`; a
     `GITHUB_TOKEN`-created PR does not trigger workflows, so its checks never run
-    and auto-merge stalls. The workflow fails loudly if the PAT is absent.
+    and auto-merge stalls. The workflow fails loudly if the PAT is absent. The
+    PAT and the signing key are secrets of the `version` environment (branch
+    `main` only), never repository secrets, so only main's drain can read them.
   - **`--merge`, never `--squash`** (`.agents/contract.toml`): squash folds the
     `Version-Bump-Applied` marker commit and trips an auto-release false alarm.
   - **Serialized.** When `PULP_BUMP_ROUTE=pr` the workflow's `concurrency` group
@@ -439,7 +441,9 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     completion of a workflow reporting its required checks (`workflow_run`,
     scoped to `release/version-bump`), so a dead end is repaired when it dies
     rather than on the next push to main. Those runs check out main, never PR
-    code.
+    code. A `workflow_run` run's ref is main, so it drains directly; a
+    `pull_request` run cannot enter the `version` environment, so its
+    `heal-on-dequeue` job (no secrets) dispatches the drain on main instead.
   - **Coalescing.** A bump PR recomputes every intent since the last marker,
     so one bump PR covers any number of merges. Opening one per merge spends a
     merge-queue validation on each bump. So when no bump PR is open, the drain

@@ -133,6 +133,8 @@ jobs:
   check:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
+    # Its credential is a secret of the main-only `automation` environment.
+    environment: automation
     name: Check dispatch and queue age
 
     env:

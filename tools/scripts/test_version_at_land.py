@@ -1902,14 +1902,38 @@ class WorkflowConcurrencyTest(unittest.TestCase):
 
     def test_heal_events_that_run_share_the_serial_group(self) -> None:
         events = dict(self._events())
-        for name in (f"dequeued {self.BUMP} {self.REPO}",
-                     f"workflow_run failure {self.REPO}",
+        for name in (f"workflow_run failure {self.REPO}",
                      f"workflow_run cancelled {self.REPO}"):
             with self.subTest(event=name):
                 ctx = {**events[name], "vars.PULP_BUMP_ROUTE": "pr"}
                 self.assertTrue(_evaluate(self.job_if, ctx))
                 self.assertEqual(_evaluate(self.group, ctx),
                                  "version-at-land-serial")
+
+    def test_a_dequeued_bump_pr_dispatches_the_drain_on_main(self) -> None:
+        # The drain holds the `version` environment's credentials, which a
+        # pull_request run (ref refs/pull/N/merge) is never admitted to, so no
+        # pull_request event may run it. The bump PR's dequeue instead runs a
+        # secret-free job that dispatches the drain on main, in its own group.
+        text = WORKFLOW.read_text(encoding="utf-8")
+        heal = text.split("\n  heal-on-dequeue:\n", 1)[1]
+        heal_if = _folded(heal, "    if:", "    runs-on:")
+        drain = text.split("\n  drain-dry-run:\n", 1)[1].split("\n  heal-on-dequeue:\n", 1)[0]
+        self.assertIn("\n    environment: version\n", drain)
+        self.assertNotIn("environment", heal.split("    steps:", 1)[0])
+        self.assertNotIn("secrets.", heal)
+        self.assertIn("gh workflow run version-at-land.yml", heal)
+        self.assertIn("--ref main", heal)
+        for route in ("pr", ""):
+            for name, ctx in self._events():
+                ctx = {**ctx, "vars.PULP_BUMP_ROUTE": route}
+                with self.subTest(route=route, event=name):
+                    if ctx["github.event_name"] == "pull_request":
+                        self.assertFalse(_evaluate(self.job_if, ctx))
+                        self.assertIn("4242", _evaluate(self.group, ctx))
+                    expected = (route == "pr"
+                                and name == f"dequeued {self.BUMP} {self.REPO}")
+                    self.assertEqual(bool(_evaluate(heal_if, ctx)), expected)
 
 
 class RefreshDerivedTest(unittest.TestCase):

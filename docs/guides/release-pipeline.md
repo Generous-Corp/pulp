@@ -497,6 +497,30 @@ Independently of manual verification, `release-reconcile.yml` re-dispatches any
 recent tag that is not published within its grace window, so a stuck release
 normally repairs itself without anyone looking (see release-watchdog.md).
 
+## Where the release credentials live
+
+No release credential is a repository secret: a repository secret is readable by
+a run started from any pushed branch that edits a workflow. Each is a secret of
+an environment whose deployment branch policy is `main` only, and the job that
+reads it declares that environment:
+
+| Environment | Job | Credentials |
+|---|---|---|
+| `release` | `auto-release.yml` `tag` | `FLEET_RELEASE_APP_PRIVATE_KEY` (with variable `FLEET_RELEASE_APP_ID`), or the interim `RELEASE_BOT_TOKEN`; `RELEASE_BOT_SSH_SIGNING_KEY` |
+| `version` | `version-at-land.yml` `drain-dry-run` | `RELEASE_BOT_TOKEN`, `RELEASE_BOT_SSH_SIGNING_KEY` |
+| `automation` | runner-health, runner-topology, webhook watchdog, merge steward, Vellum observatory dispatch, WebCLAP `deploy` | `RELEASE_BOT_TOKEN`, `SHIPYARD_APP_*`, `VELLUM_DISPATCHER_APP_PRIVATE_KEY`, `CLOUDFLARE_*` |
+
+The tag must be pushed by an identity other than the job token, or the
+tag-triggered workflows never start. `auto-release.yml` uses the `fleet-release`
+GitHub App when `FLEET_RELEASE_APP_ID` is set (the App is the only bypass actor
+of the `v*` tag ruleset, so nothing else can create a release tag), otherwise the
+`RELEASE_BOT_TOKEN` PAT with a warning, and fails before checkout when it has
+neither. `tools/scripts/test_workflow_secret_environments.py` (run by
+workflow-lint) pins which environment each credential is read from and that no
+pull-request job names an environment. `CODECOV_TOKEN` (upload-only) and the
+read-only `VELLUM_READER_APP_PRIVATE_KEY` stay repository secrets because
+pull-request and merge-group jobs read them.
+
 ## Manual release-cli backfills
 
 Use `workflow_dispatch` on `release-cli.yml` when a tag already exists but the

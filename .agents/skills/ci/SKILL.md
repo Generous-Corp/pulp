@@ -6084,6 +6084,26 @@ contains(..., matrix.platform)` on a matrix job evaluates with an empty
 `matrix` and silently skips every leg. GitHub only exposes `github`, `needs`,
 `vars`, and `inputs` to `jobs.<id>.if`.
 
+### Workflow credentials live in main-only environments, never repo secrets
+
+A repository secret is readable by a run started from any pushed branch that
+edits a workflow. Every Pulp workflow credential is a secret of the `release`,
+`version` or `automation` environment (deployment policy: branch `main`), and
+the reading job declares `environment:`. Gotchas:
+
+- A `pull_request` run's ref is the PR, never `main`, so a job that names one of
+  these environments on a PR event is refused (red), not skipped. Split it: the
+  WebCLAP deploy is its own `deploy` job, and version-at-land's `dequeued` heal
+  only dispatches the drain on main (`heal-on-dequeue`). `workflow_run`,
+  `schedule` and `repository_dispatch` runs have ref `main` and are admitted.
+- A tag-push run executes the TAGGED commit's workflow file, so an environment
+  that admits `v*` tags is only as safe as the tag ruleset's `creation` rule.
+- Adding a secret-reading job: classify the secret in
+  `tools/scripts/test_workflow_secret_environments.py` (workflow-lint runs it),
+  or it fails.
+- Referencing an environment that does not exist yet auto-creates it with NO
+  branch policy; set the policy before putting a secret in it.
+
 ### NEVER set `run-name:` on release-cli.yml (it stops all releases)
 
 GitHub returns a workflow's `run-name` as **`workflow_run.name`** in the REST API —

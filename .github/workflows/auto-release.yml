@@ -45,8 +45,43 @@ jobs:
   tag:
     runs-on: ubuntu-latest
     name: Tag moved versions
+    # The tagging credentials are secrets of the `release` environment, whose
+    # deployment policy admits branch main only, so no run from another ref
+    # can read them. The tag must be pushed by an identity other than the job
+    # token, or the tag-triggered release workflows never start: the
+    # `fleet-release` App when vars.FLEET_RELEASE_APP_ID is set (the only
+    # bypass actor of the release-tag ruleset), otherwise the interim
+    # RELEASE_BOT_TOKEN PAT. With neither, the job fails before checkout.
+    environment: release
 
     steps:
+      - name: Mint the fleet-release App token
+        id: release-app
+        if: vars.FLEET_RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          app-id: ${{ vars.FLEET_RELEASE_APP_ID }}
+          private-key: ${{ secrets.FLEET_RELEASE_APP_PRIVATE_KEY }}
+          # Scoped to this repository: tags only.
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Require a release identity
+        shell: bash
+        env:
+          HAS_APP_TOKEN: ${{ steps.release-app.outputs.token != '' }}
+          HAS_RELEASE_PAT: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
+        run: |
+          if [ "$HAS_APP_TOKEN" = "true" ]; then
+            echo "release identity: fleet-release App"
+          elif [ "$HAS_RELEASE_PAT" = "true" ]; then
+            echo "::warning title=Interim release identity::Tagging with the RELEASE_BOT_TOKEN PAT; set vars.FLEET_RELEASE_APP_ID and the fleet-release App key in the release environment to retire it."
+          else
+            echo "::error title=No release identity::Neither the fleet-release App nor RELEASE_BOT_TOKEN is available in the release environment; refusing to tag with the job token, whose tags start no release workflow." >&2
+            exit 1
+          fi
+
       - name: Checkout with range context
         uses: actions/checkout@v7.0.1
         with:
@@ -56,7 +91,7 @@ jobs:
           # below. actions/checkout@v5's default fetches tags along with
           # fetch-depth=0, but spell it out for clarity.
           fetch-tags: true
-          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.release-app.outputs.token || secrets.RELEASE_BOT_TOKEN }}
 
       - name: Skip on trailer or revert
         id: guard
@@ -460,7 +495,7 @@ jobs:
         if: steps.guard.outputs.skip == '0'
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.release-app.outputs.token || secrets.RELEASE_BOT_TOKEN }}
           SDK_AFTER: ${{ steps.versions.outputs.sdk_after }}
           # The pre-tag checks can withhold the SDK tag; they never touch the
           # plugin surface.

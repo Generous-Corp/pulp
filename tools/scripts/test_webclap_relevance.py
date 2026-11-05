@@ -51,7 +51,16 @@ class WebclapRelevanceTests(unittest.TestCase):
             r"runs-on: \$\{\{ fromJSON\(vars\.PULP_WCLAP_RUNS_ON_JSON \|\| '([^']*)'\) \}\}", workflow)
         self.assertIsNotNone(match, "the job must route through PULP_WCLAP_RUNS_ON_JSON")
         self.assertEqual(json.loads(match.group(1)), "ubuntu-latest")
-        self.assertEqual(workflow.count("runs-on:"), 1)
+        # The required build job is the only routed one. The deploy job holds
+        # the Cloudflare credentials, so it always runs hosted, in the
+        # main-only `automation` environment.
+        self.assertEqual(workflow.count("runs-on:"), 2)
+        deploy = workflow.split("\n  deploy:\n", 1)[1]
+        self.assertIn("\n    runs-on: ubuntu-latest\n", deploy)
+        self.assertIn("\n    environment: automation\n", deploy)
+        self.assertIn("needs.build-prove-deploy.outputs.relevant == 'true'", deploy)
+        build = workflow.split("\n  build-prove-deploy:\n", 1)[1].split("\n  deploy:\n", 1)[0]
+        self.assertNotIn("secrets.", build)
 
     def test_expensive_workflow_steps_are_guarded(self) -> None:
         workflow = (
@@ -112,7 +121,7 @@ class WebclapRelevanceTests(unittest.TestCase):
         self.assertIn('*) exit "$relevance_status"', workflow)
         self.assertEqual(
             workflow.count("steps.relevance.outputs.run == 'true'"),
-            23,
+            22,
             "every expensive step after relevance classification must be guarded",
         )
 

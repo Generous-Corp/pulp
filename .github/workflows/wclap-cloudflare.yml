@@ -5,6 +5,10 @@
 # PROVES it in headless Chrome (crossOriginIsolated + audio + every subresource
 # 200 under the real _headers), and — only once the owner has connected a
 # Cloudflare account (secrets present) — deploys it to Cloudflare Pages.
+# The build+proof job holds no secret: pull requests and merge groups run it.
+# The deploy is a separate job in the `automation` environment, whose
+# deployment policy admits branch main only, so the Cloudflare credentials are
+# never readable from a pull-request, merge-group or other-branch run.
 #
 # Cloudflare is WebCLAP's canonical host because it can send the COOP/COEP
 # headers that cross-origin isolation (threads + SharedArrayBuffer) requires;
@@ -64,9 +68,9 @@ jobs:
     # (tools/ci/verify_linux_runner_group.py): a target has to be a pool that
     # may hold that secret.
     runs-on: ${{ fromJSON(vars.PULP_WCLAP_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    outputs:
+      relevant: ${{ steps.relevance.outputs.run }}
     env:
-      # Owner-gated deploy switch (a step `if:` cannot read `secrets` directly).
-      HAS_CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
       # A published site never reads a cache an untrusted run can write. When
       # PULP_WCLAP_RUNS_ON_JSON routes this job to a self-hosted pool, that
       # host's ccache is shared with PR jobs, so every object is compiled here.
@@ -550,22 +554,51 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      # ── Owner-gated deploy ─────────────────────────────────────────────────
-      # Runs only after the owner adds CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
-      # repo secrets (see cloudflare/README.md). Until then this step is skipped.
-      # (`secrets` is not a valid context in a step `if:` — actionlint — so the
-      # presence check is hoisted into the job-level HAS_CF_TOKEN env var.)
+      # The deploy job publishes exactly the directory this job proved.
+      - name: Upload the proved deploy dir
+        if: ${{ steps.relevance.outputs.run == 'true' && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: wclap-cloudflare-public
+          path: examples/web-demos/wclap-build/cloudflare/public
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 3
+
+  # ── Owner-gated deploy ─────────────────────────────────────────────────────
+  # Runs only after the owner adds CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
+  # to the `automation` environment (see cloudflare/README.md). Until then the
+  # deploy steps are skipped. The environment admits branch main only, so a
+  # dispatch from another branch is refused before any step runs.
+  deploy:
+    name: Deploy to Cloudflare Pages
+    needs: build-prove-deploy
+    # ALLOWLIST, not a denylist. This previously read
+    # `github.event_name != 'pull_request'`, which silently became TRUE the
+    # day the `merge_group:` trigger was added — so every merge group
+    # published production from a synthetic gh-readonly-queue commit that had
+    # NOT merged and could still be evicted. Naming the events that MAY deploy
+    # fails closed when the next trigger is added.
+    if: ${{ needs.build-prove-deploy.outputs.relevant == 'true' && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) }}
+    runs-on: ubuntu-latest
+    environment: automation
+    env:
+      # Owner-gated deploy switch (a step `if:` cannot read `secrets` directly).
+      HAS_CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the proved deploy dir
+        if: ${{ env.HAS_CF_TOKEN == 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: wclap-cloudflare-public
+          path: examples/web-demos/wclap-build/cloudflare/public
+
       - name: Deploy to Cloudflare Pages
-        # ALLOWLIST, not a denylist. This previously read
-        # `github.event_name != 'pull_request'`, which silently became TRUE the
-        # day the `merge_group:` trigger was added — so every merge group
-        # published production from a synthetic gh-readonly-queue commit that had
-        # NOT merged and could still be evicted. The file's own comments claimed
-        # group runs "never deploy"; the condition disagreed. It only stayed
-        # invisible because merge-group runs were starving before reaching this
-        # step. Naming the events that MAY deploy fails closed when the next
-        # trigger is added.
-        if: ${{ steps.relevance.outputs.run == 'true' && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && env.HAS_CF_TOKEN == 'true' }}
+        if: ${{ env.HAS_CF_TOKEN == 'true' }}
         uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
         with:
           # wrangler-action v4 installs the latest wrangler when this is unset,
@@ -587,15 +620,6 @@ jobs:
       # The local guard checks the files on disk; only this checks the HOST. Fetch each
       # page as a crawler does, follow its og:image, and assert the bytes are a PNG.
       - name: Guard — the live site actually unfurls
-        # ALLOWLIST, not a denylist. This previously read
-        # `github.event_name != 'pull_request'`, which silently became TRUE the
-        # day the `merge_group:` trigger was added — so every merge group
-        # published production from a synthetic gh-readonly-queue commit that had
-        # NOT merged and could still be evicted. The file's own comments claimed
-        # group runs "never deploy"; the condition disagreed. It only stayed
-        # invisible because merge-group runs were starving before reaching this
-        # step. Naming the events that MAY deploy fails closed when the next
-        # trigger is added.
-        if: ${{ steps.relevance.outputs.run == 'true' && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && env.HAS_CF_TOKEN == 'true' }}
+        if: ${{ env.HAS_CF_TOKEN == 'true' }}
         working-directory: examples/web-demos/wclap-build/cloudflare
         run: node check-unfurl.mjs --base https://pulp-wclap-demos.pages.dev
