@@ -24,8 +24,13 @@ set(PULP_GPU_RUNTIME_PREFIX "" CACHE PATH
 set(PULP_GPU_RUNTIME_COMMIT "14bd4c5e430bc8da6b4204f1daa8a1bdbc6b7f3a")
 set(PULP_GPU_RUNTIME_VERSION "0.1.10")
 
+# OFF builds Pulp's own device sources on macOS too, the layer every other
+# platform still uses; it keeps that mode compilable where it can gate.
+option(PULP_USE_GPU_RUNTIME "On macOS, forward the GPU device layer to gpu-runtime" ON)
+
 set(PULP_HAS_GPU_RUNTIME FALSE)
-if(NOT (APPLE AND NOT PULP_IOS) OR NOT PULP_SKIA_PROVIDES_DAWN OR NOT SKIA_DIR)
+if(NOT PULP_USE_GPU_RUNTIME OR NOT (APPLE AND NOT PULP_IOS) OR NOT PULP_SKIA_PROVIDES_DAWN
+   OR NOT SKIA_DIR)
     return()
 endif()
 

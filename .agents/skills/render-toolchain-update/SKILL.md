@@ -364,6 +364,13 @@ retain those fields in the PR/landing evidence.
   either commit elsewhere is the negative control. The read is fail-closed (no
   network means `--strict` fails); `PULP_VELLUM_CHECKOUT=<vellum clone>` reads
   the same commit from a local clone.
+- macOS builds forward the GPU device layer to gpu-runtime by default
+  (`PULP_USE_GPU_RUNTIME=ON`, `tools/cmake/PulpGpuRuntime.cmake`); `OFF` builds
+  Pulp's own device sources there too, the mode every other platform still
+  uses. A renderer bump has to compile in both: configure a second build dir
+  with `-DPULP_USE_GPU_RUNTIME=OFF` and build `pulp-test-gpu-device-only-consumer`.
+  `gpu-runtime-mode-consistency` fails when a mode's `PULP_GPU_RUNTIME` define
+  is missing or leaks.
   Vellum's GPU mirror build pins the archive and header digests of the Pulp
   commit it was exported from, so its renderer bump can only pass after Pulp's
   lands.

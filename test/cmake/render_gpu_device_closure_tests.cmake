@@ -76,6 +76,28 @@ if(Python3_Interpreter_FOUND)
         PROPERTIES LABELS "render;gpu-device;link-closure" TIMEOUT 60)
 endif()
 
+# The device-layer mode is one fact for every consumer: PULP_GPU_RUNTIME sits
+# on pulp::platform and pulp::gpu-device-api exactly when this build forwards to
+# gpu-runtime, and a PULP_USE_GPU_RUNTIME=OFF build leaks it nowhere.
+get_target_property(_pulp_platform_defs pulp-platform INTERFACE_COMPILE_DEFINITIONS)
+get_target_property(_pulp_device_api_defs pulp-gpu-device-api INTERFACE_COMPILE_DEFINITIONS)
+foreach(_pulp_defs_var _pulp_platform_defs _pulp_device_api_defs)
+    if(NOT ${_pulp_defs_var})
+        set(${_pulp_defs_var} "")
+    endif()
+    string(REPLACE ";" "|" ${_pulp_defs_var} "${${_pulp_defs_var}}")
+endforeach()
+add_test(NAME gpu-runtime-mode-consistency
+    COMMAND ${CMAKE_COMMAND}
+        -DHAS_GPU_RUNTIME=${PULP_HAS_GPU_RUNTIME}
+        "-DPLATFORM_DEFS=${_pulp_platform_defs}"
+        "-DAPI_DEFS=${_pulp_device_api_defs}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_mode.cmake)
+set_tests_properties(gpu-runtime-mode-consistency
+    PROPERTIES LABELS "render;gpu-device;link-closure" TIMEOUT 20)
+unset(_pulp_platform_defs)
+unset(_pulp_device_api_defs)
+
 unset(_pulp_gpu_device_props)
 unset(_pulp_gpu_device_props_file)
 unset(_pulp_gpu_entry)
