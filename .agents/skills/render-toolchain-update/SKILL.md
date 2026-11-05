@@ -351,16 +351,19 @@ retain those fields in the PR/landing evidence.
   release may place libraries under `build/win-gpu/lib/Release/x64/`; older
   releases can be flat. Test a fresh x64 configure on ARM64 without an explicit
   `SKIA_DIR` as well as an explicit nested archive.
-- Vellum pins the same macOS universal archive separately, in its
-  `cmake/VellumSkiaDawn.cmake` (`_vellum_expected_archive_sha256` plus a
-  `chrome/mNNN macOS universal tuple` message). Until the two repositories share
-  one renderer lock, `tools/deps/audit.py --strict` reads that file at the Vellum
-  commit named by the Skia entry's `vellum_renderer_drift_check` and fails unless
-  both values equal Pulp's `release_assets.mac-universal.sha256` and Skia
-  `version`. A milestone bump therefore moves that commit to the Vellum change
-  carrying the same archive; pointing it at Vellum's previous milestone is the
-  negative control. The read is fail-closed (no network means `--strict` fails);
-  `PULP_VELLUM_CHECKOUT=<vellum clone>` reads the same commit from a local clone.
+- The renderer pin is written once, in gpu-runtime's `gpu-runtime/renderer-lock.json`
+  (the Vellum repository); Pulp's manifest repeats it for its own fetch.
+  `tools/deps/audit.py --strict` reads that lock at the commit named by the Skia
+  entry's `vellum_renderer_drift_check`, which must equal the
+  `vellum-gpu-runtime` entry's `upstream.commit` (the gpu-runtime Pulp builds
+  against, `tools/cmake/PulpGpuRuntime.cmake`), and fails unless the lock's
+  `macos-arm64.sha256` and `milestone` equal Pulp's
+  `release_assets.mac-universal.sha256` and Skia `version`. A milestone bump
+  therefore lands in Vellum's lock first, then one Pulp change moves the Skia
+  entry, the drift-check commit and the gpu-runtime pin together; pointing
+  either commit elsewhere is the negative control. The read is fail-closed (no
+  network means `--strict` fails); `PULP_VELLUM_CHECKOUT=<vellum clone>` reads
+  the same commit from a local clone.
   Vellum's GPU mirror build pins the archive and header digests of the Pulp
   commit it was exported from, so its renderer bump can only pass after Pulp's
   lands.
