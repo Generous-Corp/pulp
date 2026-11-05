@@ -181,6 +181,62 @@ SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphT
     return out;
 }
 
+GraphResult connect_subgraph_ports(SignalGraph& graph, const SubgraphInstance& source,
+                                   std::string_view source_port,
+                                   const SubgraphInstance& destination,
+                                   std::string_view destination_port) {
+    const auto source_it = source.ports.find(std::string(source_port));
+    if (source_it == source.ports.end())
+        return boundary(GraphResult::Code::UnknownPort, "source exposed port is not declared",
+                        "use a declared output port");
+    const auto destination_it = destination.ports.find(std::string(destination_port));
+    if (destination_it == destination.ports.end())
+        return boundary(GraphResult::Code::UnknownPort, "destination exposed port is not declared",
+                        "use a declared input port");
+    const auto& source_handle = source_it->second;
+    const auto& destination_handle = destination_it->second;
+    if (!source_handle.output)
+        return boundary(GraphResult::Code::UnknownPort, "source exposed port is not an output",
+                        "choose an output port");
+    if (destination_handle.output)
+        return boundary(GraphResult::Code::UnknownPort, "destination exposed port is not an input",
+                        "choose an input port");
+    if (source_handle.kind != destination_handle.kind)
+        return boundary(GraphResult::Code::KindMismatch, "exposed port kinds do not match",
+                        "connect ports with the same kind");
+
+    // Exposed names are instance-local aliases. Resolve each handle back to
+    // the graph-owned port name before calling the graph API, whose lookup is
+    // intentionally based on the node's canonical port names.
+    const auto resolve = [&](const PortHandle& exposed) -> PortHandle {
+        const auto* node = graph.node(exposed.node);
+        if (!node)
+            return {};
+        const auto& ports = exposed.output ? node->output_ports : node->input_ports;
+        for (const auto& current : ports) {
+            if (current.index != exposed.index || current.kind != exposed.kind)
+                continue;
+            if (exposed.owner &&
+                (current.owner != exposed.owner || current.incarnation != exposed.incarnation))
+                return {};
+            return current;
+        }
+        return {};
+    };
+    const auto canonical_source = resolve(source_handle);
+    const auto canonical_destination = resolve(destination_handle);
+    if (canonical_source.node == 0 || canonical_destination.node == 0)
+        return boundary(GraphResult::Code::UnknownPort,
+                        "exposed port handle is stale or unavailable",
+                        "obtain a live instance port");
+
+    const auto result = graph.connect(canonical_source, canonical_destination);
+    if (result)
+        return result;
+    return boundary(result.code, "exposed port connection rejected: " + result.rule,
+                    result.suggested_fix);
+}
+
 GraphResult restore_subgraph_state(SignalGraph& graph, SubgraphInstance& instance,
                                    const SubgraphState& state) {
     if (state.template_identity != instance.template_identity ||
