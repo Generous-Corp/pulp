@@ -5,6 +5,11 @@
 // these are its types and functions under their Pulp names, so a Pulp object
 // and a gpu-runtime object are one and the same.
 #include <gpu_runtime/gpu_compute.hpp>
+// The Pulp names of the types it uses, as the header always provided.
+#include <pulp/render/gpu_surface.hpp>
+#ifdef PULP_BENCHMARK
+#include <pulp/render/bench/perf_counters.hpp>
+#endif
 
 namespace pulp::render {
 using gpu_runtime::GpuCompute;

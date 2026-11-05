@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <string>
 
-namespace pulp::render {
+#include <pulp/platform/gpu_fwd.hpp>
 
-class GpuSurface;
+namespace pulp::render {
 
 /// Provider identity recorded by the development-only render observer.
 ///

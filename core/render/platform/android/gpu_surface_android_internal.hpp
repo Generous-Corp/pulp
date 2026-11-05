@@ -33,9 +33,10 @@ namespace pulp::view {
 class View;
 }
 
+#include <pulp/platform/gpu_fwd.hpp>
+
 namespace pulp::render {
 
-class GpuSurface;
 class SkiaSurface;
 
 // ── Android GPU-surface entry points ─────────────────────────────────────

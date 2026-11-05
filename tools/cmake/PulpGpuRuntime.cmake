@@ -68,3 +68,6 @@ foreach(_pulp_gpu_runtime_target DeviceApi Bootstrap Device SkiaLogBridge)
     endif()
 endforeach()
 set(PULP_HAS_GPU_RUNTIME TRUE)
+# Every consumer must agree on what pulp::render::GpuSurface names
+# (pulp/platform/gpu_fwd.hpp), so the switch travels with pulp::platform.
+target_compile_definitions(pulp-platform INTERFACE PULP_GPU_RUNTIME=1)

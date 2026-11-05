@@ -17,6 +17,9 @@
 // these are its types and functions under their Pulp names, so a Pulp object
 // and a gpu-runtime object are one and the same.
 #include <gpu_runtime/gpu_startup_report.hpp>
+// The Pulp names of the types it uses, as the header always provided.
+#include <pulp/render/gpu_diagnostics.hpp>
+#include <pulp/render/gpu_surface.hpp>
 
 namespace pulp::render {
 using gpu_runtime::GpuStartupReport;

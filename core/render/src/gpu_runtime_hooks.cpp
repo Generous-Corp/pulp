@@ -42,7 +42,7 @@ void log_line(gpu_runtime::LogLevel level, std::string_view message, void*) {
     }
 }
 
-const char* arg(const gpu_runtime::TraceArg* args, std::size_t count, const char* key) {
+[[maybe_unused]] const char* arg(const gpu_runtime::TraceArg* args, std::size_t count, const char* key) {
     for (std::size_t index = 0; index < count; ++index) {
         if (args[index].key != nullptr && std::strcmp(args[index].key, key) == 0)
             return args[index].value != nullptr ? args[index].value : "";
@@ -51,7 +51,7 @@ const char* arg(const gpu_runtime::TraceArg* args, std::size_t count, const char
 }
 
 // gpu-runtime emits category "gpu" only; Perfetto needs it at compile time.
-void trace_instant(const char*, const char* name, const gpu_runtime::TraceArg* args,
+[[maybe_unused]] void trace_instant(const char*, const char* name, const gpu_runtime::TraceArg* args,
                    std::size_t count, void*) {
     if (std::strcmp(name, "gpu.diagnostic") == 0) {
         PULP_TRACE_INSTANT_ARGS("gpu", "gpu.diagnostic", "severity", arg(args, count, "severity"),
@@ -62,11 +62,11 @@ void trace_instant(const char*, const char* name, const gpu_runtime::TraceArg* a
     }
 }
 
-void trace_begin(const char*, const char* name, void*) {
+[[maybe_unused]] void trace_begin(const char*, const char* name, void*) {
     PULP_TRACE_BEGIN_DYNAMIC("gpu", name);
 }
 
-void trace_end(const char*, void*) {
+[[maybe_unused]] void trace_end(const char*, void*) {
     PULP_TRACE_END("gpu");
 }
 

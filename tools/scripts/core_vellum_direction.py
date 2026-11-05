@@ -9,7 +9,11 @@ Two halves, both lexical, so the check needs no configured build:
 * links -- no CMake file under core/ finds, fetches, adds or links Vellum:
   ``find_package(Vellum``, ``FetchContent_Declare(vellum``,
   ``add_subdirectory(.../vellum``, or a ``Vellum::`` / ``vellum::`` target name.
-  CMake comments are ignored, so prose that mentions Vellum stays legal.
+  CMake comments are ignored, so prose that mentions Vellum stays legal;
+* device forward declarations -- GpuSurface, GpuCompute and PerfCounters are
+  forward-declared only in pulp/platform/gpu_fwd.hpp. Where the device layer is
+  gpu-runtime's, those Pulp names are gpu-runtime's types, and a hand-written
+  ``class GpuSurface;`` in pulp::render would declare a second class.
 
 Known edges are allowlisted with a reason and an exact occurrence count. An
 entry that matches more often than allowed fails (a new reference hid behind an
@@ -224,6 +228,52 @@ def check_cmake(root: pathlib.Path,
     return 0
 
 
+GPU_FWD_HEADER = "core/platform/include/pulp/platform/gpu_fwd.hpp"
+GPU_FWD_ROOTS = ("core", "test", "tools", "examples", "inspect", "apple", "packages")
+GPU_FWD_SUFFIXES = {".h", ".hh", ".hpp", ".hxx", ".c", ".cc", ".cpp", ".cxx", ".m", ".mm"}
+GPU_FWD_RE = re.compile(r"^[ \t]*(?:class|struct)[ \t]+(GpuSurface|GpuCompute|PerfCounters)[ \t]*;",
+                        re.MULTILINE)
+
+
+def check_gpu_forward_declarations(root: pathlib.Path) -> int:
+    """Refuse a raw forward declaration of the forwarded device types."""
+    scanned = 0
+    failures = []
+    for name in GPU_FWD_ROOTS:
+        base = root / name
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*"):
+            if path.suffix not in GPU_FWD_SUFFIXES or not path.is_file():
+                continue
+            relative = path.relative_to(root).as_posix()
+            if any(part.startswith("build") or part in {"_deps", "node_modules", ".git"}
+                   for part in path.relative_to(root).parts[:-1]):
+                continue
+            scanned += 1
+            if relative == GPU_FWD_HEADER:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for match in GPU_FWD_RE.finditer(text):
+                line = text.count("\n", 0, match.start()) + 1
+                failures.append(f"{relative}:{line}: forward-declares {match.group(1)}; "
+                                f"include <pulp/platform/gpu_fwd.hpp> instead")
+    if scanned == 0:
+        print("gpu-device-forward-declarations: no sources scanned (wrong root?)")
+        return 2
+    if failures:
+        print("gpu-device-forward-declarations: the GPU device types are forward-declared "
+              f"only in {GPU_FWD_HEADER}\n")
+        for failure in failures:
+            print(f"  {failure}")
+        return 1
+    print(f"gpu-device-forward-declarations: ok ({scanned} sources)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=pathlib.Path, default=pathlib.Path("."))
@@ -232,9 +282,10 @@ def main(argv: list[str] | None = None) -> int:
     boundary = include_boundary.BOUNDARIES["core-vellum"]
     include_rc = include_boundary.run(boundary, root, include_boundary.ALLOWED["core-vellum"])
     link_rc = check_cmake(root, ALLOWED_CMAKE)
-    if 2 in (include_rc, link_rc):
+    forward_rc = check_gpu_forward_declarations(root)
+    if 2 in (include_rc, link_rc, forward_rc):
         return 2
-    return max(include_rc, link_rc)
+    return max(include_rc, link_rc, forward_rc)
 
 
 if __name__ == "__main__":

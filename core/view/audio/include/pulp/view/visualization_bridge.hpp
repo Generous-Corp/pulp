@@ -29,11 +29,7 @@
 // pulp::render. Forward-declare instead; the non-trivial process() body that
 // actually dereferences PerfCounters lives in visualization_bridge.cpp, which
 // DOES include the render header.
-#ifdef PULP_BENCHMARK
-namespace pulp::render::bench {
-struct PerfCounters;
-}
-#endif
+#include <pulp/platform/gpu_fwd.hpp>
 
 namespace pulp::view {
 

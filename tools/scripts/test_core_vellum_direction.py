@@ -174,6 +174,26 @@ class CoreVellumDirectionTests(unittest.TestCase):
         self._write(provider, "#include <vellum/graphics/dawn_bootstrap.hpp>\n" + text)
         self.assertEqual(self._run(), 1)
 
+    def test_a_raw_gpu_forward_declaration_fails(self):
+        self._write("core/view/include/pulp/view/host.hpp",
+                    "namespace pulp::render {\nclass GpuSurface;\n}\n")
+        self.assertEqual(self._run(), 1)
+
+    def test_a_raw_perf_counters_forward_declaration_fails(self):
+        self._write("test/test_bench.cpp",
+                    "namespace pulp::render::bench {\n  struct PerfCounters;\n}\n")
+        self.assertEqual(self._run(), 1)
+
+    def test_the_forward_header_and_uses_pass(self):
+        self._write(direction.GPU_FWD_HEADER, "namespace pulp::render {\nclass GpuSurface;\n}\n")
+        self._write("core/view/include/pulp/view/host.hpp",
+                    "#include <pulp/platform/gpu_fwd.hpp>\n"
+                    "class GpuSurfaceView;\nvoid attach(pulp::render::GpuSurface* surface);\n")
+        self.assertEqual(self._run(), 0)
+
+    def test_the_real_tree_has_no_raw_gpu_forward_declaration(self):
+        self.assertEqual(direction.check_gpu_forward_declarations(REPO), 0)
+
     def test_gpu_runtime_targets_are_not_vellum_edges(self):
         self._write("core/gpu_audio/CMakeLists.txt",
                     "target_link_libraries(pulp-gpu-audio PRIVATE VellumGpuRuntime::Device)\n")
