@@ -68,8 +68,8 @@ owner-gated step** (it consumes credentials — treat it like an `npm publish`).
 2. **Create an API token** with the **Cloudflare Pages: Edit** permission
    (My Profile → API Tokens → *Edit Cloudflare Workers* template is sufficient).
    Note your **Account ID** (Workers & Pages → right sidebar).
-3. **Add two secrets to the `automation` environment** (Settings →
-   Environments → `automation`, whose deployment branch policy is `main` only;
+3. **Add two secrets to the `deploy` environment** (Settings →
+   Environments → `deploy`, whose deployment branch policy is `main` only;
    not repository secrets, which any branch's run could read):
    - `CLOUDFLARE_API_TOKEN` — the token from step 2.
    - `CLOUDFLARE_ACCOUNT_ID` — your account ID.

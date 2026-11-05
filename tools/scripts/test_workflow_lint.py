@@ -16,6 +16,7 @@ Run:
 
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -339,39 +340,48 @@ class ActionMajorPinTests(unittest.TestCase):
         self.assertEqual(text.count("run_steward_with_retry()"), 1)
 
 
-# --- Workflow credentials live in main-only environments ---------------------
-# Every job that reads a credential reads it from a main-only environment.
-#
-# A repository-level secret is readable by any workflow run, including one
-# started by pushing a branch that edits the workflow. An environment secret is
-# released only to a job whose ref passes the environment's deployment policy
-# (branch main, plus tags v* for `release`). This test pins the code half of that
-# boundary: each credential named below is read only by jobs that declare the
-# expected environment, and a job in a workflow that pull requests can trigger
-# declares an environment only behind an event guard, so no pull-request run is
-# ever pointed at one. The policy half lives in the repository settings.
+# --- Workflow credentials and the environments that hold them -----------------
+# A repository-level secret is readable by any workflow run, including one a
+# pushed branch starts after editing a workflow. An environment secret reaches
+# only a job whose ref passes the environment's deployment policy. These tests
+# pin the code half of that boundary (the policy half is repository settings):
+# - every credential a workflow names is classified below, and each one moved
+#   into an environment is read only by jobs that declare it;
+# - no workflow reads secrets dynamically (`secrets[...]`, `toJSON(secrets)`,
+#   `secrets: inherit`), which would hide a credential from this scan;
+# - a job in a workflow pull requests can trigger names an environment only
+#   behind an event allowlist that excludes every pull-request event;
+# - a job in a NO_REPO_CODE environment checks out nothing, so no repository
+#   code runs in the job that holds the credential.
 
 SECRET_WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
-# Credential -> environments that may hold it.
-ENVIRONMENT_SECRETS: dict[str, set[str]] = {
-    # Tagging: the fleet-release App, or the interim release-bot PAT.
-    "FLEET_RELEASE_APP_PRIVATE_KEY": {"release"},
-    "RELEASE_BOT_SSH_SIGNING_KEY": {"release", "version"},
-    # Interim PAT: tags (release), the bump PR (version), and three
-    # main-only monitors (automation).
-    "RELEASE_BOT_TOKEN": {"release", "version", "automation"},
-    "SHIPYARD_APP_ID": {"automation"},
-    "SHIPYARD_APP_PRIVATE_KEY": {"automation"},
-    "VELLUM_DISPATCHER_APP_PRIVATE_KEY": {"automation"},
-    "CLOUDFLARE_API_TOKEN": {"automation"},
-    "CLOUDFLARE_ACCOUNT_ID": {"automation"},
-    "TIER_RECORD_APP_ID": {"tier-record"},
-    "TIER_RECORD_APP_KEY": {"tier-record"},
+# Credential -> the environment that holds it.
+ENVIRONMENT_SECRETS: dict[str, str] = {
+    # Tags are created by the fleet-release-interim App, whose key only the
+    # template `publish-tags` job reads.
+    "FLEET_RELEASE_INTERIM_APP_PRIVATE_KEY": "release",
+    # The WebCLAP deploy job, which only unpacks a digest-checked tarball.
+    "CLOUDFLARE_API_TOKEN": "deploy",
+    "CLOUDFLARE_ACCOUNT_ID": "deploy",
+    "TIER_RECORD_APP_ID": "tier-record",
+    "TIER_RECORD_APP_KEY": "tier-record",
 }
 
-# Repository-level secrets that stay readable from any ref, with the reason.
+# Environments whose jobs must run no repository code.
+NO_REPO_CODE = {"release", "deploy"}
+
+# Credentials that stay repository secrets this round, with the reason.
 REPOSITORY_SECRETS: dict[str, str] = {
+    # Deferred: read by Shipyard and the steward at runtime; moving them needs
+    # a canary plan.
+    "SHIPYARD_APP_ID": "deferred: shipyard-local",
+    "SHIPYARD_APP_PRIVATE_KEY": "deferred: shipyard-local",
+    # Deferred: the release-bot PAT and its signing key also serve
+    # version-at-land and three monitors; they move with the versioner App.
+    "RELEASE_BOT_TOKEN": "deferred: bump-at-merge and monitors still read it",
+    "RELEASE_BOT_SSH_SIGNING_KEY": "deferred: version-at-land signs with it",
+    "VELLUM_DISPATCHER_APP_PRIVATE_KEY": "deferred: not a release secret",
     # Upload-only coverage token; pull-request jobs upload with it.
     "CODECOV_TOKEN": "upload-only, read by pull-request jobs",
     # Read-only App the pull_request_target / merge_group trusted gate uses.
@@ -380,8 +390,8 @@ REPOSITORY_SECRETS: dict[str, str] = {
     "PULP_AAX_SDK_ZIP_URL": "not a credential, unset",
     "PULP_AAX_SDK_ZIP_SHA256": "not a credential, unset",
     # macOS signing for sign-and-release.yml (tag-triggered); not configured.
-    # Set them only in a tag-admitting environment, and only after the v* tag
-    # ruleset restricts creation to the release identity.
+    # Set them only in an environment whose job runs no repository code, and
+    # only once the v* tag ruleset restricts creation to the release identity.
     "MACOS_CERTIFICATE": "unset",
     "MACOS_CERTIFICATE_PWD": "unset",
     "KEYCHAIN_PASSWORD": "unset",
@@ -391,9 +401,10 @@ REPOSITORY_SECRETS: dict[str, str] = {
     "APPLE_PASSWORD": "unset",
 }
 
-TAG_GUARD = "Require the tag to point at a commit on main"
 PULL_REQUEST_EVENTS = {"pull_request", "pull_request_target", "merge_group"}
 SECRET_RE = re.compile(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
+DYNAMIC_SECRETS_RE = re.compile(r"secrets\s*\[|toJSON\(\s*secrets\s*\)|secrets:\s*inherit")
+EVENT_ALLOWLIST_RE = re.compile(r"contains\(fromJSON\('(\[[^']*\])'\),\s*github\.event_name\)")
 
 
 def _secret_triggers(workflow: dict) -> set[str]:
@@ -416,72 +427,56 @@ def _secret_jobs():
     for path in sorted(SECRET_WORKFLOWS.glob("*.y*ml")):
         workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
         for name, job in (workflow.get("jobs") or {}).items():
-            text = yaml.safe_dump(job)
+            text = yaml.safe_dump(job, width=100000)
             secrets = set(SECRET_RE.findall(text)) - {"GITHUB_TOKEN"}
             yield path.name, _secret_triggers(workflow), name, job, secrets
 
 
 class WorkflowSecretEnvironments(unittest.TestCase):
     def test_the_scan_sees_every_known_credential(self) -> None:
-        # Control: the scan must find each listed credential somewhere, or a
-        # renamed secret would make every assertion below vacuous.
-        seen = set()
-        for *_, secrets in _secret_jobs():
-            seen |= secrets
+        # Control: a renamed secret or a broken scan would make every
+        # assertion below vacuous.
+        seen = set().union(*(secrets for *_, secrets in _secret_jobs()))
         self.assertEqual(set(ENVIRONMENT_SECRETS) - seen, set())
+        envs = {_secret_environment(job) for _, _, _, job, _ in _secret_jobs()}
+        self.assertTrue(set(ENVIRONMENT_SECRETS.values()) <= envs)
 
-    def test_every_credential_is_read_inside_its_environment(self) -> None:
-        unknown = []
-        misplaced = []
+    def test_every_credential_is_classified_and_read_in_its_environment(self) -> None:
+        problems = []
         for wf, _, job_name, job, secrets in _secret_jobs():
             env = _secret_environment(job)
-            for secret in sorted(secrets):
-                if secret in REPOSITORY_SECRETS:
-                    continue
-                allowed = ENVIRONMENT_SECRETS.get(secret)
-                if allowed is None:
-                    unknown.append(f"{wf}:{job_name}:{secret}")
-                elif env not in allowed:
-                    misplaced.append(f"{wf}:{job_name}:{secret} env={env!r} want one of {sorted(allowed)}")
-        self.assertEqual(unknown, [], "classify each new secret in this test")
-        self.assertEqual(misplaced, [])
+            for secret in sorted(secrets - set(REPOSITORY_SECRETS)):
+                want = ENVIRONMENT_SECRETS.get(secret)
+                if want is None:
+                    problems.append(f"{wf}:{job_name}: classify {secret} in this test")
+                elif env != want:
+                    problems.append(f"{wf}:{job_name}: {secret} read in env {env!r}, not {want!r}")
+        self.assertEqual(problems, [])
+
+    def test_no_workflow_reads_secrets_dynamically(self) -> None:
+        offenders = [path.name for path in sorted(SECRET_WORKFLOWS.glob("*.y*ml"))
+                     if DYNAMIC_SECRETS_RE.search(path.read_text(encoding="utf-8"))]
+        self.assertEqual(offenders, [])
 
     def test_no_pull_request_run_is_pointed_at_an_environment(self) -> None:
         offenders = []
         for wf, triggers, job_name, job, _ in _secret_jobs():
             if _secret_environment(job) is None or not (triggers & PULL_REQUEST_EVENTS):
                 continue
-            guard = str(job.get("if") or "")
-            if "github.event_name" not in guard:
+            allow = EVENT_ALLOWLIST_RE.search(str(job.get("if") or ""))
+            if not allow or set(json.loads(allow.group(1))) & PULL_REQUEST_EVENTS:
                 offenders.append(f"{wf}:{job_name}")
         self.assertEqual(offenders, [])
 
-    def test_tag_runs_prove_the_commit_landed_before_reading_a_credential(self) -> None:
-        # The release environment admits tags v* as well as main, so a tag
-        # pushed onto an unmerged commit would reach it. Each such job first
-        # proves the tagged commit is on main, before any step that names a
-        # credential.
-        missing = []
-        for path in sorted(SECRET_WORKFLOWS.glob("*.y*ml")):
-            workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
-            on = workflow.get(True, workflow.get("on")) or {}
-            push = on.get("push") if isinstance(on, dict) else None
-            if not (isinstance(push, dict) and push.get("tags")):
+    def test_credential_jobs_in_no_repo_code_environments_check_out_nothing(self) -> None:
+        offenders = []
+        for wf, _, job_name, job, _ in _secret_jobs():
+            if _secret_environment(job) not in NO_REPO_CODE:
                 continue
-            for name, job in (workflow.get("jobs") or {}).items():
-                if _secret_environment(job) is None:
-                    continue
-                steps = job.get("steps") or []
-                names = [str(step.get("name", "")) for step in steps]
-                first_secret = next(
-                    (i for i, step in enumerate(steps)
-                     if set(SECRET_RE.findall(yaml.safe_dump(step))) - {"GITHUB_TOKEN"}),
-                    len(steps),
-                )
-                guard = names.index(TAG_GUARD) if TAG_GUARD in names else None
-                if guard is None or guard > first_secret or "merge-base --is-ancestor" not in str(steps[guard].get("run")):
-                    missing.append(f"{path.name}:{name}")
-        self.assertEqual(missing, [])
+            for step in job.get("steps") or []:
+                if str(step.get("uses", "")).startswith("actions/checkout@"):
+                    offenders.append(f"{wf}:{job_name}")
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":

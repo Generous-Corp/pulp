@@ -70,6 +70,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_WCLAP_RUNS_ON_JSON || '"ubuntu-latest"') }}
     outputs:
       relevant: ${{ steps.relevance.outputs.run }}
+      site_sha256: ${{ steps.site.outputs.sha256 }}
     env:
       # A published site never reads a cache an untrusted run can write. When
       # PULP_WCLAP_RUNS_ON_JSON routes this job to a self-hosted pool, that
@@ -554,22 +555,33 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      # The deploy job publishes exactly the directory this job proved.
-      - name: Upload the proved deploy dir
+      # The deploy job publishes exactly the directory this job proved, as one
+      # tarball whose digest it checks before deploying.
+      - name: Pack the proved deploy dir
+        id: site
         if: ${{ steps.relevance.outputs.run == 'true' && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) }}
+        working-directory: examples/web-demos/wclap-build/cloudflare
+        run: |
+          set -euo pipefail
+          tar -cf "$RUNNER_TEMP/wclap-site.tar" public
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/wclap-site.tar" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the proved deploy dir
+        if: ${{ steps.site.outputs.sha256 != '' }}
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: wclap-cloudflare-public
-          path: examples/web-demos/wclap-build/cloudflare/public
+          name: wclap-cloudflare-site
+          path: ${{ runner.temp }}/wclap-site.tar
           if-no-files-found: error
-          include-hidden-files: true
           retention-days: 3
 
   # ── Owner-gated deploy ─────────────────────────────────────────────────────
   # Runs only after the owner adds CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
-  # to the `automation` environment (see cloudflare/README.md). Until then the
-  # deploy steps are skipped. The environment admits branch main only, so a
-  # dispatch from another branch is refused before any step runs.
+  # to the `deploy` environment (deployment policy: branch main; see
+  # cloudflare/README.md). Until then its steps are skipped. The job holds the
+  # token, so it runs no repository code: no checkout, only the digest check of
+  # the tarball the build job proved and the pinned wrangler action, run in a
+  # directory that holds nothing but that tarball's contents.
   deploy:
     name: Deploy to Cloudflare Pages
     needs: build-prove-deploy
@@ -581,23 +593,40 @@ jobs:
     # fails closed when the next trigger is added.
     if: ${{ needs.build-prove-deploy.outputs.relevant == 'true' && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) }}
     runs-on: ubuntu-latest
-    environment: automation
+    environment: deploy
+    permissions:
+      actions: read
+    outputs:
+      deployed: ${{ steps.wrangler.outcome == 'success' }}
     env:
       # Owner-gated deploy switch (a step `if:` cannot read `secrets` directly).
       HAS_CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-
       - name: Download the proved deploy dir
         if: ${{ env.HAS_CF_TOKEN == 'true' }}
         uses: actions/download-artifact@v8
         with:
-          name: wclap-cloudflare-public
-          path: examples/web-demos/wclap-build/cloudflare/public
+          name: wclap-cloudflare-site
+          path: ${{ runner.temp }}/artifact
+
+      - name: Check the tarball digest and unpack it
+        if: ${{ env.HAS_CF_TOKEN == 'true' }}
+        env:
+          WANT: ${{ needs.build-prove-deploy.outputs.site_sha256 }}
+        run: |
+          set -euo pipefail
+          tarball="$RUNNER_TEMP/artifact/wclap-site.tar"
+          got=$(sha256sum "$tarball" | cut -d' ' -f1)
+          if [ -z "$WANT" ] || [ "$got" != "$WANT" ]; then
+            echo "::error::deploy tarball digest $got does not match the proved $WANT" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/site"
+          tar -xf "$tarball" -C "$RUNNER_TEMP/site" --no-same-owner --no-same-permissions public
+          echo "SITE_DIR=$RUNNER_TEMP/site" >> "$GITHUB_ENV"
 
       - name: Deploy to Cloudflare Pages
+        id: wrangler
         if: ${{ env.HAS_CF_TOKEN == 'true' }}
         uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
         with:
@@ -609,7 +638,7 @@ jobs:
           wranglerVersion: "4.149.0"
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: examples/web-demos/wclap-build/cloudflare
+          workingDirectory: ${{ env.SITE_DIR }}
           # --branch main is REQUIRED, not cosmetic. Without it wrangler picks up the
           # current git branch and publishes a PREVIEW alias, while og:image is an
           # absolute production URL — so the card points at a host that has no images
@@ -617,9 +646,18 @@ jobs:
           # its 404 page with a 200 status, so a status-code check does not catch it.
           command: pages deploy public --project-name pulp-wclap-demos --branch main
 
-      # The local guard checks the files on disk; only this checks the HOST. Fetch each
-      # page as a crawler does, follow its og:image, and assert the bytes are a PNG.
-      - name: Guard — the live site actually unfurls
-        if: ${{ env.HAS_CF_TOKEN == 'true' }}
+  # The local guard checks the files on disk; only this checks the HOST. Fetch each
+  # page as a crawler does, follow its og:image, and assert the bytes are a PNG.
+  # Repository code, so it runs in its own job, which holds no secret.
+  unfurl-check:
+    name: Guard — the live site actually unfurls
+    needs: deploy
+    if: ${{ needs.deploy.outputs.deployed == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch every page and its og:image
         working-directory: examples/web-demos/wclap-build/cloudflare
         run: node check-unfurl.mjs --base https://pulp-wclap-demos.pages.dev

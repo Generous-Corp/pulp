@@ -20,8 +20,6 @@ jobs:
   reconcile:
     if: github.repository == vars.PULP_PRIMARY_REPO && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # Its credential is a secret of the main-only `automation` environment.
-    environment: automation
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

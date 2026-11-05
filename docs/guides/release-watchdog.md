@@ -369,10 +369,9 @@ Tracking issue title: `Auto-release workflow failed — RELEASES BLOCKED`.
 One issue, edited in place, auto-closed on recovery — mirrors the #475
 close-path pattern used by the orphan-branch and deps-drift sweeps.
 
-A `No release identity` failure means the `release` environment holds neither
-the `fleet-release` App key (with `FLEET_RELEASE_APP_ID` set) nor
-`RELEASE_BOT_TOKEN`; the job refuses to tag with the job token, whose tags start
-no release workflow (see
+With `FLEET_RELEASE_INTERIM_APP_ID` set, tags are created by the `publish-tags`
+job rather than `tag`; a failure there (App token, a commit not on `main`, or a
+tag already pointing elsewhere) fails this workflow the same way (see
 [release-pipeline.md § Where the release credentials live](release-pipeline.md#where-the-release-credentials-live)).
 
 `auto-release.yml` only tags. `CHANGELOG.md` is not a release artifact these

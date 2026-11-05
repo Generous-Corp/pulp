@@ -53,12 +53,17 @@ class WebclapRelevanceTests(unittest.TestCase):
         self.assertEqual(json.loads(match.group(1)), "ubuntu-latest")
         # The required build job is the only routed one. The deploy job holds
         # the Cloudflare credentials, so it always runs hosted, in the
-        # main-only `automation` environment.
-        self.assertEqual(workflow.count("runs-on:"), 2)
-        deploy = workflow.split("\n  deploy:\n", 1)[1]
+        # main-only `deploy` environment, and checks out nothing: it deploys
+        # the tarball the build job proved, after checking its digest. The
+        # live unfurl check is repository code, so it runs in its own job.
+        self.assertEqual(workflow.count("runs-on:"), 3)
+        deploy = workflow.split("\n  deploy:\n", 1)[1].split("\n  unfurl-check:\n", 1)[0]
         self.assertIn("\n    runs-on: ubuntu-latest\n", deploy)
-        self.assertIn("\n    environment: automation\n", deploy)
+        self.assertIn("\n    environment: deploy\n", deploy)
         self.assertIn("needs.build-prove-deploy.outputs.relevant == 'true'", deploy)
+        self.assertNotIn("actions/checkout", deploy)
+        self.assertIn("needs.build-prove-deploy.outputs.site_sha256", deploy)
+        self.assertNotIn("secrets.", workflow.split("\n  unfurl-check:\n", 1)[1])
         build = workflow.split("\n  build-prove-deploy:\n", 1)[1].split("\n  deploy:\n", 1)[0]
         self.assertNotIn("secrets.", build)
 

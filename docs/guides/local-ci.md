@@ -4859,8 +4859,6 @@ call to an operator.
   renamed, a variable edited in the web UI. A PR gate would never see any of
   that. It runs GitHub-hosted deliberately — a check that queues behind the
   saturated pool it is auditing is no check.
-  Its org-runner census reads `RELEASE_BOT_TOKEN` from the main-only
-  `automation` environment, so it runs only on `main`.
 - **`runner-topology-selftest`** (ctest) — the diff-shaped half: contract
   well-formedness and the reconciliation logic. No network, so it runs on every
   PR for free and never adds an API call to the required macOS gate.
@@ -5566,10 +5564,6 @@ does not carry, so the workflow passes `secrets.RELEASE_BOT_TOKEN` when it is
 configured (the same fallback `runner-topology-check.yml` uses). Without it the
 org scope refuses, the census records the refusal, and every reconciliation
 reports `runner_census_blind` instead of naming a label — honest, and disarmed.
-`RELEASE_BOT_TOKEN` is a secret of the `automation` environment (branch `main`
-only), not a repository secret, and both this job and `runner-topology-check.yml`
-declare `environment: automation`; a dispatch from any other branch is refused
-the environment rather than run with the token.
 
 #### Contribution: the host that goes quiet while the lane stays healthy
 

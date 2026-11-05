@@ -40,8 +40,6 @@ jobs:
     needs: validate-outbox
     if: needs.validate-outbox.outputs.dispatch_required == 'true'
     runs-on: ubuntu-latest
-    # Its credential is a secret of the main-only `automation` environment.
-    environment: automation
     steps:
       # This job never checks out or executes repository code. Only the pinned
       # GitHub-owned action sees the App private key, and its installation token

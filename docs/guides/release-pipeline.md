@@ -499,26 +499,31 @@ normally repairs itself without anyone looking (see release-watchdog.md).
 
 ## Where the release credentials live
 
-No release credential is a repository secret: a repository secret is readable by
-a run started from any pushed branch that edits a workflow. Each is a secret of
-an environment whose deployment branch policy is `main` only, and the job that
-reads it declares that environment:
+`auto-release.yml` creates tags one of two ways, chosen by the repository
+variable `FLEET_RELEASE_INTERIM_APP_ID`:
 
-| Environment | Job | Credentials |
-|---|---|---|
-| `release` | `auto-release.yml` `tag` | `FLEET_RELEASE_APP_PRIVATE_KEY` (with variable `FLEET_RELEASE_APP_ID`), or the interim `RELEASE_BOT_TOKEN`; `RELEASE_BOT_SSH_SIGNING_KEY` |
-| `version` | `version-at-land.yml` `drain-dry-run` | `RELEASE_BOT_TOKEN`, `RELEASE_BOT_SSH_SIGNING_KEY` |
-| `automation` | runner-health, runner-topology, webhook watchdog, merge steward, Vellum observatory dispatch, WebCLAP `deploy` | `RELEASE_BOT_TOKEN`, `SHIPYARD_APP_*`, `VELLUM_DISPATCHER_APP_PRIVATE_KEY`, `CLOUDFLARE_*` |
+- **Unset (legacy):** the `tag` job pushes signed tags with the
+  `RELEASE_BOT_TOKEN` PAT and `RELEASE_BOT_SSH_SIGNING_KEY`, both repository
+  secrets (version-at-land and the runner monitors read them too).
+- **Set:** the `tag` job only decides which tags to create. The
+  `publish-tags` job, in the `release` environment (deployment policy: branch
+  `main` only), mints a `fleet-release-interim` App token and creates annotated
+  tags through the GitHub API at this run's commit, after checking that the
+  commit is on `main`. It checks out nothing, so no repository code runs next to
+  the App key. That App is the only bypass actor of the `v*` tag ruleset's
+  creation rule; the tag it creates starts the release workflows as before.
 
-The tag must be pushed by an identity other than the job token, or the
-tag-triggered workflows never start. `auto-release.yml` uses the `fleet-release`
-GitHub App when `FLEET_RELEASE_APP_ID` is set (the App is the only bypass actor
-of the `v*` tag ruleset, so nothing else can create a release tag), otherwise the
-`RELEASE_BOT_TOKEN` PAT with a warning, and fails before checkout when it has
-neither. `WorkflowSecretEnvironments` in `tools/scripts/test_workflow_lint.py` pins which environment each credential is read from and that no
-pull-request job names an environment. `CODECOV_TOKEN` (upload-only) and the
-read-only `VELLUM_READER_APP_PRIVATE_KEY` stay repository secrets because
-pull-request and merge-group jobs read them.
+The WebCLAP deploy works the same way: the required build+proof job holds no
+secret and uploads the site as one tarball; the `deploy` job, in the `deploy`
+environment (branch `main` only), checks the tarball's digest against the build
+job's output, unpacks it into an empty directory and runs only the pinned
+wrangler action. The live unfurl check is repository code, so it is a third job
+with no secret.
+
+`WorkflowSecretEnvironments` in `tools/scripts/test_workflow_lint.py` pins which
+environment each credential is read from, that no pull-request run names an
+environment, that no workflow reads secrets dynamically, and that jobs in the
+`release` and `deploy` environments check out nothing.
 
 ## Manual release-cli backfills
 

@@ -44,12 +44,9 @@ on:
   # if that PR is then ejected from the merge queue, or one of its required
   # checks fails, nothing else would re-run the drain until main moves. These
   # two events re-run it at that moment. Both are scoped in the job `if` to the
-  # bot's own bump branch in this repository on the PR route, and the drain
-  # always checks out main, never PR code. A workflow_run run's ref is main, so
-  # it drains directly; a pull_request run cannot enter the main-only `version`
-  # environment, so `heal-on-dequeue` dispatches the drain on main instead.
-  # `pull_request` branch filters match the BASE branch, so the head-branch
-  # scope lives in the `if`.
+  # bot's own bump branch in this repository on the PR route, and the job always
+  # checks out main, never PR code. `pull_request` branch filters match the
+  # BASE branch, so the head-branch scope lives in the `if`.
   pull_request:
     types: [dequeued]
   workflow_run:
@@ -92,9 +89,7 @@ concurrency:
   # single pending run, and a new arrival cancels it, so a `pull_request:
   # dequeued` for any other PR, or a green bump-branch `workflow_run`, used to
   # cancel a pending push drain and then skip its own job. Those events get a
-  # per-run group instead, so they never contend. A pull_request run never
-  # drains (it only dispatches one), so it always gets a per-run group. The
-  # serial-group condition
+  # per-run group instead, so they never contend. The serial-group condition
   # mirrors the job `if` below; test_version_at_land.py evaluates both against
   # every event shape and fails if they diverge.
   group: >-
@@ -103,6 +98,9 @@ concurrency:
           || github.event_name == 'workflow_dispatch'
           || (github.event_name == 'schedule'
             && github.repository == vars.PULP_PRIMARY_REPO)
+          || (github.event_name == 'pull_request'
+            && github.event.pull_request.head.ref == 'release/version-bump'
+            && github.event.pull_request.head.repo.full_name == github.repository)
           || (github.event_name == 'workflow_run'
             && github.event.workflow_run.head_repository.full_name == github.repository
             && github.event.workflow_run.conclusion != 'success'
@@ -126,7 +124,10 @@ jobs:
     if: >-
       (github.event_name != 'schedule'
         || github.repository == vars.PULP_PRIMARY_REPO)
-      && github.event_name != 'pull_request'
+      && (github.event_name != 'pull_request'
+        || (vars.PULP_BUMP_ROUTE == 'pr'
+          && github.event.pull_request.head.ref == 'release/version-bump'
+          && github.event.pull_request.head.repo.full_name == github.repository))
       && (github.event_name != 'workflow_run'
         || (vars.PULP_BUMP_ROUTE == 'pr'
           && github.event.workflow_run.head_repository.full_name == github.repository
@@ -134,11 +135,6 @@ jobs:
           && github.event.workflow_run.conclusion != 'skipped'
           && github.event.workflow_run.conclusion != 'neutral'))
     runs-on: ubuntu-latest
-    # RELEASE_BOT_TOKEN and the signing key are secrets of the `version`
-    # environment, whose deployment policy admits branch main only. A
-    # pull_request run's ref is the PR, never main, so that event cannot run
-    # this job; `heal-on-dequeue` re-runs the drain on main instead.
-    environment: version
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -219,23 +215,3 @@ jobs:
           python3 tools/scripts/version_at_land.py --push \
               --route "$BUMP_ROUTE" "${heal[@]}" \
               --base "${{ github.event.before }}"
-
-  # A dequeued bump PR re-runs the drain on main. The drain's credentials live
-  # in the main-only `version` environment, which a pull_request run cannot
-  # enter, so this job dispatches the workflow on main with the job token
-  # (a workflow_dispatch it creates does start a run) and holds no secret.
-  heal-on-dequeue:
-    if: >-
-      github.event_name == 'pull_request'
-      && vars.PULP_BUMP_ROUTE == 'pr'
-      && github.event.pull_request.head.ref == 'release/version-bump'
-      && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Re-run the drain on main
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run version-at-land.yml --repo "$GITHUB_REPOSITORY" --ref main
