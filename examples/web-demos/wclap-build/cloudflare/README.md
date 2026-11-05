@@ -68,12 +68,15 @@ owner-gated step** (it consumes credentials — treat it like an `npm publish`).
 2. **Create an API token** with the **Cloudflare Pages: Edit** permission
    (My Profile → API Tokens → *Edit Cloudflare Workers* template is sufficient).
    Note your **Account ID** (Workers & Pages → right sidebar).
-3. **Add two GitHub repo secrets** (Settings → Secrets and variables → Actions):
+3. **Add two secrets to the `deploy` environment** (Settings →
+   Environments → `deploy`, whose deployment branch policy is `main` only;
+   not repository secrets, which any branch's run could read):
    - `CLOUDFLARE_API_TOKEN` — the token from step 2.
    - `CLOUDFLARE_ACCOUNT_ID` — your account ID.
-   The deploy step in `wclap-cloudflare.yml` is skipped until both exist; once
-   present, every push to `main` that touches the WebCLAP files builds, proves,
-   and deploys automatically.
+   The `deploy` job in `wclap-cloudflare.yml` skips its steps until both exist;
+   once present, every push to `main` that touches the WebCLAP files builds,
+   proves, and deploys automatically. Pull-request and merge-group runs only
+   build and prove; they never reach the deploy job.
 4. **(Optional) Custom domain.** Per the master plan's default, point a subdomain
    such as `wclap.generouscorp.com` at the Pages project (Pages → the project →
    Custom domains). Cloudflare serves the `_headers` rules on the custom domain

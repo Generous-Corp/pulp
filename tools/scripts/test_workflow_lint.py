@@ -16,7 +16,9 @@ Run:
 
 from __future__ import annotations
 
+import json
 import re
+import shlex
 import unittest
 from pathlib import Path
 
@@ -337,6 +339,216 @@ class ActionMajorPinTests(unittest.TestCase):
         self.assertIn("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", text)
         self.assertIn("actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9", text)
         self.assertEqual(text.count("run_steward_with_retry()"), 1)
+
+
+# --- Workflow credentials and the environments that hold them -----------------
+# A repository-level secret is readable by any workflow run, including one a
+# pushed branch starts after editing a workflow. An environment secret reaches
+# only a job whose ref passes the environment's deployment policy. These tests
+# pin the code half of that boundary (the policy half is repository settings):
+# - every credential a workflow names is classified below, and each one moved
+#   into an environment is read only by jobs that declare it;
+# - no workflow reads secrets dynamically (`secrets[...]`, `toJSON(secrets)`,
+#   `secrets: inherit`), which would hide a credential from this scan;
+# - a job in a workflow pull requests can trigger names an environment only
+#   behind an event allowlist that excludes every pull-request event;
+# - a job in a NO_REPO_CODE environment checks out nothing, so no repository
+#   code runs in the job that holds the credential.
+
+SECRET_WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+
+# Credential -> the environment that holds it.
+ENVIRONMENT_SECRETS: dict[str, str] = {
+    # The WebCLAP deploy job, which only unpacks a digest-checked tarball.
+    "CLOUDFLARE_API_TOKEN": "deploy",
+    "CLOUDFLARE_ACCOUNT_ID": "deploy",
+    "TIER_RECORD_APP_ID": "tier-record",
+    "TIER_RECORD_APP_KEY": "tier-record",
+}
+
+# Environments whose jobs must run no repository code.
+NO_REPO_CODE = {"deploy"}
+
+# Credentials that stay repository secrets this round, with the reason.
+REPOSITORY_SECRETS: dict[str, str] = {
+    # Deferred: read by Shipyard and the steward at runtime; moving them needs
+    # a canary plan.
+    "SHIPYARD_APP_ID": "deferred: shipyard-local",
+    "SHIPYARD_APP_PRIVATE_KEY": "deferred: shipyard-local",
+    # Deferred: the release-bot PAT and its signing key also serve
+    # version-at-land and three monitors; they move with the versioner App.
+    "RELEASE_BOT_TOKEN": "deferred: bump-at-merge and monitors still read it",
+    "RELEASE_BOT_SSH_SIGNING_KEY": "deferred: version-at-land signs with it",
+    "VELLUM_DISPATCHER_APP_PRIVATE_KEY": "deferred: not a release secret",
+    # Upload-only coverage token; pull-request jobs upload with it.
+    "CODECOV_TOKEN": "upload-only, read by pull-request jobs",
+    # Read-only App the pull_request_target / merge_group trusted gate uses.
+    "VELLUM_READER_APP_PRIVATE_KEY": "read-only App, read by merge-group jobs",
+    # Optional developer-supplied SDK location; not configured.
+    "PULP_AAX_SDK_ZIP_URL": "not a credential, unset",
+    "PULP_AAX_SDK_ZIP_SHA256": "not a credential, unset",
+    # macOS signing for sign-and-release.yml (tag-triggered); not configured.
+    # Set them only in an environment whose job runs no repository code, and
+    # only once the v* tag ruleset restricts creation to the release identity.
+    "MACOS_CERTIFICATE": "unset",
+    "MACOS_CERTIFICATE_PWD": "unset",
+    "KEYCHAIN_PASSWORD": "unset",
+    "SIGNING_IDENTITY": "unset",
+    "APPLE_ID": "unset",
+    "APPLE_TEAM_ID": "unset",
+    "APPLE_PASSWORD": "unset",
+}
+
+# The only actions a NO_REPO_CODE job may use, pinned as the workflow pins them.
+NO_REPO_CODE_ACTIONS = (
+    "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+    "cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0",
+)
+# Commands a credential-holding job's shell may run: no interpreter, no
+# package manager, nothing that fetches or executes other code.
+ALLOWED_COMMANDS = {
+    "gh", "git", "tar", "sha256sum", "find", "mkdir", "test", "echo", "printf",
+    "cut", "awk", "grep", "set", "exit", "true", "false", "local", "return",
+    "[", "[[", "case", "esac", "fi", "done", "for", "}", "python3 -c",
+}
+_COMMAND_SEPARATORS = {"|", "||", "&&", ";", ";;", "(", "()", "\n", "&", "|&", "$("}
+_TRANSPARENT = {"if", "then", "else", "elif", "do", "while", "until", "!", "{", "time"}
+
+
+def disallowed_commands(script: str, functions: frozenset[str] = frozenset()) -> list[str]:
+    """First words of the commands in `script` that ALLOWED_COMMANDS lacks.
+
+    Tokenizes with shell quoting, so separators inside quotes, regexes and
+    awk programs are not commands. A word that names a function the script
+    defines is allowed.
+    """
+    lines = [line for line in script.replace("\\\n", " ").splitlines()
+             if not line.strip().startswith("#")]
+    text = "\n".join(line for line in lines
+                     if not re.match(r"^\s*[\w|*.-]+\)", line))
+    lexer = shlex.shlex(text, posix=True, punctuation_chars="();<>|&\n")
+    lexer.whitespace = " \t"
+    lexer.commenters = ""
+    lexer.whitespace_split = True
+    tokens = list(lexer)
+    functions = set(functions) | set(re.findall(r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\)", text))
+    found = []
+    expect = True
+    for i, tok in enumerate(tokens):
+        if tok in _COMMAND_SEPARATORS or tok.endswith("$"):
+            expect = True
+            continue
+        if not expect:
+            continue
+        if tok in functions and tokens[i + 1:i + 2] in (["("], ["()"]):
+            continue  # the definition itself
+        if tok in _TRANSPARENT or re.match(r"^[A-Za-z_][A-Za-z0-9_]*\+?=", tok) or tok in (")", "<", ">"):
+            continue
+        expect = False
+        word = "python3 -c" if tok == "python3" and tokens[i + 1:i + 2] == ["-c"] else tok
+        if word not in ALLOWED_COMMANDS and word not in functions:
+            found.append(word)
+    # Command substitutions inside double quotes are one word to the lexer.
+    for inner in re.findall(r"\$\(([^()]*)\)", text):
+        found += [w for w in disallowed_commands(inner, frozenset(functions)) if w not in found]
+    if "`" in text:
+        found.append("`")
+    return found
+
+
+PULL_REQUEST_EVENTS = {"pull_request", "pull_request_target", "merge_group"}
+SECRET_RE = re.compile(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
+DYNAMIC_SECRETS_RE = re.compile(r"secrets\s*\[|toJSON\(\s*secrets\s*\)|secrets:\s*inherit")
+EVENT_ALLOWLIST_RE = re.compile(r"contains\(fromJSON\('(\[[^']*\])'\),\s*github\.event_name\)")
+
+
+def _secret_triggers(workflow: dict) -> set[str]:
+    on = workflow.get(True, workflow.get("on"))
+    if isinstance(on, str):
+        return {on}
+    if isinstance(on, list):
+        return set(on)
+    return set(on or {})
+
+
+def _secret_environment(job: dict) -> str | None:
+    env = job.get("environment")
+    if isinstance(env, dict):
+        return env.get("name")
+    return env
+
+
+def _secret_jobs():
+    for path in sorted(SECRET_WORKFLOWS.glob("*.y*ml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for name, job in (workflow.get("jobs") or {}).items():
+            text = yaml.safe_dump(job, width=100000)
+            secrets = set(SECRET_RE.findall(text)) - {"GITHUB_TOKEN"}
+            yield path.name, _secret_triggers(workflow), name, job, secrets
+
+
+class WorkflowSecretEnvironments(unittest.TestCase):
+    def test_the_scan_sees_every_known_credential(self) -> None:
+        # Control: a renamed secret or a broken scan would make every
+        # assertion below vacuous.
+        seen = set().union(*(secrets for *_, secrets in _secret_jobs()))
+        self.assertEqual(set(ENVIRONMENT_SECRETS) - seen, set())
+        envs = {_secret_environment(job) for _, _, _, job, _ in _secret_jobs()}
+        self.assertTrue(set(ENVIRONMENT_SECRETS.values()) <= envs)
+
+    def test_every_credential_is_classified_and_read_in_its_environment(self) -> None:
+        problems = []
+        for wf, _, job_name, job, secrets in _secret_jobs():
+            env = _secret_environment(job)
+            for secret in sorted(secrets - set(REPOSITORY_SECRETS)):
+                want = ENVIRONMENT_SECRETS.get(secret)
+                if want is None:
+                    problems.append(f"{wf}:{job_name}: classify {secret} in this test")
+                elif env != want:
+                    problems.append(f"{wf}:{job_name}: {secret} read in env {env!r}, not {want!r}")
+        self.assertEqual(problems, [])
+
+    def test_no_workflow_reads_secrets_dynamically(self) -> None:
+        offenders = [path.name for path in sorted(SECRET_WORKFLOWS.glob("*.y*ml"))
+                     if DYNAMIC_SECRETS_RE.search(path.read_text(encoding="utf-8"))]
+        self.assertEqual(offenders, [])
+
+    def test_no_pull_request_run_is_pointed_at_an_environment(self) -> None:
+        offenders = []
+        for wf, triggers, job_name, job, _ in _secret_jobs():
+            if _secret_environment(job) is None or not (triggers & PULL_REQUEST_EVENTS):
+                continue
+            allow = EVENT_ALLOWLIST_RE.search(str(job.get("if") or ""))
+            if not allow or set(json.loads(allow.group(1))) & PULL_REQUEST_EVENTS:
+                offenders.append(f"{wf}:{job_name}")
+        self.assertEqual(offenders, [])
+
+    def test_credential_jobs_in_no_repo_code_environments_check_out_nothing(self) -> None:
+        # A job holding a release or deploy credential may use only the
+        # pinned actions below, and its shell may not fetch or run code from
+        # the repository or the network.
+        offenders = []
+        for wf, _, job_name, job, _ in _secret_jobs():
+            if _secret_environment(job) not in NO_REPO_CODE:
+                continue
+            for step in job.get("steps") or []:
+                uses = str(step.get("uses") or "")
+                if uses and not uses.startswith(NO_REPO_CODE_ACTIONS):
+                    offenders.append(f"{wf}:{job_name}: uses {uses}")
+                run = str(step.get("run") or "")
+                offenders += [f"{wf}:{job_name}: runs {word}" for word in disallowed_commands(run)]
+        self.assertEqual(offenders, [])
+
+    def test_the_no_repo_code_check_is_live(self) -> None:
+        # Control: each forbidden shape is caught, and allowed shell is not.
+        for run in ("node x.mjs", "python3 tools/scripts/x.py", "source x", ". x.sh",
+                    "npx wrangler", "make", "bash ./x.sh", "./x", "echo a | sh",
+                    'echo "$(npm i x)"', "echo `node x`", "f() { curl -s y; }\nf"):
+            self.assertNotEqual(disallowed_commands(run), [], run)
+        self.assertEqual(disallowed_commands('set -e\nx=$(sha256sum "$f" | cut -d" " -f1)\n'
+                                             'if [ -z "$x" ]; then echo no >&2; exit 1; fi'), [])
+        self.assertFalse("./local-action".startswith(NO_REPO_CODE_ACTIONS))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -497,6 +497,29 @@ Independently of manual verification, `release-reconcile.yml` re-dispatches any
 recent tag that is not published within its grace window, so a stuck release
 normally repairs itself without anyone looking (see release-watchdog.md).
 
+## Where the deploy credentials live
+
+The WebCLAP Cloudflare token is not a repository secret: a repository secret is
+readable by a run started from any pushed branch that edits a workflow. The
+required build+proof job holds no secret and uploads the site as one tarball;
+the `deploy` job, in the `deploy` environment (deployment policy: branch `main`
+only), checks the tarball's digest against the build job's output, refuses any
+member that is not a regular file or directory under `public/` (the build
+job's runner is routable, so the tarball is untrusted), unpacks it into an
+empty directory, writes wrangler's config from the workflow text, and runs only
+the pinned wrangler action. The live unfurl check is repository code, so it is
+a third job with no secret.
+
+What this cannot stop: a build runner routed elsewhere can still put a
+`_worker.js` (or any page) in `public/`, and Cloudflare deploys it as the
+site's edge code. The check keeps the build runner from reaching the deploy
+job's token, not from shaping the site.
+
+`WorkflowSecretEnvironments` in `tools/scripts/test_workflow_lint.py` pins which
+environment each credential is read from, that no pull-request run names an
+environment, that no workflow reads secrets dynamically, and that jobs in the
+`deploy` environment check out nothing and run only allowlisted commands.
+
 ## Manual release-cli backfills
 
 Use `workflow_dispatch` on `release-cli.yml` when a tag already exists but the

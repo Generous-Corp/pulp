@@ -6084,6 +6084,29 @@ contains(..., matrix.platform)` on a matrix job evaluates with an empty
 `matrix` and silently skips every leg. GitHub only exposes `github`, `needs`,
 `vars`, and `inputs` to `jobs.<id>.if`.
 
+### Deploy credentials live in an environment whose job runs no repo code
+
+A repository secret is readable by a run started from any pushed branch that
+edits a workflow, and a job's secrets reach its runner before its first step,
+so any repository code in that job can read them. Deploy
+credentials are therefore secrets of the `deploy` environment
+(deployment policy: branch `main`), read only by jobs that check out nothing:
+`wclap-cloudflare.yml` `deploy` (digest- and shape-checked tarball, pinned
+wrangler). Gotchas:
+
+- A `pull_request` / `merge_group` run's ref is never `main`, so a job that
+  names one of these environments on that event is refused (red). Gate it with
+  an event allowlist: `contains(fromJSON('["push",...]'), github.event_name)`.
+- `workflow_run`, `schedule`, `repository_dispatch`, `issue_comment` and
+  `pull_request_target` runs have ref `main` and ARE admitted; never let such a
+  job run PR-controlled code next to a credential.
+- A tag-push run executes the TAGGED commit's workflow file, so an environment
+  that admits `v*` tags is only as safe as the tag ruleset's `creation` rule.
+- Referencing an environment that does not exist yet auto-creates it with NO
+  branch policy; create it with its policy first.
+- A new secret-reading job must be classified in `WorkflowSecretEnvironments`
+  (`tools/scripts/test_workflow_lint.py`), or that test fails.
+
 ### NEVER set `run-name:` on release-cli.yml (it stops all releases)
 
 GitHub returns a workflow's `run-name` as **`workflow_run.name`** in the REST API —

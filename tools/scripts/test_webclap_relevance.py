@@ -51,7 +51,28 @@ class WebclapRelevanceTests(unittest.TestCase):
             r"runs-on: \$\{\{ fromJSON\(vars\.PULP_WCLAP_RUNS_ON_JSON \|\| '([^']*)'\) \}\}", workflow)
         self.assertIsNotNone(match, "the job must route through PULP_WCLAP_RUNS_ON_JSON")
         self.assertEqual(json.loads(match.group(1)), "ubuntu-latest")
-        self.assertEqual(workflow.count("runs-on:"), 1)
+        # The required build job is the only routed one. The deploy job holds
+        # the Cloudflare credentials, so it always runs hosted, in the
+        # main-only `deploy` environment, and checks out nothing: it deploys
+        # the tarball the build job proved, after checking its digest. The
+        # live unfurl check is repository code, so it runs in its own job.
+        self.assertEqual(workflow.count("runs-on:"), 3)
+        deploy = workflow.split("\n  deploy:\n", 1)[1].split("\n  unfurl-check:\n", 1)[0]
+        self.assertIn("\n    runs-on: ubuntu-latest\n", deploy)
+        self.assertIn("\n    environment: deploy\n", deploy)
+        self.assertIn("needs.build-prove-deploy.outputs.relevant == 'true'", deploy)
+        self.assertNotIn("actions/checkout", deploy)
+        self.assertIn("needs.build-prove-deploy.outputs.site_sha256", deploy)
+        self.assertNotIn("secrets.", workflow.split("\n  unfurl-check:\n", 1)[1])
+        # The deploy job writes wrangler's config from the workflow text; it
+        # must say what the checked-in wrangler.toml says.
+        toml = (Path(__file__).resolve().parents[2] / "examples/web-demos/wclap-build/cloudflare/wrangler.toml").read_text(encoding="utf-8")
+        settings = re.findall(r"(?m)^((?:name|pages_build_output_dir|compatibility_date) = \S+)$", toml)
+        self.assertEqual(len(settings), 3)
+        for setting in settings:
+            self.assertIn(f"'{setting}'", deploy)
+        build = workflow.split("\n  build-prove-deploy:\n", 1)[1].split("\n  deploy:\n", 1)[0]
+        self.assertNotIn("secrets.", build)
 
     def test_expensive_workflow_steps_are_guarded(self) -> None:
         workflow = (
@@ -112,7 +133,7 @@ class WebclapRelevanceTests(unittest.TestCase):
         self.assertIn('*) exit "$relevance_status"', workflow)
         self.assertEqual(
             workflow.count("steps.relevance.outputs.run == 'true'"),
-            23,
+            22,
             "every expensive step after relevance classification must be guarded",
         )
 

@@ -104,13 +104,24 @@ def _commands(step: dict) -> str:
 
 
 def signing_build_jobs() -> dict[tuple[str, str], dict]:
+    """Jobs that build what is signed or published: a job that both builds
+    and publishes, or a build job that uploads an artifact a publishing job
+    in the same workflow `needs` and downloads (as wclap-cloudflare's deploy
+    job ships the directory build-prove-deploy proved)."""
     found = {}
     for path in sorted(WORKFLOWS.glob("*.yml")):
-        for job_id, job in (_load(path).get("jobs") or {}).items():
-            if not isinstance(job, dict):
-                continue
-            text = yaml.safe_dump(job, width=100000)
-            if PUBLISHES.search(text) and BUILDS.search(text):
+        jobs = {job_id: job for job_id, job in (_load(path).get("jobs") or {}).items()
+                if isinstance(job, dict)}
+        texts = {job_id: yaml.safe_dump(job, width=100000) for job_id, job in jobs.items()}
+        fed = set()
+        for job_id, text in texts.items():
+            if PUBLISHES.search(text) and "actions/download-artifact@" in text:
+                needs = jobs[job_id].get("needs") or []
+                fed.update([needs] if isinstance(needs, str) else needs)
+        for job_id, job in jobs.items():
+            text = texts[job_id]
+            ships = job_id in fed and "actions/upload-artifact@" in text
+            if BUILDS.search(text) and (PUBLISHES.search(text) or ships):
                 found[(path.name, job_id)] = job
     return found
 
