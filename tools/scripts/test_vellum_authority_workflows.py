@@ -30,7 +30,9 @@ PINNED_CHECKOUT_ACTION = (
     "3d3c42e5aac5ba805825da76410c181273ba90b1"
 )
 RUNNER_EXPRESSION = (
-    "${{ fromJSON(vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON "
+    "${{ fromJSON((github.event_name != 'pull_request' || "
+    "github.event.pull_request.head.repo.full_name == github.repository) "
+    "&& vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON "
     "|| '\"ubuntu-latest\"') }}"
 )
 MACPRO_SELECTOR = [

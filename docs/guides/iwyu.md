@@ -33,6 +33,8 @@ IWYU rejects them at analysis time.
 
 - **Workflow**: `.github/workflows/iwyu.yml`
 - **Runner**: `ubuntu-24.04` (Linux Clang 18 via the distro `iwyu` apt package)
+  (`PULP_LOCAL_IWYU_RUNS_ON_JSON` may reroute it, but never for a fork or
+  deleted-fork pull request, which always uses `ubuntu-24.04`)
 - **Advisory until**: **2026-05-05** — `continue-on-error: true`. PRs get
   inline annotations on the diff but merge is not blocked.
 - **Scope**: PR events analyze files changed vs `origin/<base>`;

@@ -116,13 +116,33 @@ error. Things that are easy to get wrong:
 - Every processor in the binary that does not override `editor_factory()` gets
   the package factory, including inner processors a wrapper composes. Hosts ask
   only the top-level processor.
-- VST3 and CLAP open a non-null `editor_factory()` through
-  `ContractEditorSession` (`contract_editor_session.hpp`, `pulp-format-core`) before
-  they consider `create_view()`. A new format adapter should map its editor API
+- VST3, CLAP and the standalone app open a non-null `editor_factory()`
+  through `ContractEditorSession` (`contract_editor_session.hpp`,
+  `pulp-format-core`) before they consider `create_view()`. A UI-package AU v2
+  serves it from `au_v2_contract_view.mm`. The standalone window
+  (`standalone_contract_editor_mac.mm`) drives the tick from its own event loop
+  (`IdleSource::host_driven`). Its headless run captures through
+  `EditorAutomation::capture_png()` and fails when the editor offers no capture.
+  A forwarded Space toggles `StandaloneTestInputHost::set_playing`. A new format adapter should map its editor API
   onto that session rather than re-implementing gesture release, the idle tick
   or size negotiation.
 - The hook calls the package function lazily, on the first `editor_factory()`
   call, never at load, so an AU bundle's early registrar never builds UI state.
+- A UI-package Standalone links `pulp::standalone-contract`, not
+  `pulp::standalone`: the same `StandaloneApp`, built from the core sources plus
+  `standalone_view_layer_none.cpp` instead of `standalone_view_layer.cpp`, so it
+  links no Pulp view, canvas, render or GPU-device code and the package's Dawn
+  (Vellum's provider) is the only one in the process. `dawn_binding_census.py`
+  counts it. Anything the standalone does that needs a Pulp view (the
+  `create_view()` window and Settings chrome, the musical typing keyboard, the
+  Audio Inspector, in-app updates) belongs in `standalone_view_layer.cpp` behind
+  one of `StandaloneApp`'s view-layer hooks, never in `standalone.cpp`; the
+  view-free library fails to link otherwise. View-layer members are owned
+  through a deleter the view layer supplies (`ViewLayerPtr`), so the core never
+  names their destructors. The per-binary view Objective-C cluster is skipped for
+  such a Standalone (`PULP_<target>_VIEW_FREE_STANDALONE`).
+  `editor-ui-package-links-no-view` checks the closure, and building the
+  fixture's `PulpEditorUiA_Standalone` proves the link.
 - A test that installs a hook with `install_plugin_editor_factory_hook()` must
   clear it (`nullptr`) before it ends, or every later test in the grouped
   binary sees a factory on a headless processor.

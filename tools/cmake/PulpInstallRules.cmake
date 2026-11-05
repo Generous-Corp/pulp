@@ -49,7 +49,7 @@ list(APPEND PULP_SDK_TARGETS
     pulp-audio pulp-midi pulp-signal pulp-dataplane pulp-dataplane-audio pulp-graph
     pulp-format pulp-format-core pulp-format-view pulp-sequence
     pulp-osc pulp-canvas pulp-design-ir pulp-view-core pulp-view-tooling pulp-view-platform pulp-view-native pulp-view
-    pulp-standalone pulp-standalone-native pulp-dsl pulp-native-components
+    pulp-standalone pulp-standalone-native pulp-standalone-contract pulp-dsl pulp-native-components
 )
 if(TARGET pulp-audio-analysis)
     list(APPEND PULP_SDK_TARGETS pulp-audio-analysis)

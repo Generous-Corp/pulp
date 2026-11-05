@@ -34,7 +34,7 @@ jobs:
     if: >-
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open')
-    runs-on: ${{ fromJSON(vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON || '"ubuntu-latest"') }}
     steps:
       # Resolve before checkout: queued pull_request_target payloads can outlive
       # the PR they describe, so live API state is authoritative for both event
@@ -276,7 +276,7 @@ jobs:
   trusted-merge-group:
     name: Vellum trusted freeze
     if: github.event_name == 'merge_group'
-    runs-on: ${{ fromJSON(vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.PULP_VELLUM_TRUSTED_RUNS_ON_JSON || '"ubuntu-latest"') }}
     steps:
       - name: Check out trusted base controls
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

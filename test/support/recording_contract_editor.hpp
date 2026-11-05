@@ -13,6 +13,7 @@
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/editor_host.hpp>
 
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -48,6 +49,8 @@ struct ContractEditorConfig {
     bool fixed_size = false;
     bool factory_builds_editor = true;
     bool factory_supports_editor = true;
+    /// Whether the editor offers EditorAutomation::capture_png().
+    bool captures_frames = true;
 };
 
 inline ContractEditorLog& contract_log() {
@@ -68,6 +71,26 @@ inline void reset_contract_recording() {
     contract_log() = {};
     contract_config() = {};
 }
+
+/// A one-pixel PNG: the frame RecordingContractEditor reports it captured.
+inline const std::vector<std::uint8_t>& recorded_frame_png() {
+    static const std::vector<std::uint8_t> png = {
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+        0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78,
+        0x9C, 0x63, 0xF8, 0xCF, 0xC0, 0xF0, 0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99,
+        0x3D, 0x1D, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
+    return png;
+}
+
+class RecordingAutomation final : public format::EditorAutomation {
+  public:
+    bool capture_png(std::vector<std::uint8_t>& png) override {
+        contract_log().calls.push_back("capture");
+        png = recorded_frame_png();
+        return true;
+    }
+};
 
 /// 400x300 preferred, 200x150 to 800x600, holds 4:3, refuses anything under
 /// 200x150, forwards Space and consumes every other key.
@@ -143,6 +166,9 @@ class RecordingContractEditor final : public format::Editor {
     void focus_changed(bool focused) override {
         contract_log().calls.push_back(focused ? "focus:on" : "focus:off");
     }
+    format::EditorAutomation* automation() override {
+        return contract_config().captures_frames ? &automation_ : nullptr;
+    }
     format::KeyDisposition offer_key(const format::EditorKeyEvent& event) override {
         if (event.key == format::EditorKey::space) {
             contract_log().calls.push_back("offer:space");
@@ -154,6 +180,7 @@ class RecordingContractEditor final : public format::Editor {
 
   private:
     format::EditorSize size_{400, 300, 1.0};
+    RecordingAutomation automation_;
 };
 
 class RecordingContractFactory final : public format::EditorFactory {
