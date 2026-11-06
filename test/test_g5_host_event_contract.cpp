@@ -219,6 +219,7 @@ TEST_CASE("G5 graph-authored event lane has checked refusal and attempt budget",
     REQUIRE(lane.emit(1, 7, 101, 8) == GraphEventResult::AttemptLimit);
     REQUIRE(lane.counters().attempts == 16);
     REQUIRE(lane.counters().accepted == 8);
+    REQUIRE(lane.counters().sequence == 16);
     REQUIRE(lane.counters().overflow == 5);
     REQUIRE(lane.counters().diagnostic_refusals == 3);
     REQUIRE(lane.begin_consumer() == GraphEventResult::Accepted);
