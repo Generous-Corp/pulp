@@ -16,6 +16,48 @@ bool is_selectable(const ContextMenu::Item& it) {
 
 }  // namespace
 
+void ContextMenu::replace_items(std::vector<Item> items) {
+    items_ = std::move(items);
+    // A rebuild during a slider gesture ends the gesture: the row the pointer
+    // was driving no longer exists, and the capture taken at mouse-down would
+    // otherwise never be released (the release path only runs for an active
+    // slider), leaving the host sending every later event to this menu.
+    if (active_slider_index_ >= 0) {
+        release_pointer_capture(active_pointer_id_);
+        active_pointer_id_ = 0;
+    }
+    active_slider_index_ = -1;
+    scroll_ = 0.0f;
+    if (hover_index_ >= static_cast<int>(items_.size()))
+        hover_index_ = -1;
+}
+
+void ContextMenu::flush_deferred_items() {
+    if (!deferred_items_)
+        return;
+    auto items = std::move(*deferred_items_);
+    deferred_items_.reset();
+    replace_items(std::move(items));
+}
+
+void ContextMenu::notify_item_change(Item& item) {
+    auto callback = item.on_change;
+    if (!callback)
+        return;
+    ++item_change_dispatch_depth_;
+    try {
+        callback(item);
+    } catch (...) {
+        --item_change_dispatch_depth_;
+        if (item_change_dispatch_depth_ == 0)
+            flush_deferred_items();
+        throw;
+    }
+    --item_change_dispatch_depth_;
+    if (item_change_dispatch_depth_ == 0)
+        flush_deferred_items();
+}
+
 ContextMenu::MenuLayout ContextMenu::layout() const {
     MenuLayout lay;
 
@@ -86,6 +128,7 @@ ContextMenu::MenuLayout ContextMenu::layout() const {
     }
 
     if (!any_delegated_width) widest = std::max(widest, kMinWidth);
+    widest = std::max(widest, min_width_);
     const float width = widest + lay.border * 2.0f;
     lay.content_height = stacked + lay.border * 2.0f;
     float height = lay.content_height;
@@ -148,16 +191,32 @@ void ContextMenu::adjust_control(Item& item, float delta) {
     if (!item.enabled)
         return;
     if (item.control_kind == Item::ControlKind::toggle) {
-        item.set_toggled(!item.checked);
+        item.checked = !item.checked;
+        notify_item_change(item);
     } else if (item.control_kind == Item::ControlKind::slider) {
-        item.set_normalized_value(item.normalized_value + delta);
+        const float next = std::clamp(item.normalized_value + delta, 0.0f, 1.0f);
+        if (next != item.normalized_value) {
+            item.normalized_value = next;
+            notify_item_change(item);
+        }
     } else if (item.control_kind == Item::ControlKind::choice && !item.choices.empty()) {
         const auto n = static_cast<long long>(item.choices.size());
         auto next = static_cast<long long>(item.choice_index) + (delta < 0.0f ? -1 : 1);
         next = std::clamp(next, 0LL, n - 1);
-        item.set_choice_index(static_cast<std::size_t>(next));
+        if (static_cast<std::size_t>(next) != item.choice_index) {
+            item.choice_index = static_cast<std::size_t>(next);
+            notify_item_change(item);
+        }
     }
     request_repaint();
+}
+
+float ContextMenu::slider_track_right(const Item& item, const Rect& row) {
+    // A value label owns the right end of the row, so the track (and the
+    // pointer mapping that drives it) stops short of it instead of running
+    // underneath the text.
+    return item.value_label.empty() ? row.x + row.width - 10.0f
+                                    : row.x + row.width - kValueLabelWidth;
 }
 
 bool ContextMenu::set_control_from_pointer(Item& item, const Rect& row, Point point) {
@@ -167,12 +226,18 @@ bool ContextMenu::set_control_from_pointer(Item& item, const Rect& row, Point po
     // label area available for selection makes the menu usable at narrow
     // sizes and mirrors ordinary parameter popovers.
     const float left = row.x + std::min(90.0f, row.width * 0.45f);
-    const float right = row.x + row.width - 10.0f;
-    const float value = right > left ? (point.x - left) / (right - left) : 0.0f;
-    const float before = item.normalized_value;
-    item.set_normalized_value(value);
+    const float right = slider_track_right(item, row);
+    const float value =
+        right > left ? std::clamp((point.x - left) / (right - left), 0.0f, 1.0f) : 0.0f;
+    const bool changed = value != item.normalized_value;
+    if (changed) {
+        item.normalized_value = value;
+        // The callback may rebuild the rows; `item` is dangling after this
+        // call and nothing below may touch it.
+        notify_item_change(item);
+    }
     request_repaint();
-    return before != item.normalized_value;
+    return changed;
 }
 
 void ContextMenu::move_hover(int delta) {
@@ -346,7 +411,7 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
 
         if (it.control_kind == Item::ControlKind::slider) {
             const float left = row.x + std::min(90.0f, row.width * 0.45f);
-            const float right = row.x + row.width - 10.0f;
+            const float right = slider_track_right(it, row);
             const float cy = iy + rh * 0.5f;
             canvas.set_stroke_color(text_dim);
             canvas.set_line_width(2.0f);
@@ -354,6 +419,12 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
             const float thumb = left + (right - left) * std::clamp(it.normalized_value, 0.0f, 1.0f);
             canvas.set_fill_color(accent_c);
             canvas.fill_circle(thumb, cy, 4.0f);
+            if (!it.value_label.empty()) {
+                canvas.set_text_align(canvas::TextAlign::right);
+                canvas.set_fill_color(i == hover_index_ && it.enabled ? text_c : text_dim);
+                canvas.fill_text(it.value_label, row.x + row.width - 8.0f, iy + rh * 0.5f + 4.0f);
+                canvas.set_text_align(canvas::TextAlign::left);
+            }
         } else if (it.control_kind == Item::ControlKind::choice && !it.choices.empty()) {
             const auto selected = std::min(it.choice_index, it.choices.size() - 1);
             canvas.set_text_align(canvas::TextAlign::right);
