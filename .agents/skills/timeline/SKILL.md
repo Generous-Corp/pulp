@@ -3842,6 +3842,12 @@ When a link edge changes anywhere under the engine, expect to update those lists
 and the target table in `docs/guides/timeline-sdk.md`, whose stated counts are
 part of the same claim.
 
+Some edges are platform-dependent. `Pulp::signal` links the muFFT backend
+(`Pulp::signal-mufft`) off Apple when muFFT compiles for the target, so the
+engine and importer closures carry it on Linux and Windows and never on Apple
+(vDSP). The example derives that one name from whether the installed package
+exports it, and fails if an Apple package does; do not add it unconditionally.
+
 ## MIDI expression lanes: who owns which invariant
 
 `MidiContent::create` — not the compiler, not a consumer — owns lane-address

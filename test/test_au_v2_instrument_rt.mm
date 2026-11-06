@@ -69,6 +69,12 @@ class RtInstrumentProcessor : public format::Processor {
     std::array<SeenMidi, 32> seen_midi{};
     std::size_t seen_midi_count = 0;
 
+    // Panic requests serviced by the adapter before a block.
+    int panic_calls = 0;
+    void on_panic(format::PanicMode) override {
+        ++panic_calls;
+    }
+
     std::array<UInt8, 1024> observed_sysex{};
     std::size_t observed_sysex_size = 0;
 
@@ -386,6 +392,46 @@ TEST_CASE("AU v2 instrument delivers non-note channel-voice MIDI to the processo
     REQUIRE(seen.seen_midi_count == 1);
     CHECK(seen.seen_midi[0].bytes[0] == 0x80);
     CHECK(seen.seen_midi[0].bytes[1] == 60);
+
+    instrument.DoCleanup();
+}
+
+TEST_CASE("AU v2 instrument services panic requests as a voice reset without MIDI out",
+          "[au][au-v2][instrument][panic]") {
+    ScopedFactoryRegistration registration(create_rt_instrument);
+
+    constexpr double kSampleRate = 48000.0;
+    constexpr UInt32 kChannels = 2;
+    constexpr UInt32 kFrames = 256;
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(make_float_format(kSampleRate, kChannels)) ==
+            noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+    REQUIRE(g_last_rt_processor != nullptr);
+
+    // aumu without produces_midi: requests are serviced, but nothing is declared
+    // for the host MIDI-output callback to carry.
+    const auto caps = g_last_rt_processor->panic_capabilities();
+    CHECK(caps.serviced);
+    CHECK_FALSE(caps.midi_out);
+
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    timestamp.mSampleTime = 0;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    CHECK(g_last_rt_processor->panic_calls == 0);
+
+    g_last_rt_processor->request_panic();
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    CHECK(g_last_rt_processor->panic_calls == 1);
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    CHECK(g_last_rt_processor->panic_calls == 1);
 
     instrument.DoCleanup();
 }

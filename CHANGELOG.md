@@ -9,6 +9,41 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1710"></a>
+## [1.71.0] - 2026-11-06
+
+- release/version bump ([#11627](https://github.com/Generous-Corp/pulp/pull/11627))
+- feature/midi panic overflow carry ([#11611](https://github.com/Generous-Corp/pulp/pull/11611))
+
+<a id="v1700"></a>
+## [1.70.0] - 2026-11-06
+
+- release/version bump ([#11619](https://github.com/Generous-Corp/pulp/pull/11619))
+- codex/g5 host event contract 20261105 ([#11587](https://github.com/Generous-Corp/pulp/pull/11587))
+- feature/au v2 instrument midi out ([#11601](https://github.com/Generous-Corp/pulp/pull/11601))
+- fix/timeline sdk closure mufft ([#11610](https://github.com/Generous-Corp/pulp/pull/11610))
+
+<a id="v1690"></a>
+## [1.69.0] - 2026-11-06
+
+- release/version bump ([#11615](https://github.com/Generous-Corp/pulp/pull/11615))
+- fix/core vellum direction scan speed ([#11609](https://github.com/Generous-Corp/pulp/pull/11609))
+- ci/merge group classify base ([#11606](https://github.com/Generous-Corp/pulp/pull/11606))
+- perf/windows static raster cache 20261103 ([#11520](https://github.com/Generous-Corp/pulp/pull/11520))
+- feature/au indexed unit discrete ([#11589](https://github.com/Generous-Corp/pulp/pull/11589))
+- codex/g4 subgraph repair followup 20261105 ([#11584](https://github.com/Generous-Corp/pulp/pull/11584))
+
+<a id="v1680"></a>
+## [1.68.0] - 2026-11-05
+
+- release/version bump ([#11599](https://github.com/Generous-Corp/pulp/pull/11599))
+- feature/editor host dawn census ([#11500](https://github.com/Generous-Corp/pulp/pull/11500))
+- feature/worker pool workgroup seqlock fences ([#11592](https://github.com/Generous-Corp/pulp/pull/11592))
+- feature/au v2 instrument latency notify ([#11595](https://github.com/Generous-Corp/pulp/pull/11595))
+- codex/sanitizer au uaf 20261105 ([#11594](https://github.com/Generous-Corp/pulp/pull/11594))
+- feature/platform reveal multifolder au test docs ([#11590](https://github.com/Generous-Corp/pulp/pull/11590))
+- feature/au v2 render context workgroup ([#11591](https://github.com/Generous-Corp/pulp/pull/11591))
+
 <a id="v1670"></a>
 ## [1.67.0] - 2026-11-05
 
@@ -12290,6 +12325,10 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.71.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.71.0
+[1.70.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.70.0
+[1.69.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.69.0
+[1.68.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.68.0
 [1.67.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.67.0
 [1.66.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.66.0
 [1.65.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.65.0

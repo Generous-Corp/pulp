@@ -700,6 +700,18 @@ count at the moment you flip rather than trusting any number written here:
 ```sh
 ssh macpro 'systemctl list-units "*ephemeral-pool@*" --all'
 ```
+### What a merge group classifies against
+
+`classify` decides whether a merge group needs the native matrix by diffing
+the group against main's tip, not against `merge_group.base_sha`. With entries
+queued ahead, `base_sha` is the previous speculative group, and a passing group
+lands every entry ahead of it, so the decision has to cover the whole batch.
+`tools/scripts/resolve_classify_base.py` walks the first-parent chain from
+`base_sha` down to `merge_group.base_ref`; a chain it cannot walk fails closed
+to the native build. Receipt reuse (`protected-receipt-reuse`) is refused for a
+group whose first parent is not that main tip, because a receipt certifies one
+pull request's tree on main and the verifier must load from protected code.
+
 ### The preamble slot
 
 `build.yml`'s preamble jobs (`resolve-provider`, `classify`,

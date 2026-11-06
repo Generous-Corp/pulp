@@ -1,0 +1,55 @@
+{
+  "id": "timeline-sdk-closure-fft-backend",
+  "title": "Timeline SDK closure expects the platform FFT backend only where the package exports it",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "timeline-sdk-closure-fft-backend-20261105",
+  "owned_paths": [
+    ".agents/skills/timeline/SKILL.md",
+    "docs/guides/timeline-sdk.md",
+    "examples/timeline-sdk-consumer/CMakeLists.txt"
+  ],
+  "evidence": [
+    {
+      "path": "examples/timeline-sdk-consumer/CMakeLists.txt",
+      "needles": [
+        "_expected_fft_backend_closure",
+        "Pulp::signal-mufft"
+      ]
+    },
+    {
+      "path": "docs/guides/timeline-sdk.md",
+      "needles": [
+        "Pulp::signal-mufft"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "Pulp::signal-mufft"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The consumer closure assertion tolerates an already-exported FFT backend target and changes no SDK header, symbol, or install surface."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline timeline command or persisted projection changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation or response shape changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The CMake closure check adds no runtime product control or grant."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No authoring capability or design-time manifest changes."
+    }
+  }
+}

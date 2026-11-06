@@ -35,6 +35,14 @@ was a single integer every open branch raced for; one merge staled the rest.
 The sections below that say "increase the counter" describe the hand-bump
 flow that branches no longer need; leave the constants alone instead.
 
+Exception: a change is pending only against the last state the history
+recorded under the SAME counter. When `--status` reports `inventory_version`
+as `assigned` (the history's last entry is an older counter), a header-byte
+change cannot be pending: `--write` refuses it with "public surface changed
+without an inventory_version increase". Then bump `SURFACE_INVENTORY_VERSION`
+by hand, past any integer an open PR already claims (the loop below), and
+`--write` again.
+
 ## Public-header fingerprint refresh
 
 When a SignalGraph or other covered public header changes bytes while its

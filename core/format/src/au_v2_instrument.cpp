@@ -73,6 +73,12 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory f
             // bus-name strings without copying it per block (which would allocate
             // on the audio thread).
             descriptor_ = processor_->descriptor();
+            // MIDI output reaches the host's MIDIOutputCallback exactly when the
+            // descriptor declares produces_midi (see plugin_produces_midi()), so
+            // that is the claim a panic can make about reaching downstream
+            // devices.
+            panic_state_ = processor_->panic_state();
+            panic_state_->attach(descriptor_.produces_midi);
             // Discover the plug-in's bundled factory presets. Empty for a
             // plug-in that ships none, and for any build not loaded from a
             // bundle (a unit-test binary, a standalone host).
@@ -183,6 +189,20 @@ OSStatus PulpAUInstrument::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitSc
                                                   outWritable);
     if (inID == kAudioUnitProperty_RenderContextObserver)
         return render_context_.property_info(inScope, inElement, outDataSize, outWritable);
+    if (inID == kAudioUnitProperty_MIDIOutputCallbackInfo && plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global)
+            return kAudioUnitErr_InvalidScope;
+        outDataSize = sizeof(CFArrayRef);
+        outWritable = false; // read: the host queries the output name list
+        return noErr;
+    }
+    if (inID == kAudioUnitProperty_MIDIOutputCallback && plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global)
+            return kAudioUnitErr_InvalidScope;
+        outDataSize = sizeof(AUMIDIOutputCallbackStruct);
+        outWritable = true; // write: the host installs the delivery callback
+        return noErr;
+    }
     if (inID == kAudioUnitProperty_SupportsMPE)
         return fill_supports_mpe_property_info(descriptor_.effective_capabilities().supports_mpe,
                                                inScope, outDataSize, outWritable);
@@ -227,6 +247,20 @@ OSStatus PulpAUInstrument::GetProperty(AudioUnitPropertyID inID, AudioUnitScope 
         return fill_parameter_clump_name(store_, inScope, outData);
     if (inID == kAudioUnitProperty_RenderContextObserver)
         return render_context_.get(inScope, inElement, outData);
+    if (inID == kAudioUnitProperty_MIDIOutputCallbackInfo && plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global)
+            return kAudioUnitErr_InvalidScope;
+        if (!outData)
+            return kAudioUnitErr_InvalidProperty;
+        // One MIDI output stream named after the plugin.
+        *static_cast<CFArrayRef*>(outData) = make_midi_output_names(descriptor_.name.c_str());
+        return noErr;
+    }
+    if (inID == kAudioUnitProperty_MIDIOutputCallback && plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global)
+            return kAudioUnitErr_InvalidScope;
+        return midi_output_callback_.reflect(outData);
+    }
     if (inID == kAudioUnitProperty_SupportsMPE)
         return fill_supports_mpe(descriptor_.effective_capabilities().supports_mpe, inScope,
                                  outData);
@@ -263,12 +297,23 @@ OSStatus PulpAUInstrument::GetProperty(AudioUnitPropertyID inID, AudioUnitScope 
     return MusicDeviceBase::GetProperty(inID, inScope, inElement, outData);
 }
 
+bool PulpAUInstrument::plugin_produces_midi() const noexcept {
+    return processor_ && descriptor_.produces_midi;
+}
+
 OSStatus PulpAUInstrument::SetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
                                        AudioUnitElement inElement, const void* inData,
                                        UInt32 inDataSize)
 {
     if (inID == kAudioUnitProperty_OfflineRender)
         return offline_render_.set(inScope, inData, inDataSize);
+    // The host installs (or clears) the MIDI-output callback on the main
+    // thread; the render thread reads the published pair each block.
+    if (inID == kAudioUnitProperty_MIDIOutputCallback && plugin_produces_midi()) {
+        if (inScope != kAudioUnitScope_Global)
+            return kAudioUnitErr_InvalidScope;
+        return midi_output_callback_.publish(inData, inDataSize);
+    }
     return MusicDeviceBase::SetProperty(inID, inScope, inElement, inData, inDataSize);
 }
 
@@ -506,7 +551,23 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
 
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
+        if (panic_state_)
+            service_panic(*processor_, *panic_state_, midi_out_);
         processor_->process(process_buffers, midi_in_, midi_out_, ctx);
+        if (panic_state_)
+            panic_state_->observe_midi_out(midi_out_);
+    }
+
+    // Deliver the block's MIDI to the host's installed MIDI-output callback,
+    // outside the no-allocation scope because the callback is host code. The
+    // packet list is built into pre-reserved storage; offsets are sample
+    // offsets within this block, and the host receives the current render
+    // time as their base. No callback installed: nothing to do.
+    const auto* midi_cb = midi_output_callback_.load();
+    if (midi_cb != nullptr && midi_cb->callback != nullptr &&
+        (midi_out_.size() > 0 || midi_out_.sysex_size() > 0)) {
+        if (const MIDIPacketList* list = midi_out_packet_builder_.build(midi_out_, inNumberFrames))
+            midi_cb->callback(midi_cb->user_data, &CurrentRenderTime(), /*midiOutNum=*/0, list);
     }
 
     // Push latency / tail changes the processor flagged during process(), as

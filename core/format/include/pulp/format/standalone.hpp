@@ -479,6 +479,8 @@ public:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Panic requests (Processor::request_panic), serviced before each block.
+    std::shared_ptr<PanicState> panic_state_;
     // Present in every StandaloneApp, but populated only by an executable that
     // explicitly links and registers a canonical control host adapter.
     std::unique_ptr<StandaloneControlHost> control_host_;

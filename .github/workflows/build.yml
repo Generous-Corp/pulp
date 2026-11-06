@@ -1126,6 +1126,9 @@ jobs:
     timeout-minutes: 10
     outputs:
       native_build_required: ${{ steps.classify.outputs.native_build_required }}
+      # The base the change set was classified against. For a merge group it
+      # is main's tip, never a speculative group ahead in the queue.
+      classify_base: ${{ steps.classify.outputs.classify_base }}
       ios_compile_required: ${{ steps.classify.outputs.ios_compile_required }}
       agent_capability_installed_sdk_required: ${{ steps.classify.outputs.agent_capability_installed_sdk_required }}
       a2t_receipt_verification_required: ${{ steps.classify.outputs.verify }}
@@ -1310,12 +1313,17 @@ jobs:
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
         # a push diffs the tip it moved away from. `origin/main` is correct for
         # neither — on a push it resolves to HEAD itself and the diff is always
-        # empty. See tools/scripts/resolve_classify_base.py for the full
+        # empty. A merge group diffs main's tip, reached from
+        # `merge_group.base_sha` down the first-parent chain: with entries
+        # queued ahead, `base_sha` is the previous speculative group, and a
+        # diff against it sees only the last entry while the group lands all
+        # of them. See tools/scripts/resolve_classify_base.py for the full
         # contract and tools/scripts/test_resolve_classify_base.py for the cases.
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_HEAD_SHA: ${{ github.sha }}
           EVENT_PATH: ${{ github.event_path }}
@@ -1421,8 +1429,11 @@ jobs:
                 trusted_verifier_base="$PR_BASE_SHA"
               fi
               if [ "$EVENT_NAME" = merge_group ]; then
-                # `merge_group.base_sha` is the prior speculative group when
-                # another PR is ahead of this one. Resolve the generated
+                # `$base` is main's tip here, so a group stacked on unlanded
+                # queue entries (`merge_group.base_sha` != main) fails the
+                # `[ "$base" = "$MERGE_GROUP_BASE_SHA" ]` shape check below and
+                # keeps the full path: the entries ahead were never validated
+                # on main, and this group would land them. Resolve the generated
                 # candidate's ORIGINAL protected-main parent without executing
                 # any code from either queue entry. Support only GitHub's exact
                 # #7771 shape: [prior cumulative group, candidate], where that
@@ -1561,6 +1572,7 @@ jobs:
           fi
           {
             echo "native_build_required=$native_build_required"
+            echo "classify_base=$base"
             echo "ios_compile_required=$ios_compile_required"
             echo "agent_capability_installed_sdk_required=$agent_capability_installed_sdk_required"
           } >> "$GITHUB_OUTPUT"
@@ -1615,6 +1627,7 @@ jobs:
           RECEIPT_TOKEN: ${{ github.token }}
           A2T_RECEIPT_VERIFICATION_REQUIRED: ${{ needs.classify.outputs.a2t_receipt_verification_required }}
           AFFECTED_SLOW_REQUIRED: ${{ needs.classify.outputs.agent_capability_installed_sdk_required }}
+          CLASSIFY_BASE: ${{ needs.classify.outputs.classify_base }}
         shell: bash
         run: |
           set -u
@@ -1647,6 +1660,17 @@ jobs:
               echo "::notice::receipt reuse unavailable: $shape"
               for target in macos linux; do
                 note "$target" refuse "$shape"
+              done
+            elif [ "$base" != "${CLASSIFY_BASE:-}" ]; then
+              # A receipt certifies one pull request's tree on a main commit.
+              # A group whose first parent is not main's tip sits on queue
+              # entries that never landed: its tree is not a receipt's tree,
+              # and its first parent is not protected code to load the
+              # verifier from. Keep the full validation.
+              stacked="the merge group's first parent ${base:0:12} is not main's tip ${CLASSIFY_BASE:0:12}; it is stacked on queue entries that have not landed"
+              echo "::notice::receipt reuse unavailable: $stacked"
+              for target in macos linux; do
+                note "$target" refuse "$stacked"
               done
             elif git show "$base:tools/scripts/protected_merge_receipt.py" \
               > "$RUNNER_TEMP/protected_merge_receipt.py"; then
@@ -4211,6 +4235,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_HEAD_SHA: ${{ github.sha }}
           EVENT_PATH: ${{ github.event_path }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
         run: bash tools/ci/macos_merge_group_bootstrap.sh
       # A `macos` check that ran no suite still belongs in the replay history
       # (receipt reuse and skip-safe groups are what a policy's coverage is

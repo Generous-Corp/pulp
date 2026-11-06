@@ -27,6 +27,7 @@ that found no files, which means the instrument looked in the wrong place).
 from __future__ import annotations
 
 import argparse
+import bisect
 import dataclasses
 import pathlib
 import re
@@ -106,6 +107,16 @@ def _inside(path: pathlib.Path, dirs: list[pathlib.Path]) -> bool:
     return any(path == d or d in path.parents for d in dirs)
 
 
+_SPLICE_RE = re.compile(r"\\\r?\n")
+# Next construct that changes how the scan proceeds: a string or character
+# literal (which can hold comment markers), a line comment, or a block comment.
+_LEXEME_RE = re.compile(
+    r"""(?P<lit>(["'])(?:\\.|(?!\2).)*?(?:\2|\Z))"""
+    r"""|(?P<line>//[^\n]*)"""
+    r"""|(?P<block>/\*.*?(?:\*/|\Z))""",
+    re.S)
+
+
 def _logical_preprocessor_lines(text: str) -> list[tuple[int, str]]:
     """Return comment-free preprocessor lines after C/C++ line splicing.
 
@@ -113,83 +124,92 @@ def _logical_preprocessor_lines(text: str) -> list[tuple[int, str]]:
     so an include directive may put its header, or even the ``include`` token,
     on the next physical line. Keep the first physical line number for each
     resulting logical line so diagnostics still point at the source directive.
+
+    The scan is regex-driven so its cost is proportional to the number of
+    lexemes, not characters; a pure per-character loop here made scanning all of
+    core/ take tens of seconds.
     """
-    chars: list[str] = []
-    lines: list[int] = []
-    physical_line = 1
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        if ch == "\\" and i + 1 < len(text):
-            if text[i + 1] == "\n":
-                physical_line += 1
-                i += 2
-                continue
-            if text[i + 1:i + 3] == "\r\n":
-                physical_line += 1
-                i += 3
-                continue
-        chars.append(ch)
-        lines.append(physical_line)
-        if ch == "\n":
-            physical_line += 1
-        i += 1
+    # Splice: remember where each backslash-newline was removed so a position in
+    # the spliced text maps back to its physical line.
+    splice_at: list[int] = []
+    pieces: list[str] = []
+    prev = 0
+    removed = 0
+    for m in _SPLICE_RE.finditer(text):
+        pieces.append(text[prev:m.start()])
+        splice_at.append(m.start() - removed)
+        removed += m.end() - m.start()
+        prev = m.end()
+    pieces.append(text[prev:])
+    spliced = "".join(pieces)
+    newline_at = [i for i, ch in enumerate(spliced) if ch == "\n"] if "\n" in spliced else []
 
-    # Replace comments with whitespace while preserving newlines and their
-    # source locations. A line comment can only end at a non-spliced newline.
+    def physical(pos: int) -> int:
+        return 1 + bisect.bisect_left(newline_at, pos) + bisect.bisect_right(splice_at, pos)
+
+    # Output is a list of segments; each remembers how to recover the physical
+    # line of any character in it. ("plain", out_start, spliced_start) maps
+    # linearly; ("fixed", out_start, line) is a single generated character.
     out: list[str] = []
-    out_lines: list[int] = []
-    quote: str | None = None
-    escaped = False
-    i = 0
-    while i < len(chars):
-        if quote is not None:
-            out.append(chars[i])
-            out_lines.append(lines[i])
-            if escaped:
-                escaped = False
-            elif chars[i] == "\\":
-                escaped = True
-            elif chars[i] == quote:
-                quote = None
-            i += 1
-            continue
-        if chars[i] in {'"', "'"}:
-            quote = chars[i]
-            out.append(chars[i])
-            out_lines.append(lines[i])
-            i += 1
-            continue
-        if chars[i:i + 2] == ["/", "/"]:
-            i += 2
-            while i < len(chars) and chars[i] != "\n":
-                i += 1
-            continue
-        if chars[i:i + 2] == ["/", "*"]:
-            start_line = lines[i]
-            i += 2
-            while i < len(chars) and chars[i:i + 2] != ["*", "/"]:
-                if chars[i] == "\n":
-                    out.append("\n")
-                    out_lines.append(lines[i])
-                elif not out or out[-1] != " ":
-                    out.append(" ")
-                    out_lines.append(start_line)
-                i += 1
-            i = min(len(chars), i + 2)
-            continue
-        out.append(chars[i])
-        out_lines.append(lines[i])
-        i += 1
+    seg_out_start: list[int] = []
+    seg_info: list[tuple[str, int]] = []
+    out_len = 0
+    last_char = ""
 
+    def emit_plain(start: int, end: int) -> None:
+        nonlocal out_len, last_char
+        if end > start:
+            out.append(spliced[start:end])
+            seg_out_start.append(out_len)
+            seg_info.append(("plain", start))
+            out_len += end - start
+            last_char = spliced[end - 1]
+
+    def emit_fixed(ch: str, line: int) -> None:
+        nonlocal out_len, last_char
+        out.append(ch)
+        seg_out_start.append(out_len)
+        seg_info.append(("fixed", line))
+        out_len += 1
+        last_char = ch
+
+    pos = 0
+    for m in _LEXEME_RE.finditer(spliced):
+        kind = m.lastgroup
+        if kind == "lit":
+            continue  # literals pass through untouched, as part of the next plain run
+        emit_plain(pos, m.start())
+        if kind == "line":
+            pos = m.end()  # the terminating newline is not consumed
+            continue
+        start_line = physical(m.start())
+        body = spliced[m.start() + 2:m.end()]
+        if body.endswith("*/"):
+            body = body[:-2]
+        segs = body.split("\n")
+        body_pos = m.start() + 2
+        for idx, seg in enumerate(segs):
+            if seg and last_char != " ":
+                emit_fixed(" ", start_line)
+            if idx < len(segs) - 1:
+                emit_fixed("\n", physical(body_pos + len(seg)))
+            body_pos += len(seg) + 1
+        pos = m.end()
+    emit_plain(pos, len(spliced))
+
+    joined = "".join(out)
     result: list[tuple[int, str]] = []
     start = 0
-    while start < len(out):
-        end = start
-        while end < len(out) and out[end] != "\n":
-            end += 1
+    n = len(joined)
+    while start < n:
+        end = joined.find("\n", start)
+        if end < 0:
+            end = n
         if end > start:
-            result.append((out_lines[start], "".join(out[start:end])))
+            seg = bisect.bisect_right(seg_out_start, start) - 1
+            kind, base = seg_info[seg]
+            line = physical(base + start - seg_out_start[seg]) if kind == "plain" else base
+            result.append((line, joined[start:end]))
         start = end + 1
     return result
 

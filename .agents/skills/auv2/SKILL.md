@@ -486,7 +486,11 @@ is unit-tested over several descriptors in `test_au_v2_effect.cpp` (`[channels]`
 ### MIDI output (`kAudioUnitProperty_MIDIOutputCallback`)
 
 A Processor that declares `produces_midi = true` now delivers the MIDI it writes
-to `midi_out` during `process()` back to the host on AU v2. The adapter:
+to `midi_out` during `process()` back to the host on AU v2, from all three
+classes: the effect (`ProcessBufferLists`), the MIDI processor, and the
+instrument (`PulpAUInstrument::Render`, which until then filled `midi_out` and
+dropped it, so an instrument's device MIDI or editor feedback never reached the
+host). The adapter:
 
 1. Advertises the output stream via `kAudioUnitProperty_MIDIOutputCallbackInfo`
    (a one-element `CFArrayRef` named after the plugin) and accepts the host's
@@ -1314,7 +1318,7 @@ Two host-conformance surfaces beyond the display-string path above:
 - `GetParameterInfo` maps `range.min/max/default_value` to
   `minValue/maxValue/defaultValue` and the unit string to an
   `AudioUnitParameterUnit` (`"Hz"`→Hertz, `"dB"`→Decibels, `"%"`→Percent,
-  Boolean, else Generic). A wrong range/unit silently mis-scales every host
+  Boolean, a discrete non-boolean (Enum) parameter→Indexed so hosts build a menu from the value strings, else Generic). A wrong range/unit silently mis-scales every host
   automation lane — assert the numeric metadata, not just the
   ValuesHaveStrings flag. Test: `test/test_au_v2_param_display.mm`.
 - **Hidden / read-only / non-automatable come from the shared model, and AU has
@@ -1522,3 +1526,17 @@ parameter. Parameters the store does not own still go through the element's
 `SetScheduledEvent`. `[au][automation]` in `test_au_v2_effect.cpp` covers
 dense interleaved events, coincident events, and ramp supersession. Each slice
 is still one full `ProcessBufferLists` and Processor call.
+
+## Panic requests: attach, service, observe
+
+Every AU v2 adapter attaches to `Processor::panic_state()` where it creates its
+processor and wraps `process()` with `service_panic()` before and
+`observe_midi_out()` after (see `docs/guides/midi-panic.md`). The `midi_out`
+flag passed to `attach()` is the adapter's honest claim that the host can
+receive MIDI: the effect and MIDI processor use the descriptor's
+`produces_midi`, and so does the `aumu` instrument now that it delivers MIDI
+through `kAudioUnitProperty_MIDIOutputCallback`; a new adapter without a host
+MIDI-output path must pass `false`. Tests: `test_au_v2_midi_processor.cpp` and
+`test_au_plugin_state.mm` (panic reaches the host callback),
+`test_au_v2_effect.cpp` (aufx vs aumf capabilities),
+`test_au_v2_instrument_rt.mm`.
