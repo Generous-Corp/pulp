@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "event_id": "20261105-gpu-runtime-device-forward",
+  "kind": "change",
+  "created_at": "2026-11-05T22:22:40Z",
+  "slices": [
+    "render-skia-dawn",
+    "retained-ui-kernel"
+  ],
+  "rationale": "render-skia-dawn: gpu_surface.hpp and gpu_render_time.hpp (both in this slice) gain a PULP_GPU_RUNTIME branch that includes <gpu_runtime/...> and forwards each name to gpu-runtime's identical declaration; the original declarations stay in the #else branch. retained-ui-kernel: window_host.hpp takes its GpuSurface forward declaration from the new pulp/platform/gpu_fwd.hpp instead of writing it by hand. No API, layout or authority boundary moves, so this is Pulp-only; the next re-export carries gpu_fwd.hpp and the <gpu_runtime/...> branches into Vellum's mirror. Hazard: Vellum must never define PULP_GPU_RUNTIME for mirrored sources while it builds the mirror's own device layer, or the mirrored headers would forward to gpu-runtime's types without the matching implementation.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-gpu-device-only-consumer",
+    "python3 test/verify_gpu_runtime_topology.py --mode gpu-runtime <consumer>",
+    "python3 tools/deps/test_audit_vellum_drift.py",
+    "python3 tools/scripts/test_core_vellum_direction.py"
+  ],
+  "disposition": "pulp-only"
+}

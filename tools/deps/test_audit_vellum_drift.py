@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the temporary Vellum renderer drift check in tools/deps/audit.py."""
+"""Tests for the renderer-lock agreement check in tools/deps/audit.py."""
 
 from __future__ import annotations
 
@@ -65,6 +65,94 @@ def reader(text: str):
 
     read.calls = calls
     return read
+
+
+def renderer_lock(sha: str = PULP_SHA, tag: str = "chrome/m158") -> str:
+    import json
+    return json.dumps({"schema": "gpu-runtime.renderer-lock.v1", "milestone": tag,
+                       "platforms": {"macos-arm64": {"sha256": sha, "archives": {}}}})
+
+
+def lock_manifest(runtime_commit: str | None = COMMIT, **overrides) -> list[dict]:
+    spec = {"path": "gpu-runtime/renderer-lock.json", "lock_platform": "macos-arm64"}
+    spec.update(overrides)
+    entries = manifest(**spec)
+    if runtime_commit is not None:
+        entries.append({"name": audit.GPU_RUNTIME_ENTRY,
+                        "upstream": {"kind": "git-commit", "ref": runtime_commit,
+                                     "commit": runtime_commit}})
+    return entries
+
+
+class RendererLockTests(unittest.TestCase):
+    def test_the_shared_lock_matches(self) -> None:
+        read = reader(renderer_lock())
+        self.assertEqual(audit.vellum_renderer_drift(lock_manifest(), read), ("match", []))
+        self.assertEqual(read.calls[0][2], "gpu-runtime/renderer-lock.json")
+
+    def test_a_lock_digest_that_differs_fails(self) -> None:
+        status, problems = audit.vellum_renderer_drift(lock_manifest(),
+                                                       reader(renderer_lock(sha=OTHER_SHA)))
+        self.assertEqual(status, "mismatch")
+        self.assertIn(f"Vellum {OTHER_SHA}", problems[0])
+
+    def test_a_lock_milestone_that_differs_fails(self) -> None:
+        status, problems = audit.vellum_renderer_drift(lock_manifest(),
+                                                       reader(renderer_lock(tag="chrome/m159")))
+        self.assertEqual(status, "mismatch")
+        self.assertIn("chrome/m159", problems[0])
+
+    def test_the_lock_must_be_read_at_the_pinned_runtime_commit(self) -> None:
+        status, problems = audit.vellum_renderer_drift(lock_manifest(runtime_commit="d" * 40),
+                                                       reader(renderer_lock()))
+        self.assertEqual(status, "mismatch")
+        self.assertIn("must be the same commit", problems[0])
+
+    def test_a_lock_without_the_platform_fails_closed(self) -> None:
+        status, problems = audit.vellum_renderer_drift(
+            lock_manifest(lock_platform="windows-x64"), reader(renderer_lock()))
+        self.assertEqual(status, "unavailable")
+
+
+class GpuRuntimePinTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        (self.root / "tools/cmake").mkdir(parents=True)
+
+    def pin(self, commit: str = COMMIT, version: str = "0.1.10") -> None:
+        (self.root / "tools/cmake/PulpGpuRuntime.cmake").write_text(
+            f'set(PULP_GPU_RUNTIME_COMMIT "{commit}")\nset(PULP_GPU_RUNTIME_VERSION "{version}")\n',
+            encoding="utf-8")
+
+    def entry(self, commit: str = COMMIT, version: str = "0.1.10 (cccccccc)") -> list[dict]:
+        return [{"name": audit.GPU_RUNTIME_ENTRY, "version": version,
+                 "upstream": {"kind": "git-commit", "ref": commit, "commit": commit},
+                 "source_files": ["tools/cmake/PulpGpuRuntime.cmake"]}]
+
+    def test_an_agreeing_pin_passes(self) -> None:
+        self.pin()
+        self.assertEqual(audit.gpu_runtime_pin_agreement(self.entry(), self.root), [])
+
+    def test_a_commit_moved_only_in_cmake_fails(self) -> None:
+        self.pin(commit="d" * 40)
+        problems = audit.gpu_runtime_pin_agreement(self.entry(), self.root)
+        self.assertTrue(problems and "fetches gpu-runtime at" in problems[0])
+
+    def test_a_version_moved_only_in_the_manifest_fails(self) -> None:
+        self.pin()
+        problems = audit.gpu_runtime_pin_agreement(self.entry(version="0.1.11 (cccccccc)"), self.root)
+        self.assertTrue(problems and "expects gpu-runtime 0.1.10" in problems[0])
+
+    def test_a_pin_the_cmake_does_not_declare_fails(self) -> None:
+        (self.root / "tools/cmake/PulpGpuRuntime.cmake").write_text("# no pin\n", encoding="utf-8")
+        self.assertTrue(audit.gpu_runtime_pin_agreement(self.entry(), self.root))
+
+    def test_the_real_tree_agrees(self) -> None:
+        import json
+        manifest = json.loads((ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
+        self.assertEqual(audit.gpu_runtime_pin_agreement(manifest), [])
 
 
 class VellumDriftTests(unittest.TestCase):

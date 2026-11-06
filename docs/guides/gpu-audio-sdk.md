@@ -307,8 +307,10 @@ exports `PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO`,
 `PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF_ENABLED` as producer capability facts.
 They do not establish runtime availability or change a plugin's default engine.
 The release provenance binds these facts to the installed config and GPU-audio
-archive; older SDKs may not contain these facts. Traced/probe builds and the
-Vellum D15 experiment remain outside the official release contract. The legacy
+archive; older SDKs may not contain these facts. Traced/probe builds remain
+outside the official release contract. On macOS the shared-I/O provider
+bootstraps Dawn's proc table through gpu-runtime's coordinator, the same one the
+render device uses, so a plug-in has one proc-table owner. The legacy
 `release-cli-local.sh` helper does not produce this qualified capability receipt;
 its archive is not a substitute for the official release artifact.
 

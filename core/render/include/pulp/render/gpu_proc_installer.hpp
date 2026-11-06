@@ -19,6 +19,19 @@
 // GPU device API alone.
 #pragma once
 
+#if defined(PULP_GPU_RUNTIME)
+// This build's device layer is gpu-runtime's (tools/cmake/PulpGpuRuntime.cmake):
+// these are its types and functions under their Pulp names, so a Pulp object
+// and a gpu-runtime object are one and the same.
+#include <gpu_runtime/gpu_proc_installer.hpp>
+
+namespace pulp::render {
+using gpu_runtime::DawnProcInstaller;
+using gpu_runtime::ensure_dawn_procs;
+using gpu_runtime::set_dawn_proc_installer;
+} // namespace pulp::render
+#else // !PULP_GPU_RUNTIME
+
 #include <string>
 
 namespace pulp::render {
@@ -57,3 +70,5 @@ struct DawnProcInstaller {
 [[nodiscard]] bool ensure_dawn_procs(std::string* error = nullptr);
 
 } // namespace pulp::render
+
+#endif // PULP_GPU_RUNTIME

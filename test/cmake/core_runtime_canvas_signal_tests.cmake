@@ -1200,18 +1200,30 @@ pulp_add_test_suite(pulp-test-visualization
     LIBRARIES pulp::view)
 # The benchmark-only VisualizationBridge API, compiled (never linked) with
 # PULP_BENCHMARK in every build so the opt-in benchmark consumers cannot rot.
+# Where the device layer is gpu-runtime's, the benchmark API also needs
+# gpu-runtime's benchmark declarations; these objects are never linked against
+# a device library, so naming GPU_RUNTIME_BENCHMARK here selects declarations
+# without mixing vtables. gpu-runtime-mode-consistency refuses a target-local
+# PULP_BENCHMARK on anything but an OBJECT library that does this.
+if(PULP_HAS_GPU_RUNTIME AND NOT PULP_BENCHMARK)
+    set(_pulp_bench_check_defs PULP_BENCHMARK GPU_RUNTIME_BENCHMARK=1)
+else()
+    set(_pulp_bench_check_defs PULP_BENCHMARK)
+endif()
 if(TARGET pulp-render)
     add_library(pulp-visualization-bench-consumer-check OBJECT
         fixtures/benchmark_consumer/visualization_bench_consumer.cpp)
     target_link_libraries(pulp-visualization-bench-consumer-check
         PRIVATE pulp::view-audio pulp::render)
-    target_compile_definitions(pulp-visualization-bench-consumer-check PRIVATE PULP_BENCHMARK)
+    target_compile_definitions(pulp-visualization-bench-consumer-check
+        PRIVATE ${_pulp_bench_check_defs})
 endif()
 # The bridge's own PULP_BENCHMARK body, compiled (never linked) the same way.
 add_library(pulp-visualization-bench-source-check OBJECT
     ${CMAKE_SOURCE_DIR}/core/dataplane/src/visualization_bridge.cpp)
 target_link_libraries(pulp-visualization-bench-source-check PRIVATE pulp::dataplane-audio)
-target_compile_definitions(pulp-visualization-bench-source-check PRIVATE PULP_BENCHMARK)
+target_compile_definitions(pulp-visualization-bench-source-check PRIVATE ${_pulp_bench_check_defs})
+unset(_pulp_bench_check_defs)
 
 # Clipboard tests
 pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform

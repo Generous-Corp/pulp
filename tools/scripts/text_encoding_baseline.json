@@ -19,7 +19,6 @@
     "test/test_pulp_mcp_binary_smoke.py": 3,
     "test/test_verify_gpu_same_device_storage.py": 3,
     "test/verify_gpu_dawn_shared_io_provider.py": 2,
-    "test/verify_gpu_dawn_vellum_provider_topology.py": 1,
     "test/verify_gpu_same_device_storage.py": 2,
     "test/verify_gpu_shared_io_paced_convolution.py": 5,
     "tools/add-component.py": 1,

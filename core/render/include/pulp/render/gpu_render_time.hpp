@@ -1,5 +1,21 @@
 #pragma once
 
+#if defined(PULP_GPU_RUNTIME)
+// This build's device layer is gpu-runtime's (tools/cmake/PulpGpuRuntime.cmake):
+// these are its types and functions under their Pulp names, so a Pulp object
+// and a gpu-runtime object are one and the same.
+#include <gpu_runtime/gpu_render_time.hpp>
+
+namespace pulp::render {
+using gpu_runtime::gpu_render_ns_to_ms;
+using gpu_runtime::gpu_surface_disabled_toggles;
+using gpu_runtime::GpuFramesInFlight;
+using gpu_runtime::GpuRenderTimeTracker;
+using gpu_runtime::kDawnTimestampQuantizationToggle;
+using gpu_runtime::kGpuRenderNanosecondsPerMillisecond;
+} // namespace pulp::render
+#else // !PULP_GPU_RUNTIME
+
 #include <atomic>
 #include <cstdint>
 #include <optional>
@@ -142,3 +158,5 @@ private:
 };
 
 } // namespace pulp::render
+
+#endif // PULP_GPU_RUNTIME

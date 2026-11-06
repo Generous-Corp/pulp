@@ -61,6 +61,7 @@
         "tools/cmake/PulpFonts.cmake",
         "tools/cmake/PulpGenerateMacIcns.cmake",
         "tools/cmake/PulpGpuProvider.cmake",
+        "tools/cmake/PulpGpuRuntimeRecord.cmake",
         "tools/cmake/PulpInspectorShipping.cmake",
         "tools/cmake/PulpInstall.cmake",
         "tools/cmake/PulpIosHostApp.cmake",

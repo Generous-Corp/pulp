@@ -10,9 +10,7 @@
 #include <functional>
 #include <vector>
 
-namespace pulp::render {
-class GpuSurface;
-}
+#include <pulp/platform/gpu_fwd.hpp>
 
 namespace pulp::view {
 

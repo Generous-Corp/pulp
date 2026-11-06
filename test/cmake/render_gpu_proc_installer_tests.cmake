@@ -20,8 +20,12 @@
     # The PULP_DAWN_PROCS_HOST_OWNED setting, without reconfiguring the build:
     # a test-only copy of pulp-gpu-device compiled from the same sources with
     # that one definition added. In a build already configured ON, the real
-    # library is the host-owned one and the copy is not needed.
-    if(TARGET pulp-gpu-device AND NOT PULP_DAWN_PROCS_HOST_OWNED)
+    # library is the host-owned one and the copy is not needed. Where the
+    # device layer is gpu-runtime's, pulp-gpu-device holds only the hooks shim
+    # and the installer is compiled into gpu-runtime-device, once, from
+    # PULP_DAWN_PROCS_HOST_OWNED (GPU_RUNTIME_HOST_OWNS_DAWN_PROCS); its
+    # host-owned contract is gpu-runtime's own device test, so no copy is made.
+    if(TARGET pulp-gpu-device AND NOT PULP_DAWN_PROCS_HOST_OWNED AND NOT PULP_HAS_GPU_RUNTIME)
         get_target_property(_pulp_dawn_procs_sources pulp-gpu-device SOURCES)
         get_target_property(_pulp_dawn_procs_dir pulp-gpu-device SOURCE_DIR)
         set(_pulp_dawn_procs_abs_sources "")

@@ -105,6 +105,16 @@ class LinkClosureRules(unittest.TestCase):
         self.props["api.interface_link"] = "skia::dawn"
         self.assertEqual(self.codes(), ["api-links-something"])
 
+    def test_api_forwarding_to_gpu_runtime_passes_only_in_that_mode(self) -> None:
+        self.props["api.interface_link"] = "VellumGpuRuntime::DeviceApi"
+        self.assertEqual(self.codes(), ["api-links-something"])
+        self.props["gpu_runtime"] = "1"
+        self.assertEqual(self.codes(), [])
+        self.props["api.interface_link"] = "VellumGpuRuntime::DeviceApi;VellumGpuRuntime::Device"
+        self.assertEqual(self.codes(), ["api-links-something"])
+        self.props["api.interface_link"] = ""
+        self.assertEqual(self.codes(), ["api-links-something"])
+
     def test_api_as_static_library_fails(self) -> None:
         self.props["api.type"] = "STATIC_LIBRARY"
         self.assertEqual(self.codes(), ["api-not-interface"])

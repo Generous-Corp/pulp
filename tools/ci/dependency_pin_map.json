@@ -53,6 +53,6 @@
   "three.js": "JavaScript runtime pinned through tools/cmake/threejs-runtime-manifest.json; no executable compiles it, so a change moves all",
   "TweetNaCl": "vendored in the tree: its sources are keyed as files, and a manifest change moves all",
   "V8": "optional JS engine (PULP_JS_ENGINE=v8), not built in the gate build, so a change moves all",
-  "Vellum D15 GPU provider": "developer-supplied prebuilt behind an opt-in, so a change moves all"
+  "vellum-gpu-runtime": "fetched only for macOS GPU builds, where every device consumer links it, so a change moves all"
  }
 }
