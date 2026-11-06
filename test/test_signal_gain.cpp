@@ -94,17 +94,16 @@ TEST_CASE("Gain multi-channel process shares one ramp across channels",
     REQUIRE(stereo.gain_linear() == 4.0f);
 }
 
-TEST_CASE("Gain multi-channel process skips null channels and empty calls",
-          "[signal][gain]") {
+TEST_CASE("Gain multi-channel process skips null channels and empty calls", "[signal][gain]") {
     pulp::signal::Gain64 gain;
     gain.set_gain_linear(1.0);
     gain.set_ramp_time(4.0 / 48000.0, 48000.0);
     gain.set_gain_linear(2.0);
     std::array<double, 4> only{1.0, 1.0, 1.0, 1.0};
     double* channels[] = {nullptr, only.data()};
-    gain.process(channels, 0, 4);      // no channels: nothing moves
-    gain.process(channels, 2, 0);      // no samples: nothing moves
-    gain.process(nullptr, 2, 4);       // no channel array: nothing moves
+    gain.process(channels, 0, 4); // no channels: nothing moves
+    gain.process(channels, 2, 0); // no samples: nothing moves
+    gain.process(nullptr, 2, 4);  // no channel array: nothing moves
     REQUIRE(gain.gain_linear() == 1.0);
     gain.process(channels, 2, 4);
     REQUIRE(only[0] == 1.25);
