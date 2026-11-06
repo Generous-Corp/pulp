@@ -9,18 +9,11 @@
  },
  "executables": {
   "Pulp UI Script Fixture": {
-   "data": "undeclared",
-   "detected_sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ],
+   "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ],
-   "undeclared_sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ]
+   "sources": [],
+   "undeclared_sources": []
   },
   "pulp-control-broker-crash-fixture": {
    "data": "none",
@@ -2985,6 +2978,7 @@
   "pulp-test-forge-tape-catalog",
   "pulp-test-format-core-only-consumer",
   "pulp-test-frame-stamp",
+  "pulp-test-g5-host-event-consumer",
   "pulp-test-gesture-threading",
   "pulp-test-golden",
   "pulp-test-golden-effect",
