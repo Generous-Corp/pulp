@@ -165,7 +165,7 @@ TEST_CASE("Audio background readers do not wake the CPU while idle",
         REQUIRE(wait_until([&] { return reader.frames_available() == 4096; }, 2000ms));
         std::this_thread::sleep_for(100ms);
         const double rate = wakeups_per_second(2000ms) - floor;
-        INFO("BufferingReader idle wakeups/s above the process floor: " << rate);
+        WARN("BufferingReader idle wakeups/s above the process floor: " << rate);
         CHECK(rate < 5.0);
         reader.stop();
     }
@@ -185,7 +185,7 @@ TEST_CASE("Audio background readers do not wake the CPU while idle",
             }));
         std::this_thread::sleep_for(100ms);
         const double rate = wakeups_per_second(2000ms) - floor;
-        INFO("StreamingSampleSource idle wakeups/s above the process floor: " << rate);
+        WARN("StreamingSampleSource idle wakeups/s above the process floor: " << rate);
         CHECK(rate < 5.0);
         source.release();
     }
