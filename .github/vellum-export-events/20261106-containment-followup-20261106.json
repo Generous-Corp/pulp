@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261106-containment-followup-20261106",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-06T14:46:24Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/platform/include/pulp/platform/child_process.hpp",
+    "core/platform/platform/posix/child_process_posix.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "The generic ChildProcess contract now places POSIX launches in private process groups and cleans descendants on timeout or cancellation; Vellum's exported framework helper must inherit the same bounded cleanup semantics."
+}
