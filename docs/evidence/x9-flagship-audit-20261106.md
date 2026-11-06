@@ -5,7 +5,7 @@
 This audit starts from the clean `origin/main` source head
 `3c11cb21c026799659e9cfe52d70f2121d46b41d`, then merges the three commits
 that arrived on `origin/main` during the audit (final worktree head
-`9316d99be9d73072ea1c0a66ecbe7c124a59ff91`). It exercises the checked-in
+`5491669d12d5d957b986ec26c91a47c9e514511d`). It exercises the checked-in
 `pulp-test-signal-graph-x9-modular-instrument` fixture through public
 `SignalGraph`, `ProcessorNodeInstance`, MIDI, state, serializer, and offline
 host APIs. The fixture includes `examples/PulpSynth/pulp_synth.hpp`; this is an
