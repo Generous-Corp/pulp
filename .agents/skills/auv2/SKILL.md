@@ -1551,7 +1551,13 @@ and reports `Initialised Unit incorrectly set to InputChans:3 OutputChans:1`
 → `* * FAIL`. `PulpAUInstrument::Initialize` now applies the effect base's
 rule before the base allocates anything and returns
 `kAudioUnitErr_FormatNotSupported`; instruments without input elements keep
-their previous behaviour. Test: "refuses an input and output channel pair it
+their previous behaviour. That check only runs when Initialize runs: auval
+initializes at a supported pair, then writes an unsupported one and calls
+Initialize again, which is a no-op on an initialized unit. So
+`StreamFormatWritable` must also return `!IsInitialized()` (as
+`AUEffectBase` does); accepting the write while initialized reproduced the
+same auval FAIL after the Initialize fix. Test: "refuses stream format
+writes while it is initialized". Test: "refuses an input and output channel pair it
 does not advertise" in `test/test_au_v2_instrument_rt.mm`.
 
 ## Panic requests: attach, service, observe
