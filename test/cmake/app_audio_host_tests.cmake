@@ -187,6 +187,12 @@ pulp_add_test_suite(pulp-test-undo-manager GROUP pulp-test-group-app-state
 pulp_add_test_suite(pulp-test-buffering-reader GROUP pulp-test-group-app-audio
     LIBRARIES pulp::audio)
 
+# BufferingReader / StreamingSampleSource wake through runtime::WakeSignal:
+# prompt refill on read, and no idle wakeups (measured on macOS).
+pulp_add_test_suite(pulp-test-audio-reader-idle-wakeups GROUP pulp-test-group-app-audio
+    LIBRARIES pulp::audio
+    PROPERTIES RUN_SERIAL TRUE)
+
 # AudioWorkgroup tests
 pulp_add_test_suite(pulp-test-workgroup GROUP pulp-test-group-app-audio
     LIBRARIES pulp::audio)
