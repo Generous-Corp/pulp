@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <pulp/view/context_menu.hpp>
 #include <pulp/canvas/canvas.hpp>
 
@@ -707,4 +708,76 @@ TEST_CASE("ContextMenu left and right arrows are symmetric on action rows",
     REQUIRE_FALSE(menu->on_key_event(key_down(KeyCode::left)));
     REQUIRE_FALSE(menu->on_key_event(key_down(KeyCode::right)));
     REQUIRE(root->child_count() == 1);
+}
+
+TEST_CASE("ContextMenu defers set_items issued from inside an item callback",
+          "[view][context-menu]") {
+    auto root = make_root();
+    ContextMenu* menu = nullptr;
+    std::size_t items_during_callback = 0;
+    std::string label_after_rebuild;
+    menu = ContextMenu::show(
+        root.get(), {kAnchorX, kAnchorY},
+        {Item::make_toggle(1, "Internal", true,
+                           [&](const Item& item) {
+                               // A product rebuilding its rows from the row's own
+                               // callback: the replacement must wait until this
+                               // returns, so `item` stays alive for the rest of it.
+                               menu->set_items({Item::make_toggle(2, "Main In", true, nullptr),
+                                                Item::make_toggle(3, "Side Chain", false, nullptr)});
+                               items_during_callback = menu->items().size();
+                               label_after_rebuild = item.label;
+                           }),
+         Item::make_toggle(4, "Note Gate", false, nullptr)},
+        [](std::optional<int>) {});
+
+    menu->on_mouse_event(down_at(kInsideX, row_center_y(*menu, 0)));
+
+    REQUIRE(items_during_callback == 2);        // the old rows were still live
+    REQUIRE(label_after_rebuild == "Internal"); // and the pressed row was readable
+    REQUIRE(menu->items().size() == 2);          // the new rows landed afterwards
+    REQUIRE(menu->items()[0].label == "Main In");
+    REQUIRE(menu->items()[1].label == "Side Chain");
+}
+
+TEST_CASE("ContextMenu slider value label shortens the track and the pointer mapping follows",
+          "[view][context-menu]") {
+    auto root = make_root();
+    float labelled = -1.0f, plain = -1.0f;
+    auto with_label = Item::make_slider(1, "Rate", 0.0f, 0.01f,
+                                        [&](const Item& item) { labelled = item.normalized_value; });
+    with_label.value_label = "2.50 Hz";
+    auto* menu = ContextMenu::show(
+        root.get(), {kAnchorX, kAnchorY},
+        {with_label, Item::make_slider(2, "Depth", 0.0f, 0.01f,
+                                       [&](const Item& item) { plain = item.normalized_value; })},
+        [](std::optional<int>) {});
+    menu->set_min_width(240.0f);
+    const auto rows = menu->layout().rows;
+    const auto& row = rows[0];
+    const float left = row.x + std::min(90.0f, row.width * 0.45f);
+    const float labelled_right = row.x + row.width - 52.0f;
+    const float x = (left + labelled_right) * 0.5f;
+
+    menu->on_mouse_event(down_at(x, row_center_y(*menu, 0)));
+    REQUIRE(labelled == Catch::Approx(0.5f).margin(0.02f));
+    // The plain slider's track runs to the row's right edge, so the same x is
+    // a smaller fraction of it.
+    menu->on_mouse_event(down_at(x, row_center_y(*menu, 1)));
+    REQUIRE(plain < labelled - 0.05f);
+    REQUIRE(menu->items()[0].value_label == "2.50 Hz");
+}
+
+TEST_CASE("ContextMenu set_min_width reserves a stable panel width", "[view][context-menu]") {
+    auto root = make_root();
+    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY},
+                                   {{10, "On"}, {20, "Off"}}, [](std::optional<int>) {});
+    const float natural = menu->measured_width();
+    REQUIRE(natural < 250.0f);
+    menu->set_min_width(250.0f);
+    REQUIRE(menu->min_width() == 250.0f);
+    REQUIRE(menu->measured_width() >= 250.0f);
+    menu->set_min_width(-5.0f);
+    REQUIRE(menu->min_width() == 0.0f);
+    REQUIRE(menu->measured_width() == Catch::Approx(natural));
 }
