@@ -3,12 +3,12 @@
   "unfreezes": [
     {
       "path": "core/render/include/pulp/render/gpu_render_time.hpp",
-      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approval_url": "https://github.com/Generous-Corp/pulp/pull/11643#issuecomment-6689114536",
       "approved_by": "danielraffel"
     },
     {
       "path": "core/render/include/pulp/render/gpu_surface.hpp",
-      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approval_url": "https://github.com/Generous-Corp/pulp/pull/11643#issuecomment-6689114536",
       "approved_by": "danielraffel"
     },
     {
@@ -18,7 +18,7 @@
     },
     {
       "path": "core/view/include/pulp/view/window_host.hpp",
-      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approval_url": "https://github.com/Generous-Corp/pulp/pull/11643#issuecomment-6689114536",
       "approved_by": "danielraffel"
     }
   ]
