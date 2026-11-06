@@ -100,8 +100,11 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   (never pass) where the platform has no counter. Register the suite twice:
   the functional cases unlabelled with `TEST_SPEC "~[idle-wakeups]"`, the
   measurement behind `TEST_SPEC "[idle-wakeups]"`, `TEST_PREFIX
-  "performance::"` and `LABELS performance`. Promotion to the required gate
-  waits for flake evidence.
+  "performance::"` and `LABELS performance`. They ride this label rather
+  than a label of their own because the existing exclusion lists already keep
+  it off the required gate. They are counter-based, not timing-based, so they
+  may well be stable under load, but there is no flake history for them yet.
+  Promotion to the required gate waits for that evidence.
 - **Tests the pull request reaches** — after the `pr-fast` tier, the PR-head
   `macos` job runs the ctests `pulp affected` selects for the pull request's
   base→head diff (`tools/ci/pr_head_affected_tests.py`), and a failure fails the
