@@ -1541,6 +1541,19 @@ parameter. Parameters the store does not own still go through the element's
 dense interleaved events, coincident events, and ramp supersession. Each slice
 is still one full `ProcessBufferLists` and Processor call.
 
+### Instrument channel pairs are enforced at Initialize
+
+`MusicDeviceBase` never checks the negotiated input/output channel counts
+against `SupportedNumChannels` (only `AUEffectBase` does), so an instrument
+that declares input buses advertised `{0,N}` + matched pairs but still
+initialized at any pair a host set. auval probes exactly that (3 in / 1 out)
+and reports `Initialised Unit incorrectly set to InputChans:3 OutputChans:1`
+→ `* * FAIL`. `PulpAUInstrument::Initialize` now applies the effect base's
+rule before the base allocates anything and returns
+`kAudioUnitErr_FormatNotSupported`; instruments without input elements keep
+their previous behaviour. Test: "refuses an input and output channel pair it
+does not advertise" in `test/test_au_v2_instrument_rt.mm`.
+
 ## Panic requests: attach, service, observe
 
 Every AU v2 adapter attaches to `Processor::panic_state()` where it creates its
