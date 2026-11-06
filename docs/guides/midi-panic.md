@@ -107,7 +107,7 @@ notes the plug-in sent. The state lives in a side table rather than a
 | VST3 | yes | `produces_midi` |
 | AU v2 effect (`aufx` / `aumf`) | yes | `produces_midi` (an `aufx` declares none, so voices only) |
 | AU v2 MIDI processor | yes | `produces_midi` |
-| AU v2 instrument (`aumu`) | yes | no: the adapter has no host MIDI output path yet |
+| AU v2 instrument (`aumu`) | yes | `produces_midi`, delivered through the host's MIDI-output callback |
 | AU v3 | yes | `produces_midi`, delivered through the host's `MIDIOutputEventBlock` when it installs one |
 | Standalone app | yes | no: there is no MIDI output device path |
 

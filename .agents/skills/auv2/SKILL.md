@@ -1534,8 +1534,9 @@ processor and wraps `process()` with `service_panic()` before and
 `observe_midi_out()` after (see `docs/guides/midi-panic.md`). The `midi_out`
 flag passed to `attach()` is the adapter's honest claim that the host can
 receive MIDI: the effect and MIDI processor use the descriptor's
-`produces_midi`; the `aumu` instrument passes `false` because it has no host
-MIDI-output path, and must flip that to the descriptor flag in the same change
-that adds one. Tests: `test_au_v2_midi_processor.cpp` (panic reaches the host
-callback), `test_au_v2_effect.cpp` (aufx vs aumf capabilities),
+`produces_midi`, and so does the `aumu` instrument now that it delivers MIDI
+through `kAudioUnitProperty_MIDIOutputCallback`; a new adapter without a host
+MIDI-output path must pass `false`. Tests: `test_au_v2_midi_processor.cpp` and
+`test_au_plugin_state.mm` (panic reaches the host callback),
+`test_au_v2_effect.cpp` (aufx vs aumf capabilities),
 `test_au_v2_instrument_rt.mm`.

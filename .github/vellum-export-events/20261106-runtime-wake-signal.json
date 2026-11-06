@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261106-runtime-wake-signal",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-06T12:00:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/wake_signal.hpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "A new header-only primitive in the exported runtime directory: wakes a sleeping consumer from a realtime producer with no lock and no system call while the consumer is busy. It has no Pulp-only dependency, so the next re-export carries it and Vellum can use it for the same audio-thread-to-worker handoffs. core/runtime/CMakeLists.txt only lists the header in the runtime unit headers, which the export carries with it."
+}

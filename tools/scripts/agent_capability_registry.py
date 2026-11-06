@@ -1614,7 +1614,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/gain.hpp",
-        "fingerprint": "sha256:54651b70d3f4f19684907be44323e35fd4d726d7e9795b04c07eda1b79aab503",
+        "fingerprint": "sha256:26ea4471471e1af735f3d3e10d795212e9a351c89c50f39d45783802107a557c",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
