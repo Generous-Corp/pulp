@@ -574,6 +574,38 @@ The event itself is an append-only JSON file directly under
 adds no authority carries `"disposition": "watch-only-no-authority"` and
 `"authority_effect": "none"`.
 
+## `route_change.py` saying "single-owner Pulp" does not mean no event is owed
+
+Routing answers who owns a path. Receipt mode answers a different question:
+does Vellum's pinned export carry that path? Both of these failed required
+checks that a green routing run and a green `gates.sh` did not predict (#11590,
+#11631, #11633):
+
+- **An exported path needs a `vellum_inherits` event**, including a change to its
+  `CMakeLists.txt`, an added file in an exported source directory, and a new
+  public header. `core/platform/**` is exported even though routing calls it
+  Pulp-owned.
+- **A new public header must be in its unit's `PULP_*_UNIT_HEADERS`** (core/runtime,
+  canvas, events, platform, simd; the design units live in
+  `core/view/cmake/PulpDesignUnits.cmake`). The `pulp.vellum-closure*` ctests that
+  enforce it need a configured build, so they only fail in CI.
+
+`tools/scripts/gates.sh` (and the pre-push hook) now run both with no build, through
+`tools/scripts/vellum_watch_preflight.py`: exit 14 prints the export-event
+skeleton for exactly the paths the real `vellum_freeze_check.py --receipt-mode`
+says are owed, exit 15 prints the exact header-list line to add or remove. Write
+the event with
+
+```bash
+python3 tools/scripts/vellum_watch_preflight.py --fix-export-event \
+  --inherits true|false --rationale "<what changed, and why Vellum does or does not take it>"
+```
+
+`--inherits` is deliberately not defaulted: it is a decision about the next
+re-export. Commit the event; the checker reads the commit range. A new public
+header also changes `docs/status/consumption-profiles.json` (the census lists
+every header) and, under core/midi or core/audio, the capability surface ledger.
+
 ## Validate the contract
 
 Run the closed eight-case suite and projection validator:
