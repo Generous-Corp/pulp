@@ -137,3 +137,71 @@ TEST_CASE("WakeSignal: several producers, one consumer",
     consumer.join();
     REQUIRE_FALSE(lost.load());
 }
+
+// The exact interleaving a lost wakeup needs, made deterministic: the work is
+// published (and notify() runs) after the consumer's first predicate check
+// and before it parks. The consumer must see it in its re-check after
+// publishing `parked`, not sleep until the deadline.
+TEST_CASE("WakeSignal: work published just before parking is not lost", "[runtime][wake-signal]") {
+    WakeSignal wake;
+    std::atomic<bool> published{false};
+    bool injected = false;
+    const auto start = std::chrono::steady_clock::now();
+    const bool ready = wake.wait_for(
+        [&] {
+            if (!injected) {
+                injected = true;
+                published.store(true, std::memory_order_release);
+                wake.notify(); // the consumer has not parked yet: no post
+                return false;
+            }
+            return published.load(std::memory_order_acquire);
+        },
+        2s);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    REQUIRE(ready);
+    REQUIRE(wake.posts() == 0);
+    REQUIRE(elapsed < 1s);
+}
+
+// Both sides released together for each trial, so the producer's publish and
+// the consumer's park race as closely as two threads can. Without the fences
+// a store-load reordering lets each miss the other; that wait then lasts its
+// whole deadline.
+TEST_CASE("WakeSignal: racing publish and park never lose a wakeup",
+          "[runtime][wake-signal][concurrent][race]") {
+    constexpr int kTrials = 20000;
+    constexpr auto kDeadline = 50ms;
+    WakeSignal wake;
+    std::atomic<int> go{0};
+    std::atomic<int> published{0};
+    std::atomic<int> finished{0};
+    std::atomic<bool> stuck{false};
+    int lost = 0;
+    std::thread producer([&] {
+        for (int trial = 1; trial <= kTrials; ++trial) {
+            if (!spin_until([&] { return go.load(std::memory_order_acquire) >= trial; })) {
+                stuck.store(true);
+                return;
+            }
+            published.store(trial, std::memory_order_release);
+            wake.notify();
+            if (!spin_until([&] { return finished.load(std::memory_order_acquire) >= trial; })) {
+                stuck.store(true);
+                return;
+            }
+        }
+    });
+    for (int trial = 1; trial <= kTrials && !stuck.load(); ++trial) {
+        go.store(trial, std::memory_order_release);
+        const auto start = std::chrono::steady_clock::now();
+        const bool ready = wake.wait_for(
+            [&] { return published.load(std::memory_order_acquire) >= trial; }, kDeadline);
+        if (!ready || std::chrono::steady_clock::now() - start >= kDeadline)
+            ++lost;
+        finished.store(trial, std::memory_order_release);
+    }
+    producer.join();
+    REQUIRE_FALSE(stuck.load());
+    REQUIRE(lost == 0);
+}
