@@ -95,6 +95,34 @@ add_test(NAME gpu-runtime-mode-consistency
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_mode.cmake)
 set_tests_properties(gpu-runtime-mode-consistency
     PROPERTIES LABELS "render;gpu-device;link-closure" TIMEOUT 20)
+# One Dawn proc-table installer per image: the device-only consumer always, and
+# the GPU-audio provider probe (render plus gpu_audio) where it is configured.
+if(APPLE AND Python3_Interpreter_FOUND)
+    if(PULP_HAS_GPU_RUNTIME)
+        set(_pulp_gpu_topology_mode gpu-runtime)
+    else()
+        set(_pulp_gpu_topology_mode pulp)
+    endif()
+    set(_pulp_gpu_topology_binaries "$<TARGET_FILE:pulp-test-gpu-device-only-consumer>")
+    if(TARGET pulp-gpu-dawn-shared-io-provider-probe)
+        list(APPEND _pulp_gpu_topology_binaries --provider
+            "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>")
+    endif()
+    add_test(NAME gpu-runtime-installer-topology
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/verify_gpu_runtime_topology.py
+            --mode ${_pulp_gpu_topology_mode} ${_pulp_gpu_topology_binaries})
+    set_tests_properties(gpu-runtime-installer-topology
+        PROPERTIES LABELS "render;gpu-device;link-closure" TIMEOUT 30)
+    unset(_pulp_gpu_topology_mode)
+    unset(_pulp_gpu_topology_binaries)
+endif()
+
+add_test(NAME gpu-runtime-prefix-record
+    COMMAND ${CMAKE_COMMAND}
+        -DMODULE=${CMAKE_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/gpu-runtime-prefix-record
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_record.cmake)
+set_tests_properties(gpu-runtime-prefix-record PROPERTIES LABELS "render;gpu-device" TIMEOUT 20)
 unset(_pulp_platform_defs)
 unset(_pulp_device_api_defs)
 

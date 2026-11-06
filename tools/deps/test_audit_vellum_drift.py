@@ -114,6 +114,47 @@ class RendererLockTests(unittest.TestCase):
         self.assertEqual(status, "unavailable")
 
 
+class GpuRuntimePinTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        (self.root / "tools/cmake").mkdir(parents=True)
+
+    def pin(self, commit: str = COMMIT, version: str = "0.1.10") -> None:
+        (self.root / "tools/cmake/PulpGpuRuntime.cmake").write_text(
+            f'set(PULP_GPU_RUNTIME_COMMIT "{commit}")\nset(PULP_GPU_RUNTIME_VERSION "{version}")\n',
+            encoding="utf-8")
+
+    def entry(self, commit: str = COMMIT, version: str = "0.1.10 (cccccccc)") -> list[dict]:
+        return [{"name": audit.GPU_RUNTIME_ENTRY, "version": version,
+                 "upstream": {"kind": "git-commit", "ref": commit, "commit": commit},
+                 "source_files": ["tools/cmake/PulpGpuRuntime.cmake"]}]
+
+    def test_an_agreeing_pin_passes(self) -> None:
+        self.pin()
+        self.assertEqual(audit.gpu_runtime_pin_agreement(self.entry(), self.root), [])
+
+    def test_a_commit_moved_only_in_cmake_fails(self) -> None:
+        self.pin(commit="d" * 40)
+        problems = audit.gpu_runtime_pin_agreement(self.entry(), self.root)
+        self.assertTrue(problems and "fetches gpu-runtime at" in problems[0])
+
+    def test_a_version_moved_only_in_the_manifest_fails(self) -> None:
+        self.pin()
+        problems = audit.gpu_runtime_pin_agreement(self.entry(version="0.1.11 (cccccccc)"), self.root)
+        self.assertTrue(problems and "expects gpu-runtime 0.1.10" in problems[0])
+
+    def test_a_pin_the_cmake_does_not_declare_fails(self) -> None:
+        (self.root / "tools/cmake/PulpGpuRuntime.cmake").write_text("# no pin\n", encoding="utf-8")
+        self.assertTrue(audit.gpu_runtime_pin_agreement(self.entry(), self.root))
+
+    def test_the_real_tree_agrees(self) -> None:
+        import json
+        manifest = json.loads((ROOT / "tools/deps/manifest.json").read_text())["dependencies"]
+        self.assertEqual(audit.gpu_runtime_pin_agreement(manifest), [])
+
+
 class VellumDriftTests(unittest.TestCase):
     def test_match_passes_and_reads_the_pinned_commit(self) -> None:
         read = reader(vellum_module())

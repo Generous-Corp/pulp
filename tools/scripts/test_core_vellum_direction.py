@@ -161,10 +161,18 @@ class CoreVellumDirectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as empty:
             self.assertEqual(self._run(pathlib.Path(empty)), 2)
 
-    def test_repository_has_no_vellum_edge_and_no_allowlist(self):
+    def test_repository_allows_only_the_counted_gpu_runtime_edge(self):
         self.assertEqual(self.repo_include_allowed, {})
-        self.assertEqual(self.repo_cmake_allowed, {})
+        self.assertTrue(self.repo_cmake_allowed)
+        self.assertEqual({reason for _count, reason in self.repo_cmake_allowed.values()},
+                         {direction._GPU_RUNTIME})
+        include_boundary.ALLOWED["core-vellum"].update(self.repo_include_allowed)
+        direction.ALLOWED_CMAKE.update(self.repo_cmake_allowed)
         self.assertEqual(self._run(REPO), 0)
+
+    def test_repository_fails_without_its_allowlist(self):
+        # Control: the counted edge is real, so the real tree fails without it.
+        self.assertEqual(self._run(REPO), 1)
 
     def test_the_real_provider_with_a_vellum_include_fails(self):
         # Control: the scan reads the real GPU-audio sources, so the include the
@@ -184,6 +192,51 @@ class CoreVellumDirectionTests(unittest.TestCase):
                     "namespace pulp::render::bench {\n  struct PerfCounters;\n}\n")
         self.assertEqual(self._run(), 1)
 
+    def test_forward_declaration_evasions_fail(self):
+        evasions = {
+            "one-line namespace": "namespace pulp::render { class GpuSurface; }\n",
+            "export macro": "namespace pulp::render {\nclass PULP_API GpuCompute;\n}\n",
+            "friend": "class View {\n  friend class GpuSurface;\n};\n",
+            "struct with macro": "namespace pulp::render::bench { struct PULP_EXPORT PerfCounters; }\n",
+            "spaced": "namespace pulp::render {\nclass   GpuSurface ;\n}\n",
+        }
+        for label, text in evasions.items():
+            for suffix in (".hpp", ".inl", ".ipp", ".inc"):
+                with self.subTest(case=label, suffix=suffix):
+                    self._write(f"core/view/include/pulp/view/evasion{suffix}", text)
+                    self.assertEqual(self._run(), 1)
+                    (self.root / f"core/view/include/pulp/view/evasion{suffix}").unlink()
+
+    def test_commented_forward_declarations_do_not_count(self):
+        self._write("core/view/include/pulp/view/doc.hpp",
+                    "// class GpuSurface; is declared in gpu_fwd.hpp\n/* struct PerfCounters; */\n")
+        self.assertEqual(self._run(), 0)
+
+    def test_cmake_outside_core_is_scanned(self):
+        for rel, text in (("CMakeLists.txt", "target_link_libraries(pulp PRIVATE Vellum::Gpu)\n"),
+                          ("tools/cmake/PulpX.cmake", "find_package(VellumUi CONFIG)\n"),
+                          ("tools/cmake/PulpConfig.cmake.in", "find_dependency(Vellum)\n")):
+            with self.subTest(file=rel):
+                self._write(rel, text)
+                self.assertEqual(self._run(), 1)
+                (self.root / rel).unlink()
+
+    def test_plain_targets_and_repository_urls_fail(self):
+        for text in ("target_link_libraries(pulp-audio PRIVATE vellum-graphics)\n",
+                     "FetchContent_Declare(ui GIT_REPOSITORY https://github.com/Generous-Corp/vellum.git)\n",
+                     "FetchContent_Declare(vellum_ui GIT_REPOSITORY x)\n"):
+            with self.subTest(text=text):
+                self._write("core/audio/CMakeLists.txt", text)
+                self.assertEqual(self._run(), 1)
+
+    def test_the_gpu_runtime_edge_is_counted(self):
+        allowed = {("tools/cmake/PulpGpuRuntime.cmake", "find_package(VellumGpuRuntime"): (1, "edge")}
+        self._write("tools/cmake/PulpGpuRuntime.cmake", "find_package(VellumGpuRuntime CONFIG)\n")
+        self.assertEqual(direction.check_cmake(self.root, allowed), 0)
+        self._write("tools/cmake/PulpGpuRuntime.cmake",
+                    "find_package(VellumGpuRuntime CONFIG)\nfind_package(VellumGpuRuntime CONFIG)\n")
+        self.assertEqual(direction.check_cmake(self.root, allowed), 1)
+
     def test_the_forward_header_and_uses_pass(self):
         self._write(direction.GPU_FWD_HEADER, "namespace pulp::render {\nclass GpuSurface;\n}\n")
         self._write("core/view/include/pulp/view/host.hpp",
@@ -194,9 +247,11 @@ class CoreVellumDirectionTests(unittest.TestCase):
     def test_the_real_tree_has_no_raw_gpu_forward_declaration(self):
         self.assertEqual(direction.check_gpu_forward_declarations(REPO), 0)
 
-    def test_gpu_runtime_targets_are_not_vellum_edges(self):
+    def test_gpu_runtime_targets_are_edges_that_must_be_counted(self):
         self._write("core/gpu_audio/CMakeLists.txt",
                     "target_link_libraries(pulp-gpu-audio PRIVATE VellumGpuRuntime::Device)\n")
+        self.assertEqual(self._run(), 1)
+        direction.ALLOWED_CMAKE[("core/gpu_audio/CMakeLists.txt", "VellumGpuRuntime::Device")] = (1, "edge")
         self.assertEqual(self._run(), 0)
         self._write("core/gpu_audio/CMakeLists.txt",
                     "target_link_libraries(pulp-gpu-audio PRIVATE Vellum::Gpu)\n")

@@ -8,7 +8,7 @@
   "capability_families": [
     "render-assets-and-backends"
   ],
-  "rationale": "The macOS GPU device headers under core/render forward to gpu-runtime (the Vellum repository's dependency-free gpu-runtime/ subproject) instead of carrying their own copy: the same types under their Pulp names, so no rendering behavior, design-import, Chromium or packaging authority moves. Non-macOS builds keep the original headers unchanged.",
+  "rationale": "The macOS GPU device headers under core/render forward to gpu-runtime (the Vellum repository's dependency-free gpu-runtime/ subproject) under PULP_GPU_RUNTIME: the same types under their Pulp names. All twelve touched headers change text (a forwarding branch, or their forward declarations moving to pulp/platform/gpu_fwd.hpp), but none changes behavior, and builds without PULP_GPU_RUNTIME compile the original bodies. No rendering behavior, design-import, Chromium or packaging authority moves. Vellum must never define PULP_GPU_RUNTIME when it builds mirrored sources.",
   "tests": [
     "python3 tools/deps/test_audit_vellum_drift.py",
     "python3 tools/scripts/test_core_vellum_direction.py",

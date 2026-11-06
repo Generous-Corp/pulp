@@ -28,6 +28,8 @@ set(PULP_GPU_RUNTIME_VERSION "0.1.10")
 # platform still uses; it keeps that mode compilable where it can gate.
 option(PULP_USE_GPU_RUNTIME "On macOS, forward the GPU device layer to gpu-runtime" ON)
 
+include("${CMAKE_CURRENT_LIST_DIR}/PulpGpuRuntimeRecord.cmake")
+
 set(PULP_HAS_GPU_RUNTIME FALSE)
 if(NOT PULP_USE_GPU_RUNTIME OR NOT (APPLE AND NOT PULP_IOS) OR NOT PULP_SKIA_PROVIDES_DAWN
    OR NOT SKIA_DIR)
@@ -35,6 +37,7 @@ if(NOT PULP_USE_GPU_RUNTIME OR NOT (APPLE AND NOT PULP_IOS) OR NOT PULP_SKIA_PRO
 endif()
 
 if(PULP_GPU_RUNTIME_PREFIX)
+    pulp_check_gpu_runtime_record("${PULP_GPU_RUNTIME_PREFIX}" "${PULP_GPU_RUNTIME_COMMIT}")
     set(GPU_RUNTIME_SKIA_DIR "${SKIA_DIR}")
     find_package(VellumGpuRuntime ${PULP_GPU_RUNTIME_VERSION} EXACT CONFIG REQUIRED
         COMPONENTS Device SkiaLogBridge

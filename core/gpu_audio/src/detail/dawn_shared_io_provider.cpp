@@ -13,7 +13,10 @@
 #include "dawn/native/DawnNative.h"
 #include "webgpu/webgpu_cpp.h"
 
-#if defined(PULP_GPU_AUDIO_HAS_GPU_RUNTIME)
+// The provider uses gpu-runtime's coordinator exactly when the build forwards
+// the device layer to gpu-runtime: the same PULP_GPU_RUNTIME fact every Pulp
+// device header reads, so the two can never disagree and install twice.
+#if defined(PULP_GPU_RUNTIME)
 #include <gpu_runtime/dawn_bootstrap.hpp>
 #include <gpu_runtime/dawn_native_bootstrap.hpp>
 #endif
@@ -65,7 +68,7 @@ ProcBootstrap& proc_bootstrap() {
     return state;
 }
 
-#if defined(PULP_GPU_AUDIO_HAS_GPU_RUNTIME)
+#if defined(PULP_GPU_RUNTIME)
 // gpu-runtime's coordinator owns the image's proc table. Pulp supplies this
 // callback only for the test-only proc-table interposer; production uses the
 // native bootstrap. Both pass through the coordinator's revision, re-entry and
@@ -99,7 +102,7 @@ gpu_runtime::DawnBootstrapResult install_override(const gpu_runtime::DawnBootstr
 
 bool install_exact_proc_table(const std::string& expected, const void* override_for_testing,
                               std::string& reason) {
-#if defined(PULP_GPU_AUDIO_HAS_GPU_RUNTIME)
+#if defined(PULP_GPU_RUNTIME)
     const auto header = gpu_runtime::native_dawn_revision();
     if (header.empty() || (!expected.empty() && expected != header)) {
         reason = "provider_identity_mismatch";

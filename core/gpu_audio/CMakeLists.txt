@@ -108,8 +108,8 @@ if(APPLE AND NOT PULP_IOS AND PULP_SKIA_PROVIDES_DAWN)
     if(PULP_HAS_GPU_RUNTIME)
         # The shared-I/O provider bootstraps Dawn's proc table through
         # gpu-runtime's coordinator, the image's only installer.
+        # PULP_GPU_RUNTIME itself arrives through pulp::platform.
         target_link_libraries(pulp-gpu-audio PRIVATE VellumGpuRuntime::Device)
-        target_compile_definitions(pulp-gpu-audio PRIVATE PULP_GPU_AUDIO_HAS_GPU_RUNTIME=1)
     endif()
 endif()
 

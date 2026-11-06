@@ -41,17 +41,36 @@ import include_boundary  # noqa: E402
 # selection must include the whole root rather than today's named exceptions.
 _SCAN_INPUT_ROOT = "core/."
 CMAKE_ROOT = _SCAN_INPUT_ROOT.rstrip("/.")
-TARGET_RE = re.compile(r"\b[Vv]ellum::[A-Za-z0-9_]+")
+# Vellum::X, vellum::x and any Vellum<Package>::X imported target.
+TARGET_RE = re.compile(r"\b[Vv]ellum[A-Za-z0-9_]*::[A-Za-z0-9_]+")
+# A plain Vellum CMake target or a Vellum repository URL.
+PLAIN_TARGET_RE = re.compile(r"(?<![A-Za-z0-9_./-])vellum-[A-Za-z0-9_-]+")
+REPOSITORY_RE = re.compile(r"github\.com[/:]Generous-Corp/vellum(?:\.git)?\b|\bvellum\.git\b", re.I)
+# The build-system files outside core/ that decide what core links.
+EXTRA_CMAKE_FILES = ("CMakeLists.txt",)
+EXTRA_CMAKE_ROOTS = ("tools/cmake",)
 _COMMAND_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _BRACKET_OPEN_RE = re.compile(r"\[(=*)\[")
 _BRACKET_ARGUMENT_RE = re.compile(r"\s*\[(=*)\[(.*?)\]\1\]", re.S)
 _FIRST_ARGUMENT_RE = re.compile(r'''\s*(?:"((?:\\.|[^"\\])*)"|([^\s()]+))''', re.S)
 
-# (file, reference) -> (count, reason). Empty: core/ has no known Vellum edge.
-# gpu-runtime (VellumGpuRuntime::*, tools/cmake/PulpGpuRuntime.cmake) is the
-# neutral device layer published from the Vellum repository; it depends on
-# neither Pulp nor Vellum, and its target names do not match TARGET_RE.
-ALLOWED_CMAKE: dict[tuple[str, str], tuple[int, str]] = {}
+# (file, reference) -> (count, reason). The one intended edge is gpu-runtime,
+# the GPU device layer published from the Vellum repository's gpu-runtime/
+# subproject: it depends on neither Pulp nor Vellum, and Pulp's macOS device
+# targets forward to it. Every reference to it is counted here, so any other
+# Vellum edge, or one more of these, fails.
+_GPU_RUNTIME = "gpu-runtime: the neutral GPU device layer (tools/cmake/PulpGpuRuntime.cmake)"
+ALLOWED_CMAKE: dict[tuple[str, str], tuple[int, str]] = {
+    ("core/gpu_audio/CMakeLists.txt", "VellumGpuRuntime::Device"): (1, _GPU_RUNTIME),
+    ("core/render/CMakeLists.txt", "VellumGpuRuntime::Device"): (1, _GPU_RUNTIME),
+    ("core/render/CMakeLists.txt", "VellumGpuRuntime::DeviceApi"): (1, _GPU_RUNTIME),
+    ("core/render/CMakeLists.txt", "VellumGpuRuntime::SkiaLogBridge"): (1, _GPU_RUNTIME),
+    ("tools/cmake/PulpConfig.cmake.in", "find_dependency(VellumGpuRuntime"): (1, _GPU_RUNTIME),
+    ("tools/cmake/PulpGpuRuntime.cmake", "FetchContent(vellum_gpu_runtime"): (2, _GPU_RUNTIME),
+    ("tools/cmake/PulpGpuRuntime.cmake", "find_package(VellumGpuRuntime"): (1, _GPU_RUNTIME),
+    ("tools/cmake/PulpGpuRuntime.cmake", "github.com/Generous-Corp/vellum.git"): (1, _GPU_RUNTIME),
+    ("tools/cmake/PulpGpuRuntime.cmake", "vellum-gpu-runtime"): (1, _GPU_RUNTIME),
+}
 
 
 def strip_cmake_comment(line: str) -> str:
@@ -163,27 +182,38 @@ def cmake_references(path: pathlib.Path) -> list[tuple[int, str]]:
     for n, command, body in cmake_commands(text):
         lower = command.lower()
         first = first_cmake_argument(body)
-        if lower == "find_package" and first.casefold() == "vellum":
-            found.append((n, "find_package(Vellum"))
+        if lower in {"find_package", "find_dependency"} and first.casefold().startswith("vellum"):
+            found.append((n, f"{lower}({first}"))
         elif lower in {"fetchcontent_declare", "fetchcontent_makeavailable",
                        "fetchcontent_populate", "fetchcontent_getproperties"} \
-                and first.casefold() == "vellum":
-            found.append((n, "FetchContent(vellum"))
-        elif lower == "externalproject_add" and first.casefold() == "vellum":
-            found.append((n, "ExternalProject_Add(vellum"))
+                and first.casefold().startswith("vellum"):
+            found.append((n, f"FetchContent({first.casefold()}"))
+        elif lower == "externalproject_add" and first.casefold().startswith("vellum"):
+            found.append((n, f"ExternalProject_Add({first.casefold()}"))
         elif lower == "add_subdirectory" and re.search(r"\bvellum\b", body, re.I):
             found.append((n, "add_subdirectory(vellum"))
-    found.extend((text.count("\n", 0, m.start()) + 1, m.group(0))
-                 for m in TARGET_RE.finditer(text))
+    for pattern in (TARGET_RE, PLAIN_TARGET_RE, REPOSITORY_RE):
+        found.extend((text.count("\n", 0, m.start()) + 1, m.group(0))
+                     for m in pattern.finditer(text))
     return found
+
+
+def _is_cmake(path: pathlib.Path) -> bool:
+    return path.is_file() and (path.name == "CMakeLists.txt" or path.suffix == ".cmake"
+                               or path.name.endswith(".cmake.in"))
 
 
 def cmake_files(root: pathlib.Path) -> list[pathlib.Path]:
     base = root / CMAKE_ROOT
     if not base.is_dir():
         return []
-    return [p for p in sorted(base.rglob("*"))
-            if p.is_file() and (p.name == "CMakeLists.txt" or p.suffix == ".cmake")]
+    files = [p for p in sorted(base.rglob("*")) if _is_cmake(p)]
+    files.extend(p for p in (root / name for name in EXTRA_CMAKE_FILES) if _is_cmake(p))
+    for name in EXTRA_CMAKE_ROOTS:
+        extra = root / name
+        if extra.is_dir():
+            files.extend(p for p in sorted(extra.rglob("*")) if _is_cmake(p))
+    return files
 
 
 def check_cmake(root: pathlib.Path,
@@ -230,9 +260,17 @@ def check_cmake(root: pathlib.Path,
 
 GPU_FWD_HEADER = "core/platform/include/pulp/platform/gpu_fwd.hpp"
 GPU_FWD_ROOTS = ("core", "test", "tools", "examples", "inspect", "apple", "packages")
-GPU_FWD_SUFFIXES = {".h", ".hh", ".hpp", ".hxx", ".c", ".cc", ".cpp", ".cxx", ".m", ".mm"}
-GPU_FWD_RE = re.compile(r"^[ \t]*(?:class|struct)[ \t]+(GpuSurface|GpuCompute|PerfCounters)[ \t]*;",
-                        re.MULTILINE)
+GPU_FWD_SUFFIXES = {".h", ".hh", ".hpp", ".hxx", ".c", ".cc", ".cpp", ".cxx", ".m", ".mm",
+                    ".inl", ".ipp", ".inc", ".tpp"}
+# Anywhere on a line, so one-line namespaces, friend declarations and export
+# macros (`class PULP_API GpuSurface;`) count too. Comments are removed first.
+GPU_FWD_RE = re.compile(r"(?:\bfriend\s+)?\b(?:class|struct)\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)*"
+                        r"(GpuSurface|GpuCompute|PerfCounters)\s*;")
+_CPP_COMMENT_RE = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
+
+
+def _without_comments(text: str) -> str:
+    return _CPP_COMMENT_RE.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
 
 
 def check_gpu_forward_declarations(root: pathlib.Path) -> int:
@@ -254,7 +292,7 @@ def check_gpu_forward_declarations(root: pathlib.Path) -> int:
             if relative == GPU_FWD_HEADER:
                 continue
             try:
-                text = path.read_text(encoding="utf-8", errors="replace")
+                text = _without_comments(path.read_text(encoding="utf-8", errors="replace"))
             except OSError:
                 continue
             for match in GPU_FWD_RE.finditer(text):
