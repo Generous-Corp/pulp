@@ -5,12 +5,7 @@
 // deterministic output oracle for every topology/block-size pair. It is intended
 // for paired baseline/candidate runs, not as a CTest timing gate.
 
-#include <pulp/audio/buffer.hpp>
-#include <pulp/format/graph_runtime_executor.hpp>
-#include <pulp/format/process_block.hpp>
-#include <pulp/graph/graph_runtime_plan.hpp>
 #include "harness/rt_allocation_probe.hpp"
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -22,6 +17,10 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <pulp/audio/buffer.hpp>
+#include <pulp/format/graph_runtime_executor.hpp>
+#include <pulp/format/process_block.hpp>
+#include <pulp/graph/graph_runtime_plan.hpp>
 #include <span>
 #include <string_view>
 #include <vector>
