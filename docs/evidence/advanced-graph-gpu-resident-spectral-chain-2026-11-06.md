@@ -9,13 +9,13 @@ adapter, public API, or runtime path.
 
 | Item | Value |
 |---|---|
-| Pulp source | `origin/main` `14a859df310eaaecaedb4a8d0735b51f10c1e853` |
+| Pulp source | merged current `origin/main` `1acc348c2c3c06c9a8f5052c58ec19caf336180d`; evidence head `cb6c07686d90c1d506df5e5e25e9ebded5978458` |
 | Worktree | `evidence/gpu-graph-chain-20261106` |
 | Host/provider | Apple Silicon macOS; WebGPU backend `Metal`; vendor `apple` |
 | Workload | `CpuSpectralStack` vs `GpuSpectralStack`, FFT 2048, hop 512, 16 resident layers, 64 measured hops after 8 warmups |
 | Build | Release, `PULP_BENCHMARK=ON`, governed `cmake --build build --target pulp-gpu-spectral-chain-evidence` |
 | Probe | `test/test_gpu_spectral_chain_evidence.cpp` (advisory standalone executable) |
-| Probe output SHA-256 | `0bffb49e2860e0e675df4272c3fcbcaf0f6f4a0bf3b737a7f300aec71919660e` |
+| Probe output SHA-256 | `96a6520466fd1d5db47d16b422acbea7cf90239939ac980dd3898d6ae112952f` |
 
 The existing GPU spectral correctness suite also passed from this clean source
 (`189 assertions / 13 cases`).
@@ -24,8 +24,8 @@ The existing GPU spectral correctness suite also passed from this clean source
 
 | Backend | min us | p50 us | p95 us | p99 us | max us | mean us | jitter SD us |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| CPU | 126.416 | 130.208 | 167.959 | 683.375 | 1127.750 | 162.345 | 142.233 |
-| GPU resident | 628.416 | 702.625 | 894.208 | 1231.125 | 1305.042 | 742.326 | 131.466 |
+| CPU | 121.000 | 125.791 | 131.625 | 133.833 | 136.000 | 126.633 | 2.993 |
+| GPU resident | 540.375 | 591.500 | 677.292 | 872.334 | 1098.625 | 611.142 | 79.006 |
 
 The GPU path is about 5.7x slower at the median for this workload. Its
 resident spectral payload is 262,144 bytes (magnitude plus phase for 16 × 2048
