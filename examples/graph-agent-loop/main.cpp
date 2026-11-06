@@ -39,7 +39,8 @@ Rendered render(SignalGraph& graph, const std::vector<float>& input, int block_f
     require(result.ok, "render");
     Rendered rendered;
     rendered.blocks = result.blocks_rendered;
-    rendered.samples.assign(result.audio.channel(0), result.audio.channel(0) + input.size());
+    const auto channel = result.audio.channel(0);
+    rendered.samples.assign(channel.begin(), channel.end());
     return rendered;
 }
 
@@ -110,10 +111,22 @@ int main(int argc, char** argv) try {
     require(stage != 0 && output_node != 0, "reload-node-names");
     const auto source = validated.node(stage)->out("audio");
     const auto destination = validated.node(output_node)->in("audio");
+    OfflineSignalGraphHost probe_host(validated);
+    require(probe_host.prepare({.sample_rate = 48000.0,
+                                .block_frames = 4,
+                                .input_channels = 1,
+                                .output_channels = 1}),
+            "probe-prepare");
     require(validated.attach_audio_edge_probe(source, destination) ==
                 SignalGraph::EdgeProbeStatus::Attached,
             "probe-attach");
-    const auto probed = render(validated, input, 4);
+    float* probe_channels[] = {const_cast<float*>(input.data())};
+    const pulp::audio::BufferView<const float> probe_view(probe_channels, 1, input.size());
+    const auto probe_result = probe_host.render({.frame_count = input.size(), .input = probe_view});
+    require(probe_result.ok, "probe-render");
+    Rendered probed;
+    probed.samples.assign(probe_result.audio.channel(0).begin(), probe_result.audio.channel(0).end());
+    probed.blocks = probe_result.blocks_rendered;
     require(probed.samples == baseline.samples, "probe-render-compare");
     pulp::graph::GraphRuntimeProbeSample sample;
     require(validated.read_audio_edge_probe(sample) && sample.frames == 4, "probe-record");
