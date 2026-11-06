@@ -51,6 +51,8 @@ PulpAUMidiProcessor::PulpAUMidiProcessor(AudioComponentInstance ci,
     // Cache the immutable descriptor once: descriptor() returns by value and
     // allocates its std::string members, so the render path must never call it.
     descriptor_ = processor_->descriptor();
+    panic_state_ = processor_->panic_state();
+    panic_state_->attach(descriptor_.produces_midi);
     // Discover the plug-in's bundled factory presets. Empty for a
     // plug-in that ships none, and for any build not loaded from a
     // bundle (a unit-test binary, a standalone host).
@@ -475,7 +477,11 @@ OSStatus PulpAUMidiProcessor::Render(AudioUnitRenderActionFlags& ioActionFlags,
         auto render_lock = state_restore_gate_.lock_for_render();
         if (render_lock) {
             pulp::runtime::ScopedNoAlloc no_alloc_guard;
+            if (panic_state_)
+                service_panic(*processor_, *panic_state_, midi_out_);
             processor_->process(process_buffers, midi_in_, midi_out_, ctx);
+            if (panic_state_)
+                panic_state_->observe_midi_out(midi_out_);
         } else {
             midi_out_.clear();
             midi_out_.clear_sysex();

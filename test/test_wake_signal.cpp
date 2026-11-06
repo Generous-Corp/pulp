@@ -88,18 +88,25 @@ TEST_CASE("WakeSignal: no lost wakeup across many handoffs",
             consumed.store(expected, std::memory_order_release);
         }
     });
+    bool stalled = false;
     for (std::uint64_t i = 1; i <= kHandoffs; ++i) {
-        while (consumed.load(std::memory_order_acquire) + 1 < i) {
-            if (missed.load() != 0)
-                break;
-            std::this_thread::yield();
+        // The consumer either takes handoff i - 1 or reports a miss.
+        if (!spin_until([&] {
+                return missed.load() != 0 || consumed.load(std::memory_order_acquire) + 1 >= i;
+            })) {
+            stalled = true;
+            break;
         }
         if (missed.load() != 0)
             break;
         published.store(i, std::memory_order_release);
         wake.notify();
     }
+    if (stalled)
+        published.store(kHandoffs, std::memory_order_release); // release the consumer
+    wake.notify();
     consumer.join();
+    REQUIRE_FALSE(stalled);
     REQUIRE(missed.load() == 0);
     REQUIRE(consumed.load() == kHandoffs);
     // The consumer parked for at least some handoffs, so the post path ran.

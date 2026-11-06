@@ -1566,3 +1566,12 @@ an unbuffered stderr write), so per-instance happy-path lifecycle messages
 (VST3 initialized / ARA factory published / bus arrangement accepted, and the
 AU v2 and CLAP equivalents) are `log_debug`; keep `log_info` for refusals and
 accommodations a user may need to see.
+
+## Panic requests
+
+The VST3 adapter attaches to `Processor::panic_state()` where it creates the
+processor and wraps `process()` with `service_panic()` before and
+`observe_midi_out()` after, passing the descriptor's `produces_midi` as the
+`midi_out` claim (`docs/guides/midi-panic.md`). Keep both calls on any new
+process path (including f64) or `Processor::request_panic()` silently stops
+working there. Tests: test_vst3_audio_parity.cpp (note-off and legacy CC events on the output event list).

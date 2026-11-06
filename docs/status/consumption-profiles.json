@@ -349,6 +349,7 @@
       "pulp/format/offline_render_host.hpp",
       "pulp/format/offline_sample_bounce.hpp",
       "pulp/format/offline_sample_slot_bounce.hpp",
+      "pulp/format/panic.hpp",
       "pulp/format/param_group_projection.hpp",
       "pulp/format/param_processing.hpp",
       "pulp/format/parameter_text.hpp",
@@ -584,6 +585,7 @@
       "pulp/midi/note_delay.hpp",
       "pulp/midi/note_repeat.hpp",
       "pulp/midi/note_utility_kernels.hpp",
+      "pulp/midi/panic.hpp",
       "pulp/midi/raw_midi_parser.hpp",
       "pulp/midi/routing_utility_kernels.hpp",
       "pulp/midi/rpn_parser.hpp",
@@ -771,6 +773,7 @@
       "pulp/runtime/triple_buffer.hpp",
       "pulp/runtime/udev_monitor.hpp",
       "pulp/runtime/url.hpp",
+      "pulp/runtime/wake_signal.hpp",
       "pulp/runtime/websocket_channel.hpp",
       "pulp/runtime/xml.hpp",
       "pulp/runtime/zip.hpp"
