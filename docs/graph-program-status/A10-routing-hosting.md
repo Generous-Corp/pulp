@@ -2,15 +2,15 @@
 
 Status: **BLOCKED — exact-head installed consumer cannot be configured**
 
-Current `origin/main` is `82a3d1606c715318b69825486b38525077414532`.
+Current `origin/main` is `2c2164d2da39a32a12559d2cc1598aae2628440d`.
 The required graph dependencies are present at exact merged heads:
 
 - G-1 named typed ports: PR [#11428](https://github.com/Generous-Corp/pulp/pull/11428), source head `be70e3c44836605ac1279c65a572e833699e1fbb`, merge `e19f556e67129117ef3a4587bff11fdee16ebf44`.
 - G-9 process-group cleanup: PR [#11667](https://github.com/Generous-Corp/pulp/pull/11667), source head `433d47e2413450323376cbf0b10e6e5ce28e6a2f`, merge `89c9be945120b9553f2983d265677292d4876caa`.
 
 Both merge commits are ancestors of the current main head. Open graph PRs
-#11679 (R2 evidence), #11680 (MPE sidecars), and #11682 (A9) do not own this
-A10 lane.
+#11679 (R2 evidence) is merged into this current main line; #11680 (MPE sidecars)
+and #11682 (A9) remain separate open lanes and do not own this A10 lane.
 
 ## Public API audit
 
@@ -28,11 +28,12 @@ an installed consumer once an exact-head SDK is available:
 
 ## Exact blocker and next safe slice
 
-The exact-head installed SDK for `82a3d1606c715318b69825486b38525077414532`
-is not present in the local SDK-dev store. A bounded probe from this fresh
-worktree also found no `./build/pulp` CLI. The forge-dev SDK installer is known
-to refuse a dirty/non-clean checkout, so creating a consumer against an older
-SDK would produce stale provenance and is not admissible as A10 evidence.
+The exact-head installed SDK for `2c2164d2da39a32a12559d2cc1598aae2628440d`
+is unavailable, so exact-head installed-consumer evidence cannot be produced.
+The available local Forge SDK provenance is stale, and the forge-dev SDK
+installer is known to refuse a dirty/non-clean checkout. Creating a consumer
+against that older SDK would produce stale provenance and is not admissible as
+A10 evidence.
 
 Next safe slice: run the SDK installer from a clean, exact-`origin/main`
 checkout, then add `examples/a10-routing-hosting-consumer` using only the
