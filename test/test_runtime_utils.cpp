@@ -31,6 +31,8 @@
 #include <thread>
 
 #ifndef _WIN32
+#include <cerrno>
+#include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -1186,6 +1188,47 @@ TEST_CASE("run_process terminates POSIX children on timeout", "[runtime][child_p
     REQUIRE(result->exit_code == -1);
     REQUIRE(result->timed_out);
     REQUIRE(elapsed < std::chrono::milliseconds(1500));
+#endif
+}
+
+TEST_CASE("run_process timeout terminates POSIX descendants", "[runtime][child_process]") {
+#if defined(_WIN32) || defined(__ANDROID__)
+    SUCCEED("POSIX process-group cleanup is covered on macOS/Linux");
+#else
+    TemporaryFile marker(".child-process-descendant-pid");
+    const auto pid_path = marker.path();
+    marker.release();
+    std::filesystem::remove(pid_path);
+    auto cleanup = make_scope_guard([&] {
+        std::error_code ec;
+        std::filesystem::remove(pid_path, ec);
+    });
+
+    // The shell records the sleep PID before waiting.  The helper timeout
+    // must terminate both members of the private process group; signalling
+    // only the shell leaves the recorded descendant running under init.
+    const auto result = run_process(
+        "/bin/sh",
+        {"-c", "trap 'exit 0' TERM INT; sleep 30 & child=$!; echo $child > \"$1\"; wait",
+         "sh", pid_path.string()},
+        "", 250);
+    REQUIRE(result.has_value());
+    REQUIRE(result->timed_out);
+
+    std::ifstream pid_file(pid_path);
+    pid_t descendant = -1;
+    pid_file >> descendant;
+    REQUIRE(descendant > 0);
+
+    bool gone = false;
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        if (::kill(descendant, 0) != 0 && errno == ESRCH) {
+            gone = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    REQUIRE(gone);
 #endif
 }
 
