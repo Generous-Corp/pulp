@@ -111,6 +111,17 @@ may be remote transport or scheduling, while long paint/GPU/JavaScript spans
 inside the guest are renderer work. Keep this diagnosis independent from the
 audio callback and never move tracing onto the real-time audio thread.
 
+Keep timed captures separate from functional screenshots and state dumps. Do
+not compile, capture screenshots, or write per-frame diagnostic files during
+the timed workload. Require the intended editor to mount: a successful process
+exit from a fallback editor does not validate the scripted interface.
+
+Record the actual renderer adapter. In a Windows ARM VM, D3D12 may use the
+Microsoft Basic Render Driver (WARP), which executes GPU work in software.
+Compare CPU recording time with explicitly enabled GPU timestamp measurements;
+a cheap paint span does not establish a cheap frame. Qualify native GPU
+performance separately from software rendering and remote display transport.
+
 The Windows editor host selects Skia CPU raster when Dawn identifies D3D12's
 Microsoft WARP adapter (`vendor=microsoft`, `architecture=warp`). WARP may report
 an integrated adapter type, which does not make it hardware accelerated. With
@@ -122,6 +133,38 @@ rendering. Set `PULP_WINDOWS_ALLOW_SOFTWARE_GPU=1` before launching the host to
 retain WARP for explicit GPU qualification or an editor that needs its GPU
 capabilities. Test policy selection and that override in the actual desktop
 session.
+
+For expensive static leaf artwork, `View::set_raster_cached(true)` (or the
+script bridge's `setRasterCached(id, true)`) retains pixels while preserving
+invalidation on content, geometry, scale, and device changes. Select the node
+through an authored semantic marker rather than a generated importer ID. Keep
+live analyzer and modulation layers drawing. Confirm actual reuse through the
+`view_raster_cache_hit`, `view_raster_cache_miss`, and
+`view_raster_cache_bypass` trace events, then compare the same binary with the
+cache off, on, and off again under the same audio and interaction workload.
+
+CPU fallback needs a persistent store too: passing a per-editor
+`RasterSceneCache` to `raster_plugin_scene_rgba()` preserves static pixels across
+its fresh frame surfaces. The Windows host owns that store for its lifetime;
+isolated captures can omit it. Without the store, the trace correctly reports
+cache bypasses. Check those events before comparing CPU fallback with WARP,
+and do not choose a fallback merely because an older, different workload was
+faster. Text raster policy changes discard the CPU store; View invalidation
+handles content, bounds, and backing-scale changes.
+
+Audio capture advances independently of animation time. `HostFramePump` can
+report a nominal resume delta after a long frame; using that delta to throttle
+audio draining can skip another slow frame and overflow a bounded capture
+buffer. Drain `VisualizationBridge` on every delivered frame and throttle UI
+publication separately. For a latest-window analyzer, retain its bounded
+backlog policy and verify sequence progress and dropped-frame counts under
+load; a larger buffer alone does not prove the scheduling defect fixed.
+
+Check initial, maximized, and restored windows using native parent/editor
+client dimensions as well as screenshots. Measure settling latency: a stale
+frame during resize and persistent clipping need different fixes. Preserve
+complete parsed state snapshots, since copying a live JSON file during its
+rewrite can capture an empty or partial document.
 
 ## Optional dependencies stay optional
 
