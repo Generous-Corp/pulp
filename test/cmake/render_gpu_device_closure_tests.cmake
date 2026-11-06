@@ -187,6 +187,11 @@ add_test(NAME gpu-runtime-prefix-record
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/gpu-runtime-prefix-record
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_record.cmake)
 set_tests_properties(gpu-runtime-prefix-record PROPERTIES LABELS "render;gpu-device" TIMEOUT 20)
+add_test(NAME gpu-runtime-benchmark-flavour
+    COMMAND ${CMAKE_COMMAND}
+        -DMODULE=${CMAKE_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_benchmark_flavour.cmake)
+set_tests_properties(gpu-runtime-benchmark-flavour PROPERTIES LABELS "render;gpu-device" TIMEOUT 20)
 unset(_pulp_platform_defs)
 unset(_pulp_device_api_defs)
 

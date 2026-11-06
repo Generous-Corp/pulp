@@ -18,3 +18,30 @@ function(pulp_check_gpu_runtime_record prefix commit)
             "Pulp: the gpu-runtime at ${prefix} was built from '${_built}', not the pinned ${commit}")
     endif()
 endfunction()
+
+# pulp_check_gpu_runtime_benchmark_flavour(<interface-defs> <pulp_benchmark>)
+#
+# gpu-runtime's benchmark hooks change its GpuCompute vtable, and an image links
+# one device library, so its flavour must equal the global PULP_BENCHMARK.
+# VellumGpuRuntime::DeviceApi records the flavour in its interface definitions
+# as GPU_RUNTIME_BENCHMARK or GPU_RUNTIME_BENCHMARK=1; any other value
+# (including =0) is the production flavour.
+function(pulp_check_gpu_runtime_benchmark_flavour defs pulp_benchmark)
+    set(_runtime OFF)
+    foreach(_def IN LISTS defs)
+        if(_def MATCHES "^GPU_RUNTIME_BENCHMARK(=1)?$")
+            set(_runtime ON)
+        endif()
+    endforeach()
+    if(pulp_benchmark)
+        set(_pulp ON)
+    else()
+        set(_pulp OFF)
+    endif()
+    if(NOT _runtime STREQUAL _pulp)
+        message(FATAL_ERROR
+            "Pulp: PULP_BENCHMARK is ${_pulp}, but gpu-runtime was built with "
+            "GPU_RUNTIME_BENCHMARK ${_runtime}; the benchmark flavour changes the "
+            "GpuCompute vtable, so the two must agree")
+    endif()
+endfunction()
