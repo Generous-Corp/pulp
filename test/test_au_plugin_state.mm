@@ -436,6 +436,31 @@ public:
     }
 };
 
+// An instrument that also processes audio: optional main input plus side chain.
+class TestAUInputInstrumentProcessor : public TestAUEffectProcessor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        auto d = TestAUEffectProcessor::descriptor();
+        d.category = pulp::format::PluginCategory::Instrument;
+        d.input_buses = {{"Main In", 2, true}, {"Side Chain", 1, true}};
+        d.accepts_midi = true;
+        return d;
+    }
+};
+
+// A side chain with no main input: the sidechain bus is then the only input
+// bus, at index 0.
+class TestAUSidechainOnlyProcessor : public TestAUEffectProcessor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        auto d = TestAUEffectProcessor::descriptor();
+        d.category = pulp::format::PluginCategory::Instrument;
+        d.input_buses = {{"No In", 0, true}, {"Side Chain", 1, true}};
+        d.accepts_midi = true;
+        return d;
+    }
+};
+
 class TestAULatencyTailEffectProcessor : public TestAUEffectProcessor {
 public:
     TestAULatencyTailEffectProcessor()
@@ -500,6 +525,14 @@ std::unique_ptr<pulp::format::Processor> create_mpe_instrument_processor() {
 
 std::unique_ptr<pulp::format::Processor> create_ump_instrument_processor() {
     return std::make_unique<TestAUUmpInstrumentProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_input_instrument_processor() {
+    return std::make_unique<TestAUInputInstrumentProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_sidechain_only_processor() {
+    return std::make_unique<TestAUSidechainOnlyProcessor>();
 }
 
 std::unique_ptr<pulp::format::Processor> create_sidechain_effect_processor() {
@@ -4064,6 +4097,132 @@ TEST_CASE("AU v3 advertises bundled factory presets and selecting one moves stat
         [bright release];
         [warm release];
         [user release];
+        [unit release];
+    }
+}
+
+namespace {
+
+// Renders one block through the AU v3 unit with a pull block that fills every
+// requested input bus with a constant per bus, and reports which buses were
+// pulled. Shared by the instrument-input cases below.
+struct AUv3InputRender {
+    NSInteger main_pulls = 0;
+    NSInteger sidechain_pulls = 0;
+    float left[8] = {};
+    float right[8] = {};
+};
+
+AUAudioUnitStatus render_with_inputs(PulpAudioUnit* unit, AUv3InputRender& out,
+                                     NSInteger sidechain_bus) {
+    constexpr UInt32 kFrames = 8;
+    struct StereoBufferList {
+        AudioBufferList list;
+        AudioBuffer extra[1];
+    } output{};
+    output.list.mNumberBuffers = 2;
+    output.list.mBuffers[0] = {1, kFrames * sizeof(float), out.left};
+    output.list.mBuffers[1] = {1, kFrames * sizeof(float), out.right};
+
+    __block NSInteger main_pulls = 0;
+    __block NSInteger sidechain_pulls = 0;
+    AURenderPullInputBlock pull = ^AUAudioUnitStatus(
+        AudioUnitRenderActionFlags*, const AudioTimeStamp*, AUAudioFrameCount frameCount,
+        NSInteger inputBusNumber, AudioBufferList* inputData) {
+      const bool is_sidechain = inputBusNumber == sidechain_bus;
+      if (is_sidechain)
+          ++sidechain_pulls;
+      else
+          ++main_pulls;
+      for (UInt32 ch = 0; ch < inputData->mNumberBuffers; ++ch) {
+          auto* samples = static_cast<float*>(inputData->mBuffers[ch].mData);
+          for (AUAudioFrameCount frame = 0; frame < frameCount; ++frame)
+              samples[frame] = is_sidechain ? 0.75f : 0.125f;
+      }
+      return noErr;
+    };
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    AUInternalRenderBlock block = [unit internalRenderBlock];
+    REQUIRE(block != nil);
+    const auto status = block(&flags, &timestamp, kFrames, 0, &output.list, nil, pull);
+    out.main_pulls = main_pulls;
+    out.sidechain_pulls = sidechain_pulls;
+    return status;
+}
+
+} // namespace
+
+TEST_CASE("AU v3 instrument with declared inputs exposes and routes both input buses",
+          "[au][auv3][audio][instrument][sidechain]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_MusicDevice;
+        desc.componentSubType = 'TstI';
+        desc.componentManufacturer = 'Plup';
+        ScopedFactoryRegistration registration(create_input_instrument_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit = [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                                          options:0
+                                                                            error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE([unit inputBusses].count == 2u);
+        REQUIRE([unit inputBusses][0].format.channelCount == 2u);
+        REQUIRE([unit inputBusses][1].format.channelCount == 1u);
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+
+        AUv3InputRender render;
+        REQUIRE(render_with_inputs(unit, render, /*sidechain_bus=*/1) == noErr);
+        REQUIRE(render.main_pulls == 1);
+        REQUIRE(render.sidechain_pulls == 1);
+        REQUIRE(processor->last_process_buffers_main_input_channels == 2);
+        REQUIRE(processor->last_process_buffers_sidechain_channels == 1);
+        REQUIRE_THAT(processor->last_process_buffers_sidechain_first_sample,
+                     WithinAbs(0.75f, 1e-6f));
+
+        [unit deallocateRenderResources];
+        [unit release];
+    }
+}
+
+TEST_CASE("AU v3 pulls a side chain declared without a main input from bus 0",
+          "[au][auv3][audio][instrument][sidechain]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_MusicDevice;
+        desc.componentSubType = 'TstJ';
+        desc.componentManufacturer = 'Plup';
+        ScopedFactoryRegistration registration(create_sidechain_only_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit = [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                                          options:0
+                                                                            error:&error];
+        REQUIRE(unit != nil);
+        // No main input bus was created, so the side chain is the only input
+        // bus and must be pulled as bus 0.
+        REQUIRE([unit inputBusses].count == 1u);
+        REQUIRE([unit inputBusses][0].format.channelCount == 1u);
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+
+        AUv3InputRender render;
+        REQUIRE(render_with_inputs(unit, render, /*sidechain_bus=*/0) == noErr);
+        REQUIRE(render.main_pulls == 0);
+        REQUIRE(render.sidechain_pulls == 1);
+        REQUIRE(processor->last_process_buffers_main_input_channels == 0);
+        REQUIRE(processor->last_process_buffers_sidechain_channels == 1);
+        REQUIRE_THAT(processor->last_process_buffers_sidechain_first_sample,
+                     WithinAbs(0.75f, 1e-6f));
+
+        [unit deallocateRenderResources];
         [unit release];
     }
 }
