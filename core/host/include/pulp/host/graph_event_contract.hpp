@@ -341,6 +341,10 @@ class GraphAuthoredEventLane final {
         ++attempts_;
         counters_.attempts = attempts_;
         const auto sequence = sequence_++;
+        // Expose the next producer-local sequence alongside the per-sample
+        // attempt counters. Invalid and overflowed attempts consume sequence
+        // identity, while the latched AttemptLimit refusal below does not.
+        counters_.sequence = sequence_;
         auto refuse = [&](GraphEventResult result) {
             ++counters_.diagnostic_refusals;
             return result;
