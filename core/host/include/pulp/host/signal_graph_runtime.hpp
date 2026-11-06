@@ -1002,6 +1002,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
     };
 
     struct NodeRuntime {
+        NodeRuntime() : mpe_in(false), mpe_out(false) {}
+
         // Per-node output-port channel storage (interleaved per-port, flat).
         // data_ has size num_output_ports * max_block_size_; channel_ptrs_[p]
         // points at data_[p * max_block_size_].
