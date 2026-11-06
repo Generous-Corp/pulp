@@ -316,7 +316,8 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
         auto edge = std::make_unique<Edge>();
         edge->stamps.resize(capacity);
         edge->bins.resize(capacity * bins);
-        edge->view = {edge->stamps, edge->bins, 0, static_cast<std::uint32_t>(bins)};
+        edge->view = {edge->stamps,     edge->bins, 0, static_cast<std::uint32_t>(bins),
+                      source->contract, false,      0};
         destination->input = &edge->view;
         source->outputs.push_back(&edge->view);
         edges.push_back(std::move(edge));

@@ -24,6 +24,7 @@ class SpectralRuntimeBank {
         NodeId root = 0;
         NodeType type;
         SpectralIdentity identity;
+        graph::SpectralFrameContract contract;
         std::optional<QualifiedSpectralStage> stage;
         std::unique_ptr<signal::SpectralFrameEngine> engine;
         std::vector<std::complex<float>> working;
@@ -38,7 +39,8 @@ class SpectralRuntimeBank {
         std::int64_t first_error_position = 0;
 
         Node(const GraphNode& n)
-            : id(n.id), type(n.type), identity(*n.spectral_identity), stage(n.spectral_stage) {}
+            : id(n.id), type(n.type), identity(*n.spectral_identity),
+              contract(identity.frame_contract()), stage(n.spectral_stage) {}
         void error(SpectralError e) noexcept {
             if (first_error == SpectralError::None) {
                 first_error = e;
@@ -87,6 +89,7 @@ class SpectralRuntimeBank {
                 }
             }
             for (auto* out : outputs) {
+                out->contract = contract;
                 out->stamps[out->count] = {epoch, sequence, origin, origin + identity.fft_size()};
                 std::copy(working.begin(), working.end(),
                           out->bins.begin() + out->count * working.size());
@@ -125,8 +128,10 @@ class SpectralRuntimeBank {
                     n.fatal(n.origin, SpectralError::ChronologyExhausted);
             } else if (n.type != NodeType::SpectralAnalysis && n.fatal_origin == limit) {
                 const auto* batch = ctx.spectral_input;
-                if (!batch)
+                if (!batch || batch->contract != n.contract) {
+                    n.error(SpectralError::IdentityMismatch);
                     return false;
+                }
                 std::uint32_t cursor = 0;
                 while (n.origin + n.identity.fft_size() <= n.output_clock + count) {
                     if (batch->fatal && n.origin >= batch->fatal_origin) {

@@ -459,6 +459,26 @@ TEST_CASE("Unsolicited duplicate frames never advance the scheduled grid",
     REQUIRE(stage->outputs.front()->count == 0);
 }
 
+TEST_CASE("A mismatched canonical frame contract fails closed",
+          "[host][spectral-fault][spectral-contract]") {
+    FaultGraph f;
+    std::array<float, 512> input{}, output{};
+    f.process(f.analysis, input, output);
+    auto* stage = f.bank.find(f.stage);
+    stage->input->contract.hop += 1;
+    f.bank.begin_block();
+    const float* ip[] = {input.data()};
+    float* op[] = {output.data()};
+    pulp::format::GraphRuntimeNodeProcessContext ctx;
+    ctx.node_inputs = {ip, 1, input.size()};
+    ctx.node_outputs = {op, 1, output.size()};
+    ctx.spectral_input = stage->input;
+    pulp::format::ProcessBlock block;
+    REQUIRE_FALSE(pulp::host::SpectralRuntimeBank::Node::process(block, ctx, stage));
+    REQUIRE(stage->first_error == pulp::host::SpectralError::IdentityMismatch);
+    REQUIRE(stage->sequence == 0);
+}
+
 TEST_CASE("Mailbox refusal preserves ingress and egress exactly once",
           "[host][spectral-transition][spectral-mailbox]") {
     using namespace pulp::host;
