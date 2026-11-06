@@ -664,6 +664,43 @@ TEST_CASE("AU v2 instrument reports unconnected inputs as absent",
     instrument.DoCleanup();
 }
 
+TEST_CASE("AU v2 instrument refuses an input and output channel pair it does not advertise",
+          "[au][au-v2][instrument][sidechain]") {
+    ScopedFactoryRegistration registration(create_input_instrument);
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    UInt32 max_frames = 64;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    const auto configure = [&](UInt32 in_ch, UInt32 out_ch) {
+        const auto in_format = make_float_format(48000.0, in_ch);
+        const auto out_format = make_float_format(48000.0, out_ch);
+        REQUIRE(instrument.Input(0).SetStreamFormat(in_format) == noErr);
+        REQUIRE(instrument.GetOutput(0)->SetStreamFormat(out_format) == noErr);
+    };
+    // The table is {0,1} {0,2} {1,1} {2,2}: the pairs auval probes and the
+    // unit must refuse are exactly the ones outside it.
+    SECTION("3 in / 1 out is refused, as auval sets it") {
+        configure(3, 1);
+        REQUIRE(instrument.DoInitialize() == kAudioUnitErr_FormatNotSupported);
+    }
+    SECTION("1 in / 2 out is refused") {
+        configure(1, 2);
+        REQUIRE(instrument.DoInitialize() == kAudioUnitErr_FormatNotSupported);
+    }
+    SECTION("2 in / 2 out initializes") {
+        configure(2, 2);
+        REQUIRE(instrument.DoInitialize() == noErr);
+        instrument.DoCleanup();
+    }
+    SECTION("0 in / 2 out initializes: the optional input left unconnected") {
+        configure(0, 2);
+        REQUIRE(instrument.DoInitialize() == noErr);
+        instrument.DoCleanup();
+    }
+}
+
 TEST_CASE("AU v2 instrument refuses a side-chain rate that differs from the output",
           "[au][au-v2][instrument][sidechain]") {
     ScopedFactoryRegistration registration(create_input_instrument);
