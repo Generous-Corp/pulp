@@ -108,7 +108,7 @@ TEST_CASE("BufferingReader: a full buffer refills promptly when the audio thread
     REQUIRE(std::chrono::steady_clock::now() - start < 300ms);
     // No sample lost or repeated across the refill.
     REQUIRE(reader.read(out.data(), 2048, 2) == 2048);
-    REQUIRE(out[0] == 2048.0f);
+    REQUIRE(out[0] == static_cast<float>(2048 % 1000));
     REQUIRE(out[2 * 2047] == static_cast<float>(4095 % 1000));
     reader.stop();
 }
