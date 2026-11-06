@@ -23,13 +23,19 @@ endfunction()
 #
 # gpu-runtime's benchmark hooks change its GpuCompute vtable, and an image links
 # one device library, so its flavour must equal the global PULP_BENCHMARK.
-# VellumGpuRuntime::DeviceApi records the flavour in its interface definitions
-# as GPU_RUNTIME_BENCHMARK or GPU_RUNTIME_BENCHMARK=1; any other value
-# (including =0) is the production flavour.
+# VellumGpuRuntime::DeviceApi records the flavour in its interface definitions.
+# Every consumer of the macro tests whether it is defined (#ifdef), so any
+# GPU_RUNTIME_BENCHMARK entry, whatever its value (=0 included), is the
+# benchmark flavour. An entry inside a generator expression cannot be read at
+# configure time and is refused rather than guessed.
 function(pulp_check_gpu_runtime_benchmark_flavour defs pulp_benchmark)
     set(_runtime OFF)
     foreach(_def IN LISTS defs)
-        if(_def MATCHES "^GPU_RUNTIME_BENCHMARK(=1)?$")
+        if(_def MATCHES "\\$<" AND _def MATCHES "GPU_RUNTIME_BENCHMARK")
+            message(FATAL_ERROR
+                "Pulp: gpu-runtime records GPU_RUNTIME_BENCHMARK through a generator "
+                "expression ('${_def}'), so its benchmark flavour cannot be checked")
+        elseif(_def MATCHES "^GPU_RUNTIME_BENCHMARK(=.*)?$")
             set(_runtime ON)
         endif()
     endforeach()

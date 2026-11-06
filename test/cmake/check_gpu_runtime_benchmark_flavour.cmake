@@ -1,6 +1,7 @@
 # Drives pulp_check_gpu_runtime_benchmark_flavour() through every pairing of
 # gpu-runtime's recorded flavour and PULP_BENCHMARK; each case runs in a child
-# cmake so a refusal's FATAL_ERROR does not end this script.
+# cmake so a refusal's FATAL_ERROR does not end this script. Consumers test the
+# macro with #ifdef, so =0 is the benchmark flavour.
 #   cmake -DMODULE=<PulpGpuRuntimeRecord.cmake> -P check_gpu_runtime_benchmark_flavour.cmake
 cmake_minimum_required(VERSION 3.24)
 include("${MODULE}")
@@ -16,8 +17,9 @@ set(_cases
     "bare-benchmark|GPU_RUNTIME_BENCHMARK|ON|pass"
     "benchmark-package-production-pulp|GPU_RUNTIME_BENCHMARK=1|OFF|refuse"
     "production-package-benchmark-pulp||ON|refuse"
-    "explicit-zero|GPU_RUNTIME_BENCHMARK=0|OFF|pass"
-    "explicit-zero-benchmark-pulp|GPU_RUNTIME_BENCHMARK=0|ON|refuse")
+    "explicit-zero-production-pulp|GPU_RUNTIME_BENCHMARK=0|OFF|refuse"
+    "explicit-zero-benchmark-pulp|GPU_RUNTIME_BENCHMARK=0|ON|pass"
+    "generator-expression|$<$<CONFIG:Release>:GPU_RUNTIME_BENCHMARK=1>|OFF|refuse")
 foreach(_case IN LISTS _cases)
     string(REPLACE "|" ";" _fields "${_case}")
     list(LENGTH _fields _count)
