@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261106-context-menu-switches-cursor",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-06T18:30:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/view/include/pulp/view/context_menu.hpp",
+    "core/view/src/context_menu.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Shared ContextMenu presentation: toggle rows paint as switches, a new Item::tab style paints a selecting toggle with a leading accent bar, the slider track and thumb leave the accent colour so the thumb reads on a hovered row, and hovering a slider row shows the pointer cursor. Pure widget behaviour with no Pulp-only dependency, so the next re-export carries it and Vellum menus get the same presentation."
+}
