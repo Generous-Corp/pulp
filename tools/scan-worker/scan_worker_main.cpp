@@ -72,6 +72,11 @@ std::string json_escape(std::string_view text) {
 std::string json_descriptor(const pulp::host::PluginInfo& info) {
     std::string out;
     out += "{\"name\":\"" + json_escape(info.name) + "\",";
+    if (info.identity_evidence)
+        out +=
+            "\"identity_evidence\":\"" +
+            json_escape(pulp::host::serialize_plugin_identity_evidence(*info.identity_evidence)) +
+            "\",";
     out += "\"manufacturer\":\"" + json_escape(info.manufacturer) + "\",";
     out += "\"version\":\"" + json_escape(info.version) + "\",";
     out += "\"unique_id\":\"" + json_escape(info.unique_id) + "\",";
