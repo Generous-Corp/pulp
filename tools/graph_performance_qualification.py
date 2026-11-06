@@ -31,6 +31,15 @@ FIXTURE_VERSION = "graph_r2_measurement_v1"
 SHAPES = ("passthrough", "chain", "fan-out")
 SCALES = (1, 4, 16, 64)
 BLOCKS = (16, 32, 64, 128, 512)
+RUN_CONSTANTS = {
+    "warmup": 500,
+    "iterations": 100000,
+    "samples": 31,
+}
+ACTIVATION_FIELDS = ("activation_p50_ns", "activation_p99_sample_ns", "activation_max_ns")
+TIMING_FIELDS = ("p50_ns", "p99_sample_ns", "max_ns", "jitter_ns", "observed_wcet_proxy_ns")
+TIMED_ALLOCATION_FIELDS = ("timed_allocations", "timed_allocation_samples")
+FIXTURE_SOURCE = Path("test/test_graph_r2_measurement.cpp")
 
 
 class ReceiptError(ValueError):
@@ -76,6 +85,11 @@ def _bits_float(value: int) -> float:
     return struct.unpack("<f", struct.pack("<I", value))[0]
 
 
+def _ordered_float_bits(value: int) -> int:
+    """Map IEEE-754 float32 bits to monotonically ordered integer bits."""
+    return (~value & 0xFFFFFFFF) if value & 0x80000000 else (value | 0x80000000)
+
+
 def expected_output_bits(shape: str, scale: int) -> int:
     # This mirrors fixed_input(frame=0) and the fixture's fan-out reduction.
     value = _float32(-0.73)
@@ -92,10 +106,23 @@ def _tokens(line: str) -> dict[str, str]:
 
 
 def parse_output(stdout: str) -> list[dict[str, Any]]:
-    """Parse the benchmark's activation/timing rows and require 40 cells."""
+    """Parse the benchmark's raw activation/timing rows and require 40 cells."""
     cells: dict[tuple[str, int, int], dict[str, Any]] = {}
+    header_seen = False
+    overhead_ns: float | None = None
     for line_number, line in enumerate(stdout.splitlines(), 1):
+        if line.strip() == FIXTURE_VERSION:
+            header_seen = True
+            continue
         fields = _tokens(line)
+        if line.startswith("graph_direct_copy_benchmark_v1"):
+            try:
+                overhead_ns = float(fields["timer_overhead_ns"])
+            except (KeyError, ValueError) as exc:
+                raise ReceiptError(f"line {line_number}: malformed timer overhead") from exc
+            if not math.isfinite(overhead_ns) or overhead_ns < 0:
+                raise ReceiptError(f"line {line_number}: invalid timer overhead")
+            continue
         if "shape" not in fields or "scale" not in fields or "block" not in fields:
             continue
         try:
@@ -109,18 +136,21 @@ def parse_output(stdout: str) -> list[dict[str, Any]]:
             if "timing" in cell:
                 raise ReceiptError(f"line {line_number}: duplicate timing row for {key!r}")
             try:
+                required = ("warmup", "iterations", "samples", "oracle", "process_allocations",
+                            *TIMED_ALLOCATION_FIELDS, "output_bits", *TIMING_FIELDS)
+                if any(name not in fields for name in required):
+                    raise KeyError("complete timing fields")
                 cell.update(
                     timing={
-                        name: float(fields[name])
-                        for name in ("p50_ns", "p99_sample_ns", "max_ns", "jitter_ns",
-                                     "observed_wcet_proxy_ns")
-                        if name in fields
+                        name: float(fields[name]) for name in TIMING_FIELDS
                     },
                     warmup=int(fields["warmup"]),
                     iterations=int(fields["iterations"]),
                     samples=int(fields["samples"]),
                     oracle=fields["oracle"],
                     process_allocations=int(fields["process_allocations"]),
+                    timed_allocations=int(fields["timed_allocations"]),
+                    timed_allocation_samples=int(fields["timed_allocation_samples"]),
                     output_bits=int(fields["output_bits"].removeprefix("0x"), 16),
                 )
             except (KeyError, ValueError) as exc:
@@ -129,17 +159,18 @@ def parse_output(stdout: str) -> list[dict[str, Any]]:
             if "activation" in cell:
                 raise ReceiptError(f"line {line_number}: duplicate activation row for {key!r}")
             try:
+                if any(name not in fields for name in (*ACTIVATION_FIELDS, "scratch_slots")):
+                    raise KeyError("complete activation fields")
                 cell.update(
                     activation={
-                        name: float(fields[name])
-                        for name in ("activation_p50_ns", "activation_p99_sample_ns",
-                                     "activation_max_ns")
-                        if name in fields
+                        name: float(fields[name]) for name in ACTIVATION_FIELDS
                     },
                     scratch_slots=int(fields["scratch_slots"]),
                 )
             except (KeyError, ValueError) as exc:
                 raise ReceiptError(f"line {line_number}: malformed activation row") from exc
+    if not header_seen or overhead_ns is None:
+        raise ReceiptError("benchmark header or timer overhead is missing")
     if frozenset(cells) != EXPECTED_KEYS:
         missing = sorted(EXPECTED_KEYS - cells.keys())
         extra = sorted(cells.keys() - EXPECTED_KEYS)
@@ -147,7 +178,36 @@ def parse_output(stdout: str) -> list[dict[str, Any]]:
     for key, cell in cells.items():
         if "activation" not in cell or "timing" not in cell:
             raise ReceiptError(f"cell {key!r} lacks activation or timing row")
+        cell["timer_overhead_ns"] = overhead_ns
+        _validate_output_cell(cell, key)
     return [cells[key] for key in sorted(cells)]
+
+
+def _validate_output_cell(cell: dict[str, Any], key: tuple[str, int, int]) -> None:
+    activation = cell["activation"]
+    timing = cell["timing"]
+    for name, value in (*activation.items(), *timing.items()):
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ReceiptError(f"invalid nonnegative timing field {name!r} for {key!r}")
+    if not (activation["activation_p50_ns"] <= activation["activation_p99_sample_ns"] <=
+            activation["activation_max_ns"]):
+        raise ReceiptError(f"activation timing order is invalid for {key!r}")
+    if not (timing["p50_ns"] <= timing["p99_sample_ns"] <= timing["max_ns"]):
+        raise ReceiptError(f"timing order is invalid for {key!r}")
+    if timing["jitter_ns"] > timing["max_ns"]:
+        raise ReceiptError(f"timing jitter is implausible for {key!r}")
+    if timing["observed_wcet_proxy_ns"] != timing["max_ns"]:
+        raise ReceiptError(f"WCET proxy must equal max timing for {key!r}")
+    for name in ("warmup", "iterations", "samples", "process_allocations",
+                 "timed_allocations", "timed_allocation_samples", "scratch_slots"):
+        if not isinstance(cell.get(name), int) or cell[name] < 0:
+            raise ReceiptError(f"invalid count field {name!r} for {key!r}")
+    if cell["warmup"] != RUN_CONSTANTS["warmup"] or cell["iterations"] != RUN_CONSTANTS["iterations"]:
+        raise ReceiptError(f"run constants are inconsistent for {key!r}")
+    if cell["samples"] != RUN_CONSTANTS["samples"]:
+        raise ReceiptError(f"timing sample count is inconsistent for {key!r}")
+    if cell["timed_allocation_samples"] != cell["samples"]:
+        raise ReceiptError(f"timed allocation samples are inconsistent for {key!r}")
 
 
 def _cache_values(build_dir: Path) -> dict[str, str]:
@@ -186,7 +246,12 @@ def make_receipt(
     compiler = values.get("CMAKE_CXX_COMPILER", "unknown")
     compiler_id = values.get("CMAKE_CXX_COMPILER_ID", "unknown")
     compiler_version = values.get("CMAKE_CXX_COMPILER_VERSION", "unknown")
+    fixture_source = root / FIXTURE_SOURCE
+    _require(fixture_source.is_file(), f"fixture source does not exist: {fixture_source}")
     cells = parse_output(stdout)
+    timer_overhead_ns = cells[0]["timer_overhead_ns"]
+    for cell in cells:
+        cell.pop("timer_overhead_ns", None)
     for cell in cells:
         cell["expected_output_bits"] = expected_output_bits(cell["shape"], cell["scale"])
     receipt: dict[str, Any] = {
@@ -199,6 +264,10 @@ def make_receipt(
             "hosted plugins, fleet execution, or final G-12 flagship coverage."
         ),
         "source_sha": _source_sha(root),
+        "source_fixture": {
+            "path": FIXTURE_SOURCE.as_posix(),
+            "sha256": sha256_file(fixture_source),
+        },
         "executable": _relative_path(executable, root),
         "executable_sha256": sha256_file(executable),
         "platform": {
@@ -227,9 +296,10 @@ def make_receipt(
         },
         "run": {
             "returncode": returncode,
-            "warmup_blocks": 500,
-            "timed_blocks": 100000,
-            "timing_samples": 31,
+            "warmup_blocks": RUN_CONSTANTS["warmup"],
+            "timed_blocks": RUN_CONSTANTS["iterations"],
+            "timing_samples": RUN_CONSTANTS["samples"],
+            "timer_overhead_ns": timer_overhead_ns,
         },
         "artifacts": {
             "raw_stdout": {
@@ -239,6 +309,10 @@ def make_receipt(
             "raw_stderr": {
                 "path": _relative_path(stderr_path, stderr_path.parent),
                 "sha256": sha256_file(stderr_path),
+            },
+            "source_fixture": {
+                "path": "source-fixture.cpp",
+                "sha256": sha256_file(fixture_source),
             },
         },
     }
@@ -266,6 +340,14 @@ def validate_receipt(receipt_path: Path) -> None:
     executable_sha = receipt.get("executable_sha256")
     _require(isinstance(executable_sha, str) and re.fullmatch(r"[0-9a-f]{64}", executable_sha) is not None,
              "executable_sha256 must be a SHA-256")
+    source_fixture = receipt.get("source_fixture")
+    _require(isinstance(source_fixture, dict), "source fixture provenance is missing")
+    _require(isinstance(source_fixture.get("path"), str) and
+             re.fullmatch(r"test/test_graph_r2_measurement\.cpp", source_fixture["path"]),
+             "source fixture path is not bound to the benchmark fixture")
+    _require(isinstance(source_fixture.get("sha256"), str) and
+             re.fullmatch(r"[0-9a-f]{64}", source_fixture["sha256"]),
+             "source fixture hash is missing")
     matrix = receipt.get("matrix")
     _require(isinstance(matrix, dict), "matrix is missing")
     _require(matrix.get("shapes") == list(SHAPES), "matrix shape dimensions mismatch")
@@ -290,21 +372,41 @@ def validate_receipt(receipt_path: Path) -> None:
                  f"process allocations were nonzero for {key!r}")
         actual_bits = cell.get("output_bits")
         expected_bits = cell.get("expected_output_bits")
-        _require(isinstance(actual_bits, int) and isinstance(expected_bits, int),
+        _require(isinstance(actual_bits, int) and isinstance(expected_bits, int) and
+                 0 <= actual_bits <= 0xFFFFFFFF and 0 <= expected_bits <= 0xFFFFFFFF,
                  f"output oracle fields are malformed for {key!r}")
-        _require(abs(_bits_float(actual_bits) - _bits_float(expected_bits)) <= 1.0e-4,
-                 f"output oracle mismatch for {key!r}")
         _require(cell.get("expected_output_bits") == expected_output_bits(key[0], key[1]),
                  f"fixture expected output mismatch for {key!r}")
+        max_ulp = max(1, key[1] // 8) if key[0] == "fan-out" else 0
+        _require(abs(_ordered_float_bits(actual_bits) - _ordered_float_bits(expected_bits)) <= max_ulp,
+                 f"deterministic output oracle mismatch for {key!r}")
         _require(isinstance(cell.get("activation"), dict), f"activation missing for {key!r}")
+        _require(set(cell["activation"]) == set(ACTIVATION_FIELDS),
+                 f"activation fields are incomplete for {key!r}")
         _require(isinstance(cell.get("timing"), dict), f"timing missing for {key!r}")
-        for lane in (cell["activation"], cell["timing"]):
-            _require(all(isinstance(number, (int, float)) and math.isfinite(number)
-                         for number in lane.values()), f"non-finite timing field for {key!r}")
+        _require(set(cell["timing"]) == set(TIMING_FIELDS),
+                 f"timing fields are incomplete for {key!r}")
+        _validate_output_cell(cell, key)
+        _require(cell.get("timed_allocations") == 0,
+                 f"timed allocations were nonzero for {key!r}")
     _require(frozenset(seen) == EXPECTED_KEYS, "matrix does not cover the expected cells")
+    run = receipt.get("run")
+    _require(isinstance(run, dict), "run metadata is missing")
+    _require(run.get("returncode") == 0, "benchmark did not exit successfully")
+    _require(run.get("warmup_blocks") == RUN_CONSTANTS["warmup"], "warmup constant mismatch")
+    _require(run.get("timed_blocks") == RUN_CONSTANTS["iterations"], "timed block constant mismatch")
+    _require(run.get("timing_samples") == RUN_CONSTANTS["samples"], "timing sample constant mismatch")
+    _require(isinstance(run.get("timer_overhead_ns"), (int, float)) and
+             math.isfinite(run["timer_overhead_ns"]) and run["timer_overhead_ns"] >= 0,
+             "timer overhead is invalid")
+    profile = receipt.get("build_profile")
+    _require(isinstance(profile, dict), "build profile is missing")
+    _require(profile.get("CMAKE_BUILD_TYPE") == "Release", "receipt is not a Release build")
+    _require(profile.get("PULP_GRAPH_DIRECT_COPY_BENCHMARK") == "ON",
+             "receipt does not prove the benchmark build option")
     artifacts = receipt.get("artifacts")
     _require(isinstance(artifacts, dict), "artifacts are missing")
-    for name in ("raw_stdout", "raw_stderr"):
+    for name in ("raw_stdout", "raw_stderr", "source_fixture"):
         artifact = artifacts.get(name)
         _require(isinstance(artifact, dict), f"{name} artifact is missing")
         relative = artifact.get("path")
@@ -314,7 +416,24 @@ def validate_receipt(receipt_path: Path) -> None:
         _require(path.parent == receipt_path.parent.resolve(), f"{name} escapes receipt directory")
         _require(path.is_file(), f"{name} artifact is missing on disk")
         _require(artifact.get("sha256") == sha256_file(path), f"{name} digest mismatch")
-    _require(receipt.get("run", {}).get("returncode") == 0, "benchmark did not exit successfully")
+        if name == "source_fixture":
+            _require(artifact.get("sha256") == source_fixture["sha256"],
+                     "source fixture artifact is not bound to recorded fixture hash")
+    raw_stdout_path = (receipt_path.parent / artifacts["raw_stdout"]["path"]).resolve()
+    parsed_cells = parse_output(raw_stdout_path.read_text(encoding="utf-8"))
+    parsed_timer_overhead = parsed_cells[0]["timer_overhead_ns"]
+    for cell in parsed_cells:
+        cell.pop("timer_overhead_ns", None)
+    _require(parsed_timer_overhead == run["timer_overhead_ns"],
+             "raw stdout timer overhead does not match receipt")
+    expected_cells = {(
+        cell["shape"], int(cell["scale"]), int(cell["block"])): cell for cell in parsed_cells
+    }
+    for recorded in cells:
+        key = (recorded["shape"], int(recorded["scale"]), int(recorded["block"]))
+        expected = expected_cells[key]
+        expected["expected_output_bits"] = expected_output_bits(*key[:2])
+        _require(recorded == expected, f"receipt cell does not match raw stdout for {key!r}")
 
 
 def _copy_receipt_directory(receipt_path: Path, destination: Path) -> Path:
@@ -337,6 +456,10 @@ def run_controls(receipt_path: Path) -> None:
                 "expected_output_bits", 0)),
             ("allocation_count", lambda value: value["matrix"]["cells"][0].__setitem__(
                 "process_allocations", 1)),
+            ("timed_allocation_count", lambda value: value["matrix"]["cells"][0].__setitem__(
+                "timed_allocations", 1)),
+            ("timing_order", lambda value: value["matrix"]["cells"][0]["timing"].__setitem__(
+                "p99_sample_ns", 0)),
         ):
             case_dir = root / name
             case_path = _copy_receipt_directory(receipt_path, case_dir)
@@ -350,10 +473,27 @@ def run_controls(receipt_path: Path) -> None:
                 pass
             else:
                 raise ReceiptError(f"planted negative passed: {name}")
+        raw_case_dir = root / "raw_output_binding"
+        raw_case_path = _copy_receipt_directory(receipt_path, raw_case_dir)
+        raw_path = raw_case_dir / "raw-output.txt"
+        raw_path.write_text(raw_path.read_text(encoding="utf-8").replace(
+            "output_bits=0xbf3ae148", "output_bits=0xbf3ae149", 1), encoding="utf-8")
+        mutated = json.loads(json.dumps(original))
+        mutated["artifacts"]["raw_stdout"]["sha256"] = sha256_file(raw_path)
+        mutated["receipt_sha256"] = receipt_digest(mutated)
+        raw_case_path.write_text(json.dumps(mutated, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        try:
+            validate_receipt(raw_case_path)
+        except ReceiptError:
+            pass
+        else:
+            raise ReceiptError("planted negative passed: raw_output_binding")
         restored_dir = root / "restored"
         restored_path = _copy_receipt_directory(receipt_path, restored_dir)
         validate_receipt(restored_path)
-    print("r2_controls=pass positive=pass planted_expected_output_cell=fail planted_allocation_count=fail")
+    print("r2_controls=pass positive=pass planted_expected_output_cell=fail "
+          "planted_allocation_count=fail planted_timed_allocation_count=fail "
+          "planted_timing_order=fail planted_raw_output_binding=fail")
 
 
 def record(args: argparse.Namespace) -> int:
@@ -363,10 +503,55 @@ def record(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir).resolve()
     _require(executable.is_file(), f"benchmark executable does not exist: {executable}")
     output_dir.mkdir(parents=True, exist_ok=True)
+    fixture_source = root / FIXTURE_SOURCE
+    _require(fixture_source.is_file(), f"fixture source does not exist: {fixture_source}")
+    _require(executable.is_relative_to(build_dir), "executable must be inside the selected build directory")
+    values = _cache_values(build_dir)
+    _require(values.get("CMAKE_BUILD_TYPE") == "Release", "benchmark build must be Release")
+    _require(values.get("PULP_GRAPH_DIRECT_COPY_BENCHMARK") == "ON",
+             "direct-copy benchmark must be enabled in the build profile")
     stdout_path = output_dir / "raw-output.txt"
     stderr_path = output_dir / "raw-stderr.txt"
-    completed = subprocess.run([str(executable)], capture_output=True, text=True,
-                               encoding="utf-8", check=False)
+    fixture_artifact = output_dir / "source-fixture.cpp"
+    shutil.copy2(fixture_source, fixture_artifact)
+    try:
+        completed = subprocess.run(
+            [str(executable)], capture_output=True, text=True, encoding="utf-8", check=False,
+            timeout=args.timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = (exc.stderr or "") + f"\nbenchmark timed out after {args.timeout_seconds:.1f}s\n"
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        stdout_path.write_text(stdout, encoding="utf-8")
+        stderr_path.write_text(stderr, encoding="utf-8")
+        returncode = 124
+        receipt = {
+            "schema": SCHEMA,
+            "fixture": FIXTURE_VERSION,
+            "status": "PARTIAL",
+            "qualification_scope": "R2 bounded graph runtime measurement",
+            "qualification_boundary": "benchmark timed out before a complete receipt could be produced",
+            "source_sha": _source_sha(root),
+            "source_fixture": {"path": FIXTURE_SOURCE.as_posix(), "sha256": sha256_file(fixture_source)},
+            "executable": _relative_path(executable, root),
+            "executable_sha256": sha256_file(executable),
+            "build_profile": values,
+            "run": {"returncode": returncode, "timeout_seconds": args.timeout_seconds},
+            "artifacts": {
+                "raw_stdout": {"path": stdout_path.name, "sha256": sha256_file(stdout_path)},
+                "raw_stderr": {"path": stderr_path.name, "sha256": sha256_file(stderr_path)},
+                "source_fixture": {"path": fixture_artifact.name, "sha256": sha256_file(fixture_artifact)},
+            },
+        }
+        receipt["receipt_sha256"] = receipt_digest(receipt)
+        receipt_path = output_dir / "receipt.json"
+        receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"r2_receipt_timeout={receipt_path}", file=sys.stderr)
+        return returncode
     stdout_path.write_text(completed.stdout, encoding="utf-8")
     stderr_path.write_text(completed.stderr, encoding="utf-8")
     receipt = make_receipt(
@@ -390,6 +575,7 @@ def parser() -> argparse.ArgumentParser:
     record_parser.add_argument("--build-dir", default="build")
     record_parser.add_argument("--executable", required=True)
     record_parser.add_argument("--output-dir", required=True)
+    record_parser.add_argument("--timeout-seconds", type=float, default=300.0)
     validate_parser = sub.add_parser("validate", help="validate a receipt and its artifacts")
     validate_parser.add_argument("receipt", type=Path)
     controls_parser = sub.add_parser("controls", help="run positive and planted-negative controls")
