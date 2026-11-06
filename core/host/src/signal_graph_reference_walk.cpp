@@ -93,8 +93,10 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
         }
         rt.midi_in_incomplete = false;
         clear_midi_block(rt.midi_in);
+        rt.mpe_in.clear();
         rt.midi_out_incomplete = false;
         clear_midi_block(rt.midi_out);
+        rt.mpe_out.clear();
         if (shape.type == NodeType::MidiInput && rt.midi_input_mailbox) {
             const auto& injected = rt.midi_input_mailbox->published.read();
             const auto sequence_seen =
@@ -103,7 +105,9 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
                 && injected.sequence != sequence_seen) {
                 rt.midi_input_mailbox->sequence_seen.store(
                     injected.sequence, std::memory_order_relaxed);
-                if (!injected.copy_to_midi(rt.midi_out)) {
+                const bool midi_ok = injected.copy_to_midi(rt.midi_out);
+                const bool mpe_ok = midi::copy_mpe_block(injected.mpe, rt.mpe_out);
+                if (!midi_ok || !mpe_ok) {
                     rt.midi_out_incomplete = true;
                 }
             }
@@ -112,7 +116,9 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
         // 1b. Gather MIDI from MIDI-flagged inbound connections.
         for (const auto& edge : rt.inbound_midi_edges) {
             if (!edge.source_runtime) continue;
-            if (!copy_midi_block(edge.source_runtime->midi_out, rt.midi_in)
+            const bool midi_ok = copy_midi_block(edge.source_runtime->midi_out, rt.midi_in);
+            const bool mpe_ok = copy_mpe_block(edge.source_runtime->mpe_out, rt.mpe_in);
+            if (!midi_ok || !mpe_ok
                 || edge.source_runtime->midi_out_incomplete) {
                 rt.midi_in_incomplete = true;
             }
@@ -564,9 +570,7 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
             case NodeType::MidiOutput:
                 if (rt.midi_output_mailbox) {
                     cg->midi_publish_scratch.set_from_midi(
-                        rt.midi_in,
-                        0,
-                        rt.midi_in_incomplete);
+                        rt.midi_in, rt.mpe_in, 0, rt.midi_in_incomplete);
                     if (cg->midi_publish_scratch.has_payload()
                         && !rt.midi_output_mailbox->pending.try_push(
                             cg->midi_publish_scratch)) {

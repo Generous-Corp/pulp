@@ -161,6 +161,8 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     events.parameter_events = ctx.node_param_events;
     events.midi_in = ctx.node_midi_in;
     events.midi_out = ctx.node_midi_out;
+    events.mpe_input = ctx.node_mpe_in;
+    events.ump_input = ctx.node_midi_in != nullptr ? ctx.node_midi_in->ump() : nullptr;
     events.audio_rate_modulations = ctx.node_audio_rate_modulations;
     local_block.events = &events;
 
@@ -253,8 +255,8 @@ bool ProcessorNode::process_main_bus_block(const ProcessBlock& block,
     const auto* previous_mpe = processor.mpe_input();
     const auto* previous_ump = processor.ump_input();
     const auto* previous_params = processor.param_events();
-    processor.set_mpe_input(nullptr);
-    processor.set_ump_input(nullptr);
+    processor.set_mpe_input(ctx.node_mpe_in);
+    processor.set_ump_input(midi_in != nullptr ? midi_in->ump() : nullptr);
     processor.set_param_events(params);
     processor.set_sidechain(nullptr);
     bool ok = true;

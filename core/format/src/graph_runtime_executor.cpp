@@ -179,7 +179,10 @@ void gather_node_midi(const graph::GraphRuntimePlan& plan,
     midi::MidiBuffer* in = midi.in(node_index);
     if (in == nullptr) return;
     clear_midi_block(*in);
+    midi::MpeBuffer* mpe_in = midi.mpe_in(node_index);
+    if (mpe_in != nullptr) mpe_in->clear();
     bool incomplete = false;
+    bool mpe_incomplete = false;
     for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
         const auto conn_index =
             plan.inbound_connection_indices[node.first_inbound_connection + c];
@@ -192,8 +195,13 @@ void gather_node_midi(const graph::GraphRuntimePlan& plan,
         // node-to-node incompleteness propagation).
         if (midi.out_incomplete(conn.source_index)) incomplete = true;
         if (!copy_midi_block(*src, *in)) incomplete = true;
+        if (mpe_in != nullptr) {
+            const auto* src_mpe = midi.mpe_out(conn.source_index);
+            if (src_mpe != nullptr && !midi::copy_mpe_block(*src_mpe, *mpe_in))
+                mpe_incomplete = true;
+        }
     }
-    midi.set_in_incomplete(node_index, incomplete);
+    midi.set_in_incomplete(node_index, incomplete || mpe_incomplete);
 }
 
 // Build this node's parameter-automation events from its inbound SPARSE
@@ -577,6 +585,12 @@ run_routed_node(std::uint32_t node_index, const graph::GraphRuntimePlan& plan,
     }
     if (midi != nullptr) {
         gather_node_midi(plan, *midi, node, node_index);
+        // System MidiInput output is prefilled by the host mailbox bridge and
+        // must survive this node visit; every other node owns its sidecar
+        // output for this block and starts with an empty bounded stream.
+        if (node.kind != graph::GraphRuntimeNodeKind::MidiInput) {
+            if (auto* mpe_out = midi->mpe_out(node_index)) mpe_out->clear();
+        }
     }
     const auto& binding = bindings[node_index];
     if (automation != nullptr) {
@@ -640,6 +654,7 @@ run_routed_node(std::uint32_t node_index, const graph::GraphRuntimePlan& plan,
     context.spectral_outputs = binding.spectral_outputs;
     context.node_midi_in = midi != nullptr ? midi->in(node_index) : nullptr;
     context.node_midi_out = midi != nullptr ? midi->out(node_index) : nullptr;
+    context.node_mpe_in = midi != nullptr ? midi->mpe_in(node_index) : nullptr;
     context.node_param_events = automation != nullptr ? automation->events(node_index) : nullptr;
     context.node_audio_rate_modulations = {};
     if (automation != nullptr &&
@@ -697,6 +712,13 @@ bool GraphRuntimeMidiScratch::reset(std::span<const std::size_t> event_capacitie
             slot->out_ump.reserve(event_capacity);
             slot->out_ump.set_realtime_capacity_limit(true);
             slot->out_buffer.attach_ump(&slot->out_ump);
+            // MPE is a sidecar to MIDI and must be bounded before the routed
+            // callback. Keep in/out capacities identical to the MIDI event
+            // lane so a graph swap cannot silently change overflow policy.
+            slot->in_mpe.reserve(event_capacity);
+            slot->in_mpe.set_realtime_capacity_limit(true);
+            slot->out_mpe.reserve(event_capacity);
+            slot->out_mpe.set_realtime_capacity_limit(true);
             slots_.push_back(std::move(slot));
         }
     } catch (...) {

@@ -34,6 +34,7 @@
 #include <pulp/host/trigger_graph.hpp>
 #include <pulp/host/spectral_graph.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/budget_policy.hpp>
 #include <pulp/runtime/slot.hpp>
@@ -396,6 +397,13 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // that retained prefix is still published. A preserved MidiInput NodeId keeps
     // its unconsumed publication across a gap-free prepare_swap().
     bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events) noexcept;
+
+    // Inject a block-local MIDI stream together with its prepared MPE
+    // expression sidecar. The two payloads share one mailbox sequence and are
+    // consumed exactly once, so a bounded sidecar refusal cannot publish a
+    // newer expression stream against an older MIDI block.
+    bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events,
+                     const midi::MpeBuffer& mpe) noexcept;
 
     // Inject sample-accurate parameter events into a Plugin node. Call before
     // process(); the latest published batch is consumed exactly once by that
@@ -936,6 +944,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
         MidiBlockSnapshot& operator=(const MidiBlockSnapshot& other) noexcept;
         bool set_from_midi(const midi::MidiBuffer& src, uint64_t new_sequence,
                            bool source_incomplete = false) noexcept;
+        bool set_from_midi(const midi::MidiBuffer& src, const midi::MpeBuffer& mpe,
+                           uint64_t new_sequence, bool source_incomplete = false) noexcept;
         bool copy_to_midi(midi::MidiBuffer& dst) const noexcept;
         bool append_to_midi(midi::MidiBuffer& dst, std::size_t& event_index,
                             std::size_t& sysex_index, std::size_t& ump_index) const noexcept;
@@ -943,6 +953,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
 
         midi::MidiBuffer events;
         midi::UmpBuffer ump;
+        midi::MpeBuffer mpe;
         bool incomplete = false;
         uint64_t sequence = 0;
     };
@@ -1055,6 +1066,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
         midi::MidiBuffer midi_out;
         midi::UmpBuffer midi_in_ump;
         midi::UmpBuffer midi_out_ump;
+        midi::MpeBuffer mpe_in;
+        midi::MpeBuffer mpe_out;
         bool midi_in_incomplete = false;
         bool midi_out_incomplete = false;
         std::shared_ptr<MidiInputMailbox> midi_input_mailbox;
@@ -1814,7 +1827,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
                                const format::ProcessContext* transport, CompiledGraph* snapshot,
                                bool trigger_admitted = false);
     static bool inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
-                                           const midi::MidiBuffer& events) noexcept;
+                                           const midi::MidiBuffer& events,
+                                           const midi::MpeBuffer* mpe = nullptr) noexcept;
     static bool
     inject_parameter_events_into_snapshot_(CompiledGraph& snapshot, NodeId id,
                                            const state::ParameterEventQueue& events) noexcept;
