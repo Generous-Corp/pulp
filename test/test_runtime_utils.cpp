@@ -1209,8 +1209,8 @@ TEST_CASE("run_process timeout terminates POSIX descendants", "[runtime][child_p
     // only the shell leaves the recorded descendant running under init.
     const auto result = run_process(
         "/bin/sh",
-        {"-c", "trap 'exit 0' TERM INT; sleep 30 & child=$!; echo $child > \"$1\"; wait",
-         "sh", pid_path.string()},
+        {"-c", "trap 'exit 0' TERM INT; sleep 30 & child=$!; echo $child > \"$1\"; wait", "sh",
+         pid_path.string()},
         "", 250);
     REQUIRE(result.has_value());
     REQUIRE(result->timed_out);

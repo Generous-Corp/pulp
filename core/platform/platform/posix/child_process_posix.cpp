@@ -283,9 +283,8 @@ struct TerminationResult {
     int status = -1;
 };
 
-TerminationResult terminate_process_group(pid_t process_group, pid_t pid,
-                                           bool child_already_reaped,
-                                           int cached_status) noexcept {
+TerminationResult terminate_process_group(pid_t process_group, pid_t pid, bool child_already_reaped,
+                                          int cached_status) noexcept {
     TerminationResult result{child_already_reaped, cached_status};
     signal_process_group(process_group, pid, !child_already_reaped, SIGTERM);
 
@@ -330,7 +329,8 @@ TerminationResult terminate_process_group(pid_t process_group, pid_t pid,
     }
     if (!result.child_reaped && pid > 0) {
         int status = 0;
-        while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+        while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+        }
         result.child_reaped = true;
         result.status = status;
     }
@@ -851,18 +851,18 @@ void ChildProcess::cancel() {
         (void)wait();
         return;
     }
-    const auto terminated = terminate_process_group(
-        impl_->process_group, impl_->pid, impl_->exit_cached, impl_->cached_exit_status);
+    const auto terminated = terminate_process_group(impl_->process_group, impl_->pid,
+                                                    impl_->exit_cached, impl_->cached_exit_status);
     impl_->standard_input.close_all();
     impl_->stdout_pipe.close_read();
     impl_->stderr_pipe.close_read();
     impl_->standard_input.close_all();
     impl_->finished = true;
     impl_->result.was_cancelled = true;
-    impl_->result.exit_code = terminated.child_reaped && terminated.status >= 0 &&
-                                     WIFEXITED(terminated.status)
-                                 ? WEXITSTATUS(terminated.status)
-                                 : -1;
+    impl_->result.exit_code =
+        terminated.child_reaped && terminated.status >= 0 && WIFEXITED(terminated.status)
+            ? WEXITSTATUS(terminated.status)
+            : -1;
     impl_->result.stdout_output = std::move(impl_->stdout_full);
     impl_->result.stderr_output = std::move(impl_->stderr_full);
 }
