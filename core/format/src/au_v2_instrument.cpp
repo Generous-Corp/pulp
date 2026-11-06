@@ -1,6 +1,7 @@
 // Audio Unit v2 instrument adapter for Pulp
 // Uses Apple's AudioUnitSDK MusicDeviceBase for AU instruments (aumu type)
-// Handles MIDI note events and renders audio output with no audio input
+// Handles MIDI note events and renders audio output; an instrument that
+// declares input buses also receives a main input and a side chain.
 
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioUnitSDK/AUOutputElement.h>
@@ -50,6 +51,19 @@ UInt32 registry_output_element_count(ProcessorFactory factory) {
     }
     return static_cast<UInt32>(count);
 }
+
+// Number of AU input elements to hand the base constructor, probed the same
+// way as the output count: 0 for the classic synth, 1 for a main input, 2 for
+// main input plus side chain. MusicDeviceBase never pulls an input element on
+// its own, so Render() pulls every element advertised here.
+UInt32 registry_input_element_count(ProcessorFactory factory) {
+    if (!factory)
+        return 0;
+    auto probe = factory();
+    if (!probe)
+        return 0;
+    return instrument_input_element_count(probe->descriptor());
+}
 }  // namespace
 
 PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
@@ -58,10 +72,9 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
 }
 
 PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory factory)
-    : MusicDeviceBase(ci, /*numInputs=*/0,
+    : MusicDeviceBase(ci, /*numInputs=*/registry_input_element_count(factory),
                       /*numOutputs=*/registry_output_element_count(factory),
-                      /*numGroups=*/0)
-{
+                      /*numGroups=*/0) {
     if (factory) {
         processor_ = factory();
         render_context_.bind(processor_.get());
@@ -73,6 +86,9 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory f
             // bus-name strings without copying it per block (which would allocate
             // on the audio thread).
             descriptor_ = processor_->descriptor();
+            has_input_element_ = instrument_input_element_count(descriptor_) > 0;
+            has_sidechain_element_ =
+                has_input_element_ && effect_has_sidechain_element(descriptor_);
             // The instrument adapter has no host MIDI output path, so a panic
             // resets the plug-in's voices only. Flip this to the descriptor's
             // produces_midi when the adapter delivers MIDI output.
@@ -99,6 +115,27 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory f
                 if (asbd.mChannelsPerFrame != static_cast<UInt32>(ch)) {
                     asbd.mChannelsPerFrame = static_cast<UInt32>(ch);
                     GetOutput(e)->SetStreamFormat(asbd);
+                }
+            }
+            // Input elements take their declared widths the same way. Element
+            // 1 is the side chain and carries the name hosts key their
+            // side-chain UI on (Logic's Side Chain pop-up).
+            const UInt32 n_inputs = Inputs().GetNumberOfElements();
+            for (UInt32 e = 0; e < n_inputs && e < descriptor_.input_buses.size(); ++e) {
+                const int ch = descriptor_.input_buses[e].default_channels;
+                if (ch <= 0)
+                    continue;
+                const auto cap = static_cast<int>(boundary::kBoundaryMaxChannels);
+                auto& element = Input(e);
+                AudioStreamBasicDescription asbd = element.GetStreamFormat();
+                asbd.mChannelsPerFrame = static_cast<UInt32>(ch > cap ? cap : ch);
+                element.SetStreamFormat(asbd);
+                if (e == kSidechainInputElement) {
+                    if (CFStringRef name = CFStringCreateWithCString(
+                            kCFAllocatorDefault, kSidechainElementName, kCFStringEncodingUTF8)) {
+                        element.SetName(name); // SetName retains
+                        CFRelease(name);
+                    }
                 }
             }
 
@@ -323,11 +360,41 @@ OSStatus PulpAUInstrument::Initialize()
     // A host offline-render write older than this session no longer applies.
     offline_render_.begin_session();
 
+    // Input audio is delivered sample-for-sample against the output, so every
+    // connected input element must run at the output rate. ChangeStreamFormat
+    // keeps unconnected elements in step for a host that only configures the
+    // output bus; an inactive element that still differs here (the host set
+    // the output format directly) is re-seeded, since nothing reads it, while
+    // an element fed by a connection or a render callback at another rate is
+    // the host's explicit choice and is refused.
+    if (has_input_element_) {
+        const auto output_rate = GetOutput(0)->GetStreamFormat().mSampleRate;
+        const UInt32 n_inputs = Inputs().GetNumberOfElements();
+        for (UInt32 e = 0; e < n_inputs; ++e) {
+            auto& element = Input(e);
+            auto format = element.GetStreamFormat();
+            if (format.mSampleRate == output_rate)
+                continue;
+            if (element.IsActive()) {
+                runtime::log_error("AU v2 instrument: input element {} sample rate {} Hz "
+                                   "does not match the output rate {} Hz",
+                                   e, format.mSampleRate, output_rate);
+                return kAudioUnitErr_FormatNotSupported;
+            }
+            format.mSampleRate = output_rate;
+            element.SetStreamFormat(format);
+        }
+    }
+
     if (processor_) {
         PrepareContext ctx;
         ctx.sample_rate = GetOutput(0)->GetStreamFormat().mSampleRate;
         ctx.max_buffer_size = GetMaxFramesPerSlice();
-        ctx.input_channels = 0;
+        // The prepare width is the negotiated main input element, which a
+        // host may leave at 0 for an optional input it never connects.
+        ctx.input_channels = (has_input_element_ && Inputs().GetNumberOfElements() > 0)
+                                 ? static_cast<int>(Input(0).GetStreamFormat().mChannelsPerFrame)
+                                 : 0;
         ctx.output_channels = static_cast<int>(
             GetOutput(0)->GetStreamFormat().mChannelsPerFrame);
         processor_->prepare(ctx);
@@ -353,9 +420,59 @@ OSStatus PulpAUInstrument::Initialize()
     midi_in_.set_realtime_capacity_limit(true);
     midi_out_.set_realtime_capacity_limit(true);
 
-    runtime::log_info("AU v2 instrument: initialized at {} Hz, {} output bus(es)",
-                      GetOutput(0)->GetStreamFormat().mSampleRate,
+    runtime::log_info("AU v2 instrument: initialized at {} Hz, {} input element(s), "
+                      "{} output bus(es)",
+                      GetOutput(0)->GetStreamFormat().mSampleRate, Inputs().GetNumberOfElements(),
                       Outputs().GetNumberOfElements());
+    return noErr;
+}
+
+UInt32 PulpAUInstrument::SupportedNumChannels(const AUChannelInfo** outInfo) {
+    if (!processor_)
+        return 0;
+    const UInt32 count = build_channel_info(descriptor_, channel_info_.data());
+    if (outInfo)
+        *outInfo = channel_info_.data();
+    return count;
+}
+
+bool PulpAUInstrument::ValidFormat(AudioUnitScope inScope, AudioUnitElement inElement,
+                                   const AudioStreamBasicDescription& inNewFormat) {
+    if (!MusicDeviceBase::ValidFormat(inScope, inElement, inNewFormat))
+        return false;
+    if (inScope == kAudioUnitScope_Input && inElement == kSidechainInputElement) {
+        return inNewFormat.mChannelsPerFrame >= 1 &&
+               inNewFormat.mChannelsPerFrame <= boundary::kBoundaryMaxChannels;
+    }
+    return true;
+}
+
+OSStatus PulpAUInstrument::ChangeStreamFormat(AudioUnitScope inScope, AudioUnitElement inElement,
+                                              const AudioStreamBasicDescription& inPrevFormat,
+                                              const AudioStreamBasicDescription& inNewFormat) {
+    const auto result =
+        MusicDeviceBase::ChangeStreamFormat(inScope, inElement, inPrevFormat, inNewFormat);
+    if (result != noErr)
+        return result;
+
+    // A rate change on the main output carries over to every unconnected
+    // input element (a connected one takes its format from the connection), so
+    // an optional input a host never touches still runs at the output rate.
+    const bool main_output = inScope == kAudioUnitScope_Output && inElement == 0;
+    if (main_output && has_input_element_ && inPrevFormat.mSampleRate != inNewFormat.mSampleRate) {
+        const UInt32 n_inputs = Inputs().GetNumberOfElements();
+        for (UInt32 e = 0; e < n_inputs; ++e) {
+            auto& element = Input(e);
+            if (element.HasConnection())
+                continue;
+            auto format = element.GetStreamFormat();
+            if (format.mSampleRate == inNewFormat.mSampleRate)
+                continue;
+            format.mSampleRate = inNewFormat.mSampleRate;
+            element.SetStreamFormat(format);
+            PropertyChanged(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, e);
+        }
+    }
     return noErr;
 }
 
@@ -446,7 +563,39 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
     // No Globals->store pull: GetParameter/SetParameter are store-backed, so
     // host automation already landed in the store and process() reads it below.
 
-    audio::BufferView<const float> input_view;
+    // Pull the connected input elements. MusicDeviceBase pulls nothing, so an
+    // instrument with audio input reads its elements here, each with a
+    // private flags word (an upstream silence flag must not mark this render
+    // silent) into the element's own preallocated buffer list. A failed pull
+    // or an unconnected element reads as "not connected" for this block.
+    UInt32 input_channels = 0;
+    UInt32 sidechain_channels = 0;
+    if (has_input_element_) {
+        const UInt32 n_inputs = Inputs().GetNumberOfElements();
+        if (n_inputs > 0 && HasInput(0)) {
+            AudioUnitRenderActionFlags input_flags = 0;
+            auto& main_in = Input(0);
+            if (main_in.PullInput(input_flags, inTimeStamp, 0, inNumberFrames) == noErr) {
+                input_channels = resolve_sidechain_channels(
+                    &main_in.GetBufferList(), main_in.GetStreamFormat().mChannelsPerFrame, 0,
+                    inNumberFrames, input_ptrs_.data(), input_ptrs_.size());
+            }
+        }
+        if (has_sidechain_element_ && n_inputs > kSidechainInputElement &&
+            HasInput(kSidechainInputElement)) {
+            AudioUnitRenderActionFlags sidechain_flags = 0;
+            auto& sidechain = Input(kSidechainInputElement);
+            if (sidechain.PullInput(sidechain_flags, inTimeStamp, kSidechainInputElement,
+                                    inNumberFrames) == noErr) {
+                sidechain_channels = resolve_sidechain_channels(
+                    &sidechain.GetBufferList(), sidechain.GetStreamFormat().mChannelsPerFrame, 0,
+                    inNumberFrames, sidechain_ptrs_.data(), sidechain_ptrs_.size());
+            }
+        }
+    }
+    audio::BufferView<const float> input_view(input_ptrs_.data(), input_channels, inNumberFrames);
+    audio::BufferView<const float> sidechain_view(sidechain_ptrs_.data(), sidechain_channels,
+                                                  inNumberFrames);
 
     midi_in_.clear();
     midi_in_.clear_sysex();
@@ -465,22 +614,22 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
 
     apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
 
-    // Instruments have no audio input; the single input bus view is inactive so
-    // process(ProcessBuffers&) projects a null main input.
-    std::array<ProcessBusBufferView<const float>, 1> input_buses{{
-        {
-            .info = {
-                .name = "Audio In",
-                .index = 0,
-                .direction = BusDirection::Input,
-                .role = BusRole::Main,
-                .declared_channels = 0,
-                .optional = true,
-                .active = false,
-            },
-            .buffer = input_view,
-        },
-    }};
+    // Input bus views from the cached descriptor: the main input (index 0)
+    // and, when declared, the side chain (index 1). A bus is active only when
+    // its element was pulled this block, so a classic synth (no input buses)
+    // or a host that left an element unconnected projects a null main input /
+    // null sidechain_input() while the bus->index mapping stays stable.
+    std::array<ProcessBusBufferInfo, 2> in_infos{};
+    const std::size_t n_in = build_input_bus_infos(descriptor_, in_infos.data(), in_infos.size());
+    in_infos[0].declared_channels = static_cast<int>(input_channels);
+    in_infos[0].active = input_channels > 0;
+    std::array<ProcessBusBufferView<const float>, 2> input_buses{};
+    input_buses[0] = {.info = in_infos[0], .buffer = input_view};
+    if (n_in > 1) {
+        in_infos[1].declared_channels = static_cast<int>(sidechain_channels);
+        in_infos[1].active = sidechain_channels > 0;
+        input_buses[1] = {.info = in_infos[1], .buffer = sidechain_view};
+    }
 
     // Build one output bus view per AU output element. The AU host renders each
     // output element with its own DoRenderBus/PrepareBuffer, but a single Render()
@@ -527,9 +676,8 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
     }
 
     ProcessBuffers process_buffers{
-        ProcessBusBufferSet<const float>{std::span(input_buses)},
-        ProcessBusBufferSet<float>{
-            std::span(output_buses.data(), routed)},
+        ProcessBusBufferSet<const float>{std::span(input_buses.data(), n_in)},
+        ProcessBusBufferSet<float>{std::span(output_buses.data(), routed)},
     };
 
     // Audio-thread render: the Processor's process() must neither allocate nor

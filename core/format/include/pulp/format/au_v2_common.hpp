@@ -16,6 +16,8 @@
 #if defined(__APPLE__)
 
 #include <AudioUnitSDK/AUBase.h>
+
+#include <cstddef>
 #include <AudioToolbox/AudioUnitProperties.h>
 
 #include <AudioUnit/AudioUnit.h>
@@ -48,6 +50,12 @@ class ContractSessionRegistry;
 } // namespace pulp::format
 
 namespace pulp::format::au {
+
+/// Upper bound on `AUChannelInfo` pairs an adapter advertises through
+/// `SupportedNumChannels`. Descriptor widths are validated into {1, 2}, so a
+/// table is a handful of pairs; the constant is a small fixed size so callers
+/// back it with instance storage and never allocate.
+inline constexpr std::size_t kMaxChannelInfoPairs = 16;
 
 /// Custom AU property ID the Cocoa view factory queries to obtain the
 /// host-side Processor + StateStore pointers. Fixes the former
