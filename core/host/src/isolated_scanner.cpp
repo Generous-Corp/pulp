@@ -109,6 +109,8 @@ std::optional<PluginInfo> parse_descriptor_line(std::string_view line) {
     info.manufacturer = member_string(object, "manufacturer");
     info.version = member_string(object, "version");
     info.unique_id = member_string(object, "unique_id");
+    info.identity_evidence =
+        parse_plugin_identity_evidence(member_string(object, "identity_evidence"));
     info.path = member_string(object, "path");
     info.format = parse_format(member_string(object, "format"));
     info.is_instrument = member_bool(object, "is_instrument", false);

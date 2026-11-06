@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include <vector>
 
 namespace {
@@ -49,6 +50,16 @@ SubgraphTemplate sink_stage_template() {
     recipe.exposed_ports = {{"input", "gain", 0, false, PortKind::Audio},
                             {"output", "output", 0, false, PortKind::Audio}};
     recipe.parameters = {{"gain", "gain", 0.25f, 0.0f, 1.0f}};
+    return recipe;
+}
+
+SubgraphTemplate nested_source_stage_template() {
+    auto child = std::make_shared<SubgraphTemplate>(source_stage_template());
+    SubgraphTemplate recipe;
+    recipe.identity = "cookbook.nested-source-stage.v1";
+    recipe.children = {{"inner", std::move(child), 4}};
+    recipe.exposed_ports = {{"input", "inner.input", 0, true, PortKind::Audio},
+                            {"output", "inner.output", 0, true, PortKind::Audio}};
     return recipe;
 }
 
@@ -172,6 +183,46 @@ bool check_composed_stages() {
            graph.connections().size() == before + 1;
 }
 
+bool check_nested_macro() {
+    SignalGraph graph;
+    auto nested = instantiate_subgraph(graph, nested_source_stage_template(), "nested", 2);
+    auto sink = instantiate_subgraph(graph, sink_stage_template(), "sink", 3);
+    if (!nested || !sink || nested.instance.parameters.at("inner.gain") != 1.0f ||
+        nested.instance.child_template_identities.at("inner") != "cookbook.source-stage.v1" ||
+        !connect_subgraph_ports(graph, nested.instance, "output", sink.instance, "input"))
+        return false;
+
+    auto state = nested.instance.save_state();
+    state.parameters.at("inner.gain") = 0.25f;
+    if (!restore_subgraph_state(graph, nested.instance, state))
+        return false;
+    auto invalid = nested.instance.save_state();
+    invalid.child_template_identities.at("inner") = "cookbook.other.v1";
+    if (restore_subgraph_state(graph, nested.instance, invalid) ||
+        nested.instance.parameters.at("inner.gain") != 0.25f)
+        return false;
+
+    OfflineSignalGraphHost host(graph);
+    if (!host.prepare({.sample_rate = 48000.0,
+                       .block_frames = 16,
+                       .input_channels = 1,
+                       .output_channels = 1}))
+        return false;
+    std::vector<float> stimulus(32, 0.0f);
+    stimulus[8] = 1.0f;
+    float* input_ptrs[] = {stimulus.data()};
+    pulp::audio::BufferView<const float> input(input_ptrs, 1, stimulus.size());
+    const auto render = host.render({.frame_count = stimulus.size(), .input = input});
+    if (!render.ok || render.audio.num_channels() != 1 || render.audio.num_samples() != 32)
+        return false;
+    for (std::size_t frame = 0; frame < 32; ++frame) {
+        const float expected = frame == 8 ? 0.0625f : 0.0f;
+        if (std::abs(render.audio.channel(0)[frame] - expected) > 1.0e-6f)
+            return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -186,6 +237,10 @@ int main() {
     if (!check_composed_stages()) {
         std::cerr << "exposed-port composition or planted negatives failed\n";
         return 3;
+    }
+    if (!check_nested_macro()) {
+        std::cerr << "nested macro identity/state/render proof failed\n";
+        return 4;
     }
     std::cout << "static stereo recipe, exposed-port composition, and planted negatives passed\n";
     return 0;

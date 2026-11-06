@@ -238,6 +238,10 @@ DrainResult drain_pipe(int fd, std::string& full_output, std::string& line_buf,
 struct ChildProcess::Impl {
     mutable std::recursive_mutex mutex;
     pid_t pid = -1;
+    // POSIX children are launched in a private process group.  Keeping the
+    // group id beside the direct child id lets cancellation and timeout paths
+    // clean up descendants without signalling the caller's own group.
+    pid_t process_group = -1;
     Pipe stdout_pipe;
     Pipe stderr_pipe;
     InputChannel standard_input;
@@ -252,6 +256,86 @@ struct ChildProcess::Impl {
     mutable bool exit_cached = false;
     ProcessResult result;
 };
+
+bool process_group_exists(pid_t process_group) noexcept {
+    if (process_group <= 0)
+        return false;
+    if (::kill(-process_group, 0) == 0)
+        return true;
+    // Treat EPERM as present.  A group owned by another uid is still a live
+    // group and cleanup must not silently report success in that case.
+    return errno == EPERM;
+}
+
+void signal_process_group(pid_t process_group, pid_t pid, bool direct_child_live,
+                          int signal) noexcept {
+    if (process_group > 0) {
+        (void)::kill(-process_group, signal);
+    }
+    // A cached/reaped child PID may already have been reused.  Never signal
+    // it as a fallback once waitpid has established that it exited.
+    if (direct_child_live && pid > 0)
+        (void)::kill(pid, signal);
+}
+
+struct TerminationResult {
+    bool child_reaped = false;
+    int status = -1;
+};
+
+TerminationResult terminate_process_group(pid_t process_group, pid_t pid, bool child_already_reaped,
+                                          int cached_status) noexcept {
+    TerminationResult result{child_already_reaped, cached_status};
+    signal_process_group(process_group, pid, !child_already_reaped, SIGTERM);
+
+    // Give the whole group a short grace period.  The direct child is the only
+    // member this process can reap; the group probe covers descendants that
+    // would otherwise outlive it.
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        if (!result.child_reaped && pid > 0) {
+            int status = 0;
+            const auto waited = ::waitpid(pid, &status, WNOHANG);
+            if (waited == pid) {
+                result.child_reaped = true;
+                result.status = status;
+            } else if (waited < 0 && errno == ECHILD) {
+                result.child_reaped = true;
+                result.status = -1;
+            }
+        }
+        if (result.child_reaped && !process_group_exists(process_group))
+            return result;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    // A descendant may ignore SIGTERM after the direct worker exits.  Do not
+    // return while that worker-owned group is still live.
+    signal_process_group(process_group, pid, !result.child_reaped, SIGKILL);
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        if (!result.child_reaped && pid > 0) {
+            int status = 0;
+            const auto waited = ::waitpid(pid, &status, WNOHANG);
+            if (waited == pid) {
+                result.child_reaped = true;
+                result.status = status;
+            } else if (waited < 0 && errno == ECHILD) {
+                result.child_reaped = true;
+                result.status = -1;
+            }
+        }
+        if (result.child_reaped && !process_group_exists(process_group))
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!result.child_reaped && pid > 0) {
+        int status = 0;
+        while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+        }
+        result.child_reaped = true;
+        result.status = status;
+    }
+    return result;
+}
 
 ChildProcessInputChannel::~ChildProcessInputChannel() {
     if (handle_ >= 0)
@@ -274,7 +358,11 @@ ChildProcessInputChannel::operator=(ChildProcessInputChannel&& other) noexcept {
 ChildProcess::ChildProcess() : impl_(std::make_unique<Impl>()) {}
 ChildProcess::~ChildProcess() {
     if (impl_ && impl_->started && !impl_->finished) {
-        if (is_running())
+        // A worker can have exited while a descendant keeps its private
+        // process group alive.  Treat that group as owned work and cancel it
+        // before waiting, rather than allowing the descendant to escape via
+        // the destructor path.
+        if (is_running() || process_group_exists(impl_->process_group))
             cancel();
         wait();
     }
@@ -316,13 +404,14 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     const bool has_standard_input = standard_input || standard_input_provider ||
                                     standard_input_session;
     if (impl_->started && !impl_->finished) {
-        if (is_running())
+        if (is_running() || process_group_exists(impl_->process_group))
             cancel();
         else
             wait();
     }
 
     impl_->pid = -1;
+    impl_->process_group = -1;
     impl_->options = options;
     impl_->stdout_full.clear();
     impl_->stderr_full.clear();
@@ -369,6 +458,10 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     impl_->pid = fork();
     if (impl_->pid == 0) {
         // Child process
+        // Group before exec so descendants inherit the containment boundary.
+        // A failed grouping must not fall back to an uncontained launch.
+        if (::setpgid(0, 0) != 0)
+            _exit(126);
         if (has_standard_input && dup2(impl_->standard_input.child, STDIN_FILENO) < 0)
             _exit(126);
         if (options.capture_stdout) {
@@ -429,23 +522,35 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     };
     posix_spawnattr_t attributes;
     posix_spawnattr_t* attributes_pointer = nullptr;
-    if (has_standard_input || options.suspended_process_validator) {
+    {
 #if defined(__APPLE__)
         const auto attribute_error = posix_spawnattr_init(&attributes);
         if (attribute_error == 0) {
             attributes_pointer = &attributes;
-            short flags = 0;
+            short flags = POSIX_SPAWN_SETPGROUP;
             if (has_standard_input)
                 flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
             if (options.suspended_process_validator)
                 flags |= POSIX_SPAWN_START_SUSPENDED;
             add_action(posix_spawnattr_setflags(&attributes, flags));
+            add_action(posix_spawnattr_setpgroup(&attributes, 0));
         } else {
             setup_error = attribute_error;
         }
 #else
         if (options.suspended_process_validator)
             setup_error = ENOTSUP;
+        else {
+            const auto attribute_error = posix_spawnattr_init(&attributes);
+            if (attribute_error == 0) {
+                attributes_pointer = &attributes;
+                const short flags = POSIX_SPAWN_SETPGROUP;
+                add_action(posix_spawnattr_setflags(&attributes, flags));
+                add_action(posix_spawnattr_setpgroup(&attributes, 0));
+            } else {
+                setup_error = attribute_error;
+            }
+        }
 #endif
     }
     if (has_standard_input) {
@@ -535,6 +640,8 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         return false;
     }
 
+    impl_->process_group = impl_->pid;
+
     if (options.suspended_process_validator) {
 #if defined(__APPLE__)
         bool accepted = false;
@@ -544,7 +651,7 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
             accepted = false;
         }
         if (!accepted || ::kill(impl_->pid, SIGCONT) != 0) {
-            (void)::kill(impl_->pid, SIGKILL);
+            signal_process_group(impl_->process_group, impl_->pid, true, SIGKILL);
             int status = 0;
             while (::waitpid(impl_->pid, &status, 0) < 0 && errno == EINTR) {}
             impl_->stdout_pipe.close_all();
@@ -738,37 +845,24 @@ void ChildProcess::cancel() {
     // Reap or cache an already-exited child before signalling. While a live
     // child remains ours, an exit becomes a zombie and its PID cannot be
     // reused between this check and kill().
-    if (!is_running()) {
+    const bool child_running = is_running();
+    if (!child_running && !process_group_exists(impl_->process_group)) {
         impl_->standard_input.close_all();
         (void)wait();
         return;
     }
-    kill(impl_->pid, SIGTERM);
+    const auto terminated = terminate_process_group(impl_->process_group, impl_->pid,
+                                                    impl_->exit_cached, impl_->cached_exit_status);
     impl_->standard_input.close_all();
-    // Grace period
-    for (int i = 0; i < 100; ++i) {
-        int status = 0;
-        if (waitpid(impl_->pid, &status, WNOHANG) != 0) {
-            impl_->stdout_pipe.close_read();
-            impl_->stderr_pipe.close_read();
-            impl_->finished = true;
-            impl_->result.was_cancelled = true;
-            impl_->result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-            impl_->result.stdout_output = std::move(impl_->stdout_full);
-            impl_->result.stderr_output = std::move(impl_->stderr_full);
-            return;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    kill(impl_->pid, SIGKILL);
-    int status = 0;
-    waitpid(impl_->pid, &status, 0);
     impl_->stdout_pipe.close_read();
     impl_->stderr_pipe.close_read();
     impl_->standard_input.close_all();
     impl_->finished = true;
     impl_->result.was_cancelled = true;
-    impl_->result.exit_code = -1;
+    impl_->result.exit_code =
+        terminated.child_reaped && terminated.status >= 0 && WIFEXITED(terminated.status)
+            ? WEXITSTATUS(terminated.status)
+            : -1;
     impl_->result.stdout_output = std::move(impl_->stdout_full);
     impl_->result.stderr_output = std::move(impl_->stderr_full);
 }
@@ -867,12 +961,7 @@ ProcessResult ChildProcess::wait() {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - start_time).count();
             if (elapsed >= impl_->options.timeout_ms) {
-                kill(impl_->pid, SIGTERM);
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                if (waitpid(impl_->pid, &status, WNOHANG) == 0) {
-                    kill(impl_->pid, SIGKILL);
-                    waitpid(impl_->pid, &status, 0);
-                }
+                (void)terminate_process_group(impl_->process_group, impl_->pid, false, -1);
                 impl_->finished = true;
                 impl_->result.timed_out = true;
                 impl_->result.exit_code = -1;

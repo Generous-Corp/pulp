@@ -1,0 +1,71 @@
+{
+  "accepted": true,
+  "consumer_external_to_checkout": true,
+  "consumer_receipt": {
+    "accepted": true,
+    "constructor_negative_controls": 2,
+    "lifecycle_recovery_cases": 2,
+    "maximum_block": 257,
+    "maximum_oracle_error": 6.503505523003383e-08,
+    "measurement_negative_controls": 2,
+    "null_tolerance_dbfs": -180,
+    "oracle_tolerance": 1e-06,
+    "renders": 6,
+    "reported_latency": 0,
+    "sample_rate": 48000,
+    "schema": "pulp.sample-region-installed-consumer.v1",
+    "signed_bake_negative_controls": 3
+  },
+  "consumer_sha256": "5fe92193c0d6f75067440b118bf7111a5f41e12b8a70b925fd4590c30b0ffc0b",
+  "installed_example_sha256": {
+    "CMakeLists.txt": "2de757bd8cc8ab8cf45aa091c49429e04b6aedf278f789bb5671801299cca04f",
+    "README.md": "ed7018556825eb4954d54a80c0e06afbaa977dfed0c362c1f4231d35abe5980b",
+    "allpass_graph.cpp": "90568e44fa67342ee0f43525577bfd77dd6e3301626ab9948ac538875176b7dd",
+    "allpass_graph.hpp": "fd4343542bfb3863e4260c6dd2925792de7b0747deb9a0746572b847e0b01343",
+    "allpass_processor.cpp": "90fe166430fcd3a1167a86a8c4a451441f1aa74f67875dd6fe928db2a6d06363",
+    "allpass_processor.hpp": "63e1b56fd81c757087344901d648ad0145341abc44fdb83f56a7dd3d13b02afa",
+    "installed_consumer.cpp": "1a77b90356d397d8cb347749ae640591804e2c59424ed156dceeed32918f9527"
+  },
+  "quality_lab_command": [
+    "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13",
+    "-m",
+    "quality_lab.cli",
+    "compare",
+    "/Volumes/Workshop/Code/agent-worktrees/g11-durable-20261106/.g11-evidence-2/artifacts/source-regular.wav",
+    "/Volumes/Workshop/Code/agent-worktrees/g11-durable-20261106/.g11-evidence-2/artifacts/bake-regular.wav",
+    "--profile",
+    "tonal-balance",
+    "--reference-role",
+    "golden",
+    "--align",
+    "none",
+    "--json",
+    "/Volumes/Workshop/Code/agent-worktrees/g11-durable-20261106/.g11-evidence-2/quality-lab.json"
+  ],
+  "quality_lab_verdict": "no_material_change_detected",
+  "quality_lab_verdict_is_advisory": true,
+  "schema": "pulp.sample-region-installed-sdk.v1",
+  "sdk_catalog_sha256": {
+    "agent-capabilities.json": "be8537a08363fd077e928963951edcb4764965f06d80d3dcb476d5db970ccda5",
+    "agent-capabilities.schema.json": "588a79c4d0f6bafb250f4e7ef076a23939e749c34c48fa7100ed0ba7bfc09fcd",
+    "dsp-capabilities.json": "2b921b106aa01ea021ae6b923db544dbee093f418684baed239104b7575b4a64",
+    "dsp-capabilities.schema.json": "c4440ac657578e12ee7ec57131cc09d62a820f9be39995009d98bf2b10f5052b",
+    "forge-catalog.json": "26b7c8b9c16b038bfa6b866ed0f660b9d2d95f8b80e5d84dc4f7585f65a9f58d",
+    "forge-catalog.schema.json": "11898f9d45b3598f47c380170ca89e9ae3236513d16fa69730bfbe9dc9a5af11"
+  },
+  "sdk_inventory_sha256": "eee279a3fa3772c2ad81808572efa61fad45ee2ee6fb541b15c9f5a864a4a366",
+  "sdk_platform": "darwin-arm64",
+  "sdk_prefix": "/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/633825f7af3d4c8d0fee7e4ec139588282bdf0a1/3b617cf352bb",
+  "selected_binding_proofs": {
+    "aggregates": 2,
+    "bindings": 48,
+    "keys": [
+      "signal.sample-region",
+      "signal.unit-delay"
+    ],
+    "proofs": 50,
+    "results_sha256": "79eb12f4847518ae3325439675e770c7154650b77d5d85ec7623ed37aac48474"
+  },
+  "source_identity_binding": "verified installed capability handoff",
+  "source_sha": "633825f7af3d4c8d0fee7e4ec139588282bdf0a1"
+}

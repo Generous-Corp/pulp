@@ -36,8 +36,9 @@ schedules, reloads the serialized graph, signs and reloads a baked plan, and
 compares every output with an independent scalar all-pass recurrence. The
 receipt is generated at `artifacts/consumer-receipt.json`; it records six
 renders, the `1e-6` oracle tolerance, the maximum oracle error, and the zero
-reported PDC. The command above creates this runtime receipt locally; this
-repository does not commit that output.
+reported PDC. A current-head run and its retained receipt, SDK provenance,
+logs, and digest manifest are committed in
+[`g11-live-sampling-evidence-20261106`](../reports/g11-live-sampling-evidence-20261106.md).
 
 The same executable carries production-negative controls. It refuses renamed
 or empty graph contracts before publishing parameters; rejects tampered,

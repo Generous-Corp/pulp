@@ -17,6 +17,12 @@ restore, with silence at every other frame. A planted left/right connection
 swap must fail the same channel oracle. An out-of-range restore must leave both
 gain values unchanged.
 
+The same consumer also expands a nested `SubgraphTemplate` macro. The child
+template's exposed ports and `gain` parameter are promoted as `input`, `output`,
+and `inner.gain` under the parent instance. A save/restore changes the nested
+parameter, while a planted child-identity mutation is rejected without changing
+the live value. The nested graph renders through the installed public SDK.
+
 This recipe proves fixed mono-to-stereo channel weighting and a two-instance
 mono gain chain in an offline host. Missing and wrong-direction exposed-port
 connections are planted negatives and must leave the topology unchanged.
