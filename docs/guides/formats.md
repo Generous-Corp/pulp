@@ -323,7 +323,14 @@ PULP_AU_INSTRUMENT(MySynthAU, my_namespace::create_my_synth)
 - A class `ClassName` subclassing `PulpAUInstrument` (which subclasses `MusicDeviceBase`)
 - A factory function via `AUSDK_COMPONENT_ENTRY(ausdk::AUMusicDeviceFactory, ClassName)`
 
-Instruments have zero audio inputs and one audio output. MIDI is received via `HandleNoteOn()` / `HandleNoteOff()`.
+An instrument has one output element per declared output bus and, when its
+descriptor declares input buses, one input element per declared input bus
+(main input, then a "Side Chain" element): `MusicDeviceBase` is constructed
+with the declared input count and `Render()` pulls each connected element
+itself. Declare an instrument's inputs `optional` so the unit also validates
+with nothing connected; `SupportedNumChannels` then lists the no-input rows
+ahead of the connected pairs. MIDI is received via `HandleNoteOn()` /
+`HandleNoteOff()`.
 
 ### Parameter Sync
 
@@ -403,9 +410,10 @@ component as `aumf`. Host MIDI and SysEx arrive via `HandleMIDIEvent()` /
 `inStartFrame` are preserved for short MIDI messages.
 
 **Instruments (`aumu`):** MIDI notes arrive via `HandleNoteOn()` and
-`HandleNoteOff()` callbacks. These are buffered in `pending_midi_` (protected by
-a mutex) and drained into `midi_in` at the start of each `Render()` call. The
-sample offset (`inStartFrame`) is preserved.
+`HandleNoteOff()` callbacks, other channel messages via `HandleNonNoteEvent()`
+and SysEx via `HandleSysEx()`. Each is pushed onto a bounded lock-free queue
+and drained into `midi_in` at the start of each `Render()` call. The sample
+offset (`inStartFrame`) is preserved.
 
 ### State Save/Load
 
@@ -461,8 +469,19 @@ contract the VST3, CLAP, and AU v3 adapters use. Scheduled-parameter slices
 advance the side-chain pointers in step with the main buffers, and the pull uses
 the element's preallocated buffer, so the audio thread does not allocate.
 `kAudioUnitProperty_SupportedNumChannels` continues to describe only the main
-input/output pair. Instruments (`aumu`) take no audio input and expose one
-output element per declared output bus instead.
+input/output pair.
+
+An instrument (`aumu`) that declares input buses gets the same two elements
+(main input, then "Side Chain"), pulled by the instrument adapter's `Render()`
+since `MusicDeviceBase` pulls nothing itself, alongside one output element per
+declared output bus. A side chain needs a main input bus in front of it:
+elements are positional, so a descriptor whose first input bus has 0 channels
+exposes no input element at all. A classic synth (no input buses) keeps zero
+input elements. A software-instrument track carries no audio of its own, so
+in Logic the instrument receives audio only through the Side Chain pop-up the
+second element makes Logic offer; which element that pop-up feeds has not yet
+been verified in Logic itself (the headless tests prove delivery through host
+render callbacks on both elements).
 
 ### Known Limitations
 
@@ -944,7 +963,7 @@ Each entry-point `.cpp` file includes the processor header and calls the format-
 | Param gestures | Yes (event-based) | Yes (`beginEdit`/`endEdit`) | Yes (`AUEventListenerNotify`) | Yes (`AUParameterTree`) |
 | MIDI in events | Yes (note events) | Yes (VST3 events) | Effects: `aumf` yes / `aufx` no, Instruments: yes | Yes (raw bytes) |
 | State format | Binary via stream | Binary via `IBStream` | Binary in `CFDictionary` | Binary in `fullState` |
-| Multi-bus declared | Yes | Yes | Effects: main input + side-chain input element; instruments: aux output elements | Main input + sidechain input |
+| Multi-bus declared | Yes | Yes | Effects: main input + side-chain input element; instruments: main + side-chain input elements and aux output elements | Main input + sidechain input |
 | Editor/UI param write-back | Yes | Yes | Yes (`AUEventListenerNotify`) | Yes (`AUParameterTree`) |
 | Render-thread param output | Yes | Yes | Not yet | Yes |
 | Latency reporting | Yes | Yes | Yes (seconds) | Yes (seconds) |
