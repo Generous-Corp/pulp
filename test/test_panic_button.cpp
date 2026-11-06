@@ -39,7 +39,9 @@ struct Tree {
         button = owned.get();
         root.add_child(std::move(owned));
     }
-    void click() { root.simulate_click({20, 20}); }
+    void click() {
+        root.simulate_click({20, 20});
+    }
 
     view::View root;
     PanicButton* button = nullptr;
@@ -64,7 +66,9 @@ class Synth : public format::Processor {
     }
     void define_parameters(state::StateStore&) override {}
     void prepare(const format::PrepareContext&) override {}
-    void on_panic(format::PanicMode mode) override { modes.push_back(mode); }
+    void on_panic(format::PanicMode mode) override {
+        modes.push_back(mode);
+    }
     void process(audio::BufferView<float>& output, const audio::BufferView<const float>&,
                  midi::MidiBuffer&, midi::MidiBuffer&, const format::ProcessContext&) override {
         for (std::size_t c = 0; c < output.num_channels(); ++c)
@@ -203,8 +207,7 @@ TEST_CASE("a processor with no servicing host hides the button", "[format][panic
     CHECK_FALSE(bare.panic_state()->pending());
 }
 
-TEST_CASE("clicking the bound button panics the processor at the next block",
-          "[format][panic]") {
+TEST_CASE("clicking the bound button panics the processor at the next block", "[format][panic]") {
     Rig rig(make_with_midi);
     Tree tree(format::panic_target(*g_synth));
     CHECK(tree.button->availability() == PanicAvailability::voices_and_midi);

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261106-midi-panic-button",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-06T18:54:58Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/view/include/pulp/view/panic_button.hpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Adds a header-only stock PanicButton widget (a TextButton bound to a PanicTarget of request/availability callbacks). Generic UI with no processor or format dependency, so the next Vellum re-export should carry it into the mirrored view."
+}

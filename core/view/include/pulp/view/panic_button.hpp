@@ -66,7 +66,9 @@ class PanicButton : public TextButton {
     }
 
     /// Availability as of the last `refresh()`.
-    PanicAvailability availability() const { return availability_; }
+    PanicAvailability availability() const {
+        return availability_;
+    }
 
     /// Raise the request now, as a click does. Returns false, and raises
     /// nothing, when the host cannot service it.
@@ -83,17 +85,23 @@ class PanicButton : public TextButton {
         release_only_ = release_only;
         set_access_label(access_text());
     }
-    bool release_only() const { return release_only_; }
+    bool release_only() const {
+        return release_only_;
+    }
 
     /// Hide when unavailable (the default) or stay visible but disabled.
     void set_hide_when_unavailable(bool hide) {
         hide_when_unavailable_ = hide;
         refresh();
     }
-    bool hide_when_unavailable() const { return hide_when_unavailable_; }
+    bool hide_when_unavailable() const {
+        return hide_when_unavailable_;
+    }
 
     /// Requests this button has raised.
-    std::uint64_t request_count() const { return requests_; }
+    std::uint64_t request_count() const {
+        return requests_;
+    }
 
   private:
     std::string access_text() const {
