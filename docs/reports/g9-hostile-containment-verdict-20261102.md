@@ -56,6 +56,35 @@ The classifier regression passes for `S`, absent PID, and zombie states `Z`,
 exit. A planted version of the old any-state classifier fails those zombie
 checks. The receipt is local run output, not a committed artifact.
 
+## Scoped POSIX helper remediation
+
+The bounded helper fix is committed on a fresh `origin/main` base at
+`786c006e9ee8ba51f2e8b6b20a941e52e1653139` (base
+`9b80bc8c0ac5ea9b564974811491204bde499c3c`). POSIX launches now create a
+private process group atomically (`POSIX_SPAWN_SETPGROUP`, or `setpgid` on the
+Android fork path). Timeout, cancellation, destructor, and relaunch cleanup
+send SIGTERM to that group, wait a bounded grace interval, then send SIGKILL
+when the group remains live. A cached/reaped direct PID is never signalled as
+a fallback, avoiding PID-reuse damage.
+
+The planted positive control is the real child-process test
+`run_process timeout terminates POSIX descendants` in
+`test/test_runtime_utils.cpp`: a shell records a real `sleep` descendant PID,
+the helper times out, and the test requires that PID to disappear. It passed
+five consecutive runs (4 assertions each). The existing POSIX child-process
+controls also passed (36 assertions across 11 cases). The raw Darwin fixture
+above remains a separate hostile observation; its current local receipt at
+`build/g9-receipt/receipt.json` has SHA-256
+`9df3994161cac52983a0fc112d7bde5ed00ef58f7902cb630e1d57be4673e540` and still
+reports `isolation_implemented=false` because it intentionally uses Python's
+own subprocess API rather than Pulp's helper.
+
+This remediation does not claim hosted-plugin sandboxing, graph runtime
+isolation, Windows descendant cleanup, callback IPC allocation, restart/state
+recovery, or sibling continuity. Those remain separate unimplemented gates;
+the overall G-9 status therefore stays PARTIAL with a HOLD containment
+verdict.
+
 ## Remaining G-9 gates
 
 - Run the hostile fixture on Linux and Windows with explicit N/A for
