@@ -4,7 +4,7 @@ This artifact records the first runnable R2 wrapper slice from the repaired PR h
 
 ## Exact run
 
-- Source commit: `143eb9df4bd41f917ce36378bcd00c6ab423989d`
+- Source commit: `44d7a234a67f4fdb93982d0c55764c2a41424be1`
 - Fixture source: `test/test_graph_r2_measurement.cpp` (SHA-256 `d320eb9b776fefd69d56c9cda6954e0778ba6b59dbcdae268f559fa3b0018641`; copied as `source-fixture.cpp`)
 - Executable: `build/test/pulp-graph-r2-measurement`
 - Executable SHA-256: `6ba732c383cd83ac693ffd371350a39950ec5fdd1a45293ce8a671e038e7ecf7`
@@ -12,7 +12,7 @@ This artifact records the first runnable R2 wrapper slice from the repaired PR h
 - Compiler: `unknown unknown` (`/usr/bin/c++`)
 - Build profile: Release, GPU `OFF`, examples `OFF`, direct-copy benchmark `ON`
 - Command: `python3 tools/graph_performance_qualification.py record --source-root . --build-dir build --executable build/test/pulp-graph-r2-measurement --output-dir docs/reports/g12-r2-qualification-20261106`
-- Receipt SHA-256: `b89afa570fff8044c2686197dd018b8cd3489ca82e9a8f09d49f7be7d05bf7e2`
+- Receipt SHA-256: `c6ae63d4c78190d9886f18055a674862e399d32d4d1d6929f3b74743790da88d`
 
 ## Measured scope
 
@@ -32,9 +32,9 @@ Each mutation recomputes `receipt_sha256`, so a stale digest cannot explain a re
 
 | artifact | SHA-256 |
 | --- | --- |
-| `raw-output.txt` | `5d502f4e8a1fae48a53372e0bbcfa3c3ae87ef3f6d7af97176ac17b98e850c1e` |
+| `raw-output.txt` | `29a01e4d13be61b62f0e40a2fb0b0674e78b6dffec8053c58578a0fa21d7ff1a` |
 | `raw-stderr.txt` | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
 | `source-fixture.cpp` | `d320eb9b776fefd69d56c9cda6954e0778ba6b59dbcdae268f559fa3b0018641` |
-| `receipt.json` | `b89afa570fff8044c2686197dd018b8cd3489ca82e9a8f09d49f7be7d05bf7e2` |
+| `receipt.json` | `c6ae63d4c78190d9886f18055a674862e399d32d4d1d6929f3b74743790da88d` |
 
 This receipt is a bounded measurement harness result, not a full G-12 qualification claim.
