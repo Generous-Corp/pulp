@@ -782,3 +782,49 @@ TEST_CASE("ContextMenu set_min_width reserves a stable panel width", "[view][con
     REQUIRE(menu->min_width() == 0.0f);
     REQUIRE(menu->measured_width() == Catch::Approx(natural));
 }
+
+TEST_CASE("ContextMenu slider callback that rebuilds the rows ends the gesture cleanly",
+          "[view][context-menu]") {
+    auto root = make_root();
+    ContextMenu* menu = nullptr;
+    int callbacks = 0;
+    const int pointer = 7;
+    menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY},
+                             {Item::make_slider(1, "Release", 0.0f, 0.01f,
+                                                [&](const Item&) {
+                                                    ++callbacks;
+                                                    // Rebuild with many more rows so the vector
+                                                    // relocates: a read of the old row after this
+                                                    // returns is a use-after-free.
+                                                    std::vector<Item> rows;
+                                                    for (int i = 0; i < 64; ++i)
+                                                        rows.push_back(Item::make_toggle(
+                                                            100 + i, "Row", false, nullptr));
+                                                    menu->set_items(std::move(rows));
+                                                })},
+                             [](std::optional<int>) {});
+    const auto row = menu->layout().rows[0];
+    auto press = down_at(row.x + row.width - 12.0f, row.y + row.height * 0.5f);
+    press.pointer_id = pointer;
+    press.phase = MousePhase::press;
+    menu->on_mouse_event(press);
+
+    REQUIRE(callbacks == 1);
+    REQUIRE(menu->items().size() == 64);
+    // The rebuild dropped the slider the pointer was driving, so the capture
+    // taken at mouse-down is released with it; otherwise the host keeps
+    // routing every later event to this menu.
+    REQUIRE_FALSE(menu->has_pointer_capture(pointer));
+    // A drag that arrives after the rebuild is plain hover over the new rows.
+    auto drag = press;
+    drag.phase = MousePhase::drag;
+    drag.position.x -= 20.0f;
+    menu->on_mouse_event(drag);
+    REQUIRE(callbacks == 1);
+    REQUIRE(menu->items().size() == 64);
+    auto release = press;
+    release.is_down = false;
+    release.phase = MousePhase::release;
+    menu->on_mouse_event(release);
+    REQUIRE_FALSE(menu->has_pointer_capture(pointer));
+}

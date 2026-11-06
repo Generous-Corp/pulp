@@ -18,6 +18,14 @@ bool is_selectable(const ContextMenu::Item& it) {
 
 void ContextMenu::replace_items(std::vector<Item> items) {
     items_ = std::move(items);
+    // A rebuild during a slider gesture ends the gesture: the row the pointer
+    // was driving no longer exists, and the capture taken at mouse-down would
+    // otherwise never be released (the release path only runs for an active
+    // slider), leaving the host sending every later event to this menu.
+    if (active_slider_index_ >= 0) {
+        release_pointer_capture(active_pointer_id_);
+        active_pointer_id_ = 0;
+    }
     active_slider_index_ = -1;
     scroll_ = 0.0f;
     if (hover_index_ >= static_cast<int>(items_.size()))
@@ -221,13 +229,15 @@ bool ContextMenu::set_control_from_pointer(Item& item, const Rect& row, Point po
     const float right = slider_track_right(item, row);
     const float value =
         right > left ? std::clamp((point.x - left) / (right - left), 0.0f, 1.0f) : 0.0f;
-    const float before = item.normalized_value;
-    if (value != before) {
+    const bool changed = value != item.normalized_value;
+    if (changed) {
         item.normalized_value = value;
+        // The callback may rebuild the rows; `item` is dangling after this
+        // call and nothing below may touch it.
         notify_item_change(item);
     }
     request_repaint();
-    return before != item.normalized_value;
+    return changed;
 }
 
 void ContextMenu::move_hover(int delta) {
