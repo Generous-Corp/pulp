@@ -44,6 +44,6 @@
     "tools/scripts/render_upward_edge_check.py": "walks core/render sources and reads CMakeLists.txt, core/**/CMakeLists.txt and tools/cmake/*.cmake for target_sources() calls; it never reads tools/scripts, tools/testing or tools/import-validation content",
     "tools/scripts/include_boundary.py": "walks the core/ roots each boundary names; its only tools/scripts content is vellum_policy.json, read through the vellum_policy import, which the reference search follows by stem",
     "tools/scripts/design_unit_boundary_check.py": "walks the include roots of the configured design targets under core/; its only tools/scripts content is vellum_policy.json, read through the vellum_policy import, which the reference search follows by stem",
-    "tools/scripts/core_vellum_direction.py": "walks the core/ roots (CMake files and the GPU forward-declaration roots); it mentions tools/cmake/PulpGpuRuntime.cmake only in a comment and reads no tools/ content"
+    "tools/scripts/core_vellum_direction.py": "walks the core/ roots (CMake files and the GPU forward-declaration roots), the root CMakeLists.txt and tools/cmake/** for Vellum references; it reads no tools/scripts, tools/testing or tools/import-validation content"
   }
 }
