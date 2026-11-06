@@ -30,13 +30,12 @@
 ///                                     manually for deterministic tests.
 
 #include <atomic>
-#include <condition_variable>
 #include <cstdint>
 #include <functional>
-#include <mutex>
 #include <thread>
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/runtime/wake_signal.hpp>
 #include <pulp/audio/planar_audio_ring_buffer.hpp>
 
 namespace pulp::audio {
@@ -280,8 +279,8 @@ private:
 
     std::thread thread_;
     std::atomic<bool> run_{false};
-    std::mutex mutex_;
-    std::condition_variable cv_;
+    // pull() (audio thread) and stop_thread() -> the background reader.
+    runtime::WakeSignal wake_;
 };
 
 }  // namespace pulp::audio
