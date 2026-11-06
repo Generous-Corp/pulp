@@ -78,4 +78,13 @@ endforeach()
 set(PULP_HAS_GPU_RUNTIME TRUE)
 # Every consumer must agree on what pulp::render::GpuSurface names
 # (pulp/platform/gpu_fwd.hpp), so the switch travels with pulp::platform.
+# The headers the switch selects (<gpu_runtime/...>) travel with it: DeviceApi
+# is header-only, so this adds include directories and no second copy of any
+# gpu-runtime archive. gpu-runtime-mode-consistency checks that every target
+# carrying the define also links DeviceApi. The property is appended directly:
+# target_link_libraries() from outside pulp-platform's own directory records
+# a directory-scope marker beside the entry, which every reader of the link
+# interface would then see.
 target_compile_definitions(pulp-platform INTERFACE PULP_GPU_RUNTIME=1)
+set_property(TARGET pulp-platform APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES VellumGpuRuntime::DeviceApi)

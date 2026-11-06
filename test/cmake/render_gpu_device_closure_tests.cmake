@@ -87,12 +87,58 @@ foreach(_pulp_defs_var _pulp_platform_defs _pulp_device_api_defs)
     endif()
     string(REPLACE ";" "|" ${_pulp_defs_var} "${${_pulp_defs_var}}")
 endforeach()
+# The define is a usage requirement, so a target inherits it only through a
+# link to a target that carries it directly. Every direct carrier must also
+# link VellumGpuRuntime::DeviceApi, so the <gpu_runtime/...> include path
+# reaches every target the define reaches. The carriers are collected once
+# every target exists.
+set(_pulp_gpu_runtime_carriers_file "${CMAKE_BINARY_DIR}/gpu-runtime-carriers.txt")
+function(_pulp_gpu_runtime_collect_carriers dir out_var)
+    get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
+    get_property(_subdirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
+    foreach(_sub IN LISTS _subdirs)
+        _pulp_gpu_runtime_collect_carriers("${_sub}" _sub_targets)
+        list(APPEND _targets ${_sub_targets})
+    endforeach()
+    set(${out_var} "${_targets}" PARENT_SCOPE)
+endfunction()
+# Deferred calls expand their arguments when they run, so the path is built
+# here rather than passed in.
+function(_pulp_gpu_runtime_write_carriers)
+    _pulp_gpu_runtime_collect_carriers("${CMAKE_SOURCE_DIR}" _targets)
+    set(_lines "")
+    foreach(_target IN LISTS _targets)
+        set(_carries FALSE)
+        set(_links FALSE)
+        foreach(_prop COMPILE_DEFINITIONS INTERFACE_COMPILE_DEFINITIONS)
+            get_target_property(_defs ${_target} ${_prop})
+            if(_defs AND "${_defs}" MATCHES "PULP_GPU_RUNTIME")
+                set(_carries TRUE)
+            endif()
+        endforeach()
+        if(NOT _carries)
+            continue()
+        endif()
+        foreach(_prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+            get_target_property(_libs ${_target} ${_prop})
+            if(_libs AND "VellumGpuRuntime::DeviceApi" IN_LIST _libs)
+                set(_links TRUE)
+            endif()
+        endforeach()
+        string(APPEND _lines "${_target} ${_links}\n")
+    endforeach()
+    file(WRITE "${CMAKE_BINARY_DIR}/gpu-runtime-carriers.txt" "${_lines}")
+endfunction()
+cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+    CALL _pulp_gpu_runtime_write_carriers)
 add_test(NAME gpu-runtime-mode-consistency
     COMMAND ${CMAKE_COMMAND}
         -DHAS_GPU_RUNTIME=${PULP_HAS_GPU_RUNTIME}
         "-DPLATFORM_DEFS=${_pulp_platform_defs}"
         "-DAPI_DEFS=${_pulp_device_api_defs}"
+        "-DCARRIERS_FILE=${_pulp_gpu_runtime_carriers_file}"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_mode.cmake)
+unset(_pulp_gpu_runtime_carriers_file)
 set_tests_properties(gpu-runtime-mode-consistency
     PROPERTIES LABELS "render;gpu-device;link-closure" TIMEOUT 20)
 # One Dawn proc-table installer per image: the device-only consumer always, and

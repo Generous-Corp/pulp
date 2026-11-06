@@ -3,8 +3,13 @@
 # interface exactly when this build forwards to gpu-runtime, so a
 # PULP_USE_GPU_RUNTIME=OFF build leaks no gpu-runtime define into a consumer.
 #
+# Every target that carries PULP_GPU_RUNTIME directly must also link
+# VellumGpuRuntime::DeviceApi, whose include directories hold the
+# <gpu_runtime/...> headers the define selects. CARRIERS_FILE lists each direct
+# carrier as `<target> <links DeviceApi>`, written at the end of configure.
+#
 #   cmake -DHAS_GPU_RUNTIME=<bool> -DPLATFORM_DEFS=<list> -DAPI_DEFS=<list>
-#         -P check_gpu_runtime_mode.cmake
+#         -DCARRIERS_FILE=<path> -P check_gpu_runtime_mode.cmake
 foreach(_name PLATFORM_DEFS API_DEFS)
     string(REPLACE "|" ";" _defs "${${_name}}")
     if("PULP_GPU_RUNTIME=1" IN_LIST _defs)
@@ -29,4 +34,26 @@ elseif(_has_PLATFORM_DEFS OR _has_API_DEFS)
         "this build keeps Pulp's own device sources, but PULP_GPU_RUNTIME leaks through "
         "pulp::platform (${_has_PLATFORM_DEFS}) or pulp::gpu-device-api (${_has_API_DEFS})")
 endif()
-message(STATUS "gpu-runtime mode consistent (forwarding: ${HAS_GPU_RUNTIME})")
+if(NOT EXISTS "${CARRIERS_FILE}")
+    message(FATAL_ERROR "carrier list ${CARRIERS_FILE} is missing; reconfigure")
+endif()
+file(STRINGS "${CARRIERS_FILE}" _carriers)
+set(_carrier_count 0)
+foreach(_line IN LISTS _carriers)
+    string(REPLACE " " ";" _fields "${_line}")
+    list(GET _fields 0 _target)
+    list(GET _fields 1 _links)
+    math(EXPR _carrier_count "${_carrier_count} + 1")
+    if(NOT HAS_GPU_RUNTIME)
+        message(FATAL_ERROR "${_target} carries PULP_GPU_RUNTIME in a build that keeps Pulp's own device sources")
+    endif()
+    if(NOT _links)
+        message(FATAL_ERROR
+            "${_target} carries PULP_GPU_RUNTIME but does not link VellumGpuRuntime::DeviceApi, "
+            "so its consumers see the define without the <gpu_runtime/...> include path")
+    endif()
+endforeach()
+if(HAS_GPU_RUNTIME AND _carrier_count LESS 2)
+    message(FATAL_ERROR "expected pulp-platform and pulp-gpu-device-api among the carriers, found ${_carrier_count}")
+endif()
+message(STATUS "gpu-runtime mode consistent (forwarding: ${HAS_GPU_RUNTIME}; ${_carrier_count} carrier(s), all linking DeviceApi)")
