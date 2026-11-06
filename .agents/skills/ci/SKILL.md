@@ -523,6 +523,16 @@ apply only when the group's first parent is that main tip; a stacked group
 keeps the full matrix. If a merge group reports skip-safe, the
 `[classify-base]` lines in the classify log name the base it diffed.
 
+The merge-group HOLD check and the queue circuit breaker scan from that same
+main tip. The "Resolve the merge group's main base" step runs the protected
+copy of the resolver before any queue-entry code and classify reuses its
+`base` output, so the three cannot disagree. Do not hand either check
+`merge_group.base_sha`: from there a HOLD on an entry ahead in the batch is
+never re-checked by the group that lands it. An unresolved base (`origin/main`)
+fails the HOLD check and a live breaker closed. A group failing with "main's
+tip could not be resolved" is that fallback: read the step's `merge-group base:`
+line, then re-run classify or re-queue.
+
 ## Diff-scoped gates on merge_group use the entry's own base
 
 `Enforce version & skill sync` diffs against `merge_group.base_sha` on a queued

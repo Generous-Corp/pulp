@@ -217,8 +217,25 @@ class WorkflowWiringTests(unittest.TestCase):
         # a missing env line would silently disable every merge-group skip.
         line = "MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}"
         classify_job = job_block(self.text, "classify")
+        resolve_step = classify_job[
+            classify_job.index("      - name: Resolve the merge group's main base"):
+            classify_job.index("      - name: Refuse a merge group whose pull request is held")
+        ]
+        self.assertIn("id: merge_group_base", resolve_step)
+        self.assertIn(line, resolve_step)
+        # The protected base branch's copy runs, never the queue entry's.
+        self.assertIn(
+            'git show "FETCH_HEAD:tools/scripts/resolve_classify_base.py" >"$resolver"',
+            resolve_step,
+        )
+        self.assertNotIn("python3 tools/scripts/resolve_classify_base.py", resolve_step)
         classify_step = classify_job[classify_job.index("      - id: classify"):]
-        self.assertIn(line, classify_step)
+        # classify reuses that answer rather than re-deriving the base.
+        self.assertIn(
+            "MERGE_GROUP_MAIN_BASE: ${{ steps.merge_group_base.outputs.base }}",
+            classify_step,
+        )
+        self.assertIn('base="${MERGE_GROUP_MAIN_BASE:-origin/main}"', classify_step)
         bootstrap = job_block(self.text, "macos-merge-group")
         self.assertIn(line, bootstrap)
         self.assertIn("bash tools/ci/macos_merge_group_bootstrap.sh", bootstrap)

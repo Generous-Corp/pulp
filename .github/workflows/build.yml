@@ -1232,10 +1232,52 @@ jobs:
           # A `pr_number` dispatch classifies its bound merge commit, as a
           # pull_request run does. Empty is the event's own ref.
           ref: ${{ steps.pr_dispatch.outputs.tested_sha || '' }}
+      # The base every merge-group step below scans from: main's tip, reached
+      # from `merge_group.base_sha` down the group's first-parent chain by
+      # tools/scripts/resolve_classify_base.py. With entries queued ahead,
+      # `base_sha` is the previous speculative group, and a group that passes
+      # lands every entry ahead of it, so the HOLD check, the queue breaker
+      # and classify must all see the whole batch. It runs the protected base
+      # branch's copy of the resolver, before any queue entry's code runs in
+      # this job, and classify reuses its answer, so the checks and the
+      # native-build decision cannot disagree about the base. Anything it
+      # cannot resolve prints `origin/main`: classify then builds natively,
+      # and the HOLD check and a live breaker fail the group.
+      - name: Resolve the merge group's main base
+        id: merge_group_base
+        if: ${{ github.event_name == 'merge_group' }}
+        env:
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -uo pipefail
+          title="merge-group base"
+          base=origin/main
+          resolver=$(mktemp)
+          trap 'rm -f "$resolver"' EXIT
+          if [[ "$MERGE_GROUP_BASE_REF" == refs/heads/* ]] \
+              && git fetch --no-tags --depth=1 origin "$MERGE_GROUP_BASE_REF" \
+              && git show "FETCH_HEAD:tools/scripts/resolve_classify_base.py" >"$resolver" \
+              && grep -q '^def merge_group_main_base' "$resolver"; then
+            if ! base=$(GITHUB_EVENT_NAME=merge_group python3 "$resolver"); then
+              base=origin/main
+            fi
+          else
+            echo "::warning title=$title::no protected resolver that walks to main on '$MERGE_GROUP_BASE_REF'; failing closed"
+          fi
+          if ! [[ "$base" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::warning title=$title::base_sha $MERGE_GROUP_BASE_SHA does not reach $MERGE_GROUP_BASE_REF's tip; classify builds natively and the HOLD check fails the group"
+            base=origin/main
+          fi
+          echo "merge-group base: base_sha $MERGE_GROUP_BASE_SHA -> $base"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
       # Backstop for a HOLD that did not take its head out of the queue: fail
       # the group, before any VM, when a queued pull request's latest trusted
-      # verdict on the head it lands is HOLD. A failed classify makes the
-      # macos-merge-group bootstrap fail `macos` closed. The token reaches only
+      # verdict on the head it lands is HOLD. It scans every entry from main's
+      # tip (the step above), not from `merge_group.base_sha`, so a HOLD on an
+      # entry further ahead in the batch is checked by the group that lands
+      # it, and a base that did not resolve fails the group. A failed classify
+      # makes the macos-merge-group bootstrap fail `macos` closed. The token reaches only
       # the protected base branch's copy of the check, never code from a queue
       # entry. It fails closed: a base it cannot fetch, or input the check
       # cannot read, fails the group (a re-run retries). Only a base that does
@@ -1244,7 +1286,7 @@ jobs:
         if: ${{ github.event_name == 'merge_group' }}
         env:
           MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
-          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_MAIN_BASE: ${{ steps.merge_group_base.outputs.base }}
           MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
@@ -1262,19 +1304,27 @@ jobs:
             echo "::notice title=$title::$MERGE_GROUP_BASE_REF has no HOLD check yet; not checked"
             exit 0
           fi
+          if ! [[ "${MERGE_GROUP_MAIN_BASE:-}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error title=$title::main's tip could not be resolved from this group (got '${MERGE_GROUP_MAIN_BASE:-}'), so the entries ahead of it cannot be checked. Fix: $fix"
+            exit 1
+          fi
           hold_check=$(mktemp)
           trap 'rm -f "$hold_check"' EXIT
           git show "FETCH_HEAD:tools/ci/merge_group_hold_check.py" >"$hold_check"
           GH_TOKEN="${{ github.token }}" python3 "$hold_check" \
             --repo "$GITHUB_REPOSITORY" \
-            --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+            --base "$MERGE_GROUP_MAIN_BASE" --head "$MERGE_GROUP_HEAD_SHA"
       # The merge-queue circuit breaker (tools/ci/queue_breaker.py). While the
       # PULP_QUEUE_BREAKER repository variable names a test failing on main,
       # fail every merge group that carries neither its fix nor a trusted
       # `queue-unblock` label, before any VM: a failed classify fails `macos`
       # closed. It never skips a group (skipped reads as green). Like the HOLD
-      # check it runs the protected base branch's copy, and it fails open: a
-      # variable or group it cannot read lets the group proceed. On a pull
+      # check it runs the protected base branch's copy and scans the group from
+      # main's tip, so a fix or `queue-unblock` further ahead in the batch
+      # counts for the group that lands it. It fails open: a variable or group
+      # it cannot read lets the group proceed. The one exception is a live
+      # breaker on a group whose main base did not resolve, which fails the
+      # group, as the HOLD check does: the scan would be narrowed. On a pull
       # request, PULP_QUEUE_BREAKER_CONTROL is judged report-only against the
       # pull request itself, the positive control that the variable reaches here.
       - name: Merge-queue circuit breaker
@@ -1282,7 +1332,7 @@ jobs:
         if: ${{ github.event_name == 'merge_group' || github.event_name == 'pull_request' }}
         env:
           BASE_REF: ${{ github.event.merge_group.base_ref || format('refs/heads/{0}', github.event.pull_request.base.ref) }}
-          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MERGE_GROUP_MAIN_BASE: ${{ steps.merge_group_base.outputs.base }}
           MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           QUEUE_BREAKER: ${{ github.event_name == 'merge_group' && vars.PULP_QUEUE_BREAKER || vars.PULP_QUEUE_BREAKER_CONTROL }}
@@ -1302,9 +1352,13 @@ jobs:
           trap 'rm -f "$breaker"' EXIT
           git show "FETCH_HEAD:tools/ci/queue_breaker.py" >"$breaker"
           if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            if ! [[ "${MERGE_GROUP_MAIN_BASE:-}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              echo "::error title=$title::queue breaker: open, but main's tip could not be resolved from this group (got '${MERGE_GROUP_MAIN_BASE:-}'), so the entries ahead of it cannot be judged; failing closed. Fix: re-run this merge group's classify job, or re-queue its pull requests"
+              exit 1
+            fi
             GH_TOKEN="${{ github.token }}" python3 "$breaker" check-group \
               --repo "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT" \
-              --base "$MERGE_GROUP_BASE_SHA" --head "$MERGE_GROUP_HEAD_SHA"
+              --base "$MERGE_GROUP_MAIN_BASE" --head "$MERGE_GROUP_HEAD_SHA"
           else
             GH_TOKEN="${{ github.token }}" python3 "$breaker" check-group \
               --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --report-only
@@ -1317,13 +1371,16 @@ jobs:
         # `merge_group.base_sha` down the first-parent chain: with entries
         # queued ahead, `base_sha` is the previous speculative group, and a
         # diff against it sees only the last entry while the group lands all
-        # of them. See tools/scripts/resolve_classify_base.py for the full
+        # of them. That base is resolved once, by the protected resolver in
+        # the "Resolve the merge group's main base" step, and reused here, so
+        # the HOLD check, the queue breaker and this classification scan the
+        # same batch. See tools/scripts/resolve_classify_base.py for the full
         # contract and tools/scripts/test_resolve_classify_base.py for the cases.
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          MERGE_GROUP_MAIN_BASE: ${{ steps.merge_group_base.outputs.base }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_HEAD_SHA: ${{ github.sha }}
           EVENT_PATH: ${{ github.event_path }}
@@ -1355,7 +1412,14 @@ jobs:
           if [[ "$a2t_decision" == *"verify=true"* ]]; then
             a2t_receipt_verification_required=true
           fi
-          base="$("$ci_python" tools/scripts/resolve_classify_base.py)"
+          if [ "$EVENT_NAME" = merge_group ]; then
+            # Main's tip from the protected resolver step; anything but a sha
+            # (origin/main included) leaves the native build required.
+            base="${MERGE_GROUP_MAIN_BASE:-origin/main}"
+            echo "classify: merge group; diffing against main base $base (base_sha $MERGE_GROUP_BASE_SHA)"
+          else
+            base="$("$ci_python" tools/scripts/resolve_classify_base.py)"
+          fi
           # A `pr_number` dispatch checked out its bound merge commit: diff it
           # against that merge's base (the bind step verified it), as a pull
           # request diffs its pinned base.sha. Anything but a sha leaves the

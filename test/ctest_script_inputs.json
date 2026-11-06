@@ -7710,7 +7710,9 @@
     ".github/workflows/build.yml",
     "tools/ci/fixtures/merge_group_hold/pr-10114-verdicts.json",
     "tools/ci/merge_group_hold_check.py",
-    "tools/ci/test_merge_group_hold_check.py"
+    "tools/ci/merge_queue_fixture.py",
+    "tools/ci/test_merge_group_hold_check.py",
+    "tools/scripts/resolve_classify_base.py"
    ],
    "kind": "python"
   },
@@ -8974,8 +8976,10 @@
    "entry": "tools/ci/test_queue_breaker.py",
    "inputs": [
     ".github/workflows/build.yml",
+    "tools/ci/merge_queue_fixture.py",
     "tools/ci/queue_breaker.py",
-    "tools/ci/test_queue_breaker.py"
+    "tools/ci/test_queue_breaker.py",
+    "tools/scripts/resolve_classify_base.py"
    ],
    "kind": "python"
   },
