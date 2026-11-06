@@ -3,11 +3,12 @@
 /// @file buffering_reader.hpp
 /// Background-thread pre-buffering for audio file playback.
 
+#include <pulp/runtime/wake_signal.hpp>
+
 #include <vector>
 #include <atomic>
+#include <chrono>
 #include <thread>
-#include <mutex>
-#include <condition_variable>
 #include <functional>
 #include <cstring>
 #include <algorithm>
@@ -87,7 +88,7 @@ public:
     /// Stop the background thread and release resources.
     void stop() {
         running_.store(false);
-        cv_.notify_all();
+        wake_.notify();
         if (thread_.joinable()) thread_.join();
         buffer_.clear();
     }
@@ -126,8 +127,9 @@ public:
         read_pos_ = (read_pos_ + samples_to_read) % buffer_size_;
         available_.fetch_sub(samples_to_read, std::memory_order_release);
 
-        // Wake up background thread if it's waiting for space
-        cv_.notify_one();
+        // Wake the background thread if it is parked waiting for space. No
+        // lock, and a system call only while it is actually asleep.
+        wake_.notify();
 
         // Zero-fill any remaining samples
         int frames_read = samples_to_read / num_channels;
@@ -161,22 +163,25 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> finished_{false};
     std::thread thread_;
-    std::mutex mutex_;
-    std::condition_variable cv_;
+    // Audio thread (read) and control thread (stop) -> the background thread.
+    runtime::WakeSignal wake_;
     static constexpr int kChunkFrames = 1024;
+    // Only bounds the cost of a missed wake; refills are driven by read().
+    static constexpr auto kIdleBackstop = std::chrono::seconds(1);
 
     void background_loop() {
         std::vector<float> temp(static_cast<size_t>(kChunkFrames * num_channels_));
 
         while (running_.load()) {
-            // Wait until there's space in the buffer
-            {
-                std::unique_lock<std::mutex> lock(mutex_);
-                cv_.wait_for(lock, std::chrono::milliseconds(10), [this] {
+            // Sleep while the buffer is full; read() wakes this thread when it
+            // frees space, and stop() when the reader shuts down. A full,
+            // unread buffer therefore costs no wakeups at all.
+            wake_.wait_for(
+                [this] {
                     return !running_.load() ||
-                           available_.load() < buffer_size_;
-                });
-            }
+                           available_.load(std::memory_order_acquire) < buffer_size_;
+                },
+                kIdleBackstop);
 
             if (!running_.load()) break;
 
@@ -193,7 +198,6 @@ private:
             if (frames_got <= 0) {
                 finished_.store(true);
                 running_.store(false);
-                cv_.notify_all();
                 return;
             }
             if (frames_got > frames_to_read) frames_got = frames_to_read;

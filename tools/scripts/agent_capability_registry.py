@@ -417,6 +417,28 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/audio/buffering_reader.hpp",
+        "fingerprint": "sha256:051b0e39daded2b42ffa26e82bb2835546bfea02bd927de687d473b16974529f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Background pre-buffering ring for file playback whose worker the audio "
+            "thread wakes through runtime::WakeSignal; streaming infrastructure, not a "
+            "generator-facing DSP capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/streaming_sample_source.hpp",
+        "fingerprint": "sha256:c6545cbfd9556d958a6b3a8768b0c0358e654d228cc99fdb1655ac8b4d4d56f9",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Preloaded-head plus streamed-tail sample source with a background reader "
+            "woken by the audio thread; the sampler's disk-streaming infrastructure, "
+            "with no generator capability claim of its own."
+        ),
+    },
+    {
         "include": "pulp/audio/async_block_worker.hpp",
         "fingerprint": "sha256:33f3ba40c7c017a7859242307bb29d51dc50e56f7827e3e262f1ea68795251d2",
         "disposition": "infrastructure",
