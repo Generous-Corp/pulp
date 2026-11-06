@@ -3,6 +3,7 @@
 #include <pulp/host/signal_graph_node.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -45,12 +46,26 @@ struct SubgraphParameterSpec {
     float maximum = 1.0f;
 };
 
+struct SubgraphTemplate;
+
+// A child is another immutable template expanded as part of its parent. The
+// child key is the stable namespace used for its exposed ports and parameter
+// paths (for example, `filter.gain`). A shared pointer keeps the declaration
+// value-owned while allowing recursive template types without a second graph
+// runtime or a pointer into a temporary object.
+struct SubgraphChildSpec {
+    std::string key;
+    std::shared_ptr<const SubgraphTemplate> definition;
+    std::uint32_t instance_index = 0;
+};
+
 struct SubgraphTemplate {
     std::string identity;
     std::vector<SubgraphNodeSpec> nodes;
     std::vector<SubgraphEdgeSpec> edges;
     std::vector<SubgraphPortSpec> exposed_ports;
     std::vector<SubgraphParameterSpec> parameters;
+    std::vector<SubgraphChildSpec> children;
 };
 
 struct SubgraphState {
@@ -58,6 +73,8 @@ struct SubgraphState {
     std::string instance_identity;
     std::uint32_t instance_index = 0;
     std::unordered_map<std::string, float> parameters;
+    std::unordered_map<std::string, std::string> child_template_identities;
+    std::unordered_map<std::string, std::uint32_t> child_instance_indices;
 };
 
 struct SubgraphParameterBounds {
@@ -74,6 +91,8 @@ struct SubgraphInstance {
     std::unordered_map<std::string, float> parameters;
     std::unordered_map<std::string, NodeId> parameter_nodes;
     std::unordered_map<std::string, SubgraphParameterBounds> parameter_bounds;
+    std::unordered_map<std::string, std::string> child_template_identities;
+    std::unordered_map<std::string, std::uint32_t> child_instance_indices;
 
     SubgraphState save_state() const;
 };
@@ -88,12 +107,14 @@ struct SubgraphExpansionResult {
 };
 
 // Expand one template instance into graph-owned nodes and edges. Expansion is
-// immutable with respect to the template. Any failure (node, edge, port, or
-// parameter declaration) rolls back every node and clears every instance entry
-// created by this call, so a failed result holds no NodeIds. Exposed port names
-// and parameter paths must be unique, parameter bounds must be finite, and each
-// parameter must target a distinct gain node. Diagnostics name the subgraph
-// boundary.
+// immutable with respect to the template. Child templates are recursively
+// flattened into the same ordinary SignalGraph plan; their exposed names and
+// parameter paths are namespaced by the child key. Any failure (node, edge,
+// port, child, or parameter declaration) rolls back every node and clears
+// every instance entry created by this call, so a failed result holds no
+// NodeIds. Exposed port names and parameter paths must be unique, parameter
+// bounds must be finite, and each parameter must target a distinct gain node.
+// Diagnostics name the subgraph boundary.
 SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphTemplate& definition,
                                              std::string instance_identity,
                                              std::uint32_t instance_index = 0);

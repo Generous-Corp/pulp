@@ -3,6 +3,7 @@
 #include <pulp/host/signal_graph_subgraph.hpp>
 
 #include <cmath>
+#include <memory>
 
 using namespace pulp::host;
 
@@ -40,6 +41,16 @@ SubgraphTemplate sink_stage_template() {
                        {"output", "output", 0, false, PortKind::Audio}};
     t.parameters = {{"gain", "gain", 1.0f, 0.0f, 2.0f}};
     return t;
+}
+
+SubgraphTemplate nested_gain_template() {
+    auto child = std::make_shared<SubgraphTemplate>(gain_template());
+    SubgraphTemplate parent;
+    parent.identity = "test.rack";
+    parent.children = {{"filter", std::move(child), 4}};
+    parent.exposed_ports = {{"input", "filter.input", 0, true, PortKind::Audio},
+                            {"output", "filter.output", 0, false, PortKind::Audio}};
+    return parent;
 }
 } // namespace
 
@@ -297,4 +308,48 @@ TEST_CASE("subgraph ports reject clear-reuse and cross-graph instances") {
     CHECK(foreign.code == GraphResult::Code::UnknownPort);
     CHECK(foreign.message().find("stale or unavailable") != std::string::npos);
     CHECK(other_graph.connections().size() == before_foreign);
+}
+
+TEST_CASE("nested subgraph macros namespace ports and state deterministically") {
+    SignalGraph graph;
+    auto expanded = instantiate_subgraph(graph, nested_gain_template(), "rack", 2);
+    REQUIRE(expanded);
+    REQUIRE(expanded.instance.nodes.size() == 3);
+    CHECK(graph.node(expanded.instance.nodes.front())->name == "rack.filter.in");
+    CHECK(expanded.instance.ports.at("input").output);
+    CHECK_FALSE(expanded.instance.ports.at("output").output);
+    CHECK(expanded.instance.parameters.at("filter.gain") == 1.0f);
+    CHECK(expanded.instance.child_template_identities.at("filter") == "test.gain");
+    CHECK(expanded.instance.child_instance_indices.at("filter") == 4);
+
+    auto state = expanded.instance.save_state();
+    state.parameters.at("filter.gain") = 0.25f;
+    REQUIRE(restore_subgraph_state(graph, expanded.instance, state));
+    CHECK(graph.node(expanded.instance.parameter_nodes.at("filter.gain"))->gain == 0.25f);
+
+    auto before = expanded.instance.save_state();
+    before.child_template_identities.at("filter") = "test.other";
+    const auto rejected = restore_subgraph_state(graph, expanded.instance, before);
+    CHECK_FALSE(rejected);
+    CHECK(rejected.message().find("subgraph boundary") != std::string::npos);
+    CHECK(expanded.instance.parameters.at("filter.gain") == 0.25f);
+}
+
+TEST_CASE("nested subgraph rejects cycles and duplicate child keys before graph mutation") {
+    SignalGraph graph;
+    auto cyclic = std::make_shared<SubgraphTemplate>();
+    cyclic->identity = "test.cycle";
+    cyclic->children = {{"loop", cyclic, 0}};
+    const auto cycle_result = instantiate_subgraph(graph, *cyclic, "cycle");
+    CHECK_FALSE(cycle_result);
+    CHECK(cycle_result.result.message().find("subgraph boundary") != std::string::npos);
+    CHECK(graph.nodes().empty());
+
+    auto duplicate = nested_gain_template();
+    duplicate.children.push_back(
+        {"filter", std::make_shared<SubgraphTemplate>(gain_template()), 5});
+    const auto duplicate_result = instantiate_subgraph(graph, duplicate, "duplicate");
+    CHECK_FALSE(duplicate_result);
+    CHECK(duplicate_result.result.message().find("subgraph boundary") != std::string::npos);
+    CHECK(graph.nodes().empty());
 }
