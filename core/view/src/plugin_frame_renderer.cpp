@@ -278,9 +278,19 @@ EditorSurfaces create_editor_surfaces(void* native_handle,
     return out;
 }
 
+struct RasterSceneCache::Impl {
+    std::shared_ptr<canvas::SkiaCanvas::RetainedLayerStore> layers =
+        canvas::SkiaCanvas::create_retained_layer_store();
+    canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy;
+};
+
+RasterSceneCache::RasterSceneCache() : impl_(std::make_unique<Impl>()) {}
+RasterSceneCache::~RasterSceneCache() = default;
+
 std::vector<std::uint8_t> raster_plugin_scene_rgba(View& root, const FrameGeometry& geometry,
                                                    std::uint32_t* out_w, std::uint32_t* out_h,
-                                                   canvas::TextRasterPolicy text_raster) {
+                                                   canvas::TextRasterPolicy text_raster,
+                                                   RasterSceneCache* retained_cache) {
     const std::uint32_t w = geometry.pixel_width();
     const std::uint32_t h = geometry.pixel_height();
     if (w == 0 || h == 0) return {};
@@ -303,8 +313,18 @@ std::vector<std::uint8_t> raster_plugin_scene_rgba(View& root, const FrameGeomet
     // below still works in logical units and the result is crisp on HiDPI at
     // the same resolution the GPU surface would have used.
     if (geometry.scale != 1.0f) sk_canvas->scale(geometry.scale, geometry.scale);
-    canvas::SkiaCanvas canvas(sk_canvas);
+    std::shared_ptr<canvas::SkiaCanvas::RetainedLayerStore> layers;
+    if (retained_cache) {
+        auto& state = *retained_cache->impl_;
+        if (state.text_raster != text_raster) {
+            state.layers = canvas::SkiaCanvas::create_retained_layer_store();
+            state.text_raster = text_raster;
+        }
+        layers = state.layers;
+    }
+    canvas::SkiaCanvas canvas(sk_canvas, nullptr, std::move(layers));
     paint_plugin_scene(canvas, root, geometry, nullptr);
+    canvas.prune_abandoned_retained_layers();
 
     std::vector<std::uint8_t> pixels(static_cast<std::size_t>(w) * h * 4u);
     SkPixmap pixmap(info, pixels.data(), static_cast<std::size_t>(w) * 4u);

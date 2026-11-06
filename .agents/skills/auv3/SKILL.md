@@ -1690,3 +1690,12 @@ editor, or nothing to prewarm, costs one virtual call. The editor itself does
 not change: an open that races the worker waits for the in-flight result
 instead of compiling again. Details: `view-bridge`, "What the host shows while
 it waits".
+
+## Panic requests
+
+The AU v3 adapter attaches to `Processor::panic_state()` where it creates the
+processor and wraps `process()` with `service_panic()` before and
+`observe_midi_out()` after, passing the descriptor's `produces_midi` as the
+`midi_out` claim (`docs/guides/midi-panic.md`). Keep both calls on any new
+process path (including f64) or `Processor::request_panic()` silently stops
+working there. Tests: test_au_plugin_state.mm (capabilities; the MIDI output block is host-installed, so the emitted MIDI is covered by the CLAP, VST3 and AU v2 tests).

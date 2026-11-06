@@ -181,6 +181,13 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        'include': 'pulp/host/graph_event_contract.hpp',
+        'fingerprint': 'sha256:04e90c3334121939d028d603d37fbe02af97ccd78ae6d2968bc65a73ad625a50',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Bounded host and graph-authored event boundary contract; it is not wired into SignalGraph admission or a generator-facing capability.',
+    },
+    {
         'include': 'pulp/audio/buffer.hpp',
         'fingerprint': 'sha256:d783b077cccb2137232cfcf34924a2fada3e356467f7768fce862785fdda977d',
         'disposition': 'infrastructure',
@@ -202,6 +209,9 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         'rationale': 'Existing executor lowering infrastructure with graph-owned opaque spectral resolver; no public native spectral-stage registration or notation capability.',
     },
     {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:7184acce0063ba69aab4c271f79a4e65ca3e04fc01e68de2f27f84aa173b3e7a', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
+
+    {'include': 'pulp/midi/synthesiser.hpp', 'fingerprint': 'sha256:2611124e14f31cf1481b9605e99d6bdff7c46fe751073ff1922b01e73e97522c', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Polyphonic voice allocator used by instrument processors; reviewed when panic() was added. Not a generator-facing capability.'},
+    {'include': 'pulp/midi/panic.hpp', 'fingerprint': 'sha256:5de1b463081d7a2bb4c01c83886bc2b341d54b492c43259dace4a944b67e5495', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Pure MIDI 1.0 panic message generation and held-note offs used by processors and adapters; not a generator-facing capability.'},
 
     {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
 

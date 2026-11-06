@@ -24,7 +24,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from resolve_classify_base import DEFAULT_BASE, ZERO_SHA, resolve_base  # noqa: E402
+from resolve_classify_base import (  # noqa: E402
+    DEFAULT_BASE,
+    MAX_QUEUE_WALK,
+    ZERO_SHA,
+    merge_group_main_base,
+    resolve_base,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # Spelled as whole literals so test/ctest_script_inputs.json records them as
@@ -105,7 +111,9 @@ class ResolveBaseTests(unittest.TestCase):
             BASE_SHA,
         )
 
-    def test_merge_group_uses_the_pinned_base_sha(self) -> None:
+    def test_merge_group_starts_from_the_pinned_base_sha(self) -> None:
+        # The pure resolver returns the event's base_sha; resolve_from_env
+        # then walks it down to main (MergeGroupMainBaseTests).
         self.assertEqual(
             resolve_base("merge_group", merge_group_base_sha=BASE_SHA), BASE_SHA
         )
@@ -151,7 +159,7 @@ class CliTests(unittest.TestCase):
         proc = subprocess.run(
             [sys.executable, str(SCRIPT)],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
             check=False,
             env=environ,
         )
@@ -170,13 +178,16 @@ class CliTests(unittest.TestCase):
             BASE_SHA,
         )
 
-    def test_cli_reads_merge_group_context_from_env(self) -> None:
+    def test_cli_merge_group_without_a_base_ref_fails_closed(self) -> None:
+        # base_sha alone cannot say whether it is main or a speculative group
+        # ahead in the queue, so without main's ref the resolver must not
+        # vouch for it. The fallback makes every caller build natively.
         self.assertEqual(
             self._run(
                 GITHUB_EVENT_NAME="merge_group",
                 MERGE_GROUP_BASE_SHA=BASE_SHA,
             ),
-            BASE_SHA,
+            DEFAULT_BASE,
         )
 
     def test_cli_defaults_with_no_context(self) -> None:
@@ -199,6 +210,33 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn(
             "MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}",
             self.text,
+        )
+
+    def test_merge_group_base_ref_reaches_every_resolver_call(self) -> None:
+        # Without base_ref the resolver cannot reach main and fails closed, so
+        # a missing env line would silently disable every merge-group skip.
+        line = "MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}"
+        classify_job = job_block(self.text, "classify")
+        classify_step = classify_job[classify_job.index("      - id: classify"):]
+        self.assertIn(line, classify_step)
+        bootstrap = job_block(self.text, "macos-merge-group")
+        self.assertIn(line, bootstrap)
+        self.assertIn("bash tools/ci/macos_merge_group_bootstrap.sh", bootstrap)
+        self.assertIn(
+            "classify_base: ${{ steps.classify.outputs.classify_base }}", classify_job
+        )
+        self.assertIn('echo "classify_base=$base"', classify_job)
+
+    def test_receipt_reuse_refuses_a_group_stacked_on_unlanded_entries(self) -> None:
+        reuse = job_block(self.text, "protected-receipt-reuse")
+        self.assertIn(
+            "CLASSIFY_BASE: ${{ needs.classify.outputs.classify_base }}", reuse
+        )
+        guard = reuse.index('elif [ "$base" != "${CLASSIFY_BASE:-}" ]; then')
+        # The guard runs before the verifier is loaded from the group's first
+        # parent, so a speculative group's tools/ never act as the verifier.
+        self.assertLess(
+            guard, reuse.index('git show "$base:tools/scripts/protected_merge_receipt.py"')
         )
 
     def test_classify_uses_bounded_exact_tree_checkout(self) -> None:
@@ -449,7 +487,7 @@ class PushDiffIntegrationTests(unittest.TestCase):
 
     def _git(self, *args: str) -> str:
         proc = subprocess.run(
-            ["git", *args], cwd=self.work, capture_output=True, text=True, check=True
+            ["git", *args], cwd=self.work, capture_output=True, text=True, encoding="utf-8", check=True
         )
         return proc.stdout.strip()
 
@@ -473,14 +511,14 @@ class PushDiffIntegrationTests(unittest.TestCase):
         self._git("symbolic-ref", "HEAD", "refs/heads/main")
 
         (self.work / "docs").mkdir()
-        (self.work / "docs" / "README.md").write_text("seed\n")
+        (self.work / "docs" / "README.md").write_text("seed\n", encoding="utf-8")
         self._git("add", "docs/README.md")
         self._git("commit", "-qm", "seed")
         self._git("push", "-q", "origin", "main")
         self.before = self._git("rev-parse", "HEAD")
 
         (self.work / "core").mkdir()
-        (self.work / "core" / "x.cpp").write_text("int main() { return 0; }\n")
+        (self.work / "core" / "x.cpp").write_text("int main() { return 0; }\n", encoding="utf-8")
         self._git("add", "core/x.cpp")
         self._git("commit", "-qm", "core change")
         self._git("push", "-q", "origin", "main")
@@ -498,7 +536,7 @@ class PushDiffIntegrationTests(unittest.TestCase):
                 base,
                 "--json",
             ],
-            cwd=self.work, capture_output=True, text=True, check=False,
+            cwd=self.work, capture_output=True, text=True, encoding="utf-8", check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return json.loads(proc.stdout)
@@ -525,7 +563,7 @@ class PushDiffIntegrationTests(unittest.TestCase):
         # docs merge from a core merge. With `origin/main` both look identical
         # (empty -> fail-closed -> build), so the skip never fires on main.
         before = self._git("rev-parse", "HEAD")
-        (self.work / "docs" / "README.md").write_text("docs only\n")
+        (self.work / "docs" / "README.md").write_text("docs only\n", encoding="utf-8")
         self._git("commit", "-qam", "docs change")
         self._git("push", "-q", "origin", "main")
         self._git("fetch", "-q", "origin", "main")
@@ -535,6 +573,198 @@ class PushDiffIntegrationTests(unittest.TestCase):
         self.assertFalse(result["native_build_required"])
         # Same push, old base: indistinguishable from a core merge.
         self.assertTrue(self._classify("origin/main")["native_build_required"])
+
+
+def _sha(n: int) -> str:
+    return f"{n + 0xabc:040x}"  # never the all-zero sha
+
+
+class MergeGroupMainBaseTests(unittest.TestCase):
+    """The first-parent walk from merge_group.base_sha down to main's tip."""
+
+    def _chain(self, length: int) -> dict[str, str]:
+        # _sha(length) -> ... -> _sha(1) -> _sha(0) == main
+        return {_sha(i): _sha(i - 1) for i in range(1, length + 1)}
+
+    def test_group_directly_on_main_returns_main(self) -> None:
+        self.assertEqual(merge_group_main_base(_sha(0), _sha(0), {}.get), _sha(0))
+
+    def test_stacked_group_walks_down_to_main(self) -> None:
+        chain = self._chain(3)
+        self.assertEqual(merge_group_main_base(_sha(3), _sha(0), chain.get), _sha(0))
+
+    def test_main_that_moved_onto_an_earlier_group_is_its_base(self) -> None:
+        # An earlier group passed and main fast-forwarded to it: the entries
+        # up to there are validated on main, only the rest are this group's.
+        chain = self._chain(3)
+        self.assertEqual(merge_group_main_base(_sha(3), _sha(2), chain.get), _sha(2))
+
+    def test_unreachable_main_fails_closed(self) -> None:
+        chain = self._chain(3)
+        self.assertIsNone(merge_group_main_base(_sha(3), "f" * 40, chain.get))
+
+    def test_unreadable_commit_fails_closed(self) -> None:
+        self.assertIsNone(merge_group_main_base(_sha(3), _sha(0), lambda _: None))
+
+    def test_walk_is_bounded(self) -> None:
+        chain = self._chain(MAX_QUEUE_WALK + 1)
+        self.assertIsNone(
+            merge_group_main_base(_sha(MAX_QUEUE_WALK + 1), _sha(0), chain.get)
+        )
+        self.assertEqual(
+            merge_group_main_base(_sha(MAX_QUEUE_WALK), _sha(0), chain.get),
+            _sha(0),
+        )
+
+    def test_missing_or_malformed_shas_fail_closed(self) -> None:
+        for group, main in (("", _sha(0)), (_sha(0), ""), (ZERO_SHA, ZERO_SHA),
+                            ("not-a-sha", _sha(0)), (None, None)):
+            with self.subTest(group=group, main=main):
+                self.assertIsNone(merge_group_main_base(group, main, {}.get))
+
+
+class StackedMergeGroupIntegrationTests(unittest.TestCase):
+    """A real merge queue's shape, driven through the resolver CLI + classifier.
+
+    Main holds docs only. Entry A changes C++; entry B changes docs. GitHub
+    builds A's group as merge(main, A) and B's as merge(A's group, B), so B's
+    `merge_group.base_sha` is A's speculative group. B's group passing lands
+    A, so B's classification must see A's C++ change.
+    """
+
+    def _git(self, cwd: Path, *args: str) -> str:
+        proc = subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", check=True
+        )
+        return proc.stdout.strip()
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.remote = self.root / "remote.git"
+        src = self.root / "source"
+        subprocess.run(["git", "init", "-q", "--bare", str(self.remote)], check=True)
+        subprocess.run(["git", "clone", "-q", str(self.remote), str(src)],
+                       check=True, capture_output=True)
+        self.src = src
+        for key, value in (("user.email", "ci@example.invalid"), ("user.name", "ci")):
+            self._git(src, "config", key, value)
+        self._git(src, "symbolic-ref", "HEAD", "refs/heads/main")
+        (src / "docs").mkdir()
+        (src / "docs" / "README.md").write_text("seed\n", encoding="utf-8")
+        self._git(src, "add", "docs/README.md")
+        self._git(src, "commit", "-qm", "seed")
+        self.main = self._git(src, "rev-parse", "HEAD")
+        self._git(src, "push", "-q", "origin", "main")
+
+        # Entry A: C++. Entry B: docs only. Both branch from main.
+        self._git(src, "checkout", "-qb", "entry-a", self.main)
+        (src / "core").mkdir()
+        (src / "core" / "x.cpp").write_text("int x;\n", encoding="utf-8")
+        self._git(src, "add", "core/x.cpp")
+        self._git(src, "commit", "-qm", "fix(format): C++ entry")
+        self.entry_a = self._git(src, "rev-parse", "HEAD")
+        self._git(src, "checkout", "-qb", "entry-b", self.main)
+        (src / "docs" / "guide.md").write_text("docs entry\n", encoding="utf-8")
+        self._git(src, "add", "docs/guide.md")
+        self._git(src, "commit", "-qm", "docs: docs entry")
+        self.entry_b = self._git(src, "rev-parse", "HEAD")
+
+    def _group(self, base: str, entry: str, number: int) -> str:
+        """GitHub's speculative group commit: merge(base, entry) on a queue ref."""
+        self._git(self.src, "checkout", "-q", "--detach", base)
+        self._git(self.src, "merge", "-q", "--no-ff", "--no-edit", entry)
+        group = self._git(self.src, "rev-parse", "HEAD")
+        self._git(self.src, "push", "-q", "origin",
+                  f"{group}:refs/heads/gh-readonly-queue/main/pr-{number}-{base}")
+        return group
+
+    def _checkout(self, sha: str) -> Path:
+        """actions/checkout at fetch-depth 1: one commit, no history."""
+        work = self.root / f"checkout-{sha[:8]}"
+        work.mkdir()
+        self._git(work, "init", "-q")
+        self._git(work, "remote", "add", "origin", self.remote.as_uri())
+        self._git(work, "fetch", "-q", "--no-tags", "--depth=1", "origin", sha)
+        self._git(work, "checkout", "-q", "--detach", sha)
+        return work
+
+    def _resolve(self, work: Path, group_base: str, base_ref: str = "refs/heads/main") -> str:
+        environ = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+        environ.update(GITHUB_EVENT_NAME="merge_group",
+                       MERGE_GROUP_BASE_SHA=group_base,
+                       MERGE_GROUP_BASE_REF=base_ref)
+        proc = subprocess.run([sys.executable, str(SCRIPT)], cwd=work, env=environ,
+                              capture_output=True, text=True, encoding="utf-8", check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout.strip()
+
+    def _classify(self, work: Path, base: str) -> dict:
+        import json
+
+        self._git(work, "fetch", "-q", "--no-tags", "--depth=1", "origin", base)
+        proc = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "tools" / "scripts" / "classify_changes.py"),
+             "--mode=diff", "--comparison=trees", "--base", base, "--json"],
+            cwd=work, env={**os.environ, "GITHUB_OUTPUT": ""},
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout)
+
+    def test_docs_entry_behind_a_cpp_entry_requires_the_native_build(self) -> None:
+        group_a = self._group(self.main, self.entry_a, 1)
+        group_b = self._group(group_a, self.entry_b, 2)
+        work = self._checkout(group_b)
+
+        base = self._resolve(work, group_a)
+        self.assertEqual(base, self.main, "a stacked group must diff against main")
+        result = self._classify(work, base)
+        self.assertTrue(result["native_build_required"], result)
+        self.assertIn("core/x.cpp", result["reason"])
+
+        # Negative control: the speculative base the workflow used to diff
+        # against sees only B's docs and skips the build that lands A.
+        stale = self._classify(work, group_a)
+        self.assertFalse(stale["native_build_required"], stale)
+
+    def test_docs_only_group_directly_on_main_still_skips(self) -> None:
+        group_b = self._group(self.main, self.entry_b, 2)
+        work = self._checkout(group_b)
+        base = self._resolve(work, self.main)
+        self.assertEqual(base, self.main)
+        result = self._classify(work, base)
+        self.assertFalse(result["native_build_required"], result)
+        self.assertEqual(result["changed_file_count"], 1)
+
+    def test_group_whose_entries_ahead_already_landed_diffs_the_new_main(self) -> None:
+        group_a = self._group(self.main, self.entry_a, 1)
+        group_b = self._group(group_a, self.entry_b, 2)
+        # A's group passed and main fast-forwarded to it.
+        self._git(self.src, "push", "-q", "origin", f"{group_a}:refs/heads/main")
+        work = self._checkout(group_b)
+        base = self._resolve(work, group_a)
+        self.assertEqual(base, group_a)
+        self.assertFalse(self._classify(work, base)["native_build_required"])
+
+    def test_main_off_the_chain_or_no_base_ref_fails_closed(self) -> None:
+        group_a = self._group(self.main, self.entry_a, 1)
+        group_b = self._group(group_a, self.entry_b, 2)
+        work = self._checkout(group_b)
+        self.assertEqual(self._resolve(work, group_a, base_ref=""), DEFAULT_BASE)
+        self.assertEqual(
+            self._resolve(work, group_a, base_ref="refs/heads/no-such-branch"),
+            DEFAULT_BASE,
+        )
+        # Main rewritten to an unrelated commit: the chain never reaches it.
+        self._git(self.src, "checkout", "-q", "--orphan", "unrelated")
+        self._git(self.src, "commit", "-q", "--allow-empty", "-m", "unrelated")
+        unrelated = self._git(self.src, "rev-parse", "HEAD")
+        self._git(self.src, "push", "-q", "-f", "origin", f"{unrelated}:refs/heads/main")
+        self.assertEqual(self._resolve(work, group_a), DEFAULT_BASE)
 
 
 class ShallowExactTreeIntegrationTests(unittest.TestCase):
@@ -570,7 +800,7 @@ class ShallowExactTreeIntegrationTests(unittest.TestCase):
                 ["git", "commit", "-qm", "base"], cwd=source, check=True
             )
             base = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], cwd=source, text=True
+                ["git", "rev-parse", "HEAD"], cwd=source, text=True, encoding="utf-8"
             ).strip()
             (source / "middle.txt").write_text("unneeded history\n", encoding="utf-8")
             subprocess.run(["git", "add", "middle.txt"], cwd=source, check=True)
@@ -607,7 +837,7 @@ class ShallowExactTreeIntegrationTests(unittest.TestCase):
                 ],
                 cwd=shallow,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8",
                 check=True,
             )
             payload = __import__("json").loads(result.stdout)
@@ -619,7 +849,7 @@ class ShallowExactTreeIntegrationTests(unittest.TestCase):
                     subprocess.check_output(
                         ["git", "rev-list", "--count", ref],
                         cwd=shallow,
-                        text=True,
+                        text=True, encoding="utf-8",
                     ).strip(),
                     "1",
                 )

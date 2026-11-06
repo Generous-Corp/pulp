@@ -203,6 +203,8 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Panic requests (Processor::request_panic), serviced before each block.
+    std::shared_ptr<PanicState> panic_state_;
     // Factory presets, bound to store_ in the constructor. Declared after
     // store_ so reverse member destruction retires the PresetManager while the
     // store it holds a reference to is still alive.
@@ -261,6 +263,15 @@ private:
     static constexpr std::size_t kMaxSysexPerBlock = 64;
     midi::MidiBuffer midi_in_;
     midi::MidiBuffer midi_out_;
+
+    // MIDI the Processor emits during process() reaches the host through
+    // kAudioUnitProperty_MIDIOutputCallback, as for the effect and the MIDI
+    // processor: one output stream (kAudioUnitProperty_MIDIOutputCallbackInfo),
+    // packed allocation-free into a CoreMIDI packet list each block. Only a
+    // processor whose descriptor sets produces_midi advertises it.
+    bool plugin_produces_midi() const noexcept;
+    MidiOutputCallbackPublisher midi_output_callback_;
+    MidiOutputPacketBuilder midi_out_packet_builder_;
 
     // Previous-block transport snapshot used to derive change flags on
     // `ProcessContext`. Default-constructed so the first Render() call

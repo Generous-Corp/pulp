@@ -1391,3 +1391,12 @@ nothing failing or warning. An opted-out processor that still reads
 `param_events()` is recorded on the audio thread (`Processor::param_events()`
 does one relaxed store) and logged once by `report_param_events_while_opted_out()`
 in `clap_deactivate()` and `clap_destroy()`.
+
+## Panic requests
+
+The CLAP adapter attaches to `Processor::panic_state()` where it creates the
+processor and wraps `process()` with `service_panic()` before and
+`observe_midi_out()` after, passing the descriptor's `produces_midi` as the
+`midi_out` claim (`docs/guides/midi-panic.md`). Keep both calls on any new
+process path (including f64) or `Processor::request_panic()` silently stops
+working there. Tests: test_clap_midi_events.cpp (emitted note-offs and channel messages on out_events).
