@@ -401,9 +401,12 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
             const float switch_h = 14.0f;
             const float sx = row.x + row.width - switch_w - 10.0f;
             const float sy = iy + (rh - switch_h) * 0.5f;
-            const auto switch_on = canvas::Color::rgba8(70, 98, 125);
-            const auto switch_off = canvas::Color::rgba8(80, 80, 100);
-            const auto thumb_on = canvas::Color::rgba8(238, 240, 232);
+            const auto switch_on =
+                resolve_color("control.switch.on", canvas::Color::rgba8(70, 98, 125));
+            const auto switch_off =
+                resolve_color("control.switch.off", canvas::Color::rgba8(80, 80, 100));
+            const auto thumb_on =
+                resolve_color("control.switch.thumb", canvas::Color::rgba8(238, 240, 232));
             canvas.set_fill_color(it.checked ? switch_on : switch_off);
             canvas.fill_rounded_rect(sx, sy, switch_w, switch_h, switch_h * 0.5f);
             canvas.set_fill_color(it.checked ? thumb_on : text_dim);
@@ -437,11 +440,13 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
             const float cy = iy + rh * 0.5f;
             // Track and thumb stay off the accent so they read on the
             // accent-filled hovered row as well as on the plain one.
-            canvas.set_stroke_color(canvas::Color::rgba8(145, 153, 164));
+            canvas.set_stroke_color(
+                resolve_color("control.slider.track", canvas::Color::rgba8(145, 153, 164)));
             canvas.set_line_width(2.0f);
             canvas.stroke_line(left, cy, right, cy);
             const float thumb = left + (right - left) * std::clamp(it.normalized_value, 0.0f, 1.0f);
-            canvas.set_fill_color(canvas::Color::rgba8(232, 235, 228));
+            canvas.set_fill_color(
+                resolve_color("control.slider.thumb", canvas::Color::rgba8(232, 235, 228)));
             canvas.fill_circle(thumb, cy, 4.0f);
             if (!it.value_label.empty()) {
                 canvas.set_text_align(canvas::TextAlign::right);
