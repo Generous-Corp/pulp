@@ -2,16 +2,18 @@
 // they sleep while there is nothing to do (no idle wakeups) and refill
 // promptly when the audio thread consumes.
 //
-// Idle wakeups are measured on macOS from the process's own counters
-// (proc_pid_rusage: interrupt + package-idle wakeups, what Activity Monitor
-// reports as "Idle Wake Ups"). Each measurement first proves the instrument
-// can see a 100 Hz polling thread; elsewhere the wakeup checks skip with a
-// named reason, never pass.
+// Idle wakeups come from test/support/idle_wakeups.hpp: each measurement
+// first proves the instrument can see a 100 Hz polling thread and subtracts
+// the process floor; unsupported platforms skip with a named reason, never
+// pass. The idle case is tagged [idle-wakeups] and registered in the
+// advisory `performance` lane; the refill cases gate.
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/audio/buffering_reader.hpp>
 #include <pulp/audio/streaming_sample_source.hpp>
+
+#include "support/idle_wakeups.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -21,12 +23,6 @@
 #include <thread>
 #include <vector>
 
-#if defined(__APPLE__)
-#include <libproc.h>
-#include <sys/resource.h>
-#include <unistd.h>
-#endif
-
 using namespace std::chrono_literals;
 using pulp::audio::BufferingReader;
 using pulp::audio::BufferView;
@@ -34,39 +30,6 @@ using pulp::audio::StreamingSampleSource;
 using pulp::audio::StreamingSampleSourceConfig;
 
 namespace {
-
-#if defined(__APPLE__)
-std::uint64_t process_wakeups() {
-    rusage_info_v4 info{};
-    if (proc_pid_rusage(getpid(), RUSAGE_INFO_V4, reinterpret_cast<rusage_info_t*>(&info)) != 0)
-        return 0;
-    return info.ri_interrupt_wkups + info.ri_pkg_idle_wkups;
-}
-
-// Wakeups per second of the whole process over `window`, the test thread
-// itself sleeping throughout.
-double wakeups_per_second(std::chrono::milliseconds window) {
-    const auto before = process_wakeups();
-    std::this_thread::sleep_for(window);
-    const auto after = process_wakeups();
-    return static_cast<double>(after - before) * 1000.0 / static_cast<double>(window.count());
-}
-
-// The instrument must see a thread that wakes every 10 ms; otherwise a low
-// reading below means nothing.
-bool instrument_sees_polling() {
-    std::atomic<bool> run{true};
-    std::thread poller([&] {
-        // unbounded-wait: allow the control poller; this thread clears run after 1 s
-        while (run.load())
-            std::this_thread::sleep_for(10ms);
-    });
-    const double rate = wakeups_per_second(1000ms);
-    run = false;
-    poller.join();
-    return rate >= 50.0;
-}
-#endif
 
 bool wait_until(const std::function<bool()>& done, std::chrono::milliseconds limit) {
     const auto end = std::chrono::steady_clock::now() + limit;
@@ -149,12 +112,13 @@ TEST_CASE("StreamingSampleSource: pulling wakes the reader to refill the ring",
 }
 
 TEST_CASE("Audio background readers do not wake the CPU while idle",
-          "[audio][wake-signal][idle-wakeups]") {
-#if !defined(__APPLE__)
-    SKIP("idle wakeups are measured from macOS process counters only");
-#else
-    REQUIRE(instrument_sees_polling());
-    const double floor = wakeups_per_second(1000ms);
+          "[audio][wake-signal][idle-wakeups][performance]") {
+    using pulp::test::wakeups_per_second;
+    if (!pulp::test::idle_wakeups_supported())
+        SKIP("no idle-wakeup counter on this platform");
+    REQUIRE(pulp::test::instrument_sees_polling());
+    const double floor = pulp::test::floor_wakeups_per_second();
+    WARN("instrument: " << pulp::test::idle_wakeups_instrument() << ", floor " << floor << "/s");
 
     SECTION("BufferingReader with a full, unread buffer") {
         BufferingReader reader;
@@ -190,5 +154,4 @@ TEST_CASE("Audio background readers do not wake the CPU while idle",
         CHECK(rate < 5.0);
         source.release();
     }
-#endif
 }
