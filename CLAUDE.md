@@ -1088,6 +1088,10 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - You need host-side evidence that built plug-in bundles (CLAP, VST3, AU v2) load, open/resize/close/reopen their editors, keep audio byte-identical with the editor open, and coexist with another plug-in in one process — the data the Vellum parity host lane compares. → `tools/editor-open/host_lane_probe.sh`
   - ⚠ **Cannot see:** Records observations, never a verdict — the paired comparison and its negative controls live in Vellum tools/parity/host_lane.py. Read-back uses CGWindowListCreateImage on the probe's own off-screen window; a frame with read=false is a blind instrument, not an empty editor. Animated editors do not reproduce pixel for pixel across runs.
 
+**artifact-census**
+- Before shipping or reviewing a plug-in or app that draws with Dawn (a Vellum editor, a GPU view) — prove each artifact brings at most one Dawn into a process, keeps a bundled one hidden, and installs the proc table only through the one bootstrap. → `tools/scripts/dawn_binding_census.py`
+  - ⚠ **Cannot see:** Reads symbol tables, so a Dawn linked privately into a STRIPPED image is invisible (an exported one still shows), and a library loaded with dlopen() at run time is outside the static image set. A PASS means no second Dawn was seen in what it could read, never that none exists.
+
 **import-validation**
 - Validate a Chromium DevTools Protocol browser-render receipt before comparing an imported native render. → `tools/import-validation/verify_browser_fidelity_receipt.py`
 

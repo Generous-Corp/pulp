@@ -2783,6 +2783,40 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-7ae61ce004b6"
+paths = ["tools/scripts/test_dawn_binding_census.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "dawn-binding-census-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-d65fbd56ee43"
 paths = ["tools/scripts/test_design_unit_boundary_check.py"]
 tests = [
@@ -7792,6 +7826,7 @@ paths = [
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_ctest_unique_names_check.py",
+  "tools/scripts/test_dawn_binding_census.py",
   "tools/scripts/test_design_unit_boundary_check.py",
   "tools/scripts/test_designated_initializer_lint.py",
   "tools/scripts/test_dispatch_advisory_lanes.py",
@@ -8121,6 +8156,7 @@ tests = [
   "ctest-inventory-parity-self-check",
   "ctest-label-exclusion-guard",
   "ctest-label-exclusion-guard-selftest",
+  "dawn-binding-census-selftest",
   "deps-audit-vellum-drift-selftest",
   "drift-fast-selftest",
   "dsp-capability-registry-selftest",
@@ -8384,6 +8420,7 @@ paths = [
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_ctest_unique_names_check.py",
+  "tools/scripts/test_dawn_binding_census.py",
   "tools/scripts/test_design_unit_boundary_check.py",
   "tools/scripts/test_designated_initializer_lint.py",
   "tools/scripts/test_dispatch_advisory_lanes.py",

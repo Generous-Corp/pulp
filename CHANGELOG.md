@@ -9,6 +9,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1670"></a>
+## [1.67.0] - 2026-11-05
+
+- release/version bump ([#11583](https://github.com/Generous-Corp/pulp/pull/11583))
+- codex/g11 cookbook repair 20261105 ([#11574](https://github.com/Generous-Corp/pulp/pull/11574))
+- codex/g4 subgraph connect 20261105 ([#11581](https://github.com/Generous-Corp/pulp/pull/11581))
+- feature/data plane core move ([#11450](https://github.com/Generous-Corp/pulp/pull/11450))
+- feature/editor owner released ([#11572](https://github.com/Generous-Corp/pulp/pull/11572))
+- feature/au value strings null query ([#11580](https://github.com/Generous-Corp/pulp/pull/11580))
+
 <a id="v1660"></a>
 ## [1.66.0] - 2026-11-05
 
@@ -12280,6 +12290,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.67.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.67.0
 [1.66.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.66.0
 [1.65.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.65.0
 [1.64.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.64.0
