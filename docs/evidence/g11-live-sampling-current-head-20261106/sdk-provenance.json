@@ -1,0 +1,23 @@
+{
+  "schema": "pulp.sdk-provenance.v1",
+  "kind": "development",
+  "profile": "forge-dev",
+  "profile_revision": 4,
+  "build_profile": "dev",
+  "distribution_eligible": false,
+  "sdk_version": "1.76.0",
+  "source_git_sha": "633825f7af3d4c8d0fee7e4ec139588282bdf0a1",
+  "source_git_dirty": false,
+  "platform": "darwin-arm64",
+  "architectures": ["arm64"],
+  "build_type": "Release",
+  "cmake_version": "cmake version 4.3.3",
+  "generator": "Ninja",
+  "compiler": "Apple clang version 21.0.0 (clang-2100.4.1.1)",
+  "macos_sdk": "27.2",
+  "deployment_target": "13.4",
+  "features": {"gpu": true, "design_import": true, "webview": true, "audio_probes": false, "inspector": false, "bridge_exec": false},
+  "formats": {"AU": true, "VST3": true, "CLAP": true, "Standalone": true},
+  "dependencies": {"skia": "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250", "vst3_git_sha": "3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96", "ausdk_git_sha": "e789bc83ddc07cbf80e7bfaf84f1ade975287400"},
+  "input_fingerprint": "3b617cf352bb"
+}

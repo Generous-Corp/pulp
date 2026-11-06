@@ -1,0 +1,10 @@
+[governed-build] applying requested lower parallelism cap before lease admission -j2
+[governed-build] interactive lease acquired id=pulp-shipyard-local-27709-1793977004 cores=2 (asked 2, normal QoS)
+[governed-build] heartbeat every 60s for lease id=pulp-shipyard-local-27709-1793977004
+[1/6] Building CXX object CMakeFiles/sample-region-allpass-core.dir/allpass_graph.cpp.o
+[2/6] Building CXX object CMakeFiles/sample-region-allpass-core.dir/allpass_processor.cpp.o
+[3/6] Linking CXX static library libsample-region-allpass-core.a
+[4/6] Rewriting Skia's libskunicode_icu.a with trimmed ICU data
+icu_data_subset: arm64: 10876560 -> 4847120 bytes (717/2361 items)
+[5/6] Building CXX object CMakeFiles/sample-region-allpass-consumer.dir/installed_consumer.cpp.o
+[6/6] Linking CXX executable sample-region-allpass-consumer
