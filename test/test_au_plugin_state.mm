@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/midi/panic.hpp>
 #include <pulp/format/au_factory_presets.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/au_v2_instrument.hpp>
@@ -1065,6 +1066,93 @@ TEST_CASE("AU v2 instrument delivers processor MIDI output to the host callback"
                                                    kAudioUnitScope_Global, 0, size,
                                                    writable) != noErr);
     }
+}
+
+// A panic request reaches the host's MIDI-output callback: a note-off for the
+// note the instrument left held, then the channel messages, all at offset 0.
+TEST_CASE("AU v2 instrument delivers a panic to the host MIDI callback",
+          "[au][auv2][instrument][midi-out][panic]") {
+    constexpr UInt32 kFrames = 64;
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags =
+        kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+
+    ScopedFactoryRegistration registration(create_midi_out_instrument_processor);
+    pulp::format::au::PulpAUInstrument instrument(nullptr);
+    REQUIRE(g_last_instrument_processor != nullptr);
+    // aumu with produces_midi: requests are serviced and can reach the host.
+    CHECK(g_last_instrument_processor->panic_capabilities().serviced);
+    CHECK(g_last_instrument_processor->panic_capabilities().midi_out);
+
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(format) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+
+    struct Received {
+        std::vector<std::pair<MIDITimeStamp, std::vector<uint8_t>>> packets;
+    };
+    Received received;
+    AUMIDIOutputCallbackStruct callback{};
+    callback.midiOutputCallback = [](void* user, const AudioTimeStamp*, UInt32,
+                                     const MIDIPacketList* list) -> OSStatus {
+        auto* r = static_cast<Received*>(user);
+        const MIDIPacket* packet = &list->packet[0];
+        for (UInt32 i = 0; i < list->numPackets; ++i) {
+            r->packets.push_back(
+                {packet->timeStamp,
+                 std::vector<uint8_t>(packet->data, packet->data + packet->length)});
+            packet = MIDIPacketNext(packet);
+        }
+        return noErr;
+    };
+    callback.userData = &received;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MIDIOutputCallback,
+                                           kAudioUnitScope_Global, 0, &callback,
+                                           sizeof(callback)) == noErr);
+
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    // First block: the instrument sends note-on ch 1 / 60 and leaves it held.
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    received.packets.clear();
+
+    g_last_instrument_processor->request_panic();
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+
+    // Everything stamped at the block start is the panic (the fixture's own
+    // events sit at offsets 5, 10 and 20). CoreMIDI may coalesce same-timestamp
+    // messages, so compare the byte stream.
+    std::vector<uint8_t> delivered, wanted = {0x81, 60, 0};
+    for (const auto& packet : received.packets) {
+        if (packet.first == 0)
+            delivered.insert(delivered.end(), packet.second.begin(), packet.second.end());
+    }
+    std::array<pulp::midi::MidiEvent, pulp::midi::kMaxPanicMessages> messages;
+    const auto count = pulp::midi::panic_messages(pulp::midi::PanicScope{}, messages);
+    for (std::size_t i = 0; i < count; ++i)
+        wanted.insert(wanted.end(),
+                      {messages[i].data()[0], messages[i].data()[1], messages[i].data()[2]});
+    CHECK(delivered.size() == wanted.size());
+    CHECK(delivered == wanted);
+
+    // Consumed once: the next block carries only the fixture's own events.
+    received.packets.clear();
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    for (const auto& packet : received.packets)
+        CHECK(packet.first != 0);
+    instrument.DoCleanup();
 }
 
 // An AU v2 host learns that an instrument's latency or tail moved only
