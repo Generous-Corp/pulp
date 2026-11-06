@@ -2,6 +2,11 @@
   "_comment": "Reviewed pre-existing raw-owner worker captures. Each needle must be part of the matched thread construction and carries the teardown invariant that makes the site acceptable. New sites fail raw_this_async_check.py until reviewed.",
   "entries": [
     {
+      "path": "core/audio/include/pulp/audio/async_block_worker.hpp",
+      "needle": "std::thread([this]",
+      "reason": "AsyncBlockWorker destructor and prepare() call release(), which stops and joins the worker before the rings, job, or signals are reset or destroyed; the class is neither copyable nor movable"
+    },
+    {
       "path": "core/audio/include/pulp/audio/buffering_reader.hpp",
       "needle": "std::thread([this]",
       "reason": "BufferingReader destructor calls stop and joins the worker before member teardown"

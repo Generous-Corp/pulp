@@ -3,8 +3,10 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/audio/async_block_worker.hpp>
 #include <pulp/midi/panic.hpp>
 #include <pulp/format/au_factory_presets.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
@@ -589,6 +591,51 @@ class TestAUFlaggingInstrumentProcessor : public TestAUInstrumentProcessor {
 
 std::unique_ptr<pulp::format::Processor> create_flagging_instrument_processor() {
     return std::make_unique<TestAUFlaggingInstrumentProcessor>();
+}
+
+// An instrument that renders on an AsyncBlockWorker and reports its latency;
+// the worker's latency listener is the processor's flag_latency_changed().
+class TestAUAsyncWorkerInstrumentProcessor;
+TestAUAsyncWorkerInstrumentProcessor* g_async_worker_instrument = nullptr;
+class TestAUAsyncWorkerInstrumentProcessor : public TestAUInstrumentProcessor {
+  public:
+    TestAUAsyncWorkerInstrumentProcessor() {
+        g_async_worker_instrument = this;
+    }
+    void prepare(const pulp::format::PrepareContext& context) override {
+        pulp::audio::AsyncBlockWorkerConfig config;
+        config.sample_rate = context.sample_rate;
+        config.output_channels = 2;
+        config.max_block = static_cast<std::uint32_t>(context.max_buffer_size);
+        config.latency_blocks = 1;
+        config.max_latency_blocks = 4;
+        config.run_worker_thread = false;
+        worker.prepare(config, [](pulp::audio::AsyncBlockWorker<int>::Chunk&) {});
+        worker.set_latency_listener(
+            [](void* self) noexcept {
+                static_cast<TestAUAsyncWorkerInstrumentProcessor*>(self)->flag_latency_changed();
+            },
+            this);
+    }
+    int latency_samples() const override {
+        return static_cast<int>(worker.latency_samples());
+    }
+    void process(pulp::format::ProcessBuffers& audio, pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        TestAUInstrumentProcessor::process(audio, midi_in, midi_out, context);
+        if (auto* output = audio.main_output()) {
+            const pulp::audio::BufferView<const float> no_input;
+            worker.process(no_input, *output, static_cast<std::uint32_t>(output->num_samples()), {},
+                           [](std::uint32_t, int) {});
+            worker.pump();
+        }
+    }
+    pulp::audio::AsyncBlockWorker<int> worker;
+};
+
+std::unique_ptr<pulp::format::Processor> create_async_worker_instrument_processor() {
+    return std::make_unique<TestAUAsyncWorkerInstrumentProcessor>();
 }
 
 // Records the properties the adapter tells the host have changed.
@@ -1240,6 +1287,65 @@ TEST_CASE("AU v2 instrument fires PropertyChanged for a processor latency/tail c
     REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
     REQUIRE(count(kAudioUnitProperty_Latency) == 1);
     REQUIRE(count(kAudioUnitProperty_TailTime) == 1);
+    instrument.DoCleanup();
+}
+
+// The worker's latency change reaches the host through the adapter: the
+// listener flags the processor, the instrument adapter fires PropertyChanged,
+// and kAudioUnitProperty_Latency reports the new value.
+TEST_CASE("AU v2 instrument reports an AsyncBlockWorker latency change",
+          "[au][auv2][instrument][latency][async-block-worker]") {
+    ScopedFactoryRegistration registration(create_async_worker_instrument_processor);
+    constexpr UInt32 kFrames = 64;
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags =
+        kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+    CapturingAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(format) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+    REQUIRE(g_async_worker_instrument != nullptr);
+    auto count = [&](AudioUnitPropertyID id) {
+        return std::count(instrument.changed.begin(), instrument.changed.end(), id);
+    };
+    auto latency_seconds = [&] {
+        Float64 latency = -1.0;
+        REQUIRE(instrument.DispatchGetProperty(kAudioUnitProperty_Latency, kAudioUnitScope_Global,
+                                               0, &latency) == noErr);
+        return latency;
+    };
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 0);
+    REQUIRE(latency_seconds() == Catch::Approx(64.0 / 48000.0));
+
+    REQUIRE(g_async_worker_instrument->worker.request_latency_blocks(3));
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 1);
+    REQUIRE(latency_seconds() == Catch::Approx(3.0 * 64.0 / 48000.0));
+
+    g_async_worker_instrument->worker.set_worker_latency_samples(10);
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 2);
+    REQUIRE(latency_seconds() == Catch::Approx((3.0 * 64.0 + 10.0) / 48000.0));
+
+    // No further change: no further notification.
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 2);
     instrument.DoCleanup();
 }
 
