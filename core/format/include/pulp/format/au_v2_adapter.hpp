@@ -34,9 +34,8 @@ namespace pulp::format::au {
 /// Maximum number of `AUChannelInfo` pairs `build_channel_info` can produce.
 /// Pulp's flexible channel contract allows mono / stereo per main bus
 /// (`validate_channel_layout` constrains every count to {1, 2}), so the worst
-/// case is two pairs (mono and stereo). Sized as a small constant so callers can
-/// back the array with fixed storage and avoid heap allocation.
-inline constexpr std::size_t kMaxChannelInfoPairs = 16;
+/// case is a handful of pairs. The bound itself, `kMaxChannelInfoPairs`, lives
+/// in au_v2_common.hpp so the instrument adapter shares it.
 
 /// Derive the AU `kAudioUnitProperty_SupportedNumChannels` table from a Pulp
 /// `PluginDescriptor`. Surfaces which (input, output) channel-count pairs the
@@ -91,7 +90,13 @@ inline UInt32 build_channel_info(const PluginDescriptor& desc,
     const int out_w = clamp_width(desc.default_output_channels());
 
     UInt32 count = 0;
-    if (in_w == 0) {
+    // An instrument whose main input is optional must also validate with that
+    // input unconnected (a host that offers no audio to a synth still has to
+    // initialize it), so its table carries the no-input rows ahead of the
+    // connected pairs. Effects are unchanged: their main input is required.
+    const bool optional_input = in_w > 0 && desc.category == PluginCategory::Instrument &&
+                                !desc.input_buses.empty() && desc.input_buses[0].optional;
+    if (in_w == 0 || optional_input) {
         // No input bus (instrument / generator): 0 in, each output width up to
         // the declared maximum.
         for (int w = 1; w <= out_w && count < kMaxChannelInfoPairs; ++w) {
@@ -99,6 +104,9 @@ inline UInt32 build_channel_info(const PluginDescriptor& desc,
             out[count].outChannels = static_cast<SInt16>(w);
             ++count;
         }
+    }
+    if (in_w == 0) {
+        // Nothing else to advertise without an input bus.
     } else if (in_w == out_w) {
         // Symmetric effect: matching in==out pairs up to the declared width.
         for (int w = 1; w <= in_w && count < kMaxChannelInfoPairs; ++w) {
@@ -106,7 +114,7 @@ inline UInt32 build_channel_info(const PluginDescriptor& desc,
             out[count].outChannels = static_cast<SInt16>(w);
             ++count;
         }
-    } else {
+    } else if (count < kMaxChannelInfoPairs) {
         // Asymmetric effect: report the exact declared pair (e.g. {1,2}).
         out[count].inChannels = static_cast<SInt16>(in_w);
         out[count].outChannels = static_cast<SInt16>(out_w);
@@ -122,19 +130,32 @@ inline constexpr AudioUnitElement kSidechainInputElement = 1;
 /// "Side Chain" pop-up from the presence of this second input element.
 inline constexpr const char* kSidechainElementName = "Side Chain";
 
-/// True when an AU v2 effect built from `desc` exposes a second input element
+/// True when an AU v2 unit built from `desc` exposes a second input element
 /// for side-chain audio: the descriptor declares a main input bus plus a second
-/// input bus with at least one channel. The Processor API exposes exactly one
-/// side-chain slot (input bus 1), so further input buses are not surfaced.
+/// input bus with at least one channel. AU input elements are positional, so a
+/// side chain is only reachable behind a main input; the Processor API exposes
+/// exactly one side-chain slot (input bus 1), so further input buses are not
+/// surfaced. Shared by the effect and the instrument adapter.
 inline bool effect_has_sidechain_element(const PluginDescriptor& desc) noexcept {
     return desc.input_buses.size() > 1 && desc.input_buses[0].default_channels > 0 &&
            desc.input_buses[1].default_channels > 0;
 }
 
 /// Number of AU input elements an AU v2 effect built from `desc` exposes:
-/// 2 with a side-chain bus (main + side chain), otherwise 1.
+/// 2 with a side-chain bus (main + side chain), otherwise 1. An effect always
+/// has a main input element, even for a descriptor that declares none.
 inline UInt32 effect_input_element_count(const PluginDescriptor& desc) noexcept {
     return effect_has_sidechain_element(desc) ? 2u : 1u;
+}
+
+/// Number of AU input elements an AU v2 INSTRUMENT built from `desc` exposes:
+/// 0 without a main input bus (the classic synth), 1 with a main input, 2 with
+/// a main input and a side chain. `MusicDeviceBase` pulls no input itself, so
+/// the instrument adapter pulls each of these elements by hand in Render().
+inline UInt32 instrument_input_element_count(const PluginDescriptor& desc) noexcept {
+    if (desc.input_buses.empty() || desc.input_buses[0].default_channels <= 0)
+        return 0u;
+    return effect_input_element_count(desc);
 }
 
 /// Default channel count of the side-chain input element, clamped into the
@@ -172,7 +193,10 @@ inline std::size_t build_input_bus_infos(const PluginDescriptor& desc,
     out[n].direction = BusDirection::Input;
     out[n].role = BusRole::Main;
     out[n].declared_channels = desc.default_input_channels();
-    out[n].optional = desc.default_input_channels() == 0;
+    // A declared-optional main input (an instrument that can also process
+    // audio) stays optional; a 0-channel input is optional by construction.
+    out[n].optional = desc.default_input_channels() == 0 ||
+                      (!desc.input_buses.empty() && desc.input_buses[0].optional);
     out[n].active = true;  // adapter overwrites from live channel count
     ++n;
     if (desc.input_buses.size() > 1 && n < cap) {

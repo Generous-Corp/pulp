@@ -21,6 +21,10 @@
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - planning-gitlink (no accidental `planning` submodule pointer bump)
+#   - vellum export event + unit header lists (an exported path edited without
+#     a vellum_inherits decision, or a public header under core/runtime, canvas,
+#     events, platform or simd missing from its PULP_*_UNIT_HEADERS list: the
+#     exact event JSON or list line is printed; --fix-export-event writes it)
 #   - vellum-watch (a range touching a watched capability-family path owes a
 #     committed watch event, and one touching a transferred-slice path owes a
 #     committed change event; prints the exact event JSON to add)
@@ -273,7 +277,7 @@ if [ -f "$VELLUM_HINT" ]; then
     "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
     vellum_rc=$?
     if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ] ||
-       [ "$vellum_rc" -eq 13 ]; then
+       [ "$vellum_rc" -eq 13 ] || [ "$vellum_rc" -eq 14 ] || [ "$vellum_rc" -eq 15 ]; then
         fail=1
     fi
 fi

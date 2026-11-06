@@ -2092,6 +2092,15 @@ CLI flag or command is enough to stale `docs/status/pulp-tooling-disposition.jso
 the regenerate command (`python3 tools/scripts/pulp_tooling_disposition.py
 --write`, and so on) for whichever is stale.
 
+**It also checks two things that used to fail only in CI.** Exit 14 is the real
+`vellum_freeze_check.py --receipt-mode` verdict for an exported path changed
+without a `vellum_inherits` decision, with the export-event skeleton printed (or
+written by `--fix-export-event --inherits true|false --rationale ...`). Exit 15
+is a public header under core/runtime, canvas, events, platform or simd that is
+missing from its `PULP_*_UNIT_HEADERS` list, or listed but gone (the
+`pulp.vellum-closure*` ctests need a configured build), with the exact line to
+add. See the `pulp-vellum-change-routing` skill.
+
 **"Could not be verified" is not "stale".** `pulp_tooling_disposition.py`
 reads `cli-commands.yaml` and needs PyYAML. Without it, the generator exits 3,
 naming the interpreter, and the gate prints "could not be verified" (exit 13)

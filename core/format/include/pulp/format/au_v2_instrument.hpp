@@ -11,6 +11,7 @@
 #include <AudioUnitSDK/MusicDeviceBase.h>
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/contract_editor_session.hpp>
 #include <pulp/format/au_v2_common.hpp>
 #include <pulp/format/host_quirks.hpp>
@@ -131,6 +132,20 @@ public:
     bool StreamFormatWritable(AudioUnitScope scope, AudioUnitElement element) override;
     bool CanScheduleParameters() const noexcept override;
 
+    // Channel capabilities for an instrument that also declares audio input:
+    // the descriptor's input/output pairs, preceded by the no-input rows when
+    // the main input is optional so the unit validates both connected and
+    // unconnected. Without inputs the table is the classic {0, N} ladder.
+    UInt32 SupportedNumChannels(const AUChannelInfo** outInfo) override;
+    // The side-chain input element (element 1) accepts 1..kBoundaryMaxChannels
+    // channels; an output sample-rate change carries over to every unconnected
+    // input element so input and output run at one rate.
+    bool ValidFormat(AudioUnitScope inScope, AudioUnitElement inElement,
+                     const AudioStreamBasicDescription& inNewFormat) override;
+    OSStatus ChangeStreamFormat(AudioUnitScope inScope, AudioUnitElement inElement,
+                                const AudioStreamBasicDescription& inPrevFormat,
+                                const AudioStreamBasicDescription& inNewFormat) override;
+
     OSStatus HandleNoteOn(UInt8 inChannel, UInt8 inNoteNumber,
                           UInt8 inVelocity, UInt32 inStartFrame) override;
     OSStatus HandleNoteOff(UInt8 inChannel, UInt8 inNoteNumber,
@@ -237,6 +252,21 @@ private:
     // realloc and the render path never grows a vector on the audio thread.
     static constexpr std::size_t kMaxOutputBuses = BusBufferSet::kMaxBuses;
     std::array<std::vector<float*>, kMaxOutputBuses> output_bus_ptrs_{};
+
+    // Audio input elements. `MusicDeviceBase` creates the elements the
+    // constructor asks for but never pulls them, so Render() pulls each
+    // connected element itself: element 0 is the main input, element 1 the
+    // side chain. Both are fixed at construction from the descriptor. The
+    // pointer arrays are the per-block read pointers into the elements' own
+    // preallocated buffer lists, so the pull never allocates on the audio
+    // thread. Lifetime of a pulled list is one Render() call.
+    bool has_input_element_ = false;
+    bool has_sidechain_element_ = false;
+    std::array<const float*, boundary::kBoundaryMaxChannels> input_ptrs_{};
+    std::array<const float*, boundary::kBoundaryMaxChannels> sidechain_ptrs_{};
+    // Capability table returned by SupportedNumChannels; the host reads it
+    // after the call returns, so it is instance storage rather than a local.
+    std::array<AUChannelInfo, kMaxChannelInfoPairs> channel_info_{};
 
     // Main-thread listener that pushes editor parameter edits to the host
     // (never from the render thread). Kept alive for the adapter's lifetime.

@@ -1275,6 +1275,10 @@ pulp_add_test_suite(pulp-test-activity-channel GROUP pulp-test-group-core-runtim
     LIBRARIES pulp::runtime
     PROPERTIES LABELS lifecycle)
 
+# WakeSignal (realtime producer -> sleeping consumer wake, elided post)
+pulp_add_test_suite(pulp-test-wake-signal GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
+
 # SpscRingIndex (index-pair SPSC ring-buffer cursor management)
 pulp_add_test_suite(pulp-test-spsc-ring-index GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime)

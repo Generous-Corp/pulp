@@ -40,9 +40,31 @@ buses read silence rather than uninitialised memory. See
 |--------|--------------|-----------------|-------|
 | VST3   | `addAudioOutput` per declared bus (main + aux) | second input bus (`kAux`) | Full multi-in/out. |
 | CLAP   | one audio-output port per declared bus | second input port | Full multi-in/out. |
-| AU v2 **instrument** (`aumu`) | one AU **output element** per declared bus | n/a (no input) | Logic/Live/Cubase list each aux output and route it to its own channel. |
+| AU v2 **instrument** (`aumu`) | one AU **output element** per declared bus | main input **element** 0 + second input element named "Side Chain" when input buses are declared | Logic/Live/Cubase list each aux output and route it to its own channel. Declare the inputs `optional`; the adapter pulls each connected element itself and leaves an unconnected one inactive. A side chain needs a main input bus in front of it (elements are positional). |
 | AU v2 **effect** (`aufx`/`aumf`) | single main output only | second input **element** named "Side Chain" | A declared sidechain bus adds input element 1, so Logic offers its Side Chain pop-up. The adapter pulls element 1 before the main render and delivers it as the Sidechain bus; while the host leaves it unconnected `sidechain_input()` returns null. |
-| AU v3  | descriptor bus 0 + one input bus 1 today | input bus 1 | Additional aux outputs not yet surfaced. |
+| AU v3  | descriptor bus 0 + one input bus 1 today | the input bus after the main input (bus 0 when the main input declares 0 channels) | Additional aux outputs not yet surfaced. Instruments with declared inputs get the same input buses as effects. |
+| AAX | main stem | one optional **mono** sidechain | An Instrument-category plug-in may declare its main input `optional` (an input stem on a generator); an effect's main input must be required. |
+| LV2 | one audio port per output channel | the second input bus's ports, marked `lv2:isSideChain` | Ports stay one flat run; optional buses carry `lv2:connectionOptional`, and the runtime routes the second bus to `sidechain_input()`. |
+
+## Instruments that also process audio
+
+An instrument that can take audio (a vocoder, a granular processor with an
+internal oscillator) declares its inputs `optional`:
+
+```cpp
+d.category = PluginCategory::Instrument;
+d.input_buses = {{"Main In", 2, true}, {"Side Chain", 2, true}};
+```
+
+Each format then exposes them the way its hosts expect: VST3 advertises every
+optional bus as `kAux` and not default-active, which is what Ableton Live's
+instrument Sidechain chooser keys on (a required instrument input would be a
+`kMain` bus Live cannot feed from the chooser); CLAP lists the ports, which
+Bitwig routes from any track; AU v2 and AU v3 create the input elements/buses
+described above, so Logic shows its Side Chain pop-up on the instrument; AAX
+carries an input stem on the generator; LV2 marks the ports optional. The
+standalone host feeds the configured input device into the main input at the
+device's width and has no side chain.
 
 Disconnected buses are always delivered inactive/silent **without reordering**
 the bus→buffer mapping: `audio.outputs[b].info.index` is stable, so a plugin can

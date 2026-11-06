@@ -101,6 +101,16 @@ adapter reads as an `LV2_Atom_Sequence` — a type confusion that compiles, link
 and loads. `test_lv2_bundle_discovery_e2e.cpp` is what now compares the emitted
 indices against the reader, on a real built bundle.
 
+The flat run is also how the side chain travels: `run()` splits the connected
+input ports at the first bus's width (`num_main_audio_inputs`), the first ones
+being the main input and the rest the Sidechain bus, so a second declared input
+bus reaches `sidechain_input()` without changing any index. The manifest marks
+those ports `lv2:portProperty lv2:isSideChain`, and every port of an `optional`
+bus `lv2:connectionOptional`; a port the host leaves unconnected makes its bus
+inactive rather than handing `process()` a null pointer, which is what lets an
+instrument with optional inputs run on a track that feeds it nothing.
+`test_lv2_adapter.cpp` ("LV2 run routes the second input bus") pins the split.
+
 `kind_of()` checks both ends of every range and answers `None` for a negative
 or past-the-end index, so `connect_port()` cannot land outside an array;
 `instantiate()` additionally refuses a descriptor wider than `kMaxChannels`

@@ -893,3 +893,15 @@ things follow:
   `dlclose` runs freed code.
 
 No-op unless the build is configured `PULP_TRACING=ON`.
+
+### An instrument may declare an optional main input; an effect may not
+
+`build_plugin_definition()` rejects an `optional` main input bus for every
+category except `Instrument`. An effect's main input is its signal path, and
+Pro Tools has no notion of an effect with nothing to process, so that
+rejection stays. An instrument that can also process audio (a vocoder, a
+granular processor with its own oscillator) declares `{"Main In", 2, true}`
+and is accepted: the category already maps to the generator component, and
+the input is carried as a regular input stem (`AddAudioIn`), with the usual
+mono optional sidechain allowed behind it. `[aax][model]` "accepts an
+instrument with an optional main input" pins both halves.

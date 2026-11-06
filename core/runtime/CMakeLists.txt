@@ -360,6 +360,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/triple_buffer.hpp
     include/pulp/runtime/udev_monitor.hpp
     include/pulp/runtime/url.hpp
+    include/pulp/runtime/wake_signal.hpp
     include/pulp/runtime/websocket_channel.hpp
     include/pulp/runtime/xml.hpp
     include/pulp/runtime/zip.hpp

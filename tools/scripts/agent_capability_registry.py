@@ -417,6 +417,49 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/audio/buffering_reader.hpp",
+        "fingerprint": "sha256:051b0e39daded2b42ffa26e82bb2835546bfea02bd927de687d473b16974529f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Background pre-buffering ring for file playback whose worker the audio "
+            "thread wakes through runtime::WakeSignal; streaming infrastructure, not a "
+            "generator-facing DSP capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/streaming_sample_source.hpp",
+        "fingerprint": "sha256:c6545cbfd9556d958a6b3a8768b0c0358e654d228cc99fdb1655ac8b4d4d56f9",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Preloaded-head plus streamed-tail sample source with a background reader "
+            "woken by the audio thread; the sampler's disk-streaming infrastructure, "
+            "with no generator capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/audio/async_block_worker.hpp",
+        "fingerprint": "sha256:33f3ba40c7c017a7859242307bb29d51dc50e56f7827e3e262f1ea68795251d2",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Fixed-latency playout of worker-rendered audio and timed events for "
+            "variable host blocks; threading infrastructure a processor drives from "
+            "process(), not a generator-facing DSP capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/pull_rate_detector.hpp",
+        "fingerprint": "sha256:d6be164e1d3f435ae45c994b0ee9835a873895bf98f87652c515064253925c5f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Detects a host pulling audio faster than real time without declaring an "
+            "offline render; a scheduling helper with no DSP or generator claim."
+        ),
+    },
+    {
         "include": "pulp/audio/planar_audio_ring_buffer.hpp",
         "fingerprint": "sha256:3234f8016508d561dee810e774000fc32421aa1c2da4f6ad8f8edc0b4a03acbe",
         "disposition": "infrastructure",

@@ -421,8 +421,9 @@ stack-owned `ProcessBuffers` block and calls the additive
 the existing `ScopedNoAlloc` guard. Legacy processors still reach the original
 main-in/main-out callback through the default projection, while processors that
 override the richer overload can inspect AU v2 bus metadata directly. The AU v2
-instrument `Render()` path uses the same additive dispatch with an inactive,
-optional main input bus and the active output bus.
+instrument `Render()` path uses the same additive dispatch; its input views are
+built from the descriptor and are active only for the elements pulled that
+block (a classic synth projects an inactive, optional main input).
 
 ### Latency / tail change notifications
 
@@ -609,6 +610,19 @@ The genuine AU v2 multi-bus vehicle is the **instrument** (`aumu` /
     audio-thread allocation), using a PRIVATE flags word so the side chain's
     `OutputIsSilence` never marks the main render silent, then calls the base
     `Render`. The pulled list lives only for that call (`sidechain_pulled_`).
+  - `PulpAUInstrument` does the same for an instrument that declares input
+    buses: `MusicDeviceBase` is constructed with
+    `instrument_input_element_count(desc)` (0 / 1 / 2, since the count must be
+    known before the base runs), the constructor sets each input element's
+    width and names element 1, and `Render()` pulls element 0 and element 1
+    itself (`MusicDeviceBase` pulls nothing) with private flag words. Declare
+    an instrument's inputs `optional`: `build_channel_info` then lists `{0,N}`
+    rows ahead of the pairs so `auval` validates with nothing connected, and an
+    inactive element at another sample rate is re-seeded to the output rate in
+    `Initialize` instead of refused (an element fed by a connection or render
+    callback at another rate is still refused). A side chain needs a main
+    input bus in front of it: elements are positional, so a 0-channel first
+    bus means no input elements at all.
   - `ProcessBufferLists` resolves the pointers with
     `resolve_sidechain_channels`, offset by `slice_frame_offset_`:
     `AUEffectBase::ProcessScheduledSlice` advances ONLY the main buffer lists
