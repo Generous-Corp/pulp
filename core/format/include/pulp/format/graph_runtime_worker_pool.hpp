@@ -203,6 +203,18 @@ private:
     };
 
     AudioWorkgroupPublication current_audio_workgroup_publication() const noexcept;
+
+  public:
+#if defined(PULP_GRAPH_RUNTIME_WORKER_POOL_TEST_HOOKS)
+    // One coherent read of the workgroup publication (pointer, generation and
+    // null policy), so a test can check that no reader ever combines fields
+    // from two different publications.
+    AudioWorkgroupPublication audio_workgroup_publication_for_test() const noexcept {
+        return current_audio_workgroup_publication();
+    }
+#endif
+
+  private:
     bool workers_acknowledged_current_audio_workgroup() const noexcept;
     void publish_audio_workgroup(void* workgroup,
                                  bool fallback_when_null) noexcept;

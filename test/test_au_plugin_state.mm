@@ -533,6 +533,41 @@ std::unique_ptr<pulp::format::Processor> create_midi_out_instrument_processor() 
     return std::make_unique<TestAUMidiOutInstrumentProcessor>();
 }
 
+// An instrument that flags a latency / tail change from process() on request.
+bool g_instrument_flag_latency = false;
+bool g_instrument_flag_tail = false;
+class TestAUFlaggingInstrumentProcessor : public TestAUInstrumentProcessor {
+  public:
+    void process(pulp::format::ProcessBuffers& audio, pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        TestAUInstrumentProcessor::process(audio, midi_in, midi_out, context);
+        if (g_instrument_flag_latency) {
+            flag_latency_changed();
+            g_instrument_flag_latency = false;
+        }
+        if (g_instrument_flag_tail) {
+            flag_tail_changed();
+            g_instrument_flag_tail = false;
+        }
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_flagging_instrument_processor() {
+    return std::make_unique<TestAUFlaggingInstrumentProcessor>();
+}
+
+// Records the properties the adapter tells the host have changed.
+struct CapturingAUInstrument : pulp::format::au::PulpAUInstrument {
+    using pulp::format::au::PulpAUInstrument::PulpAUInstrument;
+    std::vector<AudioUnitPropertyID> changed;
+    void PropertyChanged(AudioUnitPropertyID id, AudioUnitScope scope,
+                         AudioUnitElement element) override {
+        changed.push_back(id);
+        pulp::format::au::PulpAUInstrument::PropertyChanged(id, scope, element);
+    }
+};
+
 std::unique_ptr<pulp::format::Processor> create_latency_tail_instrument_processor() {
     return std::make_unique<TestAULatencyTailInstrumentProcessor>();
 }
@@ -1009,6 +1044,61 @@ TEST_CASE("AU v2 instrument delivers processor MIDI output to the host callback"
                                                    kAudioUnitScope_Global, 0, size,
                                                    writable) != noErr);
     }
+}
+
+// An AU v2 host learns that an instrument's latency or tail moved only
+// through PropertyChanged; without it the host keeps compensating for the
+// old latency.
+TEST_CASE("AU v2 instrument fires PropertyChanged for a processor latency/tail change",
+          "[au][auv2][instrument][latency][tail]") {
+    ScopedFactoryRegistration registration(create_flagging_instrument_processor);
+    g_instrument_flag_latency = false;
+    g_instrument_flag_tail = false;
+    constexpr UInt32 kFrames = 64;
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags =
+        kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+    CapturingAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(format) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+    auto count = [&](AudioUnitPropertyID id) {
+        return std::count(instrument.changed.begin(), instrument.changed.end(), id);
+    };
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 0);
+    REQUIRE(count(kAudioUnitProperty_TailTime) == 0);
+
+    g_instrument_flag_latency = true;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 1);
+    REQUIRE(count(kAudioUnitProperty_TailTime) == 0);
+
+    g_instrument_flag_tail = true;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 1);
+    REQUIRE(count(kAudioUnitProperty_TailTime) == 1);
+
+    // Consumed: a block without a new flag does not notify again.
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 1);
+    REQUIRE(count(kAudioUnitProperty_TailTime) == 1);
+    instrument.DoCleanup();
 }
 
 TEST_CASE("AU v2 host callbacks mark transport jumps for processor reset",

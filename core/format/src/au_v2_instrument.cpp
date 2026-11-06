@@ -560,6 +560,16 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
             midi_cb->callback(midi_cb->user_data, &CurrentRenderTime(), /*midiOutNum=*/0, list);
     }
 
+    // Push latency / tail changes the processor flagged during process(), as
+    // the effect and MIDI-processor adapters do. AU v2 hosts watch
+    // kAudioUnitProperty_Latency / ...TailTime through property listeners;
+    // without this an instrument whose latency moves leaves the host's delay
+    // compensation on the old value.
+    if (processor_->consume_latency_changed_flag())
+        PropertyChanged(kAudioUnitProperty_Latency, kAudioUnitScope_Global, 0);
+    if (processor_->consume_tail_changed_flag())
+        PropertyChanged(kAudioUnitProperty_TailTime, kAudioUnitScope_Global, 0);
+
     return noErr;
 }
 
