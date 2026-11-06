@@ -1,1 +1,1 @@
-r2_controls=pass positive=pass planted_expected_output_cell=fail planted_allocation_count=fail
+r2_controls=pass positive=pass planted_expected_output_cell=fail planted_allocation_count=fail planted_timed_allocation_count=fail planted_timing_order=fail planted_raw_output_binding=fail
