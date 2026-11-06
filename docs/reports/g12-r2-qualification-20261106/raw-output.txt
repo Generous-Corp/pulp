@@ -1,82 +1,82 @@
 graph_r2_measurement_v1
 graph_direct_copy_benchmark_v1 timer_overhead_ns=0.000
-shape=passthrough scale=1 block=16 activation_p50_ns=1541.000 activation_p99_sample_ns=54167.000 activation_max_ns=54167.000 scratch_slots=3
-shape=passthrough scale=1 block=16 warmup=500 iterations=100000 samples=31 p50_ns=53.303 p99_sample_ns=55.988 max_ns=55.988 jitter_ns=4.780 observed_wcet_proxy_ns=55.988 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=passthrough scale=1 block=32 activation_p50_ns=1667.000 activation_p99_sample_ns=17417.000 activation_max_ns=17417.000 scratch_slots=3
-shape=passthrough scale=1 block=32 warmup=500 iterations=100000 samples=31 p50_ns=54.943 p99_sample_ns=58.123 max_ns=58.123 jitter_ns=6.515 observed_wcet_proxy_ns=58.123 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=passthrough scale=1 block=64 activation_p50_ns=1542.000 activation_p99_sample_ns=11667.000 activation_max_ns=11667.000 scratch_slots=3
-shape=passthrough scale=1 block=64 warmup=500 iterations=100000 samples=31 p50_ns=59.193 p99_sample_ns=61.378 max_ns=61.378 jitter_ns=6.375 observed_wcet_proxy_ns=61.378 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=passthrough scale=1 block=128 activation_p50_ns=1500.000 activation_p99_sample_ns=12292.000 activation_max_ns=12292.000 scratch_slots=3
-shape=passthrough scale=1 block=128 warmup=500 iterations=100000 samples=31 p50_ns=70.778 p99_sample_ns=84.487 max_ns=84.487 jitter_ns=18.152 observed_wcet_proxy_ns=84.487 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=passthrough scale=1 block=512 activation_p50_ns=1625.000 activation_p99_sample_ns=14250.000 activation_max_ns=14250.000 scratch_slots=3
-shape=passthrough scale=1 block=512 warmup=500 iterations=100000 samples=31 p50_ns=122.471 p99_sample_ns=126.479 max_ns=126.479 jitter_ns=10.272 observed_wcet_proxy_ns=126.479 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=1 block=16 activation_p50_ns=1334.000 activation_p99_sample_ns=9000.000 activation_max_ns=9000.000 scratch_slots=3
-shape=chain scale=1 block=16 warmup=500 iterations=100000 samples=31 p50_ns=52.785 p99_sample_ns=55.884 max_ns=55.884 jitter_ns=5.824 observed_wcet_proxy_ns=55.884 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=1 block=32 activation_p50_ns=1500.000 activation_p99_sample_ns=9750.000 activation_max_ns=9750.000 scratch_slots=3
-shape=chain scale=1 block=32 warmup=500 iterations=100000 samples=31 p50_ns=55.150 p99_sample_ns=56.985 max_ns=56.985 jitter_ns=5.516 observed_wcet_proxy_ns=56.985 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=1 block=64 activation_p50_ns=1459.000 activation_p99_sample_ns=9459.000 activation_max_ns=9459.000 scratch_slots=3
-shape=chain scale=1 block=64 warmup=500 iterations=100000 samples=31 p50_ns=59.183 p99_sample_ns=72.151 max_ns=72.151 jitter_ns=15.540 observed_wcet_proxy_ns=72.151 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=1 block=128 activation_p50_ns=1500.000 activation_p99_sample_ns=9916.000 activation_max_ns=9916.000 scratch_slots=3
-shape=chain scale=1 block=128 warmup=500 iterations=100000 samples=31 p50_ns=69.833 p99_sample_ns=83.188 max_ns=83.188 jitter_ns=16.853 observed_wcet_proxy_ns=83.188 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=1 block=512 activation_p50_ns=1708.000 activation_p99_sample_ns=11333.000 activation_max_ns=11333.000 scratch_slots=3
-shape=chain scale=1 block=512 warmup=500 iterations=100000 samples=31 p50_ns=121.868 p99_sample_ns=124.506 max_ns=124.506 jitter_ns=7.844 observed_wcet_proxy_ns=124.506 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=4 block=16 activation_p50_ns=2583.000 activation_p99_sample_ns=15125.000 activation_max_ns=15125.000 scratch_slots=3
-shape=chain scale=4 block=16 warmup=500 iterations=100000 samples=31 p50_ns=99.255 p99_sample_ns=100.605 max_ns=100.605 jitter_ns=6.387 observed_wcet_proxy_ns=100.605 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=4 block=32 activation_p50_ns=2250.000 activation_p99_sample_ns=10208.000 activation_max_ns=10208.000 scratch_slots=3
-shape=chain scale=4 block=32 warmup=500 iterations=100000 samples=31 p50_ns=103.686 p99_sample_ns=115.741 max_ns=115.741 jitter_ns=18.283 observed_wcet_proxy_ns=115.741 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=4 block=64 activation_p50_ns=2458.000 activation_p99_sample_ns=11375.000 activation_max_ns=11375.000 scratch_slots=3
-shape=chain scale=4 block=64 warmup=500 iterations=100000 samples=31 p50_ns=114.226 p99_sample_ns=120.555 max_ns=120.555 jitter_ns=12.058 observed_wcet_proxy_ns=120.555 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=4 block=128 activation_p50_ns=2041.000 activation_p99_sample_ns=10833.000 activation_max_ns=10833.000 scratch_slots=3
-shape=chain scale=4 block=128 warmup=500 iterations=100000 samples=31 p50_ns=149.226 p99_sample_ns=165.576 max_ns=165.576 jitter_ns=27.680 observed_wcet_proxy_ns=165.576 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=4 block=512 activation_p50_ns=2292.000 activation_p99_sample_ns=12250.000 activation_max_ns=12250.000 scratch_slots=3
-shape=chain scale=4 block=512 warmup=500 iterations=100000 samples=31 p50_ns=241.327 p99_sample_ns=266.264 max_ns=266.264 jitter_ns=30.749 observed_wcet_proxy_ns=266.264 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=16 block=16 activation_p50_ns=3917.000 activation_p99_sample_ns=13708.000 activation_max_ns=13708.000 scratch_slots=3
-shape=chain scale=16 block=16 warmup=500 iterations=100000 samples=31 p50_ns=284.475 p99_sample_ns=300.612 max_ns=300.612 jitter_ns=32.113 observed_wcet_proxy_ns=300.612 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=16 block=32 activation_p50_ns=4459.000 activation_p99_sample_ns=18708.000 activation_max_ns=18708.000 scratch_slots=3
-shape=chain scale=16 block=32 warmup=500 iterations=100000 samples=31 p50_ns=298.271 p99_sample_ns=311.969 max_ns=311.969 jitter_ns=17.886 observed_wcet_proxy_ns=311.969 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=16 block=64 activation_p50_ns=4458.000 activation_p99_sample_ns=15208.000 activation_max_ns=15208.000 scratch_slots=3
-shape=chain scale=16 block=64 warmup=500 iterations=100000 samples=31 p50_ns=328.026 p99_sample_ns=346.135 max_ns=346.135 jitter_ns=24.040 observed_wcet_proxy_ns=346.135 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=16 block=128 activation_p50_ns=4333.000 activation_p99_sample_ns=15000.000 activation_max_ns=15000.000 scratch_slots=3
-shape=chain scale=16 block=128 warmup=500 iterations=100000 samples=31 p50_ns=438.301 p99_sample_ns=474.474 max_ns=474.474 jitter_ns=48.106 observed_wcet_proxy_ns=474.474 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=16 block=512 activation_p50_ns=4333.000 activation_p99_sample_ns=15625.000 activation_max_ns=15625.000 scratch_slots=3
-shape=chain scale=16 block=512 warmup=500 iterations=100000 samples=31 p50_ns=750.412 p99_sample_ns=804.189 max_ns=804.189 jitter_ns=102.362 observed_wcet_proxy_ns=804.189 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=64 block=16 activation_p50_ns=12375.000 activation_p99_sample_ns=36833.000 activation_max_ns=36833.000 scratch_slots=3
-shape=chain scale=64 block=16 warmup=500 iterations=100000 samples=31 p50_ns=1121.020 p99_sample_ns=1186.654 max_ns=1186.654 jitter_ns=121.517 observed_wcet_proxy_ns=1186.654 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=64 block=32 activation_p50_ns=11917.000 activation_p99_sample_ns=27500.000 activation_max_ns=27500.000 scratch_slots=3
-shape=chain scale=64 block=32 warmup=500 iterations=100000 samples=31 p50_ns=1125.514 p99_sample_ns=1150.904 max_ns=1150.904 jitter_ns=85.726 observed_wcet_proxy_ns=1150.904 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=64 block=64 activation_p50_ns=12291.000 activation_p99_sample_ns=26458.000 activation_max_ns=26458.000 scratch_slots=3
-shape=chain scale=64 block=64 warmup=500 iterations=100000 samples=31 p50_ns=1211.147 p99_sample_ns=1335.501 max_ns=1335.501 jitter_ns=156.666 observed_wcet_proxy_ns=1335.501 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=64 block=128 activation_p50_ns=11959.000 activation_p99_sample_ns=25209.000 activation_max_ns=25209.000 scratch_slots=3
-shape=chain scale=64 block=128 warmup=500 iterations=100000 samples=31 p50_ns=1654.514 p99_sample_ns=1771.712 max_ns=1771.712 jitter_ns=167.752 observed_wcet_proxy_ns=1771.712 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=chain scale=64 block=512 activation_p50_ns=15250.000 activation_p99_sample_ns=31167.000 activation_max_ns=31167.000 scratch_slots=3
-shape=chain scale=64 block=512 warmup=500 iterations=100000 samples=31 p50_ns=2538.634 p99_sample_ns=2650.283 max_ns=2650.283 jitter_ns=138.454 observed_wcet_proxy_ns=2650.283 oracle=pass process_allocations=0 output_bits=0xbf3ae148
-shape=fan-out scale=4 block=16 activation_p50_ns=2167.000 activation_p99_sample_ns=14458.000 activation_max_ns=14458.000 scratch_slots=6
-shape=fan-out scale=4 block=16 warmup=500 iterations=100000 samples=31 p50_ns=125.851 p99_sample_ns=138.299 max_ns=138.299 jitter_ns=16.921 observed_wcet_proxy_ns=138.299 oracle=pass process_allocations=0 output_bits=0xc03ae148
-shape=fan-out scale=4 block=32 activation_p50_ns=2209.000 activation_p99_sample_ns=15166.000 activation_max_ns=15166.000 scratch_slots=6
-shape=fan-out scale=4 block=32 warmup=500 iterations=100000 samples=31 p50_ns=137.224 p99_sample_ns=149.523 max_ns=149.523 jitter_ns=17.068 observed_wcet_proxy_ns=149.523 oracle=pass process_allocations=0 output_bits=0xc03ae148
-shape=fan-out scale=4 block=64 activation_p50_ns=2125.000 activation_p99_sample_ns=12417.000 activation_max_ns=12417.000 scratch_slots=6
-shape=fan-out scale=4 block=64 warmup=500 iterations=100000 samples=31 p50_ns=162.462 p99_sample_ns=174.872 max_ns=174.872 jitter_ns=16.742 observed_wcet_proxy_ns=174.872 oracle=pass process_allocations=0 output_bits=0xc03ae148
-shape=fan-out scale=4 block=128 activation_p50_ns=2250.000 activation_p99_sample_ns=13792.000 activation_max_ns=13792.000 scratch_slots=6
-shape=fan-out scale=4 block=128 warmup=500 iterations=100000 samples=31 p50_ns=245.636 p99_sample_ns=257.880 max_ns=257.880 jitter_ns=22.810 observed_wcet_proxy_ns=257.880 oracle=pass process_allocations=0 output_bits=0xc03ae148
-shape=fan-out scale=4 block=512 activation_p50_ns=2375.000 activation_p99_sample_ns=16000.000 activation_max_ns=16000.000 scratch_slots=6
-shape=fan-out scale=4 block=512 warmup=500 iterations=100000 samples=31 p50_ns=495.383 p99_sample_ns=532.565 max_ns=532.565 jitter_ns=58.289 observed_wcet_proxy_ns=532.565 oracle=pass process_allocations=0 output_bits=0xc03ae148
-shape=fan-out scale=16 block=16 activation_p50_ns=4500.000 activation_p99_sample_ns=16875.000 activation_max_ns=16875.000 scratch_slots=18
-shape=fan-out scale=16 block=16 warmup=500 iterations=100000 samples=31 p50_ns=364.126 p99_sample_ns=383.580 max_ns=383.580 jitter_ns=28.378 observed_wcet_proxy_ns=383.580 oracle=pass process_allocations=0 output_bits=0xc13ae146
-shape=fan-out scale=16 block=32 activation_p50_ns=4666.000 activation_p99_sample_ns=17583.000 activation_max_ns=17583.000 scratch_slots=18
-shape=fan-out scale=16 block=32 warmup=500 iterations=100000 samples=31 p50_ns=407.309 p99_sample_ns=441.905 max_ns=441.905 jitter_ns=54.298 observed_wcet_proxy_ns=441.905 oracle=pass process_allocations=0 output_bits=0xc13ae146
-shape=fan-out scale=16 block=64 activation_p50_ns=4167.000 activation_p99_sample_ns=16709.000 activation_max_ns=16709.000 scratch_slots=18
-shape=fan-out scale=16 block=64 warmup=500 iterations=100000 samples=31 p50_ns=509.724 p99_sample_ns=539.674 max_ns=539.674 jitter_ns=45.984 observed_wcet_proxy_ns=539.674 oracle=pass process_allocations=0 output_bits=0xc13ae146
-shape=fan-out scale=16 block=128 activation_p50_ns=4583.000 activation_p99_sample_ns=21125.000 activation_max_ns=21125.000 scratch_slots=18
-shape=fan-out scale=16 block=128 warmup=500 iterations=100000 samples=31 p50_ns=835.197 p99_sample_ns=862.930 max_ns=862.930 jitter_ns=52.571 observed_wcet_proxy_ns=862.930 oracle=pass process_allocations=0 output_bits=0xc13ae146
-shape=fan-out scale=16 block=512 activation_p50_ns=5542.000 activation_p99_sample_ns=27583.000 activation_max_ns=27583.000 scratch_slots=18
-shape=fan-out scale=16 block=512 warmup=500 iterations=100000 samples=31 p50_ns=1629.727 p99_sample_ns=1688.193 max_ns=1688.193 jitter_ns=83.299 observed_wcet_proxy_ns=1688.193 oracle=pass process_allocations=0 output_bits=0xc13ae146
-shape=fan-out scale=64 block=16 activation_p50_ns=13750.000 activation_p99_sample_ns=31125.000 activation_max_ns=31125.000 scratch_slots=66
-shape=fan-out scale=64 block=16 warmup=500 iterations=100000 samples=31 p50_ns=1346.105 p99_sample_ns=1423.645 max_ns=1423.645 jitter_ns=122.880 observed_wcet_proxy_ns=1423.645 oracle=pass process_allocations=0 output_bits=0xc23ae142
-shape=fan-out scale=64 block=32 activation_p50_ns=13708.000 activation_p99_sample_ns=29833.000 activation_max_ns=29833.000 scratch_slots=66
-shape=fan-out scale=64 block=32 warmup=500 iterations=100000 samples=31 p50_ns=1529.729 p99_sample_ns=1732.628 max_ns=1732.628 jitter_ns=272.577 observed_wcet_proxy_ns=1732.628 oracle=pass process_allocations=0 output_bits=0xc23ae142
-shape=fan-out scale=64 block=64 activation_p50_ns=17083.000 activation_p99_sample_ns=41959.000 activation_max_ns=41959.000 scratch_slots=66
-shape=fan-out scale=64 block=64 warmup=500 iterations=100000 samples=31 p50_ns=2054.315 p99_sample_ns=2187.441 max_ns=2187.441 jitter_ns=236.372 observed_wcet_proxy_ns=2187.441 oracle=pass process_allocations=0 output_bits=0xc23ae142
-shape=fan-out scale=64 block=128 activation_p50_ns=17792.000 activation_p99_sample_ns=42417.000 activation_max_ns=42417.000 scratch_slots=66
-shape=fan-out scale=64 block=128 warmup=500 iterations=100000 samples=31 p50_ns=3387.062 p99_sample_ns=3747.755 max_ns=3747.755 jitter_ns=556.352 observed_wcet_proxy_ns=3747.755 oracle=pass process_allocations=0 output_bits=0xc23ae142
-shape=fan-out scale=64 block=512 activation_p50_ns=19584.000 activation_p99_sample_ns=55542.000 activation_max_ns=55542.000 scratch_slots=66
-shape=fan-out scale=64 block=512 warmup=500 iterations=100000 samples=31 p50_ns=7591.048 p99_sample_ns=7946.971 max_ns=7946.971 jitter_ns=642.574 observed_wcet_proxy_ns=7946.971 oracle=pass process_allocations=0 output_bits=0xc23ae142
+shape=passthrough scale=1 block=16 activation_p50_ns=1458.000 activation_p99_sample_ns=11291.000 activation_max_ns=11291.000 scratch_slots=3
+shape=passthrough scale=1 block=16 warmup=500 iterations=100000 samples=31 p50_ns=50.220 p99_sample_ns=51.440 max_ns=51.440 jitter_ns=4.449 observed_wcet_proxy_ns=51.440 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=passthrough scale=1 block=32 activation_p50_ns=1375.000 activation_p99_sample_ns=12000.000 activation_max_ns=12000.000 scratch_slots=3
+shape=passthrough scale=1 block=32 warmup=500 iterations=100000 samples=31 p50_ns=51.917 p99_sample_ns=53.758 max_ns=53.758 jitter_ns=3.869 observed_wcet_proxy_ns=53.758 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=passthrough scale=1 block=64 activation_p50_ns=1417.000 activation_p99_sample_ns=8792.000 activation_max_ns=8792.000 scratch_slots=3
+shape=passthrough scale=1 block=64 warmup=500 iterations=100000 samples=31 p50_ns=57.866 p99_sample_ns=60.688 max_ns=60.688 jitter_ns=4.529 observed_wcet_proxy_ns=60.688 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=passthrough scale=1 block=128 activation_p50_ns=1458.000 activation_p99_sample_ns=12250.000 activation_max_ns=12250.000 scratch_slots=3
+shape=passthrough scale=1 block=128 warmup=500 iterations=100000 samples=31 p50_ns=68.465 p99_sample_ns=72.661 max_ns=72.661 jitter_ns=7.898 observed_wcet_proxy_ns=72.661 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=passthrough scale=1 block=512 activation_p50_ns=1583.000 activation_p99_sample_ns=9417.000 activation_max_ns=9417.000 scratch_slots=3
+shape=passthrough scale=1 block=512 warmup=500 iterations=100000 samples=31 p50_ns=119.338 p99_sample_ns=127.561 max_ns=127.561 jitter_ns=11.643 observed_wcet_proxy_ns=127.561 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=1 block=16 activation_p50_ns=1375.000 activation_p99_sample_ns=9375.000 activation_max_ns=9375.000 scratch_slots=3
+shape=chain scale=1 block=16 warmup=500 iterations=100000 samples=31 p50_ns=51.411 p99_sample_ns=61.522 max_ns=61.522 jitter_ns=11.994 observed_wcet_proxy_ns=61.522 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=1 block=32 activation_p50_ns=1375.000 activation_p99_sample_ns=9000.000 activation_max_ns=9000.000 scratch_slots=3
+shape=chain scale=1 block=32 warmup=500 iterations=100000 samples=31 p50_ns=53.021 p99_sample_ns=58.389 max_ns=58.389 jitter_ns=8.440 observed_wcet_proxy_ns=58.389 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=1 block=64 activation_p50_ns=1375.000 activation_p99_sample_ns=8834.000 activation_max_ns=8834.000 scratch_slots=3
+shape=chain scale=1 block=64 warmup=500 iterations=100000 samples=31 p50_ns=59.560 p99_sample_ns=63.665 max_ns=63.665 jitter_ns=6.565 observed_wcet_proxy_ns=63.665 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=1 block=128 activation_p50_ns=1292.000 activation_p99_sample_ns=8708.000 activation_max_ns=8708.000 scratch_slots=3
+shape=chain scale=1 block=128 warmup=500 iterations=100000 samples=31 p50_ns=67.755 p99_sample_ns=77.137 max_ns=77.137 jitter_ns=12.768 observed_wcet_proxy_ns=77.137 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=1 block=512 activation_p50_ns=1625.000 activation_p99_sample_ns=9584.000 activation_max_ns=9584.000 scratch_slots=3
+shape=chain scale=1 block=512 warmup=500 iterations=100000 samples=31 p50_ns=119.431 p99_sample_ns=131.809 max_ns=131.809 jitter_ns=18.129 observed_wcet_proxy_ns=131.809 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=4 block=16 activation_p50_ns=2000.000 activation_p99_sample_ns=11167.000 activation_max_ns=11167.000 scratch_slots=3
+shape=chain scale=4 block=16 warmup=500 iterations=100000 samples=31 p50_ns=97.100 p99_sample_ns=102.255 max_ns=102.255 jitter_ns=10.549 observed_wcet_proxy_ns=102.255 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=4 block=32 activation_p50_ns=1959.000 activation_p99_sample_ns=10792.000 activation_max_ns=10792.000 scratch_slots=3
+shape=chain scale=4 block=32 warmup=500 iterations=100000 samples=31 p50_ns=115.561 p99_sample_ns=131.927 max_ns=131.927 jitter_ns=27.262 observed_wcet_proxy_ns=131.927 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=4 block=64 activation_p50_ns=2041.000 activation_p99_sample_ns=10000.000 activation_max_ns=10000.000 scratch_slots=3
+shape=chain scale=4 block=64 warmup=500 iterations=100000 samples=31 p50_ns=111.253 p99_sample_ns=121.988 max_ns=121.988 jitter_ns=17.875 observed_wcet_proxy_ns=121.988 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=4 block=128 activation_p50_ns=2042.000 activation_p99_sample_ns=11166.000 activation_max_ns=11166.000 scratch_slots=3
+shape=chain scale=4 block=128 warmup=500 iterations=100000 samples=31 p50_ns=146.777 p99_sample_ns=152.662 max_ns=152.662 jitter_ns=13.541 observed_wcet_proxy_ns=152.662 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=4 block=512 activation_p50_ns=2250.000 activation_p99_sample_ns=11041.000 activation_max_ns=11041.000 scratch_slots=3
+shape=chain scale=4 block=512 warmup=500 iterations=100000 samples=31 p50_ns=235.178 p99_sample_ns=250.850 max_ns=250.850 jitter_ns=23.068 observed_wcet_proxy_ns=250.850 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=16 block=16 activation_p50_ns=5167.000 activation_p99_sample_ns=23500.000 activation_max_ns=23500.000 scratch_slots=3
+shape=chain scale=16 block=16 warmup=500 iterations=100000 samples=31 p50_ns=281.553 p99_sample_ns=308.855 max_ns=308.855 jitter_ns=37.314 observed_wcet_proxy_ns=308.855 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=16 block=32 activation_p50_ns=3875.000 activation_p99_sample_ns=13833.000 activation_max_ns=13833.000 scratch_slots=3
+shape=chain scale=16 block=32 warmup=500 iterations=100000 samples=31 p50_ns=295.046 p99_sample_ns=306.661 max_ns=306.661 jitter_ns=26.633 observed_wcet_proxy_ns=306.661 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=16 block=64 activation_p50_ns=4167.000 activation_p99_sample_ns=14041.000 activation_max_ns=14041.000 scratch_slots=3
+shape=chain scale=16 block=64 warmup=500 iterations=100000 samples=31 p50_ns=322.088 p99_sample_ns=349.207 max_ns=349.207 jitter_ns=35.048 observed_wcet_proxy_ns=349.207 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=16 block=128 activation_p50_ns=4167.000 activation_p99_sample_ns=15125.000 activation_max_ns=15125.000 scratch_slots=3
+shape=chain scale=16 block=128 warmup=500 iterations=100000 samples=31 p50_ns=441.308 p99_sample_ns=455.973 max_ns=455.973 jitter_ns=32.119 observed_wcet_proxy_ns=455.973 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=16 block=512 activation_p50_ns=4250.000 activation_p99_sample_ns=14750.000 activation_max_ns=14750.000 scratch_slots=3
+shape=chain scale=16 block=512 warmup=500 iterations=100000 samples=31 p50_ns=693.759 p99_sample_ns=709.170 max_ns=709.170 jitter_ns=37.812 observed_wcet_proxy_ns=709.170 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=64 block=16 activation_p50_ns=11917.000 activation_p99_sample_ns=43458.000 activation_max_ns=43458.000 scratch_slots=3
+shape=chain scale=64 block=16 warmup=500 iterations=100000 samples=31 p50_ns=1031.213 p99_sample_ns=1056.288 max_ns=1056.288 jitter_ns=41.949 observed_wcet_proxy_ns=1056.288 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=64 block=32 activation_p50_ns=12125.000 activation_p99_sample_ns=25167.000 activation_max_ns=25167.000 scratch_slots=3
+shape=chain scale=64 block=32 warmup=500 iterations=100000 samples=31 p50_ns=1065.412 p99_sample_ns=1074.822 max_ns=1074.822 jitter_ns=31.168 observed_wcet_proxy_ns=1074.822 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=64 block=64 activation_p50_ns=12084.000 activation_p99_sample_ns=25042.000 activation_max_ns=25042.000 scratch_slots=3
+shape=chain scale=64 block=64 warmup=500 iterations=100000 samples=31 p50_ns=1176.263 p99_sample_ns=1216.852 max_ns=1216.852 jitter_ns=59.888 observed_wcet_proxy_ns=1216.852 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=64 block=128 activation_p50_ns=11875.000 activation_p99_sample_ns=24958.000 activation_max_ns=24958.000 scratch_slots=3
+shape=chain scale=64 block=128 warmup=500 iterations=100000 samples=31 p50_ns=1655.074 p99_sample_ns=3476.036 max_ns=3476.036 jitter_ns=1866.412 observed_wcet_proxy_ns=3476.036 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=chain scale=64 block=512 activation_p50_ns=12459.000 activation_p99_sample_ns=26166.000 activation_max_ns=26166.000 scratch_slots=3
+shape=chain scale=64 block=512 warmup=500 iterations=100000 samples=31 p50_ns=2573.199 p99_sample_ns=4026.879 max_ns=4026.879 jitter_ns=1502.288 observed_wcet_proxy_ns=4026.879 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xbf3ae148
+shape=fan-out scale=4 block=16 activation_p50_ns=2083.000 activation_p99_sample_ns=12083.000 activation_max_ns=12083.000 scratch_slots=6
+shape=fan-out scale=4 block=16 warmup=500 iterations=100000 samples=31 p50_ns=136.168 p99_sample_ns=144.465 max_ns=144.465 jitter_ns=14.452 observed_wcet_proxy_ns=144.465 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc03ae148
+shape=fan-out scale=4 block=32 activation_p50_ns=2083.000 activation_p99_sample_ns=11583.000 activation_max_ns=11583.000 scratch_slots=6
+shape=fan-out scale=4 block=32 warmup=500 iterations=100000 samples=31 p50_ns=140.128 p99_sample_ns=146.982 max_ns=146.982 jitter_ns=15.655 observed_wcet_proxy_ns=146.982 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc03ae148
+shape=fan-out scale=4 block=64 activation_p50_ns=2167.000 activation_p99_sample_ns=11292.000 activation_max_ns=11292.000 scratch_slots=6
+shape=fan-out scale=4 block=64 warmup=500 iterations=100000 samples=31 p50_ns=163.348 p99_sample_ns=175.519 max_ns=175.519 jitter_ns=17.790 observed_wcet_proxy_ns=175.519 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc03ae148
+shape=fan-out scale=4 block=128 activation_p50_ns=2250.000 activation_p99_sample_ns=13584.000 activation_max_ns=13584.000 scratch_slots=6
+shape=fan-out scale=4 block=128 warmup=500 iterations=100000 samples=31 p50_ns=241.166 p99_sample_ns=261.340 max_ns=261.340 jitter_ns=38.925 observed_wcet_proxy_ns=261.340 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc03ae148
+shape=fan-out scale=4 block=512 activation_p50_ns=2458.000 activation_p99_sample_ns=18375.000 activation_max_ns=18375.000 scratch_slots=6
+shape=fan-out scale=4 block=512 warmup=500 iterations=100000 samples=31 p50_ns=479.511 p99_sample_ns=497.103 max_ns=497.103 jitter_ns=28.351 observed_wcet_proxy_ns=497.103 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc03ae148
+shape=fan-out scale=16 block=16 activation_p50_ns=4459.000 activation_p99_sample_ns=16542.000 activation_max_ns=16542.000 scratch_slots=18
+shape=fan-out scale=16 block=16 warmup=500 iterations=100000 samples=31 p50_ns=365.517 p99_sample_ns=386.710 max_ns=386.710 jitter_ns=30.326 observed_wcet_proxy_ns=386.710 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc13ae146
+shape=fan-out scale=16 block=32 activation_p50_ns=4250.000 activation_p99_sample_ns=16209.000 activation_max_ns=16209.000 scratch_slots=18
+shape=fan-out scale=16 block=32 warmup=500 iterations=100000 samples=31 p50_ns=411.152 p99_sample_ns=434.897 max_ns=434.897 jitter_ns=34.567 observed_wcet_proxy_ns=434.897 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc13ae146
+shape=fan-out scale=16 block=64 activation_p50_ns=4500.000 activation_p99_sample_ns=17083.000 activation_max_ns=17083.000 scratch_slots=18
+shape=fan-out scale=16 block=64 warmup=500 iterations=100000 samples=31 p50_ns=509.981 p99_sample_ns=531.228 max_ns=531.228 jitter_ns=39.514 observed_wcet_proxy_ns=531.228 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc13ae146
+shape=fan-out scale=16 block=128 activation_p50_ns=4625.000 activation_p99_sample_ns=20875.000 activation_max_ns=20875.000 scratch_slots=18
+shape=fan-out scale=16 block=128 warmup=500 iterations=100000 samples=31 p50_ns=817.529 p99_sample_ns=846.655 max_ns=846.655 jitter_ns=49.826 observed_wcet_proxy_ns=846.655 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc13ae146
+shape=fan-out scale=16 block=512 activation_p50_ns=5166.000 activation_p99_sample_ns=26291.000 activation_max_ns=26291.000 scratch_slots=18
+shape=fan-out scale=16 block=512 warmup=500 iterations=100000 samples=31 p50_ns=1627.334 p99_sample_ns=1668.384 max_ns=1668.384 jitter_ns=94.045 observed_wcet_proxy_ns=1668.384 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc13ae146
+shape=fan-out scale=64 block=16 activation_p50_ns=13542.000 activation_p99_sample_ns=28584.000 activation_max_ns=28584.000 scratch_slots=66
+shape=fan-out scale=64 block=16 warmup=500 iterations=100000 samples=31 p50_ns=1377.959 p99_sample_ns=1392.539 max_ns=1392.539 jitter_ns=51.280 observed_wcet_proxy_ns=1392.539 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc23ae142
+shape=fan-out scale=64 block=32 activation_p50_ns=14541.000 activation_p99_sample_ns=34625.000 activation_max_ns=34625.000 scratch_slots=66
+shape=fan-out scale=64 block=32 warmup=500 iterations=100000 samples=31 p50_ns=1539.688 p99_sample_ns=1574.116 max_ns=1574.116 jitter_ns=65.986 observed_wcet_proxy_ns=1574.116 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc23ae142
+shape=fan-out scale=64 block=64 activation_p50_ns=13625.000 activation_p99_sample_ns=36084.000 activation_max_ns=36084.000 scratch_slots=66
+shape=fan-out scale=64 block=64 warmup=500 iterations=100000 samples=31 p50_ns=1870.994 p99_sample_ns=1926.470 max_ns=1926.470 jitter_ns=86.535 observed_wcet_proxy_ns=1926.470 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc23ae142
+shape=fan-out scale=64 block=128 activation_p50_ns=13917.000 activation_p99_sample_ns=43250.000 activation_max_ns=43250.000 scratch_slots=66
+shape=fan-out scale=64 block=128 warmup=500 iterations=100000 samples=31 p50_ns=3110.513 p99_sample_ns=3245.627 max_ns=3245.627 jitter_ns=198.661 observed_wcet_proxy_ns=3245.627 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc23ae142
+shape=fan-out scale=64 block=512 activation_p50_ns=15333.000 activation_p99_sample_ns=47166.000 activation_max_ns=47166.000 scratch_slots=66
+shape=fan-out scale=64 block=512 warmup=500 iterations=100000 samples=31 p50_ns=6889.206 p99_sample_ns=7221.968 max_ns=7221.968 jitter_ns=510.445 observed_wcet_proxy_ns=7221.968 oracle=pass process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0xc23ae142
