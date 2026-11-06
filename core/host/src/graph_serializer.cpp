@@ -22,6 +22,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -907,6 +908,79 @@ std::optional<std::vector<uint8_t>> b64_decode(std::string_view s) {
 
 int GraphSerializer::current_format_version() {
     return kFormatVersion;
+}
+
+GraphSerializer::SaveResult
+GraphSerializer::to_file(const SignalGraph& graph, const std::filesystem::path& path,
+                         const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
+    SaveResult result;
+    const auto json = to_json(graph, editor_layout);
+    if (json.empty()) {
+        result.error = "graph serialization failed";
+        return result;
+    }
+    const auto payload_size = json.size() + 1; // canonical files end with a newline
+    if (payload_size > max_file_bytes) {
+        result.error = "graph file exceeds " + std::to_string(max_file_bytes) + " byte limit";
+        return result;
+    }
+
+    std::error_code ec;
+    const auto parent =
+        path.parent_path().empty() ? std::filesystem::path(".") : path.parent_path();
+    if (!std::filesystem::is_directory(parent, ec)) {
+        result.error = "graph file destination directory is unavailable: " + parent.string();
+        return result;
+    }
+
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    std::filesystem::path temporary;
+    for (unsigned attempt = 0; attempt != 16; ++attempt) {
+        temporary = parent / (path.filename().string() + ".tmp-" + std::to_string(stamp) + "-" +
+                              std::to_string(attempt));
+        if (!std::filesystem::exists(temporary, ec))
+            break;
+        temporary.clear();
+    }
+    if (temporary.empty()) {
+        result.error = "could not reserve a temporary graph file";
+        return result;
+    }
+
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output) {
+            std::filesystem::remove(temporary, ec);
+            result.error = "graph file cannot be written: " + path.string();
+            return result;
+        }
+        output.write(json.data(), static_cast<std::streamsize>(json.size()));
+        output.put('\n');
+        output.flush();
+        if (!output) {
+            std::filesystem::remove(temporary, ec);
+            result.error = "graph file write failed: " + path.string();
+            return result;
+        }
+    }
+
+    ec.clear();
+    std::filesystem::rename(temporary, path, ec);
+    if (ec) {
+        // Windows cannot replace an existing file with rename; remove only
+        // after the complete temporary payload is durable.
+        std::error_code remove_ec;
+        std::filesystem::remove(path, remove_ec);
+        ec.clear();
+        std::filesystem::rename(temporary, path, ec);
+    }
+    if (ec) {
+        std::filesystem::remove(temporary, ec);
+        result.error = "graph file replace failed: " + path.string();
+        return result;
+    }
+    result.ok = true;
+    return result;
 }
 
 bool GraphSerializer::register_migration(int from_version,

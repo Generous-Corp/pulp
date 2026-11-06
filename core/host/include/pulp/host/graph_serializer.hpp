@@ -114,6 +114,17 @@ class GraphSerializer {
     static std::string to_json(const SignalGraph& graph,
                                const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout = {});
 
+    struct SaveResult {
+        bool ok = false;
+        std::string error;
+    };
+
+    // Serialize one bounded graph file. The destination is replaced only
+    // after the complete canonical JSON payload has been written.
+    static SaveResult
+    to_file(const SignalGraph& graph, const std::filesystem::path& path,
+            const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout = {});
+
     // Result of a load attempt. Plugins that couldn't be re-resolved show
     // up in `missing_plugins` with their original identity tuple — the
     // graph still loads but those nodes have null PluginSlots.

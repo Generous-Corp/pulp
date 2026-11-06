@@ -1494,6 +1494,12 @@ report the graph shape without running plugin code. `fmt` rewrites the file in
 canonical JSON form and is byte stable on repeated runs; `canonicalize` remains
 an alias. Formatting refuses unresolved plugin nodes or rejected plugin state.
 
+`pulp graph save INPUT --output OUTPUT --json` loads a graph through the same
+bounded serializer and writes a canonical copy without modifying the input.
+The public `GraphSerializer::to_file` API applies the same 64 MiB file limit and
+replaces the destination only after the complete payload is written. Save is a
+CLI-only write operation; the MCP `pulp_graph` tool remains read-only.
+
 `pulp graph render FILE --output OUTPUT.wav --json` prepares the saved graph
 and renders one second at 48 kHz to a float WAV. Its JSON result reports frame,
 sample rate, and block counts. Unresolved node types and prepare failures return

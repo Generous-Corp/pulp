@@ -20,6 +20,8 @@
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <new>
 #include <numeric>
@@ -1215,6 +1217,34 @@ TEST_CASE("GraphSerializer surfaces malformed JSON as a clean error",
     auto result = GraphSerializer::from_json(dst, "{ this is not json }");
     REQUIRE_FALSE(result.ok);
     REQUIRE_FALSE(result.error.empty());
+}
+
+TEST_CASE("GraphSerializer saves a bounded canonical file and refuses unavailable destinations",
+          "[host][serializer][file]") {
+    SignalGraph source;
+    const auto input = source.add_input_node(1, "Input");
+    const auto output = source.add_output_node(1, "Output");
+    REQUIRE(source.connect(input, 0, output, 0));
+
+    const auto root = std::filesystem::temp_directory_path() / "pulp-graph-serializer-save-test";
+    std::filesystem::remove_all(root);
+    REQUIRE(std::filesystem::create_directories(root));
+    const auto path = root / "saved.pulpgraph";
+    const auto saved = GraphSerializer::to_file(source, path);
+    REQUIRE(saved.ok);
+    REQUIRE(std::filesystem::is_regular_file(path));
+
+    SignalGraph loaded;
+    const auto restored = GraphSerializer::from_file(loaded, path);
+    REQUIRE(restored.ok);
+    REQUIRE(GraphSerializer::to_json(loaded) == GraphSerializer::to_json(source));
+
+    const auto before = std::filesystem::file_size(path);
+    const auto missing_parent =
+        GraphSerializer::to_file(source, root / "missing" / "bad.pulpgraph");
+    REQUIRE_FALSE(missing_parent.ok);
+    REQUIRE(std::filesystem::file_size(path) == before);
+    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("GraphSerializer rejects non-object roots and malformed field types",
