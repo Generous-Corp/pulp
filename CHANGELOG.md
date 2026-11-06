@@ -9,6 +9,12 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1710"></a>
+## [1.71.0] - 2026-11-06
+
+- release/version bump ([#11627](https://github.com/Generous-Corp/pulp/pull/11627))
+- feature/midi panic overflow carry ([#11611](https://github.com/Generous-Corp/pulp/pull/11611))
+
 <a id="v1700"></a>
 ## [1.70.0] - 2026-11-06
 
@@ -12319,6 +12325,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.71.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.71.0
 [1.70.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.70.0
 [1.69.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.69.0
 [1.68.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.68.0

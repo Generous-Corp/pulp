@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 90,
+  "manifest_revision": 91,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
