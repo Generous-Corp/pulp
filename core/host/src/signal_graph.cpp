@@ -391,6 +391,8 @@ bool sample_kernel_storage_is_disjoint(const SampleKernelDescriptor& descriptor,
 
 SignalGraph::MidiBlockSnapshot::MidiBlockSnapshot() {
     prepare_midi_block_storage(events, ump);
+    mpe.reserve(kGraphMidiEventCapacity);
+    mpe.set_realtime_capacity_limit(true);
 }
 
 SignalGraph::MidiBlockSnapshot::MidiBlockSnapshot(
@@ -402,7 +404,7 @@ SignalGraph::MidiBlockSnapshot::MidiBlockSnapshot(
 SignalGraph::MidiBlockSnapshot&
 SignalGraph::MidiBlockSnapshot::operator=(const MidiBlockSnapshot& other) noexcept {
     if (this == &other) return *this;
-    set_from_midi(other.events, other.sequence, other.incomplete);
+    set_from_midi(other.events, other.mpe, other.sequence, other.incomplete);
     return *this;
 }
 
@@ -411,9 +413,23 @@ bool SignalGraph::MidiBlockSnapshot::set_from_midi(
     uint64_t new_sequence,
     bool source_incomplete) noexcept {
     clear_midi_block(events);
+    mpe.clear();
     sequence = new_sequence;
     const bool copied_all = copy_midi_block(src, events);
     incomplete = source_incomplete || !copied_all;
+    return !incomplete;
+}
+
+bool SignalGraph::MidiBlockSnapshot::set_from_midi(const midi::MidiBuffer& src,
+                                                   const midi::MpeBuffer& src_mpe,
+                                                   uint64_t new_sequence,
+                                                   bool source_incomplete) noexcept {
+    clear_midi_block(events);
+    mpe.clear();
+    sequence = new_sequence;
+    const bool copied_all = copy_midi_block(src, events);
+    const bool copied_mpe = midi::copy_mpe_block(src_mpe, mpe);
+    incomplete = source_incomplete || !copied_all || !copied_mpe;
     return !incomplete;
 }
 
@@ -454,8 +470,8 @@ bool SignalGraph::MidiBlockSnapshot::append_to_midi(
 }
 
 bool SignalGraph::MidiBlockSnapshot::has_payload() const noexcept {
-    return !events.empty() || events.sysex_size() != 0 || !ump.empty()
-        || incomplete;
+    return !events.empty() || events.sysex_size() != 0 || !ump.empty() || !mpe.empty() ||
+           incomplete;
 }
 
 bool SignalGraph::ParameterBlockSnapshot::set_from_queue(
@@ -1435,6 +1451,13 @@ bool SignalGraph::ExecutionSnapshot::inject_midi(
     NodeId midi_input_node, const midi::MidiBuffer& events) const noexcept {
     return snapshot_ != nullptr && !snapshot_->spectral &&
            SignalGraph::inject_midi_into_snapshot_(*snapshot_, midi_input_node, events);
+}
+
+bool SignalGraph::ExecutionSnapshot::inject_midi(NodeId midi_input_node,
+                                                 const midi::MidiBuffer& events,
+                                                 const midi::MpeBuffer& mpe) const noexcept {
+    return snapshot_ != nullptr && !snapshot_->spectral &&
+           SignalGraph::inject_midi_into_snapshot_(*snapshot_, midi_input_node, events, &mpe);
 }
 
 std::uint64_t SignalGraph::ExecutionSnapshot::sample_region_binding_generation() const noexcept {
