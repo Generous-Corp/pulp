@@ -721,5 +721,239 @@ class VellumFreezePreflightTest(_PreflightRepo, unittest.TestCase):
         self.assertNotIn("Traceback", output)
 
 
+# ── unit header lists and export events ────────────────────────────────────
+
+
+def _load_preflight():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_fixture_preflight", PREFLIGHT)
+    module = importlib.util.module_from_spec(spec)
+    import sys
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class UnitHeaderListTests(unittest.TestCase):
+    """`check_unit_headers` mirrors the closure's header-list rule with no build."""
+
+    def setUp(self) -> None:
+        self.pf = _load_preflight()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _unit(self, listed: list[str], on_disk: list[str], directory: str = "core/platform") -> None:
+        lines = "\n".join(f"    {h}" for h in listed)
+        cmake = self.root / directory / "CMakeLists.txt"
+        cmake.parent.mkdir(parents=True, exist_ok=True)
+        cmake.write_text(
+            "# a comment mentioning include/pulp/platform/ghost.hpp is not an entry\n"
+            f"set(PULP_PLATFORM_UNIT_HEADERS\n{lines}\n)\n"
+            "set_property(TARGET pulp-platform PROPERTY PULP_UNIT_HEADERS ${PULP_PLATFORM_UNIT_HEADERS})\n",
+            encoding="utf-8")
+        for header in on_disk:
+            path = self.root / directory / header
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("#pragma once\n", encoding="utf-8")
+
+    def test_a_listed_header_passes(self) -> None:
+        self._unit(["include/pulp/platform/a.hpp", "include/pulp/platform/b.hpp"],
+                   ["include/pulp/platform/a.hpp", "include/pulp/platform/b.hpp"])
+        self.assertEqual(self.pf.check_unit_headers(self.root), [])
+
+    def test_an_unlisted_header_fails_and_names_the_line_to_add(self) -> None:
+        self._unit(["include/pulp/platform/a.hpp", "include/pulp/platform/c.hpp"],
+                   ["include/pulp/platform/a.hpp", "include/pulp/platform/c.hpp",
+                    "include/pulp/platform/b.hpp"])
+        problems = self.pf.check_unit_headers(self.root)
+        self.assertEqual(len(problems), 1, msg=problems)
+        self.assertIn("core/platform/include/pulp/platform/b.hpp is not in "
+                      "PULP_PLATFORM_UNIT_HEADERS", problems[0])
+        self.assertIn("after `include/pulp/platform/a.hpp`", problems[0])
+        self.assertIn("    include/pulp/platform/b.hpp", problems[0])
+
+    def test_a_listed_header_that_is_gone_fails(self) -> None:
+        self._unit(["include/pulp/platform/a.hpp", "include/pulp/platform/gone.hpp"],
+                   ["include/pulp/platform/a.hpp"])
+        problems = self.pf.check_unit_headers(self.root)
+        self.assertEqual(len(problems), 1, msg=problems)
+        self.assertIn("lists include/pulp/platform/gone.hpp, which does not exist", problems[0])
+
+    def test_a_comment_or_variable_is_not_an_entry(self) -> None:
+        # The comment names ghost.hpp; if it counted as an entry it would be
+        # reported as a missing file.
+        self._unit(["include/pulp/platform/a.hpp"], ["include/pulp/platform/a.hpp"])
+        self.assertEqual(self.pf.check_unit_headers(self.root), [])
+
+    def test_a_non_header_file_is_ignored(self) -> None:
+        self._unit(["include/pulp/platform/a.hpp"],
+                   ["include/pulp/platform/a.hpp", "include/pulp/platform/notes.txt"])
+        self.assertEqual(self.pf.check_unit_headers(self.root), [])
+
+    def test_a_design_unit_list_naming_a_missing_header_fails(self) -> None:
+        cmake = self.root / "core/view/cmake/PulpDesignUnits.cmake"
+        cmake.parent.mkdir(parents=True)
+        cmake.write_text("set(PULP_DESIGN_IR_HEADERS\n    include/pulp/view/nope.hpp\n)\n",
+                         encoding="utf-8")
+        problems = self.pf.check_unit_headers(self.root)
+        self.assertEqual(len(problems), 1, msg=problems)
+        self.assertIn("PULP_DESIGN_IR_HEADERS lists include/pulp/view/nope.hpp", problems[0])
+
+    def test_this_checkout_is_clean_and_the_checker_actually_read_its_lists(self) -> None:
+        # Negative control: "no problems" is only evidence if the parser saw
+        # real lists. Every single-unit directory must yield a non-empty list.
+        self.assertEqual(self.pf.check_unit_headers(ROOT), [])
+        for directory in self.pf.SINGLE_UNIT_DIRS:
+            lists = self.pf.parse_header_lists(
+                (ROOT / directory / "CMakeLists.txt").read_text(encoding="utf-8"))
+            listed = [h for n, v in lists.items() if n.endswith("UNIT_HEADERS") for h in v]
+            self.assertGreater(len(listed), 0, msg=directory)
+
+
+class ExportEventTests(unittest.TestCase):
+    """The receipt-mode verdict becomes an event skeleton, and `--fix` writes it."""
+
+    REPORT = {
+        "status": "fail", "export_id": "20261102-0f616a440cec",
+        "missing": ["core/platform/src/b.cpp", "core/platform/src/a.cpp"],
+        "owed": {"core/platform/src/a.cpp": "exported",
+                 "core/platform/src/b.cpp": "added in an exported source directory"},
+    }
+
+    def setUp(self) -> None:
+        self.pf = _load_preflight()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self._real = self.pf.export_verdict
+        self.pf.export_verdict = lambda *a, **k: (
+            subprocess.CompletedProcess([], 1, "", "owed"), dict(self.REPORT))
+
+    def tearDown(self) -> None:
+        self.pf.export_verdict = self._real
+        self._tmp.cleanup()
+
+    def _run(self, **kwargs):
+        out = io.StringIO()
+        code = self.pf.run_unit_and_export(self.root, "origin/main", "HEAD", out, **kwargs)
+        return code, out.getvalue()
+
+    def test_an_owed_export_prints_the_skeleton_for_exactly_the_owed_paths(self) -> None:
+        code, output = self._run()
+        self.assertEqual(code, self.pf.EXPORT_OWED, msg=output)
+        self.assertIn(".github/vellum-export-events/", output)
+        self.assertIn('"kind": "exported-path-change"', output)
+        self.assertIn('"receipt_export_id": "20261102-0f616a440cec"', output)
+        self.assertLess(output.index("core/platform/src/a.cpp"),
+                        output.index("core/platform/src/b.cpp"))
+        self.assertIn("<DECIDE", output)
+        self.assertIn("--fix-export-event", output)
+
+    def test_fix_needs_a_decision_and_a_real_rationale(self) -> None:
+        for kwargs in ({}, {"inherits": "true"}, {"inherits": "true", "rationale": "short"},
+                       {"inherits": "true", "rationale": "<what changed and why it is safe>"}):
+            code, _ = self._run(fix=True, **kwargs)
+            self.assertEqual(code, self.pf.WRITE_REFUSED, msg=kwargs)
+        self.assertFalse((self.root / ".github").exists())
+
+    def test_fix_writes_a_valid_event_and_refuses_to_overwrite_it(self) -> None:
+        import datetime as dt
+        import json
+        now = dt.datetime(2026, 11, 6, 12, 0, tzinfo=dt.timezone.utc)
+        code, output = self._run(
+            fix=True, inherits="false", event_id="20261106-example-change", now=now,
+            rationale="Adds a platform helper Vellum's host does not call yet.")
+        self.assertEqual(code, 0, msg=output)
+        event = json.loads(
+            (self.root / ".github/vellum-export-events/20261106-example-change.json").read_text(encoding="utf-8"))
+        self.assertEqual(event["paths"], ["core/platform/src/a.cpp", "core/platform/src/b.cpp"])
+        self.assertIs(event["vellum_inherits"], False)
+        self.assertEqual(event["kind"], "exported-path-change")
+        self.assertEqual(event["created_at"], "2026-11-06T12:00:00Z")
+        code, _ = self._run(fix=True, inherits="false", event_id="20261106-example-change",
+                            rationale="Adds a platform helper Vellum's host does not call yet.")
+        self.assertEqual(code, self.pf.WRITE_REFUSED)
+
+    def test_nothing_owed_is_clean(self) -> None:
+        self.pf.export_verdict = lambda *a, **k: (
+            subprocess.CompletedProcess([], 0, "", ""), {"missing": [], "status": "pass"})
+        code, output = self._run()
+        self.assertEqual(code, 0, msg=output)
+        self.assertEqual(output, "")
+
+
+class ExportEventRealCheckerTests(unittest.TestCase):
+    """The same flow against the real receipt-mode checker, in a shared clone.
+
+    The pinned receipt names a Pulp commit, so this needs full history and
+    skips (loudly) on a shallow checkout.
+    """
+
+    EXPORTED_PATH = "core/platform/src/file_dialog_stub.cpp"
+
+    def setUp(self) -> None:
+        self.pf = _load_preflight()
+        import json
+        pin = ROOT / ".github/vellum-export-receipt/pin.json"
+        if not pin.is_file():
+            self.skipTest("no pinned export receipt")
+        receipts = sorted((ROOT / ".github/vellum-export-receipt").glob("2*.json"))
+        pulp_sha = json.loads(receipts[-1].read_text(encoding="utf-8")).get("pulp_sha") if receipts else None
+        have = pulp_sha and subprocess.run(
+            ["git", "-C", str(ROOT), "cat-file", "-e", f"{pulp_sha}^{{commit}}"],
+            capture_output=True).returncode == 0
+        if not have:
+            self.skipTest("receipt mode needs the receipt's Pulp commit in history (shallow checkout)")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.clone = Path(self._tmp.name) / "clone"
+        subprocess.run(["git", "clone", "-q", "--shared", "--no-checkout", str(ROOT),
+                        str(self.clone)], check=True, capture_output=True)
+        self.base = _git(ROOT, "rev-parse", "HEAD")
+        _git(self.clone, "config", "user.email", "fixture@example.invalid")
+        _git(self.clone, "config", "user.name", "Fixture")
+        _git(self.clone, "checkout", "-q", "-b", "topic", self.base)
+        _git(self.clone, "checkout", "-q", self.base, "--", "tools/scripts", ".github",
+             ".agents/skills/pulp-vellum-change-routing", "docs/contracts")
+        _git(self.clone, "reset", "-q", "--soft", self.base)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _commit(self, files: dict[str, str], message: str) -> None:
+        for rel, text in files.items():
+            path = self.clone / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+            _git(self.clone, "add", "-f", rel)
+        _git(self.clone, "commit", "-q", "-m", message)
+
+    def _run(self, **kwargs):
+        out = io.StringIO()
+        code = self.pf.run_unit_and_export(self.clone, self.base, "HEAD", out, **kwargs)
+        return code, out.getvalue()
+
+    def test_an_exported_edit_is_refused_then_accepted_once_the_event_is_committed(self) -> None:
+        original = (self.clone / self.EXPORTED_PATH).read_text(encoding="utf-8")
+        self._commit({self.EXPORTED_PATH: original + "// probe\n"}, "edit an exported path")
+        code, output = self._run()
+        if code == 0:
+            self.skipTest("the pinned receipt no longer exports " + self.EXPORTED_PATH)
+        self.assertEqual(code, self.pf.EXPORT_OWED, msg=output)
+        self.assertIn(self.EXPORTED_PATH, output)
+
+        code, output = self._run(
+            fix=True, inherits="false", event_id="20261106-preflight-probe",
+            rationale="A probe edit to prove the preflight round trip; not carried.")
+        self.assertEqual(code, 0, msg=output)
+        event = "20261106-preflight-probe"
+        self._commit({f".github/vellum-export-events/{event}.json":
+                      (self.clone / ".github/vellum-export-events" / f"{event}.json")
+                      .read_text(encoding="utf-8")}, "add the export event")
+        code, output = self._run()
+        self.assertEqual(code, 0, msg=output)
+
+
 if __name__ == "__main__":
     unittest.main()

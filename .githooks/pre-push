@@ -532,7 +532,7 @@ if [ -f "$VELLUM_HINT" ]; then
     "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
     vellum_rc=$?
     if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ] ||
-       [ "$vellum_rc" -eq 13 ]; then
+       [ "$vellum_rc" -eq 13 ] || [ "$vellum_rc" -eq 14 ] || [ "$vellum_rc" -eq 15 ]; then
         fail=1
     fi
 fi
