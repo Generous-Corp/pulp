@@ -250,6 +250,7 @@ class CoreVellumDirectionTests(unittest.TestCase):
             "twice": guarded + "#if defined(PULP_GPU_RUNTIME)\n#else\nnamespace pulp::render { class GpuSurface; }\n#endif\n",
             "nested conditional": "#if defined(PULP_GPU_RUNTIME)\n#else\n#if 1\nnamespace pulp::render { class GpuSurface; }\n#endif\n#endif\n",
             "another type": "#if defined(PULP_GPU_RUNTIME)\n#else\nnamespace pulp::render { class GpuCompute; }\n#endif\n",
+            "compound guard": "#if defined(PULP_GPU_RUNTIME) && 0\n#else\nnamespace pulp::render { class GpuSurface; }\n#endif\n",
         }
         for label, text in cases.items():
             with self.subTest(label=label):

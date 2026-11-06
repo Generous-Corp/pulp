@@ -277,17 +277,19 @@ _CPP_COMMENT_RE = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
 GPU_FWD_GUARDED_ELSE = {
     ("core/view/include/pulp/view/window_host.hpp", "GpuSurface"): 1,
 }
-_GPU_RUNTIME_IF = "#if defined(PULP_GPU_RUNTIME)"
+# The whole directive line, so `#if defined(PULP_GPU_RUNTIME) && X` or a mention
+# inside another line does not open the guard.
+_GPU_RUNTIME_IF_LINE = re.compile(r"(?m)^[ \t]*#[ \t]*if[ \t]+defined\(PULP_GPU_RUNTIME\)[ \t]*$")
 
 
 def _in_gpu_runtime_else(text: str, offset: int) -> bool:
     """True when `offset` lies in the `#else` branch of the nearest preceding
     `#if defined(PULP_GPU_RUNTIME)`, with no conditional directive between."""
-    opened = text.rfind(_GPU_RUNTIME_IF, 0, offset)
-    if opened < 0:
+    opened = [m for m in _GPU_RUNTIME_IF_LINE.finditer(text, 0, offset)]
+    if not opened:
         return False
     between = [m.group(1) for m in re.finditer(r"(?m)^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b",
-                                               text[opened + len(_GPU_RUNTIME_IF):offset])]
+                                               text[opened[-1].end():offset])]
     return between == ["else"]
 
 
