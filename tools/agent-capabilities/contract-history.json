@@ -2427594,12 +2427594,17 @@
       },
       "surface": {
         "schema": "pulp.agent-capability-surface.v1",
-        "inventory_version": 186,
+        "inventory_version": 187,
         "headers": [
           {
             "include": "pulp/audio/analyzer_provider.hpp",
             "fingerprint": "sha256:61a125489eff54a9ab4433207b62c68af5df896e064d4cebacef86cdd1e207ed",
             "disposition": "legacy_unreviewed"
+          },
+          {
+            "include": "pulp/audio/async_block_worker.hpp",
+            "fingerprint": "sha256:33f3ba40c7c017a7859242307bb29d51dc50e56f7827e3e262f1ea68795251d2",
+            "disposition": "infrastructure"
           },
           {
             "include": "pulp/audio/audio.hpp",
@@ -2427820,6 +2427825,11 @@
             "include": "pulp/audio/published_sample_store.hpp",
             "fingerprint": "sha256:19bf5531ac90bf4fd88c3b6a1afac7de5796a7110c36e898ebcd3bf54a1a5c2e",
             "disposition": "legacy_unreviewed"
+          },
+          {
+            "include": "pulp/audio/pull_rate_detector.hpp",
+            "fingerprint": "sha256:d6be164e1d3f435ae45c994b0ee9835a873895bf98f87652c515064253925c5f",
+            "disposition": "infrastructure"
           },
           {
             "include": "pulp/audio/realtime_sample_recorder.hpp",
@@ -2430204,7 +2430214,7 @@
         ],
         "tombstones": []
       },
-      "entry_digest": "sha256:cb8f478d77f7813de435dce533db79dc43e894c24a08300ba91a22d3fa16f448"
+      "entry_digest": "sha256:224e67f2c534b2c69cc545b651b509e416828437c3a58e26a9b83eaabd2df2ec"
     }
   ]
 }

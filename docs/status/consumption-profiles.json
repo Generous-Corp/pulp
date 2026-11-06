@@ -19,6 +19,7 @@
   "public_headers_by_root": {
     "core/audio/include": [
       "pulp/audio/analyzer_provider.hpp",
+      "pulp/audio/async_block_worker.hpp",
       "pulp/audio/audio.hpp",
       "pulp/audio/audio_boundary_report.hpp",
       "pulp/audio/audio_device_manager.hpp",
@@ -63,6 +64,7 @@
       "pulp/audio/onset_detector.hpp",
       "pulp/audio/planar_audio_ring_buffer.hpp",
       "pulp/audio/published_sample_store.hpp",
+      "pulp/audio/pull_rate_detector.hpp",
       "pulp/audio/realtime_sample_recorder.hpp",
       "pulp/audio/realtime_time_stretch.hpp",
       "pulp/audio/restored_path.hpp",
@@ -780,6 +782,7 @@
     ],
     "core/sample_bank_manifest/../audio/include": [
       "pulp/audio/analyzer_provider.hpp",
+      "pulp/audio/async_block_worker.hpp",
       "pulp/audio/audio.hpp",
       "pulp/audio/audio_boundary_report.hpp",
       "pulp/audio/audio_device_manager.hpp",
@@ -824,6 +827,7 @@
       "pulp/audio/onset_detector.hpp",
       "pulp/audio/planar_audio_ring_buffer.hpp",
       "pulp/audio/published_sample_store.hpp",
+      "pulp/audio/pull_rate_detector.hpp",
       "pulp/audio/realtime_sample_recorder.hpp",
       "pulp/audio/realtime_time_stretch.hpp",
       "pulp/audio/restored_path.hpp",
