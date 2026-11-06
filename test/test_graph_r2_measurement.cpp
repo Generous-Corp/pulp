@@ -241,15 +241,22 @@ double timer_overhead_ns() {
     return samples[kSamples / 2];
 }
 
-double timed_sample(Case& test, GraphRuntimeExecutor& executor, double overhead_ns) {
+struct TimedSample {
+    double latency_ns = std::numeric_limits<double>::quiet_NaN();
+    std::size_t allocations = 0;
+};
+
+TimedSample timed_sample(Case& test, GraphRuntimeExecutor& executor, double overhead_ns) {
+    pulp::test::RtAllocationProbe probe;
     const auto start = std::chrono::steady_clock::now();
     for (int i = 0; i < kTimedBlocks; ++i) {
         if (!run_one(test, executor))
-            return std::numeric_limits<double>::quiet_NaN();
+            return {};
     }
     const auto end = std::chrono::steady_clock::now();
     const auto total_ns = std::chrono::duration<double, std::nano>(end - start).count();
-    return std::max(0.0, total_ns / static_cast<double>(kTimedBlocks) - overhead_ns);
+    return {std::max(0.0, total_ns / static_cast<double>(kTimedBlocks) - overhead_ns),
+            probe.allocation_count()};
 }
 
 int run() {
@@ -339,9 +346,15 @@ int run() {
                         return EXIT_FAILURE;
                     }
                 std::array<double, kSamples> samples{};
+                std::size_t timed_allocations = 0;
                 for (auto& sample : samples) {
-                    sample = timed_sample(test, executor, overhead_ns);
-                    if (!std::isfinite(sample)) {
+                    const auto timed = timed_sample(test, executor, overhead_ns);
+                    sample = timed.latency_ns;
+                    timed_allocations += timed.allocations;
+                    if (!std::isfinite(sample) || timed.allocations != 0) {
+                        std::cerr << "timed_allocations shape=" << shape_name(shape)
+                                  << " scale=" << scale << " block=" << frames
+                                  << " count=" << timed.allocations << '\n';
                         std::cerr << "timing_failed shape=" << shape_name(shape)
                                   << " block=" << frames << '\n';
                         return EXIT_FAILURE;
@@ -364,7 +377,9 @@ int run() {
                           << " p99_sample_ns=" << p99_ns << " max_ns=" << max_ns
                           << " jitter_ns=" << jitter_ns << " observed_wcet_proxy_ns=" << max_ns
                           << " oracle=pass"
-                          << " process_allocations=" << process_allocations << " output_bits=0x"
+                          << " process_allocations=" << process_allocations
+                          << " timed_allocations=" << timed_allocations
+                          << " timed_allocation_samples=" << kSamples << " output_bits=0x"
                           << std::hex << std::bit_cast<std::uint32_t>(test.output[0][0]) << std::dec
                           << '\n';
             }
