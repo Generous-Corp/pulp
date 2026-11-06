@@ -180,7 +180,8 @@ void gather_node_midi(const graph::GraphRuntimePlan& plan,
     if (in == nullptr) return;
     clear_midi_block(*in);
     midi::MpeBuffer* mpe_in = midi.mpe_in(node_index);
-    if (mpe_in != nullptr) mpe_in->clear();
+    if (mpe_in != nullptr)
+        mpe_in->clear();
     bool incomplete = false;
     bool mpe_incomplete = false;
     for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
@@ -589,7 +590,8 @@ run_routed_node(std::uint32_t node_index, const graph::GraphRuntimePlan& plan,
         // must survive this node visit; every other node owns its sidecar
         // output for this block and starts with an empty bounded stream.
         if (node.kind != graph::GraphRuntimeNodeKind::MidiInput) {
-            if (auto* mpe_out = midi->mpe_out(node_index)) mpe_out->clear();
+            if (auto* mpe_out = midi->mpe_out(node_index))
+                mpe_out->clear();
         }
     }
     const auto& binding = bindings[node_index];

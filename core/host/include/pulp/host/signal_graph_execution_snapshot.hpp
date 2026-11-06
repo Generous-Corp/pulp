@@ -29,8 +29,7 @@ class SignalGraph::ExecutionSnapshot {
 
     bool inject_midi(NodeId midi_input_node,
                      const midi::MidiBuffer& events) const noexcept;
-    bool inject_midi(NodeId midi_input_node,
-                     const midi::MidiBuffer& events,
+    bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events,
                      const midi::MpeBuffer& mpe) const noexcept;
     // Generic live-mailbox injection into this pinned generation. Available to
     // any host holding the snapshot handle.

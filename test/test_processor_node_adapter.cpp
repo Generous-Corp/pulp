@@ -42,12 +42,12 @@ namespace {
 using pulp::format::GraphRuntimeExecutor;
 using pulp::format::GraphRuntimeNodeBinding;
 using pulp::format::GraphRuntimeNodeProcessContext;
-using pulp::format::ProcessBlock;
 using pulp::format::GraphRuntimeSnapshot;
 using pulp::format::HeadlessHost;
 using pulp::format::PluginCategory;
 using pulp::format::PluginDescriptor;
 using pulp::format::PrepareContext;
+using pulp::format::ProcessBlock;
 using pulp::format::ProcessContext;
 using pulp::format::Processor;
 using pulp::format::ProcessorNode;

@@ -69,8 +69,8 @@ bool SignalGraph::inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
     auto& mailbox = *it->second.midi_input_mailbox;
     const uint64_t sequence = next_nonzero_mailbox_sequence(mailbox.next_sequence);
     const bool copied_all = mpe != nullptr
-        ? mailbox.writer_scratch.set_from_midi(events, *mpe, sequence)
-        : mailbox.writer_scratch.set_from_midi(events, sequence);
+                                ? mailbox.writer_scratch.set_from_midi(events, *mpe, sequence)
+                                : mailbox.writer_scratch.set_from_midi(events, sequence);
     mailbox.published.write(mailbox.writer_scratch);
     return copied_all;
 }

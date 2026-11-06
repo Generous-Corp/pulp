@@ -118,8 +118,7 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
             if (!edge.source_runtime) continue;
             const bool midi_ok = copy_midi_block(edge.source_runtime->midi_out, rt.midi_in);
             const bool mpe_ok = copy_mpe_block(edge.source_runtime->mpe_out, rt.mpe_in);
-            if (!midi_ok || !mpe_ok
-                || edge.source_runtime->midi_out_incomplete) {
+            if (!midi_ok || !mpe_ok || edge.source_runtime->midi_out_incomplete) {
                 rt.midi_in_incomplete = true;
             }
         }
@@ -569,8 +568,8 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
                 break;
             case NodeType::MidiOutput:
                 if (rt.midi_output_mailbox) {
-                    cg->midi_publish_scratch.set_from_midi(
-                        rt.midi_in, rt.mpe_in, 0, rt.midi_in_incomplete);
+                    cg->midi_publish_scratch.set_from_midi(rt.midi_in, rt.mpe_in, 0,
+                                                           rt.midi_in_incomplete);
                     if (cg->midi_publish_scratch.has_payload()
                         && !rt.midi_output_mailbox->pending.try_push(
                             cg->midi_publish_scratch)) {
