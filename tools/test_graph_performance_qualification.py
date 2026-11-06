@@ -22,7 +22,19 @@ SPEC.loader.exec_module(gq)
 def fake_receipt(directory: Path) -> Path:
     stdout = directory / "raw-output.txt"
     stderr = directory / "raw-stderr.txt"
-    stdout.write_text("graph_r2_measurement_v1\n", encoding="utf-8")
+    source_fixture = directory / "source-fixture.cpp"
+    source_fixture.write_text("fixture source\n", encoding="utf-8")
+    output_lines = ["graph_r2_measurement_v1", "graph_direct_copy_benchmark_v1 timer_overhead_ns=1.000"]
+    for shape, scale, block in sorted(gq.EXPECTED_KEYS):
+        output_lines.append(
+            "shape=%s scale=%d block=%d activation_p50_ns=1 activation_p99_sample_ns=2 "
+            "activation_max_ns=3 scratch_slots=1" % (shape, scale, block))
+        output_lines.append(
+            "shape=%s scale=%d block=%d warmup=500 iterations=100000 samples=31 p50_ns=1 "
+            "p99_sample_ns=2 max_ns=3 jitter_ns=1 observed_wcet_proxy_ns=3 oracle=pass "
+            "process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0x%x"
+            % (shape, scale, block, gq.expected_output_bits(shape, scale)))
+    stdout.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
     stderr.write_text("", encoding="utf-8")
     cells = []
     for shape, scale, block in sorted(gq.EXPECTED_KEYS):
@@ -34,7 +46,9 @@ def fake_receipt(directory: Path) -> Path:
             "timing": {"p50_ns": 1.0, "p99_sample_ns": 2.0, "max_ns": 3.0,
                        "jitter_ns": 1.0, "observed_wcet_proxy_ns": 3.0},
             "warmup": 500, "iterations": 100000, "samples": 31,
-            "oracle": "pass", "process_allocations": 0,
+            "oracle": "pass", "process_allocations": 0, "timed_allocations": 0,
+            "timed_allocation_samples": 31,
+            "scratch_slots": 1,
             "output_bits": output_bits, "expected_output_bits": output_bits,
         })
     receipt = {
@@ -44,6 +58,8 @@ def fake_receipt(directory: Path) -> Path:
         "qualification_scope": "R2 bounded graph runtime measurement",
         "qualification_boundary": "bounded slice only",
         "source_sha": "a" * 40,
+        "source_fixture": {"path": "test/test_graph_r2_measurement.cpp",
+                            "sha256": gq.sha256_file(source_fixture)},
         "executable": "build/test/pulp-graph-r2-measurement",
         "executable_sha256": "b" * 64,
         "platform": {"system": "test", "release": "test", "machine": "test"},
@@ -59,7 +75,10 @@ def fake_receipt(directory: Path) -> Path:
         "artifacts": {
             "raw_stdout": {"path": stdout.name, "sha256": gq.sha256_file(stdout)},
             "raw_stderr": {"path": stderr.name, "sha256": gq.sha256_file(stderr)},
+            "source_fixture": {"path": source_fixture.name, "sha256": gq.sha256_file(source_fixture)},
         },
+        "run": {"returncode": 0, "warmup_blocks": 500, "timed_blocks": 100000,
+                "timing_samples": 31, "timer_overhead_ns": 1.0},
     }
     receipt["receipt_sha256"] = gq.receipt_digest(receipt)
     path = directory / "receipt.json"
@@ -70,13 +89,16 @@ def fake_receipt(directory: Path) -> Path:
 class GraphPerformanceQualification(unittest.TestCase):
     def test_expected_matrix_has_forty_cells(self):
         self.assertEqual(len(gq.EXPECTED_KEYS), 40)
-        self.assertEqual(len(gq.parse_output("\n".join(
+        output = "\n".join(
+            ["graph_r2_measurement_v1", "graph_direct_copy_benchmark_v1 timer_overhead_ns=1"] +
             ["shape=%s scale=%d block=%d activation_p50_ns=1 activation_p99_sample_ns=2 "
              "activation_max_ns=3 scratch_slots=1" % key for key in sorted(gq.EXPECTED_KEYS)] +
             ["shape=%s scale=%d block=%d warmup=500 iterations=100000 samples=31 p50_ns=1 "
              "p99_sample_ns=2 max_ns=3 jitter_ns=1 observed_wcet_proxy_ns=3 oracle=pass "
-             "process_allocations=0 output_bits=0x%x" % (*key, gq.expected_output_bits(key[0], key[1]))
-             for key in sorted(gq.EXPECTED_KEYS)]))), 40)
+             "process_allocations=0 timed_allocations=0 timed_allocation_samples=31 output_bits=0x%x"
+             % (*key, gq.expected_output_bits(key[0], key[1]))
+             for key in sorted(gq.EXPECTED_KEYS)])
+        self.assertEqual(len(gq.parse_output(output)), 40)
 
     def test_receipt_and_resigned_planted_negatives(self):
         with tempfile.TemporaryDirectory(prefix="pulp-r2-test-") as temporary:
@@ -98,8 +120,34 @@ class GraphPerformanceQualification(unittest.TestCase):
                 receipt_path.write_text(json.dumps(mutated, indent=2, sort_keys=True) + "\n",
                                         encoding="utf-8")
                 with self.assertRaisesRegex(gq.ReceiptError,
-                                           "(fixture expected output|allocations)"):
+                                           "(fixture expected output|allocations|raw stdout)"):
                     gq.validate_receipt(receipt_path)
+
+    def test_raw_output_and_timing_negatives_are_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="pulp-r2-test-") as temporary:
+            directory = Path(temporary)
+            receipt_path = fake_receipt(directory)
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            raw = directory / "raw-output.txt"
+            raw_text = raw.read_text(encoding="utf-8").replace(
+                "p50_ns=1 p99_sample_ns=2 max_ns=3", "p50_ns=3 p99_sample_ns=2 max_ns=3", 1)
+            raw.write_text(raw_text, encoding="utf-8")
+            receipt["artifacts"]["raw_stdout"]["sha256"] = gq.sha256_file(raw)
+            receipt["receipt_sha256"] = gq.receipt_digest(receipt)
+            receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+                                    encoding="utf-8")
+            with self.assertRaisesRegex(gq.ReceiptError, "timing order"):
+                gq.validate_receipt(receipt_path)
+
+    def test_missing_timing_fields_are_rejected(self):
+        with self.assertRaisesRegex(gq.ReceiptError, "malformed timing row"):
+            gq.parse_output(
+                "graph_r2_measurement_v1\n"
+                "graph_direct_copy_benchmark_v1 timer_overhead_ns=1\n"
+                "shape=passthrough scale=1 block=16 activation_p50_ns=1 "
+                "activation_p99_sample_ns=2 activation_max_ns=3 scratch_slots=1\n"
+                "shape=passthrough scale=1 block=16 warmup=500 iterations=100000 samples=31 "
+                "p50_ns=1 p99_sample_ns=2 max_ns=3 oracle=pass process_allocations=0\n")
 
 
 if __name__ == "__main__":
