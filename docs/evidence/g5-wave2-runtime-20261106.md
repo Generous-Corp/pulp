@@ -1,17 +1,16 @@
 # G-5 Wave 2 runtime transport receipt
 
-Head: `758eb2da0f7e45ab03e72068779c1afa7889daa6`
+Head: `43a983c83fa4c4a47fb571a4b3cdbf4f01bd7f54`
 
-This slice extends the admitted typed trigger runtime with a fixed 64-record
-future-sample queue. `TriggerContext::emit_at_sample()` accepts an absolute
-sample in the current epoch; same-sample events retain the existing
-16-attempt/8-accepted budget, while future records are ordered by sample then
-producer sequence and drained at the exact sample across block boundaries.
-Negative coordinates, stale epochs, late records, and queue exhaustion refuse
-without mutating the live graph. Reset clears the queue and audio feedback
-state. Existing one-edge admission still rejects pair feedback and all
-unsupported payloads; audio feedback remains owned by the existing bounded
-graph pool.
+This slice preserves the admitted current-sample typed trigger runtime.
+`TriggerContext::emit_at_sample()` accepts an absolute sample in the current
+epoch only; future targets are refused with `Future` because no scheduler or
+cross-block queue is admitted by the G-5 event transport contract. Same-sample
+events retain the existing 16-attempt/8-accepted budget. Negative coordinates,
+stale epochs, late records, and over-capacity publication refuse without
+mutating the live graph. Existing one-edge admission still rejects pair
+feedback and all unsupported payloads; audio feedback remains owned by the
+existing bounded graph pool.
 
 ## Positive and planted-negative controls
 
@@ -23,19 +22,9 @@ ctest --test-dir build -R 'trigger-runtime-public-consumer|trigger-runtime$' --o
 100% tests passed, 0 tests failed out of 1
 ```
 
-The new positive case schedules samples 5 and 3 in reverse publication order,
-renders three uneven blocks, and observes samples 3 then 5. The negative case
-covers negative coordinates, the per-sample attempt fuse, and late scheduled
-records after a cursor advance. The production branch is mutation-tested:
-
-```text
-bash tools/scripts/confirm_failure.sh \
-  --file core/host/src/trigger_graph.cpp \
-  --break "perl -0pi -e 's/pending_size == pending_capacity/pending_size == 0/'" \
-  --build-dir build --target pulp-test-group-trigger-graph \
-  --test "./build/test/pulp-test-group-trigger-graph 'Typed transport retains future samples across block boundaries'"
-CONFIRMED — the test passes with the fix and fails without it.
-```
+The negative control publishes nine records at one sample, proving exactly eight
+are delivered and the ninth returns `Overflow`; it also covers negative, future,
+and late coordinates.
 
 This receipt proves the bounded framework trigger transport only. Host absolute
 timestamp ingress, arbitrary graph-authored callback registration, plugin
