@@ -9,6 +9,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1690"></a>
+## [1.69.0] - 2026-11-06
+
+- release/version bump ([#11615](https://github.com/Generous-Corp/pulp/pull/11615))
+- fix/core vellum direction scan speed ([#11609](https://github.com/Generous-Corp/pulp/pull/11609))
+- ci/merge group classify base ([#11606](https://github.com/Generous-Corp/pulp/pull/11606))
+- perf/windows static raster cache 20261103 ([#11520](https://github.com/Generous-Corp/pulp/pull/11520))
+- feature/au indexed unit discrete ([#11589](https://github.com/Generous-Corp/pulp/pull/11589))
+- codex/g4 subgraph repair followup 20261105 ([#11584](https://github.com/Generous-Corp/pulp/pull/11584))
+
 <a id="v1680"></a>
 ## [1.68.0] - 2026-11-05
 
@@ -12301,6 +12311,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.69.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.69.0
 [1.68.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.68.0
 [1.67.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.67.0
 [1.66.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.66.0
