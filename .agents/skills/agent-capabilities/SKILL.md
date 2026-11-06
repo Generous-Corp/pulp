@@ -1377,6 +1377,13 @@ the bypass trailer by reflex:
   `PULP_SDK_TARGETS` minus INTERFACE targets against that list, so an INTERFACE
   target needs no stem and a STATIC one does.
 
+- **Removing a non-header runtime artifact** — dropping an
+  `install(IMPORTED_RUNTIME_ARTIFACTS …)` block, such as the retired Vellum
+  D15 GPU-audio provider dylib and its notice files, takes no header out of
+  any covered root, so no capability surface changes. Check that no
+  `PULP_SDK_TARGETS` entry or release-matrix stem named the artifact; the
+  provider was never one, so neither list moves.
+
 ## A platform header installed for per-binary recompilation is not capability surface
 
 `PulpInstallRules.cmake` installs more than public API. The macOS ObjC cluster
