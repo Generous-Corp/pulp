@@ -57,6 +57,7 @@ double wakeups_per_second(std::chrono::milliseconds window) {
 bool instrument_sees_polling() {
     std::atomic<bool> run{true};
     std::thread poller([&] {
+        // unbounded-wait: allow the control poller; this thread clears run after 1 s
         while (run.load())
             std::this_thread::sleep_for(10ms);
     });
