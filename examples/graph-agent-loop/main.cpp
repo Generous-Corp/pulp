@@ -73,7 +73,8 @@ GraphLoadOptions hermetic_load_options() {
 } // namespace
 
 int main(int argc, char** argv) try {
-    const std::filesystem::path output = argc == 2 ? argv[1] : std::filesystem::temp_directory_path();
+    const std::filesystem::path output =
+        argc == 2 ? argv[1] : std::filesystem::temp_directory_path();
     std::filesystem::create_directories(output);
     const auto baseline_path = output / "a9-baseline.pulpgraph";
     const auto edited_path = output / "a9-edited.pulpgraph";
@@ -84,8 +85,8 @@ int main(int argc, char** argv) try {
     require(!catalog.empty(), "catalog-discovery");
     require(audit_catalog_export(catalog).empty(), "catalog-audit");
 
-    const std::vector<float> input = {1.0f, -0.5f, 0.25f, -0.125f, 0.0625f, -0.03125f,
-                                      0.015625f, -0.0078125f, 0.00390625f};
+    const std::vector<float> input = {1.0f,      -0.5f,     0.25f,       -0.125f,    0.0625f,
+                                      -0.03125f, 0.015625f, -0.0078125f, 0.00390625f};
     SignalGraph graph;
     make_graph(graph, 0.5f);
     const std::string notation = GraphSerializer::to_json(graph);
@@ -99,7 +100,8 @@ int main(int argc, char** argv) try {
     // Reloading through the file API is the validation step. Plugins are explicitly disabled,
     // so this cannot execute an ambient library while reproducing the saved inputs.
     SignalGraph validated;
-    const auto loaded = GraphSerializer::from_file(validated, baseline_path, hermetic_load_options());
+    const auto loaded =
+        GraphSerializer::from_file(validated, baseline_path, hermetic_load_options());
     require(loaded.ok && loaded.missing_plugins.empty(), "validate-reload");
     const auto canonical = GraphSerializer::to_json(validated);
     require(canonical == notation, "canonical-notation");
@@ -112,11 +114,10 @@ int main(int argc, char** argv) try {
     const auto source = validated.node(stage)->out("audio");
     const auto destination = validated.node(output_node)->in("audio");
     OfflineSignalGraphHost probe_host(validated);
-    require(probe_host.prepare({.sample_rate = 48000.0,
-                                .block_frames = 4,
-                                .input_channels = 1,
-                                .output_channels = 1}),
-            "probe-prepare");
+    require(
+        probe_host.prepare(
+            {.sample_rate = 48000.0, .block_frames = 4, .input_channels = 1, .output_channels = 1}),
+        "probe-prepare");
     require(validated.attach_audio_edge_probe(source, destination) ==
                 SignalGraph::EdgeProbeStatus::Attached,
             "probe-attach");
@@ -125,7 +126,8 @@ int main(int argc, char** argv) try {
     const auto probe_result = probe_host.render({.frame_count = input.size(), .input = probe_view});
     require(probe_result.ok, "probe-render");
     Rendered probed;
-    probed.samples.assign(probe_result.audio.channel(0).begin(), probe_result.audio.channel(0).end());
+    probed.samples.assign(probe_result.audio.channel(0).begin(),
+                          probe_result.audio.channel(0).end());
     probed.blocks = probe_result.blocks_rendered;
     require(probed.samples == baseline.samples, "probe-render-compare");
     pulp::graph::GraphRuntimeProbeSample sample;
@@ -142,7 +144,8 @@ int main(int argc, char** argv) try {
     }
 
     SignalGraph reproduced;
-    const auto replay = GraphSerializer::from_file(reproduced, baseline_path, hermetic_load_options());
+    const auto replay =
+        GraphSerializer::from_file(reproduced, baseline_path, hermetic_load_options());
     require(replay.ok, "reproduce-reload");
     const auto reproduced_render = render(reproduced, input, 4);
     require(reproduced_render.samples == baseline.samples, "reproduce-baseline");
@@ -155,4 +158,3 @@ int main(int argc, char** argv) try {
     std::cerr << "graph-agent-loop FAIL rule=" << error.what() << '\n';
     return 1;
 }
-
