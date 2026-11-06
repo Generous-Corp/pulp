@@ -223,3 +223,108 @@ TEST_CASE("AU v2 channel capabilities expose only descriptor-declared layouts",
     REQUIRE(capabilities[1].inChannels == 1);
     REQUIRE(capabilities[1].outChannels == 1);
 }
+
+namespace {
+PluginDescriptor instrument_with_inputs(bool optional_main, int sidechain_channels) {
+    PluginDescriptor d;
+    d.category = pulp::format::PluginCategory::Instrument;
+    d.input_buses = {{"Main In", 2, optional_main}};
+    if (sidechain_channels >= 0)
+        d.input_buses.push_back({"Side Chain", sidechain_channels, true});
+    d.output_buses = {{"Main Out", 2}};
+    d.accepts_midi = true;
+    return d;
+}
+} // namespace
+
+TEST_CASE("AU v2 instrument input element count follows the declared input buses",
+          "[au][au-v2][instrument][bus]") {
+    using pulp::format::au::instrument_input_element_count;
+    REQUIRE(instrument_input_element_count(multi_out_instrument(1)) == 0);
+    REQUIRE(instrument_input_element_count(instrument_with_inputs(true, -1)) == 1);
+    REQUIRE(instrument_input_element_count(instrument_with_inputs(true, 2)) == 2);
+    REQUIRE(instrument_input_element_count(instrument_with_inputs(false, 1)) == 2);
+
+    // A 0-channel side chain adds no element.
+    REQUIRE(instrument_input_element_count(instrument_with_inputs(true, 0)) == 1);
+
+    // Elements are positional: a side chain behind a 0-channel main input has
+    // no element to live in, so neither is exposed.
+    PluginDescriptor no_main = instrument_with_inputs(true, 2);
+    no_main.input_buses[0].default_channels = 0;
+    REQUIRE(instrument_input_element_count(no_main) == 0);
+}
+
+TEST_CASE("AU v2 input bus infos keep a declared-optional main input optional",
+          "[au][au-v2][instrument][bus]") {
+    // The infos view the descriptor's names, so it must outlive them.
+    const PluginDescriptor d = instrument_with_inputs(true, 2);
+    std::array<ProcessBusBufferInfo, 2> infos{};
+    const std::size_t n = pulp::format::au::build_input_bus_infos(d, infos.data(), infos.size());
+    REQUIRE(n == 2);
+    REQUIRE(infos[0].name == "Main In");
+    REQUIRE(infos[0].index == 0);
+    REQUIRE(infos[0].role == BusRole::Main);
+    REQUIRE(infos[0].declared_channels == 2);
+    REQUIRE(infos[0].optional);
+    REQUIRE(infos[1].name == "Side Chain");
+    REQUIRE(infos[1].index == 1);
+    REQUIRE(infos[1].role == BusRole::Sidechain);
+    REQUIRE(infos[1].optional);
+    REQUIRE_FALSE(infos[1].active);
+}
+
+TEST_CASE("AU v2 input bus infos report an effect's required main input as required",
+          "[au][au-v2][bus]") {
+    PluginDescriptor d; // default {"Main In", 2, false}
+    std::array<ProcessBusBufferInfo, 2> infos{};
+    const std::size_t n = pulp::format::au::build_input_bus_infos(d, infos.data(), infos.size());
+    REQUIRE(n == 1);
+    REQUIRE(infos[0].declared_channels == 2);
+    REQUIRE_FALSE(infos[0].optional);
+}
+
+TEST_CASE("AU v2 channel capabilities for an instrument with an optional input "
+          "include the unconnected rows",
+          "[au][au-v2][instrument][bus-layout]") {
+    std::array<AUChannelInfo, pulp::format::au::kMaxChannelInfoPairs> capabilities{};
+    const auto count =
+        pulp::format::au::build_channel_info(instrument_with_inputs(true, 2), capabilities.data());
+    // {0,1} {0,2} for the unconnected input, then the matched {1,1} {2,2}.
+    REQUIRE(count == 4);
+    REQUIRE(capabilities[0].inChannels == 0);
+    REQUIRE(capabilities[0].outChannels == 1);
+    REQUIRE(capabilities[1].inChannels == 0);
+    REQUIRE(capabilities[1].outChannels == 2);
+    REQUIRE(capabilities[2].inChannels == 1);
+    REQUIRE(capabilities[2].outChannels == 1);
+    REQUIRE(capabilities[3].inChannels == 2);
+    REQUIRE(capabilities[3].outChannels == 2);
+}
+
+TEST_CASE("AU v2 channel capabilities for a required input stay the matched ladder",
+          "[au][au-v2][bus-layout]") {
+    std::array<AUChannelInfo, pulp::format::au::kMaxChannelInfoPairs> capabilities{};
+    SECTION("effect") {
+        PluginDescriptor d;
+        const auto count = pulp::format::au::build_channel_info(d, capabilities.data());
+        REQUIRE(count == 2);
+        REQUIRE(capabilities[0].inChannels == 1);
+        REQUIRE(capabilities[1].inChannels == 2);
+    }
+    SECTION("instrument with a required input") {
+        const auto count = pulp::format::au::build_channel_info(instrument_with_inputs(false, -1),
+                                                                capabilities.data());
+        REQUIRE(count == 2);
+        REQUIRE(capabilities[0].inChannels == 1);
+        REQUIRE(capabilities[1].inChannels == 2);
+    }
+    SECTION("instrument without an input keeps the zero-input ladder") {
+        const auto count =
+            pulp::format::au::build_channel_info(multi_out_instrument(1), capabilities.data());
+        REQUIRE(count == 2);
+        REQUIRE(capabilities[0].inChannels == 0);
+        REQUIRE(capabilities[1].inChannels == 0);
+        REQUIRE(capabilities[1].outChannels == 2);
+    }
+}

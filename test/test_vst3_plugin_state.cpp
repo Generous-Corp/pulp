@@ -7113,3 +7113,45 @@ TEST_CASE("VST3 host parameter write reaches serialized state without process",
     const float after = serialized_value(kGainParamId);
     CHECK(after != Catch::Approx(before).margin(1e-6));
 }
+
+TEST_CASE("VST3 instrument input buses follow the declared optional flag",
+          "[vst3][bus][instrument]") {
+    // Ableton Live's instrument Sidechain chooser keys on aux input buses, so
+    // an instrument that can also process audio declares its inputs optional
+    // and both arrive as kAux, inactive by default; a required instrument
+    // input stays kMain and default-active.
+    TestVst3Config config;
+    config.descriptor.category = pulp::format::PluginCategory::Instrument;
+    config.descriptor.accepts_midi = true;
+
+    SECTION("optional main input and side chain are aux buses") {
+        config.descriptor.input_buses = {{"Main In", 2, true}, {"Side Chain", 2, true}};
+        reset_test_processor(config);
+        HostApp host_app;
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        REQUIRE(processor.getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kInput) == 2);
+        for (Steinberg::int32 index = 0; index < 2; ++index) {
+            Steinberg::Vst::BusInfo info{};
+            REQUIRE(processor.getBusInfo(Steinberg::Vst::kAudio, Steinberg::Vst::kInput, index,
+                                         info) == Steinberg::kResultOk);
+            REQUIRE(info.busType == Steinberg::Vst::BusTypes::kAux);
+            REQUIRE(info.channelCount == 2);
+            REQUIRE((info.flags & Steinberg::Vst::BusInfo::kDefaultActive) == 0);
+        }
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+    SECTION("a required instrument input is the main bus") {
+        config.descriptor.input_buses = {{"Main In", 2, false}};
+        reset_test_processor(config);
+        HostApp host_app;
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        Steinberg::Vst::BusInfo info{};
+        REQUIRE(processor.getBusInfo(Steinberg::Vst::kAudio, Steinberg::Vst::kInput, 0, info) ==
+                Steinberg::kResultOk);
+        REQUIRE(info.busType == Steinberg::Vst::BusTypes::kMain);
+        REQUIRE((info.flags & Steinberg::Vst::BusInfo::kDefaultActive) != 0);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+}

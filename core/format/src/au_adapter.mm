@@ -136,6 +136,9 @@ struct AUBridge {
     // bus; the render block then skips the sidechain pull and calls
     // Processor::set_sidechain(nullptr).
     int sidechain_channels = 0;
+    // Index of the sidechain bus in `inputBusses`. Bus arrays are built in
+    // declaration order, so without a main input bus the sidechain sits at 0.
+    NSInteger sidechain_bus_index = 1;
     // Dual-tracked bypass.
     //   * `bypass_param_id != 0` means the plugin declared a "Bypass"
     //     parameter; the AUAudioUnit's `shouldBypassEffect` reads/writes
@@ -498,6 +501,7 @@ struct ScopedAuV3HostWriting {
         AUAudioUnitBus *sidechainBus =
             [[AUAudioUnitBus alloc] initWithFormat:scFormat error:outError];
         if (!sidechainBus) return nil;
+        _bridge.sidechain_bus_index = static_cast<NSInteger>([inBusses count]);
         [inBusses addObject:sidechainBus];
     }
 
@@ -1233,11 +1237,11 @@ struct ScopedAuV3HostWriting {
                     bridge->sidechain_storage.data() + i * frameCount;
             }
             AudioUnitRenderActionFlags pullFlags = 0;
-            // Input bus index 1 is the sidechain, per the bus-array init
-            // order in initWithComponentDescription.
-            auto scStatus = pullInputBlock(
-                &pullFlags, timestamp, frameCount, 1,
-                reinterpret_cast<AudioBufferList*>(&scAbl));
+            // The sidechain's bus index follows the bus-array order from
+            // initWithComponentDescription: 1 behind a main input, 0 without.
+            auto scStatus =
+                pullInputBlock(&pullFlags, timestamp, frameCount, bridge->sidechain_bus_index,
+                               reinterpret_cast<AudioBufferList*>(&scAbl));
             if (scStatus == noErr) {
                 auto* sidechainAbl = reinterpret_cast<AudioBufferList*>(&scAbl);
                 if (!pulp::format::detail::audio_buffer_list_shape_matches(

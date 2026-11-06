@@ -308,6 +308,9 @@ inline LV2_Handle instantiate(
 
     // Audio channel counts, already summed and bounds-checked above.
     inst->num_audio_inputs = declared_inputs;
+    inst->num_main_audio_inputs = admission_desc.input_buses.empty()
+                                      ? 0
+                                      : std::max(0, admission_desc.input_buses[0].default_channels);
     inst->num_audio_outputs = declared_outputs;
     inst->accepts_midi = admission_desc.accepts_midi;
     inst->produces_midi = admission_desc.produces_midi;
@@ -488,17 +491,40 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         }
     }
 
-    audio::BufferView<const float> input(in_ptrs,
-        static_cast<size_t>(inst->num_audio_inputs), n_samples);
+    // The connected input ports split into the main bus and, past the first
+    // bus's width, the side chain; both views read the flat port run in place.
+    // A port the host left unconnected (lv2:connectionOptional) is null, which
+    // makes that bus read as inactive rather than handing out a null pointer.
+    const int main_inputs = std::min(inst->num_main_audio_inputs, inst->num_audio_inputs);
+    const int sidechain_inputs = inst->num_audio_inputs - main_inputs;
+    const auto bus_connected = [&](int begin, int count) {
+        for (int i = begin; i < begin + count; ++i)
+            if (in_ptrs[i] == nullptr)
+                return false;
+        return count > 0;
+    };
+    const bool main_connected = bus_connected(0, main_inputs);
+    const bool sidechain_connected = bus_connected(main_inputs, sidechain_inputs);
+    audio::BufferView<const float> input(
+        in_ptrs, static_cast<size_t>(main_connected ? main_inputs : 0), n_samples);
+    audio::BufferView<const float> sidechain(
+        in_ptrs + main_inputs, static_cast<size_t>(sidechain_connected ? sidechain_inputs : 0),
+        n_samples);
     audio::BufferView<float> output(out_ptrs,
         static_cast<size_t>(inst->num_audio_outputs), n_samples);
-    std::array<ProcessBusBufferView<const float>, 1> input_buses{{
+    std::array<ProcessBusBufferView<const float>, 2> input_buses{{
         {
-            .info = {"Main In", 0, BusDirection::Input, BusRole::Main,
-                     inst->num_audio_inputs, false, inst->num_audio_inputs > 0},
+            .info = {"Main In", 0, BusDirection::Input, BusRole::Main, main_inputs,
+                     main_inputs == 0, main_connected},
             .buffer = input,
         },
+        {
+            .info = {"Sidechain", 1, BusDirection::Input, BusRole::Sidechain, sidechain_inputs,
+                     true, sidechain_connected},
+            .buffer = sidechain,
+        },
     }};
+    const std::size_t input_bus_count = sidechain_inputs > 0 ? 2 : 1;
     std::array<ProcessBusBufferView<float>, 1> output_buses{{
         {
             .info = {"Main Out", 0, BusDirection::Output, BusRole::Main,
@@ -507,7 +533,8 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         },
     }};
     ProcessBuffers process_buffers{
-        .inputs = ProcessBusBufferSet<const float>(input_buses),
+        .inputs = ProcessBusBufferSet<const float>(
+            std::span<ProcessBusBufferView<const float>>(input_buses.data(), input_bus_count)),
         .outputs = ProcessBusBufferSet<float>(output_buses),
     };
 
