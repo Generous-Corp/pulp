@@ -237,6 +237,13 @@ graph walks the topology, computes each node's input / output latency,
 and allocates per-connection delay lines so parallel branches converge
 aligned. Query results with `SignalGraph::latency_samples()` (graph-wide
 total) and `node_latency_samples(id)` (alignment at a specific node).
+Control-thread consumers that need the complete prepared analysis can copy
+`prepared_latency_snapshot()`. The copy carries total latency, deterministic
+node input/output entries, and
+per-connection PDC delays. It returns no value while the graph is unprepared
+or its authored topology has been invalidated; a previously copied value stays
+valid as an independent diagnostic record. This API performs vector copies and
+is not an audio-callback or realtime surface.
 Feedback edges (`connect_feedback`) don't contribute to PDC — the
 one-block delay absorbs their alignment.
 Sparse automation edges do not contribute to PDC. They are control-rate
