@@ -54,7 +54,7 @@ namespace pulp::runtime {
 /// }
 /// @endcode
 class WakeSignal {
-public:
+  public:
     using Clock = std::chrono::steady_clock;
 
     WakeSignal() noexcept
@@ -89,8 +89,7 @@ public:
     /// Consumer side. Returns true once `ready()` holds, false if `deadline`
     /// passes first. `ready` runs before parking and after every wake, so
     /// spurious or surplus posts are harmless.
-    template <typename Ready>
-    bool wait_until(Ready&& ready, Clock::time_point deadline) {
+    template <typename Ready> bool wait_until(Ready&& ready, Clock::time_point deadline) {
         for (;;) {
             if (ready())
                 return true;
@@ -112,19 +111,24 @@ public:
     }
 
     /// wait_until() with a deadline `timeout` from now.
-    template <typename Ready>
-    bool wait_for(Ready&& ready, Clock::duration timeout) {
+    template <typename Ready> bool wait_for(Ready&& ready, Clock::duration timeout) {
         return wait_until(static_cast<Ready&&>(ready), Clock::now() + timeout);
     }
 
     /// Diagnostics: kernel posts the producers made, and times the consumer
     /// woke from a park (a post or a timeout).
-    std::uint64_t posts() const noexcept { return posts_.load(std::memory_order_relaxed); }
-    std::uint64_t wakes() const noexcept { return wakes_.load(std::memory_order_relaxed); }
+    std::uint64_t posts() const noexcept {
+        return posts_.load(std::memory_order_relaxed);
+    }
+    std::uint64_t wakes() const noexcept {
+        return wakes_.load(std::memory_order_relaxed);
+    }
     /// Diagnostics: whether the consumer is currently parked (or about to be).
-    bool consumer_parked() const noexcept { return parked_.load(std::memory_order_relaxed); }
+    bool consumer_parked() const noexcept {
+        return parked_.load(std::memory_order_relaxed);
+    }
 
-private:
+  private:
     void post() noexcept {
 #if defined(__APPLE__)
         (void)dispatch_semaphore_signal(semaphore_);

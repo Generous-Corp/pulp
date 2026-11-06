@@ -14,8 +14,7 @@ using pulp::runtime::WakeSignal;
 namespace {
 
 // Spin (with yields) until `done()` or a generous wall-clock limit.
-template <typename Done>
-bool spin_until(Done&& done, std::chrono::milliseconds limit = 5000ms) {
+template <typename Done> bool spin_until(Done&& done, std::chrono::milliseconds limit = 5000ms) {
     const auto end = std::chrono::steady_clock::now() + limit;
     while (!done()) {
         if (std::chrono::steady_clock::now() > end)
@@ -27,7 +26,8 @@ bool spin_until(Done&& done, std::chrono::milliseconds limit = 5000ms) {
 
 } // namespace
 
-TEST_CASE("WakeSignal: a busy consumer costs the producer no post", "[runtime][wake-signal][rt-safety]") {
+TEST_CASE("WakeSignal: a busy consumer costs the producer no post",
+          "[runtime][wake-signal][rt-safety]") {
     WakeSignal wake;
     std::atomic<int> published{0};
     for (int i = 0; i < 10000; ++i) {
@@ -71,7 +71,8 @@ TEST_CASE("WakeSignal: the deadline ends a wait with nothing published", "[runti
 // Ping-pong: every handoff makes the consumer park before the producer
 // publishes, which is the window a lost wakeup needs. A lost wakeup shows up
 // as a wait that only ends at its deadline.
-TEST_CASE("WakeSignal: no lost wakeup across many handoffs", "[runtime][wake-signal][concurrent][race]") {
+TEST_CASE("WakeSignal: no lost wakeup across many handoffs",
+          "[runtime][wake-signal][concurrent][race]") {
     constexpr std::uint64_t kHandoffs = 100000;
     WakeSignal wake;
     std::atomic<std::uint64_t> published{0};
@@ -79,7 +80,8 @@ TEST_CASE("WakeSignal: no lost wakeup across many handoffs", "[runtime][wake-sig
     std::atomic<std::uint64_t> missed{0};
     std::thread consumer([&] {
         for (std::uint64_t expected = 1; expected <= kHandoffs; ++expected) {
-            if (!wake.wait_for([&] { return published.load(std::memory_order_acquire) >= expected; }, 1s)) {
+            if (!wake.wait_for(
+                    [&] { return published.load(std::memory_order_acquire) >= expected; }, 1s)) {
                 missed.fetch_add(1);
                 return;
             }
@@ -104,7 +106,8 @@ TEST_CASE("WakeSignal: no lost wakeup across many handoffs", "[runtime][wake-sig
     REQUIRE(wake.posts() > 0);
 }
 
-TEST_CASE("WakeSignal: several producers, one consumer", "[runtime][wake-signal][concurrent][race]") {
+TEST_CASE("WakeSignal: several producers, one consumer",
+          "[runtime][wake-signal][concurrent][race]") {
     constexpr int kProducers = 4;
     constexpr std::uint64_t kEach = 20000;
     WakeSignal wake;
@@ -113,7 +116,8 @@ TEST_CASE("WakeSignal: several producers, one consumer", "[runtime][wake-signal]
     std::thread consumer([&] {
         std::uint64_t seen = 0;
         while (seen < kProducers * kEach) {
-            if (!wake.wait_for([&] { return published.load(std::memory_order_acquire) > seen; }, 1s)) {
+            if (!wake.wait_for([&] { return published.load(std::memory_order_acquire) > seen; },
+                               1s)) {
                 lost.store(true);
                 return;
             }
