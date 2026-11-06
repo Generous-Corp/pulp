@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 186,
+  "inventory_version": 188,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,21 +43,21 @@
   ],
   "counts": {
     "public_headers": 521,
-    "reviewed_headers": 274,
-    "legacy_unreviewed_headers": 247,
+    "reviewed_headers": 276,
+    "legacy_unreviewed_headers": 245,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 105,
-      "legacy_unreviewed": 247,
+      "infrastructure": 107,
+      "legacy_unreviewed": 245,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
         "public_headers": 114,
-        "reviewed_headers": 18,
-        "legacy_unreviewed_headers": 96,
+        "reviewed_headers": 20,
+        "legacy_unreviewed_headers": 94,
         "unsupported_headers": 0
       },
       "midi": {
@@ -261,11 +261,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/buffering_reader.hpp",
-      "fingerprint": "sha256:89d37d1bae31a3851126afadf408056980fb1fd09d2e66987a359f762f78945a",
+      "fingerprint": "sha256:051b0e39daded2b42ffa26e82bb2835546bfea02bd927de687d473b16974529f",
       "include": "pulp/audio/buffering_reader.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Background pre-buffering ring for file playback whose worker the audio thread wakes through runtime::WakeSignal; streaming infrastructure, not a generator-facing DSP capability."
     },
     {
       "domain": "audio",
@@ -978,11 +978,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/streaming_sample_source.hpp",
-      "fingerprint": "sha256:3daf96212583d625d2372780b22f8a7e211104290511e776ca6ff149b2a61e64",
+      "fingerprint": "sha256:c6545cbfd9556d958a6b3a8768b0c0358e654d228cc99fdb1655ac8b4d4d56f9",
       "include": "pulp/audio/streaming_sample_source.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Preloaded-head plus streamed-tail sample source with a background reader woken by the audio thread; the sampler's disk-streaming infrastructure, with no generator capability claim of its own."
     },
     {
       "domain": "audio",
