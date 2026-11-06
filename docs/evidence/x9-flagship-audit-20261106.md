@@ -3,7 +3,9 @@
 ## Scope and source boundary
 
 This audit starts from the clean `origin/main` source head
-`3c11cb21c026799659e9cfe52d70f2121d46b41d` and exercises the checked-in
+`3c11cb21c026799659e9cfe52d70f2121d46b41d`, then merges the three commits
+that arrived on `origin/main` during the audit (final worktree head
+`9316d99be9d73072ea1c0a66ecbe7c124a59ff91`). It exercises the checked-in
 `pulp-test-signal-graph-x9-modular-instrument` fixture through public
 `SignalGraph`, `ProcessorNodeInstance`, MIDI, state, serializer, and offline
 host APIs. The fixture includes `examples/PulpSynth/pulp_synth.hpp`; this is an
@@ -56,7 +58,7 @@ The focused CTest run passed all five generated X9 cases:
 
 ```text
 100% tests passed, 0 tests failed out of 5
-Total Test time (real) =   0.20 sec
+Total Test time (real) =   0.30 sec
 ```
 
 Receipt hashes from this worktree:
@@ -65,7 +67,8 @@ Receipt hashes from this worktree:
 | --- | --- |
 | source fixture | `80d7ca99b6d24ac0f5c7a5268c090517576cedff304ee46f5a2e4c1cd7af9ca5` |
 | Release executable | `93e5737de840e31d8b97f3bc379fc4b4563cd9e1365cbab5ae8e99c5b388ad2a` |
-| focused CTest transcript | `047516aa79ce99872eb5bb9a1b12fdb86f4fa170c42951e26549f34cdb44294e` |
+| focused CTest transcript | `7ef434054c1f215d590ba778f8060c3f7beb83c5802951c043389ac4c826c65e` |
+| direct executable transcript | `3604a05954901b2f8666c9dd5ec46c73debb21938b8fdbfcaad769e31c7e7842` |
 
 The direct executable reported **1,828 assertions in 5 test cases**. This is
 local Release evidence only; it does not establish cross-platform, hosted
