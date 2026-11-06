@@ -49,7 +49,7 @@ struct MpeExpressionEvent {
 /// and clears it afterwards. Not thread-safe; all access is assumed to
 /// happen on the audio thread in one producer/consumer pair.
 class MpeBuffer {
-public:
+  public:
     // Graph runtime scratch starts empty and is reserved by its off-RT prepare
     // step. Standalone adapter buffers retain the historical eager capacity.
     explicit MpeBuffer(bool reserve_storage = true) {
