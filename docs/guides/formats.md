@@ -477,9 +477,11 @@ since `MusicDeviceBase` pulls nothing itself, alongside one output element per
 declared output bus. A side chain needs a main input bus in front of it:
 elements are positional, so a descriptor whose first input bus has 0 channels
 exposes no input element at all. A classic synth (no input buses) keeps zero
-input elements. Logic lists such an instrument on an instrument track with its
-Side Chain pop-up; the instrument reads the track's own audio only through that
-pop-up, because Logic routes no track audio into an instrument's main input.
+input elements. A software-instrument track carries no audio of its own, so
+in Logic the instrument receives audio only through the Side Chain pop-up the
+second element makes Logic offer; which element that pop-up feeds has not yet
+been verified in Logic itself (the headless tests prove delivery through host
+render callbacks on both elements).
 
 ### Known Limitations
 
