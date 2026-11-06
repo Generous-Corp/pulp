@@ -315,6 +315,21 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-clap-identity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-scan-worker",
+    "pulp-test-fixture-clap-identity"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_clap_identity.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-cli-audio-compare": {
    "data": "declared",
    "detected_sources": [],
@@ -2792,6 +2807,7 @@
   "pulp-test-clap-entry",
   "pulp-test-clap-host-validation",
   "pulp-test-clap-hosted-editor",
+  "pulp-test-clap-identity",
   "pulp-test-clap-latency-quirk",
   "pulp-test-clap-midi-events",
   "pulp-test-clap-slot-channel-width",
@@ -12544,6 +12560,7 @@
     "core/host",
     "core/host/include",
     "core/host/include/pulp/host",
+    "core/host/src",
     "core/platform/include/pulp/platform/child_process.hpp",
     "docs/status",
     "docs/status/consumption-profiles.json",

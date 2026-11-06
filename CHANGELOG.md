@@ -9,6 +9,26 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1762"></a>
+## [1.76.2] - 2026-11-06
+
+- release/version bump ([#11670](https://github.com/Generous-Corp/pulp/pull/11670))
+- g9/containment followup 20261106 ([#11667](https://github.com/Generous-Corp/pulp/pull/11667))
+- codex/g11 durable 20261106 ([#11668](https://github.com/Generous-Corp/pulp/pull/11668))
+
+<a id="v1761"></a>
+## [1.76.1] - 2026-11-06
+
+- release/version bump ([#11666](https://github.com/Generous-Corp/pulp/pull/11666))
+- codex/g10 codec completion 20261106 ([#11662](https://github.com/Generous-Corp/pulp/pull/11662))
+- fix/au v2 instrument format writable 20261106 ([#11665](https://github.com/Generous-Corp/pulp/pull/11665))
+- audit/g8 multirate clean 20261106 ([#11660](https://github.com/Generous-Corp/pulp/pull/11660))
+- docs/idle wakeup lane why ([#11661](https://github.com/Generous-Corp/pulp/pull/11661))
+- evidence/gpu graph chain 20261106 ([#11659](https://github.com/Generous-Corp/pulp/pull/11659))
+- fix/au v2 instrument channel validation 20261106 ([#11657](https://github.com/Generous-Corp/pulp/pull/11657))
+- codex/g6 receipt repair 20261106 ([#11658](https://github.com/Generous-Corp/pulp/pull/11658))
+- feature/idle wakeup lane ([#11656](https://github.com/Generous-Corp/pulp/pull/11656))
+
 <a id="v1760"></a>
 ## [1.76.0] - 2026-11-06
 
@@ -12360,6 +12380,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.76.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.76.2
+[1.76.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.76.1
 [1.76.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.76.0
 [1.75.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.75.0
 [1.74.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.74.0
