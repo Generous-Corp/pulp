@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 523,
-    "reviewed_headers": 278,
+    "public_headers": 526,
+    "reviewed_headers": 281,
     "legacy_unreviewed_headers": 245,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 109,
+      "infrastructure": 112,
       "legacy_unreviewed": 245,
       "unsupported_capability": 2
     },
@@ -97,8 +97,8 @@
         "unsupported_headers": 0
       },
       "host": {
-        "public_headers": 14,
-        "reviewed_headers": 14,
+        "public_headers": 17,
+        "reviewed_headers": 17,
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       }
@@ -1207,6 +1207,24 @@
     },
     {
       "domain": "host",
+      "source": "core/host/include/pulp/host/plugin_identity.hpp",
+      "fingerprint": "sha256:f5d1fe9c5e8038b5cbb564170a8cb23fe7abb79b0c6009f5f6ec8b0d8b578060",
+      "include": "pulp/host/plugin_identity.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema."
+    },
+    {
+      "domain": "host",
+      "source": "core/host/include/pulp/host/plugin_slot.hpp",
+      "fingerprint": "sha256:9285bdcc1d97c35e6c8f2871d92eb938322d58d2817e9ed53a624340857df0e9",
+      "include": "pulp/host/plugin_slot.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema."
+    },
+    {
+      "domain": "host",
       "source": "core/host/include/pulp/host/sample_region_authoring.hpp",
       "fingerprint": "sha256:15e798963f6115b371c9a644de16619a6ea10e5c797845b25db72c14301ebaf7",
       "include": "pulp/host/sample_region_authoring.hpp",
@@ -1237,6 +1255,15 @@
         "signal.sample-region"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "host",
+      "source": "core/host/include/pulp/host/scanner.hpp",
+      "fingerprint": "sha256:23c5d2b996ec52b881d3f7f24055af43e751d60f2a70d0bbc547c7730d316b80",
+      "include": "pulp/host/scanner.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema."
     },
     {
       "domain": "host",

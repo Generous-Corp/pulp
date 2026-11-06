@@ -181,6 +181,27 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        'include': 'pulp/host/plugin_identity.hpp',
+        'fingerprint': 'sha256:f5d1fe9c5e8038b5cbb564170a8cb23fe7abb79b0c6009f5f6ec8b0d8b578060',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema.',
+    },
+    {
+        'include': 'pulp/host/plugin_slot.hpp',
+        'fingerprint': 'sha256:9285bdcc1d97c35e6c8f2871d92eb938322d58d2817e9ed53a624340857df0e9',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema.',
+    },
+    {
+        'include': 'pulp/host/scanner.hpp',
+        'fingerprint': 'sha256:23c5d2b996ec52b881d3f7f24055af43e751d60f2a70d0bbc547c7730d316b80',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema.',
+    },
+    {
         'include': 'pulp/host/graph_event_contract.hpp',
         'fingerprint': 'sha256:d0e530c8e75604b4b7ef06afca2503335e4bb8a307c82e87edc8077a47d66ca0',
         'disposition': 'infrastructure',
