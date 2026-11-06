@@ -73,11 +73,12 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory f
             // bus-name strings without copying it per block (which would allocate
             // on the audio thread).
             descriptor_ = processor_->descriptor();
-            // The instrument adapter has no host MIDI output path, so a panic
-            // resets the plug-in's voices only. Flip this to the descriptor's
-            // produces_midi when the adapter delivers MIDI output.
+            // MIDI output reaches the host's MIDIOutputCallback exactly when the
+            // descriptor declares produces_midi (see plugin_produces_midi()), so
+            // that is the claim a panic can make about reaching downstream
+            // devices.
             panic_state_ = processor_->panic_state();
-            panic_state_->attach(false);
+            panic_state_->attach(descriptor_.produces_midi);
             // Discover the plug-in's bundled factory presets. Empty for a
             // plug-in that ships none, and for any build not loaded from a
             // bundle (a unit-test binary, a standalone host).

@@ -414,7 +414,8 @@ TEST_CASE("AU v2 instrument services panic requests as a voice reset without MID
     REQUIRE(instrument.DoInitialize() == noErr);
     REQUIRE(g_last_rt_processor != nullptr);
 
-    // aumu: requests are serviced, but the adapter has no host MIDI output.
+    // aumu without produces_midi: requests are serviced, but nothing is declared
+    // for the host MIDI-output callback to carry.
     const auto caps = g_last_rt_processor->panic_capabilities();
     CHECK(caps.serviced);
     CHECK_FALSE(caps.midi_out);
