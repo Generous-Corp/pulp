@@ -119,11 +119,17 @@ Inside `initWithComponentDescription:…`:
 - Main input bus: when `desc.default_input_channels() > 0`, one
   `AUAudioUnitBus` with that channel count.
 - Sidechain bus: when `desc.input_buses.size() > 1` and
-  `desc.input_buses[1].default_channels > 0`, a **second** input
-  `AUAudioUnitBus` — bus index 1. Hosts connect their sidechain source
-  to bus index 1 and the render block pulls it from that index.
+  `desc.input_buses[1].default_channels > 0`, a further input
+  `AUAudioUnitBus`. Its index is whatever position it lands at in
+  `inBusses` — 1 behind a main input bus, 0 when the main input declares no
+  channels — and `_bridge.sidechain_bus_index` records it when the bus is
+  created so the render block pulls the index the host sees. A pull hard-coded
+  to 1 asked for a bus that did not exist on the side-chain-only shape.
 
-This mirrors the CLAP / VST3 "bus 0 = main, bus 1 = sidechain" rule.
+This mirrors the CLAP / VST3 "bus 0 = main, bus 1 = sidechain" rule for the
+common shape. Instruments get the same buses as effects: an instrument that
+declares input buses (optional, so it validates unconnected) exposes them and
+is pulled the same way; nothing in the category hides them.
 
 ### Parameters: `AUParameterTree`
 
