@@ -43,9 +43,36 @@ template <typename SampleType = float> class GainT {
         return input * gain_ramp_.next();
     }
 
+    /// One channel. The ramp advances once per sample, so calling this once per
+    /// channel of a multi-channel buffer moves the ramp once per channel: during
+    /// a ramp each channel would get a different part of it. Use the
+    /// multi-channel overload for that.
     void process(SampleType* buffer, int num_samples) const {
         for (int i = 0; i < num_samples; ++i)
             buffer[i] *= gain_ramp_.next();
+    }
+
+    /// Every channel of a multi-channel block with one shared ramp: sample i of
+    /// every channel is multiplied by the same gain, so channels stay matched
+    /// while the gain moves. Null channel pointers are skipped (the ramp still
+    /// advances for them).
+    void process(SampleType* const* channels, int num_channels, int num_samples) const {
+        if (channels == nullptr || num_channels <= 0 || num_samples <= 0)
+            return;
+        int i = 0;
+        for (; i < num_samples && gain_ramp_.is_smoothing(); ++i) {
+            const SampleType gain = gain_ramp_.next();
+            for (int c = 0; c < num_channels; ++c)
+                if (channels[c] != nullptr)
+                    channels[c][i] *= gain;
+        }
+        if (i == num_samples)
+            return;
+        const SampleType gain = gain_ramp_.current();
+        for (int c = 0; c < num_channels; ++c)
+            if (channels[c] != nullptr)
+                for (int k = i; k < num_samples; ++k)
+                    channels[c][k] *= gain;
     }
 
   private:
