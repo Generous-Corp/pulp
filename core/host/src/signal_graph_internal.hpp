@@ -18,6 +18,7 @@
 #include <pulp/midi/block_ops.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
 
 #include <cstddef>
 #include <string>
@@ -50,6 +51,11 @@ inline void prepare_midi_block_storage(midi::MidiBuffer& block,
     ump.reserve(kGraphMidiEventCapacity);
     ump.set_realtime_capacity_limit(true);
     block.attach_ump(&ump);
+}
+
+inline void prepare_mpe_block_storage(midi::MpeBuffer& block) {
+    block.reserve(kGraphMidiEventCapacity);
+    block.set_realtime_capacity_limit(true);
 }
 
 }  // namespace pulp::host
