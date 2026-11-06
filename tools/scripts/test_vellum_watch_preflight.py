@@ -519,10 +519,12 @@ class VellumWatchPreflightTest(_PreflightRepo, unittest.TestCase):
             self.assertRegex(
                 block,
                 r'vellum_rc"? -eq 10 \] \|\| \[ "\$vellum_rc"? -eq 11 \] '
-                r'\|\| \[ "\$vellum_rc"? -eq 12 \] \|\|\s+\[ "\$vellum_rc"? -eq 13 \];'
+                r'\|\| \[ "\$vellum_rc"? -eq 12 \] \|\|\s+\[ "\$vellum_rc"? -eq 13 \] '
+                r'\|\| \[ "\$vellum_rc"? -eq 14 \] \|\| \[ "\$vellum_rc"? -eq 15 \];'
                 r' then\s+fail=1',
                 msg=f"{rel} does not fail on an owed watch event, a stale "
-                    "inventory, an owed change event, or an unverifiable inventory")
+                    "inventory, an owed change event, an unverifiable inventory, "
+                    "an owed export event, or a wrong unit header list")
             self.assertNotRegex(block, r"-eq 20|-ne 0|-gt 0",
                                 msg=f"{rel} blocks on a no-verdict exit")
 
