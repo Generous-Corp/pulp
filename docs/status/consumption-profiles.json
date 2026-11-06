@@ -1648,103 +1648,107 @@
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 109
+            "closure_node_count": 114
           },
           {
             "exported_as": "Pulp::inspect-graph-runtime",
-            "closure_node_count": 100
+            "closure_node_count": 105
           },
           {
             "exported_as": "Pulp::inspect-sample-region-runtime",
-            "closure_node_count": 100
+            "closure_node_count": 105
           },
           {
             "exported_as": "Pulp::view-graph-editor",
-            "closure_node_count": 95
+            "closure_node_count": 100
           },
           {
             "exported_as": "Pulp::host",
-            "closure_node_count": 94
+            "closure_node_count": 99
           },
           {
             "exported_as": "Pulp::inspect",
-            "closure_node_count": 93
+            "closure_node_count": 98
           },
           {
             "exported_as": "Pulp::standalone",
-            "closure_node_count": 93
+            "closure_node_count": 98
           },
           {
             "exported_as": "Pulp::standalone-native",
-            "closure_node_count": 93
+            "closure_node_count": 98
           },
           {
             "exported_as": "Pulp::inspect-offline-runtime",
-            "closure_node_count": 92
+            "closure_node_count": 97
           },
           {
             "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 91
+            "closure_node_count": 96
           },
           {
             "exported_as": "Pulp::format",
-            "closure_node_count": 89
+            "closure_node_count": 94
           },
           {
             "exported_as": "Pulp::format-view",
-            "closure_node_count": 88
+            "closure_node_count": 93
           },
           {
             "exported_as": "Pulp::inspect-runtime-eval",
-            "closure_node_count": 84
+            "closure_node_count": 89
           },
           {
             "exported_as": "Pulp::view",
-            "closure_node_count": 83
+            "closure_node_count": 88
           },
           {
             "exported_as": "Pulp::view-native",
-            "closure_node_count": 82
+            "closure_node_count": 87
           },
           {
             "exported_as": "Pulp::view-audio",
-            "closure_node_count": 78
+            "closure_node_count": 83
           },
           {
             "exported_as": "Pulp::view-platform",
-            "closure_node_count": 70
+            "closure_node_count": 75
           },
           {
             "exported_as": "Pulp::view-tooling",
-            "closure_node_count": 70
+            "closure_node_count": 75
           },
           {
             "exported_as": "Pulp::design-import-audio-pack",
-            "closure_node_count": 69
+            "closure_node_count": 74
           },
           {
             "exported_as": "Pulp::view-script",
-            "closure_node_count": 69
+            "closure_node_count": 74
           },
           {
             "exported_as": "Pulp::design-import",
-            "closure_node_count": 68
+            "closure_node_count": 73
           },
           {
             "exported_as": "Pulp::inspect-telemetry",
-            "closure_node_count": 68
+            "closure_node_count": 73
           },
           {
             "exported_as": "Pulp::view-core",
-            "closure_node_count": 66
+            "closure_node_count": 71
           },
           {
             "exported_as": "Pulp::render",
-            "closure_node_count": 59
+            "closure_node_count": 64
           },
           {
             "exported_as": "Pulp::gpu-audio",
-            "closure_node_count": 57
+            "closure_node_count": 62
+          },
+          {
+            "exported_as": "Pulp::gpu-device",
+            "closure_node_count": 46
           },
           {
             "exported_as": "Pulp::canvas",
@@ -1764,10 +1768,6 @@
           },
           {
             "exported_as": "Pulp::dsl",
-            "closure_node_count": 41
-          },
-          {
-            "exported_as": "Pulp::gpu-device",
             "closure_node_count": 41
           },
           {
@@ -1931,6 +1931,10 @@
             "closure_node_count": 3
           },
           {
+            "exported_as": "Pulp::gpu-device-api",
+            "closure_node_count": 2
+          },
+          {
             "exported_as": "Pulp::timebase",
             "closure_node_count": 2
           },
@@ -1952,10 +1956,6 @@
           },
           {
             "exported_as": "Pulp::foundation",
-            "closure_node_count": 1
-          },
-          {
-            "exported_as": "Pulp::gpu-device-api",
             "closure_node_count": 1
           },
           {
@@ -2779,7 +2779,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 68,
+            "node_count": 73,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -2802,6 +2802,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -2815,12 +2820,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 53,
+            "count": 58,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -2895,7 +2905,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 69,
+            "node_count": 74,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -2919,6 +2929,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -2932,12 +2947,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 53,
+            "count": 58,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -3218,7 +3238,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 89,
+            "node_count": 94,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -3258,6 +3278,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -3273,7 +3298,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 59,
+            "count": 64,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -3281,6 +3306,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -3545,7 +3575,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 88,
+            "node_count": 93,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -3584,6 +3614,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -3599,7 +3634,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 59,
+            "count": 64,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -3607,6 +3642,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -3718,7 +3758,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/gpu_audio",
           "closure": {
-            "node_count": 57,
+            "node_count": 62,
             "pulp_targets": [
               "pulp-audio",
               "pulp-events",
@@ -3738,6 +3778,11 @@
             ],
             "third_party_targets": [
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -3749,9 +3794,14 @@
             ]
           },
           "external_dependencies": {
-            "count": 42,
+            "count": 47,
             "third_party_targets": [
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -3813,6 +3863,7 @@
             "framework:CoreFoundation",
             "framework:IOKit",
             "framework:Metal",
+            "gpu-runtime-device",
             "pulp-audio",
             "pulp-gpu-device",
             "pulp-runtime",
@@ -3828,7 +3879,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/render",
           "closure": {
-            "node_count": 41,
+            "node_count": 46,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-gpu-device",
@@ -3839,6 +3890,11 @@
             ],
             "third_party_targets": [
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -3850,9 +3906,14 @@
             ]
           },
           "external_dependencies": {
-            "count": 35,
+            "count": 40,
             "third_party_targets": [
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -3901,9 +3962,8 @@
             "generated_include_roots": 0
           },
           "direct_dependencies": [
-            "framework:Cocoa",
-            "framework:Metal",
-            "framework:QuartzCore",
+            "gpu-runtime-device",
+            "gpu-runtime-skia-log-bridge",
             "pulp-gpu-device-api",
             "pulp-runtime",
             "skia::skia"
@@ -3915,15 +3975,19 @@
           "type": "INTERFACE_LIBRARY",
           "source_dir": "core/render",
           "closure": {
-            "node_count": 1,
+            "node_count": 2,
             "pulp_targets": [
               "pulp-gpu-device-api"
             ],
-            "third_party_targets": []
+            "third_party_targets": [
+              "gpu-runtime-device-api"
+            ]
           },
           "external_dependencies": {
-            "count": 0,
-            "third_party_targets": [],
+            "count": 1,
+            "third_party_targets": [
+              "gpu-runtime-device-api"
+            ],
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [],
@@ -3935,7 +3999,9 @@
             ],
             "generated_include_roots": 0
           },
-          "direct_dependencies": []
+          "direct_dependencies": [
+            "gpu-runtime-device-api"
+          ]
         },
         "graph": {
           "target": "pulp-graph",
@@ -4009,7 +4075,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/host",
           "closure": {
-            "node_count": 94,
+            "node_count": 99,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -4052,6 +4118,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -4067,7 +4138,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 61,
+            "count": 66,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4075,6 +4146,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -4200,7 +4276,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 93,
+            "node_count": 98,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -4240,6 +4316,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -4259,12 +4340,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 61,
+            "count": 66,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -4555,7 +4641,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 100,
+            "node_count": 105,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -4600,6 +4686,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -4619,7 +4710,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 65,
+            "count": 70,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4627,6 +4718,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -4712,7 +4808,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 92,
+            "node_count": 97,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -4752,6 +4848,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -4770,7 +4871,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 62,
+            "count": 67,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4778,6 +4879,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -5017,7 +5123,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 84,
+            "node_count": 89,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -5053,6 +5159,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -5067,12 +5178,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 56,
+            "count": 61,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -5150,7 +5266,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 100,
+            "node_count": 105,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -5195,6 +5311,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -5214,7 +5335,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 65,
+            "count": 70,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -5222,6 +5343,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -5307,7 +5433,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 109,
+            "node_count": 114,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -5355,6 +5481,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -5380,7 +5511,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 71,
+            "count": 76,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -5388,6 +5519,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -5483,7 +5619,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 68,
+            "node_count": 73,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -5505,6 +5641,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -5519,12 +5660,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 54,
+            "count": 59,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -5601,7 +5747,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 91,
+            "node_count": 96,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -5641,6 +5787,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -5658,12 +5809,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 59,
+            "count": 64,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -6349,7 +6505,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/render",
           "closure": {
-            "node_count": 59,
+            "node_count": 64,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -6366,6 +6522,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -6377,12 +6538,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 50,
+            "count": 55,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -7072,7 +7238,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 93,
+            "node_count": 98,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7115,6 +7281,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -7131,7 +7302,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 60,
+            "count": 65,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7139,6 +7310,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -7313,7 +7489,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 93,
+            "node_count": 98,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7356,6 +7532,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -7372,7 +7553,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 60,
+            "count": 65,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7380,6 +7561,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -7779,7 +7965,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 83,
+            "node_count": 88,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7815,6 +8001,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -7828,12 +8019,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 60,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -7915,7 +8111,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 78,
+            "node_count": 83,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7946,6 +8142,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -7959,12 +8160,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 60,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -8046,7 +8252,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 66,
+            "node_count": 71,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -8068,6 +8274,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -8080,12 +8291,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 52,
+            "count": 57,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -8175,7 +8391,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view/audio",
           "closure": {
-            "node_count": 95,
+            "node_count": 100,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -8219,6 +8435,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -8234,7 +8455,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 61,
+            "count": 66,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -8242,6 +8463,11 @@
               "ausdk",
               "clap",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "lv2-headers",
               "mbedcrypto",
@@ -8323,7 +8549,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 82,
+            "node_count": 87,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -8358,6 +8584,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -8371,12 +8602,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 60,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -8456,7 +8692,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 70,
+            "node_count": 75,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -8481,6 +8717,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -8494,12 +8735,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 53,
+            "count": 58,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -8575,7 +8821,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 69,
+            "node_count": 74,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -8599,6 +8845,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -8612,12 +8863,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 53,
+            "count": 58,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -8696,7 +8952,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 70,
+            "node_count": 75,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -8721,6 +8977,11 @@
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",
@@ -8734,12 +8995,17 @@
             ]
           },
           "external_dependencies": {
-            "count": 53,
+            "count": 58,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
               "SheenBidi",
               "everest",
+              "gpu-runtime-bootstrap",
+              "gpu-runtime-dawn",
+              "gpu-runtime-device",
+              "gpu-runtime-device-api",
+              "gpu-runtime-skia-log-bridge",
               "hwy",
               "mbedcrypto",
               "mbedtls",

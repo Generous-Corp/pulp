@@ -151,7 +151,7 @@ class GpuRuntimePinTests(unittest.TestCase):
 
     def test_the_real_tree_agrees(self) -> None:
         import json
-        manifest = json.loads((ROOT / "tools/deps/manifest.json").read_text())["dependencies"]
+        manifest = json.loads((ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
         self.assertEqual(audit.gpu_runtime_pin_agreement(manifest), [])
 
 

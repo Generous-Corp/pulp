@@ -28,7 +28,7 @@ from pathlib import Path
 
 def defined(path: Path) -> list[str]:
     result = subprocess.run(["nm", "-U", "-C", str(path)], capture_output=True, text=True,
-                            check=False)
+                            encoding="utf-8", check=False)
     if result.returncode != 0:
         raise SystemExit(f"nm failed on {path}: {result.stderr.strip()}")
     return [line.split(" ", 2)[-1] for line in result.stdout.splitlines() if line.strip()]

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include <pulp/platform/gpu_fwd.hpp>
+#include <pulp/render/gpu_surface.hpp>
 
 namespace pulp::render {
 
