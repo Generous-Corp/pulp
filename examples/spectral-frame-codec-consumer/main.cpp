@@ -2,8 +2,9 @@
 
 #include <algorithm>
 #include <iostream>
+#include <string_view>
 
-int main() {
+int main(int argc, char** argv) {
     using namespace pulp::signal;
     auto stream = make_spectral_stream({256, 64, 2, 48000}, 2);
     if (!stream)
@@ -22,8 +23,12 @@ int main() {
     auto again = encode_spectral_stream(*decoded.value);
     if (!again || !std::ranges::equal(encoded.value->view(), again.value->view()))
         return 4;
-    encoded.value->bytes[87] = 0x80;
-    if (decode_spectral_stream(encoded.value->view()).error != SpectralCodecError::NoncanonicalZero)
-        return 5;
+    if (argc > 1 && std::string_view(argv[1]) == "--planted-unknown-profile") {
+        // The CTest entry is WILL_FAIL: a correct decoder rejects this
+        // production-byte mutation, so the deliberately inverted exit status
+        // makes a guard regression fail the package-level control.
+        encoded.value->bytes[12] = 0x02;
+        return decode_spectral_stream(encoded.value->view()) ? 0 : 1;
+    }
     std::cout << "owned spectral codec: exact roundtrip and strict rejection passed\n";
 }

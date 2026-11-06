@@ -9,8 +9,17 @@ and an optional owned value. No failure publishes a partial value. Callers retai
 their previous value until they explicitly replace it with a successful result.
 
 These operations allocate and must run off the audio callback. They do not read
-files, serialize Processors, route graph edges, or perform synthesis. The standalone
-example in `examples/spectral-frame-codec-consumer` consumes only the public header.
+files, serialize Processors, route graph edges, or perform synthesis. An external
+consumer can use the installed SDK target without a source checkout:
+
+```cmake
+find_package(Pulp CONFIG REQUIRED COMPONENTS signal)
+add_executable(my_spectral_tool main.cpp)
+target_link_libraries(my_spectral_tool PRIVATE Pulp::signal)
+```
+
+The standalone example in `examples/spectral-frame-codec-consumer` exercises this
+installed-target path and includes a strict unknown-profile negative control.
 
 ## Values and conventions
 
