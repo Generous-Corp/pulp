@@ -10,13 +10,16 @@
     "core/render/include/pulp/render/gpu_compute.hpp",
     "core/render/include/pulp/render/gpu_diagnostics.hpp",
     "core/render/include/pulp/render/gpu_proc_installer.hpp",
+    "core/render/include/pulp/render/gpu_render_time.hpp",
     "core/render/include/pulp/render/gpu_startup_report.hpp",
+    "core/render/include/pulp/render/gpu_surface.hpp",
     "core/render/src/gpu_runtime_hooks.cpp",
     "core/render/src/render_observer_private.hpp",
     "core/view/include/pulp/view/plugin_view_host.hpp",
     "core/view/include/pulp/view/scripted_editor_session.hpp",
     "core/view/include/pulp/view/scripted_ui.hpp",
-    "core/view/include/pulp/view/widget_bridge.hpp"
+    "core/view/include/pulp/view/widget_bridge.hpp",
+    "core/view/include/pulp/view/window_host.hpp"
   ],
   "vellum_inherits": true,
   "rationale": "These headers and sources are in the Vellum export. Each gains a PULP_GPU_RUNTIME forwarding branch or takes its forward declarations from pulp/platform/gpu_fwd.hpp, with the original bodies kept in the #else branch, and gpu_runtime_hooks.cpp and gpu_fwd.hpp are new. The next re-export carries these text changes into Vellum's mirror, where they are inert as long as Vellum never defines PULP_GPU_RUNTIME for mirrored sources."
