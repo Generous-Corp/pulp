@@ -41,11 +41,13 @@ namespace {
 
 using pulp::format::GraphRuntimeExecutor;
 using pulp::format::GraphRuntimeNodeBinding;
+using pulp::format::GraphRuntimeNodeProcessContext;
 using pulp::format::GraphRuntimeSnapshot;
 using pulp::format::HeadlessHost;
 using pulp::format::PluginCategory;
 using pulp::format::PluginDescriptor;
 using pulp::format::PrepareContext;
+using pulp::format::ProcessBlock;
 using pulp::format::ProcessContext;
 using pulp::format::Processor;
 using pulp::format::ProcessorNode;
@@ -459,6 +461,8 @@ class ContextProbe final : public Processor {
         midi_out.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
         params_seen = param_events();
         sidechain_seen = sidechain_input();
+        mpe_seen = mpe_input();
+        ump_seen = ump_input();
         for (std::size_t i = 0; i < out.num_samples(); ++i)
             out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
     }
@@ -467,6 +471,8 @@ class ContextProbe final : public Processor {
     std::size_t midi_in_events = 0;
     const pulp::state::ParameterEventQueue* params_seen = nullptr;
     const pulp::audio::BufferView<const float>* sidechain_seen = nullptr;
+    const pulp::midi::MpeBuffer* mpe_seen = nullptr;
+    const pulp::midi::UmpBuffer* ump_seen = nullptr;
 };
 
 } // namespace
@@ -517,6 +523,8 @@ TEST_CASE("ProcessorNode hands a main-bus processor the block context and empty 
     REQUIRE(processor.params_seen != nullptr);
     CHECK(processor.params_seen->empty());
     CHECK(processor.sidechain_seen == nullptr);
+    CHECK(processor.mpe_seen == nullptr);
+    CHECK(processor.ump_seen == nullptr);
 
     // Partial transport: the block fills the rate and length it leaves unset.
     ProcessContext partial;
@@ -538,6 +546,51 @@ TEST_CASE("ProcessorNode hands a main-bus processor the block context and empty 
     CHECK(processor.midi_in_events == 0);
     // The node restored the processor's sidecars after each block.
     CHECK(processor.param_events() == nullptr);
+}
+
+TEST_CASE("ProcessorNode forwards routed MPE and UMP sidecars",
+          "[format][graph][executor][routing][processor-node][mpe][ump]") {
+    constexpr int frames = 8;
+    ContextProbe processor;
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 1;
+    prepare.output_channels = 1;
+    REQUIRE(node.prepare(prepare));
+
+    std::array<float, frames> input{};
+    std::array<float, frames> output{};
+    std::array<const float*, 1> in_ch{input.data()};
+    std::array<float*, 1> out_ch{output.data()};
+    pulp::midi::MidiBuffer midi;
+    pulp::midi::UmpBuffer ump;
+    midi.reserve(4);
+    midi.set_realtime_capacity_limit(true);
+    ump.reserve(4);
+    ump.set_realtime_capacity_limit(true);
+    midi.attach_ump(&ump);
+    REQUIRE(midi.add(pulp::midi::MidiEvent::note_on(1, 60, 100)));
+    pulp::midi::MpeBuffer mpe;
+    mpe.reserve(4);
+    mpe.set_realtime_capacity_limit(true);
+    REQUIRE(mpe.add({3, pulp::midi::MpeExpressionEvent::Kind::NoteOn, {true, 1, 60, 100}}));
+
+    GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    context.node_inputs = {in_ch.data(), 1, frames};
+    context.node_outputs = {out_ch.data(), 1, frames};
+    context.node_midi_in = &midi;
+    context.node_mpe_in = &mpe;
+    ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    CHECK(processor.mpe_seen == &mpe);
+    CHECK(processor.ump_seen == &ump);
 }
 
 namespace {

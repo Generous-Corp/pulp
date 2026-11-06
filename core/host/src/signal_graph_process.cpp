@@ -242,9 +242,12 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                     for (auto& mi : cg->routed.midi_inputs) {
                         mi.pending_seq = 0;
                         midi::MidiBuffer* out_buf = cg->routed.midi.out(mi.plan_index);
+                        midi::MpeBuffer* out_mpe = cg->routed.midi.mpe_out(mi.plan_index);
                         if (out_buf == nullptr)
                             continue;
                         clear_midi_block(*out_buf);
+                        if (out_mpe != nullptr)
+                            out_mpe->clear();
                         cg->routed.midi.set_out_incomplete(mi.plan_index, false);
                         auto rt_it = cg->runtime.find(mi.id);
                         if (rt_it == cg->runtime.end() || !rt_it->second.midi_input_mailbox) {
@@ -255,8 +258,10 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                             rt_it->second.midi_input_mailbox->sequence_seen.load(
                                 std::memory_order_relaxed);
                         if (injected.sequence != 0 && injected.sequence != sequence_seen) {
-                            cg->routed.midi.set_out_incomplete(mi.plan_index,
-                                                               !injected.copy_to_midi(*out_buf));
+                            const bool midi_ok = injected.copy_to_midi(*out_buf);
+                            const bool mpe_ok =
+                                out_mpe == nullptr || midi::copy_mpe_block(injected.mpe, *out_mpe);
+                            cg->routed.midi.set_out_incomplete(mi.plan_index, !(midi_ok && mpe_ok));
                             mi.pending_seq = injected.sequence;
                         }
                     }
@@ -297,8 +302,14 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                             !rt_it->second.midi_output_mailbox) {
                             continue;
                         }
-                        cg->midi_publish_scratch.set_from_midi(
-                            *in_buf, 0, cg->routed.midi.in_incomplete(mo.plan_index));
+                        const auto* in_mpe = cg->routed.midi.mpe_in(mo.plan_index);
+                        if (in_mpe != nullptr) {
+                            cg->midi_publish_scratch.set_from_midi(
+                                *in_buf, *in_mpe, 0, cg->routed.midi.in_incomplete(mo.plan_index));
+                        } else {
+                            cg->midi_publish_scratch.set_from_midi(
+                                *in_buf, 0, cg->routed.midi.in_incomplete(mo.plan_index));
+                        }
                         if (cg->midi_publish_scratch.has_payload() &&
                             !rt_it->second.midi_output_mailbox->pending.try_push(
                                 cg->midi_publish_scratch)) {

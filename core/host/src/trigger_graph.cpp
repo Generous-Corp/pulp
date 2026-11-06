@@ -12,8 +12,11 @@
 
 namespace pulp::host {
 SignalGraph::MidiBlockSnapshot::MidiBlockSnapshot(bool reserve_storage) {
-    if (reserve_storage)
+    if (reserve_storage) {
         prepare_midi_block_storage(events, ump);
+        mpe.reserve(kGraphMidiEventCapacity);
+        mpe.set_realtime_capacity_limit(true);
+    }
 }
 namespace detail {
 namespace {

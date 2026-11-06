@@ -732,7 +732,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/block_ops.hpp",
-        "fingerprint": "sha256:563569c0bb61029b1b374a8d91812a77818cb9f3db18cc2706a4c570860dd8a0",
+        "fingerprint": "sha256:7cc39d018aad8ab08ca1ef31a2af8c0ea3dc77ac63877a197434854770bc8d24",
         "disposition": "capability_support",
         "capability_keys": [
             "midi.arpeggiator", "midi.channel-routing", "midi.controller-mapping",
@@ -764,7 +764,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/mpe_buffer.hpp",
-        "fingerprint": "sha256:40f4e08a25956811f4466b031734e5fd418e313e4861007304dd33a33ca50e0e",
+        "fingerprint": "sha256:9b08b7224b5ce9c5aa833547fccd1827d70b18445d0c14fc3775bc21eb072cfb",
         "disposition": "capability_support",
         "capability_keys": ["midi.mpe-voice-tracker"],
         "rationale": (

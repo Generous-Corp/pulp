@@ -589,6 +589,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             prepare_midi_block_storage(runtime_it->second.midi_in, runtime_it->second.midi_in_ump);
             prepare_midi_block_storage(runtime_it->second.midi_out,
                                        runtime_it->second.midi_out_ump);
+            prepare_mpe_block_storage(runtime_it->second.mpe_in);
+            prepare_mpe_block_storage(runtime_it->second.mpe_out);
         }
         if (n.type == NodeType::MidiInput) {
             // Keep mailbox identity across a live snapshot recompile so an

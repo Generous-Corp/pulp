@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 190,
+  "inventory_version": 191,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -1308,7 +1308,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:ba5964f72055cb9113da3579ff040a560d657a46bb7ebc95514af8c98e32f791",
+      "fingerprint": "sha256:5e5f2547ae4675e5641c608d81a497aefa4b17fa120adbf991a9f96dc7380416",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1375,7 +1375,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/block_ops.hpp",
-      "fingerprint": "sha256:563569c0bb61029b1b374a8d91812a77818cb9f3db18cc2706a4c570860dd8a0",
+      "fingerprint": "sha256:7cc39d018aad8ab08ca1ef31a2af8c0ea3dc77ac63877a197434854770bc8d24",
       "include": "pulp/midi/block_ops.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -1575,7 +1575,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/mpe_buffer.hpp",
-      "fingerprint": "sha256:40f4e08a25956811f4466b031734e5fd418e313e4861007304dd33a33ca50e0e",
+      "fingerprint": "sha256:9b08b7224b5ce9c5aa833547fccd1827d70b18445d0c14fc3775bc21eb072cfb",
       "include": "pulp/midi/mpe_buffer.hpp",
       "disposition": "capability_support",
       "capability_keys": [
