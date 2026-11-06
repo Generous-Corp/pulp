@@ -24,9 +24,8 @@ void check(bool condition, const char* rule) {
         throw std::runtime_error(rule);
 }
 
-HostEventRecord record(std::uint64_t epoch, std::int64_t sample,
-                       std::uint64_t sequence, std::uint32_t producer,
-                       pulp::midi::MidiEvent event) {
+HostEventRecord record(std::uint64_t epoch, std::int64_t sample, std::uint64_t sequence,
+                       std::uint32_t producer, pulp::midi::MidiEvent event) {
     HostEventRecord value;
     value.epoch = epoch;
     value.absolute_sample = sample;
@@ -38,8 +37,7 @@ HostEventRecord record(std::uint64_t epoch, std::int64_t sample,
 
 void host_ingress_controls() {
     HostEventIngress<8> ingress;
-    check(ingress.begin_block(7, 100, 4) == HostEventResult::Accepted,
-          "host-begin-block");
+    check(ingress.begin_block(7, 100, 4) == HostEventResult::Accepted, "host-begin-block");
 
     using pulp::midi::MidiEvent;
     check(ingress.publish(record(7, 100, 1, 2, MidiEvent::note_on(1, 60, 100))) ==
@@ -50,8 +48,7 @@ void host_ingress_controls() {
     check(ingress.publish(record(7, 100, 1, 1, MidiEvent::note_on(2, 61, 90))) ==
               HostEventResult::Accepted,
           "host-tie-from-second-producer");
-    check(ingress.publish(record(7, 99, 3, 2, MidiEvent::note_off(1, 60))) ==
-              HostEventResult::Late,
+    check(ingress.publish(record(7, 99, 3, 2, MidiEvent::note_off(1, 60))) == HostEventResult::Late,
           "host-late-negative");
     check(ingress.publish(record(6, 101, 4, 2, MidiEvent::note_off(1, 60))) ==
               HostEventResult::StaleEpoch,
@@ -83,16 +80,15 @@ void host_ingress_controls() {
     pulp::midi::MpeBuffer sidecar;
     sidecar.reserve(8);
     sidecar.set_realtime_capacity_limit(true);
-    check(pulp::host::derive_mpe(std::span<const HostEventRecord>(projected.data(), count),
-                                 100, tracker, sidecar) == HostEventResult::Accepted,
+    check(pulp::host::derive_mpe(std::span<const HostEventRecord>(projected.data(), count), 100,
+                                 tracker, sidecar) == HostEventResult::Accepted,
           "host-mpe-derive");
-    check(sidecar.size() == 3 && sidecar[0].sample_offset == 0 &&
-              sidecar[1].sample_offset == 0 && sidecar[2].sample_offset == 2,
+    check(sidecar.size() == 3 && sidecar[0].sample_offset == 0 && sidecar[1].sample_offset == 0 &&
+              sidecar[2].sample_offset == 2,
           "host-mpe-sample-offsets");
 
     check(ingress.end_block() == HostEventResult::Accepted, "host-end-block");
-    check(ingress.begin_block(7, 104, 1) == HostEventResult::Accepted,
-          "host-future-block");
+    check(ingress.begin_block(7, 104, 1) == HostEventResult::Accepted, "host-future-block");
     std::array<HostEventRecord, 1> future{};
     check(ingress.project(future, count) == HostEventResult::Accepted && count == 1 &&
               future[0].absolute_sample == 104,
@@ -119,8 +115,7 @@ Observation render(std::span<const std::size_t> partitions) {
         check(lane.begin_block(1, absolute, frames) == GraphEventResult::Accepted,
               "graph-begin-block");
         for (std::size_t offset = 0; offset < frames; ++offset, ++sample_index) {
-            check(lane.begin_sample(offset) == GraphEventResult::Accepted,
-                  "graph-begin-sample");
+            check(lane.begin_sample(offset) == GraphEventResult::Accepted, "graph-begin-sample");
             if (sample_index == 0) {
                 check(lane.emit(2, 9, 1, absolute) == GraphEventResult::StaleEpoch,
                       "graph-stale-negative");
@@ -175,9 +170,8 @@ void graph_partition_controls() {
               one_block.events[8].sequence == 16,
           "graph-event-trace");
     check(one_block.attempts == std::array<std::uint8_t, 2>{16, 1} &&
-              one_block.accepted == std::array<std::uint8_t, 2>{8, 1} &&
-              one_block.overflow == 7 && one_block.diagnostic_refusals == 1 &&
-              one_block.sequence == 17,
+              one_block.accepted == std::array<std::uint8_t, 2>{8, 1} && one_block.overflow == 7 &&
+              one_block.diagnostic_refusals == 1 && one_block.sequence == 17,
           "graph-counters");
 }
 
