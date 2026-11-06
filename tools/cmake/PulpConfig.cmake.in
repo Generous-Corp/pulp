@@ -178,9 +178,16 @@ endif()
 set(PULP_HAS_GPU_RUNTIME "@PULP_HAS_GPU_RUNTIME@")
 if(PULP_HAS_GPU_RUNTIME)
     set(GPU_RUNTIME_SKIA_DIR "${PULP_SDK_DIR}/external/skia-build")
-    find_dependency(VellumGpuRuntime @PULP_GPU_RUNTIME_VERSION@ EXACT CONFIG
-        COMPONENTS Device SkiaLogBridge
-        PATHS "${PULP_SDK_DIR}/@CMAKE_INSTALL_LIBDIR@/cmake/VellumGpuRuntime" NO_DEFAULT_PATH)
+    include("${CMAKE_CURRENT_LIST_DIR}/PulpGpuRuntimeRecord.cmake")
+    pulp_find_gpu_runtime_package(@PULP_GPU_RUNTIME_VERSION@
+        "${PULP_SDK_DIR}/@CMAKE_INSTALL_LIBDIR@/cmake/VellumGpuRuntime" _pulp_gpu_runtime_error)
+    if(_pulp_gpu_runtime_error)
+        set(Pulp_FOUND FALSE)
+        set(Pulp_NOT_FOUND_MESSAGE "Pulp: ${_pulp_gpu_runtime_error}")
+        unset(_pulp_gpu_runtime_error)
+        return()
+    endif()
+    unset(_pulp_gpu_runtime_error)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpTargets.cmake")

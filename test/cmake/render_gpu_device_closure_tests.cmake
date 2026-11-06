@@ -192,6 +192,19 @@ add_test(NAME gpu-runtime-benchmark-flavour
         -DMODULE=${CMAKE_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_benchmark_flavour.cmake)
 set_tests_properties(gpu-runtime-benchmark-flavour PROPERTIES LABELS "render;gpu-device" TIMEOUT 20)
+# The installed SDK finds gpu-runtime through pulp_find_gpu_runtime_package(),
+# checked here against the gpu-runtime this build fetched.
+if(PULP_HAS_GPU_RUNTIME AND DEFINED vellum_gpu_runtime_BINARY_DIR AND NOT PULP_GPU_RUNTIME_PREFIX)
+    add_test(NAME gpu-runtime-package-find
+        COMMAND ${CMAKE_COMMAND}
+            -DMODULE=${CMAKE_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake
+            -DRUNTIME_BUILD_DIR=${vellum_gpu_runtime_BINARY_DIR}
+            -DSKIA_DIR=${SKIA_DIR}
+            -DVERSION=${PULP_GPU_RUNTIME_VERSION}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/gpu-runtime-package-find
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_package_find.cmake)
+    set_tests_properties(gpu-runtime-package-find PROPERTIES LABELS "render;gpu-device" TIMEOUT 60)
+endif()
 unset(_pulp_platform_defs)
 unset(_pulp_device_api_defs)
 

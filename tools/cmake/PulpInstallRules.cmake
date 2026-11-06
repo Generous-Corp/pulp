@@ -935,6 +935,8 @@ install(FILES
     # must land beside it — a consumer that can stage sidecars but not verify
     # them is exactly the gap WAH-3 closes.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpVerifyRuntimeStaging.cmake"
+    # Included by PulpConfig.cmake to find the gpu-runtime package beside the SDK.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
     # Included by FindSkia.cmake relative to its own directory.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSkiaDawnProvider.cmake"

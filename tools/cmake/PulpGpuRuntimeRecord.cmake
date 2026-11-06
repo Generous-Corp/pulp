@@ -45,3 +45,42 @@ function(pulp_check_gpu_runtime_benchmark_flavour defs pulp_benchmark)
             "GpuCompute vtable, so the two must agree")
     endif()
 endfunction()
+
+# pulp_find_gpu_runtime_package(<version> <dir> <out-error>)
+#
+# Finds an installed VellumGpuRuntime package of exactly <version> in <dir> and
+# checks that it carries the device layer Pulp forwards to. Sets <out-error>
+# to an empty string on success, or to the reason it cannot be used.
+#
+# Components are checked here rather than requested from find_package(): the
+# package marks a missing Dawn with VellumGpuRuntime_Device_FOUND FALSE but
+# never marks an installed component found, so check_required_components()
+# reports the whole package as not found as soon as any component is named.
+# GPU_RUNTIME_SKIA_DIR (or GPU_RUNTIME_RENDERER_ARCHIVE) must name the locked
+# Dawn build before the call.
+function(pulp_find_gpu_runtime_package version dir out_error)
+    find_package(VellumGpuRuntime ${version} EXACT CONFIG QUIET
+        PATHS "${dir}" NO_DEFAULT_PATH)
+    set(_error "")
+    if(NOT VellumGpuRuntime_FOUND)
+        set(_error "no VellumGpuRuntime ${version} package in ${dir}")
+        if(VellumGpuRuntime_NOT_FOUND_MESSAGE)
+            string(APPEND _error ": ${VellumGpuRuntime_NOT_FOUND_MESSAGE}")
+        endif()
+    elseif(NOT VellumGpuRuntime_HAS_DEVICE OR
+           (DEFINED VellumGpuRuntime_Device_FOUND AND NOT VellumGpuRuntime_Device_FOUND) OR
+           NOT TARGET gpu-runtime-dawn)
+        set(_error
+            "the VellumGpuRuntime package in ${dir} has no usable device library: it was "
+            "built without one, or GPU_RUNTIME_SKIA_DIR ('${GPU_RUNTIME_SKIA_DIR}') does not "
+            "hold the locked Dawn build")
+    else()
+        foreach(_target DeviceApi Bootstrap Device SkiaLogBridge)
+            if(NOT TARGET VellumGpuRuntime::${_target})
+                set(_error "the VellumGpuRuntime package in ${dir} lacks VellumGpuRuntime::${_target}")
+                break()
+            endif()
+        endforeach()
+    endif()
+    set(${out_error} "${_error}" PARENT_SCOPE)
+endfunction()

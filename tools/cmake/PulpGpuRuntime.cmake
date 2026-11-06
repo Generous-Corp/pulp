@@ -39,9 +39,12 @@ endif()
 if(PULP_GPU_RUNTIME_PREFIX)
     pulp_check_gpu_runtime_record("${PULP_GPU_RUNTIME_PREFIX}" "${PULP_GPU_RUNTIME_COMMIT}")
     set(GPU_RUNTIME_SKIA_DIR "${SKIA_DIR}")
-    find_package(VellumGpuRuntime ${PULP_GPU_RUNTIME_VERSION} EXACT CONFIG REQUIRED
-        COMPONENTS Device SkiaLogBridge
-        PATHS "${PULP_GPU_RUNTIME_PREFIX}" NO_DEFAULT_PATH)
+    pulp_find_gpu_runtime_package(${PULP_GPU_RUNTIME_VERSION} "${PULP_GPU_RUNTIME_PREFIX}"
+        _pulp_gpu_runtime_error)
+    if(_pulp_gpu_runtime_error)
+        message(FATAL_ERROR "Pulp: ${_pulp_gpu_runtime_error}")
+    endif()
+    unset(_pulp_gpu_runtime_error)
 else()
     include(FetchContent)
     FetchContent_Declare(
