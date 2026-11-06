@@ -2,8 +2,23 @@
   "schema": "pulp.vellum.owner-unfreezes.v2",
   "unfreezes": [
     {
+      "path": "core/render/include/pulp/render/gpu_render_time.hpp",
+      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approved_by": "danielraffel"
+    },
+    {
+      "path": "core/render/include/pulp/render/gpu_surface.hpp",
+      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approved_by": "danielraffel"
+    },
+    {
       "path": "core/view/include/pulp/view/value_source.hpp",
       "approval_url": "https://github.com/Generous-Corp/pulp/pull/11451#issuecomment-6612900699",
+      "approved_by": "danielraffel"
+    },
+    {
+      "path": "core/view/include/pulp/view/window_host.hpp",
+      "approval_url": "PENDING-OWNER-APPROVAL",
       "approved_by": "danielraffel"
     }
   ]
