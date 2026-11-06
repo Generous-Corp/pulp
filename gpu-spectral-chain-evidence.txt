@@ -1,0 +1,8 @@
+cpu min_us=126.416 p50_us=130.208 p95_us=167.959 p99_us=683.375 max_us=1127.750 mean_us=162.345 jitter_sd_us=142.233
+cpu_resident_payload_bytes=262144 gpu_copy_count_measured=false
+gpu_available=true backend=Metal vendor=apple timestamp_query=true max_fft=4194304
+gpu min_us=628.416 p50_us=702.625 p95_us=894.208 p99_us=1231.125 max_us=1305.042 mean_us=742.326 jitter_sd_us=131.466
+gpu_resident_payload_bytes=262144 resident_output_bytes_per_hop=16384 gpu_copy_count_measured=false
+positive_parity_max_abs=0.000 positive_non_silent=true
+negative_oversized_available=false
+negative_device_loss device_lost=true gpu_render_after_loss=false cpu_fallback_render=true
