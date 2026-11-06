@@ -18,6 +18,7 @@ SignalGraph::MidiBlockSnapshot::MidiBlockSnapshot(bool reserve_storage) {
 namespace detail {
 namespace {
 constexpr std::size_t record_capacity = 4096 * 8;
+constexpr std::size_t pending_capacity = 64;
 // Reservations include object storage, alignment and shared-owner bookkeeping.
 // This fixed overhead is conservative; unused reserved bytes remain charged.
 constexpr std::size_t owner_overhead = 256;
@@ -77,6 +78,8 @@ struct TriggerState {
     std::uint64_t consumed_frontier = 0;
     std::size_t trace_size = 0;
     std::size_t sample_begin = 0;
+    std::array<TriggerRecord, pending_capacity> pending{};
+    std::size_t pending_size = 0;
     std::uint32_t max_frames = 0;
     std::uint8_t phase = 0; // 0 idle/sealed, 1 producer, 2 consumer
     bool attempt_closed = false;
@@ -107,11 +110,12 @@ struct TriggerState {
             node.memory = 0;
         current_sample = consumed_frontier = 0;
         trace_size = sample_begin = 0;
+        pending_size = 0;
         phase = 0;
         attempt_closed = rendered = false;
     }
     TriggerEmitResult emit_at(TriggerPayload payload, std::uint64_t epoch, std::uint8_t port,
-                              std::uint64_t target, bool out_of_range = false) noexcept {
+                              std::int64_t target, bool allow_future = false) noexcept {
         if (attempt_closed)
             return TriggerEmitResult::AttemptLimit;
         if (phase != 1) {
@@ -133,21 +137,59 @@ struct TriggerState {
             return refuse(TriggerEmitResult::StaleEpoch);
         if (port != 0 || edge.producer == 0 || edge.consumer == 0)
             return refuse(TriggerEmitResult::Unbound);
-        if (out_of_range)
+        if (target < 0)
             return refuse(TriggerEmitResult::OutOfRange);
-        if (target > current_sample)
+        const auto sample = static_cast<std::uint64_t>(target);
+        if (sample > current_sample && !allow_future)
             return refuse(TriggerEmitResult::Future);
-        if (target < current_sample || (rendered && target < consumed_frontier))
+        if (sample < current_sample || (rendered && sample < consumed_frontier))
             return refuse(TriggerEmitResult::Late);
-        if (counters.accepted == 8) {
+        if (sample == current_sample && counters.accepted == 8) {
             increment(counters.overflow);
             return TriggerEmitResult::Overflow;
         }
-        controller->arena->records[trace_size++] = {counters.epoch,      current_sample, sequence,
-                                                    edge.producer,       payload.token,  0,
-                                                    TriggerKind::Trigger};
-        ++counters.accepted;
+        const TriggerRecord record{counters.epoch, sample, sequence, edge.producer, payload.token,
+                                   0, TriggerKind::Trigger};
+        if (sample == current_sample) {
+            if (trace_size == record_capacity) {
+                increment(counters.overflow);
+                return TriggerEmitResult::Overflow;
+            }
+            controller->arena->records[trace_size++] = record;
+            ++counters.accepted;
+        } else {
+            if (pending_size == pending_capacity) {
+                increment(counters.overflow);
+                return TriggerEmitResult::Overflow;
+            }
+            std::size_t at = pending_size;
+            while (at > 0 &&
+                   (pending[at - 1].sample > record.sample ||
+                    (pending[at - 1].sample == record.sample &&
+                     pending[at - 1].sequence > record.sequence))) {
+                pending[at] = pending[at - 1];
+                --at;
+            }
+            pending[at] = record;
+            ++pending_size;
+        }
         return TriggerEmitResult::Accepted;
+    }
+    void drain_pending() noexcept {
+        std::size_t consumed = 0;
+        while (consumed < pending_size && pending[consumed].sample == current_sample) {
+            if (trace_size == record_capacity) {
+                increment(counters.overflow);
+                break;
+            }
+            controller->arena->records[trace_size++] = pending[consumed++];
+        }
+        if (consumed != 0) {
+            const auto remaining = pending_size - consumed;
+            for (std::size_t i = 0; i < remaining; ++i)
+                pending[i] = pending[i + consumed];
+            pending_size = remaining;
+        }
     }
     void produce_sample(audio::BufferView<float>& out, const audio::BufferView<const float>& in,
                         int, const CustomNodeEventBlock& events) noexcept {
@@ -180,6 +222,7 @@ struct TriggerState {
             sample_begin = trace_size;
             counters.attempts = counters.accepted = 0;
             attempt_closed = false;
+            drain_pending();
             phase = 1;
             const CustomNodeEventBlock events{nullptr, nullptr, &context};
             auto sample_out = out.slice(s, 1);
@@ -196,7 +239,12 @@ struct TriggerState {
 } // namespace detail
 
 TriggerEmitResult TriggerContext::emit(TriggerPayload payload) noexcept {
-    return state_->emit_at(payload, state_->counters.epoch, 0, state_->current_sample);
+    return state_->emit_at(payload, state_->counters.epoch, 0,
+                           static_cast<std::int64_t>(state_->current_sample));
+}
+TriggerEmitResult TriggerContext::emit_at_sample(std::int64_t absolute_sample,
+                                                 TriggerPayload payload) noexcept {
+    return state_->emit_at(payload, state_->counters.epoch, 0, absolute_sample, true);
 }
 std::span<const TriggerRecord> TriggerContext::received() const noexcept {
     if (state_->phase != 2)
@@ -745,8 +793,12 @@ void SignalGraph::trigger_test_clock_(std::uint64_t cursor, std::uint64_t sequen
 TriggerEmitResult SignalGraph::trigger_test_emit_(std::int64_t target, std::uint64_t epoch,
                                                   std::uint8_t port) {
     auto pin = live_slot_.read();
-    return pin->trigger_state->emit_at({42}, epoch, port, static_cast<std::uint64_t>(target),
-                                       target < 0);
+    return pin->trigger_state->emit_at({42}, epoch, port, target);
+}
+TriggerEmitResult SignalGraph::trigger_test_schedule_(std::int64_t target,
+                                                      std::uint64_t epoch) {
+    auto pin = live_slot_.read();
+    return pin->trigger_state->emit_at({42}, epoch, 0, target, true);
 }
 void SignalGraph::trigger_test_gate_(bool held) {
     if (held)

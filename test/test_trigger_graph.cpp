@@ -18,6 +18,10 @@ struct TriggerTestAccess {
                                   std::uint8_t port = 0) {
         return g.trigger_test_emit_(target, epoch, port);
     }
+    static TriggerEmitResult schedule(SignalGraph& g, std::int64_t target,
+                                      std::uint64_t epoch) {
+        return g.trigger_test_schedule_(target, epoch);
+    }
     static void gate(SignalGraph& g, bool held) {
         g.trigger_test_gate_(held);
     }
@@ -187,6 +191,39 @@ TEST_CASE("Typed emission attempts and overflow have distinct budgets", "[trigge
     Access::clock(fixture.graph, 0, 0, 1, 2);
     CHECK(Access::emit(fixture.graph, 0, 1) == TriggerEmitResult::InvalidPhase);
     CHECK(counters(fixture.graph).sequence == 0);
+}
+
+TEST_CASE("Typed transport retains future samples across block boundaries", "[trigger]") {
+    Fixture fixture;
+    Access::clock(fixture.graph, 0, 0, 1, 1);
+    REQUIRE(Access::schedule(fixture.graph, 5, 1) == TriggerEmitResult::Accepted);
+    REQUIRE(Access::schedule(fixture.graph, 3, 1) == TriggerEmitResult::Accepted);
+    Block block;
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 2) == TriggerGraphResult::Accepted);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 2) == TriggerGraphResult::Accepted);
+    const auto trace = fixture.graph.trigger_trace();
+    REQUIRE(trace.size() == 1);
+    CHECK(trace[0].sample == 3);
+    CHECK(trace[0].sequence == 1);
+    CHECK(trace[0].token == 42);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 2) == TriggerGraphResult::Accepted);
+    const auto later = fixture.graph.trigger_trace();
+    REQUIRE(later.size() == 1);
+    CHECK(later[0].sample == 5);
+    REQUIRE(fixture.graph.try_reset_events() == TriggerGraphResult::Accepted);
+    CHECK(fixture.graph.trigger_trace().empty());
+}
+
+TEST_CASE("Typed future transport is bounded and refuses stale scheduled samples",
+          "[trigger][negative-control]") {
+    Fixture fixture;
+    Access::clock(fixture.graph, 0, 0, 1, 1);
+    CHECK(Access::schedule(fixture.graph, -1, 1) == TriggerEmitResult::OutOfRange);
+    for (int i = 0; i < 15; ++i)
+        REQUIRE(Access::schedule(fixture.graph, 100 + i, 1) == TriggerEmitResult::Accepted);
+    CHECK(Access::schedule(fixture.graph, 200, 1) == TriggerEmitResult::AttemptLimit);
+    Access::clock(fixture.graph, 10, 0, 1, 1);
+    CHECK(Access::schedule(fixture.graph, 9, 1) == TriggerEmitResult::Late);
 }
 
 TEST_CASE("Typed reset replacement and release retire old generation access", "[trigger]") {
