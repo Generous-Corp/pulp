@@ -773,6 +773,7 @@
       "pulp/runtime/triple_buffer.hpp",
       "pulp/runtime/udev_monitor.hpp",
       "pulp/runtime/url.hpp",
+      "pulp/runtime/wake_signal.hpp",
       "pulp/runtime/websocket_channel.hpp",
       "pulp/runtime/xml.hpp",
       "pulp/runtime/zip.hpp"
