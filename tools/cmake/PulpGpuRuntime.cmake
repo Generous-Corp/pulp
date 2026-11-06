@@ -75,6 +75,32 @@ foreach(_pulp_gpu_runtime_target DeviceApi Bootstrap Device SkiaLogBridge)
             "Pulp: gpu-runtime did not provide VellumGpuRuntime::${_pulp_gpu_runtime_target}")
     endif()
 endforeach()
+# The benchmark hooks change gpu-runtime's GpuCompute vtable, and an image links
+# one device library, so the flavour is global and must match PULP_BENCHMARK
+# (itself a global definition). Its DeviceApi target records the flavour it
+# was built with; a prefix package built the other way is refused here rather
+# than at the first benchmark consumer.
+get_target_property(_pulp_gpu_runtime_api_defs VellumGpuRuntime::DeviceApi
+    INTERFACE_COMPILE_DEFINITIONS)
+if(_pulp_gpu_runtime_api_defs AND "${_pulp_gpu_runtime_api_defs}" MATCHES "GPU_RUNTIME_BENCHMARK")
+    set(_pulp_gpu_runtime_benchmark ON)
+else()
+    set(_pulp_gpu_runtime_benchmark OFF)
+endif()
+if(PULP_BENCHMARK)
+    set(_pulp_benchmark ON)
+else()
+    set(_pulp_benchmark OFF)
+endif()
+if(NOT _pulp_gpu_runtime_benchmark STREQUAL _pulp_benchmark)
+    message(FATAL_ERROR
+        "Pulp: PULP_BENCHMARK is ${_pulp_benchmark}, but gpu-runtime was built with "
+        "GPU_RUNTIME_BENCHMARK ${_pulp_gpu_runtime_benchmark}; the benchmark flavour "
+        "changes the GpuCompute vtable, so the two must agree")
+endif()
+unset(_pulp_gpu_runtime_api_defs)
+unset(_pulp_gpu_runtime_benchmark)
+unset(_pulp_benchmark)
 set(PULP_HAS_GPU_RUNTIME TRUE)
 # Every consumer must agree on what pulp::render::GpuSurface names
 # (pulp/platform/gpu_fwd.hpp), so the switch travels with pulp::platform.

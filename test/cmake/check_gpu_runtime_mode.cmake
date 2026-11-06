@@ -42,6 +42,26 @@ set(_carrier_count 0)
 foreach(_line IN LISTS _carriers)
     string(REPLACE " " ";" _fields "${_line}")
     list(GET _fields 0 _target)
+    # `benchmark-only <target> <type> <names GPU_RUNTIME_BENCHMARK>`: a
+    # target-local PULP_BENCHMARK must stay compile-only, and with gpu-runtime
+    # it must select gpu-runtime's benchmark declarations itself.
+    if(_target STREQUAL "benchmark-only")
+        list(GET _fields 1 _bench_target)
+        list(GET _fields 2 _bench_type)
+        list(GET _fields 3 _bench_grb)
+        if(NOT _bench_type STREQUAL "OBJECT_LIBRARY")
+            message(FATAL_ERROR
+                "${_bench_target} defines PULP_BENCHMARK locally but is a ${_bench_type}; "
+                "only a never-linked OBJECT library may, since a linked one would mix "
+                "benchmark and production GpuCompute vtables")
+        endif()
+        if(HAS_GPU_RUNTIME AND NOT _bench_grb)
+            message(FATAL_ERROR
+                "${_bench_target} defines PULP_BENCHMARK locally without GPU_RUNTIME_BENCHMARK=1, "
+                "so gpu-runtime's benchmark declarations are absent")
+        endif()
+        continue()
+    endif()
     list(GET _fields 1 _links)
     math(EXPR _carrier_count "${_carrier_count} + 1")
     if(NOT HAS_GPU_RUNTIME)
