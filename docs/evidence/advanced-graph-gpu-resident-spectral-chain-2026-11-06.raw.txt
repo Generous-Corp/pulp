@@ -1,9 +1,9 @@
 [pulp:info]  GpuCompute: pipelines created (device shared: false)
 [pulp:error] GpuCompute: device lost (reason -1): 
-cpu min_us=121.000 p50_us=125.791 p95_us=131.625 p99_us=133.833 max_us=136.000 mean_us=126.633 jitter_sd_us=2.993
+cpu min_us=116.417 p50_us=128.917 p95_us=137.417 p99_us=147.750 max_us=176.875 mean_us=130.401 jitter_sd_us=7.806
 cpu_resident_payload_bytes=262144 gpu_copy_count_measured=false
 gpu_available=true backend=Metal vendor=apple timestamp_query=true max_fft=4194304
-gpu min_us=540.375 p50_us=591.500 p95_us=677.292 p99_us=872.334 max_us=1098.625 mean_us=611.142 jitter_sd_us=79.006
+gpu min_us=438.791 p50_us=483.667 p95_us=710.000 p99_us=1096.750 max_us=1133.500 mean_us=532.272 jitter_sd_us=141.319
 gpu_resident_payload_bytes=262144 resident_output_bytes_per_hop=16384 gpu_copy_count_measured=false
 positive_parity_max_abs=0.000 positive_non_silent=true
 negative_oversized_available=false

@@ -15,7 +15,7 @@ adapter, public API, or runtime path.
 | Workload | `CpuSpectralStack` vs `GpuSpectralStack`, FFT 2048, hop 512, 16 resident layers, 64 measured hops after 8 warmups |
 | Build | Release, `PULP_BENCHMARK=ON`, governed `cmake --build build --target pulp-gpu-spectral-chain-evidence` |
 | Probe | `test/test_gpu_spectral_chain_evidence.cpp` (advisory standalone executable) |
-| Probe output | `docs/evidence/advanced-graph-gpu-resident-spectral-chain-2026-11-06.raw.txt` (SHA-256 `96a6520466fd1d5db47d16b422acbea7cf90239939ac980dd3898d6ae112952f`) |
+| Probe output | `docs/evidence/advanced-graph-gpu-resident-spectral-chain-2026-11-06.raw.txt` (SHA-256 `8d2a8c2bb3d7696e0d669f355acab2856c939041d464db5ab3264e37d03a4e14`) |
 
 The existing GPU spectral correctness suite also passed from this clean source
 (`189 assertions / 13 cases`).
@@ -24,8 +24,8 @@ The existing GPU spectral correctness suite also passed from this clean source
 
 | Backend | min us | p50 us | p95 us | p99 us | max us | mean us | jitter SD us |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| CPU | 121.000 | 125.791 | 131.625 | 133.833 | 136.000 | 126.633 | 2.993 |
-| GPU resident | 540.375 | 591.500 | 677.292 | 872.334 | 1098.625 | 611.142 | 79.006 |
+| CPU | 116.417 | 128.917 | 137.417 | 147.750 | 176.875 | 130.401 | 7.806 |
+| GPU resident | 438.791 | 483.667 | 710.000 | 1096.750 | 1133.500 | 532.272 | 141.319 |
 
 The GPU path is about 5.7x slower at the median for this workload. Its
 resident spectral payload is 262,144 bytes (magnitude plus phase for 16 × 2048
