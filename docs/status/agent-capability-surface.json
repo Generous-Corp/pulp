@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 520,
-    "reviewed_headers": 273,
+    "public_headers": 521,
+    "reviewed_headers": 274,
     "legacy_unreviewed_headers": 247,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 104,
+      "infrastructure": 105,
       "legacy_unreviewed": 247,
       "unsupported_capability": 2
     },
@@ -97,8 +97,8 @@
         "unsupported_headers": 0
       },
       "host": {
-        "public_headers": 13,
-        "reviewed_headers": 13,
+        "public_headers": 14,
+        "reviewed_headers": 14,
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       }
@@ -1177,6 +1177,15 @@
         "signal.sample-region"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "host",
+      "source": "core/host/include/pulp/host/graph_event_contract.hpp",
+      "fingerprint": "sha256:04e90c3334121939d028d603d37fbe02af97ccd78ae6d2968bc65a73ad625a50",
+      "include": "pulp/host/graph_event_contract.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Bounded host and graph-authored event boundary contract; it is not wired into SignalGraph admission or a generator-facing capability."
     },
     {
       "domain": "host",

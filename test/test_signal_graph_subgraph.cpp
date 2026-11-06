@@ -261,3 +261,40 @@ TEST_CASE("subgraph port connection negatives are planted and mutation-free") {
     CHECK(mismatched.message().find("kinds do not match") != std::string::npos);
     CHECK(graph.connections().size() == before);
 }
+
+TEST_CASE("subgraph ports reject clear-reuse and cross-graph instances") {
+    SignalGraph graph;
+    const auto old_source = instantiate_subgraph(graph, source_stage_template(), "source");
+    const auto old_sink = instantiate_subgraph(graph, sink_stage_template(), "sink");
+    REQUIRE(old_source);
+    REQUIRE(old_sink);
+
+    graph.clear();
+    const auto replacement_source = instantiate_subgraph(graph, source_stage_template(), "source");
+    const auto replacement_sink = instantiate_subgraph(graph, sink_stage_template(), "sink");
+    REQUIRE(replacement_source);
+    REQUIRE(replacement_sink);
+    REQUIRE(replacement_source.instance.nodes.front() == old_source.instance.nodes.front());
+    const auto before_reuse = graph.connections().size();
+
+    const auto stale = connect_subgraph_ports(graph, old_source.instance, "output",
+                                              replacement_sink.instance, "input");
+    CHECK_FALSE(stale);
+    CHECK(stale.code == GraphResult::Code::UnknownPort);
+    CHECK(stale.message().find("stale or unavailable") != std::string::npos);
+    CHECK(graph.connections().size() == before_reuse);
+
+    SignalGraph other_graph;
+    const auto foreign_source =
+        instantiate_subgraph(other_graph, source_stage_template(), "source");
+    const auto foreign_sink = instantiate_subgraph(other_graph, sink_stage_template(), "sink");
+    REQUIRE(foreign_source);
+    REQUIRE(foreign_sink);
+    const auto before_foreign = other_graph.connections().size();
+    const auto foreign = connect_subgraph_ports(other_graph, replacement_source.instance, "output",
+                                                foreign_sink.instance, "input");
+    CHECK_FALSE(foreign);
+    CHECK(foreign.code == GraphResult::Code::UnknownPort);
+    CHECK(foreign.message().find("stale or unavailable") != std::string::npos);
+    CHECK(other_graph.connections().size() == before_foreign);
+}

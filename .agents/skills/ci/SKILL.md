@@ -507,6 +507,22 @@ macOS.
   record, or a `deferred` one, cannot be armed once `tiered_required_checks`
   is set.
 
+## The native-build decision on merge_group uses main, not base_sha
+
+Opposite to the diff-scoped gates below, and on purpose. `classify` decides
+whether a group's tree needs the native matrix, and a passing group lands every
+entry ahead of it, so it diffs the whole batch: main's tip, reached by
+`tools/scripts/resolve_classify_base.py` walking the first-parent chain down
+from `merge_group.base_sha` to `merge_group.base_ref`. Diffing `base_sha`
+itself (the previous speculative group when entries are queued ahead) let a
+docs-only entry at the end of a batch report `native_build_required=false`
+and carry a C++ entry that had failed its own group onto main. A chain the
+resolver cannot walk prints `origin/main`, which every caller treats as "build".
+The exact-generated-version-bump fast path and `protected-receipt-reuse` both
+apply only when the group's first parent is that main tip; a stacked group
+keeps the full matrix. If a merge group reports skip-safe, the
+`[classify-base]` lines in the classify log name the base it diffed.
+
 ## Diff-scoped gates on merge_group use the entry's own base
 
 `Enforce version & skill sync` diffs against `merge_group.base_sha` on a queued
