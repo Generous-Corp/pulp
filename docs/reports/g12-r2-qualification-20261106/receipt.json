@@ -6,11 +6,11 @@
     },
     "raw_stdout": {
       "path": "raw-output.txt",
-      "sha256": "29a01e4d13be61b62f0e40a2fb0b0674e78b6dffec8053c58578a0fa21d7ff1a"
+      "sha256": "ef3f1bebc33442ebdaaa66e3f9e479828a21d26e4f5941d6ebdd55f03afb0d66"
     },
     "source_fixture": {
       "path": "source-fixture.cpp",
-      "sha256": "d320eb9b776fefd69d56c9cda6954e0778ba6b59dbcdae268f559fa3b0018641"
+      "sha256": "5958bf2a806695ac8e0493662232cdec19be67acab90e62ac8081b6050ab454c"
     }
   },
   "build_profile": {
@@ -38,36 +38,36 @@
     "cells": [
       {
         "activation": {
-          "activation_max_ns": 9792.0,
-          "activation_p50_ns": 1500.0,
-          "activation_p99_sample_ns": 9792.0
-        },
-        "block": 16,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 1,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 4.308,
-          "max_ns": 54.442,
-          "observed_wcet_proxy_ns": 54.442,
-          "p50_ns": 52.428,
-          "p99_sample_ns": 54.442
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 9459.0,
+          "activation_max_ns": 9750.0,
           "activation_p50_ns": 1417.0,
-          "activation_p99_sample_ns": 9459.0
+          "activation_p99_sample_ns": 9750.0
+        },
+        "block": 16,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 1,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 4.689,
+          "max_ns": 56.358,
+          "observed_wcet_proxy_ns": 56.358,
+          "p50_ns": 53.503,
+          "p99_sample_ns": 56.358
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 9958.0,
+          "activation_p50_ns": 1458.0,
+          "activation_p99_sample_ns": 9958.0
         },
         "block": 32,
         "expected_output_bits": 3208307016,
@@ -82,19 +82,19 @@
         "timed_allocation_samples": 31,
         "timed_allocations": 0,
         "timing": {
-          "jitter_ns": 3.349,
-          "max_ns": 54.506,
-          "observed_wcet_proxy_ns": 54.506,
-          "p50_ns": 53.045,
-          "p99_sample_ns": 54.506
+          "jitter_ns": 4.586,
+          "max_ns": 56.769,
+          "observed_wcet_proxy_ns": 56.769,
+          "p50_ns": 54.162,
+          "p99_sample_ns": 56.769
         },
         "warmup": 500
       },
       {
         "activation": {
-          "activation_max_ns": 10042.0,
+          "activation_max_ns": 10250.0,
           "activation_p50_ns": 1417.0,
-          "activation_p99_sample_ns": 10042.0
+          "activation_p99_sample_ns": 10250.0
         },
         "block": 64,
         "expected_output_bits": 3208307016,
@@ -109,991 +109,991 @@
         "timed_allocation_samples": 31,
         "timed_allocations": 0,
         "timing": {
-          "jitter_ns": 20.015,
-          "max_ns": 76.949,
-          "observed_wcet_proxy_ns": 76.949,
-          "p50_ns": 59.29,
-          "p99_sample_ns": 76.949
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 11917.0,
-          "activation_p50_ns": 1542.0,
-          "activation_p99_sample_ns": 11917.0
-        },
-        "block": 128,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 1,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 7.068,
-          "max_ns": 73.958,
-          "observed_wcet_proxy_ns": 73.958,
-          "p50_ns": 69.911,
-          "p99_sample_ns": 73.958
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 13709.0,
-          "activation_p50_ns": 2083.0,
-          "activation_p99_sample_ns": 13709.0
-        },
-        "block": 512,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 1,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 6.803,
-          "max_ns": 126.568,
-          "observed_wcet_proxy_ns": 126.568,
-          "p50_ns": 123.082,
-          "p99_sample_ns": 126.568
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 23667.0,
-          "activation_p50_ns": 2041.0,
-          "activation_p99_sample_ns": 23667.0
-        },
-        "block": 16,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 4,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 20.267,
-          "max_ns": 113.709,
-          "observed_wcet_proxy_ns": 113.709,
-          "p50_ns": 98.863,
-          "p99_sample_ns": 113.709
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 11917.0,
-          "activation_p50_ns": 2042.0,
-          "activation_p99_sample_ns": 11917.0
-        },
-        "block": 32,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 4,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 17.743,
-          "max_ns": 115.351,
-          "observed_wcet_proxy_ns": 115.351,
-          "p50_ns": 101.329,
-          "p99_sample_ns": 115.351
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 12250.0,
-          "activation_p50_ns": 2084.0,
-          "activation_p99_sample_ns": 12250.0
-        },
-        "block": 64,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 4,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 6.215,
-          "max_ns": 112.54,
-          "observed_wcet_proxy_ns": 112.54,
-          "p50_ns": 110.642,
-          "p99_sample_ns": 112.54
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 13500.0,
-          "activation_p50_ns": 2125.0,
-          "activation_p99_sample_ns": 13500.0
-        },
-        "block": 128,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 4,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 24.926,
-          "max_ns": 168.463,
-          "observed_wcet_proxy_ns": 168.463,
-          "p50_ns": 152.162,
-          "p99_sample_ns": 168.463
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 13417.0,
-          "activation_p50_ns": 2375.0,
-          "activation_p99_sample_ns": 13417.0
-        },
-        "block": 512,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 4,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 11.445,
-          "max_ns": 246.751,
-          "observed_wcet_proxy_ns": 246.751,
-          "p50_ns": 237.344,
-          "p99_sample_ns": 246.751
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 15625.0,
-          "activation_p50_ns": 4375.0,
-          "activation_p99_sample_ns": 15625.0
-        },
-        "block": 16,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 16,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 27.072,
-          "max_ns": 303.39,
-          "observed_wcet_proxy_ns": 303.39,
-          "p50_ns": 282.888,
-          "p99_sample_ns": 303.39
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 19875.0,
-          "activation_p50_ns": 4417.0,
-          "activation_p99_sample_ns": 19875.0
-        },
-        "block": 32,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 16,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 22.132,
-          "max_ns": 314.705,
-          "observed_wcet_proxy_ns": 314.705,
-          "p50_ns": 297.064,
-          "p99_sample_ns": 314.705
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 16875.0,
-          "activation_p50_ns": 4416.0,
-          "activation_p99_sample_ns": 16875.0
-        },
-        "block": 64,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 16,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 43.106,
-          "max_ns": 356.9,
-          "observed_wcet_proxy_ns": 356.9,
-          "p50_ns": 328.454,
-          "p99_sample_ns": 356.9
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 16000.0,
-          "activation_p50_ns": 4292.0,
-          "activation_p99_sample_ns": 16000.0
-        },
-        "block": 128,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 16,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 53.215,
-          "max_ns": 473.005,
-          "observed_wcet_proxy_ns": 473.005,
-          "p50_ns": 446.132,
-          "p99_sample_ns": 473.005
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 17458.0,
-          "activation_p50_ns": 4458.0,
-          "activation_p99_sample_ns": 17458.0
-        },
-        "block": 512,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 16,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 26.385,
-          "max_ns": 714.167,
-          "observed_wcet_proxy_ns": 714.167,
-          "p50_ns": 701.534,
-          "p99_sample_ns": 714.167
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 29084.0,
-          "activation_p50_ns": 11584.0,
-          "activation_p99_sample_ns": 29084.0
-        },
-        "block": 16,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 64,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 28.437,
-          "max_ns": 1058.047,
-          "observed_wcet_proxy_ns": 1058.047,
-          "p50_ns": 1044.735,
-          "p99_sample_ns": 1058.047
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 28875.0,
-          "activation_p50_ns": 11875.0,
-          "activation_p99_sample_ns": 28875.0
-        },
-        "block": 32,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 64,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 167.776,
-          "max_ns": 1226.05,
-          "observed_wcet_proxy_ns": 1226.05,
-          "p50_ns": 1082.578,
-          "p99_sample_ns": 1226.05
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 25500.0,
-          "activation_p50_ns": 12167.0,
-          "activation_p99_sample_ns": 25500.0
-        },
-        "block": 64,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 64,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 51.516,
-          "max_ns": 1233.066,
-          "observed_wcet_proxy_ns": 1233.066,
-          "p50_ns": 1199.0,
-          "p99_sample_ns": 1233.066
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 26042.0,
-          "activation_p50_ns": 12750.0,
-          "activation_p99_sample_ns": 26042.0
-        },
-        "block": 128,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 64,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 63.521,
-          "max_ns": 1743.643,
-          "observed_wcet_proxy_ns": 1743.643,
-          "p50_ns": 1719.853,
-          "p99_sample_ns": 1743.643
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 29208.0,
-          "activation_p50_ns": 12833.0,
-          "activation_p99_sample_ns": 29208.0
-        },
-        "block": 512,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 64,
-        "scratch_slots": 3,
-        "shape": "chain",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 88.709,
-          "max_ns": 2631.741,
-          "observed_wcet_proxy_ns": 2631.741,
-          "p50_ns": 2590.623,
-          "p99_sample_ns": 2631.741
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 12250.0,
-          "activation_p50_ns": 2167.0,
-          "activation_p99_sample_ns": 12250.0
-        },
-        "block": 16,
-        "expected_output_bits": 3225084232,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3225084232,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 4,
-        "scratch_slots": 6,
-        "shape": "fan-out",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 13.818,
-          "max_ns": 138.13,
-          "observed_wcet_proxy_ns": 138.13,
-          "p50_ns": 127.436,
-          "p99_sample_ns": 138.13
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 14458.0,
-          "activation_p50_ns": 2125.0,
-          "activation_p99_sample_ns": 14458.0
-        },
-        "block": 32,
-        "expected_output_bits": 3225084232,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3225084232,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 4,
-        "scratch_slots": 6,
-        "shape": "fan-out",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 7.599,
-          "max_ns": 142.835,
-          "observed_wcet_proxy_ns": 142.835,
-          "p50_ns": 138.672,
-          "p99_sample_ns": 142.835
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 14833.0,
-          "activation_p50_ns": 2250.0,
-          "activation_p99_sample_ns": 14833.0
-        },
-        "block": 64,
-        "expected_output_bits": 3225084232,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3225084232,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 4,
-        "scratch_slots": 6,
-        "shape": "fan-out",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 12.024,
-          "max_ns": 173.37,
-          "observed_wcet_proxy_ns": 173.37,
-          "p50_ns": 165.81,
-          "p99_sample_ns": 173.37
+          "jitter_ns": 6.746,
+          "max_ns": 63.397,
+          "observed_wcet_proxy_ns": 63.397,
+          "p50_ns": 60.696,
+          "p99_sample_ns": 63.397
         },
         "warmup": 500
       },
       {
         "activation": {
           "activation_max_ns": 17500.0,
-          "activation_p50_ns": 2209.0,
+          "activation_p50_ns": 1458.0,
           "activation_p99_sample_ns": 17500.0
         },
         "block": 128,
-        "expected_output_bits": 3225084232,
+        "expected_output_bits": 3208307016,
         "iterations": 100000,
         "oracle": "pass",
-        "output_bits": 3225084232,
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 1,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 10.33,
+          "max_ns": 75.297,
+          "observed_wcet_proxy_ns": 75.297,
+          "p50_ns": 70.206,
+          "p99_sample_ns": 75.297
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 16041.0,
+          "activation_p50_ns": 1583.0,
+          "activation_p99_sample_ns": 16041.0
+        },
+        "block": 512,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 1,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 8.108,
+          "max_ns": 126.9,
+          "observed_wcet_proxy_ns": 126.9,
+          "p50_ns": 123.438,
+          "p99_sample_ns": 126.9
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 15792.0,
+          "activation_p50_ns": 2041.0,
+          "activation_p99_sample_ns": 15792.0
+        },
+        "block": 16,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
         "process_allocations": 0,
         "samples": 31,
         "scale": 4,
-        "scratch_slots": 6,
-        "shape": "fan-out",
+        "scratch_slots": 3,
+        "shape": "chain",
         "timed_allocation_samples": 31,
         "timed_allocations": 0,
         "timing": {
-          "jitter_ns": 24.618,
-          "max_ns": 259.422,
-          "observed_wcet_proxy_ns": 259.422,
-          "p50_ns": 252.338,
-          "p99_sample_ns": 259.422
+          "jitter_ns": 8.373,
+          "max_ns": 106.608,
+          "observed_wcet_proxy_ns": 106.608,
+          "p50_ns": 102.191,
+          "p99_sample_ns": 106.608
         },
         "warmup": 500
       },
       {
         "activation": {
-          "activation_max_ns": 25250.0,
-          "activation_p50_ns": 2542.0,
-          "activation_p99_sample_ns": 25250.0
+          "activation_max_ns": 16792.0,
+          "activation_p50_ns": 2041.0,
+          "activation_p99_sample_ns": 16792.0
         },
-        "block": 512,
-        "expected_output_bits": 3225084232,
+        "block": 32,
+        "expected_output_bits": 3208307016,
         "iterations": 100000,
         "oracle": "pass",
-        "output_bits": 3225084232,
+        "output_bits": 3208307016,
         "process_allocations": 0,
         "samples": 31,
         "scale": 4,
-        "scratch_slots": 6,
-        "shape": "fan-out",
+        "scratch_slots": 3,
+        "shape": "chain",
         "timed_allocation_samples": 31,
         "timed_allocations": 0,
         "timing": {
-          "jitter_ns": 28.94,
-          "max_ns": 497.114,
-          "observed_wcet_proxy_ns": 497.114,
-          "p50_ns": 486.634,
-          "p99_sample_ns": 497.114
+          "jitter_ns": 8.203,
+          "max_ns": 108.373,
+          "observed_wcet_proxy_ns": 108.373,
+          "p50_ns": 105.078,
+          "p99_sample_ns": 108.373
         },
         "warmup": 500
       },
       {
         "activation": {
-          "activation_max_ns": 21250.0,
-          "activation_p50_ns": 4583.0,
-          "activation_p99_sample_ns": 21250.0
-        },
-        "block": 16,
-        "expected_output_bits": 3241861448,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3241861446,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 16,
-        "scratch_slots": 18,
-        "shape": "fan-out",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 53.638,
-          "max_ns": 405.3,
-          "observed_wcet_proxy_ns": 405.3,
-          "p50_ns": 381.361,
-          "p99_sample_ns": 405.3
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 19250.0,
-          "activation_p50_ns": 4625.0,
-          "activation_p99_sample_ns": 19250.0
-        },
-        "block": 32,
-        "expected_output_bits": 3241861448,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3241861446,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 16,
-        "scratch_slots": 18,
-        "shape": "fan-out",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 62.583,
-          "max_ns": 456.91,
-          "observed_wcet_proxy_ns": 456.91,
-          "p50_ns": 432.582,
-          "p99_sample_ns": 456.91
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 17625.0,
-          "activation_p50_ns": 4500.0,
-          "activation_p99_sample_ns": 17625.0
+          "activation_max_ns": 11500.0,
+          "activation_p50_ns": 2042.0,
+          "activation_p99_sample_ns": 11500.0
         },
         "block": 64,
-        "expected_output_bits": 3241861448,
+        "expected_output_bits": 3208307016,
         "iterations": 100000,
         "oracle": "pass",
-        "output_bits": 3241861446,
+        "output_bits": 3208307016,
         "process_allocations": 0,
         "samples": 31,
-        "scale": 16,
-        "scratch_slots": 18,
-        "shape": "fan-out",
+        "scale": 4,
+        "scratch_slots": 3,
+        "shape": "chain",
         "timed_allocation_samples": 31,
         "timed_allocations": 0,
         "timing": {
-          "jitter_ns": 54.674,
-          "max_ns": 575.402,
-          "observed_wcet_proxy_ns": 575.402,
-          "p50_ns": 549.472,
-          "p99_sample_ns": 575.402
+          "jitter_ns": 11.262,
+          "max_ns": 122.552,
+          "observed_wcet_proxy_ns": 122.552,
+          "p50_ns": 118.537,
+          "p99_sample_ns": 122.552
         },
         "warmup": 500
       },
       {
         "activation": {
-          "activation_max_ns": 28500.0,
-          "activation_p50_ns": 5917.0,
-          "activation_p99_sample_ns": 28500.0
+          "activation_max_ns": 12166.0,
+          "activation_p50_ns": 2167.0,
+          "activation_p99_sample_ns": 12166.0
         },
         "block": 128,
-        "expected_output_bits": 3241861448,
+        "expected_output_bits": 3208307016,
         "iterations": 100000,
         "oracle": "pass",
-        "output_bits": 3241861446,
+        "output_bits": 3208307016,
         "process_allocations": 0,
         "samples": 31,
-        "scale": 16,
-        "scratch_slots": 18,
-        "shape": "fan-out",
+        "scale": 4,
+        "scratch_slots": 3,
+        "shape": "chain",
         "timed_allocation_samples": 31,
         "timed_allocations": 0,
         "timing": {
-          "jitter_ns": 97.82,
-          "max_ns": 893.835,
-          "observed_wcet_proxy_ns": 893.835,
-          "p50_ns": 830.777,
-          "p99_sample_ns": 893.835
+          "jitter_ns": 19.91,
+          "max_ns": 160.099,
+          "observed_wcet_proxy_ns": 160.099,
+          "p50_ns": 149.44,
+          "p99_sample_ns": 160.099
         },
         "warmup": 500
       },
       {
         "activation": {
-          "activation_max_ns": 30209.0,
-          "activation_p50_ns": 5542.0,
-          "activation_p99_sample_ns": 30209.0
+          "activation_max_ns": 12084.0,
+          "activation_p50_ns": 2292.0,
+          "activation_p99_sample_ns": 12084.0
         },
         "block": 512,
-        "expected_output_bits": 3241861448,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3241861446,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 16,
-        "scratch_slots": 18,
-        "shape": "fan-out",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 120.04,
-          "max_ns": 1727.579,
-          "observed_wcet_proxy_ns": 1727.579,
-          "p50_ns": 1655.496,
-          "p99_sample_ns": 1727.579
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 30167.0,
-          "activation_p50_ns": 13625.0,
-          "activation_p99_sample_ns": 30167.0
-        },
-        "block": 16,
-        "expected_output_bits": 3258638664,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3258638658,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 64,
-        "scratch_slots": 66,
-        "shape": "fan-out",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 46.703,
-          "max_ns": 1385.799,
-          "observed_wcet_proxy_ns": 1385.799,
-          "p50_ns": 1369.932,
-          "p99_sample_ns": 1385.799
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 31000.0,
-          "activation_p50_ns": 14208.0,
-          "activation_p99_sample_ns": 31000.0
-        },
-        "block": 32,
-        "expected_output_bits": 3258638664,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3258638658,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 64,
-        "scratch_slots": 66,
-        "shape": "fan-out",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 87.403,
-          "max_ns": 1610.517,
-          "observed_wcet_proxy_ns": 1610.517,
-          "p50_ns": 1541.873,
-          "p99_sample_ns": 1610.517
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 35834.0,
-          "activation_p50_ns": 13875.0,
-          "activation_p99_sample_ns": 35834.0
-        },
-        "block": 64,
-        "expected_output_bits": 3258638664,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3258638658,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 64,
-        "scratch_slots": 66,
-        "shape": "fan-out",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 164.423,
-          "max_ns": 2030.515,
-          "observed_wcet_proxy_ns": 2030.515,
-          "p50_ns": 1913.261,
-          "p99_sample_ns": 2030.515
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 33875.0,
-          "activation_p50_ns": 14167.0,
-          "activation_p99_sample_ns": 33875.0
-        },
-        "block": 128,
-        "expected_output_bits": 3258638664,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3258638658,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 64,
-        "scratch_slots": 66,
-        "shape": "fan-out",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 231.856,
-          "max_ns": 3236.576,
-          "observed_wcet_proxy_ns": 3236.576,
-          "p50_ns": 3066.793,
-          "p99_sample_ns": 3236.576
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 50583.0,
-          "activation_p50_ns": 17625.0,
-          "activation_p99_sample_ns": 50583.0
-        },
-        "block": 512,
-        "expected_output_bits": 3258638664,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3258638658,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 64,
-        "scratch_slots": 66,
-        "shape": "fan-out",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 27880.63,
-          "max_ns": 34793.822,
-          "observed_wcet_proxy_ns": 34793.822,
-          "p50_ns": 7023.781,
-          "p99_sample_ns": 34793.822
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 47209.0,
-          "activation_p50_ns": 1500.0,
-          "activation_p99_sample_ns": 47209.0
-        },
-        "block": 16,
         "expected_output_bits": 3208307016,
         "iterations": 100000,
         "oracle": "pass",
         "output_bits": 3208307016,
         "process_allocations": 0,
         "samples": 31,
-        "scale": 1,
+        "scale": 4,
         "scratch_slots": 3,
-        "shape": "passthrough",
+        "shape": "chain",
         "timed_allocation_samples": 31,
         "timed_allocations": 0,
         "timing": {
-          "jitter_ns": 1.548,
-          "max_ns": 53.108,
-          "observed_wcet_proxy_ns": 53.108,
-          "p50_ns": 52.266,
-          "p99_sample_ns": 53.108
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 16167.0,
-          "activation_p50_ns": 1542.0,
-          "activation_p99_sample_ns": 16167.0
-        },
-        "block": 32,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 1,
-        "scratch_slots": 3,
-        "shape": "passthrough",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 3.77,
-          "max_ns": 56.11,
-          "observed_wcet_proxy_ns": 56.11,
-          "p50_ns": 53.231,
-          "p99_sample_ns": 56.11
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 23750.0,
-          "activation_p50_ns": 1417.0,
-          "activation_p99_sample_ns": 23750.0
-        },
-        "block": 64,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 1,
-        "scratch_slots": 3,
-        "shape": "passthrough",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 19.935,
-          "max_ns": 77.023,
-          "observed_wcet_proxy_ns": 77.023,
-          "p50_ns": 59.047,
-          "p99_sample_ns": 77.023
-        },
-        "warmup": 500
-      },
-      {
-        "activation": {
-          "activation_max_ns": 23959.0,
-          "activation_p50_ns": 1500.0,
-          "activation_p99_sample_ns": 23959.0
-        },
-        "block": 128,
-        "expected_output_bits": 3208307016,
-        "iterations": 100000,
-        "oracle": "pass",
-        "output_bits": 3208307016,
-        "process_allocations": 0,
-        "samples": 31,
-        "scale": 1,
-        "scratch_slots": 3,
-        "shape": "passthrough",
-        "timed_allocation_samples": 31,
-        "timed_allocations": 0,
-        "timing": {
-          "jitter_ns": 17.17,
-          "max_ns": 84.235,
-          "observed_wcet_proxy_ns": 84.235,
-          "p50_ns": 69.773,
-          "p99_sample_ns": 84.235
+          "jitter_ns": 13.03,
+          "max_ns": 245.775,
+          "observed_wcet_proxy_ns": 245.775,
+          "p50_ns": 239.558,
+          "p99_sample_ns": 245.775
         },
         "warmup": 500
       },
       {
         "activation": {
           "activation_max_ns": 18000.0,
-          "activation_p50_ns": 1667.0,
+          "activation_p50_ns": 4250.0,
           "activation_p99_sample_ns": 18000.0
+        },
+        "block": 16,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 16,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 14.921,
+          "max_ns": 290.672,
+          "observed_wcet_proxy_ns": 290.672,
+          "p50_ns": 285.466,
+          "p99_sample_ns": 290.672
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 30041.0,
+          "activation_p50_ns": 4792.0,
+          "activation_p99_sample_ns": 30041.0
+        },
+        "block": 32,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 16,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 92.618,
+          "max_ns": 388.87,
+          "observed_wcet_proxy_ns": 388.87,
+          "p50_ns": 302.399,
+          "p99_sample_ns": 388.87
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 16958.0,
+          "activation_p50_ns": 4417.0,
+          "activation_p99_sample_ns": 16958.0
+        },
+        "block": 64,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 16,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 20.332,
+          "max_ns": 349.64,
+          "observed_wcet_proxy_ns": 349.64,
+          "p50_ns": 339.81,
+          "p99_sample_ns": 349.64
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 32625.0,
+          "activation_p50_ns": 4291.0,
+          "activation_p99_sample_ns": 32625.0
+        },
+        "block": 128,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 16,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 103.423,
+          "max_ns": 527.336,
+          "observed_wcet_proxy_ns": 527.336,
+          "p50_ns": 459.455,
+          "p99_sample_ns": 527.336
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 16500.0,
+          "activation_p50_ns": 4458.0,
+          "activation_p99_sample_ns": 16500.0
+        },
+        "block": 512,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 16,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 779.456,
+          "max_ns": 1486.958,
+          "observed_wcet_proxy_ns": 1486.958,
+          "p50_ns": 718.316,
+          "p99_sample_ns": 1486.958
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 35500.0,
+          "activation_p50_ns": 12458.0,
+          "activation_p99_sample_ns": 35500.0
+        },
+        "block": 16,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 64,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 45.88,
+          "max_ns": 1073.272,
+          "observed_wcet_proxy_ns": 1073.272,
+          "p50_ns": 1058.845,
+          "p99_sample_ns": 1073.272
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 26583.0,
+          "activation_p50_ns": 12375.0,
+          "activation_p99_sample_ns": 26583.0
+        },
+        "block": 32,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 64,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 38.742,
+          "max_ns": 1109.833,
+          "observed_wcet_proxy_ns": 1109.833,
+          "p50_ns": 1091.919,
+          "p99_sample_ns": 1109.833
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 26416.0,
+          "activation_p50_ns": 12083.0,
+          "activation_p99_sample_ns": 26416.0
+        },
+        "block": 64,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 64,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 44.843,
+          "max_ns": 1231.438,
+          "observed_wcet_proxy_ns": 1231.438,
+          "p50_ns": 1213.496,
+          "p99_sample_ns": 1231.438
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 30958.0,
+          "activation_p50_ns": 12459.0,
+          "activation_p99_sample_ns": 30958.0
+        },
+        "block": 128,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 64,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 54.378,
+          "max_ns": 1738.874,
+          "observed_wcet_proxy_ns": 1738.874,
+          "p50_ns": 1711.555,
+          "p99_sample_ns": 1738.874
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 33875.0,
+          "activation_p50_ns": 12416.0,
+          "activation_p99_sample_ns": 33875.0
+        },
+        "block": 512,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 64,
+        "scratch_slots": 3,
+        "shape": "chain",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 117.86,
+          "max_ns": 2682.663,
+          "observed_wcet_proxy_ns": 2682.663,
+          "p50_ns": 2636.778,
+          "p99_sample_ns": 2682.663
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 11583.0,
+          "activation_p50_ns": 2042.0,
+          "activation_p99_sample_ns": 11583.0
+        },
+        "block": 16,
+        "expected_output_bits": 3225084232,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3225084232,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 4,
+        "scratch_slots": 6,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 9.159,
+          "max_ns": 132.836,
+          "observed_wcet_proxy_ns": 132.836,
+          "p50_ns": 128.968,
+          "p99_sample_ns": 132.836
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 13084.0,
+          "activation_p50_ns": 2166.0,
+          "activation_p99_sample_ns": 13084.0
+        },
+        "block": 32,
+        "expected_output_bits": 3225084232,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3225084232,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 4,
+        "scratch_slots": 6,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 17.498,
+          "max_ns": 159.475,
+          "observed_wcet_proxy_ns": 159.475,
+          "p50_ns": 151.027,
+          "p99_sample_ns": 159.475
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 12875.0,
+          "activation_p50_ns": 2125.0,
+          "activation_p99_sample_ns": 12875.0
+        },
+        "block": 64,
+        "expected_output_bits": 3225084232,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3225084232,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 4,
+        "scratch_slots": 6,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 10.816,
+          "max_ns": 173.442,
+          "observed_wcet_proxy_ns": 173.442,
+          "p50_ns": 168.713,
+          "p99_sample_ns": 173.442
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 13959.0,
+          "activation_p50_ns": 2375.0,
+          "activation_p99_sample_ns": 13959.0
+        },
+        "block": 128,
+        "expected_output_bits": 3225084232,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3225084232,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 4,
+        "scratch_slots": 6,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 32.108,
+          "max_ns": 262.876,
+          "observed_wcet_proxy_ns": 262.876,
+          "p50_ns": 248.519,
+          "p99_sample_ns": 262.876
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 38084.0,
+          "activation_p50_ns": 2417.0,
+          "activation_p99_sample_ns": 38084.0
+        },
+        "block": 512,
+        "expected_output_bits": 3225084232,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3225084232,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 4,
+        "scratch_slots": 6,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 24.646,
+          "max_ns": 493.283,
+          "observed_wcet_proxy_ns": 493.283,
+          "p50_ns": 481.841,
+          "p99_sample_ns": 493.283
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 19833.0,
+          "activation_p50_ns": 4542.0,
+          "activation_p99_sample_ns": 19833.0
+        },
+        "block": 16,
+        "expected_output_bits": 3241861448,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3241861446,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 16,
+        "scratch_slots": 18,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 58.782,
+          "max_ns": 423.173,
+          "observed_wcet_proxy_ns": 423.173,
+          "p50_ns": 383.559,
+          "p99_sample_ns": 423.173
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 17459.0,
+          "activation_p50_ns": 4583.0,
+          "activation_p99_sample_ns": 17459.0
+        },
+        "block": 32,
+        "expected_output_bits": 3241861448,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3241861446,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 16,
+        "scratch_slots": 18,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 28.919,
+          "max_ns": 434.627,
+          "observed_wcet_proxy_ns": 434.627,
+          "p50_ns": 423.067,
+          "p99_sample_ns": 434.627
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 21167.0,
+          "activation_p50_ns": 4792.0,
+          "activation_p99_sample_ns": 21167.0
+        },
+        "block": 64,
+        "expected_output_bits": 3241861448,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3241861446,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 16,
+        "scratch_slots": 18,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 33.949,
+          "max_ns": 549.249,
+          "observed_wcet_proxy_ns": 549.249,
+          "p50_ns": 528.03,
+          "p99_sample_ns": 549.249
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 21375.0,
+          "activation_p50_ns": 4709.0,
+          "activation_p99_sample_ns": 21375.0
+        },
+        "block": 128,
+        "expected_output_bits": 3241861448,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3241861446,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 16,
+        "scratch_slots": 18,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 73.045,
+          "max_ns": 871.279,
+          "observed_wcet_proxy_ns": 871.279,
+          "p50_ns": 840.822,
+          "p99_sample_ns": 871.279
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 36333.0,
+          "activation_p50_ns": 5417.0,
+          "activation_p99_sample_ns": 36333.0
+        },
+        "block": 512,
+        "expected_output_bits": 3241861448,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3241861446,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 16,
+        "scratch_slots": 18,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 59.755,
+          "max_ns": 1689.152,
+          "observed_wcet_proxy_ns": 1689.152,
+          "p50_ns": 1647.358,
+          "p99_sample_ns": 1689.152
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 32792.0,
+          "activation_p50_ns": 13583.0,
+          "activation_p99_sample_ns": 32792.0
+        },
+        "block": 16,
+        "expected_output_bits": 3258638664,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3258638658,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 64,
+        "scratch_slots": 66,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 75.887,
+          "max_ns": 1414.775,
+          "observed_wcet_proxy_ns": 1414.775,
+          "p50_ns": 1372.975,
+          "p99_sample_ns": 1414.775
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 29542.0,
+          "activation_p50_ns": 13083.0,
+          "activation_p99_sample_ns": 29542.0
+        },
+        "block": 32,
+        "expected_output_bits": 3258638664,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3258638658,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 64,
+        "scratch_slots": 66,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 194.447,
+          "max_ns": 1696.165,
+          "observed_wcet_proxy_ns": 1696.165,
+          "p50_ns": 1539.079,
+          "p99_sample_ns": 1696.165
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 43750.0,
+          "activation_p50_ns": 13666.0,
+          "activation_p99_sample_ns": 43750.0
+        },
+        "block": 64,
+        "expected_output_bits": 3258638664,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3258638658,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 64,
+        "scratch_slots": 66,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 334.895,
+          "max_ns": 2247.363,
+          "observed_wcet_proxy_ns": 2247.363,
+          "p50_ns": 1958.688,
+          "p99_sample_ns": 2247.363
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 72625.0,
+          "activation_p50_ns": 14459.0,
+          "activation_p99_sample_ns": 72625.0
+        },
+        "block": 128,
+        "expected_output_bits": 3258638664,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3258638658,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 64,
+        "scratch_slots": 66,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 146.85,
+          "max_ns": 3191.994,
+          "observed_wcet_proxy_ns": 3191.994,
+          "p50_ns": 3139.115,
+          "p99_sample_ns": 3191.994
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 53083.0,
+          "activation_p50_ns": 15792.0,
+          "activation_p99_sample_ns": 53083.0
+        },
+        "block": 512,
+        "expected_output_bits": 3258638664,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3258638658,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 64,
+        "scratch_slots": 66,
+        "shape": "fan-out",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 258.738,
+          "max_ns": 7413.597,
+          "observed_wcet_proxy_ns": 7413.597,
+          "p50_ns": 7243.271,
+          "p99_sample_ns": 7413.597
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 47709.0,
+          "activation_p50_ns": 1542.0,
+          "activation_p99_sample_ns": 47709.0
+        },
+        "block": 16,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 1,
+        "scratch_slots": 3,
+        "shape": "passthrough",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 5.03,
+          "max_ns": 56.32,
+          "observed_wcet_proxy_ns": 56.32,
+          "p50_ns": 53.453,
+          "p99_sample_ns": 56.32
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 10125.0,
+          "activation_p50_ns": 1417.0,
+          "activation_p99_sample_ns": 10125.0
+        },
+        "block": 32,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 1,
+        "scratch_slots": 3,
+        "shape": "passthrough",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 5.02,
+          "max_ns": 57.94,
+          "observed_wcet_proxy_ns": 57.94,
+          "p50_ns": 54.548,
+          "p99_sample_ns": 57.94
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 12667.0,
+          "activation_p50_ns": 1458.0,
+          "activation_p99_sample_ns": 12667.0
+        },
+        "block": 64,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 1,
+        "scratch_slots": 3,
+        "shape": "passthrough",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 3.952,
+          "max_ns": 63.482,
+          "observed_wcet_proxy_ns": 63.482,
+          "p50_ns": 61.368,
+          "p99_sample_ns": 63.482
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 14167.0,
+          "activation_p50_ns": 1459.0,
+          "activation_p99_sample_ns": 14167.0
+        },
+        "block": 128,
+        "expected_output_bits": 3208307016,
+        "iterations": 100000,
+        "oracle": "pass",
+        "output_bits": 3208307016,
+        "process_allocations": 0,
+        "samples": 31,
+        "scale": 1,
+        "scratch_slots": 3,
+        "shape": "passthrough",
+        "timed_allocation_samples": 31,
+        "timed_allocations": 0,
+        "timing": {
+          "jitter_ns": 7.433,
+          "max_ns": 73.384,
+          "observed_wcet_proxy_ns": 73.384,
+          "p50_ns": 69.776,
+          "p99_sample_ns": 73.384
+        },
+        "warmup": 500
+      },
+      {
+        "activation": {
+          "activation_max_ns": 14916.0,
+          "activation_p50_ns": 1583.0,
+          "activation_p99_sample_ns": 14916.0
         },
         "block": 512,
         "expected_output_bits": 3208307016,
@@ -1108,11 +1108,11 @@
         "timed_allocation_samples": 31,
         "timed_allocations": 0,
         "timing": {
-          "jitter_ns": 9.627,
-          "max_ns": 124.655,
-          "observed_wcet_proxy_ns": 124.655,
-          "p50_ns": 120.392,
-          "p99_sample_ns": 124.655
+          "jitter_ns": 10.772,
+          "max_ns": 126.255,
+          "observed_wcet_proxy_ns": 126.255,
+          "p50_ns": 124.107,
+          "p99_sample_ns": 126.255
         },
         "warmup": 500
       }
@@ -1137,7 +1137,7 @@
   },
   "qualification_boundary": "This receipt does not qualify callback deadlines, WCET, cross-platform RT safety, hosted plugins, fleet execution, or final G-12 flagship coverage.",
   "qualification_scope": "R2 bounded graph runtime measurement",
-  "receipt_sha256": "c6ae63d4c78190d9886f18055a674862e399d32d4d1d6929f3b74743790da88d",
+  "receipt_sha256": "2a5b5e9f6ad7a3f1c866d07dbd72b3889d55448e772ddc617d44605bebf3fcb3",
   "run": {
     "returncode": 0,
     "timed_blocks": 100000,
@@ -1148,8 +1148,8 @@
   "schema": "pulp.graph_r2_qualification_receipt.v1",
   "source_fixture": {
     "path": "test/test_graph_r2_measurement.cpp",
-    "sha256": "d320eb9b776fefd69d56c9cda6954e0778ba6b59dbcdae268f559fa3b0018641"
+    "sha256": "5958bf2a806695ac8e0493662232cdec19be67acab90e62ac8081b6050ab454c"
   },
-  "source_sha": "44d7a234a67f4fdb93982d0c55764c2a41424be1",
+  "source_sha": "7a63d4d99dc04cc651a3c47bdc974263b93c13e6",
   "status": "PARTIAL"
 }
