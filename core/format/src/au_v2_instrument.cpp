@@ -356,6 +356,38 @@ OSStatus PulpAUInstrument::SetProperty(AudioUnitPropertyID inID, AudioUnitScope 
 
 OSStatus PulpAUInstrument::Initialize()
 {
+    // An instrument with input elements publishes its (input, output) pairs
+    // through SupportedNumChannels; MusicDeviceBase, unlike AUEffectBase,
+    // never checks the negotiated formats against that table, so a host could
+    // initialize the unit at a pair it advertised it does not support (auval
+    // sets 3 in / 1 out and expects a refusal). Apply the same rule the
+    // effect base applies, before the base allocates anything.
+    if (has_input_element_ && Inputs().GetNumberOfElements() > 0) {
+        const auto in_ch = static_cast<SInt16>(Input(0).GetStreamFormat().mChannelsPerFrame);
+        const auto out_ch = static_cast<SInt16>(GetOutput(0)->GetStreamFormat().mChannelsPerFrame);
+        const AUChannelInfo* table = nullptr;
+        const UInt32 pairs = SupportedNumChannels(&table);
+        bool supported = pairs == 0 || table == nullptr;
+        for (UInt32 i = 0; i < pairs && !supported && table != nullptr; ++i) {
+            const SInt16 want_in = table[i].inChannels;
+            const SInt16 want_out = table[i].outChannels;
+            if (want_in < 0 && want_out < 0) {
+                supported = (want_in == -1 && want_out == -2) ||
+                            (want_in == -2 && want_out == -1) ||
+                            (want_in == -1 && want_out == -1 && in_ch == out_ch);
+            } else {
+                supported =
+                    (want_in == -1 || want_in == in_ch) && (want_out == -1 || want_out == out_ch);
+            }
+        }
+        if (!supported) {
+            runtime::log_error("AU v2 instrument: {} input / {} output channels is not an "
+                               "advertised configuration",
+                               in_ch, out_ch);
+            return kAudioUnitErr_FormatNotSupported;
+        }
+    }
+
     auto result = MusicDeviceBase::Initialize();
     if (result != noErr) return result;
     // A host offline-render write older than this session no longer applies.
