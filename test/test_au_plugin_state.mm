@@ -510,6 +510,29 @@ std::unique_ptr<pulp::format::Processor> create_latency_tail_effect_processor() 
     return std::make_unique<TestAULatencyTailEffectProcessor>();
 }
 
+// An instrument that emits MIDI every block: a note on at offset 5, SysEx at
+// 10 and a controller at 20, so delivery order and offsets are checkable.
+class TestAUMidiOutInstrumentProcessor : public TestAUInstrumentProcessor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        auto d = TestAUInstrumentProcessor::descriptor();
+        d.produces_midi = true;
+        return d;
+    }
+    void process(pulp::format::ProcessBuffers& audio, pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        TestAUInstrumentProcessor::process(audio, midi_in, midi_out, context);
+        midi_out.add(pulp::midi::MidiEvent{choc::midi::ShortMessage(0xB2, 7, 99), 20, 0.0});
+        midi_out.add(pulp::midi::MidiEvent{choc::midi::ShortMessage(0x91, 60, 100), 5, 0.0});
+        static const uint8_t sysex[] = {0xF0, 0x7D, 0x01, 0xF7};
+        midi_out.add_sysex_copy(sysex, sizeof(sysex), 10);
+    }
+};
+std::unique_ptr<pulp::format::Processor> create_midi_out_instrument_processor() {
+    return std::make_unique<TestAUMidiOutInstrumentProcessor>();
+}
+
 // An instrument that flags a latency / tail change from process() on request.
 bool g_instrument_flag_latency = false;
 bool g_instrument_flag_tail = false;
@@ -917,6 +940,109 @@ TEST_CASE("AU v2 latency and tail report processor runtime contract",
             REQUIRE(instrument.SupportsTail());
             REQUIRE(std::isinf(instrument.GetTailTime()));
         }
+    }
+}
+
+// A host reads kAudioUnitProperty_MIDIOutputCallbackInfo and installs a
+// kAudioUnitProperty_MIDIOutputCallback to receive an instrument's MIDI; the
+// instrument adapter must deliver what process() emitted, in time order, with
+// in-block offsets as packet timestamps.
+TEST_CASE("AU v2 instrument delivers processor MIDI output to the host callback",
+          "[au][auv2][instrument][midi-out]") {
+    constexpr UInt32 kFrames = 64;
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags =
+        kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+
+    SECTION("a MIDI-producing instrument advertises and delivers") {
+        ScopedFactoryRegistration registration(create_midi_out_instrument_processor);
+        pulp::format::au::PulpAUInstrument instrument(nullptr);
+        instrument.CreateElements();
+        REQUIRE(instrument.GetOutput(0)->SetStreamFormat(format) == noErr);
+        UInt32 max_frames = kFrames;
+        REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                               kAudioUnitScope_Global, 0, &max_frames,
+                                               sizeof(max_frames)) == noErr);
+        REQUIRE(instrument.DoInitialize() == noErr);
+
+        UInt32 size = 0;
+        bool writable = false;
+        REQUIRE(instrument.DispatchGetPropertyInfo(kAudioUnitProperty_MIDIOutputCallbackInfo,
+                                                   kAudioUnitScope_Global, 0, size,
+                                                   writable) == noErr);
+        CFArrayRef names = nullptr;
+        REQUIRE(instrument.DispatchGetProperty(kAudioUnitProperty_MIDIOutputCallbackInfo,
+                                               kAudioUnitScope_Global, 0, &names) == noErr);
+        REQUIRE(names != nullptr);
+        REQUIRE(CFArrayGetCount(names) == 1);
+        CFRelease(names);
+        REQUIRE(instrument.DispatchGetPropertyInfo(kAudioUnitProperty_MIDIOutputCallback,
+                                                   kAudioUnitScope_Global, 0, size,
+                                                   writable) == noErr);
+        REQUIRE(writable);
+
+        struct Received {
+            std::vector<std::pair<MIDITimeStamp, std::vector<uint8_t>>> packets;
+            int calls = 0;
+        };
+        Received received;
+        AUMIDIOutputCallbackStruct callback{};
+        callback.midiOutputCallback = [](void* user, const AudioTimeStamp*, UInt32,
+                                         const MIDIPacketList* list) -> OSStatus {
+            auto* r = static_cast<Received*>(user);
+            ++r->calls;
+            const MIDIPacket* packet = &list->packet[0];
+            for (UInt32 i = 0; i < list->numPackets; ++i) {
+                r->packets.push_back(
+                    {packet->timeStamp,
+                     std::vector<uint8_t>(packet->data, packet->data + packet->length)});
+                packet = MIDIPacketNext(packet);
+            }
+            return noErr;
+        };
+        callback.userData = &received;
+        REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MIDIOutputCallback,
+                                               kAudioUnitScope_Global, 0, &callback,
+                                               sizeof(callback)) == noErr);
+
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp timestamp{};
+        timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+        REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+        REQUIRE(received.calls == 1);
+        REQUIRE(received.packets.size() == 3);
+        REQUIRE(received.packets[0].first == 5);
+        REQUIRE(received.packets[0].second == std::vector<uint8_t>{0x91, 60, 100});
+        REQUIRE(received.packets[1].first == 10);
+        REQUIRE(received.packets[1].second == std::vector<uint8_t>{0xF0, 0x7D, 0x01, 0xF7});
+        REQUIRE(received.packets[2].first == 20);
+        REQUIRE(received.packets[2].second == std::vector<uint8_t>{0xB2, 7, 99});
+
+        // Clearing the callback stops delivery.
+        AUMIDIOutputCallbackStruct none{};
+        REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MIDIOutputCallback,
+                                               kAudioUnitScope_Global, 0, &none,
+                                               sizeof(none)) == noErr);
+        REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+        REQUIRE(received.calls == 1);
+        instrument.DoCleanup();
+    }
+
+    SECTION("an instrument that produces no MIDI does not advertise it") {
+        ScopedFactoryRegistration registration(create_instrument_processor);
+        pulp::format::au::PulpAUInstrument instrument(nullptr);
+        UInt32 size = 0;
+        bool writable = false;
+        REQUIRE(instrument.DispatchGetPropertyInfo(kAudioUnitProperty_MIDIOutputCallbackInfo,
+                                                   kAudioUnitScope_Global, 0, size,
+                                                   writable) != noErr);
     }
 }
 

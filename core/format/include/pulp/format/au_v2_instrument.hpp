@@ -262,6 +262,15 @@ private:
     midi::MidiBuffer midi_in_;
     midi::MidiBuffer midi_out_;
 
+    // MIDI the Processor emits during process() reaches the host through
+    // kAudioUnitProperty_MIDIOutputCallback, as for the effect and the MIDI
+    // processor: one output stream (kAudioUnitProperty_MIDIOutputCallbackInfo),
+    // packed allocation-free into a CoreMIDI packet list each block. Only a
+    // processor whose descriptor sets produces_midi advertises it.
+    bool plugin_produces_midi() const noexcept;
+    MidiOutputCallbackPublisher midi_output_callback_;
+    MidiOutputPacketBuilder midi_out_packet_builder_;
+
     // Previous-block transport snapshot used to derive change flags on
     // `ProcessContext`. Default-constructed so the first Render() call
     // after Initialize() reports no changes.
