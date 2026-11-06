@@ -2769,6 +2769,7 @@
   "pulp-test-audio-edge-cases",
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
+  "pulp-test-audio-reader-idle-wakeups",
   "pulp-test-audio-registration",
   "pulp-test-audio-route-catalog",
   "pulp-test-audio-support",
