@@ -141,8 +141,12 @@ public:
     /// Reserve a width so a family of menus that rebuild their rows (a
     /// progressive-disclosure menu, a radio group whose labels differ in
     /// length) keeps one stable panel width instead of resizing per state.
-    void set_min_width(float width) { min_width_ = std::max(0.0f, width); }
-    float min_width() const { return min_width_; }
+    void set_min_width(float width) {
+        min_width_ = std::max(0.0f, width);
+    }
+    float min_width() const {
+        return min_width_;
+    }
     std::vector<Item>& items() {
         return items_;
     }

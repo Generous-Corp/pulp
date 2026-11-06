@@ -723,8 +723,9 @@ TEST_CASE("ContextMenu defers set_items issued from inside an item callback",
                                // A product rebuilding its rows from the row's own
                                // callback: the replacement must wait until this
                                // returns, so `item` stays alive for the rest of it.
-                               menu->set_items({Item::make_toggle(2, "Main In", true, nullptr),
-                                                Item::make_toggle(3, "Side Chain", false, nullptr)});
+                               menu->set_items(
+                                   {Item::make_toggle(2, "Main In", true, nullptr),
+                                    Item::make_toggle(3, "Side Chain", false, nullptr)});
                                items_during_callback = menu->items().size();
                                label_after_rebuild = item.label;
                            }),
@@ -735,7 +736,7 @@ TEST_CASE("ContextMenu defers set_items issued from inside an item callback",
 
     REQUIRE(items_during_callback == 2);        // the old rows were still live
     REQUIRE(label_after_rebuild == "Internal"); // and the pressed row was readable
-    REQUIRE(menu->items().size() == 2);          // the new rows landed afterwards
+    REQUIRE(menu->items().size() == 2);         // the new rows landed afterwards
     REQUIRE(menu->items()[0].label == "Main In");
     REQUIRE(menu->items()[1].label == "Side Chain");
 }
@@ -744,8 +745,8 @@ TEST_CASE("ContextMenu slider value label shortens the track and the pointer map
           "[view][context-menu]") {
     auto root = make_root();
     float labelled = -1.0f, plain = -1.0f;
-    auto with_label = Item::make_slider(1, "Rate", 0.0f, 0.01f,
-                                        [&](const Item& item) { labelled = item.normalized_value; });
+    auto with_label = Item::make_slider(
+        1, "Rate", 0.0f, 0.01f, [&](const Item& item) { labelled = item.normalized_value; });
     with_label.value_label = "2.50 Hz";
     auto* menu = ContextMenu::show(
         root.get(), {kAnchorX, kAnchorY},
@@ -770,8 +771,8 @@ TEST_CASE("ContextMenu slider value label shortens the track and the pointer map
 
 TEST_CASE("ContextMenu set_min_width reserves a stable panel width", "[view][context-menu]") {
     auto root = make_root();
-    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY},
-                                   {{10, "On"}, {20, "Off"}}, [](std::optional<int>) {});
+    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY}, {{10, "On"}, {20, "Off"}},
+                                   [](std::optional<int>) {});
     const float natural = menu->measured_width();
     REQUIRE(natural < 250.0f);
     menu->set_min_width(250.0f);
