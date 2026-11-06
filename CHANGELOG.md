@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1700"></a>
+## [1.70.0] - 2026-11-06
+
+- release/version bump ([#11619](https://github.com/Generous-Corp/pulp/pull/11619))
+- codex/g5 host event contract 20261105 ([#11587](https://github.com/Generous-Corp/pulp/pull/11587))
+- feature/au v2 instrument midi out ([#11601](https://github.com/Generous-Corp/pulp/pull/11601))
+- fix/timeline sdk closure mufft ([#11610](https://github.com/Generous-Corp/pulp/pull/11610))
+
 <a id="v1690"></a>
 ## [1.69.0] - 2026-11-06
 
@@ -12311,6 +12319,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.70.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.70.0
 [1.69.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.69.0
 [1.68.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.68.0
 [1.67.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.67.0
