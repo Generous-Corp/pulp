@@ -8,6 +8,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "../core/host/src/graph_serializer_test_access.hpp"
+
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/plugin_slot.hpp>
@@ -1243,7 +1245,121 @@ TEST_CASE("GraphSerializer saves a bounded canonical file and refuses unavailabl
     const auto missing_parent =
         GraphSerializer::to_file(source, root / "missing" / "bad.pulpgraph");
     REQUIRE_FALSE(missing_parent.ok);
+    REQUIRE(missing_parent.code == GraphSerializer::SaveResult::Code::parent_unavailable);
     REQUIRE(std::filesystem::file_size(path) == before);
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("GraphSerializer save failures are typed and preserve the destination",
+          "[host][serializer][file][negative]") {
+    SignalGraph source;
+    const auto input = source.add_input_node(1, "Input");
+    const auto output = source.add_output_node(1, "Output");
+    REQUIRE(source.connect(input, 0, output, 0));
+
+    const auto root =
+        std::filesystem::temp_directory_path() / "pulp-graph-serializer-save-negative";
+    std::filesystem::remove_all(root);
+    REQUIRE(std::filesystem::create_directories(root));
+    const auto path = root / "saved.pulpgraph";
+    {
+        std::ofstream initial(path, std::ios::binary);
+        initial << "original destination\n";
+    }
+    const auto original = [&] {
+        std::ifstream stream(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(stream), {});
+    }();
+
+    GraphSerializerTestAccess::fail_next_write();
+    const auto write_failed = GraphSerializer::to_file(source, path);
+    REQUIRE_FALSE(write_failed.ok);
+    REQUIRE(write_failed.code == GraphSerializer::SaveResult::Code::write_failed);
+    REQUIRE(std::filesystem::is_regular_file(path));
+    {
+        std::ifstream stream(path, std::ios::binary);
+        REQUIRE(std::string(std::istreambuf_iterator<char>(stream), {}) == original);
+    }
+
+    GraphSerializerTestAccess::fail_next_replace();
+    const auto replace_failed = GraphSerializer::to_file(source, path);
+    REQUIRE_FALSE(replace_failed.ok);
+    REQUIRE(replace_failed.code == GraphSerializer::SaveResult::Code::replace_failed);
+    {
+        std::ifstream stream(path, std::ios::binary);
+        REQUIRE(std::string(std::istreambuf_iterator<char>(stream), {}) == original);
+    }
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("GraphSerializer refuses oversized and unresolved custom persistence",
+          "[host][serializer][file][negative]") {
+    const auto root = std::filesystem::temp_directory_path() / "pulp-graph-serializer-save-bounds";
+    std::filesystem::remove_all(root);
+    REQUIRE(std::filesystem::create_directories(root));
+
+    SignalGraph unresolved;
+    const auto node = unresolved.add_unresolved_custom_node("test.missing", 7, 1, 1, "Missing");
+    REQUIRE(node != 0);
+    const auto refused = GraphSerializer::to_file(unresolved, root / "unresolved.pulpgraph");
+    REQUIRE_FALSE(refused.ok);
+    REQUIRE(refused.code == GraphSerializer::SaveResult::Code::serialization_refused);
+    REQUIRE_FALSE(std::filesystem::exists(root / "unresolved.pulpgraph"));
+
+    CustomNodeType large_type;
+    large_type.type_id = "test.large";
+    large_type.version = 1;
+    large_type.num_input_ports = 1;
+    large_type.num_output_ports = 1;
+    large_type.default_name = "Large";
+    large_type.process = [](pulp::audio::BufferView<float>& output,
+                            const pulp::audio::BufferView<const float>& input, int frames) {
+        for (int i = 0; i < frames; ++i)
+            output.channel_ptr(0)[i] = input.channel_ptr(0)[i];
+    };
+    SignalGraph oversized;
+    REQUIRE(oversized.register_custom_node_type(std::move(large_type)));
+    const auto large_node = oversized.add_custom_node("test.large", "Large");
+    REQUIRE(large_node != 0);
+    REQUIRE(oversized.set_custom_node_state(large_node,
+                                            std::vector<std::uint8_t>(50u * 1024u * 1024u, 0xA5)));
+    const auto too_large = GraphSerializer::to_file(oversized, root / "too-large.pulpgraph");
+    REQUIRE_FALSE(too_large.ok);
+    REQUIRE(too_large.code == GraphSerializer::SaveResult::Code::file_too_large);
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("GraphSerializer rejects same-size replacement without mutating the caller graph",
+          "[host][serializer][file][concurrency][negative]") {
+    const auto root = std::filesystem::temp_directory_path() / "pulp-graph-serializer-concurrent";
+    std::filesystem::remove_all(root);
+    REQUIRE(std::filesystem::create_directories(root));
+    const auto path = root / "graph.pulpgraph";
+    const auto replacement = root / "replacement.pulpgraph";
+
+    SignalGraph first;
+    first.add_input_node(1, "A");
+    REQUIRE(GraphSerializer::to_file(first, path).ok);
+    SignalGraph second;
+    second.add_input_node(1, "B");
+    {
+        std::ofstream stream(replacement, std::ios::binary);
+        stream << GraphSerializer::to_json(second) << '\n';
+    }
+    REQUIRE(std::filesystem::file_size(path) == std::filesystem::file_size(replacement));
+
+    SignalGraph caller;
+    caller.add_gain_node("sentinel");
+    const auto before = GraphSerializer::to_json(caller);
+    GraphSerializerTestAccess::set_after_first_read([replacement](const auto& destination) {
+        std::error_code ec;
+        std::filesystem::rename(replacement, destination, ec);
+        REQUIRE_FALSE(ec);
+    });
+    const auto loaded = GraphSerializer::from_file(caller, path);
+    REQUIRE_FALSE(loaded.ok);
+    REQUIRE(loaded.error.find("changed while reading") != std::string::npos);
+    REQUIRE(GraphSerializer::to_json(caller) == before);
     std::filesystem::remove_all(root);
 }
 

@@ -18,6 +18,7 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/processor_restore.hpp>
 #include <filesystem>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -115,9 +116,23 @@ class GraphSerializer {
                                const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout = {});
 
     struct SaveResult {
+        enum class Code : std::uint8_t {
+            ok,
+            serialization_refused,
+            file_too_large,
+            parent_unavailable,
+            temporary_unavailable,
+            write_failed,
+            replace_failed,
+            directory_sync_failed,
+        };
+
         bool ok = false;
+        Code code = Code::serialization_refused;
         std::string error;
     };
+
+    static const char* save_code_name(SaveResult::Code code) noexcept;
 
     // Serialize one bounded graph file. The destination is replaced only
     // after the complete canonical JSON payload has been written.

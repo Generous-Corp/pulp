@@ -56,6 +56,13 @@
       "rationale": "pulp graph save writes a canonical bounded copy through GraphSerializer::to_file; input loading and output replacement are control-thread file operations.",
       "evidence": [
         {
+          "kind": "cli_handler",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": [
+            "op == \"save\""
+          ]
+        },
+        {
           "kind": "cli_definition",
           "path": "tools/cli/cmd_graph.cpp",
           "needles": [

@@ -4,6 +4,9 @@
 #include <pulp/host/processor_restore.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/detail/durable_file_replacement.hpp>
+
+#include "graph_serializer_test_access.hpp"
 
 // The web DSP builds (Emscripten for WAM, plain clang targeting wasm32 for
 // WebCLAP) compile this serializer without the plugin scanner and have no
@@ -22,6 +25,7 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -36,9 +40,14 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <span>
 
 namespace pulp::host {
 namespace {
+
+std::function<void(const std::filesystem::path&)> g_after_first_read_hook;
+std::atomic<bool> g_fail_next_write{false};
+std::atomic<bool> g_fail_next_replace{false};
 
 // Tolerant numeric coercion — choc distinguishes int/float strictly and
 // getFloat64() throws on integers, so wrap accesses to coerce the common
@@ -906,6 +915,19 @@ std::optional<std::vector<uint8_t>> b64_decode(std::string_view s) {
 
 } // namespace
 
+void GraphSerializerTestAccess::set_after_first_read(
+    std::function<void(const std::filesystem::path&)> hook) {
+    g_after_first_read_hook = std::move(hook);
+}
+
+void GraphSerializerTestAccess::fail_next_write() noexcept {
+    g_fail_next_write.store(true, std::memory_order_release);
+}
+
+void GraphSerializerTestAccess::fail_next_replace() noexcept {
+    g_fail_next_replace.store(true, std::memory_order_release);
+}
+
 int GraphSerializer::current_format_version() {
     return kFormatVersion;
 }
@@ -914,13 +936,24 @@ GraphSerializer::SaveResult
 GraphSerializer::to_file(const SignalGraph& graph, const std::filesystem::path& path,
                          const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
     SaveResult result;
+    for (const auto& node : graph.nodes()) {
+        if (node.type == NodeType::Custom &&
+            graph.custom_node_type(node.custom_type_id, node.custom_type_version) == nullptr) {
+            result.code = SaveResult::Code::serialization_refused;
+            result.error = "graph contains an unresolved custom node type: " + node.custom_type_id +
+                           "@" + std::to_string(node.custom_type_version);
+            return result;
+        }
+    }
     const auto json = to_json(graph, editor_layout);
     if (json.empty()) {
+        result.code = SaveResult::Code::serialization_refused;
         result.error = "graph serialization failed";
         return result;
     }
     const auto payload_size = json.size() + 1; // canonical files end with a newline
     if (payload_size > max_file_bytes) {
+        result.code = SaveResult::Code::file_too_large;
         result.error = "graph file exceeds " + std::to_string(max_file_bytes) + " byte limit";
         return result;
     }
@@ -929,58 +962,75 @@ GraphSerializer::to_file(const SignalGraph& graph, const std::filesystem::path& 
     const auto parent =
         path.parent_path().empty() ? std::filesystem::path(".") : path.parent_path();
     if (!std::filesystem::is_directory(parent, ec)) {
+        result.code = SaveResult::Code::parent_unavailable;
         result.error = "graph file destination directory is unavailable: " + parent.string();
         return result;
     }
 
-    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    std::filesystem::path temporary;
-    for (unsigned attempt = 0; attempt != 16; ++attempt) {
-        temporary = parent / (path.filename().string() + ".tmp-" + std::to_string(stamp) + "-" +
-                              std::to_string(attempt));
-        if (!std::filesystem::exists(temporary, ec))
-            break;
-        temporary.clear();
-    }
-    if (temporary.empty()) {
-        result.error = "could not reserve a temporary graph file";
+    using pulp::runtime::detail::DurableFileCommitOutcome;
+    using pulp::runtime::detail::DurableFileReplacement;
+    auto replacement = DurableFileReplacement::create(path);
+    if (!replacement) {
+        result.code = SaveResult::Code::temporary_unavailable;
+        result.error = "could not create a temporary graph file for " + path.string();
         return result;
     }
-
-    {
-        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-        if (!output) {
-            std::filesystem::remove(temporary, ec);
-            result.error = "graph file cannot be written: " + path.string();
-            return result;
-        }
-        output.write(json.data(), static_cast<std::streamsize>(json.size()));
-        output.put('\n');
-        output.flush();
-        if (!output) {
-            std::filesystem::remove(temporary, ec);
-            result.error = "graph file write failed: " + path.string();
-            return result;
-        }
+    const auto bytes = std::span<const std::uint8_t>{
+        reinterpret_cast<const std::uint8_t*>(json.data()), json.size()};
+    if (g_fail_next_write.exchange(false, std::memory_order_acq_rel) ||
+        !replacement->write_all(bytes) ||
+        !replacement->write_all(
+            std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>("\n"), 1})) {
+        replacement->cancel();
+        result.code = SaveResult::Code::write_failed;
+        result.error = "graph file write failed: " + path.string();
+        return result;
     }
-
-    ec.clear();
-    std::filesystem::rename(temporary, path, ec);
-    if (ec) {
-        // Windows cannot replace an existing file with rename; remove only
-        // after the complete temporary payload is durable.
-        std::error_code remove_ec;
-        std::filesystem::remove(path, remove_ec);
-        ec.clear();
-        std::filesystem::rename(temporary, path, ec);
-    }
-    if (ec) {
-        std::filesystem::remove(temporary, ec);
+    if (g_fail_next_replace.exchange(false, std::memory_order_acq_rel)) {
+        replacement->cancel();
+        result.code = SaveResult::Code::replace_failed;
         result.error = "graph file replace failed: " + path.string();
         return result;
     }
-    result.ok = true;
+    switch (replacement->commit()) {
+    case DurableFileCommitOutcome::ReplacedDurably:
+        result.ok = true;
+        result.code = SaveResult::Code::ok;
+        return result;
+    case DurableFileCommitOutcome::ReplacedButDirectorySyncFailed:
+        result.code = SaveResult::Code::directory_sync_failed;
+        result.error = "graph file replaced but parent directory sync failed: " + path.string();
+        return result;
+    case DurableFileCommitOutcome::NotReplaced:
+        result.code = SaveResult::Code::replace_failed;
+        result.error = "graph file replace failed: " + path.string();
+        return result;
+    }
+    result.code = SaveResult::Code::replace_failed;
+    result.error = "graph file replace failed: " + path.string();
     return result;
+}
+
+const char* GraphSerializer::save_code_name(SaveResult::Code code) noexcept {
+    switch (code) {
+    case SaveResult::Code::ok:
+        return "ok";
+    case SaveResult::Code::serialization_refused:
+        return "serialization_refused";
+    case SaveResult::Code::file_too_large:
+        return "file_too_large";
+    case SaveResult::Code::parent_unavailable:
+        return "parent_unavailable";
+    case SaveResult::Code::temporary_unavailable:
+        return "temporary_unavailable";
+    case SaveResult::Code::write_failed:
+        return "write_failed";
+    case SaveResult::Code::replace_failed:
+        return "replace_failed";
+    case SaveResult::Code::directory_sync_failed:
+        return "directory_sync_failed";
+    }
+    return "serialization_refused";
 }
 
 bool GraphSerializer::register_migration(int from_version,
@@ -1420,9 +1470,39 @@ GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
         result.error = "graph file changed while reading: " + path.string();
         return result;
     }
+    if (g_after_first_read_hook) {
+        auto hook = std::move(g_after_first_read_hook);
+        hook(path);
+    }
     ec.clear();
     const auto final_size = std::filesystem::file_size(path, ec);
     if (ec || final_size != size) {
+        result.error = "graph file changed while reading: " + path.string();
+        return result;
+    }
+    // A same-size replacement is invisible to the size checks above. Read the
+    // current pathname again and compare its content before mutating the
+    // caller's graph. This closes the replacement window for both truncating
+    // writers and atomic same-size renames.
+    std::ifstream verification(path, std::ios::binary);
+    if (!verification) {
+        result.error = "graph file changed while reading: " + path.string();
+        return result;
+    }
+    std::string verified(static_cast<std::size_t>(size), '\0');
+    if (!verified.empty())
+        verification.read(verified.data(), static_cast<std::streamsize>(verified.size()));
+    if (!verification && !verification.eof()) {
+        result.error = "graph file changed while reading: " + path.string();
+        return result;
+    }
+    if (static_cast<std::size_t>(verification.gcount()) != verified.size() || verified != json) {
+        result.error = "graph file changed while reading: " + path.string();
+        return result;
+    }
+    ec.clear();
+    const auto verified_size = std::filesystem::file_size(path, ec);
+    if (ec || verified_size != size) {
         result.error = "graph file changed while reading: " + path.string();
         return result;
     }
