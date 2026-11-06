@@ -1526,3 +1526,16 @@ parameter. Parameters the store does not own still go through the element's
 `SetScheduledEvent`. `[au][automation]` in `test_au_v2_effect.cpp` covers
 dense interleaved events, coincident events, and ramp supersession. Each slice
 is still one full `ProcessBufferLists` and Processor call.
+
+## Panic requests: attach, service, observe
+
+Every AU v2 adapter attaches to `Processor::panic_state()` where it creates its
+processor and wraps `process()` with `service_panic()` before and
+`observe_midi_out()` after (see `docs/guides/midi-panic.md`). The `midi_out`
+flag passed to `attach()` is the adapter's honest claim that the host can
+receive MIDI: the effect and MIDI processor use the descriptor's
+`produces_midi`; the `aumu` instrument passes `false` because it has no host
+MIDI-output path, and must flip that to the descriptor flag in the same change
+that adds one. Tests: `test_au_v2_midi_processor.cpp` (panic reaches the host
+callback), `test_au_v2_effect.cpp` (aufx vs aumf capabilities),
+`test_au_v2_instrument_rt.mm`.

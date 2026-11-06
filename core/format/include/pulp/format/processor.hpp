@@ -9,6 +9,7 @@
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/format/note_name.hpp>
+#include <pulp/format/panic.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/format/plugin_descriptor.hpp>
 #include <pulp/format/prepare_resources.hpp>
@@ -87,6 +88,15 @@ editor_resize_handlers() {
 /// Guarded by editor_resize_mutex().
 inline std::unordered_map<const void*, bool>& standalone_processors() {
     static std::unordered_map<const void*, bool> table;
+    return table;
+}
+
+/// Panic request/state per processor, in a side table for the same layout
+/// reason as the handlers above. The shared_ptr is handed to the adapter once,
+/// off the audio thread; the audio thread never touches this table or its
+/// mutex. Guarded by editor_resize_mutex().
+inline std::unordered_map<const void*, std::shared_ptr<PanicState>>& panic_states() {
+    static std::unordered_map<const void*, std::shared_ptr<PanicState>> table;
     return table;
 }
 
@@ -172,6 +182,7 @@ public:
         std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
         detail::editor_resize_handlers().erase(this);
         detail::standalone_processors().erase(this);
+        detail::panic_states().erase(this);
     }
     virtual ~Processor();
 
@@ -1247,6 +1258,42 @@ public:
     ///
     /// Appended to preserve additive-only vtable ordering (node_abi_gate).
     virtual EditorFactory* editor_factory();
+
+    /// Panic hook: stop this plug-in's own voices. Called on the audio thread
+    /// by a host adapter that services panic requests (see pulp/format/panic.hpp),
+    /// before `process()`, when `request_panic()` was raised. `immediate` means
+    /// hard-stop (release tails cut, the MIDI CC 120 semantic); `release` means
+    /// enter the normal release (CC 123). A processor that owns a
+    /// `midi::Synthesiser` implements it as `synth.panic(mode == PanicMode::immediate)`.
+    /// Must be real-time safe. Default: no-op. Appended to preserve additive-only
+    /// vtable ordering (node_abi_gate).
+    virtual void on_panic(PanicMode /*mode*/) {}
+
+    /// Ask the plug-in to silence itself and, where the host has MIDI output,
+    /// end the notes it has sent. Safe from any non-real-time thread (a UI
+    /// button, a script, a menu): it records the request and returns at once;
+    /// the next audio block services it. Does nothing audible if the host
+    /// adapter does not service panic requests; check `panic_capabilities()`.
+    /// The state lives in a side table, so this adds nothing to
+    /// `sizeof(Processor)`.
+    void request_panic(PanicMode mode = PanicMode::immediate) {
+        panic_state()->request(mode);
+    }
+
+    /// What a panic request can do in the current host. Cheap; any thread.
+    PanicCapabilities panic_capabilities() const {
+        return panic_state()->capabilities();
+    }
+
+    /// The request/state object adapters service. Created on first use, off the
+    /// audio thread: fetch it once at prepare time and keep the pointer.
+    std::shared_ptr<PanicState> panic_state() const {
+        std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
+        auto& slot = detail::panic_states()[this];
+        if (!slot)
+            slot = std::make_shared<PanicState>();
+        return slot;
+    }
 
   private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;
