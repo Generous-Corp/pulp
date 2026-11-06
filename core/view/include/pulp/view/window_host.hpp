@@ -10,11 +10,20 @@
 #include <functional>
 #include <vector>
 
+#if defined(PULP_GPU_RUNTIME)
+// The device layer is gpu-runtime's: pulp::render::GpuSurface names its type
+// (pulp/platform/gpu_fwd.hpp), so it is not declared here.
 #include <pulp/platform/gpu_fwd.hpp>
 
 namespace pulp::render {
 class RenderLoop;
 }
+#else
+namespace pulp::render {
+class GpuSurface;
+class RenderLoop;
+}
+#endif
 
 namespace pulp::canvas {
 class Canvas;

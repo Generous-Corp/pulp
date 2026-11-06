@@ -237,6 +237,28 @@ class CoreVellumDirectionTests(unittest.TestCase):
                     "find_package(VellumGpuRuntime CONFIG)\nfind_package(VellumGpuRuntime CONFIG)\n")
         self.assertEqual(direction.check_cmake(self.root, allowed), 1)
 
+    def test_window_host_keeps_its_declaration_only_under_the_gpu_runtime_else(self):
+        guarded = ("#if defined(PULP_GPU_RUNTIME)\n#include <pulp/platform/gpu_fwd.hpp>\n"
+                   "namespace pulp::render {\nclass RenderLoop;\n}\n#else\n"
+                   "namespace pulp::render {\nclass GpuSurface;\nclass RenderLoop;\n}\n#endif\n")
+        self._write("core/view/include/pulp/view/window_host.hpp", guarded)
+        self.assertEqual(self._run(), 0)
+        # the same declaration unguarded, in the #if branch, twice, or in another file fails
+        cases = {
+            "unguarded": "namespace pulp::render {\nclass GpuSurface;\n}\n",
+            "in the #if branch": "#if defined(PULP_GPU_RUNTIME)\nnamespace pulp::render { class GpuSurface; }\n#else\n#endif\n",
+            "twice": guarded + "#if defined(PULP_GPU_RUNTIME)\n#else\nnamespace pulp::render { class GpuSurface; }\n#endif\n",
+            "nested conditional": "#if defined(PULP_GPU_RUNTIME)\n#else\n#if 1\nnamespace pulp::render { class GpuSurface; }\n#endif\n#endif\n",
+            "another type": "#if defined(PULP_GPU_RUNTIME)\n#else\nnamespace pulp::render { class GpuCompute; }\n#endif\n",
+        }
+        for label, text in cases.items():
+            with self.subTest(label=label):
+                self._write("core/view/include/pulp/view/window_host.hpp", text)
+                self.assertEqual(self._run(), 1)
+        self._write("core/view/include/pulp/view/window_host.hpp", guarded)
+        self._write("core/view/include/pulp/view/other_host.hpp", guarded)
+        self.assertEqual(self._run(), 1)
+
     def test_the_forward_header_and_uses_pass(self):
         self._write(direction.GPU_FWD_HEADER, "namespace pulp::render {\nclass GpuSurface;\n}\n")
         self._write("core/view/include/pulp/view/host.hpp",

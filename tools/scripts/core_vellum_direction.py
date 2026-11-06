@@ -269,6 +269,26 @@ GPU_FWD_SUFFIXES = {".h", ".hh", ".hpp", ".hxx", ".c", ".cc", ".cpp", ".cxx", ".
 GPU_FWD_RE = re.compile(r"(?:\bfriend\s+)?\b(?:class|struct)\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)*"
                         r"(GpuSurface|GpuCompute|PerfCounters)\s*;")
 _CPP_COMMENT_RE = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
+# A header whose original text must stay byte-equal to Vellum's mirror keeps
+# its own declaration in the `#else` of `#if defined(PULP_GPU_RUNTIME)`: there
+# Pulp's device layer is in use and the class is Pulp's own, so the
+# declaration agrees with gpu_fwd.hpp. Exact path, type and count; a match
+# anywhere else in the file still fails.
+GPU_FWD_GUARDED_ELSE = {
+    ("core/view/include/pulp/view/window_host.hpp", "GpuSurface"): 1,
+}
+_GPU_RUNTIME_IF = "#if defined(PULP_GPU_RUNTIME)"
+
+
+def _in_gpu_runtime_else(text: str, offset: int) -> bool:
+    """True when `offset` lies in the `#else` branch of the nearest preceding
+    `#if defined(PULP_GPU_RUNTIME)`, with no conditional directive between."""
+    opened = text.rfind(_GPU_RUNTIME_IF, 0, offset)
+    if opened < 0:
+        return False
+    between = [m.group(1) for m in re.finditer(r"(?m)^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b",
+                                               text[opened + len(_GPU_RUNTIME_IF):offset])]
+    return between == ["else"]
 
 
 def _without_comments(text: str) -> str:
@@ -297,8 +317,14 @@ def check_gpu_forward_declarations(root: pathlib.Path) -> int:
                 text = _without_comments(path.read_text(encoding="utf-8", errors="replace"))
             except OSError:
                 continue
+            guarded: dict[str, int] = {}
             for match in GPU_FWD_RE.finditer(text):
                 line = text.count("\n", 0, match.start()) + 1
+                key = (relative, match.group(1))
+                if key in GPU_FWD_GUARDED_ELSE and _in_gpu_runtime_else(text, match.start()):
+                    guarded[match.group(1)] = guarded.get(match.group(1), 0) + 1
+                    if guarded[match.group(1)] <= GPU_FWD_GUARDED_ELSE[key]:
+                        continue
                 failures.append(f"{relative}:{line}: forward-declares {match.group(1)}; "
                                 f"include <pulp/platform/gpu_fwd.hpp> instead")
     if scanned == 0:

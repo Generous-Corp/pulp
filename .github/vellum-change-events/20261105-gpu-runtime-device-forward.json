@@ -7,7 +7,7 @@
     "render-skia-dawn",
     "retained-ui-kernel"
   ],
-  "rationale": "render-skia-dawn: gpu_surface.hpp and gpu_render_time.hpp (both in this slice) gain a PULP_GPU_RUNTIME branch that includes <gpu_runtime/...> and forwards each name to gpu-runtime's identical declaration; the original declarations stay in the #else branch. retained-ui-kernel: window_host.hpp takes its GpuSurface forward declaration from the new pulp/platform/gpu_fwd.hpp instead of writing it by hand. No API, layout or authority boundary moves, so this is Pulp-only; the next re-export carries gpu_fwd.hpp and the <gpu_runtime/...> branches into Vellum's mirror. Hazard: Vellum must never define PULP_GPU_RUNTIME for mirrored sources while it builds the mirror's own device layer, or the mirrored headers would forward to gpu-runtime's types without the matching implementation.",
+  "rationale": "render-skia-dawn: gpu_surface.hpp and gpu_render_time.hpp gain an `#if defined(PULP_GPU_RUNTIME)` branch that includes <gpu_runtime/...> and forwards each name to gpu-runtime's identical declaration; their original text stays unchanged under `#else`. retained-ui-kernel: window_host.hpp, under the same guard, takes GpuSurface from pulp/platform/gpu_fwd.hpp, and keeps its original declarations unchanged under `#else`. The three paths are edited here on the owner unfreeze recorded in .github/vellum-export-receipt/owner-unfreezes.json, because a class declaration of GpuSurface cannot coexist with the gpu-runtime alias and Vellum's mirror/ is read-only. vellum_inherits is true: the next re-export carries these bytes, and since Vellum never defines PULP_GPU_RUNTIME for mirrored sources, the `#else` text it compiles is the text it has today. Hazard: Vellum must never define PULP_GPU_RUNTIME for mirrored sources while it builds the mirror's own device layer, or the mirrored headers would forward to gpu-runtime's types without the matching implementation.",
   "tests": [
     "Vellum freeze",
     "Vellum trusted freeze",
@@ -16,5 +16,6 @@
     "python3 tools/deps/test_audit_vellum_drift.py",
     "python3 tools/scripts/test_core_vellum_direction.py"
   ],
-  "disposition": "pulp-only"
+  "disposition": "pulp-only",
+  "vellum_inherits": true
 }
