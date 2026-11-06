@@ -19,7 +19,8 @@ void usage() {
     std::cout << "Usage: pulp graph <inspect|validate|explain|render|probe|fmt|canonicalize> "
                  "<file.pulpgraph> [--json] [--output file.wav (render)]\n";
     std::cout << "probe: --input file.wav --source-node NAME --source-port NAME "
-                 "--destination-node NAME --destination-port NAME [--block-frames 64]\n";
+                 "--destination-node NAME --destination-port NAME [--block-frames 64] "
+                 "[--plan] [--latency] [--node-loads]\n";
 }
 void json_error(const std::string& code, const std::string& message) {
     auto value = choc::value::createObject("GraphError");
@@ -36,9 +37,24 @@ int probe_graph(const std::vector<std::string>& args) {
         return 2;
     };
     std::map<std::string, std::string> options;
+    bool include_plan = false;
+    bool include_latency = false;
+    bool include_node_loads = false;
     for (std::size_t i = 2; i < args.size(); ++i) {
         if (args[i] == "--json")
             continue;
+        if (args[i] == "--plan") {
+            include_plan = true;
+            continue;
+        }
+        if (args[i] == "--latency") {
+            include_latency = true;
+            continue;
+        }
+        if (args[i] == "--node-loads") {
+            include_node_loads = true;
+            continue;
+        }
         const auto key = args[i];
         if (key != "--input" && key != "--source-node" && key != "--source-port" &&
             key != "--destination-node" && key != "--destination-port" && key != "--block-frames")
@@ -181,6 +197,10 @@ int probe_graph(const std::vector<std::string>& args) {
     if (status != Graph::EdgeProbeStatus::Attached)
         return fail(status_name, "cannot attach the requested serial ordinary audio edge");
     const auto identity = graph.audio_edge_probe_identity();
+    // Timing is opt-in: an unattached/ordinary graph remains on the zero-cost
+    // path, and the per-node clock reads begin only when requested by tooling.
+    if (include_node_loads)
+        graph.set_node_load_monitoring(true);
     auto records = choc::value::createEmptyArray();
     std::vector<float*> pointers(input->num_channels());
     for (std::uint64_t offset = 0; offset < input->num_frames(); offset += block) {
@@ -224,6 +244,77 @@ int probe_graph(const std::vector<std::string>& args) {
     id.addMember("destination_port", static_cast<int64_t>(identity.destination_port));
     report.addMember("identity", id);
     report.addMember("records", records);
+    if (include_plan) {
+        auto plan = choc::value::createObject("GraphPlan");
+        auto nodes = choc::value::createEmptyArray();
+        for (const auto& node : graph.nodes()) {
+            auto item = choc::value::createObject("GraphPlanNode");
+            item.addMember("id", static_cast<int64_t>(node.id));
+            item.addMember("name", node.name);
+            item.addMember("input_ports", node.num_input_ports);
+            item.addMember("output_ports", node.num_output_ports);
+            nodes.addArrayElement(item);
+        }
+        auto connections = choc::value::createEmptyArray();
+        for (const auto& edge : graph.connections()) {
+            auto item = choc::value::createObject("GraphPlanConnection");
+            item.addMember("source_node", static_cast<int64_t>(edge.source_node));
+            item.addMember("source_port", static_cast<int64_t>(edge.source_port));
+            item.addMember("destination_node", static_cast<int64_t>(edge.dest_node));
+            item.addMember("destination_port", static_cast<int64_t>(edge.dest_port));
+            item.addMember("feedback", edge.feedback);
+            item.addMember("midi", edge.midi);
+            item.addMember("automation", edge.automation);
+            item.addMember("audio_rate_modulation", edge.audio_rate_modulation);
+            item.addMember("sidechain", edge.sidechain);
+            connections.addArrayElement(item);
+        }
+        plan.addMember("nodes", nodes);
+        plan.addMember("connections", connections);
+        report.addMember("plan", plan);
+    }
+    if (include_latency) {
+        auto latency = choc::value::createObject("LatencyPDC");
+        latency.addMember("total_latency_samples", graph.latency_samples());
+        auto snapshot = graph.prepared_latency_snapshot();
+        if (!snapshot)
+            return fail("unprepared_latency",
+                        "latency/PDC introspection requires a prepared graph");
+        auto nodes = choc::value::createEmptyArray();
+        auto connections = choc::value::createEmptyArray();
+        {
+            for (const auto& node : snapshot->nodes) {
+                auto item = choc::value::createObject("LatencyNode");
+                item.addMember("node_id", static_cast<int64_t>(node.node_id));
+                item.addMember("input_latency_samples", node.input_latency_samples);
+                item.addMember("output_latency_samples", node.output_latency_samples);
+                nodes.addArrayElement(item);
+            }
+            for (const auto& edge : snapshot->connections) {
+                auto item = choc::value::createObject("PDCConnection");
+                item.addMember("source_node", static_cast<int64_t>(edge.connection.source_node));
+                item.addMember("source_port", static_cast<int64_t>(edge.connection.source_port));
+                item.addMember("destination_node", static_cast<int64_t>(edge.connection.dest_node));
+                item.addMember("destination_port", static_cast<int64_t>(edge.connection.dest_port));
+                item.addMember("delay_samples", edge.delay_samples);
+                connections.addArrayElement(item);
+            }
+        }
+        latency.addMember("nodes", nodes);
+        latency.addMember("connections", connections);
+        report.addMember("latency_pdc", latency);
+    }
+    if (include_node_loads) {
+        auto loads = choc::value::createEmptyArray();
+        for (const auto& entry : graph.node_loads()) {
+            auto item = choc::value::createObject("NodeLoad");
+            item.addMember("node_id", static_cast<int64_t>(entry.node_id));
+            item.addMember("load", entry.load.load);
+            item.addMember("callback_count", static_cast<int64_t>(entry.load.callback_count));
+            loads.addArrayElement(item);
+        }
+        report.addMember("node_loads", loads);
+    }
     std::cout << choc::json::toString(report) << '\n';
     return 0;
 }
@@ -242,6 +333,15 @@ int cmd_graph(const std::vector<std::string>& args) {
     if (op == "probe")
         return probe_graph(args);
     const bool json = std::find(args.begin() + 2, args.end(), "--json") != args.end();
+    for (const auto* flag : {"--plan", "--latency", "--node-loads"}) {
+        if (std::find(args.begin() + 2, args.end(), flag) != args.end()) {
+            if (json)
+                json_error("invalid_option", std::string(flag) + " is only valid for graph probe");
+            else
+                std::cerr << "pulp graph: " << flag << " is only valid for graph probe\n";
+            return 2;
+        }
+    }
     if (op != "inspect" && op != "validate" && op != "explain" && op != "render" && op != "fmt" &&
         op != "canonicalize") {
         if (json)

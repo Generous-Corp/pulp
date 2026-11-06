@@ -108,3 +108,28 @@ unchanged rendered audio, clocks, identity, loss and refusals. The installed
 consumer test also invokes actual CLI/MCP binaries against its saved fixture.
 This is bounded offline functional proof, not paced realtime qualification,
 control/event capture, or a complete latency/PDC map.
+
+### Optional introspection sections
+
+The same read-only `probe` command can include deterministic control-thread
+introspection sections:
+
+```sh
+pulp graph probe graph.pulpgraph --input input.wav \
+  --source-node source --source-port audio \
+  --destination-node downstream --destination-port audio \
+  --plan --latency --node-loads --json
+```
+
+`--plan` adds the authored node and connection view, `--latency` adds the
+prepared total, per-node input/output latency, and per-connection PDC delays,
+and `--node-loads` opts into per-node callback timing and reports the bounded
+latest-value snapshots. The timing option is intentionally opt-in: an
+unattached or ordinary graph does not read per-node clocks, preserving the
+zero-cost audio path. The installed MCP `pulp_graph` operation mirrors these
+three booleans and invokes the matching sibling CLI, so its JSON sections and
+refusals stay identical to the CLI surface.
+
+Control and event taps remain deferred until a prepared producer/consumer
+contract exists. Requests for those lanes must fail closed rather than being
+represented as audio measurements or fabricated zero values.
