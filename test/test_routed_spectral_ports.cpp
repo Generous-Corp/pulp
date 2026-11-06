@@ -419,4 +419,11 @@ TEST_CASE("Spectral batches carry canonical versioned frame fields",
     auto noncanonical = encoded;
     noncanonical[31] = 1;
     REQUIRE_FALSE(SpectralFrameContract::decode(noncanonical));
+
+    // Telemetry consumers persist these values; adding InvalidContract must
+    // not renumber any existing diagnostic.
+    REQUIRE(static_cast<std::uint8_t>(SpectralError::None) == 0);
+    REQUIRE(static_cast<std::uint8_t>(SpectralError::IdentityMismatch) == 3);
+    REQUIRE(static_cast<std::uint8_t>(SpectralError::OutputUnderrun) == 19);
+    REQUIRE(static_cast<std::uint8_t>(SpectralError::InvalidContract) == 20);
 }

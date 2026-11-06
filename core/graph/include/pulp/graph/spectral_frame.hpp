@@ -231,6 +231,10 @@ struct SpectralFrameBatchView {
     std::uint32_t count = 0;
     std::uint32_t bins_per_frame = 0;
     SpectralFrameContract contract;
+    /// Canonical wire identity copied at publication. Consumers validate this
+    /// boundary before reading any frame payload, so mutating either the
+    /// decoded fields or the encoded bytes fails closed.
+    std::array<std::uint8_t, SpectralFrameContract::encoded_size> encoded_contract{};
     bool fatal = false;
     std::int64_t fatal_origin = 0;
 };

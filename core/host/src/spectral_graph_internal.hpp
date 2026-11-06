@@ -90,6 +90,7 @@ class SpectralRuntimeBank {
             }
             for (auto* out : outputs) {
                 out->contract = contract;
+                out->encoded_contract = contract.encode();
                 out->stamps[out->count] = {epoch, sequence, origin, origin + identity.fft_size()};
                 std::copy(working.begin(), working.end(),
                           out->bins.begin() + out->count * working.size());
@@ -128,7 +129,12 @@ class SpectralRuntimeBank {
                     n.fatal(n.origin, SpectralError::ChronologyExhausted);
             } else if (n.type != NodeType::SpectralAnalysis && n.fatal_origin == limit) {
                 const auto* batch = ctx.spectral_input;
-                if (!batch || batch->contract != n.contract) {
+                const auto decoded_contract = batch
+                                                  ? graph::SpectralFrameContract::decode(
+                                                        batch->encoded_contract)
+                                                  : graph::SpectralResult<graph::SpectralFrameContract>{};
+                if (!batch || !decoded_contract || *decoded_contract.value != n.contract ||
+                    batch->contract != *decoded_contract.value) {
                     n.error(SpectralError::IdentityMismatch);
                     return false;
                 }
