@@ -43,7 +43,7 @@ bool has_output_port(const GraphNode& node, PortIndex port) {
     return node.num_output_ports > 0 && port < static_cast<PortIndex>(node.num_output_ports);
 }
 
-void populate_named_ports(GraphNode& node) {
+void populate_named_ports(GraphNode& node, std::uint64_t owner, std::uint64_t incarnation) {
     node.input_ports.clear();
     node.output_ports.clear();
     const auto kind = (node.type == NodeType::MidiInput || node.type == NodeType::MidiOutput)
@@ -51,10 +51,12 @@ void populate_named_ports(GraphNode& node) {
                           : PortKind::Audio;
     for (int i = 0; i < node.num_input_ports; ++i)
         node.input_ports.push_back({node.id, static_cast<PortIndex>(i), false,
-                                    i == 0 ? "audio" : "in" + std::to_string(i), kind});
+                                    i == 0 ? "audio" : "in" + std::to_string(i), kind, owner,
+                                    incarnation});
     for (int i = 0; i < node.num_output_ports; ++i)
         node.output_ports.push_back({node.id, static_cast<PortIndex>(i), true,
-                                     i == 0 ? "audio" : "out" + std::to_string(i), kind});
+                                     i == 0 ? "audio" : "out" + std::to_string(i), kind, owner,
+                                     incarnation});
 }
 
 } // namespace
@@ -74,7 +76,7 @@ NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
     node.type = NodeType::AudioInput;
     node.name = name;
     node.num_output_ports = channels;
-    populate_named_ports(node);
+    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -89,7 +91,7 @@ NodeId SignalGraph::add_output_node(int channels, const std::string& name) {
     node.type = NodeType::AudioOutput;
     node.name = name;
     node.num_input_ports = channels;
-    populate_named_ports(node);
+    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -107,7 +109,7 @@ NodeId SignalGraph::add_plugin_node(const PluginInfo& info) {
     node.num_output_ports = info.num_outputs;
     node.plugin = std::shared_ptr<PluginSlot>(PluginSlot::load(info));
     node.plugin_info = info; // preserve identity even if load failed
-    populate_named_ports(node);
+    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -127,7 +129,7 @@ NodeId SignalGraph::add_unresolved_plugin_node(const PluginInfo& info, int num_i
     node.plugin_info = info;
     node.plugin_info.num_inputs = num_inputs;
     node.plugin_info.num_outputs = num_outputs;
-    populate_named_ports(node);
+    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -152,7 +154,7 @@ NodeId SignalGraph::add_plugin_node(std::unique_ptr<PluginSlot> slot, int num_in
         node.plugin_info.num_inputs = num_inputs;
         node.plugin_info.num_outputs = num_outputs;
     }
-    populate_named_ports(node);
+    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -190,7 +192,7 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
     const NodeId id = node.id;
     try {
         processor_nodes_.emplace(id, std::make_shared<ProcessorNodeLifetime>(std::move(instance)));
-        populate_named_ports(node);
+        populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
         nodes_.push_back(std::move(node));
     } catch (...) {
         processor_nodes_.erase(id);
@@ -246,7 +248,7 @@ NodeId SignalGraph::add_gain_node(const std::string& name) {
     node.name = name;
     node.num_input_ports = 2;
     node.num_output_ports = 2;
-    populate_named_ports(node);
+    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -261,7 +263,7 @@ NodeId SignalGraph::add_midi_input_node(const std::string& name) {
     node.type = NodeType::MidiInput;
     node.name = name;
     node.num_output_ports = 1;
-    populate_named_ports(node);
+    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -276,7 +278,7 @@ NodeId SignalGraph::add_midi_output_node(const std::string& name) {
     node.type = NodeType::MidiOutput;
     node.name = name;
     node.num_input_ports = 1;
-    populate_named_ports(node);
+    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -331,7 +333,7 @@ NodeId SignalGraph::add_unresolved_custom_node(std::string_view type_id, int ver
     node.num_output_ports = num_outputs;
     node.custom_type_id = std::move(type.type_id);
     node.custom_type_version = version;
-    populate_named_ports(node);
+    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;

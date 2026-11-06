@@ -96,6 +96,16 @@ class Mutation:
 
 
 @dataclasses.dataclass(frozen=True)
+class Census:
+    """tools/scripts/dawn_binding_census.py over the slice executables: every
+    one passes, the headless slice carries no Dawn and the Vellum slice exactly
+    one (the controls that show the census can see Dawn and its absence)."""
+
+    def describe(self) -> str:
+        return "dawn_binding_census.py over the slice executables"
+
+
+@dataclasses.dataclass(frozen=True)
 class Direction:
     """Pulp's core -> Vellum direction check passed."""
 
@@ -216,9 +226,12 @@ ITEMS: tuple = (
     Item("5", "Dependency direction: core/ includes and links nothing from Vellum", (
         Direction(),
     )),
-    Item("6", "One GPU device: single-Dawn census per artifact; two Vellum versions in one REAPER",
-         skip_reason="needs the gpu-runtime subproject and the Pulp SDK bundling the Vellum SDK "
-                     "(M2 gpu-runtime, M3)"),
+    Item("6a", "One GPU device: at most one Dawn per process image, hidden per bundle", (
+        Census(),
+    )),
+    Item("6b", "One GPU device: two plug-ins built against different Vellum versions in one REAPER",
+         skip_reason="needs gpu-runtime per-bundle registration and two published Vellum "
+                     "versions"),
     Item("7", "Sterile default checkout: clone, pulp build, pulp create, items 1-2 without Vellum",
          skip_reason="needs the Pulp SDK to bundle the Vellum SDK and pulp create --ui (M3)"),
 )
@@ -240,6 +253,8 @@ class Observations:
     failed: set = dataclasses.field(default_factory=set)
     tests: dict = dataclasses.field(default_factory=dict)
     direction_passed: bool | None = None
+    # dawn_binding_census.py: {"reports": [...]} from its JSON, or {"error": why}.
+    census: dict | None = None
     # confirm_failure.sh verdicts by mutation name ("CONFIRMED", "NOT
     # CONFIRMED", "INCONCLUSIVE"), and why mutations did not run at all.
     mutations: dict = dataclasses.field(default_factory=dict)
@@ -292,11 +307,45 @@ def evaluate_check(check, obs: Observations) -> tuple[bool, str]:
         if verdict is None:
             return False, f"{check.describe()} did not run"
         return verdict == "CONFIRMED", f"{check.describe()}: {verdict}"
+    if isinstance(check, Census):
+        return evaluate_census(obs.census)
     if isinstance(check, Direction):
         if obs.direction_passed is None:
             return False, "core_vellum_direction.py did not run"
         return obs.direction_passed, f"core_vellum_direction.py: {'ok' if obs.direction_passed else 'FAIL'}"
     raise TypeError(f"unknown check {check!r}")
+
+
+# The slice executables the census reads, and the two that are its controls.
+CENSUS_BINARIES = (
+    "pulp-slice-headless", "pulp-slice-vellum", "pulp-slice-rmlui", "pulp-slice-native",
+    "pulp-slice-formats-vellum", "pulp-slice-formats-rmlui", "pulp-slice-formats-native",
+    "pulp-slice-standalone-vellum", "pulp-slice-standalone-rmlui", "pulp-slice-standalone-native",
+)
+CENSUS_CONTROLS = {"pulp-slice-headless": 0, "pulp-slice-vellum": 1}
+
+
+def evaluate_census(result: dict | None) -> tuple[bool, str]:
+    if result is None:
+        return False, "the Dawn binding census did not run"
+    if result.get("error"):
+        return False, f"the Dawn binding census could not run: {result['error']}"
+    reports = {Path(r["artifact"]).name: r for r in result.get("reports", [])}
+    problems = []
+    for name in CENSUS_BINARIES:
+        report = reports.get(name)
+        if report is None:
+            problems.append(f"{name}: not censused")
+        elif report["verdict"] != "PASS":
+            problems.append(f"{name}: " + "; ".join(report["reasons"]))
+    for name, expected in CENSUS_CONTROLS.items():
+        report = reports.get(name)
+        if report is not None and len(report["dawn_images"]) != expected:
+            problems.append(f"{name}: {len(report['dawn_images'])} Dawn image(s), the control "
+                            f"expects {expected}")
+    if problems:
+        return False, "Dawn binding census: " + " | ".join(problems)
+    return True, f"Dawn binding census: {len(reports)} executables pass"
 
 
 @dataclasses.dataclass
@@ -402,6 +451,24 @@ def run_mutation(build: Path, mutation: dict) -> str:
     return parse_confirm_failure(result.stdout + "\n" + result.stderr)
 
 
+def run_census(build: Path) -> dict:
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
+    import dawn_binding_census
+
+    paths = []
+    for name in CENSUS_BINARIES:
+        binary = find_binary(build, name)
+        if binary is None:
+            return {"error": f"{name} is not built in {build}"}
+        paths.append(binary)
+    try:
+        reports = [dawn_binding_census.census(p) for p in paths]
+    except dawn_binding_census.CensusError as error:
+        return {"error": str(error)}
+    print(dawn_binding_census.render(reports), file=sys.stderr)
+    return {"reports": dawn_binding_census.to_json(reports)}
+
+
 def check_vellum_prefix(prefix: Path) -> str:
     for needed in ("lib/cmake/Vellum/VellumConfig.cmake", "lib/cmake/VellumRmlUi"):
         if not (prefix / needed).exists():
@@ -454,6 +521,8 @@ def main(argv: list | None = None) -> int:
     direction = _run([sys.executable, str(REPO_ROOT / "tools/scripts/core_vellum_direction.py"),
                       "--root", str(REPO_ROOT)], capture_output=True)
     obs.direction_passed = direction.returncode == 0
+
+    obs.census = run_census(build)
 
     if args.skip_build:
         obs.mutation_skip_reason = ("not run: --skip-build (the mutation check rebuilds the "
