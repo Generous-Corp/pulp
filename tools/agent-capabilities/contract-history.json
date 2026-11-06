@@ -2388140,6 +2388140,11 @@
             "disposition": "capability_entrypoint"
           },
           {
+            "include": "pulp/host/graph_event_contract.hpp",
+            "fingerprint": "sha256:04e90c3334121939d028d603d37fbe02af97ccd78ae6d2968bc65a73ad625a50",
+            "disposition": "infrastructure"
+          },
+          {
             "include": "pulp/host/sample_region_authoring.hpp",
             "fingerprint": "sha256:15e798963f6115b371c9a644de16619a6ea10e5c797845b25db72c14301ebaf7",
             "disposition": "capability_entrypoint"
@@ -2388343,11 +2388348,6 @@
             "include": "pulp/midi/note_utility_kernels.hpp",
             "fingerprint": "sha256:6b4005421eb2f5f98b88765883154451e800a76188a8608887755201f9cc21e6",
             "disposition": "capability_entrypoint"
-          },
-          {
-            "include": "pulp/midi/panic.hpp",
-            "fingerprint": "sha256:8c7d581bb16cc8d0aac5ff9e64c52a28416acd3d5c3bf5053c85c9a3d9e0afea",
-            "disposition": "infrastructure"
           },
           {
             "include": "pulp/midi/raw_midi_parser.hpp",
@@ -2390157,7 +2390157,7 @@
         ],
         "tombstones": []
       },
-      "entry_digest": "sha256:f0b73fd8b4cf3561c2e1d1e38aee9c80ba1be54157ea8e1e63300afbfbc54d31"
+      "entry_digest": "sha256:132b802af18d0fe66ca766e7baefce38dc1ec6a438f6db6cc821e666b4350f24"
     }
   ]
 }

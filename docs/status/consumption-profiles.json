@@ -499,6 +499,7 @@
       "pulp/host/forge_synthesis_catalog.hpp",
       "pulp/host/forge_tape_catalog.hpp",
       "pulp/host/forge_wavetable_catalog.hpp",
+      "pulp/host/graph_event_contract.hpp",
       "pulp/host/graph_identity.hpp",
       "pulp/host/graph_runtime_plan.hpp",
       "pulp/host/graph_runtime_queue.hpp",
