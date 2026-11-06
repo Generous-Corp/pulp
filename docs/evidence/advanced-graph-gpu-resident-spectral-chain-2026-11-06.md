@@ -15,7 +15,7 @@ adapter, public API, or runtime path.
 | Workload | `CpuSpectralStack` vs `GpuSpectralStack`, FFT 2048, hop 512, 16 resident layers, 64 measured hops after 8 warmups |
 | Build | Release, `PULP_BENCHMARK=ON`, governed `cmake --build build --target pulp-gpu-spectral-chain-evidence` |
 | Probe | `test/test_gpu_spectral_chain_evidence.cpp` (advisory standalone executable) |
-| Probe output SHA-256 | `96a6520466fd1d5db47d16b422acbea7cf90239939ac980dd3898d6ae112952f` |
+| Probe output | `docs/evidence/advanced-graph-gpu-resident-spectral-chain-2026-11-06.raw.txt` (SHA-256 `96a6520466fd1d5db47d16b422acbea7cf90239939ac980dd3898d6ae112952f`) |
 
 The existing GPU spectral correctness suite also passed from this clean source
 (`189 assertions / 13 cases`).
