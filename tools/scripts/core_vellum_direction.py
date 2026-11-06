@@ -68,7 +68,8 @@ ALLOWED_CMAKE: dict[tuple[str, str], tuple[int, str]] = {
     ("tools/cmake/PulpConfig.cmake.in", "find_dependency(VellumGpuRuntime"): (1, _GPU_RUNTIME),
     ("tools/cmake/PulpGpuRuntime.cmake", "FetchContent(vellum_gpu_runtime"): (2, _GPU_RUNTIME),
     ("tools/cmake/PulpGpuRuntime.cmake", "find_package(VellumGpuRuntime"): (1, _GPU_RUNTIME),
-    ("tools/cmake/PulpGpuRuntime.cmake", "VellumGpuRuntime::DeviceApi"): (1, _GPU_RUNTIME),
+    # pulp-platform links it, and configure reads its recorded benchmark flavour.
+    ("tools/cmake/PulpGpuRuntime.cmake", "VellumGpuRuntime::DeviceApi"): (2, _GPU_RUNTIME),
     ("tools/cmake/PulpGpuRuntime.cmake", "github.com/Generous-Corp/vellum.git"): (1, _GPU_RUNTIME),
     ("tools/cmake/PulpGpuRuntime.cmake", "vellum-gpu-runtime"): (1, _GPU_RUNTIME),
 }
