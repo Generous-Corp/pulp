@@ -251,6 +251,26 @@ EditorSurfaces create_editor_surfaces(void* native_handle,
                                       bool want_partial_repaint,
                                       const char* log_tag);
 
+/// Per-editor retained pixels for successive CPU-raster frames. The host owns
+/// this for the editor's lifetime; captures may omit it for isolated rendering.
+/// GPU caches never enter this store. Text raster policy changes reset it.
+class RasterSceneCache {
+  public:
+    RasterSceneCache();
+    ~RasterSceneCache();
+
+    RasterSceneCache(const RasterSceneCache&) = delete;
+    RasterSceneCache& operator=(const RasterSceneCache&) = delete;
+
+  private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    friend std::vector<std::uint8_t> raster_plugin_scene_rgba(View&, const FrameGeometry&,
+                                                              std::uint32_t*, std::uint32_t*,
+                                                              canvas::TextRasterPolicy,
+                                                              RasterSceneCache*);
+};
+
 /// CPU-raster one editor frame at physical-pixel resolution, returning tightly
 /// packed RGBA8888 and reporting the pixel dimensions through `out_w`/`out_h`.
 /// Empty on any failure.
@@ -267,7 +287,8 @@ EditorSurfaces create_editor_surfaces(void* native_handle,
 std::vector<std::uint8_t>
 raster_plugin_scene_rgba(View& root, const FrameGeometry& geometry, std::uint32_t* out_w,
                          std::uint32_t* out_h,
-                         canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy);
+                         canvas::TextRasterPolicy text_raster = canvas::TextRasterPolicy::legacy,
+                         RasterSceneCache* retained_cache = nullptr);
 
 /// Encode tightly packed RGBA8888 pixels as a PNG byte stream. Empty on
 /// failure or on empty input.

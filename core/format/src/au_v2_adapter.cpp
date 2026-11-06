@@ -41,6 +41,7 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
     : AUMIDIEffectBase(ci, /*inProcessesInPlace=*/false) {
     if (factory) {
         processor_ = factory();
+        render_context_.bind(processor_.get());
         if (processor_) {
             sample_accurate_params_ = processor_->wants_sample_accurate_parameters();
             param_events_monitor_.arm(!sample_accurate_params_, &param_events_);
@@ -581,6 +582,8 @@ OSStatus PulpAUEffect::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope 
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_property_info(store_, inScope, outDataSize,
                                                   outWritable);
+    if (inID == kAudioUnitProperty_RenderContextObserver)
+        return render_context_.property_info(inScope, inElement, outDataSize, outWritable);
     if (inID == kAudioUnitProperty_SupportsMPE)
         return fill_supports_mpe_property_info(descriptor_.effective_capabilities().supports_mpe,
                                                inScope, outDataSize, outWritable);
@@ -637,6 +640,8 @@ OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
         return offline_render_.get(inScope, outData);
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_name(store_, inScope, outData);
+    if (inID == kAudioUnitProperty_RenderContextObserver)
+        return render_context_.get(inScope, inElement, outData);
     if (inID == kAudioUnitProperty_SupportsMPE)
         return fill_supports_mpe(descriptor_.effective_capabilities().supports_mpe, inScope,
                                  outData);
@@ -895,6 +900,9 @@ void PulpAUEffect::warm_render_path() {
 
 void PulpAUEffect::Cleanup()
 {
+    // Leave the host's borrowed workgroup before the processor releases the
+    // threads that joined it.
+    render_context_.clear_after_render_resources();
     if (processor_) {
         param_events_monitor_.report(*processor_);
         processor_->release();
@@ -966,6 +974,10 @@ OSStatus PulpAUEffect::ChangeStreamFormat(AudioUnitScope inScope, AudioUnitEleme
 OSStatus PulpAUEffect::Render(AudioUnitRenderActionFlags& ioActionFlags,
                               const AudioTimeStamp& inTimeStamp, UInt32 nFrames)
 {
+    // The observer completes a workgroup transition before it returns; this
+    // idempotent guard makes every render verify the current publication
+    // before any early exit, as the AUv3 render block does.
+    render_context_.prepare_for_render();
     sidechain_pulled_ = nullptr;
     if (has_sidechain_element_ && HasInput(kSidechainInputElement)) {
         // The side chain's own silence/pre-render flags must not leak into the

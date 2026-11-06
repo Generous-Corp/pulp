@@ -393,6 +393,28 @@ public:
     }
 };
 
+// An instrument that runs auxiliary realtime threads: it implements
+// AudioWorkgroupClient and records what the adapter publishes to it.
+class TestAUWorkgroupInstrumentProcessor : public TestAUInstrumentProcessor,
+                                           public pulp::format::AudioWorkgroupClient {
+  public:
+    void set_audio_workgroup(void* value) noexcept override {
+        audio_workgroup.store(value, std::memory_order_release);
+        audio_workgroup_updates.fetch_add(1, std::memory_order_relaxed);
+    }
+    void wait_for_audio_workgroup_update() noexcept override {
+        audio_workgroup_waits.fetch_add(1, std::memory_order_relaxed);
+    }
+    bool prepare_audio_workgroup_for_render() noexcept override {
+        audio_workgroup_prepares.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+    std::atomic<void*> audio_workgroup{nullptr};
+    std::atomic<int> audio_workgroup_updates{0};
+    std::atomic<int> audio_workgroup_waits{0};
+    std::atomic<int> audio_workgroup_prepares{0};
+};
+
 class TestAULayoutProcessor : public TestAUEffectProcessor {
 public:
     pulp::format::PluginDescriptor descriptor() const override {
@@ -464,6 +486,10 @@ std::unique_ptr<pulp::format::Processor> create_instrument_processor() {
     return std::make_unique<TestAUInstrumentProcessor>();
 }
 
+std::unique_ptr<pulp::format::Processor> create_workgroup_instrument_processor() {
+    return std::make_unique<TestAUWorkgroupInstrumentProcessor>();
+}
+
 std::unique_ptr<pulp::format::Processor> create_wide_editor_processor() {
     return std::make_unique<TestAUWideEditorProcessor>();
 }
@@ -483,6 +509,64 @@ std::unique_ptr<pulp::format::Processor> create_sidechain_effect_processor() {
 std::unique_ptr<pulp::format::Processor> create_latency_tail_effect_processor() {
     return std::make_unique<TestAULatencyTailEffectProcessor>();
 }
+
+// An instrument that emits MIDI every block: a note on at offset 5, SysEx at
+// 10 and a controller at 20, so delivery order and offsets are checkable.
+class TestAUMidiOutInstrumentProcessor : public TestAUInstrumentProcessor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        auto d = TestAUInstrumentProcessor::descriptor();
+        d.produces_midi = true;
+        return d;
+    }
+    void process(pulp::format::ProcessBuffers& audio, pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        TestAUInstrumentProcessor::process(audio, midi_in, midi_out, context);
+        midi_out.add(pulp::midi::MidiEvent{choc::midi::ShortMessage(0xB2, 7, 99), 20, 0.0});
+        midi_out.add(pulp::midi::MidiEvent{choc::midi::ShortMessage(0x91, 60, 100), 5, 0.0});
+        static const uint8_t sysex[] = {0xF0, 0x7D, 0x01, 0xF7};
+        midi_out.add_sysex_copy(sysex, sizeof(sysex), 10);
+    }
+};
+std::unique_ptr<pulp::format::Processor> create_midi_out_instrument_processor() {
+    return std::make_unique<TestAUMidiOutInstrumentProcessor>();
+}
+
+// An instrument that flags a latency / tail change from process() on request.
+bool g_instrument_flag_latency = false;
+bool g_instrument_flag_tail = false;
+class TestAUFlaggingInstrumentProcessor : public TestAUInstrumentProcessor {
+  public:
+    void process(pulp::format::ProcessBuffers& audio, pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        TestAUInstrumentProcessor::process(audio, midi_in, midi_out, context);
+        if (g_instrument_flag_latency) {
+            flag_latency_changed();
+            g_instrument_flag_latency = false;
+        }
+        if (g_instrument_flag_tail) {
+            flag_tail_changed();
+            g_instrument_flag_tail = false;
+        }
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_flagging_instrument_processor() {
+    return std::make_unique<TestAUFlaggingInstrumentProcessor>();
+}
+
+// Records the properties the adapter tells the host have changed.
+struct CapturingAUInstrument : pulp::format::au::PulpAUInstrument {
+    using pulp::format::au::PulpAUInstrument::PulpAUInstrument;
+    std::vector<AudioUnitPropertyID> changed;
+    void PropertyChanged(AudioUnitPropertyID id, AudioUnitScope scope,
+                         AudioUnitElement element) override {
+        changed.push_back(id);
+        pulp::format::au::PulpAUInstrument::PropertyChanged(id, scope, element);
+    }
+};
 
 std::unique_ptr<pulp::format::Processor> create_latency_tail_instrument_processor() {
     return std::make_unique<TestAULatencyTailInstrumentProcessor>();
@@ -878,6 +962,164 @@ TEST_CASE("AU v2 latency and tail report processor runtime contract",
             REQUIRE(std::isinf(instrument.GetTailTime()));
         }
     }
+}
+
+// A host reads kAudioUnitProperty_MIDIOutputCallbackInfo and installs a
+// kAudioUnitProperty_MIDIOutputCallback to receive an instrument's MIDI; the
+// instrument adapter must deliver what process() emitted, in time order, with
+// in-block offsets as packet timestamps.
+TEST_CASE("AU v2 instrument delivers processor MIDI output to the host callback",
+          "[au][auv2][instrument][midi-out]") {
+    constexpr UInt32 kFrames = 64;
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags =
+        kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+
+    SECTION("a MIDI-producing instrument advertises and delivers") {
+        ScopedFactoryRegistration registration(create_midi_out_instrument_processor);
+        pulp::format::au::PulpAUInstrument instrument(nullptr);
+        instrument.CreateElements();
+        REQUIRE(instrument.GetOutput(0)->SetStreamFormat(format) == noErr);
+        UInt32 max_frames = kFrames;
+        REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                               kAudioUnitScope_Global, 0, &max_frames,
+                                               sizeof(max_frames)) == noErr);
+        REQUIRE(instrument.DoInitialize() == noErr);
+
+        UInt32 size = 0;
+        bool writable = false;
+        REQUIRE(instrument.DispatchGetPropertyInfo(kAudioUnitProperty_MIDIOutputCallbackInfo,
+                                                   kAudioUnitScope_Global, 0, size,
+                                                   writable) == noErr);
+        CFArrayRef names = nullptr;
+        REQUIRE(instrument.DispatchGetProperty(kAudioUnitProperty_MIDIOutputCallbackInfo,
+                                               kAudioUnitScope_Global, 0, &names) == noErr);
+        REQUIRE(names != nullptr);
+        REQUIRE(CFArrayGetCount(names) == 1);
+        CFRelease(names);
+        REQUIRE(instrument.DispatchGetPropertyInfo(kAudioUnitProperty_MIDIOutputCallback,
+                                                   kAudioUnitScope_Global, 0, size,
+                                                   writable) == noErr);
+        REQUIRE(writable);
+
+        struct Received {
+            std::vector<std::pair<MIDITimeStamp, std::vector<uint8_t>>> packets;
+            int calls = 0;
+        };
+        Received received;
+        AUMIDIOutputCallbackStruct callback{};
+        callback.midiOutputCallback = [](void* user, const AudioTimeStamp*, UInt32,
+                                         const MIDIPacketList* list) -> OSStatus {
+            auto* r = static_cast<Received*>(user);
+            ++r->calls;
+            const MIDIPacket* packet = &list->packet[0];
+            for (UInt32 i = 0; i < list->numPackets; ++i) {
+                r->packets.push_back(
+                    {packet->timeStamp,
+                     std::vector<uint8_t>(packet->data, packet->data + packet->length)});
+                packet = MIDIPacketNext(packet);
+            }
+            return noErr;
+        };
+        callback.userData = &received;
+        REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MIDIOutputCallback,
+                                               kAudioUnitScope_Global, 0, &callback,
+                                               sizeof(callback)) == noErr);
+
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp timestamp{};
+        timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+        REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+        REQUIRE(received.calls == 1);
+        REQUIRE(received.packets.size() == 3);
+        REQUIRE(received.packets[0].first == 5);
+        REQUIRE(received.packets[0].second == std::vector<uint8_t>{0x91, 60, 100});
+        REQUIRE(received.packets[1].first == 10);
+        REQUIRE(received.packets[1].second == std::vector<uint8_t>{0xF0, 0x7D, 0x01, 0xF7});
+        REQUIRE(received.packets[2].first == 20);
+        REQUIRE(received.packets[2].second == std::vector<uint8_t>{0xB2, 7, 99});
+
+        // Clearing the callback stops delivery.
+        AUMIDIOutputCallbackStruct none{};
+        REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MIDIOutputCallback,
+                                               kAudioUnitScope_Global, 0, &none,
+                                               sizeof(none)) == noErr);
+        REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+        REQUIRE(received.calls == 1);
+        instrument.DoCleanup();
+    }
+
+    SECTION("an instrument that produces no MIDI does not advertise it") {
+        ScopedFactoryRegistration registration(create_instrument_processor);
+        pulp::format::au::PulpAUInstrument instrument(nullptr);
+        UInt32 size = 0;
+        bool writable = false;
+        REQUIRE(instrument.DispatchGetPropertyInfo(kAudioUnitProperty_MIDIOutputCallbackInfo,
+                                                   kAudioUnitScope_Global, 0, size,
+                                                   writable) != noErr);
+    }
+}
+
+// An AU v2 host learns that an instrument's latency or tail moved only
+// through PropertyChanged; without it the host keeps compensating for the
+// old latency.
+TEST_CASE("AU v2 instrument fires PropertyChanged for a processor latency/tail change",
+          "[au][auv2][instrument][latency][tail]") {
+    ScopedFactoryRegistration registration(create_flagging_instrument_processor);
+    g_instrument_flag_latency = false;
+    g_instrument_flag_tail = false;
+    constexpr UInt32 kFrames = 64;
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags =
+        kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+    CapturingAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(format) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+    auto count = [&](AudioUnitPropertyID id) {
+        return std::count(instrument.changed.begin(), instrument.changed.end(), id);
+    };
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 0);
+    REQUIRE(count(kAudioUnitProperty_TailTime) == 0);
+
+    g_instrument_flag_latency = true;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 1);
+    REQUIRE(count(kAudioUnitProperty_TailTime) == 0);
+
+    g_instrument_flag_tail = true;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 1);
+    REQUIRE(count(kAudioUnitProperty_TailTime) == 1);
+
+    // Consumed: a block without a new flag does not notify again.
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(count(kAudioUnitProperty_Latency) == 1);
+    REQUIRE(count(kAudioUnitProperty_TailTime) == 1);
+    instrument.DoCleanup();
 }
 
 TEST_CASE("AU v2 host callbacks mark transport jumps for processor reset",
@@ -3193,6 +3435,138 @@ TEST_CASE("AU v3 render context observer forwards workgroup changes and removal"
         [unit release];
     }
     pulp::format::set_host_quirk_policy(std::nullopt);
+}
+
+// AU v2 hosts read kAudioUnitProperty_RenderContextObserver (the v2 form of
+// AUv3's renderContextObserver) and the OS calls the returned block before a
+// render whose workgroup changed. The workgroup below is deliberately not a
+// real os_object: an observer that regressed to os_retain/os_release would
+// crash here instead of passing.
+namespace {
+template <typename Unit> AURenderContextObserver get_v2_render_context_observer(Unit& unit) {
+    UInt32 size = 0;
+    bool writable = true;
+    REQUIRE(unit.DispatchGetPropertyInfo(kAudioUnitProperty_RenderContextObserver,
+                                         kAudioUnitScope_Global, 0, size, writable) == noErr);
+    REQUIRE(size == sizeof(AURenderContextObserver));
+    REQUIRE_FALSE(writable);
+    AURenderContextObserver observer = nil;
+    REQUIRE(unit.DispatchGetProperty(kAudioUnitProperty_RenderContextObserver,
+                                     kAudioUnitScope_Global, 0, &observer) == noErr);
+    REQUIRE(observer != nil);
+    // Global scope, element 0 only.
+    REQUIRE(unit.DispatchGetPropertyInfo(kAudioUnitProperty_RenderContextObserver,
+                                         kAudioUnitScope_Output, 0, size,
+                                         writable) == kAudioUnitErr_InvalidScope);
+    return observer;
+}
+
+AudioStreamBasicDescription v2_float_stereo_format() {
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags =
+        kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+    return format;
+}
+} // namespace
+
+TEST_CASE("AU v2 effect render context observer forwards workgroup changes and removal",
+          "[au][auv2][workgroup][rt-safety]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+    constexpr UInt32 kFrames = 64;
+    const auto format = v2_float_stereo_format();
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    auto* processor = g_last_effect_processor;
+    REQUIRE(processor != nullptr);
+    effect.CreateElements();
+    REQUIRE(effect.Input(0).SetStreamFormat(format) == noErr);
+    REQUIRE(effect.Output(0).SetStreamFormat(format) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0, &max_frames,
+                                       sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    AURenderContextObserver observer = get_v2_render_context_observer(effect);
+    AudioUnitRenderContext context{};
+    context.workgroup = reinterpret_cast<os_workgroup_t>(std::uintptr_t{0x7070});
+    observer(&context);
+    REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) ==
+            reinterpret_cast<void*>(context.workgroup));
+    REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 1);
+    REQUIRE(processor->audio_workgroup_prepares.load(std::memory_order_relaxed) == 1);
+
+    // A null context is an explicit removal.
+    observer(nullptr);
+    REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) == nullptr);
+    REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 2);
+
+    observer(&context);
+    effect.DoCleanup();
+    REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) == nullptr);
+    REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 4);
+    REQUIRE(processor->audio_workgroup_waits.load(std::memory_order_relaxed) == 1);
+}
+
+TEST_CASE("AU v2 instrument render context observer reaches AudioWorkgroupClient",
+          "[au][auv2][instrument][workgroup][rt-safety]") {
+    ScopedFactoryRegistration registration(create_workgroup_instrument_processor);
+    constexpr UInt32 kFrames = 64;
+    pulp::format::au::PulpAUInstrument instrument(nullptr);
+    auto* processor =
+        dynamic_cast<TestAUWorkgroupInstrumentProcessor*>(g_last_instrument_processor);
+    REQUIRE(processor != nullptr);
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(v2_float_stereo_format()) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+
+    AURenderContextObserver observer = get_v2_render_context_observer(instrument);
+    AudioUnitRenderContext context{};
+    context.workgroup = reinterpret_cast<os_workgroup_t>(std::uintptr_t{0x7171});
+    observer(&context);
+    REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) ==
+            reinterpret_cast<void*>(context.workgroup));
+    REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 1);
+    REQUIRE(processor->audio_workgroup_prepares.load(std::memory_order_relaxed) == 1);
+
+    // Every render re-verifies the publication through the idempotent guard.
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(processor->audio_workgroup_prepares.load(std::memory_order_relaxed) == 2);
+    REQUIRE(processor->audio_workgroup_updates.load(std::memory_order_relaxed) == 1);
+
+    instrument.DoCleanup();
+    REQUIRE(processor->audio_workgroup.load(std::memory_order_acquire) == nullptr);
+    REQUIRE(processor->audio_workgroup_waits.load(std::memory_order_relaxed) == 1);
+}
+
+TEST_CASE("AU v2 instrument without auxiliary realtime threads leaves the observer unadvertised",
+          "[au][auv2][instrument][workgroup]") {
+    ScopedFactoryRegistration registration(create_instrument_processor);
+    pulp::format::au::PulpAUInstrument instrument(nullptr);
+    REQUIRE(g_last_instrument_processor != nullptr);
+    UInt32 size = 0;
+    bool writable = false;
+    REQUIRE(instrument.DispatchGetPropertyInfo(kAudioUnitProperty_RenderContextObserver,
+                                               kAudioUnitScope_Global, 0, size,
+                                               writable) == kAudioUnitErr_InvalidProperty);
+    AURenderContextObserver observer = nil;
+    REQUIRE(instrument.DispatchGetProperty(kAudioUnitProperty_RenderContextObserver,
+                                           kAudioUnitScope_Global, 0,
+                                           &observer) == kAudioUnitErr_InvalidProperty);
+    REQUIRE(observer == nil);
 }
 
 TEST_CASE("AU v3 per-method audit invariants",

@@ -209,6 +209,9 @@ private:
     // store_ so reverse member destruction retires the PresetManager while the
     // store it holds a reference to is still alive.
     FactoryPresetTable factory_presets_;
+    // kAudioUnitProperty_RenderContextObserver; bound once the processor
+    // exists, advertised only for an AudioWorkgroupClient processor.
+    RenderContextObserverProperty render_context_;
     // Keeps a host class-info restore off the processor while Render() is
     // inside it. Declared after processor_ so it outlives every render that
     // consults it.
@@ -260,6 +263,15 @@ private:
     static constexpr std::size_t kMaxSysexPerBlock = 64;
     midi::MidiBuffer midi_in_;
     midi::MidiBuffer midi_out_;
+
+    // MIDI the Processor emits during process() reaches the host through
+    // kAudioUnitProperty_MIDIOutputCallback, as for the effect and the MIDI
+    // processor: one output stream (kAudioUnitProperty_MIDIOutputCallbackInfo),
+    // packed allocation-free into a CoreMIDI packet list each block. Only a
+    // processor whose descriptor sets produces_midi advertises it.
+    bool plugin_produces_midi() const noexcept;
+    MidiOutputCallbackPublisher midi_output_callback_;
+    MidiOutputPacketBuilder midi_out_packet_builder_;
 
     // Previous-block transport snapshot used to derive change flags on
     // `ProcessContext`. Default-constructed so the first Render() call

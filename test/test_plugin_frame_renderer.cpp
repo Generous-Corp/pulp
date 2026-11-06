@@ -477,6 +477,74 @@ TEST_CASE("the raster path paints the editor background, not black",
     REQUIRE(pixels[3] == 255);
 }
 
+TEST_CASE("the CPU editor retains static pixels across fresh frame surfaces",
+          "[plugin-frame][raster][raster-cache]") {
+    class CountedLeaf : public View {
+      public:
+        int paints = 0;
+        void paint(pulp::canvas::Canvas& c) override {
+            ++paints;
+            c.set_fill_color(pulp::canvas::Color::rgba8(35, 115, 205, 190));
+            c.fill_rect(0, 0, bounds().width, bounds().height);
+        }
+    } cached, direct;
+    cached.set_bounds({0, 0, 40, 30});
+    direct.set_bounds(cached.bounds());
+    cached.set_raster_cached(true);
+    FrameGeometry geometry;
+    geometry.width = 40;
+    geometry.height = 30;
+    RasterSceneCache store;
+    std::uint32_t w = 0, h = 0;
+    const auto compare = [&](pulp::canvas::TextRasterPolicy policy =
+                                 pulp::canvas::TextRasterPolicy::legacy) {
+        const auto reference = raster_plugin_scene_rgba(direct, geometry, &w, &h, policy);
+        const auto actual = raster_plugin_scene_rgba(cached, geometry, &w, &h, policy, &store);
+        REQUIRE_FALSE(actual.empty());
+        REQUIRE(actual.size() == reference.size());
+        int max_channel_delta = 0;
+        for (std::size_t i = 0; i < actual.size(); ++i)
+            max_channel_delta =
+                std::max(max_channel_delta, std::abs(int(actual[i]) - int(reference[i])));
+        // The cached RGBA8 intermediate rounds a translucent color before
+        // compositing; direct paint rounds only once. Bound that quantization
+        // to one channel level while checking every output pixel.
+        REQUIRE(max_channel_delta <= 1);
+    };
+    compare();
+    compare();
+    REQUIRE(cached.paints == 1);
+
+    // A real style mutation must produce fresh pixels, not merely a cache hit.
+    cached.set_background_color(pulp::canvas::Color::rgba8(170, 40, 90, 255));
+    direct.set_background_color(pulp::canvas::Color::rgba8(170, 40, 90, 255));
+    compare();
+    compare();
+    REQUIRE(cached.paints == 2);
+
+    geometry.scale = 1.5f;
+    compare();
+    compare();
+    REQUIRE(w == 60);
+    REQUIRE(h == 45);
+    REQUIRE(cached.paints == 3);
+
+    cached.set_bounds({0, 0, 28, 20});
+    direct.set_bounds(cached.bounds());
+    compare();
+    compare();
+    REQUIRE(cached.paints == 4);
+
+    compare(pulp::canvas::TextRasterPolicy::chromium);
+    compare(pulp::canvas::TextRasterPolicy::chromium);
+    REQUIRE(cached.paints == 5);
+
+    // Omitting the store preserves the uncached standalone-capture behavior.
+    const auto isolated = raster_plugin_scene_rgba(cached, geometry, &w, &h);
+    REQUIRE_FALSE(isolated.empty());
+    REQUIRE(cached.paints == 6);
+}
+
 TEST_CASE("before the document mounts, every pixel is the declared background",
           "[plugin-frame][raster][first-frame]") {
     // A view-first editor's first frames paint an empty root. With a declared
