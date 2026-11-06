@@ -105,6 +105,10 @@ HeadlessHost::HeadlessHost(ProcessorFactory factory) {
         processor_->set_state_store(&store_);
         processor_->define_parameters(store_);
         descriptor_ = processor_->descriptor();
+        // This host services panic requests before every block, with MIDI
+        // output exactly when the descriptor declares it.
+        panic_state_ = processor_->panic_state();
+        panic_state_->attach(descriptor_.produces_midi);
     }
 }
 
@@ -212,7 +216,11 @@ void HeadlessHost::process(audio::BufferView<float>& output,
     auto process_buffers =
         make_process_buffers(output, input, input_buses, output_buses);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
+    if (panic_state_)
+        service_panic(*processor_, *panic_state_, midi_out);
     processor_->process(process_buffers, midi_in, midi_out, context);
+    if (panic_state_)
+        panic_state_->observe_midi_out(midi_out);
 }
 
 void HeadlessHost::process_with_sidechain(
@@ -232,7 +240,11 @@ void HeadlessHost::process_with_sidechain(
     auto process_buffers = make_process_buffers_with_sidechain(
         output, input, sidechain, input_buses, output_buses);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
+    if (panic_state_)
+        service_panic(*processor_, *panic_state_, midi_out);
     processor_->process(process_buffers, midi_in, midi_out, context);
+    if (panic_state_)
+        panic_state_->observe_midi_out(midi_out);
 }
 
 void HeadlessHost::process(audio::BufferView<float>& output,
@@ -253,7 +265,11 @@ void HeadlessHost::process(audio::BufferView<float>& output,
     auto process_buffers =
         make_process_buffers(output, input, input_buses, output_buses);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
+    if (panic_state_)
+        service_panic(*processor_, *panic_state_, midi_out);
     processor_->process(process_buffers, midi_in, midi_out, context);
+    if (panic_state_)
+        panic_state_->observe_midi_out(midi_out);
 }
 
 void HeadlessHost::process_f64(audio::BufferView<double>& output,
@@ -307,7 +323,11 @@ void HeadlessHost::process_f64(audio::BufferView<double>& output,
     auto process_buffers =
         make_process_buffers(output, input, input_buses, output_buses);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
+    if (panic_state_)
+        service_panic(*processor_, *panic_state_, midi_out);
     processor_->process_f64(process_buffers, midi_in, midi_out, context);
+    if (panic_state_)
+        panic_state_->observe_midi_out(midi_out);
 }
 
 void HeadlessHost::process_f64(
@@ -329,7 +349,11 @@ void HeadlessHost::process_f64(
     auto process_buffers =
         make_process_buffers(output, input, input_buses, output_buses);
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
+    if (panic_state_)
+        service_panic(*processor_, *panic_state_, midi_out);
     processor_->process_f64(process_buffers, midi_in, midi_out, context);
+    if (panic_state_)
+        panic_state_->observe_midi_out(midi_out);
 }
 
 std::optional<audio::AudioFileData> HeadlessHost::render_offline(

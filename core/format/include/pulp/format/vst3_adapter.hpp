@@ -329,6 +329,8 @@ public:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Panic requests (Processor::request_panic), serviced before each block.
+    std::shared_ptr<PanicState> panic_state_;
     std::unique_ptr<ParamGroupProjection> param_groups_;
     Steinberg::Vst::UnitID selected_unit_ = Steinberg::Vst::kRootUnitId;
     // Keeps a host setState() off the processor while process() is inside it.

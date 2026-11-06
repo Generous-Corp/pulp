@@ -264,6 +264,11 @@ docs:
     kind: guide
     summary: Forge MIDI effects — all transforms and parameters, pattern/chord schemas, chain cookbook, exhaustive C++ method API, realtime lifecycle, and host validation
 
+  - slug: midi-panic
+    path: guides/midi-panic.md
+    kind: guide
+    summary: MIDI panic — CC 120 / 123 / 121 / 64 and pitch bend centre generation, held-note offs, scope and classification (pure, real-time safe)
+
   - slug: signal-processing
     path: guides/signal-processing.md
     kind: guide
