@@ -59,6 +59,11 @@ endforeach()
 # pulp-gpu-audio's GPU path is compiled exactly when the device target exists,
 # which is always the case inside this PULP_ENABLE_GPU manifest.
 string(APPEND _pulp_gpu_device_props "gpu_audio.expects_device\t1\n")
+if(PULP_HAS_GPU_RUNTIME)
+    string(APPEND _pulp_gpu_device_props "gpu_runtime\t1\n")
+else()
+    string(APPEND _pulp_gpu_device_props "gpu_runtime\t0\n")
+endif()
 set(_pulp_gpu_device_props_file
     "${CMAKE_CURRENT_BINARY_DIR}/gpu_device_link_closure.properties")
 file(WRITE "${_pulp_gpu_device_props_file}" "${_pulp_gpu_device_props}")
