@@ -129,10 +129,9 @@ class SpectralRuntimeBank {
                     n.fatal(n.origin, SpectralError::ChronologyExhausted);
             } else if (n.type != NodeType::SpectralAnalysis && n.fatal_origin == limit) {
                 const auto* batch = ctx.spectral_input;
-                const auto decoded_contract = batch
-                                                  ? graph::SpectralFrameContract::decode(
-                                                        batch->encoded_contract)
-                                                  : graph::SpectralResult<graph::SpectralFrameContract>{};
+                const auto decoded_contract =
+                    batch ? graph::SpectralFrameContract::decode(batch->encoded_contract)
+                          : graph::SpectralResult<graph::SpectralFrameContract>{};
                 if (!batch || !decoded_contract || *decoded_contract.value != n.contract ||
                     batch->contract != *decoded_contract.value) {
                     n.error(SpectralError::IdentityMismatch);
