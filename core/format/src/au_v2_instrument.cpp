@@ -521,7 +521,11 @@ void PulpAUInstrument::Cleanup()
 bool PulpAUInstrument::StreamFormatWritable(AudioUnitScope scope, AudioUnitElement element)
 {
     (void)element;
-    return scope == kAudioUnitScope_Output || scope == kAudioUnitScope_Input;
+    // Formats are negotiated before Initialize, as AUEffectBase has it: a
+    // write accepted while the unit is initialized would never be validated
+    // (Initialize is a no-op on an initialized unit), which is how auval's
+    // unsupported-pair probes slipped through with the input elements.
+    return (scope == kAudioUnitScope_Output || scope == kAudioUnitScope_Input) && !IsInitialized();
 }
 
 bool PulpAUInstrument::CanScheduleParameters() const noexcept

@@ -701,6 +701,43 @@ TEST_CASE("AU v2 instrument refuses an input and output channel pair it does not
     }
 }
 
+TEST_CASE("AU v2 instrument refuses stream format writes while it is initialized",
+          "[au][au-v2][instrument][sidechain]") {
+    // auval initializes at a supported pair, then writes an unsupported one
+    // and initializes again; the second Initialize is a no-op on an
+    // initialized unit, so the write itself has to be refused.
+    ScopedFactoryRegistration registration(create_input_instrument);
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    UInt32 max_frames = 64;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    const auto stereo = make_float_format(48000.0, 2);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+                                           0, &stereo, sizeof(stereo)) == noErr);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output,
+                                           0, &stereo, sizeof(stereo)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+    const auto three = make_float_format(48000.0, 3);
+    const auto mono = make_float_format(48000.0, 1);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+                                           0, &three,
+                                           sizeof(three)) == kAudioUnitErr_PropertyNotWritable);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output,
+                                           0, &mono,
+                                           sizeof(mono)) == kAudioUnitErr_PropertyNotWritable);
+    REQUIRE(instrument.Input(0).GetStreamFormat().mChannelsPerFrame == 2);
+    REQUIRE(instrument.GetOutput(0)->GetStreamFormat().mChannelsPerFrame == 2);
+    instrument.DoCleanup();
+    // Uninitialized again, the write lands and Initialize judges it.
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+                                           0, &three, sizeof(three)) == noErr);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output,
+                                           0, &mono, sizeof(mono)) == noErr);
+    REQUIRE(instrument.DoInitialize() == kAudioUnitErr_FormatNotSupported);
+}
+
 TEST_CASE("AU v2 instrument refuses a side-chain rate that differs from the output",
           "[au][au-v2][instrument][sidechain]") {
     ScopedFactoryRegistration registration(create_input_instrument);
