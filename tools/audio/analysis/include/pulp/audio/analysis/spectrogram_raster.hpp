@@ -100,11 +100,11 @@ double db_to_palette_unit(double db, double ceiling_db, double range_db) noexcep
 // ── STFT grid ──────────────────────────────────────────────────────────────
 
 struct SpectrogramSettings {
-    int fft_length = 2048;  ///< power of two, at least 16
-    int hop = 512;          ///< at least 1
+    int fft_length = 2048; ///< power of two, at least 16
+    int hop = 512;         ///< at least 1
     Window window = Window::hann;
     FrequencyScale scale = FrequencyScale::linear;
-    double db_range = 90.0;  ///< displayed dynamic range below 0 dBFS
+    double db_range = 90.0; ///< displayed dynamic range below 0 dBFS
 };
 
 /// Checks the settings a caller is about to render with. Returns an empty
@@ -117,13 +117,13 @@ std::string validate_spectrogram_settings(const SpectrogramSettings& settings);
 /// `window_coefficients`). Silence reads `kSpectrogramFloorDb`.
 struct SpectrogramGrid {
     std::uint32_t columns = 0;
-    std::uint32_t bins = 0;  ///< fft_length / 2 + 1
+    std::uint32_t bins = 0; ///< fft_length / 2 + 1
     double sample_rate = 0.0;
     int fft_length = 0;
     int hop = 0;
-    std::uint64_t frames_total = 0;     ///< STFT frames the range yields
-    std::uint64_t frames_analyzed = 0;  ///< STFT frames actually folded in
-    std::vector<float> magnitude_db;    ///< columns * bins, column-major
+    std::uint64_t frames_total = 0;    ///< STFT frames the range yields
+    std::uint64_t frames_analyzed = 0; ///< STFT frames actually folded in
+    std::vector<float> magnitude_db;   ///< columns * bins, column-major
 
     float at(std::uint32_t column, std::uint32_t bin) const noexcept {
         return magnitude_db[static_cast<std::size_t>(column) * bins + bin];
@@ -136,8 +136,7 @@ inline constexpr float kSpectrogramFloorDb = -200.0f;
 /// given FFT length and hop: `(total - fft) / hop + 1`, or 0 when the range
 /// is shorter than one FFT. A trailing partial frame is dropped rather than
 /// zero-padded, so the image never shows a truncation edge as content.
-std::uint64_t spectrogram_frame_count(std::uint64_t total_frames, int fft_length,
-                                      int hop) noexcept;
+std::uint64_t spectrogram_frame_count(std::uint64_t total_frames, int fft_length, int hop) noexcept;
 
 /// dBFS of one FFT bin magnitude for an N-point real FFT of a window with
 /// coherent gain 1: `20 log10(2 |X| / N)`, floored at `kSpectrogramFloorDb`.
@@ -161,7 +160,9 @@ class SpectrogramBuilder {
     SpectrogramBuilder(const SpectrogramSettings& settings, double sample_rate,
                        std::uint64_t total_frames, std::uint32_t columns);
 
-    std::uint64_t expected_frames() const noexcept { return frames_total_; }
+    std::uint64_t expected_frames() const noexcept {
+        return frames_total_;
+    }
 
     void push(std::span<const float> samples);
 
@@ -204,4 +205,4 @@ RasterImage render_spectrogram_image(const SpectrogramGrid& grid,
                                      const SpectrogramImageOptions& options,
                                      const ImageChrome& chrome);
 
-}  // namespace pulp::test::audio
+} // namespace pulp::test::audio

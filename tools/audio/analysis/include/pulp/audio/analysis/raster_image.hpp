@@ -43,7 +43,9 @@ struct RasterImage {
 
     static RasterImage filled(std::uint32_t width, std::uint32_t height, Rgb8 colour);
 
-    bool empty() const noexcept { return width == 0 || height == 0 || rgba.empty(); }
+    bool empty() const noexcept {
+        return width == 0 || height == 0 || rgba.empty();
+    }
 
     /// Writes one opaque pixel. Out-of-range coordinates are ignored so
     /// callers can draw markers at the image edge without bounds bookkeeping.
@@ -65,7 +67,7 @@ struct RasterImage {
 
 inline constexpr int kGlyphWidth = 5;
 inline constexpr int kGlyphHeight = 7;
-inline constexpr int kGlyphAdvance = 6;  ///< glyph width plus one column of spacing
+inline constexpr int kGlyphAdvance = 6; ///< glyph width plus one column of spacing
 
 /// Seven row bitmaps for `c`. Characters outside printable ASCII render as
 /// the replacement box so an unexpected byte is visible rather than silent.
@@ -123,7 +125,7 @@ struct ImageChrome {
     double end_s = 0.0;
 };
 
-inline constexpr int kChromeLeftMargin = 40;    ///< room for left-axis labels
+inline constexpr int kChromeLeftMargin = 40; ///< room for left-axis labels
 inline constexpr int kChromeRightMargin = 4;
 inline constexpr int kChromeTopMargin = 4;
 inline constexpr int kChromeTimeAxisHeight = 12;
@@ -140,4 +142,4 @@ std::uint32_t chrome_image_height(std::uint32_t plot_height) noexcept;
 RasterImage compose_plot_with_chrome(const RasterImage& plot, const std::vector<AxisLabel>& left,
                                      const ImageChrome& chrome);
 
-}  // namespace pulp::test::audio
+} // namespace pulp::test::audio

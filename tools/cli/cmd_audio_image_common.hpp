@@ -31,13 +31,13 @@ inline constexpr const char* kSidecarSchema = "pulp.audio.image.v1";
 struct ImageArgs {
     std::string input;
     std::string png;
-    std::string json;  ///< sidecar path; empty means `<png>.json`
+    std::string json; ///< sidecar path; empty means `<png>.json`
     bool absolute_paths = false;
     std::optional<double> start_s;
     std::optional<double> end_s;
     std::uint32_t channel = 0;
-    std::uint32_t width = 0;   ///< plot width in pixels; 0 = verb default
-    std::uint32_t height = 0;  ///< plot height in pixels; 0 = verb default
+    std::uint32_t width = 0;  ///< plot width in pixels; 0 = verb default
+    std::uint32_t height = 0; ///< plot height in pixels; 0 = verb default
 };
 
 enum class CommonArg { not_common, consumed, error };
@@ -45,7 +45,8 @@ enum class CommonArg { not_common, consumed, error };
 /// Consumes one common flag at `args[index]` (advancing `index` past its
 /// value). `not_common` leaves `index` untouched so the verb can try its own
 /// flags; `error` has already printed the reason to stderr.
-CommonArg parse_common_arg(const std::vector<std::string>& args, std::size_t& index, ImageArgs& out);
+CommonArg parse_common_arg(const std::vector<std::string>& args, std::size_t& index,
+                           ImageArgs& out);
 
 /// Help text for the common flags, appended to each verb's usage.
 const char* common_flags_help();
@@ -54,15 +55,17 @@ const char* common_flags_help();
 struct OpenedInput {
     pulp::audio::MemoryMappedAudioReader reader;
     pulp::audio::AudioFileInfo info;
-    std::string path;          ///< input path as given
-    std::string decoder_name;  ///< registry reader's `format_name()`
-    std::string sha256;        ///< hex SHA-256 of the input bytes
+    std::string path;         ///< input path as given
+    std::string decoder_name; ///< registry reader's `format_name()`
+    std::string sha256;       ///< hex SHA-256 of the input bytes
     std::uint64_t start_frame = 0;
-    std::uint64_t end_frame = 0;  ///< exclusive
+    std::uint64_t end_frame = 0; ///< exclusive
     double start_s = 0.0;
     double end_s = 0.0;
 
-    std::uint64_t range_frames() const noexcept { return end_frame - start_frame; }
+    std::uint64_t range_frames() const noexcept {
+        return end_frame - start_frame;
+    }
 };
 
 /// Validates the common arguments, opens the input, hashes it and resolves
@@ -73,7 +76,7 @@ int open_input(const ImageArgs& args, OpenedInput& out);
 
 /// What the streamed pass observed over the rendered range.
 struct StreamStats {
-    double peak_abs = 0.0;  ///< max |sample| over the range, unclamped
+    double peak_abs = 0.0; ///< max |sample| over the range, unclamped
     std::uint64_t frames = 0;
 };
 
@@ -85,8 +88,8 @@ bool stream_channel(OpenedInput& input, std::uint32_t channel, std::uint64_t win
 
 /// Settings and image facts the verb contributes to the sidecar.
 struct SidecarFields {
-    std::string verb;           ///< "spectrogram" or "waveform"
-    std::string settings_json;  ///< a serialized JSON object
+    std::string verb;          ///< "spectrogram" or "waveform"
+    std::string settings_json; ///< a serialized JSON object
     std::uint32_t image_width = 0;
     std::uint32_t image_height = 0;
 };
@@ -109,4 +112,4 @@ std::string sidecar_path(const ImageArgs& args);
 int write_outputs(const ImageArgs& args, const pulp::test::audio::RasterImage& image,
                   const std::string& sidecar_json);
 
-}  // namespace pulp::cli::audio_image
+} // namespace pulp::cli::audio_image

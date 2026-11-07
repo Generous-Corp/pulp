@@ -35,7 +35,9 @@ struct WaveformColumns {
     std::vector<float> max;
     std::vector<std::uint8_t> clipped;
 
-    std::uint32_t width() const noexcept { return static_cast<std::uint32_t>(min.size()); }
+    std::uint32_t width() const noexcept {
+        return static_cast<std::uint32_t>(min.size());
+    }
 };
 
 /// True when the peak touches full scale in either direction. `AudioPeak`
@@ -67,7 +69,8 @@ WaveformColumns columns_from_overview(const pulp::audio::WaveformOverview& overv
 /// share `samples_per_peak` and channel count; this is how a range longer
 /// than memory is assembled from overviews built on consecutive windows.
 /// Returns an empty level on a mismatch.
-pulp::audio::OverviewLevel concatenate_levels(const std::vector<pulp::audio::OverviewLevel>& chunks);
+pulp::audio::OverviewLevel
+concatenate_levels(const std::vector<pulp::audio::OverviewLevel>& chunks);
 
 struct WaveformImageOptions {
     std::uint32_t plot_height = 160;
@@ -82,13 +85,14 @@ std::vector<AxisLabel> amplitude_axis_labels();
 /// Plot pixels only: width = column count, height = `plot_height`. Zero sits
 /// on the centre row; each column is a vertical bar from min to max, and a
 /// clipped column gets a red marker across the top and bottom edge.
-RasterImage render_waveform_plot(const WaveformColumns& columns, const WaveformImageOptions& options);
+RasterImage render_waveform_plot(const WaveformColumns& columns,
+                                 const WaveformImageOptions& options);
 
 /// Plot plus amplitude labels, time ticks and footer.
-RasterImage render_waveform_image(const WaveformColumns& columns, const WaveformImageOptions& options,
-                                  const ImageChrome& chrome);
+RasterImage render_waveform_image(const WaveformColumns& columns,
+                                  const WaveformImageOptions& options, const ImageChrome& chrome);
 
 /// Colour of the clip marker, exposed so a test can look for it.
 Rgb8 waveform_clip_marker_colour() noexcept;
 
-}  // namespace pulp::test::audio
+} // namespace pulp::test::audio

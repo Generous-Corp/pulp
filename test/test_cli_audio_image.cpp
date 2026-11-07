@@ -63,8 +63,8 @@ fs::path write_sparse_silent_wav(const fs::path& path, uint32_t sample_rate, uin
     put32(4, static_cast<uint32_t>(36 + data_bytes));
     std::memcpy(header.data() + 8, "WAVEfmt ", 8);
     put32(16, 16);
-    put16(20, 1);  // PCM
-    put16(22, 1);  // mono
+    put16(20, 1); // PCM
+    put16(22, 1); // mono
     put32(24, sample_rate);
     put32(28, sample_rate * 2);
     put16(32, 2);
@@ -74,7 +74,8 @@ fs::path write_sparse_silent_wav(const fs::path& path, uint32_t sample_rate, uin
 
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     REQUIRE(out.is_open());
-    out.write(reinterpret_cast<const char*>(header.data()), static_cast<std::streamsize>(header.size()));
+    out.write(reinterpret_cast<const char*>(header.data()),
+              static_cast<std::streamsize>(header.size()));
     if (data_bytes > 0) {
         out.seekp(static_cast<std::streamoff>(44 + data_bytes - 1));
         const char zero = 0;
@@ -88,12 +89,16 @@ fs::path write_sparse_silent_wav(const fs::path& path, uint32_t sample_rate, uin
 
 struct Workspace {
     fs::path dir;
-    Workspace() : dir(unique_temp_dir("pulp-cli-audio-image")) { fs::create_directories(dir); }
+    Workspace() : dir(unique_temp_dir("pulp-cli-audio-image")) {
+        fs::create_directories(dir);
+    }
     ~Workspace() {
         std::error_code ec;
         fs::remove_all(dir, ec);
     }
-    fs::path operator/(const std::string& name) const { return dir / name; }
+    fs::path operator/(const std::string& name) const {
+        return dir / name;
+    }
 };
 
 bool has_png_signature(const fs::path& path) {
@@ -106,7 +111,8 @@ bool has_png_signature(const fs::path& path) {
 std::set<std::string> top_level_keys(const std::string& json) {
     std::set<std::string> keys;
     const std::regex key_re(R"re(\n  "([a-z_]+)": )re");
-    for (auto it = std::sregex_iterator(json.begin(), json.end(), key_re); it != std::sregex_iterator(); ++it)
+    for (auto it = std::sregex_iterator(json.begin(), json.end(), key_re);
+         it != std::sregex_iterator(); ++it)
         keys.insert((*it)[1].str());
     return keys;
 }
@@ -127,7 +133,7 @@ std::string json_string_after(const std::string& json, const std::string& key) {
     return match[1].str();
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("audio image verbs show help and refuse an empty invocation",
           "[cli][shellout][audio-image]") {
@@ -151,7 +157,8 @@ TEST_CASE("audio image verbs validate arguments before touching audio",
                                     pulp::audio::WavBitDepth::Int16);
     const std::string png = (ws / "out.png").string();
 
-    auto expect_error = [&](std::vector<std::string> args, const std::string& needle, int code = 1) {
+    auto expect_error = [&](std::vector<std::string> args, const std::string& needle,
+                            int code = 1) {
         auto r = run_pulp(args);
         INFO("args: " << args.back() << "\nstderr: " << r.stderr_output);
         CHECK(r.exit_code == code);
@@ -160,31 +167,45 @@ TEST_CASE("audio image verbs validate arguments before touching audio",
     };
 
     expect_error({"audio", "spectrogram", wav.string()}, "--png");
-    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--scale", "bark"}, "--scale");
+    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--scale", "bark"},
+                 "--scale");
     expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--hop", "0"}, "--hop");
-    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--fft", "1000"}, "power of two");
-    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--fft", "16", "--hop", "32"}, "hop");
-    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--window", "triangle"}, "--window");
-    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--db-range", "0"}, "--db-range");
-    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--start", "1", "--end", "0.5"},
-                 "--end must be greater");
-    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--start", "9"}, "past the end");
-    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--channel", "2"}, "out of range");
-    expect_error({"audio", "spectrogram", wav.string(), "--png", wav.string()}, "must not be the input");
-    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--json", png}, "must not be the PNG");
+    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--fft", "1000"},
+                 "power of two");
+    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--fft", "16", "--hop", "32"},
+                 "hop");
+    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--window", "triangle"},
+                 "--window");
+    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--db-range", "0"},
+                 "--db-range");
+    expect_error(
+        {"audio", "spectrogram", wav.string(), "--png", png, "--start", "1", "--end", "0.5"},
+        "--end must be greater");
+    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--start", "9"},
+                 "past the end");
+    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--channel", "2"},
+                 "out of range");
+    expect_error({"audio", "spectrogram", wav.string(), "--png", wav.string()},
+                 "must not be the input");
+    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--json", png},
+                 "must not be the PNG");
     expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--width", "0"}, "--width");
     expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--bogus"}, "unknown option");
-    expect_error({"audio", "spectrogram", (ws / "missing.wav").string(), "--png", png}, "not a readable file");
+    expect_error({"audio", "spectrogram", (ws / "missing.wav").string(), "--png", png},
+                 "not a readable file");
     expect_error({"audio", "waveform", wav.string(), "--png", png, "--select", "2,1"}, "--select");
-    expect_error({"audio", "waveform", wav.string(), "--png", png, "--channel", "7"}, "out of range");
+    expect_error({"audio", "waveform", wav.string(), "--png", png, "--channel", "7"},
+                 "out of range");
 
     // A PNG path whose parent is a regular file cannot be created.
     write_text(ws / "blocker", "x");
-    expect_error({"audio", "waveform", wav.string(), "--png", (ws / "blocker" / "out.png").string()},
-                 "failed to write PNG");
+    expect_error(
+        {"audio", "waveform", wav.string(), "--png", (ws / "blocker" / "out.png").string()},
+        "failed to write PNG");
 
     // Input shorter than one FFT is a refusal (2), not a crash.
-    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--fft", "65536"}, "shorter than --fft", 2);
+    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--fft", "65536"},
+                 "shorter than --fft", 2);
 
     // Empty input (a valid header declaring zero frames) is a refusal too.
     write_sparse_silent_wav(ws / "empty.wav", 48000, 0);
@@ -201,8 +222,9 @@ TEST_CASE("audio spectrogram writes a PNG and a pulp.audio.image.v1 sidecar",
                                     pulp::audio::WavBitDepth::Int16);
     const fs::path png = ws / "nested" / "spec.png";
 
-    auto r = run_pulp({"audio", "spectrogram", wav.string(), "--png", png.string(), "--scale", "mel",
-                       "--channel", "1", "--start", "0.25", "--end", "0.75", "--width", "200", "--height", "100"});
+    auto r = run_pulp({"audio", "spectrogram", wav.string(), "--png", png.string(), "--scale",
+                       "mel", "--channel", "1", "--start", "0.25", "--end", "0.75", "--width",
+                       "200", "--height", "100"});
     INFO(r.stderr_output);
     REQUIRE(r.exit_code == 0);
     REQUIRE(fs::exists(png));
@@ -212,9 +234,9 @@ TEST_CASE("audio spectrogram writes a PNG and a pulp.audio.image.v1 sidecar",
     REQUIRE(fs::exists(sidecar));
     const std::string json = read_file(sidecar);
 
-    const std::set<std::string> expected = {"schema",  "display_only", "verb",     "tool_version",
-                                            "input",   "decoder",      "time_range", "channel",
-                                            "settings", "image",       "true_peak"};
+    const std::set<std::string> expected = {
+        "schema",     "display_only", "verb",     "tool_version", "input",    "decoder",
+        "time_range", "channel",      "settings", "image",        "true_peak"};
     CHECK(top_level_keys(json) == expected);
     CHECK(json_string_after(json, "schema") == "pulp.audio.image.v1");
     CHECK(json.find("\"display_only\": true") != std::string::npos);
@@ -223,7 +245,7 @@ TEST_CASE("audio spectrogram writes a PNG and a pulp.audio.image.v1 sidecar",
     CHECK(json_string_after(json, "png") == "spec.png");
     CHECK(json_string_after(json, "sha256").size() == 64);
     CHECK(json_string_after(json, "name").find('/') == std::string::npos);
-    CHECK(json.find(ws.dir.string()) == std::string::npos);  // no absolute paths by default
+    CHECK(json.find(ws.dir.string()) == std::string::npos); // no absolute paths by default
     CHECK(json_number_after(json, "channel") == 1.0);
     CHECK(json_number_after(json, "start_seconds") == Catch::Approx(0.25));
     CHECK(json_number_after(json, "end_seconds") == Catch::Approx(0.75));
@@ -267,7 +289,8 @@ TEST_CASE("audio waveform reports float input above full scale without normalizi
     CHECK(json.find("\"method\": \"sample_peak\"") != std::string::npos);
 
     // The spectrogram of the same file reports the same unclamped peak.
-    auto s = run_pulp({"audio", "spectrogram", wav.string(), "--png", (ws / "hot-spec.png").string()});
+    auto s =
+        run_pulp({"audio", "spectrogram", wav.string(), "--png", (ws / "hot-spec.png").string()});
     REQUIRE(s.exit_code == 0);
     const std::string json2 = read_file(ws / "hot-spec.png.json");
     CHECK(json_number_after(json2, "linear") == Catch::Approx(amplitude).margin(0.002));
@@ -280,7 +303,7 @@ TEST_CASE("audio image verbs render a 70-minute WAV that decode_wav refuses",
         SKIP("pulp not built");
     Workspace ws;
     constexpr uint32_t kRate = 48000;
-    constexpr uint64_t kFrames = 70ull * 60 * kRate;  // 201,600,000 > the 100,000,000 decode cap
+    constexpr uint64_t kFrames = 70ull * 60 * kRate; // 201,600,000 > the 100,000,000 decode cap
     const auto wav = write_sparse_silent_wav(ws / "seventy-minutes.wav", kRate, kFrames);
 
     // Control: the whole-file decoder refuses this layout, so a render can
@@ -295,7 +318,8 @@ TEST_CASE("audio image verbs render a 70-minute WAV that decode_wav refuses",
         CHECK_FALSE(pulp::audio::decode_wav(bytes).has_value());
     }
 
-    auto wave = run_pulp({"audio", "waveform", wav.string(), "--png", (ws / "long.png").string()}, 120000);
+    auto wave =
+        run_pulp({"audio", "waveform", wav.string(), "--png", (ws / "long.png").string()}, 120000);
     INFO(wave.stderr_output);
     REQUIRE(wave.exit_code == 0);
     const std::string json = read_file(ws / "long.png.json");
@@ -304,8 +328,9 @@ TEST_CASE("audio image verbs render a 70-minute WAV that decode_wav refuses",
     CHECK(json.find("\"clipped\": false") != std::string::npos);
 
     // A one-minute range past the decode cap renders a spectrogram.
-    auto spec = run_pulp({"audio", "spectrogram", wav.string(), "--png", (ws / "long-spec.png").string(),
-                          "--start", "3600", "--end", "3660"}, 120000);
+    auto spec = run_pulp({"audio", "spectrogram", wav.string(), "--png",
+                          (ws / "long-spec.png").string(), "--start", "3600", "--end", "3660"},
+                         120000);
     INFO(spec.stderr_output);
     REQUIRE(spec.exit_code == 0);
     const std::string json2 = read_file(ws / "long-spec.png.json");

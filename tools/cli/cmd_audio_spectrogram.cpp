@@ -58,7 +58,7 @@ std::string format_db(double value) {
     return buffer;
 }
 
-}  // namespace
+} // namespace
 
 int cmd_audio_spectrogram(const std::vector<std::string>& args) {
     if (args.empty() || args[0] == "--help" || args[0] == "-h") {
@@ -149,8 +149,8 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
     if (const int rc = img::open_input(common, input); rc != 0)
         return rc;
 
-    const std::uint64_t frames = ana::spectrogram_frame_count(input.range_frames(), settings.fft_length,
-                                                              settings.hop);
+    const std::uint64_t frames =
+        ana::spectrogram_frame_count(input.range_frames(), settings.fft_length, settings.hop);
     if (frames == 0) {
         std::cerr << "Error: the range holds " << input.range_frames()
                   << " frames, shorter than --fft " << settings.fft_length
@@ -164,8 +164,9 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
     ana::SpectrogramBuilder builder(settings, static_cast<double>(input.info.sample_rate),
                                     input.range_frames(), plot_width);
     img::StreamStats stats;
-    if (!img::stream_channel(input, common.channel, kStreamWindowFrames,
-                             [&](std::span<const float> window) { builder.push(window); }, stats))
+    if (!img::stream_channel(
+            input, common.channel, kStreamWindowFrames,
+            [&](std::span<const float> window) { builder.push(window); }, stats))
         return 1;
     const ana::SpectrogramGrid grid = builder.finish();
 
@@ -190,12 +191,10 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
                   << ", \"window\": " << pulp::cli::json_string(ana::window_name(settings.window))
                   << ", \"scale\": "
                   << pulp::cli::json_string(std::string(ana::frequency_scale_name(settings.scale)))
-                  << ", \"db_range\": " << format_db(settings.db_range)
-                  << ", \"db_ceiling\": 0"
+                  << ", \"db_range\": " << format_db(settings.db_range) << ", \"db_ceiling\": 0"
                   << ", \"mel_convention\": \"htk\""
                   << ", \"column_reduction\": \"peak_hold\""
-                  << ", \"stft_frames\": " << grid.frames_analyzed
-                  << ", \"bins\": " << grid.bins
+                  << ", \"stft_frames\": " << grid.frames_analyzed << ", \"bins\": " << grid.bins
                   << ", \"plot_width\": " << plot_width << ", \"plot_height\": " << plot_height
                   << "}";
 

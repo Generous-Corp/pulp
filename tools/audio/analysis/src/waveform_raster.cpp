@@ -46,7 +46,7 @@ WaveformColumns columns_from_level(const OverviewLevel& level, std::uint32_t cha
         const std::uint64_t begin = static_cast<std::uint64_t>(column) * peaks / width;
         std::uint64_t end = static_cast<std::uint64_t>(column + 1) * peaks / width;
         if (end <= begin)
-            end = begin + 1;  // fewer peaks than columns: repeat the peak this column falls on
+            end = begin + 1; // fewer peaks than columns: repeat the peak this column falls on
         float lo = 1.0f;
         float hi = -1.0f;
         bool clipped = false;
@@ -90,7 +90,8 @@ OverviewLevel concatenate_levels(const std::vector<OverviewLevel>& chunks) {
         for (std::size_t ch = 0; ch < channels; ++ch) {
             if (chunk.peaks[ch].size() != chunk.peaks_per_channel)
                 return {};
-            out.peaks[ch].insert(out.peaks[ch].end(), chunk.peaks[ch].begin(), chunk.peaks[ch].end());
+            out.peaks[ch].insert(out.peaks[ch].end(), chunk.peaks[ch].begin(),
+                                 chunk.peaks[ch].end());
         }
         out.peaks_per_channel += chunk.peaks_per_channel;
     }
@@ -99,7 +100,7 @@ OverviewLevel concatenate_levels(const std::vector<OverviewLevel>& chunks) {
 
 std::vector<AxisLabel> amplitude_axis_labels() {
     return {
-        AxisLabel{1.0, "+1"},  AxisLabel{0.75, "+.5"}, AxisLabel{0.5, "0"},
+        AxisLabel{1.0, "+1"},   AxisLabel{0.75, "+.5"}, AxisLabel{0.5, "0"},
         AxisLabel{0.25, "-.5"}, AxisLabel{0.0, "-1"},
     };
 }
@@ -108,7 +109,8 @@ Rgb8 waveform_clip_marker_colour() noexcept {
     return Rgb8{255, 64, 64};
 }
 
-RasterImage render_waveform_plot(const WaveformColumns& columns, const WaveformImageOptions& options) {
+RasterImage render_waveform_plot(const WaveformColumns& columns,
+                                 const WaveformImageOptions& options) {
     constexpr Rgb8 kBackground{18, 18, 22};
     constexpr Rgb8 kSelection{34, 46, 64};
     constexpr Rgb8 kGrid{40, 46, 56};
@@ -146,20 +148,22 @@ RasterImage render_waveform_plot(const WaveformColumns& columns, const WaveformI
         int bottom = row_for(columns.min[column]);
         if (bottom < top)
             std::swap(top, bottom);
-        plot.fill_rect(static_cast<int>(column), top, static_cast<int>(column) + 1, bottom + 1, kWave);
+        plot.fill_rect(static_cast<int>(column), top, static_cast<int>(column) + 1, bottom + 1,
+                       kWave);
         if (columns.clipped[column]) {
             const Rgb8 marker = waveform_clip_marker_colour();
             plot.fill_rect(static_cast<int>(column), 0, static_cast<int>(column) + 1, 3, marker);
-            plot.fill_rect(static_cast<int>(column), h - 3, static_cast<int>(column) + 1, h, marker);
+            plot.fill_rect(static_cast<int>(column), h - 3, static_cast<int>(column) + 1, h,
+                           marker);
         }
     }
     return plot;
 }
 
-RasterImage render_waveform_image(const WaveformColumns& columns, const WaveformImageOptions& options,
-                                  const ImageChrome& chrome) {
+RasterImage render_waveform_image(const WaveformColumns& columns,
+                                  const WaveformImageOptions& options, const ImageChrome& chrome) {
     return compose_plot_with_chrome(render_waveform_plot(columns, options), amplitude_axis_labels(),
                                     chrome);
 }
 
-}  // namespace pulp::test::audio
+} // namespace pulp::test::audio

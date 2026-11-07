@@ -75,7 +75,7 @@ std::string platform_name() {
 #endif
 }
 
-}  // namespace
+} // namespace
 
 const char* common_flags_help() {
     return "  --png <out.png>          Output image (required)\n"
@@ -88,7 +88,8 @@ const char* common_flags_help() {
            "  --absolute-paths         Write full paths into the sidecar instead of basenames\n";
 }
 
-CommonArg parse_common_arg(const std::vector<std::string>& args, std::size_t& index, ImageArgs& out) {
+CommonArg parse_common_arg(const std::vector<std::string>& args, std::size_t& index,
+                           ImageArgs& out) {
     const std::string& arg = args[index];
     auto take_value = [&](const char* flag, std::string& value) {
         if (index + 1 >= args.size()) {
@@ -130,7 +131,7 @@ CommonArg parse_common_arg(const std::vector<std::string>& args, std::size_t& in
         if (!take_value("--channel", value))
             return CommonArg::error;
         return parse_u32_arg(value, "--channel", out.channel, false) ? CommonArg::consumed
-                                                                       : CommonArg::error;
+                                                                     : CommonArg::error;
     }
     if (arg == "--width" || arg == "--height") {
         if (!take_value(arg.c_str(), value))
@@ -255,7 +256,8 @@ bool stream_channel(OpenedInput& input, std::uint32_t channel, std::uint64_t win
     // read_frames fills the first N channels, so N buffers are needed to reach
     // channel N-1. Windows bound the cost regardless of file length.
     const std::uint32_t buffers = channel + 1;
-    std::vector<std::vector<float>> storage(buffers, std::vector<float>(static_cast<std::size_t>(window_frames)));
+    std::vector<std::vector<float>> storage(
+        buffers, std::vector<float>(static_cast<std::size_t>(window_frames)));
     std::vector<float*> pointers(buffers);
     for (std::uint32_t c = 0; c < buffers; ++c)
         pointers[c] = storage[c].data();
@@ -295,8 +297,8 @@ std::string build_sidecar_json(const ImageArgs& args, const OpenedInput& input,
                                const SidecarFields& fields, const StreamStats& stats) {
     std::ostringstream json;
     const double sample_rate = static_cast<double>(input.info.sample_rate);
-    const double peak_dbfs =
-        stats.peak_abs > 0.0 ? 20.0 * std::log10(stats.peak_abs) : -std::numeric_limits<double>::infinity();
+    const double peak_dbfs = stats.peak_abs > 0.0 ? 20.0 * std::log10(stats.peak_abs)
+                                                  : -std::numeric_limits<double>::infinity();
 
     json << "{\n";
     json << "  \"schema\": " << json_string(kSidecarSchema) << ",\n";
@@ -383,4 +385,4 @@ int write_outputs(const ImageArgs& args, const pulp::test::audio::RasterImage& i
     return 0;
 }
 
-}  // namespace pulp::cli::audio_image
+} // namespace pulp::cli::audio_image

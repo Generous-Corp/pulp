@@ -664,7 +664,8 @@ std::string handle_audio_image(const std::string& params_json, const std::string
         if (!present(key))
             continue;
         if (verb != "spectrogram" && (std::string(key) == "fft" || std::string(key) == "hop"))
-            return arg_error(std::string("Error: ") + key + " applies only to pulp_audio_spectrogram");
+            return arg_error(std::string("Error: ") + key +
+                             " applies only to pulp_audio_spectrogram");
         const int value = extract_int(params_json, key, -1);
         const bool positive = std::string(key) != "channel";
         if (value < 0 || (positive && value == 0))
@@ -677,7 +678,8 @@ std::string handle_audio_image(const std::string& params_json, const std::string
             continue;
         const double value = extract_double(params_json, key, -1.0);
         if (!(value >= 0.0))
-            return arg_error(std::string("Error: ") + key + " must be a non-negative number of seconds");
+            return arg_error(std::string("Error: ") + key +
+                             " must be a non-negative number of seconds");
         cmd += std::string(" --") + key + " " + std::to_string(value);
     }
     if (present("db_range")) {
@@ -693,7 +695,8 @@ std::string handle_audio_image(const std::string& params_json, const std::string
         if (value.empty())
             continue;
         if (verb != "spectrogram")
-            return arg_error(std::string("Error: ") + key + " applies only to pulp_audio_spectrogram");
+            return arg_error(std::string("Error: ") + key +
+                             " applies only to pulp_audio_spectrogram");
         if (value.front() == '-')
             return arg_error(std::string("Error: ") + key + " must be a name, not an option");
         cmd += std::string(" --") + key + " " + shell_quote(value);
@@ -704,7 +707,8 @@ std::string handle_audio_image(const std::string& params_json, const std::string
 
     auto result = exec_with_status(cmd);
     if (result.failed()) {
-        std::string message = "Error: pulp audio " + verb + " exited " + std::to_string(result.status);
+        std::string message =
+            "Error: pulp audio " + verb + " exited " + std::to_string(result.status);
         if (!result.output.empty())
             message += "\n" + result.output;
         return arg_error(message);
@@ -713,8 +717,8 @@ std::string handle_audio_image(const std::string& params_json, const std::string
     const std::string sidecar_path = json_path.empty() ? png_path + ".json" : json_path;
     const auto sidecar = read_text_file(sidecar_path);
     if (sidecar.empty())
-        return arg_error("Error: pulp audio " + verb + " did not write the sidecar " + sidecar_path +
-                         (result.output.empty() ? "" : "\n" + result.output));
+        return arg_error("Error: pulp audio " + verb + " did not write the sidecar " +
+                         sidecar_path + (result.output.empty() ? "" : "\n" + result.output));
     std::string normalized;
     std::string parse_error;
     if (!normalize_structured_json(sidecar, normalized, parse_error))
@@ -726,7 +730,7 @@ std::string handle_audio_image(const std::string& params_json, const std::string
     return json_tool_payload(payload);
 }
 
-}  // namespace
+} // namespace
 
 std::string handle_audio_spectrogram(const std::string& params_json) {
     return handle_audio_image(params_json, "spectrogram");
@@ -736,4 +740,4 @@ std::string handle_audio_waveform(const std::string& params_json) {
     return handle_audio_image(params_json, "waveform");
 }
 
-}  // namespace pulp_mcp
+} // namespace pulp_mcp

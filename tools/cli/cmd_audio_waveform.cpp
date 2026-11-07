@@ -55,7 +55,7 @@ bool parse_selection(const std::string& text, double& start_s, double& end_s) {
     return true;
 }
 
-}  // namespace
+} // namespace
 
 int cmd_audio_waveform(const std::vector<std::string>& args) {
     if (args.empty() || args[0] == "--help" || args[0] == "-h") {
@@ -119,7 +119,8 @@ int cmd_audio_waveform(const std::vector<std::string>& args) {
         [&](std::span<const float> window) {
             const float* channel_ptr = window.data();
             pulp::audio::BufferView<const float> view(&channel_ptr, 1, window.size());
-            auto overview = pulp::audio::WaveformOverview::build_from_buffer_view(view, sample_rate, spp);
+            auto overview =
+                pulp::audio::WaveformOverview::build_from_buffer_view(view, sample_rate, spp);
             if (!overview.empty())
                 chunks.push_back(overview.level(0));
         },

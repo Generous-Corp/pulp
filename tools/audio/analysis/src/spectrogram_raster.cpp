@@ -16,17 +16,23 @@ namespace pulp::test::audio {
 
 std::string_view frequency_scale_name(FrequencyScale scale) noexcept {
     switch (scale) {
-    case FrequencyScale::linear: return "linear";
-    case FrequencyScale::log: return "log";
-    case FrequencyScale::mel: return "mel";
+    case FrequencyScale::linear:
+        return "linear";
+    case FrequencyScale::log:
+        return "log";
+    case FrequencyScale::mel:
+        return "mel";
     }
     return "linear";
 }
 
 std::optional<FrequencyScale> parse_frequency_scale(std::string_view text) noexcept {
-    if (text == "linear") return FrequencyScale::linear;
-    if (text == "log") return FrequencyScale::log;
-    if (text == "mel") return FrequencyScale::mel;
+    if (text == "linear")
+        return FrequencyScale::linear;
+    if (text == "log")
+        return FrequencyScale::log;
+    if (text == "mel")
+        return FrequencyScale::mel;
     return std::nullopt;
 }
 
@@ -42,23 +48,29 @@ namespace {
 
 double axis_transform(double hz, FrequencyScale scale) noexcept {
     switch (scale) {
-    case FrequencyScale::linear: return hz;
-    case FrequencyScale::log: return std::log2(std::max(hz, std::numeric_limits<double>::min()));
-    case FrequencyScale::mel: return hz_to_mel(std::max(hz, 0.0));
+    case FrequencyScale::linear:
+        return hz;
+    case FrequencyScale::log:
+        return std::log2(std::max(hz, std::numeric_limits<double>::min()));
+    case FrequencyScale::mel:
+        return hz_to_mel(std::max(hz, 0.0));
     }
     return hz;
 }
 
 double axis_inverse(double value, FrequencyScale scale) noexcept {
     switch (scale) {
-    case FrequencyScale::linear: return value;
-    case FrequencyScale::log: return std::exp2(value);
-    case FrequencyScale::mel: return mel_to_hz(value);
+    case FrequencyScale::linear:
+        return value;
+    case FrequencyScale::log:
+        return std::exp2(value);
+    case FrequencyScale::mel:
+        return mel_to_hz(value);
     }
     return value;
 }
 
-}  // namespace
+} // namespace
 
 double frequency_to_unit(double hz, double f_lo, double f_hi, FrequencyScale scale) noexcept {
     const double lo = axis_transform(f_lo, scale);
@@ -110,8 +122,10 @@ std::vector<BinBand> row_bin_bands(std::uint32_t bins, double sample_rate, int f
         const double last_raw = std::ceil(hz_top / bin_hz - 1e-9) - 1.0;
         BinBand band;
         if (last_raw >= first_raw) {
-            band.first = static_cast<std::uint32_t>(std::clamp<double>(first_raw, first_bin, last_bin));
-            band.last = static_cast<std::uint32_t>(std::clamp<double>(last_raw, first_bin, last_bin));
+            band.first =
+                static_cast<std::uint32_t>(std::clamp<double>(first_raw, first_bin, last_bin));
+            band.last =
+                static_cast<std::uint32_t>(std::clamp<double>(last_raw, first_bin, last_bin));
         } else {
             // Row narrower than one bin: snap to the nearest bin centre.
             band.first = band.last = bin_for_frequency(0.5 * (hz_bottom + hz_top));
@@ -137,8 +151,8 @@ std::vector<AxisLabel> frequency_axis_labels(double sample_rate, int fft_length,
     auto add = [&](double hz) {
         if (hz < f_lo - 1e-9 || hz > f_hi + 1e-9)
             return;
-        labels.push_back(AxisLabel{frequency_to_unit(hz, f_lo, f_hi, scale),
-                                   format_frequency_label(hz)});
+        labels.push_back(
+            AxisLabel{frequency_to_unit(hz, f_lo, f_hi, scale), format_frequency_label(hz)});
     };
     if (scale == FrequencyScale::linear) {
         const int max_ticks = std::max(2, static_cast<int>(rows) / 32);
@@ -171,13 +185,15 @@ Rgb8 spectrogram_palette(double t) noexcept {
     if (t > 1.0)
         t = 1.0;
     const double scaled = t * static_cast<double>(kStops.size() - 1);
-    const std::size_t index = std::min<std::size_t>(static_cast<std::size_t>(scaled), kStops.size() - 2);
+    const std::size_t index =
+        std::min<std::size_t>(static_cast<std::size_t>(scaled), kStops.size() - 2);
     const double frac = scaled - static_cast<double>(index);
     const auto& a = kStops[index];
     const auto& b = kStops[index + 1];
     auto mix = [&](int channel) {
-        const double value = a[static_cast<std::size_t>(channel)] +
-                             (b[static_cast<std::size_t>(channel)] - a[static_cast<std::size_t>(channel)]) * frac;
+        const double value =
+            a[static_cast<std::size_t>(channel)] +
+            (b[static_cast<std::size_t>(channel)] - a[static_cast<std::size_t>(channel)]) * frac;
         return static_cast<std::uint8_t>(std::clamp(std::lround(value), 0L, 255L));
     };
     return Rgb8{mix(0), mix(1), mix(2)};
@@ -225,7 +241,8 @@ float bin_magnitude_dbfs(double magnitude, int fft_length) noexcept {
 
 SpectrogramBuilder::SpectrogramBuilder(const SpectrogramSettings& settings, double sample_rate,
                                        std::uint64_t total_frames, std::uint32_t columns)
-    : settings_(settings), sample_rate_(sample_rate), columns_(std::max<std::uint32_t>(columns, 1)) {
+    : settings_(settings), sample_rate_(sample_rate),
+      columns_(std::max<std::uint32_t>(columns, 1)) {
     frames_total_ = spectrogram_frame_count(total_frames, settings_.fft_length, settings_.hop);
     bins_ = static_cast<std::uint32_t>(settings_.fft_length / 2 + 1);
     window_ = window_coefficients(settings_.window, settings_.fft_length);
@@ -253,9 +270,8 @@ void SpectrogramBuilder::analyze_frame(const float* frame) {
     std::vector<std::complex<double>> spectrum(static_cast<std::size_t>(bins_));
     fft.forward_real_half(segment_.data(), spectrum.data());
 
-    const std::uint32_t column = static_cast<std::uint32_t>(
-        std::min<std::uint64_t>(frames_done_ * columns_ / std::max<std::uint64_t>(frames_total_, 1),
-                                columns_ - 1));
+    const std::uint32_t column = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+        frames_done_ * columns_ / std::max<std::uint64_t>(frames_total_, 1), columns_ - 1));
     column_touched_[column] = 1;
     float* dst = grid_.magnitude_db.data() + static_cast<std::size_t>(column) * bins_;
     for (std::uint32_t bin = 0; bin < bins_; ++bin) {
@@ -317,11 +333,12 @@ SpectrogramGrid SpectrogramBuilder::finish() {
 
 RasterImage render_spectrogram_plot(const SpectrogramGrid& grid,
                                     const SpectrogramImageOptions& options) {
-    RasterImage plot = RasterImage::filled(grid.columns, options.plot_height, spectrogram_palette(0.0));
+    RasterImage plot =
+        RasterImage::filled(grid.columns, options.plot_height, spectrogram_palette(0.0));
     if (grid.columns == 0 || grid.bins == 0 || options.plot_height == 0)
         return plot;
-    const auto bands =
-        row_bin_bands(grid.bins, grid.sample_rate, grid.fft_length, options.plot_height, options.scale);
+    const auto bands = row_bin_bands(grid.bins, grid.sample_rate, grid.fft_length,
+                                     options.plot_height, options.scale);
     for (std::uint32_t row = 0; row < options.plot_height; ++row) {
         const BinBand band = bands[row];
         for (std::uint32_t column = 0; column < grid.columns; ++column) {
@@ -339,9 +356,9 @@ RasterImage render_spectrogram_image(const SpectrogramGrid& grid,
                                      const SpectrogramImageOptions& options,
                                      const ImageChrome& chrome) {
     const RasterImage plot = render_spectrogram_plot(grid, options);
-    const auto labels =
-        frequency_axis_labels(grid.sample_rate, grid.fft_length, options.scale, options.plot_height);
+    const auto labels = frequency_axis_labels(grid.sample_rate, grid.fft_length, options.scale,
+                                              options.plot_height);
     return compose_plot_with_chrome(plot, labels, chrome);
 }
 
-}  // namespace pulp::test::audio
+} // namespace pulp::test::audio

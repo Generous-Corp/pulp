@@ -44,18 +44,20 @@ namespace {
 std::vector<float> sine(double hz, double amplitude, double sample_rate, std::size_t frames) {
     std::vector<float> out(frames);
     for (std::size_t i = 0; i < frames; ++i)
-        out[i] = static_cast<float>(amplitude *
-                                    std::sin(2.0 * std::numbers::pi * hz * static_cast<double>(i) / sample_rate));
+        out[i] = static_cast<float>(amplitude * std::sin(2.0 * std::numbers::pi * hz *
+                                                         static_cast<double>(i) / sample_rate));
     return out;
 }
 
 // Linear chirp from f0 to f1 over the buffer.
-std::vector<float> chirp(double f0, double f1, double amplitude, double sample_rate, std::size_t frames) {
+std::vector<float> chirp(double f0, double f1, double amplitude, double sample_rate,
+                         std::size_t frames) {
     std::vector<float> out(frames);
     const double duration = static_cast<double>(frames) / sample_rate;
     for (std::size_t i = 0; i < frames; ++i) {
         const double t = static_cast<double>(i) / sample_rate;
-        const double phase = 2.0 * std::numbers::pi * (f0 * t + (f1 - f0) * t * t / (2.0 * duration));
+        const double phase =
+            2.0 * std::numbers::pi * (f0 * t + (f1 - f0) * t * t / (2.0 * duration));
         out[i] = static_cast<float>(amplitude * std::sin(phase));
     }
     return out;
@@ -91,7 +93,8 @@ void check_against_golden(const RasterImage& image, const std::string& name) {
         REQUIRE_FALSE(png.empty());
         fs::create_directories(path.parent_path());
         std::ofstream out(path, std::ios::binary);
-        out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+        out.write(reinterpret_cast<const char*>(png.data()),
+                  static_cast<std::streamsize>(png.size()));
         REQUIRE(out.good());
         SUCCEED("wrote golden " + path.string());
         return;
@@ -112,7 +115,8 @@ void check_against_golden(const RasterImage& image, const std::string& name) {
     for (std::size_t i = 0; i < golden.size(); i += 4) {
         bool differs = false;
         for (std::size_t c = 0; c < 3; ++c) {
-            const int delta = std::abs(static_cast<int>(golden[i + c]) - static_cast<int>(image.rgba[i + c]));
+            const int delta =
+                std::abs(static_cast<int>(golden[i + c]) - static_cast<int>(image.rgba[i + c]));
             max_delta = std::max(max_delta, delta);
             differs = differs || delta != 0;
         }
@@ -128,7 +132,7 @@ void check_against_golden(const RasterImage& image, const std::string& name) {
 #endif
 }
 
-}  // namespace
+} // namespace
 
 // ── Palette ────────────────────────────────────────────────────────────────
 
@@ -150,9 +154,9 @@ TEST_CASE("db_to_palette_unit maps the display window onto [0, 1]", "[audio][ima
     CHECK(db_to_palette_unit(0.0, 0.0, 90.0) == Approx(1.0));
     CHECK(db_to_palette_unit(-90.0, 0.0, 90.0) == Approx(0.0));
     CHECK(db_to_palette_unit(-45.0, 0.0, 90.0) == Approx(0.5));
-    CHECK(db_to_palette_unit(+12.0, 0.0, 90.0) == Approx(1.0));   // above ceiling clamps
-    CHECK(db_to_palette_unit(-200.0, 0.0, 90.0) == Approx(0.0));  // below floor clamps
-    CHECK(db_to_palette_unit(-10.0, 0.0, 0.0) == Approx(0.0));    // degenerate range
+    CHECK(db_to_palette_unit(+12.0, 0.0, 90.0) == Approx(1.0));  // above ceiling clamps
+    CHECK(db_to_palette_unit(-200.0, 0.0, 90.0) == Approx(0.0)); // below floor clamps
+    CHECK(db_to_palette_unit(-10.0, 0.0, 0.0) == Approx(0.0));   // degenerate range
 }
 
 // ── Frequency axis ─────────────────────────────────────────────────────────
@@ -194,7 +198,8 @@ TEST_CASE("row_bin_bands covers every bin exactly once in order", "[audio][image
                 const int fft = 1024;
                 const std::uint32_t bins = fft / 2 + 1;
                 const auto bands = row_bin_bands(bins, sample_rate, fft, rows, scale);
-                INFO("scale " << frequency_scale_name(scale) << " rows " << rows << " sr " << sample_rate);
+                INFO("scale " << frequency_scale_name(scale) << " rows " << rows << " sr "
+                              << sample_rate);
                 REQUIRE(bands.size() == rows);
                 const std::uint32_t first_bin = scale == FrequencyScale::log ? 1u : 0u;
                 CHECK(bands.front().last == bins - 1);
@@ -304,7 +309,7 @@ TEST_CASE("spectrogram frame count and bin dBFS", "[audio][image][stft]") {
     CHECK(spectrogram_frame_count(100, 0, 128) == 0);
     CHECK(bin_magnitude_dbfs(512.0, 1024) == Approx(0.0).margin(1e-6));
     CHECK(bin_magnitude_dbfs(0.0, 1024) == kSpectrogramFloorDb);
-    CHECK(validate_spectrogram_settings({}) .empty());
+    CHECK(validate_spectrogram_settings({}).empty());
     SpectrogramSettings bad;
     bad.fft_length = 1000;
     CHECK(validate_spectrogram_settings(bad) == "fft length must be a power of two");
@@ -319,7 +324,8 @@ TEST_CASE("spectrogram frame count and bin dBFS", "[audio][image][stft]") {
     CHECK_FALSE(validate_spectrogram_settings(bad).empty());
 }
 
-TEST_CASE("SpectrogramBuilder reads a full-scale tone at 0 dBFS in its bin", "[audio][image][stft]") {
+TEST_CASE("SpectrogramBuilder reads a full-scale tone at 0 dBFS in its bin",
+          "[audio][image][stft]") {
     const double sample_rate = 48000.0;
     SpectrogramSettings settings;
     settings.fft_length = 1024;
@@ -350,7 +356,8 @@ TEST_CASE("SpectrogramBuilder reads a full-scale tone at 0 dBFS in its bin", "[a
     }
 }
 
-TEST_CASE("SpectrogramBuilder is independent of how the samples are chunked", "[audio][image][stft]") {
+TEST_CASE("SpectrogramBuilder is independent of how the samples are chunked",
+          "[audio][image][stft]") {
     const double sample_rate = 44100.0;
     SpectrogramSettings settings;
     settings.fft_length = 512;
@@ -369,7 +376,7 @@ TEST_CASE("SpectrogramBuilder is independent of how the samples are chunked", "[
         const std::size_t count = std::min(step, samples.size() - offset);
         chunked.push(std::span<const float>(samples.data() + offset, count));
         offset += count;
-        step = step * 3 + 7;  // irregular block sizes straddle frame boundaries
+        step = step * 3 + 7; // irregular block sizes straddle frame boundaries
     }
     const SpectrogramGrid b = chunked.finish();
     REQUIRE(a.magnitude_db.size() == b.magnitude_db.size());
@@ -381,7 +388,7 @@ TEST_CASE("SpectrogramBuilder fills columns no frame reached", "[audio][image][s
     SpectrogramSettings settings;
     settings.fft_length = 256;
     settings.hop = 256;
-    const auto samples = sine(2000.0, 0.5, 16000.0, 1024);  // four frames, many columns
+    const auto samples = sine(2000.0, 0.5, 16000.0, 1024); // four frames, many columns
     SpectrogramBuilder builder(settings, 16000.0, samples.size(), 40);
     builder.push(samples);
     const SpectrogramGrid grid = builder.finish();
@@ -395,7 +402,8 @@ TEST_CASE("SpectrogramBuilder fills columns no frame reached", "[audio][image][s
     }
 }
 
-TEST_CASE("spectrogram plot paints the tone row bright and the rest dark", "[audio][image][render]") {
+TEST_CASE("spectrogram plot paints the tone row bright and the rest dark",
+          "[audio][image][render]") {
     const double sample_rate = 48000.0;
     SpectrogramSettings settings;
     settings.fft_length = 512;
@@ -420,7 +428,8 @@ TEST_CASE("spectrogram plot paints the tone row bright and the rest dark", "[aud
 TEST_CASE("clip detection and base resolution choice", "[audio][image][waveform]") {
     CHECK(peak_is_clipped(pulp::audio::AudioPeak::from_range(-0.2f, 1.0f)));
     CHECK(peak_is_clipped(pulp::audio::AudioPeak::from_range(-1.0f, 0.1f)));
-    CHECK(peak_is_clipped(pulp::audio::AudioPeak::from_range(-0.5f, 1.7f)));  // clamps, still clipped
+    CHECK(
+        peak_is_clipped(pulp::audio::AudioPeak::from_range(-0.5f, 1.7f))); // clamps, still clipped
     CHECK_FALSE(peak_is_clipped(pulp::audio::AudioPeak::from_range(-0.99f, 0.99f)));
     CHECK(choose_samples_per_peak(96000, 1024) == 64);
     CHECK(choose_samples_per_peak(10, 1024) == 1);
@@ -458,7 +467,8 @@ TEST_CASE("columns_from_level reduces, repeats and folds channels", "[audio][ima
         }
     }
     SECTION("all-channels fold takes the outer envelope") {
-        const auto columns = columns_from_level(level, pulp::audio::WaveformOverview::kAllChannels, 8);
+        const auto columns =
+            columns_from_level(level, pulp::audio::WaveformOverview::kAllChannels, 8);
         CHECK(columns.max[0] == Approx(0.5f).margin(0.01));
         CHECK(columns.max[7] == Approx(1.0f));
         CHECK(columns.clipped[7] == 1);
@@ -500,7 +510,8 @@ TEST_CASE("columns_from_overview selects a level and concatenate_levels stitches
     CHECK(concatenate_levels({a.level(0), mismatched}).peaks_per_channel == 0);
 }
 
-TEST_CASE("waveform plot marks clipped columns and shades the selection", "[audio][image][render]") {
+TEST_CASE("waveform plot marks clipped columns and shades the selection",
+          "[audio][image][render]") {
     WaveformColumns columns;
     columns.min = {-0.5f, -1.0f, -0.2f, 0.0f};
     columns.max = {0.5f, 1.0f, 0.2f, 0.0f};
@@ -532,7 +543,8 @@ TEST_CASE("golden: 1 kHz tone spectrogram", "[audio][image][golden]") {
     SpectrogramImageOptions options;
     options.plot_height = 128;
     ImageChrome chrome;
-    chrome.footer = "tone-1k.wav  sha256:synthetic000  fft 512 hop 128 hann linear 90dB ch0  pulp test";
+    chrome.footer =
+        "tone-1k.wav  sha256:synthetic000  fft 512 hop 128 hann linear 90dB ch0  pulp test";
     chrome.start_s = 0.0;
     chrome.end_s = 0.5;
     check_against_golden(render_spectrogram_image(builder.finish(), options, chrome),
@@ -575,5 +587,6 @@ TEST_CASE("golden: waveform with a clipped burst", "[audio][image][golden]") {
     chrome.footer = "burst.wav  sha256:synthetic000  spp 64 ch0 CLIP  pulp test";
     chrome.start_s = 0.0;
     chrome.end_s = 0.5;
-    check_against_golden(render_waveform_image(columns, options, chrome), "waveform-clipped-burst.png");
+    check_against_golden(render_waveform_image(columns, options, chrome),
+                         "waveform-clipped-burst.png");
 }
