@@ -439,6 +439,10 @@ void apply_pointer(MouseEvent& e, const View::SimulatedPointer& p) {
 
 }  // namespace
 
+bool View::simulate_modifier_keys(Modifiers modifiers) {
+    return deliver_modifier_keys_changed(*this, modifiers);
+}
+
 void View::simulate_click(Point root_pos) {
     simulate_click(root_pos, SimulatedPointer{});
 }

@@ -473,6 +473,14 @@ public:
     /// Key event with modifiers and up/down state.
     /// Return true if handled (prevents propagation to parent).
     virtual bool on_key_event(const KeyEvent& event) { (void)event; return false; }
+    /// The set of held modifier keys changed (Shift, Ctrl, Alt, Meta/Cmd
+    /// pressed or released) with no other key involved. `modifiers` is the full
+    /// set now held, not a delta. Delivered to the focused view and to any view
+    /// currently captured by a pointer press, so a drag can switch to fine
+    /// adjustment when Shift goes down after the drag began. Disabled views are
+    /// skipped. Hosts report changes through `deliver_modifier_keys_changed`
+    /// in pointer_dispatch.hpp.
+    virtual void on_modifier_keys_changed(Modifiers modifiers) { (void)modifiers; }
     /// Text input from keyboard/IME (separate from key events).
     virtual void on_text_input(const TextInputEvent& event) { (void)event; }
     /// Called when this view gains or loses focus.
@@ -638,6 +646,10 @@ public:
         MouseButton button = MouseButton::left;
         int pointer_id = 0;
     };
+
+    /// Headless equivalent of a platform modifier-key notification. `this`
+    /// must be the tree root. See `deliver_modifier_keys_changed`.
+    bool simulate_modifier_keys(Modifiers modifiers);
 
     // Dispatch a synthetic click to the deepest view at the given point
     void simulate_click(Point root_pos);
@@ -1680,6 +1692,10 @@ public:
         /// time. Which claims nest and which replace is decided in
         /// `claim_overlay()`.
         std::vector<View*> overlay_stack;
+        /// View each pointer's press landed on, keyed by pointer id, from the
+        /// press until its release or cancel. Lets modifier-key changes reach
+        /// the view a drag is captured by without every host tracking it.
+        std::vector<std::pair<int, ViewCapture>> pressed_targets;
         /// Instance id of the trigger the latest press reached (0: none); a
         /// claim with no anchor of its own adopts it. See `set_overlay_anchor`.
         std::uint64_t pending_overlay_opener = 0;

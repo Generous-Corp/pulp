@@ -1007,6 +1007,18 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
     }
 }
 
+// A modifier key went down or up with no other key. Tell the focused view and
+// any view a pointer press is captured by, so Shift pressed mid-drag takes
+// effect without the pointer moving.
+- (void)flagsChanged:(NSEvent*)event {
+    if (self.rootView) {
+        if (pulp::view::deliver_modifier_keys_changed(
+                *self.rootView, modifiers_from_ns_flags(event.modifierFlags)))
+            [self setNeedsDisplay:YES];
+    }
+    [super flagsChanged:event];
+}
+
 // Symmetric key-up so released keys reach handlers that need both edges — most
 // importantly musical-typing note-off (without this, computer-keyboard notes
 // stick). Routes the global-key hook (is_down=false) then the focused view.

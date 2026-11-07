@@ -447,7 +447,17 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
                                      horizontal ? 0.0f : steps, mouse_modifiers(wp));
     }
 
+    static bool is_modifier_virtual_key(WPARAM vk) {
+        return vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT ||
+               vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL ||
+               vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU ||
+               vk == VK_LWIN || vk == VK_RWIN;
+    }
+
     bool handle_key(WPARAM wp, LPARAM lp, bool is_down) {
+        const bool is_repeat = is_down && ((static_cast<uintptr_t>(lp) & (1u << 30)) != 0);
+        if (is_modifier_virtual_key(wp) && !is_repeat)
+            input_router_.on_modifier_keys(keyboard_modifiers());
         return input_router_.on_key(win_input::key_code_from_virtual_key(static_cast<uint32_t>(wp)),
                                     keyboard_modifiers(), is_down,
                                     is_down && ((static_cast<uintptr_t>(lp) & (1u << 30)) != 0));

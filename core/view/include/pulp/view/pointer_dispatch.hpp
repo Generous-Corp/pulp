@@ -172,6 +172,20 @@ bool deliver_key_event(View& target, const KeyEvent& event);
 /// disabled-input contract. Returns true when the text was delivered.
 bool deliver_text_input(View& target, const TextInputEvent& event);
 
+/// Report that the set of held modifier keys changed. Call it from the
+/// platform's modifier notification (macOS flagsChanged, a Windows modifier
+/// virtual-key press or release, X11 or Wayland modifier key events, an Android
+/// meta-state change, a DOM `keydown`/`keyup` of a modifier key) with the full
+/// set now held.
+///
+/// The change reaches `View::on_modifier_keys_changed` on the view holding
+/// input focus and on every view a pointer press is currently captured by,
+/// each at most once, skipping disabled views. A drag therefore sees Shift go
+/// down or up mid-drag with no pointer movement. Returns true when at least
+/// one view was notified. The call does not de-duplicate; a host should not
+/// report key auto-repeat as a change.
+bool deliver_modifier_keys_changed(View& root, Modifiers modifiers);
+
 /// Deliver one BUTTONLESS pointer move — a hover — to the view under
 /// `root_pt`, which is in root-view space.
 ///

@@ -122,6 +122,24 @@ void dispatch_dom_pointer_path(View& root,
     }
 }
 
+void note_pressed_target(View& root, int pointer_id, const ViewCapture& target) {
+    auto& slots = root.interaction().pressed_targets;
+    for (auto& slot : slots) {
+        if (slot.first == pointer_id) {
+            slot.second = target;
+            return;
+        }
+    }
+    slots.emplace_back(pointer_id, target);
+}
+
+void clear_pressed_target(View& root, int pointer_id) {
+    auto& slots = root.interaction().pressed_targets;
+    slots.erase(std::remove_if(slots.begin(), slots.end(),
+                               [&](const auto& s) { return s.first == pointer_id; }),
+                slots.end());
+}
+
 // Blur every root-local focus holder except `keep`. Focus callbacks may
 // synchronously claim a replacement (IME commit is the common case), so a
 // single snapshot is insufficient. The bounded fallback guarantees hostile
@@ -247,6 +265,31 @@ bool transfer_input_focus(View& root, View* target) {
 View* focused_input_under_root(View& root) {
     View* focused = root.interaction().focused_input;
     return still_in_tree(focused, &root) ? focused : nullptr;
+}
+
+bool deliver_modifier_keys_changed(View& root, Modifiers modifiers) {
+    std::vector<ViewCapture> receivers;
+    {
+        ViewCapture focused;
+        focused.set(focused_input_under_root(root));
+        if (focused.has_value()) receivers.push_back(focused);
+    }
+    for (const auto& entry : root.interaction().pressed_targets)
+        receivers.push_back(entry.second);
+
+    bool delivered = false;
+    std::vector<View*> seen;
+    for (const auto& capture : receivers) {
+        // Re-resolve each hop: a handler may unmount a later receiver.
+        View* view = capture.live_in(root);
+        if (!view || std::find(seen.begin(), seen.end(), view) != seen.end())
+            continue;
+        seen.push_back(view);
+        if (!view->effectively_enabled()) continue;
+        view->on_modifier_keys_changed(modifiers);
+        delivered = true;
+    }
+    return delivered;
 }
 
 bool deliver_key_event(View& target, const KeyEvent& event) {
@@ -410,6 +453,7 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
 
     ViewCapture target_capture;
     target_capture.set(target);
+    note_pressed_target(root, pointer.pointer_id, target_capture);
     const auto bubble_path = capture_path_to_root(target->parent());
     const Point local = point_to_local(root_pt, target, &root);
 
@@ -490,6 +534,7 @@ void deliver_pointer_terminal(View& root, View* target, Point root_pt,
     if (!still_in_tree(target, &root)) return;
 
     const bool cancelled = kind == PointerTerminalKind::cancel;
+    clear_pressed_target(root, pointer.pointer_id);
 
     ViewCapture target_capture;
     target_capture.set(target);

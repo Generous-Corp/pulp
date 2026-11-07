@@ -172,6 +172,21 @@ host that routes pointer and key events through them gets it without extra
 checks. Use `View::effectively_enabled()` to ask whether a view and all of its
 ancestors are enabled.
 
+### Modifier-key changes
+
+`View::on_modifier_keys_changed(Modifiers)` fires when a modifier key (Shift,
+Ctrl, Alt, Meta or Cmd) goes down or up on its own. The argument is the full
+set of modifiers now held. It reaches the focused view and every view a pointer
+press is currently captured by, each at most once, so a knob can switch to fine
+adjustment when Shift is pressed after the drag began, with no pointer
+movement. Disabled views are skipped.
+
+Hosts report the change with `deliver_modifier_keys_changed` in
+`pulp/view/pointer_dispatch.hpp`. The macOS standalone and plug-in hosts do so
+from `flagsChanged:`, the Windows plug-in host from the modifier virtual keys,
+and the browser host from `keydown` and `keyup` of Shift, Control, Alt and
+Meta. In tests, call `root.simulate_modifier_keys(kModShift)`.
+
 ## Accessibility
 
 Every widget has an access role, label, and value for screen readers:

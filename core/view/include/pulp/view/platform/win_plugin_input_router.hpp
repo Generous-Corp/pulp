@@ -421,6 +421,18 @@ public:
         return consumed;
     }
 
+    /// A modifier virtual key (Shift, Ctrl, Alt, Windows) went down or up.
+    /// `modifiers` is the full set now held. Forwards the change to the
+    /// focused view and to any view a pointer press is captured by, so Shift
+    /// pressed mid-drag reaches the dragged control. Key auto-repeat must not
+    /// be reported here.
+    bool on_modifier_keys(std::uint16_t modifiers) {
+        const bool delivered =
+            pulp::view::deliver_modifier_keys_changed(host_.input_root(), modifiers);
+        if (delivered) host_.input_request_repaint();
+        return delivered;
+    }
+
     /// One UTF-16 code unit from `WM_CHAR`. Returns whether the unit was
     /// consumed by the text channel — a `false` return means no focused view
     /// accepts text, so the host should let default processing have it.

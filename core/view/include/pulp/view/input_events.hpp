@@ -21,6 +21,9 @@ enum Modifier : uint16_t {
     kModCmd     = 1 << 4,   ///< Command (macOS) — alias for platform primary modifier
 };
 
+/// A bitfield of `Modifier` flags: the modifier keys held at one instant.
+using Modifiers = uint16_t;
+
 /// True if the primary action modifier is held (Cmd on macOS, Ctrl on Windows/Linux).
 inline bool is_main_modifier(uint16_t mods) {
 #ifdef __APPLE__
