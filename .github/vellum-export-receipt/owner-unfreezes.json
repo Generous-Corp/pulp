@@ -12,6 +12,16 @@
       "approved_by": "danielraffel"
     },
     {
+      "path": "core/view/include/pulp/view/input_events.hpp",
+      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approved_by": "danielraffel"
+    },
+    {
+      "path": "core/view/include/pulp/view/pointer_dispatch.hpp",
+      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approved_by": "danielraffel"
+    },
+    {
       "path": "core/view/include/pulp/view/value_source.hpp",
       "approval_url": "https://github.com/Generous-Corp/pulp/pull/11451#issuecomment-6612900699",
       "approved_by": "danielraffel"
@@ -19,6 +29,16 @@
     {
       "path": "core/view/include/pulp/view/window_host.hpp",
       "approval_url": "https://github.com/Generous-Corp/pulp/pull/11643#issuecomment-6689114536",
+      "approved_by": "danielraffel"
+    },
+    {
+      "path": "core/view/src/gesture.cpp",
+      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approved_by": "danielraffel"
+    },
+    {
+      "path": "core/view/src/pointer_dispatch.cpp",
+      "approval_url": "PENDING-OWNER-APPROVAL",
       "approved_by": "danielraffel"
     }
   ]
