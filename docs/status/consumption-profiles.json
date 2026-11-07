@@ -350,6 +350,7 @@
       "pulp/format/midi_processing.hpp",
       "pulp/format/mpe_expression.hpp",
       "pulp/format/native_core_processor.hpp",
+      "pulp/format/native_surface_host.hpp",
       "pulp/format/note_name.hpp",
       "pulp/format/offline_render_host.hpp",
       "pulp/format/offline_sample_bounce.hpp",
