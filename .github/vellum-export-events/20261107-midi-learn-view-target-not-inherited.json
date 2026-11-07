@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-midi-learn-view-target-not-inherited",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T19:20:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/view/include/pulp/view/midi_learn_target.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "The session that adapts the learn menu to a state::MidiLearnEngine includes engine, undo and persistence headers that are not in the exported closure, and no exported target includes it. Only the callback-based menu and overlay are carried; a Vellum editor supplies its own MidiLearnTarget."
+}

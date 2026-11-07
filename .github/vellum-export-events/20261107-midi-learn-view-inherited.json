@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-midi-learn-view-inherited",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T19:20:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/view/include/pulp/view/midi_learn_menu.hpp",
+    "core/view/src/midi_learn_menu.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "The MIDI Learn menu rows, right-click attach helper and overlay are view-layer code with no engine dependency: the header includes only the view and state/parameter.hpp headers and talks to a callback struct. Editors built on Vellum's mirrored core/view should get the same affordance, so the next re-export carries them."
+}
