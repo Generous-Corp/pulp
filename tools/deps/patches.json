@@ -125,7 +125,8 @@
         "functions": [
           "pulp_patch_choc_v8",
           "pulp_patch_choc_json_number_exponent",
-          "pulp_patch_choc_file_watcher"
+          "pulp_patch_choc_file_watcher",
+          "pulp_patch_choc_wav_extensible_container_bits"
         ],
         "note": "Applied to the fetched source at configure time. Each replacement stops the configure when the text it expects is gone, so these cannot drift silently."
       }

@@ -200,3 +200,29 @@ function(pulp_patch_choc_file_watcher choc_source_dir)
         message(STATUS "Pulp: applied CHOC file watcher lifetime patch")
     endif()
 endfunction()
+
+# WAVE_FORMAT_EXTENSIBLE carries two bit counts: wBitsPerSample is the
+# container width, which is the sample width the data chunk is laid out in,
+# and wValidBitsPerSample only says how many of those bits carry audio (the
+# rest are zero). CHOC derives the integer depth from the valid-bits field
+# while keeping the container stride, so a 24-valid-bits-in-32-bit-container
+# file is read as packed 24-bit at a 4-byte stride: three of every four bytes,
+# off by one byte, 256x too loud and sign-garbled. dr_wav and libsndfile scale
+# the container value. The patch reads the field and keeps the container width.
+function(pulp_patch_choc_wav_extensible_container_bits choc_source_dir)
+    set(_pulp_choc_wav_header
+        "${choc_source_dir}/choc/audio/choc_AudioFileFormat_WAV.h")
+    if(NOT EXISTS "${_pulp_choc_wav_header}")
+        message(FATAL_ERROR
+            "Pulp: CHOC WAV header not found for the extensible container-width patch: ${_pulp_choc_wav_header}")
+    endif()
+
+    file(READ "${_pulp_choc_wav_header}" _pulp_choc_wav)
+    _pulp_choc_apply_patch(_pulp_choc_wav "WAV extensible container width"
+"                    bitsPerSample = readInt<uint16_t>();
+                    properties.speakers = getSpeakers (readInt<uint32_t>());"
+"                    (void) readInt<uint16_t>(); // wValidBitsPerSample: the container width stays the sample width
+                    properties.speakers = getSpeakers (readInt<uint32_t>());")
+    file(WRITE "${_pulp_choc_wav_header}" "${_pulp_choc_wav}")
+    message(STATUS "Pulp: applied CHOC WAV extensible container-width patch")
+endfunction()
