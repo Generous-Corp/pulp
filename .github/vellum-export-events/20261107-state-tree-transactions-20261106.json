@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-state-tree-transactions-20261106",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T02:33:17Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/state/include/pulp/state/state_tree.hpp",
+    "core/state/include/pulp/state/state_tree_sync.hpp",
+    "core/state/src/state_tree.cpp",
+    "core/state/src/state_tree_sync.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Adds StateTree transactions, undo steps, move_child and checked edits, and makes clone_synced unhook removed subtrees. Additive public API with no behavior change outside transactions apart from final-state ordering of child_removed during a move, so the next Vellum re-export should carry it."
+}
