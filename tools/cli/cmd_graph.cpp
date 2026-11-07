@@ -17,9 +17,9 @@
 
 namespace {
 void usage() {
-    std::cout
-        << "Usage: pulp graph <inspect|validate|explain|render|probe|report|fmt|canonicalize> "
-           "<file.pulpgraph> [--json] [--output file.wav (render)]\n";
+    std::cout << "Usage: pulp graph "
+                 "<inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
+                 "<file.pulpgraph> [--json] [--output path]\n";
     std::cout << "report: [--sample-rate 48000] [--max-block-size 512] [--block-size N] "
                  "[--measure-blocks 16] (always JSON)\n";
     std::cout << "probe: --input file.wav --source-node NAME --source-port NAME "
@@ -317,7 +317,7 @@ int cmd_graph(const std::vector<std::string>& args) {
         return report_graph(args);
     const bool json = std::find(args.begin() + 2, args.end(), "--json") != args.end();
     if (op != "inspect" && op != "validate" && op != "explain" && op != "render" && op != "fmt" &&
-        op != "canonicalize") {
+        op != "canonicalize" && op != "save") {
         if (json)
             json_error("unknown_operation", "unknown graph subcommand: " + op);
         else
@@ -423,6 +423,39 @@ int cmd_graph(const std::vector<std::string>& args) {
             std::cout << "rendered 48000 frames in " << rendered.blocks_rendered << " blocks\n";
         return 0;
     }
+    if (op == "save") {
+        const auto output_arg = std::find(args.begin() + 2, args.end(), "--output");
+        if (output_arg == args.end() || output_arg + 1 == args.end() ||
+            (*(output_arg + 1)).empty()) {
+            if (json)
+                json_error("missing_output", "save requires --output PATH");
+            else
+                std::cerr << "pulp graph: save requires --output PATH\n";
+            return 2;
+        }
+        if (!loaded.missing_plugins.empty() || !loaded.state_restore_failures.empty() ||
+            !loaded.missing_custom_node_types.empty()) {
+            if (json)
+                json_error("serialization_refused",
+                           "cannot save with unresolved plugin or custom node state");
+            else
+                std::cerr
+                    << "pulp graph: cannot save with unresolved plugin or custom node state\n";
+            return 1;
+        }
+        const auto saved =
+            pulp::host::GraphSerializer::to_file(graph, *(output_arg + 1), loaded.editor_layout);
+        if (!saved.ok) {
+            if (json)
+                json_error(pulp::host::GraphSerializer::save_code_name(saved.code), saved.error);
+            else
+                std::cerr << "pulp graph: " << saved.error << '\n';
+            return 1;
+        }
+        if (json)
+            std::cout << "{\"valid\":true,\"code\":\"saved\"}\n";
+        return 0;
+    }
     if (op == "canonicalize" || op == "fmt") {
         if (!loaded.missing_plugins.empty()) {
             std::cerr << "pulp graph: cannot canonicalize while plugin nodes are unresolved; "
@@ -436,27 +469,12 @@ int cmd_graph(const std::vector<std::string>& args) {
                          "overwrite it\n";
             return 1;
         }
-        const auto serialized = pulp::host::GraphSerializer::to_json(graph, loaded.editor_layout);
-        if (serialized.empty()) {
-            std::cerr << "pulp graph: cannot canonicalize graph because serialization failed\n";
-            return 1;
-        }
-        try {
-            const auto parsed = choc::json::parse(serialized);
-            if (!parsed.isObject()) {
-                std::cerr << "pulp graph: cannot canonicalize graph because serialization was not "
-                             "an object\n";
-                return 1;
-            }
-        } catch (const std::exception& error) {
-            std::cerr << "pulp graph: cannot canonicalize graph because serialization was invalid: "
-                      << error.what() << '\n';
-            return 1;
-        }
-        std::string error;
-        if (!pulp::cli::write_text_file_atomically(std::filesystem::path(path), serialized + '\n',
-                                                   error)) {
-            std::cerr << "pulp graph: cannot replace '" << path << "': " << error << '\n';
+        const auto saved = pulp::host::GraphSerializer::to_file(graph, std::filesystem::path(path),
+                                                                loaded.editor_layout);
+        if (!saved.ok) {
+            std::cerr << "pulp graph: cannot canonicalize graph ("
+                      << pulp::host::GraphSerializer::save_code_name(saved.code)
+                      << "): " << saved.error << '\n';
             return 1;
         }
         return 0;

@@ -1,0 +1,100 @@
+{
+  "id": "graph-save-cli-surface",
+  "title": "Bounded graph save is covered by the sequencer exposure ledger",
+  "classification": "offline_cli_mcp",
+  "delivery_state": "pending",
+  "claim_id": "6a6a75a7-57d7-4b62-9b11-6f6ce7f2e5dd",
+  "owned_paths": [
+    "core/host/include/pulp/host/graph_serializer.hpp",
+    "core/host/src/graph_serializer.cpp",
+    "tools/cli/cmd_graph.cpp",
+    "docs/status/sequencer-exposure/rows/graph-save-cli-surface.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/graph_serializer.hpp",
+      "needles": [
+        "static SaveResult",
+        "to_file"
+      ]
+    },
+    {
+      "path": "test/test_graph_serializer.cpp",
+      "needles": [
+        "saves a bounded canonical file"
+      ]
+    },
+    {
+      "path": "test/test_cli_shellout.cpp",
+      "needles": [
+        "pulp graph save writes"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "GraphSerializer::to_file is a bounded control-thread save API in the public host header; it does not add live product control or execute plugin code.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/graph_serializer.hpp",
+          "needles": [
+            "to_file"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "exposed",
+      "rationale": "pulp graph save writes a canonical bounded copy through GraphSerializer::to_file; input loading and output replacement are control-thread file operations.",
+      "evidence": [
+        {
+          "kind": "cli_handler",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": [
+            "op == \"save\""
+          ]
+        },
+        {
+          "kind": "cli_definition",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": [
+            "op == \"save\""
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_cli_shellout.cpp",
+          "needles": [
+            "pulp graph save writes"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "MCP remains read-only and refuses the save operation; file writes stay on the explicit CLI surface."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The save API is an offline notation file operation and adds no live sequencer mutation route."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No agent capability or design-time manifest entry is added."
+    }
+  }
+}
