@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261107-view-spectrum-log-axis-20261106-watch",
+  "created_at": "2026-11-07T03:05:35Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "SpectrumView gains built-in spectrum analysis on a log-frequency axis and EqCurveView's analyzer overlay maps its bins through the same code. Both are audio-plugin view widgets built on the pulp::signal FFT and window primitives. No design-import, Chromium, rendering, or packaging authority moves, and no render backend, asset, or capture path is touched.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-spectrum-analyzer",
+    "ctest --test-dir build -R pulp-test-spectrum-bin-mapping",
+    "ctest --test-dir build -R pulp-test-spectrum-view",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
