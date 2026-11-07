@@ -10,6 +10,6 @@
     "core/view/src/gesture.cpp",
     "core/view/src/pointer_dispatch.cpp"
   ],
-  "vellum_inherits": false,
-  "rationale": "The four paths the owner unfroze now carry the disabled-view input contract, modifier-key change delivery, focus-cause delivery and stationary-pointer hover re-evaluation. The additions are source-compatible and depend on no Pulp-only code, so the next re-export . Vellum does not take these edits through the mirror; it reimplements the behavior natively, using the four input-contract test files in Pulp as its specification."
+  "vellum_inherits": true,
+  "rationale": "The four paths the owner unfroze now carry the disabled-view input contract, modifier-key change delivery, focus-cause delivery and stationary-pointer hover re-evaluation. The additions are source-compatible and depend on no Pulp-only code. Vellum receives these edits as code through the next mirror export, so they become Vellum-native at the rename; the four input-contract test files in Pulp serve as the specification to verify and adopt them."
 }
