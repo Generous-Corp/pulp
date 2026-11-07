@@ -23,18 +23,33 @@ namespace {
 // Counts every pointer-facing callback and keeps a pressed flag the way a
 // button does: set on press, cleared on release.
 class InputSpy : public View {
-public:
-    void on_mouse_down(Point) override { ++downs; pressed = true; }
+  public:
+    void on_mouse_down(Point) override {
+        ++downs;
+        pressed = true;
+    }
     void on_mouse_drag(Point) override {
         ++drags;
         if (disable_after_drags > 0 && drags == disable_after_drags)
             set_enabled(false);
     }
-    void on_mouse_up(Point) override { ++ups; pressed = false; }
-    void on_mouse_enter() override { ++enters; }
-    void on_mouse_leave() override { ++leaves; }
-    bool on_key_event(const KeyEvent&) override { ++keys; return true; }
-    void on_text_input(const TextInputEvent&) override { ++texts; }
+    void on_mouse_up(Point) override {
+        ++ups;
+        pressed = false;
+    }
+    void on_mouse_enter() override {
+        ++enters;
+    }
+    void on_mouse_leave() override {
+        ++leaves;
+    }
+    bool on_key_event(const KeyEvent&) override {
+        ++keys;
+        return true;
+    }
+    void on_text_input(const TextInputEvent&) override {
+        ++texts;
+    }
 
     int downs = 0, drags = 0, ups = 0, enters = 0, leaves = 0, keys = 0, texts = 0;
     int disable_after_drags = 0;
@@ -62,7 +77,7 @@ struct Fixture {
 
 constexpr Point kInside{70, 70};
 
-}  // namespace
+} // namespace
 
 TEST_CASE("disabling a widget mid-drag ends the drag with exactly one up",
           "[view][input][disabled]") {
@@ -72,7 +87,7 @@ TEST_CASE("disabling a widget mid-drag ends the drag with exactly one up",
     f.root.simulate_drag({60, 60}, {140, 60}, 8);
 
     CHECK(f.spy->downs == 1);
-    CHECK(f.spy->drags == 2);  // the disabling move, and nothing after it
+    CHECK(f.spy->drags == 2); // the disabling move, and nothing after it
     CHECK(f.spy->ups == 1);
     CHECK_FALSE(f.spy->pressed);
 }
@@ -93,14 +108,13 @@ TEST_CASE("a real fader disabled mid-drag is not left holding its gesture",
 
     fp->set_enabled(false);
     deliver_mouse_drag(root, fp, {20, 60}, 0);
-    CHECK(fp->is_gesture_active());  // the drag was refused, not yet released
+    CHECK(fp->is_gesture_active()); // the drag was refused, not yet released
 
     deliver_mouse_up(root, fp, {20, 60}, 0, 1, MouseUpHost{});
     CHECK_FALSE(fp->is_gesture_active());
 }
 
-TEST_CASE("a disabled ancestor disables the whole subtree",
-          "[view][input][disabled]") {
+TEST_CASE("a disabled ancestor disables the whole subtree", "[view][input][disabled]") {
     Fixture f;
     f.group->set_enabled(false);
 
@@ -122,8 +136,7 @@ TEST_CASE("a disabled ancestor disables the whole subtree",
     CHECK(f.spy->texts == 0);
 }
 
-TEST_CASE("an enabled view still receives key and text input",
-          "[view][input][disabled]") {
+TEST_CASE("an enabled view still receives key and text input", "[view][input][disabled]") {
     Fixture f;
     CHECK(deliver_key_event(*f.spy, KeyEvent{.key = KeyCode::a}));
     CHECK(deliver_text_input(*f.spy, TextInputEvent{.text = "x"}));
@@ -131,16 +144,14 @@ TEST_CASE("an enabled view still receives key and text input",
     CHECK(f.spy->texts == 1);
 }
 
-TEST_CASE("a double-click on a disabled view delivers nothing",
-          "[view][input][disabled]") {
+TEST_CASE("a double-click on a disabled view delivers nothing", "[view][input][disabled]") {
     Fixture f;
     f.spy->set_enabled(false);
     CHECK_FALSE(deliver_mouse_down(f.root, f.spy, kInside, 0, /*click_count=*/2));
     CHECK(f.spy->downs == 0);
 }
 
-TEST_CASE("a disabled view gains no hover but still receives the exit",
-          "[view][input][disabled]") {
+TEST_CASE("a disabled view gains no hover but still receives the exit", "[view][input][disabled]") {
     Fixture f;
 
     f.root.simulate_hover(kInside);
@@ -148,17 +159,16 @@ TEST_CASE("a disabled view gains no hover but still receives the exit",
     REQUIRE(f.spy->is_hovered());
 
     f.spy->set_enabled(false);
-    f.root.simulate_hover({300, 250});  // pointer leaves
+    f.root.simulate_hover({300, 250}); // pointer leaves
     CHECK(f.spy->leaves == 1);
     CHECK_FALSE(f.spy->is_hovered());
 
-    f.root.simulate_hover(kInside);  // pointer returns to a disabled view
+    f.root.simulate_hover(kInside); // pointer returns to a disabled view
     CHECK(f.spy->enters == 1);
     CHECK_FALSE(f.spy->is_hovered());
 }
 
-TEST_CASE("the cursor over a disabled view is the default cursor",
-          "[view][input][disabled]") {
+TEST_CASE("the cursor over a disabled view is the default cursor", "[view][input][disabled]") {
     Fixture f;
     f.spy->set_cursor(View::CursorStyle::pointer);
     f.group->set_cursor(View::CursorStyle::crosshair);
@@ -182,7 +192,8 @@ TEST_CASE("a recognizer on a view disabled mid-gesture is cancelled once",
     bool disabled = false;
     rec.on_cancelled = [&](GestureRecognizer&) { ++cancelled; };
     rec.on_changed = [&](GestureRecognizer&) {
-        if (disabled) ++changed_after_disable;
+        if (disabled)
+            ++changed_after_disable;
     };
 
     auto event = [&](MousePhase phase, Point p) {

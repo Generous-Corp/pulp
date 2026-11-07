@@ -26,23 +26,23 @@ struct Record {
 };
 
 class Node : public View {
-public:
+  public:
     explicit Node(std::string n, std::vector<Record>* log = nullptr)
         : name(std::move(n)), log_(log) {}
-    void on_descendant_focus_changed(View& child, bool gained,
-                                     FocusCause cause) override {
-        if (log_) log_->push_back({name, &child, gained, cause});
+    void on_descendant_focus_changed(View& child, bool gained, FocusCause cause) override {
+        if (log_)
+            log_->push_back({name, &child, gained, cause});
     }
     std::string name;
 
-private:
+  private:
     std::vector<Record>* log_;
 };
 
 // A widget written before causes existed: it overrides only the one-argument
 // hook.
 class LegacyField : public View {
-public:
+  public:
     void on_focus_changed(bool gained) override {
         View::on_focus_changed(gained);
         seen.push_back(gained);
@@ -71,7 +71,8 @@ struct Tree {
         first = a.get();
         second = b.get();
         legacy = l.get();
-        for (View* v : {first, second, static_cast<View*>(legacy)}) v->set_focusable(true);
+        for (View* v : {first, second, static_cast<View*>(legacy)})
+            v->set_focusable(true);
         row->add_child(std::move(a));
         row->add_child(std::move(b));
         group->add_child(std::move(r));
@@ -80,7 +81,7 @@ struct Tree {
     }
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("focus carries the cause that moved it", "[view][focus]") {
     Tree t;
@@ -96,13 +97,12 @@ TEST_CASE("focus carries the cause that moved it", "[view][focus]") {
     CHECK_FALSE(t.first->has_focus());
     CHECK_FALSE(t.first->focus_visible());
 
-    REQUIRE(transfer_input_focus(t.root, t.first));  // no cause given
+    REQUIRE(transfer_input_focus(t.root, t.first)); // no cause given
     CHECK(t.first->focus_cause() == FocusCause::programmatic);
     CHECK(t.first->focus_visible());
 }
 
-TEST_CASE("a widget that overrides only the one-argument hook still hears focus",
-          "[view][focus]") {
+TEST_CASE("a widget that overrides only the one-argument hook still hears focus", "[view][focus]") {
     Tree t;
     REQUIRE(transfer_input_focus(t.root, t.legacy, FocusCause::keyboard));
     REQUIRE(t.legacy->seen.size() == 1);
@@ -128,8 +128,7 @@ TEST_CASE("every ancestor is told, nearest first", "[view][focus]") {
     }
 }
 
-TEST_CASE("moving focus between siblings reports the loss then the gain",
-          "[view][focus]") {
+TEST_CASE("moving focus between siblings reports the loss then the gain", "[view][focus]") {
     Tree t;
     REQUIRE(transfer_input_focus(t.root, t.first, FocusCause::pointer));
     t.log.clear();

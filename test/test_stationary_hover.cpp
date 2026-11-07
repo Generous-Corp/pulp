@@ -20,10 +20,17 @@ using namespace pulp::view;
 namespace {
 
 class Row : public View {
-public:
-    void on_mouse_enter() override { ++enters; }
-    void on_mouse_leave() override { ++leaves; }
-    void on_hover_move(Point p) override { last_local = p; ++moves; }
+  public:
+    void on_mouse_enter() override {
+        ++enters;
+    }
+    void on_mouse_leave() override {
+        ++leaves;
+    }
+    void on_hover_move(Point p) override {
+        last_local = p;
+        ++moves;
+    }
     int enters = 0, leaves = 0, moves = 0;
     Point last_local{-1, -1};
 };
@@ -49,12 +56,12 @@ struct List {
     }
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("a scrolled list moves hover to the row now under a still pointer",
           "[view][input][hover]") {
     List list;
-    const Point pointer{50, 30};  // over row 1
+    const Point pointer{50, 30}; // over row 1
 
     deliver_hover_move(list.root, pointer);
     REQUIRE(list.rows[1]->is_hovered());
@@ -64,7 +71,7 @@ TEST_CASE("a scrolled list moves hover to the row now under a still pointer",
     CHECK_FALSE(reevaluate_stationary_hover(list.root));
     CHECK(list.rows[1]->moves == 1);
 
-    list.scroll->set_scroll(0, 40);  // rows 3 is now under y=30 (30+40=70)
+    list.scroll->set_scroll(0, 40); // rows 3 is now under y=30 (30+40=70)
     REQUIRE(reevaluate_stationary_hover(list.root));
 
     CHECK_FALSE(list.rows[1]->is_hovered());
@@ -85,7 +92,7 @@ TEST_CASE("the same row moving under the pointer gets a positioned move only",
     REQUIRE(list.rows[1]->is_hovered());
     const int moves_before = list.rows[1]->moves;
 
-    list.scroll->set_scroll(0, 5);  // row 1 still under y=30, but 5 px further in
+    list.scroll->set_scroll(0, 5); // row 1 still under y=30, but 5 px further in
     REQUIRE(reevaluate_stationary_hover(list.root));
 
     CHECK(list.rows[1]->enters == 1);
@@ -99,18 +106,16 @@ TEST_CASE("damage that misses the pointer does no work", "[view][input][hover]")
     deliver_hover_move(list.root, {50, 30});
     list.scroll->set_scroll(0, 40);
 
-    CHECK_FALSE(reevaluate_stationary_hover(
-        list.root, HoverDamage::region({0, 60, 200, 40})));
-    CHECK(list.rows[1]->is_hovered());  // stale: the frame never touched it
+    CHECK_FALSE(reevaluate_stationary_hover(list.root, HoverDamage::region({0, 60, 200, 40})));
+    CHECK(list.rows[1]->is_hovered()); // stale: the frame never touched it
 
-    CHECK(reevaluate_stationary_hover(
-        list.root, HoverDamage::region({0, 20, 200, 20})));
+    CHECK(reevaluate_stationary_hover(list.root, HoverDamage::region({0, 20, 200, 20})));
     CHECK_FALSE(list.rows[1]->is_hovered());
     CHECK(list.rows[3]->is_hovered());
 }
 
 TEST_CASE("content that leaves the pointer clears hover", "[view][input][hover]") {
-    List list(2);  // two rows, 40 px of content in a 100 px pane
+    List list(2); // two rows, 40 px of content in a 100 px pane
     deliver_hover_move(list.root, {50, 30});
     REQUIRE(list.rows[1]->is_hovered());
 
@@ -126,7 +131,7 @@ TEST_CASE("no hover is synthesized before a pointer exists, after it leaves, or 
     CHECK_FALSE(reevaluate_stationary_hover(list.root));
 
     deliver_hover_move(list.root, {50, 30});
-    list.root.simulate_hover({-1, -1});  // pointer exit
+    list.root.simulate_hover({-1, -1}); // pointer exit
     list.scroll->set_scroll(0, 40);
     CHECK_FALSE(reevaluate_stationary_hover(list.root));
     CHECK_FALSE(list.rows[3]->is_hovered());

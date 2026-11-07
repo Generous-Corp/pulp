@@ -17,8 +17,10 @@ using namespace pulp::view;
 namespace {
 
 class ModifierSpy : public View {
-public:
-    void on_modifier_keys_changed(Modifiers m) override { seen.push_back(m); }
+  public:
+    void on_modifier_keys_changed(Modifiers m) override {
+        seen.push_back(m);
+    }
     std::vector<Modifiers> seen;
 };
 
@@ -44,10 +46,9 @@ struct Fixture {
     }
 };
 
-}  // namespace
+} // namespace
 
-TEST_CASE("a modifier change reaches the view a drag is captured by",
-          "[view][input][modifiers]") {
+TEST_CASE("a modifier change reaches the view a drag is captured by", "[view][input][modifiers]") {
     Fixture f;
 
     REQUIRE(deliver_mouse_down(f.root, f.knob, {30, 30}, 0));
@@ -66,8 +67,7 @@ TEST_CASE("a modifier change reaches the view a drag is captured by",
     CHECK(f.bystander->seen.empty());
 }
 
-TEST_CASE("a modifier change reaches the focused view",
-          "[view][input][modifiers]") {
+TEST_CASE("a modifier change reaches the focused view", "[view][input][modifiers]") {
     Fixture f;
     REQUIRE(transfer_input_focus(f.root, f.field));
 
@@ -77,8 +77,7 @@ TEST_CASE("a modifier change reaches the focused view",
     CHECK(f.knob->seen.empty());
 }
 
-TEST_CASE("a view that is both focused and captured is told once",
-          "[view][input][modifiers]") {
+TEST_CASE("a view that is both focused and captured is told once", "[view][input][modifiers]") {
     Fixture f;
     REQUIRE(transfer_input_focus(f.root, f.knob));
     REQUIRE(deliver_mouse_down(f.root, f.knob, {30, 30}, 0));
@@ -97,12 +96,10 @@ TEST_CASE("after the release no view is captured and nothing is delivered",
     CHECK(f.knob->seen.empty());
 }
 
-TEST_CASE("a cancelled press also ends the capture",
-          "[view][input][modifiers]") {
+TEST_CASE("a cancelled press also ends the capture", "[view][input][modifiers]") {
     Fixture f;
     REQUIRE(deliver_mouse_down(f.root, f.knob, {30, 30}, 0));
-    deliver_mouse_cancel(f.root, f.knob, {30, 30}, 0, 1, MouseButton::left,
-                         PointerAttributes{});
+    deliver_mouse_cancel(f.root, f.knob, {30, 30}, 0, 1, MouseButton::left, PointerAttributes{});
     CHECK_FALSE(f.root.simulate_modifier_keys(kModShift));
 }
 
@@ -115,40 +112,36 @@ TEST_CASE("a disabled view is not told about modifier changes",
     CHECK(f.field->seen.empty());
 }
 
-TEST_CASE("each touch pointer keeps its own captured view",
-          "[view][input][modifiers]") {
+TEST_CASE("each touch pointer keeps its own captured view", "[view][input][modifiers]") {
     Fixture f;
     PointerAttributes a, b;
     a.type = b.type = PointerType::touch;
     a.pointer_id = 1;
     b.pointer_id = 2;
-    REQUIRE(deliver_mouse_down(f.root, f.knob, {30, 30}, 0, 1, true,
-                               MouseButton::left, MouseDownHost{}, a));
-    REQUIRE(deliver_mouse_down(f.root, f.bystander, {230, 30}, 0, 1, true,
-                               MouseButton::left, MouseDownHost{}, b));
+    REQUIRE(deliver_mouse_down(f.root, f.knob, {30, 30}, 0, 1, true, MouseButton::left,
+                               MouseDownHost{}, a));
+    REQUIRE(deliver_mouse_down(f.root, f.bystander, {230, 30}, 0, 1, true, MouseButton::left,
+                               MouseDownHost{}, b));
 
     f.root.simulate_modifier_keys(kModShift);
     CHECK(f.knob->seen.size() == 1);
     CHECK(f.bystander->seen.size() == 1);
 
-    deliver_mouse_up(f.root, f.knob, {30, 30}, 0, 1, MouseUpHost{},
-                     MouseButton::left, a);
+    deliver_mouse_up(f.root, f.knob, {30, 30}, 0, 1, MouseUpHost{}, MouseButton::left, a);
     f.root.simulate_modifier_keys(kModNone);
     CHECK(f.knob->seen.size() == 1);
     CHECK(f.bystander->seen.size() == 2);
 }
 
-TEST_CASE("a buttonless move ends a press whose release was lost",
-          "[view][input][modifiers]") {
+TEST_CASE("a buttonless move ends a press whose release was lost", "[view][input][modifiers]") {
     Fixture f;
     REQUIRE(deliver_mouse_down(f.root, f.knob, {30, 30}, 0));
-    deliver_hover_move(f.root, {300, 150});  // button is plainly up
+    deliver_hover_move(f.root, {300, 150}); // button is plainly up
     CHECK_FALSE(f.root.simulate_modifier_keys(kModShift));
     CHECK(f.knob->seen.empty());
 }
 
-TEST_CASE("a press whose target left the tree is still released",
-          "[view][input][modifiers]") {
+TEST_CASE("a press whose target left the tree is still released", "[view][input][modifiers]") {
     Fixture f;
     REQUIRE(deliver_mouse_down(f.root, f.knob, {30, 30}, 0));
     auto removed = f.root.remove_child(f.knob);
