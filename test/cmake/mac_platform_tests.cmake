@@ -243,3 +243,13 @@ if(TARGET pulp-native)
         "-framework AppKit" "-framework Metal" "-framework QuartzCore")
     catch_discover_tests(pulp-test-native-metal-surface)
 endif()
+if(TARGET pulp-native)
+    # integrations/pulp-native: AppKit event translation (pointer, wheel, key,
+    # modifier-only keys, cursors) and the key-routing rule, from synthetic
+    # NSEvents and CGEvents.
+    add_executable(pulp-test-native-input test_native_input.mm)
+    target_compile_options(pulp-test-native-input PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-native-input PRIVATE
+        pulp::native Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-native-input)
+endif()
