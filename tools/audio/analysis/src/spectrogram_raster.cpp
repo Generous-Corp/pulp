@@ -250,8 +250,8 @@ float bin_magnitude_dbfs(double magnitude, int fft_length) noexcept {
 
 SpectrogramBuilder::SpectrogramBuilder(const SpectrogramSettings& settings, double sample_rate,
                                        std::uint64_t total_frames, std::uint32_t columns)
-    : settings_(settings), sample_rate_(sample_rate),
-      columns_(std::max<std::uint32_t>(columns, 1)), fft_(settings.fft_length) {
+    : settings_(settings), sample_rate_(sample_rate), columns_(std::max<std::uint32_t>(columns, 1)),
+      fft_(settings.fft_length) {
     frames_total_ = spectrogram_frame_count(total_frames, settings_.fft_length, settings_.hop);
     bins_ = static_cast<std::uint32_t>(settings_.fft_length / 2 + 1);
     window_ = window_coefficients(settings_.window, settings_.fft_length);

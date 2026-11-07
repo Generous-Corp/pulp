@@ -96,8 +96,7 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
             std::size_t parsed = 0;
             if (!parse_size_arg(value, arg.c_str(), parsed))
                 return 1;
-            if (parsed == 0 ||
-                parsed > static_cast<std::size_t>(ana::kSpectrogramMaxFftLength)) {
+            if (parsed == 0 || parsed > static_cast<std::size_t>(ana::kSpectrogramMaxFftLength)) {
                 std::cerr << "Error: " << arg << " must be between 1 and "
                           << ana::kSpectrogramMaxFftLength << "\n";
                 return 1;
@@ -154,7 +153,8 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
     const std::uint64_t grid_bytes = ana::spectrogram_grid_bytes(plot_width, settings.fft_length);
     if (grid_bytes > ana::kSpectrogramGridBudgetBytes) {
         std::cerr << "Error: --width " << plot_width << " x " << (settings.fft_length / 2 + 1)
-                  << " bins needs " << (grid_bytes >> 20) << " MiB for the spectrogram grid, over the "
+                  << " bins needs " << (grid_bytes >> 20)
+                  << " MiB for the spectrogram grid, over the "
                   << (ana::kSpectrogramGridBudgetBytes >> 20)
                   << " MiB budget; use a smaller --fft or --width\n";
         return 1;
@@ -172,7 +172,6 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
                   << "; use a smaller --fft or a longer range\n";
         return 2;
     }
-
 
     ana::SpectrogramBuilder builder(settings, static_cast<double>(input.info.sample_rate),
                                     input.range_frames(), plot_width);

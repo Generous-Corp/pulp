@@ -277,7 +277,8 @@ bool stream_channel(OpenedInput& input, std::uint32_t channel, std::uint64_t win
                 noted_fallback = true;
             }
             if (!input.reader.read_frames(pointers.data(), buffers, frame, count)) {
-                std::cerr << "Error: failed to read frames " << frame << ".." << frame + count << "\n";
+                std::cerr << "Error: failed to read frames " << frame << ".." << frame + count
+                          << "\n";
                 return false;
             }
         }
