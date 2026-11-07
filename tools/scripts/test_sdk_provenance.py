@@ -222,7 +222,7 @@ class SdkProvenanceTests(unittest.TestCase):
     def test_installed_template_exports_producer_facts_over_consumer_cache(self):
         template = (SCRIPT.parents[1] / "cmake/PulpConfig.cmake.in").read_text()
         section = template.split('set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO', 1)[1].split(
-            'if(PULP_GPU_AUDIO_HAS_VELLUM_D15)', 1)[0]
+            '\n# pulp_make_bundle_relocatable()', 1)[0]
         section = 'set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO' + section
         for key, (producer, _) in provenance.GPU_AUDIO_CAPABILITIES.items():
             section = section.replace('@' + producer + '@', 'ON')

@@ -1110,11 +1110,11 @@
       "documented_in_notice_md": true,
       "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, Windows ARM64, and Skia.xcframework slices the upstream does not ship. The chrome/m158 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Its two Linux archives were re-cut from the same Skia revision with skia_use_partition_alloc = false (skia-builder run 41466672481); the release notes' replacement ledger records both digests. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
       "vellum_renderer_drift_check": {
-        "temporary": true,
-        "note": "Temporary until Pulp and Vellum read one shared renderer lock: tools/deps/audit.py --strict reads Vellum's cmake/VellumSkiaDawn.cmake at this exact commit and fails unless its _vellum_expected_archive_sha256 equals release_assets.mac-universal.sha256 and its 'chrome/mNNN macOS universal tuple' equals this entry's version. PULP_VELLUM_CHECKOUT=<vellum checkout> reads the same commit from a local clone instead of raw.githubusercontent.com. Move the commit whenever either repository moves its renderer pin.",
+        "note": "tools/deps/audit.py --strict reads gpu-runtime's renderer lock at this commit, which must equal vellum-gpu-runtime's upstream.commit, and fails unless its macos-arm64 sha256 equals release_assets.mac-universal.sha256 and its milestone equals this entry's version. PULP_VELLUM_CHECKOUT=<vellum checkout> reads the same commit from a local clone instead of raw.githubusercontent.com.",
         "repository": "https://github.com/Generous-Corp/vellum",
-        "commit": "6e01f7ec8a602c8cfba61516e8f2a0e0e2619415",
-        "path": "cmake/VellumSkiaDawn.cmake",
+        "commit": "14bd4c5e430bc8da6b4204f1daa8a1bdbc6b7f3a",
+        "path": "gpu-runtime/renderer-lock.json",
+        "lock_platform": "macos-arm64",
         "pulp_release_asset": "mac-universal"
       },
       "determinism": {
@@ -1363,23 +1363,22 @@
       }
     },
     {
-      "name": "Vellum D15 GPU provider",
-      "category": "gpu-audio",
-      "license": "MIT plus bundled third-party notices",
-      "version": "0.1.7",
-      "source_kind": "developer-supplied-prebuilt",
-      "repository": "https://github.com/Generous-Corp/vellum",
-      "upstream": { "kind": "none" },
+      "name": "vellum-gpu-runtime",
+      "category": "render",
+      "license": "MIT",
+      "version": "0.1.10 (14bd4c5e)",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/Generous-Corp/vellum.git",
+      "upstream": {
+        "kind": "git-commit",
+        "ref": "14bd4c5e430bc8da6b4204f1daa8a1bdbc6b7f3a",
+        "commit": "14bd4c5e430bc8da6b4204f1daa8a1bdbc6b7f3a"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "notes": "Opt-in macOS D15 development provider, pinned to Vellum 0.1.7 and SHA-256 1ab0aafdcfce2e682d8ae65386d93250f2c49d0431561f34a3d7705138d103d3. A D15-enabled Pulp SDK redistributes libvellum-gpu.dylib with exact LICENSE.md (35de8f3cebd71bad85e4d9741f3d03cc8deb32349a6568c77c5f4ef11c2911aa), NOTICE.md (6c743360892bf2320833833501e78128860dee8a506f61ea7c944b6bc6ff7493), and DEPENDENCIES.md (411ad08d92bcfffd2ef93987bc0aeb983bea9a7ff952319d14cd50d48e4b85d2). Production release eligibility remains blocked until the renderer builder emits and attests an exhaustive transitive source/license manifest.",
+      "notes": "gpu-runtime, the GPU device layer shared by GPU audio and rendering: a self-contained subproject of the Vellum repository (gpu-runtime/) with no Pulp or Vellum dependency. Pulp's macOS device targets forward to it (tools/cmake/PulpGpuRuntime.cmake). It adds no third-party code: its Dawn is the Skia toolchain's, checked against gpu-runtime/renderer-lock.json, which the Skia entry's vellum_renderer_drift_check holds equal to Pulp's pin.",
       "source_files": [
-        "core/gpu_audio/CMakeLists.txt",
-        "tools/cmake/PulpInstallRules.cmake",
-        "tools/cmake/PulpConfig.cmake.in",
-        "DEPENDENCIES.md",
-        "NOTICE.md",
-        "docs/reference/licensing.md"
+        "tools/cmake/PulpGpuRuntime.cmake"
       ]
     },
     {

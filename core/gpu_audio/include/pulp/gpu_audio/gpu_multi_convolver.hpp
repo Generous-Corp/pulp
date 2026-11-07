@@ -10,9 +10,7 @@
 #include <pulp/gpu_audio/gpu_audio_status.hpp>
 #include <pulp/gpu_audio/flow_pans.hpp>
 
-namespace pulp::render {
-class GpuCompute;
-}
+#include <pulp/platform/gpu_fwd.hpp>
 
 namespace pulp::gpu_audio {
 
