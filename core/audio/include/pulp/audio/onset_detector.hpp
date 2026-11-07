@@ -23,7 +23,9 @@ struct OnsetDetectionConfig {
     double min_confidence = 0.05;
     std::size_t max_markers = 1024;
     // Sample rate of `source`. Only SuperFlux reads it (its filterbank is laid
-    // out in hertz). The default keeps the other methods' behavior unchanged.
+    // out in hertz). The default keeps the other methods' behavior unchanged,
+    // but every method requires it to be finite and positive: a config with a
+    // sample rate of 0 is rejected (ok == false).
     double sample_rate = 48000.0;
     // SuperFlux settings; ignored by the other methods. SuperFlux needs
     // `frame_size` <= 65536, at most 256 channels and `hop_size` <= `frame_size`,
@@ -31,7 +33,17 @@ struct OnsetDetectionConfig {
     // produced it, where its novelty peaks (the other methods keep reporting
     // the window start, as they always have, so existing slice maps do not
     // move; a Hann-windowed attack is only fully seen at the window centre,
-    // which is why SuperFlux does not use the start).
+    // which is why SuperFlux does not use the start). See
+    // OnsetDetectionResult::marker_timing.
+    //
+    // SuperFlux also pads the source with silence at the start: half a window,
+    // so the first frame is centred on sample 0, plus the lag, so that frame
+    // has an earlier (silent) frame to compare with. A hit in the first half
+    // window is therefore found near where it happens instead of at the first
+    // window centre. Frames are centred on multiples of `hop_size`. Like the
+    // published method, SuperFlux peaks as an attack enters the window, so
+    // markers typically lead the attack by a few milliseconds (5 to 13 ms for
+    // the published settings on synthetic drums at 44.1 kHz).
     signal::SuperFluxConfig superflux{};
 };
 
@@ -59,10 +71,27 @@ struct OnsetMarker {
     OnsetDetectionMethod method = OnsetDetectionMethod::EnergyFlux;
 };
 
+// Which point of the analysis window a marker's frame names.
+enum class OnsetMarkerTiming {
+    // The first sample of the window (EnergyFlux, SpectralFlux,
+    // HighFrequencyContent).
+    window_start,
+    // The centre of the window, `frame_size / 2` after its start (SuperFlux).
+    window_centre,
+};
+
 struct OnsetDetectionResult {
     bool ok = false;
     std::uint64_t analyzed_frames = 0;
     std::vector<OnsetMarker> markers;
+    // The timing convention of `markers`. Code that merges markers from two
+    // methods, or switches method behind a setting, can align them with
+    // `marker_offset_frames`: subtract it to get window starts, or add
+    // `frame_size / 2 - marker_offset_frames` to get window centres.
+    OnsetMarkerTiming marker_timing = OnsetMarkerTiming::window_start;
+    // How far after the start of its analysis window each marker sits: 0 for
+    // window_start, `frame_size / 2` for window_centre.
+    std::uint64_t marker_offset_frames = 0;
 };
 
 class OnsetDetector {

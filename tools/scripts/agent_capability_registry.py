@@ -1850,7 +1850,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/svf.hpp",
-        "fingerprint": "sha256:cec09c01f149641202c322667431ed0e25249d4b54f2249dcc8e67ca1af742b9",
+        "fingerprint": "sha256:30e4e76d67700ee5e97934e2d5f1f8879ca82306b443990e3baae1c5d2e4c494",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1862,16 +1862,16 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/korg35_filter.hpp",
-        "fingerprint": "sha256:320f7a246d50cbfebae78135920e5d7b133267560eb7c6f0d2f853a4d66b2f80",
+        "fingerprint": "sha256:d6466500fb59e0612c1363b84787ec3ff4faf884e54d563a330cba87320d8e7f",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
-            "Two-pole lowpass/highpass Sallen-Key-family filter with a saturating feedback path solved in zero-delay form, plus a pure prototype_magnitude() for its linear response. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+            "Two-pole lowpass/highpass Sallen-Key-family filter with a saturating feedback path solved in zero-delay form; a change of mode restarts it from rest. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
         ),
     },
     {
         "include": "pulp/signal/diode_ladder_filter.hpp",
-        "fingerprint": "sha256:c1fd09177806e9ce5bc39a9d94bb85a7cc41293005e25a7a699c388b0cf4c7a7",
+        "fingerprint": "sha256:381d92d35bce20345ed8fd1e9c4e938eb618de103733560e82932dfb07ce5a33",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1880,7 +1880,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/antiderivative_iir.hpp",
-        "fingerprint": "sha256:3743006ae7b5060e0cdcbc01947211a5713ebba65235ab876b2f661e877ff74e",
+        "fingerprint": "sha256:23a76aa340cfcfda2c127663cce3dd427ddafdfe8d3b8227d3bd8eaaadc47d2e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

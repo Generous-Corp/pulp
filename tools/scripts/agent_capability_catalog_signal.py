@@ -691,10 +691,10 @@ EXPORTS = [
         bindings=[
             binding(role="chroma", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
                     qualified_name="pulp::signal::ChromaFrontEndT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:c1bfaa0c9c750c7fa5e87b60a3d15fece4ad569bae0fbd9a2773930108f130ff"),
+                    header_fingerprint="sha256:1c61b8a488617ee1cde8fd1d8092c0b1533bf55cbce5102d55ae153d40aaeca0"),
             binding(role="onset_novelty", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
                     qualified_name="pulp::signal::OnsetNoveltyFrontEndT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:c1bfaa0c9c750c7fa5e87b60a3d15fece4ad569bae0fbd9a2773930108f130ff"),
+                    header_fingerprint="sha256:1c61b8a488617ee1cde8fd1d8092c0b1533bf55cbce5102d55ae153d40aaeca0"),
         ],
         _link_probes=[
             {"role": "chroma", "binding": "pulp::signal::ChromaFrontEndT<float>",
@@ -822,7 +822,7 @@ EXPORTS = [
                     header_fingerprint="sha256:da89147c18e3c0479bf02294273bc7ec8ff76bc83cc7e198e645b14fe100a298"),
             binding(role="breakpoint", kind="cpp_type", include="pulp/signal/breakpoint_envelope.hpp",
                     qualified_name="pulp::signal::BreakpointEnvelopeT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:8a81865dd18a7bc3c9f3d9f1ecd452db5c3de6b9b3b7c6411e3afa6f651d2b69"),
+                    header_fingerprint="sha256:4f37c4c188e7094d8bf615144d0735a629d26a974f394f40e380a69d82a74c06"),
             binding(role="rise_fall", kind="cpp_type", include="pulp/signal/rise_fall_generator.hpp",
                     qualified_name="pulp::signal::RiseFallGeneratorT<float>", target="Pulp::signal",
                     header_fingerprint="sha256:67185305462aff7fef2f089d00f0bf6eeaa5708436e3f042fca6b8271c4b3fa3"),

@@ -7,6 +7,8 @@
 
 #include <pulp/signal/korg35_filter.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -17,6 +19,15 @@ using Filter = pulp::signal::Korg35Filter64;
 using Mode = Filter::Mode;
 
 namespace {
+
+// Magnitude of the linear (unsaturated) prototype at `omega`, the frequency in
+// units of the cutoff, for feedback amount `k`.
+double prototype_magnitude(Mode mode, double k, double omega) {
+    const double re = 1.0 - omega * omega;
+    const double im = (2.0 - k) * omega;
+    const double den = std::sqrt(re * re + im * im);
+    return (mode == Mode::lowpass ? 1.0 : omega * omega) / den;
+}
 
 constexpr double kFs = 48000.0;
 constexpr double kPi = 3.14159265358979323846;
@@ -75,7 +86,7 @@ TEST_CASE("Korg35 linear loop matches the analytic prototype response",
         for (const double resonance : {0.0, 0.5, 0.9}) {
             for (const double hz : {200.0, 1500.0, 2500.0, 3000.0, 3600.0, 8000.0}) {
                 const double k = 2.0 * resonance;
-                const double want = Filter::prototype_magnitude(mode, k, warped_omega(hz, cutoff));
+                const double want = prototype_magnitude(mode, k, warped_omega(hz, cutoff));
                 const double got = gain_at(mode, cutoff, resonance, 0.0, hz);
                 INFO("mode " << static_cast<int>(mode) << " r " << resonance << " hz " << hz);
                 CHECK_THAT(got, WithinRel(want, 0.01));
@@ -206,6 +217,40 @@ TEST_CASE("Korg35 survives parameter changes on every sample", "[signal][korg35]
         REQUIRE(std::isfinite(f.process(0.0)));
 }
 
+TEST_CASE("Korg35 mode change restarts the new topology from rest",
+          "[signal][korg35][mode]") {
+    // A resonant lowpass full of energy switches to highpass: the output must
+    // be exactly that of a fresh highpass, not one started from lowpass states.
+    for (const Mode from : {Mode::lowpass, Mode::highpass}) {
+        const Mode to = from == Mode::lowpass ? Mode::highpass : Mode::lowpass;
+        Filter running, fresh;
+        running.configure(from, kFs, 2000.0, 0.95, 1.0);
+        fresh.configure(to, kFs, 2000.0, 0.95, 1.0);
+        for (int n = 0; n < 2000; ++n)
+            running.process(std::sin(2.0 * kPi * 2000.0 * n / kFs));
+        running.set_mode(to);
+        CHECK(running.mode() == to);
+        for (int n = 0; n < 500; ++n) {
+            const double x = std::sin(0.07 * n);
+            REQUIRE(running.process(x) == fresh.process(x));
+        }
+        // Setting the mode already in force keeps the state.
+        Filter steady, reference;
+        steady.configure(to, kFs, 2000.0, 0.95, 1.0);
+        reference.configure(to, kFs, 2000.0, 0.95, 1.0);
+        for (int n = 0; n < 300; ++n) {
+            steady.process(std::sin(0.1 * n));
+            reference.process(std::sin(0.1 * n));
+        }
+        steady.set_mode(to);
+        steady.configure(to, kFs, 2000.0, 0.95, 1.0);
+        for (int n = 0; n < 100; ++n) {
+            const double x = std::cos(0.05 * n);
+            REQUIRE(steady.process(x) == reference.process(x));
+        }
+    }
+}
+
 TEST_CASE("Korg35 feedback solver matches bisection", "[signal][korg35][solver]") {
     for (const double drive : {0.25, 1.0, 4.0, 16.0}) {
         for (const double a : {0.0, 0.2, 0.4, 0.62}) {
@@ -247,4 +292,24 @@ TEST_CASE("Korg35 float and double agree on a moderate setting", "[signal][korg3
         worst = std::max(worst, std::abs(single.process(static_cast<float>(x)) - dbl.process(x)));
     }
     CHECK(worst < 1e-3);
+}
+
+TEST_CASE("Korg35 processing allocates nothing", "[signal][korg35][rt-safety]") {
+    Filter f;
+    f.configure(Mode::lowpass, kFs, 1200.0, 1.1, 2.0);
+    double sink = 0.0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int n = 0; n < 20000; ++n) {
+            if (n % 64 == 0) {
+                f.set_frequency(400.0 + 30.0 * (n % 300));
+                f.set_resonance(0.3 + 0.002 * (n % 400));
+            }
+            if (n == 10000)
+                f.set_mode(Mode::highpass);
+            sink += f.process(std::sin(0.03 * n));
+        }
+        CHECK(probe.allocation_count() == 0);
+    }
+    CHECK(std::isfinite(sink));
 }

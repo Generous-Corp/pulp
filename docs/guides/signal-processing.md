@@ -548,7 +548,7 @@ for (int i = 0; i < num_samples; ++i)
 | `set_frequency(float hz)` | Set cutoff frequency. Recalculates coefficients. |
 | `set_resonance(float q)` | Set Q factor (default 0.707). Recalculates coefficients. |
 | `set_mode(Mode)` | Select output: `lowpass`, `highpass`, `bandpass`, `notch`, `unity_bandpass`, `allpass`, `peak`, `band_shelf`. |
-| `set_shelf_gain(float)` / `set_shelf_gain_db(float)` | Gain at the cutoff for `band_shelf` (1.0 is transparent). |
+| `set_shelf_gain(float)` / `set_shelf_gain_db(float)` | Gain at the cutoff for `band_shelf` (1.0 is transparent). A cut is not the inverse of the same boost; see below. |
 | `process(float)` | Filter one sample. |
 | `process_all(float)` | Filter one sample and return every output in an `Outputs` struct. |
 | `process(float*, int)` | Filter buffer in-place. |
@@ -563,6 +563,13 @@ frequency), peak is lowpass minus highpass, and band-shelf is
 `in + (G - 1)*k*v1` (gain `G` at the cutoff, unity far from it). Notch plus
 unity bandpass reconstructs the input exactly. The existing four modes keep
 their numeric values and their output.
+
+The band-shelf uses the filter's own damping, so its bandwidth follows `Q`
+for a boost and is narrower for a cut. A cut of `1/G` therefore does not undo
+a boost of `G`: the pair leaves `1 + ((G - 1)^2 / G) * UBP * (1 - UBP)`, unity
+only at the cutoff, DC and Nyquist (about +4.4 dB at 0.72 of the cutoff for
+`Q = 1.5` and +/-9.5 dB). Use a peaking `Biquad` when a cut must exactly
+reverse a boost.
 
 ```cpp
 signal::Svf filter;
@@ -644,7 +651,7 @@ for (int i = 0; i < num_samples; ++i)
 | Method | Description |
 |---|---|
 | `configure(mode, sample_rate, hz, resonance, drive)` | Set everything in one prewarp. |
-| `set_mode(Mode)` | `lowpass` or `highpass`. |
+| `set_mode(Mode)` | `lowpass` or `highpass`. A change of mode clears the state (the two topologies' memories mean different things), so it can click on a running signal; crossfade two instances for a smooth switch. |
 | `set_frequency(float hz)` | Cutoff; the TPT integrators keep it exact up to Nyquist. |
 | `set_resonance(float r)` | 0 to 1.25. `r = 1` is the self-oscillation threshold (feedback `k = 2`); above it the filter rings at the cutoff and the saturator sets the amplitude. |
 | `set_drive(float d)` | Feedback saturator `tanh(d x) / d`. Unit small-signal gain for every `d`; 0 makes the loop linear and caps resonance just below the threshold. |
@@ -675,16 +682,31 @@ for (int i = 0; i < num_samples; ++i)
 | Method | Description |
 |---|---|
 | `configure(sample_rate, hz, resonance, drive)` | Set everything in one prewarp. |
-| `set_frequency(float hz)` | The frequency the filter self-oscillates at. The unresonant -3 dB corner is far lower: `kUnresonantCornerRatio` (about 0.106) of this value before warping. |
+| `set_frequency(float hz)` | By default the frequency the filter self-oscillates at, which is where the resonance peak sits on `LadderFilter` and `Svf` too. The unresonant -3 dB corner is far lower (see below). |
+| `set_cutoff_reference(CutoffReference)` | `oscillation` (default) or `corner`: with `corner`, `set_frequency()` names the unresonant -3 dB corner, kept through sample-rate changes. |
+| `corner_frequency_hz(fs, hz)` / `frequency_for_corner_hz(fs, corner)` | Static: exact conversion between the set frequency and the -3 dB corner. |
 | `set_resonance(float r)` | 0 to 1.25; 1 is the oscillation threshold (`k = 17 r`). |
 | `set_drive(float d)` | Feedback saturator `tanh(d x) / d`; 0 is a linear loop capped just below the threshold. |
 | `set_bass_compensation(float)` | 0 to 1; scales the input by `1 + amount * k`. 1 holds the passband at unity gain. |
 | `process(float)` / `process(float*, int)` | Filter one sample or a buffer. |
 | `reset()` | Clear state. |
 
-Compared with `LadderFilter` at zero resonance, the two agree within 0.25 dB from DC up to the -3 dB corner when that corner is set equal on both (checked in the tests); above the corner the diode ladder rolls off more gently. The four coupled stages are solved together without a unit delay: the inverse of the stage matrix is rebuilt when the cutoff changes, and the saturated resonance loop is a single scalar equation solved by bracketed Newton iteration.
+**Where the corner is.** In the analog prototype the unresonant -3 dB corner is `kUnresonantCornerRatio` (about 0.106) of the oscillation frequency. Only the oscillation frequency is prewarped, so in the digital filter that ratio holds at low settings and rises toward the top of the range:
 
-**Real-time:** a 4x4 matrix-vector product and a bounded number of `tanh` calls per sample; no allocation. Retuning rebuilds the matrix inverse (control-rate).
+| `set_frequency` at 48 kHz | -3 dB corner | ratio |
+|---|---|---|
+| 1 kHz | 106 Hz | 0.106 |
+| 5 kHz | 548 Hz | 0.110 |
+| 10 kHz | 1.24 kHz | 0.124 |
+| 15 kHz | 2.40 kHz | 0.160 |
+| 20 kHz | 5.74 kHz | 0.287 |
+| 23.5 kHz (the 0.49 fs clamp) | 19.6 kHz | 0.833 |
+
+A knob that should track brightness reads better with `set_cutoff_reference(CutoffReference::corner)`, since the hardware's cutoff control is usually described by its corner. At zero resonance and the same setting the corner is about two octaves below `LadderFilter`'s and three below a Butterworth-damped `Svf`'s. Texts that describe the diode ladder by its one-pole coupling rate `fc` have it oscillate at `fc / sqrt(2)` with the corner at 0.0747 `fc`; to reproduce a setting quoted that way, call `set_frequency(fc / sqrt(2))`.
+
+Compared with `LadderFilter` at zero resonance, the two agree within 0.25 dB from DC up to the -3 dB corner when that corner is set equal on both (checked in the tests); above the corner the diode ladder rolls off more gently. The four coupled stages are solved together without a unit delay: the inverse of the stage matrix is rebuilt only when the cutoff or sample rate changes (resonance, drive and compensation update two scalars), and the saturated resonance loop is a single scalar equation solved by bracketed Newton iteration.
+
+**Real-time:** a 4x4 matrix-vector product and a bounded number of `tanh` calls per sample; no allocation. Per-sample modulation of every parameter is safe. A cutoff change rebuilds the 4x4 inverse (a few hundred flops), so updating the cutoff at control rate is cheaper; resonance changes are cheap at any rate.
 
 **References:** Zavalishin, *The Art of VA Filter Design*, chapter 6; Pirkle, *Designing Software Synthesizer Plug-Ins in C++*, 2nd ed., diode ladder filter. Tests: `test/test_signal_diode_ladder_filter.cpp`.
 
@@ -1258,7 +1280,7 @@ for (int i = 0; i < num_samples; ++i)
 aa.set_kernel(signal::AntiderivativeIirKernel::butterworth(6, 0.35));  // steeper, more delay
 ```
 
-Nonlinearities are small structs with `operator()(double)`, `breakpoints(lo, hi, out)` (the points where the curve is not smooth, so quadrature never straddles a kink), `length_scale()` and a `piecewise_linear` flag. `TanhNonlinearity` and `HardClipNonlinearity` are provided; the curve must satisfy `f(0) = 0`. Piecewise-linear curves are integrated exactly; smooth ones with eight-point Gauss-Legendre panels, as many as the input span per sample needs (capped at 16 per smooth span).
+Nonlinearities are small structs with `operator()(double)`, `breakpoints(lo, hi, out, capacity)` (the points where the curve is not smooth, so quadrature never straddles a kink), `length_scale()` and a `piecewise_linear` flag. `breakpoints` writes at most `capacity` kinks (`AntiderivativeIir::kMaxSplits`, 4 per sample step) and returns how many it wrote; a curve with more kinks than that should report the most important first, and the rest are integrated across, at some cost in accuracy. `TanhNonlinearity` and `HardClipNonlinearity` are provided; the curve must satisfy `f(0) = 0`. Piecewise-linear curves are integrated exactly; smooth ones with eight-point Gauss-Legendre panels, as many as the input span per sample needs (capped at 16 per smooth span).
 
 The same method is a `Saturator` alias policy:
 
@@ -1269,7 +1291,19 @@ sat.set_alias_policy(signal::SaturatorAliasPolicy::adaa_iir);
 sat.set_adaa_iir_kernel(signal::AntiderivativeIirKernel::butterworth(6, 0.35));  // optional
 ```
 
-`group_delay_samples()` reports the kernel's low-frequency delay (about 1.4 samples for the default) and `latency_samples()` its whole samples, with the dry path matched. Poles must be simple; kernels up to eight poles. A non-finite input resets the state.
+`group_delay_samples()` reports the kernel's low-frequency delay (about 1.4 samples for the default) and `latency_samples()` its whole samples, with the dry path matched; the remaining fraction is not compensated, so a 50 percent dry/wet mix dips by about 1.8 dB at Nyquist. `set_adaa_iir_kernel()` returns false, and keeps the current kernel, for an empty kernel or one with more than 31 samples of delay.
+
+The default kernel is flatter than second-order ADAA's two-sample triangle below a quarter of the sample rate and much steeper above it, which is where its alias advantage comes from:
+
+| Frequency (fraction of the rate) | `adaa2` | `adaa_iir` default |
+|---|---|---|
+| 0.2 | -1.2 dB | -0.2 dB |
+| 0.25 | -1.8 dB | -0.9 dB |
+| 0.3 | -2.7 dB | -3.0 dB |
+| 0.4 | -4.8 dB | -10.4 dB |
+| 0.5 | -7.8 dB | -17.8 dB |
+
+So the wet path is a lowpass near 0.3 of the rate (about 14 kHz at 48 kHz); keep that in mind when mixing it with a bright dry signal. Poles must be simple; kernels up to eight poles. A non-finite input resets the state.
 
 **Real-time:** `process()` allocates nothing and does bounded work: the nonlinearity is evaluated once per quadrature node (8 nodes for a sample whose input moves less than two length scales, more for large jumps). Kernel changes are control-thread operations.
 
@@ -1574,7 +1608,7 @@ signal::OnsetNoveltyFrontEndT<float, 2048, 2> front_end;
 front_end.prepare(stream_config, signal::OnsetDetectionMethod::SuperFlux, signal::SuperFluxConfig{});
 ```
 
-`SuperFluxConfig` carries the filterbank density and range, the compression, the width of the max filter (3 by default; 1 turns the vibrato suppression off) and the lag in frames (derived from the window and hop when 0). The detector needs `OnsetDetectionConfig::sample_rate` because the filterbank is laid out in hertz; `analyze_detected()` fills it from the source rate. Unlike the other methods, SuperFlux markers sit at the centre of the analysis window that produced them (where the novelty peaks), which puts them within about 10 ms of the hit for the default settings. Frame size must be a power of two up to 65536.
+`SuperFluxConfig` carries the filterbank density and range, the compression, the width of the max filter (3 by default; 1 turns the vibrato suppression off) and the lag in frames (derived from the window and hop when 0). The detector needs `OnsetDetectionConfig::sample_rate` because the filterbank is laid out in hertz; `analyze_detected()` fills it from the source rate. Unlike the other methods, SuperFlux markers sit at the centre of the analysis window that produced them (where the novelty peaks). `OnsetDetectionResult::marker_timing` and `marker_offset_frames` say which convention a result uses, so markers from two methods can be aligned. SuperFlux pads the start of the source with silence (half a window plus the lag), so frames are centred on multiples of the hop from sample 0 and a hit in the first half window is found near where it happens. Markers typically lead the attack by 5 to 13 ms for the default settings, since the novelty peaks as the attack enters the window. Frame size must be a power of two up to 65536.
 
 **Real-time:** `prepare()` is a control-thread call. After it, the streaming front end allocates nothing; the filterbank, lag history and spectrum are fixed-size members. Detection and slice analysis are offline operations and allocate.
 

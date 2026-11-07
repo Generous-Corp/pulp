@@ -8,6 +8,8 @@
 #include <pulp/signal/diode_ladder_filter.hpp>
 #include <pulp/signal/ladder_filter.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -100,6 +102,91 @@ TEST_CASE("Diode ladder unresonant corner sits at the documented fraction of the
     for (const double cutoff : {2000.0, 5000.0}) {
         const double corner = Filter::kUnresonantCornerRatio * cutoff;
         CHECK_THAT(filter_gain(cutoff, 0.0, 0.0, corner), WithinRel(1.0 / std::sqrt(2.0), 0.02));
+    }
+}
+
+TEST_CASE("Diode ladder corner helper is exact at high cutoffs where the ratio drifts",
+          "[signal][diode-ladder][response][corner]") {
+    // The ratio rises with the cutoff because only the oscillation frequency is
+    // prewarped. The documented figures at 48 kHz:
+    const std::array<std::array<double, 2>, 6> documented{{{1000.0, 0.106},
+                                                           {5000.0, 0.110},
+                                                           {10000.0, 0.124},
+                                                           {15000.0, 0.160},
+                                                           {20000.0, 0.287},
+                                                           {23520.0, 0.833}}};
+    for (const auto& [cutoff, ratio] : documented) {
+        INFO("cutoff " << cutoff);
+        CHECK_THAT(Filter::corner_frequency_hz(kFs, cutoff) / cutoff, WithinAbs(ratio, 0.002));
+    }
+    // Measured: the filter is 3 dB down exactly at the helper's corner, and the
+    // fixed ratio is visibly wrong there.
+    for (const double cutoff : {10000.0, 15000.0, 20000.0}) {
+        const double corner = Filter::corner_frequency_hz(kFs, cutoff);
+        INFO("cutoff " << cutoff << " corner " << corner);
+        CHECK_THAT(filter_gain(cutoff, 0.0, 0.0, corner), WithinRel(1.0 / std::sqrt(2.0), 0.01));
+        CHECK(std::abs(filter_gain(cutoff, 0.0, 0.0, Filter::kUnresonantCornerRatio * cutoff) -
+                       1.0 / std::sqrt(2.0)) > 0.03);
+    }
+    // The analog prototype agrees: |H| at the helper's corner, mapped back to
+    // normalized frequency, is 1/sqrt(2).
+    for (const double cutoff : {500.0, 12000.0, 22000.0}) {
+        const double corner = Filter::corner_frequency_hz(kFs, cutoff);
+        CHECK_THAT(closed_loop_gain(0.0, normalized_omega(corner, cutoff)),
+                   WithinRel(1.0 / std::sqrt(2.0), 1e-9));
+    }
+    // Round trip, and the clamp.
+    for (const double corner : {50.0, 1000.0, 4000.0, 12000.0, 19000.0}) {
+        const double cutoff = Filter::frequency_for_corner_hz(kFs, corner);
+        CHECK_THAT(Filter::corner_frequency_hz(kFs, cutoff), WithinRel(corner, 1e-9));
+    }
+    const double top = Filter::corner_frequency_hz(kFs, 0.49 * kFs);
+    CHECK_THAT(top, WithinRel(19590.0, 2e-3));
+    CHECK_THAT(Filter::frequency_for_corner_hz(kFs, 23000.0), WithinRel(0.49 * kFs, 1e-12));
+}
+
+TEST_CASE("Diode ladder corner reference makes set_frequency name the -3 dB corner",
+          "[signal][diode-ladder][corner]") {
+    for (const double corner : {300.0, 2500.0, 9000.0, 16000.0}) {
+        Filter f;
+        f.configure(kFs, corner, 0.0, 0.0);
+        f.set_cutoff_reference(Filter::CutoffReference::corner);
+        CHECK(f.cutoff_reference() == Filter::CutoffReference::corner);
+        CHECK_THAT(f.oscillation_frequency_hz(),
+                   WithinRel(Filter::frequency_for_corner_hz(kFs, corner), 1e-12));
+        INFO("corner " << corner);
+        CHECK_THAT(sine_gain([&](double x) { return f.process(x); }, corner, 1.0),
+                   WithinRel(1.0 / std::sqrt(2.0), 0.01));
+    }
+    // The corner is kept through a sample-rate change.
+    Filter f;
+    f.configure(kFs, 4000.0, 0.0, 0.0);
+    f.set_cutoff_reference(Filter::CutoffReference::corner);
+    f.set_sample_rate(96000.0);
+    CHECK_THAT(Filter::corner_frequency_hz(96000.0, f.oscillation_frequency_hz()),
+               WithinRel(4000.0, 1e-9));
+    // Back to the default reference.
+    f.set_cutoff_reference(Filter::CutoffReference::oscillation);
+    CHECK_THAT(f.oscillation_frequency_hz(), WithinRel(4000.0, 1e-12));
+}
+
+TEST_CASE("Diode ladder resonance changes update the feedback without changing the matrix",
+          "[signal][diode-ladder][modulation]") {
+    // Per-sample resonance, drive and compensation changes through the cheap
+    // setters must give exactly what a full reconfigure gives.
+    Filter cheap, full;
+    cheap.configure(kFs, 3000.0, 0.2, 1.0);
+    for (int n = 0; n < 4000; ++n) {
+        const double r = 0.6 + 0.55 * std::sin(0.003 * n);
+        const double d = 1.0 + 0.5 * std::sin(0.001 * n);
+        const double comp = 0.5 + 0.5 * std::sin(0.002 * n);
+        cheap.set_resonance(r);
+        cheap.set_drive(d);
+        cheap.set_bass_compensation(comp);
+        full.configure(kFs, 3000.0, r, d);
+        full.set_bass_compensation(comp);
+        const double x = std::sin(0.05 * n) + 0.3 * std::sin(0.9 * n);
+        REQUIRE(cheap.process(x) == full.process(x));
     }
 }
 
@@ -355,4 +442,22 @@ TEST_CASE("Diode ladder survives per-sample parameter changes and float precisio
         REQUIRE(std::isfinite(y));
         REQUIRE(std::abs(y) < 100.0f);
     }
+}
+
+TEST_CASE("Diode ladder processing allocates nothing", "[signal][diode-ladder][rt-safety]") {
+    Filter f;
+    f.configure(kFs, 1200.0, 1.1, 2.0);
+    double sink = 0.0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int n = 0; n < 20000; ++n) {
+            if (n % 64 == 0) {
+                f.set_frequency(400.0 + 30.0 * (n % 300));
+                f.set_resonance(0.3 + 0.002 * (n % 400));
+            }
+            sink += f.process(std::sin(0.03 * n));
+        }
+        CHECK(probe.allocation_count() == 0);
+    }
+    CHECK(std::isfinite(sink));
 }

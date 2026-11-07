@@ -29,6 +29,13 @@ namespace pulp::signal {
 //   band-shelf   BSH = in + (G - 1) k v1  gain G at the cutoff, unity far away
 //
 // Notch plus unity bandpass reconstructs the input exactly.
+//
+// The band-shelf is built on the filter's own damping k, so its bandwidth
+// follows the resonance for a boost and narrows for a cut: a cut of 1/G does
+// not undo a boost of G. Boost and cut in cascade leave
+// 1 + ((G - 1)^2 / G) UBP (1 - UBP), which is unity only at the cutoff, DC and
+// Nyquist (about +4.4 dB at 0.72 of the cutoff for Q = 1.5 and +/-9.5 dB).
+// Use a peaking Biquad when a cut must be the exact inverse of a boost.
 template <typename SampleType = float>
 class SvfT {
   public:
@@ -56,8 +63,9 @@ class SvfT {
     void set_mode(Mode m) { mode_ = m; }
 
     /// Linear amplitude gain at the cutoff for the band_shelf output (1 is
-    /// transparent). Takes effect on the next sample; bandwidth follows the
-    /// resonance setting.
+    /// transparent). Takes effect on the next sample. The bandwidth follows the
+    /// resonance setting for a boost and is narrower for a cut, so a cut is not
+    /// the inverse of the same boost (see the file comment).
     void set_shelf_gain(SampleType linear_gain) {
         shelf_gain_ = std::isfinite(static_cast<double>(linear_gain)) && linear_gain > SampleType{0}
                           ? linear_gain
@@ -97,14 +105,8 @@ class SvfT {
     }
 
     SampleType process(SampleType input) {
-        SampleType v3 = input - ic2_;
-        SampleType v1 = a1_ * ic1_ + a2_ * v3;
-        SampleType v2 = ic2_ + a2_ * ic1_ + a3_ * v3;
-        // Snap the two integrator states where subnormals are slow (see
-        // snap_recursion_state()). No-op above 1e-15.
-        ic1_ = snap_recursion_state(SampleType{2.0f} * v1 - ic1_);
-        ic2_ = snap_recursion_state(SampleType{2.0f} * v2 - ic2_);
-
+        SampleType v1, v2;
+        step(input, v1, v2);
         switch (mode_) {
         case Mode::lowpass:
             return pick<Mode::lowpass>(input, v1, v2);
@@ -129,11 +131,8 @@ class SvfT {
     /// One sample step returning every output at once. Same state update as
     /// process(); use it when several responses of one filter are needed.
     Outputs process_all(SampleType input) {
-        SampleType v3 = input - ic2_;
-        SampleType v1 = a1_ * ic1_ + a2_ * v3;
-        SampleType v2 = ic2_ + a2_ * ic1_ + a3_ * v3;
-        ic1_ = snap_recursion_state(SampleType{2.0f} * v1 - ic1_);
-        ic2_ = snap_recursion_state(SampleType{2.0f} * v2 - ic2_);
+        SampleType v1, v2;
+        step(input, v1, v2);
         return outputs(input, v1, v2);
     }
 
@@ -186,6 +185,18 @@ private:
     SampleType a1_ = 0, a2_ = 0, a3_ = 0;
     SampleType ic1_ = 0, ic2_ = 0;
     SampleType shelf_gain_ = SampleType{1};
+
+    /// The per-sample state update shared by process() and process_all():
+    /// the bandpass and lowpass integrator outputs for `input`, with the two
+    /// states snapped where subnormals are slow (snap_recursion_state(), a
+    /// no-op above 1e-15).
+    void step(SampleType input, SampleType& v1, SampleType& v2) {
+        const SampleType v3 = input - ic2_;
+        v1 = a1_ * ic1_ + a2_ * v3;
+        v2 = ic2_ + a2_ * ic1_ + a3_ * v3;
+        ic1_ = snap_recursion_state(SampleType{2.0f} * v1 - ic1_);
+        ic2_ = snap_recursion_state(SampleType{2.0f} * v2 - ic2_);
+    }
 
     template <Mode M>
     static SampleType pick(SampleType input, SampleType v1, SampleType v2, SampleType k,

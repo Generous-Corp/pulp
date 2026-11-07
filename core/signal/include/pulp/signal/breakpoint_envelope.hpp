@@ -53,7 +53,11 @@
 /// `trigger_legato()` starts a new note without a jump. If the envelope is
 /// already gated (rising, looping or holding) it keeps going untouched; if it
 /// is releasing or finished, the first segment is replayed from the current
-/// value, over its authored duration, to point 1.
+/// value, over its authored duration, to point 1. Two exceptions jump instead:
+/// with the sustain point at point 0 the envelope parks on point 0's value
+/// (there is no first segment to glide along before the hold), and a
+/// zero-length first segment (an authored instant attack) is skipped, so the
+/// envelope starts at point 1.
 ///
 /// RT contract: the program and runtime state are fixed-capacity scalar/array
 /// storage. `next()`, `process()`, `trigger()`, and `reset()` allocate nothing,
@@ -216,7 +220,8 @@ template <typename SampleType = float, std::size_t MaxPoints = 16> class Breakpo
 
     /// Opens the gate without a jump. An envelope that is already gated is left
     /// running; one that is releasing or finished replays its first segment from
-    /// the current value.
+    /// the current value. It jumps when the sustain point is point 0 or the
+    /// first segment has zero length (see the file comment).
     void trigger_legato() noexcept {
         if (active_ && gate_)
             return;
@@ -292,7 +297,10 @@ template <typename SampleType = float, std::size_t MaxPoints = 16> class Breakpo
     bool holding() const noexcept {
         return holding_;
     }
-    /// True from `trigger()` / `trigger_legato()` until `release()`.
+    /// True from `trigger()` / `trigger_legato()` until `release()`. This is
+    /// the key state, not activity: an envelope without a sustain point that
+    /// runs to its end keeps the gate on until `release()`. Use `active()` to
+    /// tell whether it is still producing a contour.
     bool gate() const noexcept {
         return gate_;
     }

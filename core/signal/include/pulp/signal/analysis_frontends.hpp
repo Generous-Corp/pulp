@@ -36,10 +36,14 @@ struct SuperFluxConfig {
     double bands_per_octave = 24.0;
     double min_hz = 27.5;
     double max_hz = 16000.0;
-    /// `lambda` in `log(lambda * |X| + 1)`, with `|X|` calibrated so a full-scale
-    /// sine at a bin centre reads 1. Larger values compress quiet detail less
-    /// aggressively; the published value 1 applies to a differently scaled
-    /// spectrogram.
+    /// `lambda` in `log(lambda * |X| + 1)`, with `|X|` the triangle-weighted
+    /// mean magnitude over the band's bins, scaled so a full-scale sine at the
+    /// centre of a one-bin band reads 1. A wide band averages a sine's window
+    /// main lobe over many bins and reads lower (10 to 20 dB lower for the
+    /// 40-plus-bin bands near 16 kHz), as in the published method, so the
+    /// effective compression varies by band. Larger values compress quiet
+    /// detail less aggressively; the published value 1 applies to a
+    /// differently scaled spectrogram.
     double compression = 1000.0;
     /// Width of the maximum filter across bands (odd, 1 to 15). 1 disables it.
     std::uint32_t max_filter_width = 3;
@@ -706,6 +710,12 @@ class OnsetNoveltyFrontEndT {
     }
     [[nodiscard]] std::uint32_t readiness_latency_samples() const noexcept {
         return window_.prepared() ? window_.config().fft_size - 1u : 0u;
+    }
+    /// Frames between the spectra SuperFlux compares (SuperFluxConfig::lag_frames,
+    /// or the value derived from the window and hop); 0 for the other methods.
+    /// A frame's novelty is 0 until this many earlier frames exist.
+    [[nodiscard]] std::size_t superflux_lag_frames() const noexcept {
+        return method_ == OnsetDetectionMethod::SuperFlux ? superflux_.lag_frames() : 0u;
     }
     [[nodiscard]] std::uint64_t retained_fft_bytes() const noexcept {
         return window_.retained_fft_bytes();

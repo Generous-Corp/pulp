@@ -43,6 +43,16 @@
 /// Requirements on the nonlinearity: `f(0) = 0` (subtract `f(0)` and add it
 /// back otherwise). Poles must be simple; repeated poles are not supported.
 ///
+/// A nonlinearity is a small struct with `operator()(double)`, a
+/// `static constexpr bool piecewise_linear`, `length_scale()` (the width of its
+/// features, which sets the quadrature panel count) and
+/// `breakpoints(lo, hi, out, capacity)`. `breakpoints` writes at most
+/// `capacity` kink positions strictly inside `(lo, hi)` to `out`, in any order,
+/// and returns how many it wrote. The capacity is `AntiderivativeIir::kMaxSplits`
+/// (4); kinks past it are not split around (the quadrature then straddles
+/// them, which costs accuracy but nothing else), so report the kinks that
+/// matter most first.
+///
 /// Reference: Pier Paolo La Pastina, Stefano D'Angelo and Leonardo Gabrielli,
 /// "Arbitrary-Order IIR Antiderivative Antialiasing", Proceedings of the 24th
 /// International Conference on Digital Audio Effects (DAFx), 2021, pp. 9-16.
@@ -73,7 +83,7 @@ struct TanhNonlinearity {
     double length_scale() const noexcept {
         return 1.0;
     }
-    int breakpoints(double, double, double*) const noexcept {
+    int breakpoints(double, double, double*, int) const noexcept {
         return 0;
     }
 };
@@ -89,11 +99,11 @@ struct HardClipNonlinearity {
     double length_scale() const noexcept {
         return threshold;
     }
-    int breakpoints(double lo, double hi, double* out) const noexcept {
+    int breakpoints(double lo, double hi, double* out, int capacity) const noexcept {
         int n = 0;
-        if (-threshold > lo && -threshold < hi)
+        if (n < capacity && -threshold > lo && -threshold < hi)
             out[n++] = -threshold;
-        if (threshold > lo && threshold < hi)
+        if (n < capacity && threshold > lo && threshold < hi)
             out[n++] = threshold;
         return n;
     }
@@ -241,7 +251,15 @@ class AntiderivativeIir {
     /// The default kernel: fourth-order Butterworth, -3 dB at 0.3 of the sample
     /// rate. Measured on a heavily driven 1 kHz sine at 44.1 kHz it sits within
     /// a dB or two of the best Butterworth order and cutoff for both tanh and
-    /// hard clip, with a group delay of about 1.4 samples.
+    /// hard clip, with a group delay of about 1.4 samples. The hidden test case
+    /// tagged `[adaa-iir][report]` reruns that sweep (orders 2 to 8, cutoffs 0.2
+    /// to 0.45 of the rate) and prints the alias level, the droop at a quarter
+    /// of the rate and the group delay for each kernel.
+    ///
+    /// Its response: -0.17 dB at 0.2 of the rate, -0.9 dB at 0.25, -3 dB at
+    /// 0.3, -10.4 dB at 0.4 and -17.8 dB at Nyquist. Flatter than a two-sample
+    /// triangle (second-order antiderivative antialiasing) below a quarter of
+    /// the rate, much steeper above it.
     static constexpr double kDefaultCutoffRatio = 0.30;
 
     AntiderivativeIir() {
@@ -301,8 +319,11 @@ class AntiderivativeIir {
         knots[static_cast<std::size_t>(knot_count++)] = 0.0;
         if (delta != 0.0) {
             std::array<double, kMaxSplits> kinks{};
+            // A curve must write at most kMaxSplits kinks; the returned count is
+            // clamped as well so a miscounting curve cannot index past the arrays.
             const int found =
-                std::min(kMaxSplits, f.breakpoints(std::min(x0, x), std::max(x0, x), kinks.data()));
+                std::clamp(f.breakpoints(std::min(x0, x), std::max(x0, x), kinks.data(), kMaxSplits),
+                           0, kMaxSplits);
             std::array<double, kMaxSplits> ts{};
             for (int i = 0; i < found; ++i)
                 ts[static_cast<std::size_t>(i)] = (kinks[static_cast<std::size_t>(i)] - x0) / delta;
@@ -360,9 +381,12 @@ class AntiderivativeIir {
         return y;
     }
 
+    /// Most kinks per sample step that are split around; the capacity passed to
+    /// a nonlinearity's `breakpoints()`.
+    static constexpr int kMaxSplits = 4;
+
   private:
     static constexpr int kNodes = 8;
-    static constexpr int kMaxSplits = 4;
     // Gauss-Legendre nodes and weights on [0, 1], eight points.
     static constexpr double kNodeT[kNodes] = {
         0.0198550717512319, 0.1016667612931866, 0.2372337950418355, 0.4082826787521751,
@@ -408,13 +432,33 @@ class AntiderivativeIir {
             static_cast<int>(std::clamp(std::ceil(span / (kPanelSpan * f.length_scale())), 1.0,
                                         static_cast<double>(kMaxPanels)));
         const double h = (tb - ta) / panels;
-        for (int p = 0; p < panels; ++p) {
-            const double pa = ta + h * p;
-            for (int j = 0; j < kNodes; ++j) {
-                const double t = pa + h * kNodeT[j];
-                const double fv = f(x0 + t * delta) * kNodeW[j] * h;
-                for (std::size_t i = 0; i < kernel_.size(); ++i)
-                    integral[i] += fv * std::exp(kernel_.section(i).pole * (1.0 - t));
+        // e^{p (1 - t)} at node j of panel q is e^{p (1 - ta)} e^{-p h q}
+        // e^{-p h t_j}: the node factors and the panel step are computed once
+        // per section, so the exponentials do not grow with the panel count.
+        const std::size_t sections = kernel_.size();
+        std::array<std::array<std::complex<double>, kNodes>, AntiderivativeIirKernel::kMaxSections>
+            node_factor{};
+        std::array<std::complex<double>, AntiderivativeIirKernel::kMaxSections> panel_factor{};
+        std::array<std::complex<double>, AntiderivativeIirKernel::kMaxSections> panel_step{};
+        for (std::size_t i = 0; i < sections; ++i) {
+            const std::complex<double> p = kernel_.section(i).pole;
+            for (int j = 0; j < kNodes; ++j)
+                node_factor[i][static_cast<std::size_t>(j)] =
+                    kNodeW[j] * h * std::exp(-p * (h * kNodeT[j]));
+            panel_factor[i] = std::exp(p * (1.0 - ta));
+            panel_step[i] = std::exp(-p * h);
+        }
+        for (int q = 0; q < panels; ++q) {
+            const double pa = ta + h * q;
+            std::array<double, kNodes> fv{};
+            for (int j = 0; j < kNodes; ++j)
+                fv[static_cast<std::size_t>(j)] = f(x0 + (pa + h * kNodeT[j]) * delta);
+            for (std::size_t i = 0; i < sections; ++i) {
+                std::complex<double> acc = 0.0;
+                for (int j = 0; j < kNodes; ++j)
+                    acc += fv[static_cast<std::size_t>(j)] * node_factor[i][static_cast<std::size_t>(j)];
+                integral[i] += panel_factor[i] * acc;
+                panel_factor[i] *= panel_step[i];
             }
         }
     }

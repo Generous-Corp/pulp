@@ -8978,6 +8978,7 @@
               "process(const SampleType* const* channels, std::size_t channel_count, std::size_t frames, Sink&& sink)",
               "current()",
               "readiness_latency_samples()",
+              "superflux_lag_frames()",
               "retained_fft_bytes()"
             ],
             "enums": []
@@ -8990,7 +8991,7 @@
             "template": null,
             "methods": [
               "length_scale()",
-              "breakpoints(double, double, double*)"
+              "breakpoints(double, double, double*, int)"
             ],
             "enums": []
           },
@@ -9000,7 +9001,7 @@
             "template": null,
             "methods": [
               "length_scale()",
-              "breakpoints(double lo, double hi, double* out)"
+              "breakpoints(double lo, double hi, double* out, int capacity)"
             ],
             "enums": []
           },
@@ -10447,8 +10448,13 @@
               "process(SampleType x)",
               "process(SampleType* buffer, int num_samples)",
               "reset()",
+              "corner_frequency_hz(double sample_rate, double frequency_hz)",
+              "frequency_for_corner_hz(double sample_rate, double corner_hz)",
               "set_sample_rate(SampleType sr)",
               "set_frequency(SampleType hz)",
+              "set_cutoff_reference(CutoffReference reference)",
+              "cutoff_reference()",
+              "oscillation_frequency_hz()",
               "set_resonance(SampleType r)",
               "set_drive(SampleType d)",
               "set_bass_compensation(SampleType amount)",
@@ -10456,7 +10462,15 @@
               "feedback()",
               "solve_loop(SampleType d, SampleType ck, SampleType drive)"
             ],
-            "enums": []
+            "enums": [
+              [
+                "CutoffReference",
+                [
+                  "oscillation",
+                  "corner"
+                ]
+              ]
+            ]
           }
         ],
         "distortion.hpp": [
@@ -13155,7 +13169,6 @@
               "configure(Mode mode, SampleType sample_rate, SampleType frequency, SampleType resonance, SampleType drive = SampleType{1})",
               "mode()",
               "feedback()",
-              "prototype_magnitude(Mode mode, double k, double omega)",
               "solve_loop(SampleType c, SampleType a, SampleType drive)"
             ],
             "enums": [
@@ -15568,7 +15581,7 @@
             "template": null,
             "methods": [
               "length_scale()",
-              "breakpoints(double lo, double hi, double* out)"
+              "breakpoints(double lo, double hi, double* out, int capacity)"
             ],
             "enums": []
           }

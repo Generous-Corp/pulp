@@ -277,6 +277,17 @@ pulp_add_test_suite(pulp-test-signal-adaa-iir GROUP pulp-test-group-dsp-rt-signa
     LIBRARIES pulp::signal
     TIMEOUT 300)
 
+# Korg35-style two-pole filter with a saturating feedback path, with its
+# allocation probe.
+pulp_add_test_suite(pulp-test-signal-korg35-filter GROUP pulp-test-group-dsp-rt-signal
+    SOURCES test_signal_korg35_filter.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+# Four-stage diode-coupled ladder lowpass, including agreement with the
+# transistor ladder at low resonance, with its allocation probe.
+pulp_add_test_suite(pulp-test-signal-diode-ladder-filter GROUP pulp-test-group-dsp-rt-signal
+    SOURCES test_signal_diode_ladder_filter.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+
 pulp_add_test_suite(pulp-test-signal-nonlinear-shaping GROUP pulp-test-group-dsp-rt-signal
     SOURCES test_signal_nonlinear_shaping.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal

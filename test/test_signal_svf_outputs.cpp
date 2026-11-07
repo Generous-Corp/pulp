@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cmath>
+#include <complex>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -112,9 +113,36 @@ TEST_CASE("Svf band shelf reaches its gain at the cutoff and is flat far away",
     CHECK_THAT(far_below.band_shelf, WithinRel(1.0, 2e-2));
     const auto far_above = measure(6000.0, 1.5, 23000.0, gain);
     CHECK_THAT(far_above.band_shelf, WithinRel(1.0, 5e-2));
-    // A cut is the mirror image.
+    // A cut also reaches its gain at the cutoff.
     const auto cut = measure(6000.0, 1.5, 6000.0, 0.25);
     CHECK_THAT(cut.band_shelf, WithinRel(0.25, 2e-3));
+}
+
+TEST_CASE("Svf band shelf cut does not undo the same boost away from the cutoff",
+          "[signal][svf][shelf]") {
+    // The shelf shares the filter's damping, so boost G followed by cut 1/G
+    // leaves 1 + ((G - 1)^2 / G) U (1 - U), with U the unity bandpass of the
+    // analog prototype at the prewarped frequency. Unity only at the cutoff.
+    const double fc = 6000.0, q = 1.5, k = 1.0 / q;
+    const double gain = std::pow(10.0, 9.5 / 20.0);
+    auto residual = [&](double hz) {
+        const double w = std::tan(kPi * hz / kSampleRate) / std::tan(kPi * fc / kSampleRate);
+        const std::complex<double> s{0.0, w};
+        const std::complex<double> u = k * s / (s * s + k * s + 1.0);
+        return std::abs(1.0 + (gain - 1.0) * (gain - 1.0) / gain * u * (1.0 - u));
+    };
+    for (const double hz : {0.5 * fc, 0.72 * fc, fc, 1.4 * fc, 2.0 * fc}) {
+        const double cascade =
+            measure(fc, q, hz, gain).band_shelf * measure(fc, q, hz, 1.0 / gain).band_shelf;
+        INFO("hz " << hz);
+        CHECK_THAT(cascade, WithinRel(residual(hz), 5e-3));
+    }
+    // The documented residual: about +4.4 dB at 0.72 of the cutoff.
+    const double at_072 = measure(fc, q, 0.72 * fc, gain).band_shelf *
+                          measure(fc, q, 0.72 * fc, 1.0 / gain).band_shelf;
+    CHECK_THAT(20.0 * std::log10(at_072), WithinAbs(4.4, 0.3));
+    CHECK_THAT(measure(fc, q, fc, gain).band_shelf * measure(fc, q, fc, 1.0 / gain).band_shelf,
+               WithinRel(1.0, 3e-3));
 }
 
 TEST_CASE("Svf legacy modes are unchanged and the new modes match process_all",

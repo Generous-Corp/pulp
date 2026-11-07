@@ -229,6 +229,59 @@ TEST_CASE("SuperFlux detects a synthetic drum pattern at the right frames",
         CHECK(marker.method == OnsetDetectionMethod::SuperFlux);
 }
 
+TEST_CASE("SuperFlux finds a hit in the first half window near where it happens",
+          "[audio][onset][superflux][padding]") {
+    // Without start padding the first frame is centred at 1024 and an early
+    // hit is reported at or after the first frame past the lag (frame 2 of a
+    // 220-sample hop, centred at 1464, 33 ms). With it the early hit is held to
+    // the same tolerance as any other: SuperFlux peaks as the attack enters the
+    // window, a few milliseconds before it (5 to 13 ms on the drum pattern), so
+    // a hit in the first 13 ms is reported at or near sample 0.
+    const auto first_unpadded_centre = static_cast<std::int64_t>(2 * 220 + 1024);
+    for (const double hit_time : {0.005, 0.012, 0.02}) {
+        // Two snares: their tails decay to silence inside the render.
+        const auto audio = render_drums({{hit_time, 1}, {0.6, 1}}, 1.2);
+        const float* pointer = nullptr;
+        const auto result =
+            OnsetDetector{}.detect(view_of(audio, &pointer), superflux_onset_config(kFs));
+        REQUIRE(result.ok);
+        REQUIRE(result.markers.size() == 2);
+        const auto first = static_cast<std::int64_t>(result.markers.front().frame);
+        const auto truth = static_cast<std::int64_t>(hit_time * kFs);
+        INFO("hit at " << truth << " first marker " << first);
+        CHECK(std::llabs(first - truth) <= static_cast<std::int64_t>(0.025 * kFs));
+        CHECK(first <= truth);
+        CHECK(first < first_unpadded_centre);
+    }
+}
+
+TEST_CASE("Onset results state their marker timing convention", "[audio][onset][superflux]") {
+    const auto audio = render_drums(drum_pattern(), 4.0);
+    const float* pointer = nullptr;
+    const auto source = view_of(audio, &pointer);
+    const auto super = OnsetDetector{}.detect(source, superflux_onset_config(kFs));
+    REQUIRE(super.ok);
+    CHECK(super.marker_timing == OnsetMarkerTiming::window_centre);
+    CHECK(super.marker_offset_frames == 1024);
+
+    for (const auto method : {OnsetDetectionMethod::EnergyFlux, OnsetDetectionMethod::SpectralFlux,
+                              OnsetDetectionMethod::HighFrequencyContent}) {
+        OnsetDetectionConfig config;
+        config.method = method;
+        config.sample_rate = kFs;
+        const auto legacy = OnsetDetector{}.detect(source, config);
+        REQUIRE(legacy.ok);
+        CHECK(legacy.marker_timing == OnsetMarkerTiming::window_start);
+        CHECK(legacy.marker_offset_frames == 0);
+    }
+    // A rejected detection reports the default convention.
+    auto invalid = superflux_onset_config(kFs);
+    invalid.frame_size = 3000;
+    const auto rejected = OnsetDetector{}.detect(source, invalid);
+    CHECK_FALSE(rejected.ok);
+    CHECK(rejected.markers.empty());
+}
+
 TEST_CASE("SuperFlux raises fewer false onsets than spectral flux on a vibrato tone",
           "[audio][onset][superflux][vibrato]") {
     const double hit = 1.5;

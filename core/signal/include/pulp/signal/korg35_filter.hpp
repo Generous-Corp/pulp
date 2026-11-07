@@ -71,7 +71,16 @@ template <typename SampleType = float> class Korg35FilterT {
         update();
     }
 
+    /// Switch between the lowpass and highpass topologies. The three
+    /// integrator states mean different things in the two topologies (the
+    /// second section is a lowpass in one and a highpass's internal lowpass in
+    /// the other; the third tracks the output in one and the feedback in the
+    /// other), so a change of mode clears them: the filter restarts from rest,
+    /// which can click on a running signal. Crossfade two instances for a
+    /// click-free switch. Setting the mode already in force does nothing.
     void set_mode(Mode mode) {
+        if (mode != mode_)
+            reset();
         mode_ = mode;
     }
     void set_sample_rate(SampleType sr) {
@@ -98,10 +107,11 @@ template <typename SampleType = float> class Korg35FilterT {
         update();
     }
 
-    /// Install a coherent set in one prewarp.
+    /// Install a coherent set in one prewarp. A change of mode clears the
+    /// state, as set_mode() does.
     void configure(Mode mode, SampleType sample_rate, SampleType frequency, SampleType resonance,
                    SampleType drive = SampleType{1}) {
-        mode_ = mode;
+        set_mode(mode);
         if (sample_rate > SampleType{0})
             sample_rate_ = sample_rate;
         if (std::isfinite(static_cast<double>(frequency)))
@@ -119,15 +129,6 @@ template <typename SampleType = float> class Korg35FilterT {
     /// The feedback amount `k` in force after clamping.
     SampleType feedback() const {
         return k_;
-    }
-
-    /// Magnitude of the linear (unsaturated) prototype at `omega`, the
-    /// frequency in units of the cutoff, for feedback amount `k`.
-    static double prototype_magnitude(Mode mode, double k, double omega) {
-        const double re = 1.0 - omega * omega;
-        const double im = (2.0 - k) * omega;
-        const double den = std::sqrt(re * re + im * im);
-        return (mode == Mode::lowpass ? 1.0 : omega * omega) / den;
     }
 
     SampleType process(SampleType x) {
@@ -181,8 +182,13 @@ template <typename SampleType = float> class Korg35FilterT {
     }
 
     /// Solves `h = c + a T(h)` with `T(x) = tanh(drive x) / drive` (identity at
-    /// drive 0). `F(h) = h - c - a T(h)` is monotonic for `a < 1`; Newton from
-    /// the one-step fixed-point guess converges in a few iterations.
+    /// drive 0). `F(h) = h - c - a T(h)` has `F'(h)` in `[1 - a, 1]`, so it is
+    /// monotonic for `a < 1`. In this filter `a = k G (1 - G)` with `k <= 2.5`
+    /// and `G (1 - G) <= 1/4`, so `a <= 0.625` and `F' >= 0.375`: the fixed
+    /// four Newton steps from the one-step fixed-point guess need no bracket.
+    /// Checked against 200-step bisection over `a` up to 0.625, drive 0.25 to
+    /// 16 and `c` from -200 to 200: worst relative error about 1e-15 (three
+    /// steps leave about 1e-8). Larger `a` would need a safeguard.
     static SampleType solve_loop(SampleType c, SampleType a, SampleType drive) {
         if (drive <= SampleType{0})
             return c / (SampleType{1} - a);

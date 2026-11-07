@@ -71,9 +71,14 @@
 /// roll-off. `adaa_iir` replaces the finite averaging kernel of the
 /// antiderivative methods with a low-pass IIR kernel (a fourth-order Butterworth
 /// at 0.3 of the sample rate by default, see antiderivative_iir.hpp): it cuts
-/// aliases of heavily driven signals several dB below `adaa2`, droops the top
-/// octave far less, and reports its group delay of about 1.4 samples. `oversample_2x` keeps the house half-band path available for
-/// chains that must stay phase-coherent with another oversampled stage; it
+/// aliases of heavily driven signals several dB below `adaa2` (about 7 dB for
+/// tanh at +30 dB drive) and reports its group delay of about 1.4 samples. Its
+/// frequency response is flatter than `adaa2`'s below a quarter of the sample
+/// rate (-0.2 dB against -1.2 dB at 0.2 of the rate) and then much steeper
+/// (-10 dB against -5 dB at 0.4 of the rate, -18 dB against -8 dB at Nyquist),
+/// so the wet path is a lowpass near 0.3 of the sample rate; keep that in mind
+/// when mixing it with a bright dry signal. `oversample_2x` keeps the house
+/// half-band path available for chains that must stay phase-coherent with another oversampled stage; it
 /// reports its latency exactly rather than estimating. `off` exists only for
 /// tests and the CPU floor.
 ///
@@ -567,12 +572,14 @@ public:
 
     /// The antialiasing kernel `adaa_iir` uses. A control-thread call: it
     /// restarts the kernel's state. Group delay beyond 31 samples is not
-    /// accepted (the dry-path alignment ring holds 127).
-    void set_adaa_iir_kernel(const AntiderivativeIirKernel& kernel) {
+    /// accepted (the dry-path alignment ring holds 127). Returns false, and
+    /// keeps the current kernel, for a rejected kernel.
+    bool set_adaa_iir_kernel(const AntiderivativeIirKernel& kernel) {
         if (kernel.size() == 0 || kernel.group_delay_samples() > 31.0)
-            return;
+            return false;
         adaa_iir_.set_kernel(kernel);
         reseed_iir();
+        return true;
     }
     const AntiderivativeIirKernel& adaa_iir_kernel() const {
         return adaa_iir_.kernel();
@@ -590,9 +597,13 @@ public:
 
     /// The integer delay the host should compensate, matched on the dry path.
     /// One sample for `adaa2`, whose three-point stencil is centred one sample
-    /// back; the whole samples of the IIR kernel's group delay for `adaa_iir`; the composed oversampler's own reported latency for
-    /// `oversample_2x`; zero for `off`, and zero for `adaa`, whose half sample
-    /// is below what an integer delay can express (`group_delay_samples()`).
+    /// back; the whole samples of the IIR kernel's group delay for `adaa_iir`
+    /// (1 for the default kernel, whose delay is about 1.4 samples: the
+    /// remaining fraction is not compensated, so a 50 percent dry/wet mix dips
+    /// by about 1.8 dB at Nyquist); the composed oversampler's own reported
+    /// latency for `oversample_2x`; zero for `off`, and zero for `adaa`, whose
+    /// half sample is below what an integer delay can express
+    /// (`group_delay_samples()`).
     int latency_samples() const noexcept {
         switch (alias_policy_) {
         case AliasPolicy::oversample_2x:
@@ -609,8 +620,9 @@ public:
     }
 
     /// The wet path's exact delay on the linear part of the curve, in samples:
-    /// 0.5 for `adaa` (its two-tap average), 1 for `adaa2`, the oversampler's
-    /// exact figure for `oversample_2x`, 0 for `off`.
+    /// 0.5 for `adaa` (its two-tap average), 1 for `adaa2`, the kernel's
+    /// low-frequency group delay for `adaa_iir`, the oversampler's exact figure
+    /// for `oversample_2x`, 0 for `off`.
     double group_delay_samples() const noexcept {
         switch (alias_policy_) {
         case AliasPolicy::oversample_2x:
@@ -874,13 +886,13 @@ private:
         double length_scale() const noexcept {
             return 1.0 / self->drive_;
         }
-        int breakpoints(double lo, double hi, double* out) const noexcept {
+        int breakpoints(double lo, double hi, double* out, int capacity) const noexcept {
             if (self->shape_ != Shape::cubic_soft)
                 return 0;
             int n = 0;
             for (const double edge : {-1.0, 1.0}) {
                 const double x = (edge - self->bias_) / self->drive_;
-                if (x > lo && x < hi)
+                if (n < capacity && x > lo && x < hi)
                     out[n++] = x;
             }
             return n;
