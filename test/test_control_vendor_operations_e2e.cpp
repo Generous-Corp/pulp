@@ -93,20 +93,22 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
          .sdk_version = "vendor-product",
          .executable_path = executable,
          .process_generation = 405,
-         .installed_host_selections = {{.host_id = "vendor-product",
-                                        .intent = ControlTrustedHostLaunchIntent{
-                                            .executable = host,
-                                            .arguments = {},
-                                            .working_directory = host.parent_path(),
-                                            .host_tier = ControlHostTier::Standalone}}},
+         .installed_host_selections =
+             {{.host_id = "vendor-product",
+               .intent = ControlTrustedHostLaunchIntent{.executable = host,
+                                                        .arguments = {},
+                                                        .working_directory = host.parent_path(),
+                                                        .host_tier = ControlHostTier::Standalone}}},
          .decide_consent = [&](const ControlGrantConsentRequest& request) {
              {
                  std::lock_guard lock(consent_mutex);
                  consented_selectors.push_back(request.selector_id);
              }
-             return ControlConsentDecision{
-                 true, ControlConsentAuthority::TrustedHostUi,
-                 "vendor-e2e-consent-" + std::to_string(consent_sequence.fetch_add(1)), {}};
+             return ControlConsentDecision{true,
+                                           ControlConsentAuthority::TrustedHostUi,
+                                           "vendor-e2e-consent-" +
+                                               std::to_string(consent_sequence.fetch_add(1)),
+                                           {}};
          }});
     REQUIRE(daemon.start());
     ControlClientConnection management(
@@ -120,12 +122,15 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
     INFO(prepared.explanation);
     REQUIRE(prepared.status_id == "prepared");
     auto launch = choc::value::createObject("");
-    launch.addMember("inventory_id", choc::value::createString(
-                                         choc::json::parse(prepared.data_json)["inventory_id"]
-                                             .getString()));
-    const std::array<const char*, 6> child_environment = {
-        "CI", "PULP_HEADLESS", "PULP_TEST_MODE", "PULP_SCREENSHOT", "PULP_SCREENSHOT_PATH",
-        "PULP_SCREENSHOT_KEEP_AUDIO"};
+    launch.addMember("inventory_id",
+                     choc::value::createString(
+                         choc::json::parse(prepared.data_json)["inventory_id"].getString()));
+    const std::array<const char*, 6> child_environment = {"CI",
+                                                          "PULP_HEADLESS",
+                                                          "PULP_TEST_MODE",
+                                                          "PULP_SCREENSHOT",
+                                                          "PULP_SCREENSHOT_PATH",
+                                                          "PULP_SCREENSHOT_KEEP_AUDIO"};
     std::array<std::optional<std::string>, 6> saved_environment;
     for (std::size_t index = 0; index < child_environment.size(); ++index) {
         if (const auto* value = std::getenv(child_environment[index]))
@@ -133,7 +138,8 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
         REQUIRE(unsetenv(child_environment[index]) == 0);
     }
     REQUIRE(setenv("PULP_AUDIO_DEVICE", "null", 1) == 0);
-    const auto launched = management.manage("host-launch", choc::json::toString(launch, false), 10s);
+    const auto launched =
+        management.manage("host-launch", choc::json::toString(launch, false), 10s);
     REQUIRE(unsetenv("PULP_AUDIO_DEVICE") == 0);
     for (std::size_t index = 0; index < child_environment.size(); ++index)
         if (saved_environment[index])
@@ -170,13 +176,12 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
         const auto issued = run(cli, root.runtime, arguments);
         INFO(issued.stdout_output);
         REQUIRE(issued.exit_code == 0);
-        return std::string(
-            choc::json::parse(issued.stdout_output)["data"]["grant_id"].getString());
+        return std::string(choc::json::parse(issued.stdout_output)["data"]["grant_id"].getString());
     };
     const auto call = [&](std::string operation, std::string params, std::string grant_id) {
-        std::vector<std::string> arguments{"control", "call", "--instance", instance,
-                                           std::move(operation), "--params", std::move(params),
-                                           "--json"};
+        std::vector<std::string> arguments{
+            "control",         "call",  "--instance", instance, std::move(operation), "--params",
+            std::move(params), "--json"};
         if (!grant_id.empty()) {
             arguments.emplace_back("--grant");
             arguments.emplace_back(std::move(grant_id));
@@ -209,16 +214,16 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
     const auto set_receipt = choc::json::parse(set.stdout_output);
     REQUIRE(set_receipt["state"].getString() == "completed");
     CHECK(std::abs(set_receipt["detail"]["level"].getFloat64() - 0.75) < 1e-6);
-    const auto durable = wait_terminal_receipt(
-        operations, std::string(set_receipt["receipt_id"].getString()));
+    const auto durable =
+        wait_terminal_receipt(operations, std::string(set_receipt["receipt_id"].getString()));
     require_instance_binding(durable, identity);
     CHECK(durable["manifest_digest"].getString() == manifest_digest);
     CHECK(durable["operation_id"].getString() == "dev.org.example/level.set@1");
 
     const auto reread = call("dev.org.example/level.read@1", "{}", observe_grant);
     REQUIRE(reread.exit_code == 0);
-    CHECK(std::abs(choc::json::parse(reread.stdout_output)["detail"]["level"].getFloat64() -
-                   0.75) < 1e-6);
+    CHECK(std::abs(choc::json::parse(reread.stdout_output)["detail"]["level"].getFloat64() - 0.75) <
+          1e-6);
 
     // Arguments outside the declared schema never reach the handler.
     const auto out_of_range = call("dev.org.example/level.set@1", R"({"level":2})", develop_grant);
@@ -230,9 +235,9 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
     CHECK(undeclared.exit_code != 0);
     const auto after_undeclared = call("dev.org.example/level.read@1", "{}", observe_grant);
     REQUIRE(after_undeclared.exit_code == 0);
-    CHECK(std::abs(
-              choc::json::parse(after_undeclared.stdout_output)["detail"]["level"].getFloat64() -
-              0.75) < 1e-6);
+    CHECK(
+        std::abs(choc::json::parse(after_undeclared.stdout_output)["detail"]["level"].getFloat64() -
+                 0.75) < 1e-6);
 
     // Render tier is outside every profile and needs its own consent.
     const auto render_with_profile = call("dev.org.example/render.ping@1", "{}", develop_grant);
@@ -259,8 +264,8 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
               consented_selectors.end());
     }
 
-    const auto release = call("dev.pulp.session/control@1", R"({"action":"release"})",
-                              develop_grant);
+    const auto release =
+        call("dev.pulp.session/control@1", R"({"action":"release"})", develop_grant);
     REQUIRE(release.exit_code == 0);
 
     // The same live instance through pulp-mcp.
@@ -268,13 +273,11 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
         mcp, root.runtime,
         instances_call(1) +
             mcp_call(2, "pulp_control_session_control", instance, R"({"action":"acquire"})") +
-            vendor_call(3, instance, "dev.org.example/level.set@1", R"({"level":0.5})",
-                        "develop") +
+            vendor_call(3, instance, "dev.org.example/level.set@1", R"({"level":0.5})", "develop") +
             vendor_call(4, instance, "dev.org.example/level.read@1", "{}") +
             vendor_call(5, instance, "dev.org.example/render.ping@1", "{}") +
             vendor_call(6, instance, "dev.org.example/level.reset@1", "{}") +
-            vendor_call(7, instance, "dev.org.example/level.set@1", R"({"level":-1})",
-                        "develop") +
+            vendor_call(7, instance, "dev.org.example/level.set@1", R"({"level":-1})", "develop") +
             mcp_call(8, "pulp_control_session_control", instance, R"({"action":"release"})"));
     REQUIRE(responses.size() == 8);
     const auto structured = [&](std::size_t index) {
@@ -286,8 +289,8 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
     const auto mcp_instances = structured(0);
     for (const auto item : mcp_instances["instances"])
         if (item["instance_id"].getString() == instance)
-            mcp_listed = item["vendor_operations"].isArray() &&
-                         item["vendor_operations"].size() == 4;
+            mcp_listed =
+                item["vendor_operations"].isArray() && item["vendor_operations"].size() == 4;
     CHECK(mcp_listed);
     CHECK(structured(1)["state"].getString() == "completed");
     const auto mcp_set = structured(2);
@@ -299,11 +302,9 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
     const auto mcp_ping = structured(4);
     CHECK(mcp_ping["result"]["rendered"].getBool());
     CHECK(responses[5]["result"]["isError"].getWithDefault<bool>(false));
-    CHECK(choc::json::toString(responses[5], false).find("unknown-operation") !=
-          std::string::npos);
+    CHECK(choc::json::toString(responses[5], false).find("unknown-operation") != std::string::npos);
     CHECK(responses[6]["result"]["isError"].getWithDefault<bool>(false));
-    CHECK(choc::json::toString(responses[6], false).find("invalid-arguments") !=
-          std::string::npos);
+    CHECK(choc::json::toString(responses[6], false).find("invalid-arguments") != std::string::npos);
     CHECK(structured(7)["state"].getString() == "completed");
 #else
     SKIP("the vendor operations product fixture is Apple-only");

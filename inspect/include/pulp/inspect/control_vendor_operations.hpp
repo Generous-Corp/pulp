@@ -101,7 +101,8 @@ struct ControlVendorOperationsDiagnostics {
 /// alive for as long as they use a returned descriptor.
 class ControlVendorOperationTable {
   public:
-    ControlVendorOperationTable(std::string vendor_id, std::vector<ControlVendorOperation> operations);
+    ControlVendorOperationTable(std::string vendor_id,
+                                std::vector<ControlVendorOperation> operations);
     ControlVendorOperationTable(const ControlVendorOperationTable&) = delete;
     ControlVendorOperationTable& operator=(const ControlVendorOperationTable&) = delete;
 
@@ -115,8 +116,7 @@ class ControlVendorOperationTable {
     /// The broker-facing contract of one declared operation. Its capability is
     /// the tier capability; it never produces artifacts and carries no
     /// operation-specific receipt field (the durable receipt still exists).
-    const ControlOperationDescriptor* descriptor(std::string_view id,
-                                                 std::uint32_t version) const;
+    const ControlOperationDescriptor* descriptor(std::string_view id, std::uint32_t version) const;
     bool declares_tier(ControlVendorTier tier) const;
 
   private:

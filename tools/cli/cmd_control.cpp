@@ -740,12 +740,11 @@ int cmd_control(const std::vector<std::string>& args) {
         .operation_id = operation,
         .operation_version = operation_version,
         .idempotency_key = *idempotency,
-        .deadline_unix_ms = deadline
-                                ? deadline->unix_deadline_ms(std::chrono::system_clock::now())
-                                : std::chrono::duration_cast<std::chrono::milliseconds>(
-                                      std::chrono::system_clock::now().time_since_epoch())
-                                          .count() +
-                                      timeout_ms,
+        .deadline_unix_ms = deadline ? deadline->unix_deadline_ms(std::chrono::system_clock::now())
+                                     : std::chrono::duration_cast<std::chrono::milliseconds>(
+                                           std::chrono::system_clock::now().time_since_epoch())
+                                               .count() +
+                                           timeout_ms,
         .params_json = params};
     request.request_hash = control_request_hash(request).value_or("");
     const auto result = client.request(request, *final_timeout);

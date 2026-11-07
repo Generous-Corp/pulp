@@ -774,10 +774,9 @@ ControlBroker::finish_operation(const VerifiedControlPeerIdentity& client_peer,
                               terminal_state == ControlReceiptState::CompletedAfterRevocation;
     const bool authority_live = success_like && revalidate_operation_locked(client_peer, plan);
     if (success_like) {
-        const auto resolved =
-            resolve_operation_locked(current->binding.manifest_digest,
-                                     current->binding.operation_id,
-                                     current->binding.operation_version);
+        const auto resolved = resolve_operation_locked(current->binding.manifest_digest,
+                                                       current->binding.operation_id,
+                                                       current->binding.operation_version);
         const auto* operation = resolved.descriptor;
         ControlJsonSchemaDiagnostics diagnostics;
         if (!operation || !validate_control_output_json_schema(
@@ -796,11 +795,11 @@ ControlBroker::finish_operation(const VerifiedControlPeerIdentity& client_peer,
             };
         }
     }
-    const auto resolved_result =
-        success_like ? resolve_operation_locked(current->binding.manifest_digest,
-                                                current->binding.operation_id,
-                                                current->binding.operation_version)
-                     : ControlResolvedOperation{};
+    const auto resolved_result = success_like
+                                     ? resolve_operation_locked(current->binding.manifest_digest,
+                                                                current->binding.operation_id,
+                                                                current->binding.operation_version)
+                                     : ControlResolvedOperation{};
     const auto* operation = resolved_result.descriptor;
     if (!result.artifacts.empty() &&
         (!operation || !operation->artifact_binding.produced)) {
@@ -1040,8 +1039,8 @@ bool ControlBroker::authorize_artifact_read_locked(const VerifiedControlPeerIden
     const auto client = identities_.client(authority.client_id);
     const auto registration = identities_.registration(authority.registration_id);
     const auto grant = grants_.grant(authority.grant_id);
-    const auto resolved = resolve_operation_locked(authority.manifest_digest, authority.operation_id,
-                                                   authority.operation_version);
+    const auto resolved = resolve_operation_locked(
+        authority.manifest_digest, authority.operation_id, authority.operation_version);
     const auto* operation = resolved.descriptor;
 
     const bool valid =
@@ -1127,8 +1126,8 @@ void ControlBroker::sweep_expired() {
                     registration->instance_id == binding.instance_id &&
                     registration->publication_id == binding.publication_id &&
                     registration->manifest_digest == binding.manifest_digest &&
-                    grants_.is_granted(binding.grant_id, binding.client_id,
-                                       binding.registration_id, operation->capability) &&
+                    grants_.is_granted(binding.grant_id, binding.client_id, binding.registration_id,
+                                       operation->capability) &&
                     [&] {
                         if (!capability_is_vendor_tier(operation->capability))
                             return true;

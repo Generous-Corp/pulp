@@ -192,11 +192,12 @@ class FakeSession final : public ControlMcpSession {
                 return {.status_id = "completed",
                         .data_json = R"({"schema":"pulp.control.instances.v1","instances":[]})"};
             if (state_->vendor_operations)
-                return {.status_id = "completed",
-                        .data_json =
-                            std::string(
-                                R"({"schema":"pulp.control.instances.v1","instances":[{"instance_id":"instance-1","plugin_id":"com.acme.synth","profile":"developer-local","publication_id":"publication-1","registration_id":"registration-1","session_id":"session-1","vendor_operations":)") +
-                            std::string(kFakeVendorOperations) + "}]}"};
+                return {
+                    .status_id = "completed",
+                    .data_json =
+                        std::string(
+                            R"({"schema":"pulp.control.instances.v1","instances":[{"instance_id":"instance-1","plugin_id":"com.acme.synth","profile":"developer-local","publication_id":"publication-1","registration_id":"registration-1","session_id":"session-1","vendor_operations":)") +
+                        std::string(kFakeVendorOperations) + "}]}"};
             return {
                 .status_id = "completed",
                 .data_json =
@@ -366,10 +367,10 @@ TEST_CASE("control MCP calls only vendor operations the exact instance declares"
     // A Pulp-reserved or malformed id never reaches the broker.
     for (const auto* id : {"dev.pulp.state/read@1", "dev.com.acme/presets.count", "com.acme/x@1"}) {
         INFO(id);
-        const auto rejected = adapter.call_tool(
-            "pulp_control_vendor_call",
-            std::string(R"({"instance_id":"instance-1","operation_id":")") + id +
-                R"(","input":{}})");
+        const auto rejected =
+            adapter.call_tool("pulp_control_vendor_call",
+                              std::string(R"({"instance_id":"instance-1","operation_id":")") + id +
+                                  R"(","input":{}})");
         REQUIRE(rejected.find("invalid-arguments") != std::string::npos);
     }
     REQUIRE_FALSE(state->request.has_value());

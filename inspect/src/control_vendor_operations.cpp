@@ -99,10 +99,10 @@ struct SchemaChecker {
             return fail(path, "every schema must be a JSON object");
 
         static constexpr std::array<std::string_view, 17> kKeywords{
-            "$schema",  "type",      "properties", "required", "additionalProperties",
-            "items",    "minItems",  "maxItems",   "uniqueItems", "enum",
-            "const",    "minimum",   "maximum",    "minLength",   "maxLength",
-            "oneOf",    "default"};
+            "$schema", "type",     "properties", "required",    "additionalProperties",
+            "items",   "minItems", "maxItems",   "uniqueItems", "enum",
+            "const",   "minimum",  "maximum",    "minLength",   "maxLength",
+            "oneOf",   "default"};
         std::string unknown;
         schema.visitObjectMembers([&](std::string_view name, const choc::value::ValueView&) {
             if (unknown.empty() && std::ranges::find(kKeywords, name) == kKeywords.end())
@@ -111,8 +111,8 @@ struct SchemaChecker {
         if (!unknown.empty())
             return fail(path, "unsupported schema keyword '" + unknown + "'");
 
-        if (schema.hasObjectMember("$schema") &&
-            (!root || !schema["$schema"].isString() || schema["$schema"].getString() != kSchemaDialect))
+        if (schema.hasObjectMember("$schema") && (!root || !schema["$schema"].isString() ||
+                                                  schema["$schema"].getString() != kSchemaDialect))
             return fail(path, "$schema may appear only at the root and must name draft 2020-12");
 
         std::string type;
@@ -155,8 +155,8 @@ struct SchemaChecker {
                 alternatives.size() > kMaximumAlternatives)
                 return fail(path, "oneOf must be a non-empty array of at most 16 schemas");
             for (std::uint32_t index = 0; index < alternatives.size(); ++index)
-                if (!check(alternatives[index], path + "/oneOf/" + std::to_string(index),
-                           depth + 1, false))
+                if (!check(alternatives[index], path + "/oneOf/" + std::to_string(index), depth + 1,
+                           false))
                     return false;
         }
 
@@ -202,10 +202,9 @@ struct SchemaChecker {
             }
         }
 
-        const bool array_keywords = schema.hasObjectMember("items") ||
-                                    schema.hasObjectMember("minItems") ||
-                                    schema.hasObjectMember("maxItems") ||
-                                    schema.hasObjectMember("uniqueItems");
+        const bool array_keywords =
+            schema.hasObjectMember("items") || schema.hasObjectMember("minItems") ||
+            schema.hasObjectMember("maxItems") || schema.hasObjectMember("uniqueItems");
         if (array_keywords && type != "array")
             return fail(path, "array keywords require type array");
         if (type == "array") {
@@ -279,7 +278,8 @@ InspectorCapability control_vendor_tier_capability(ControlVendorTier tier) {
     return InspectorCapability::Unavailable;
 }
 
-std::optional<ControlVendorTier> control_vendor_tier_for_capability(InspectorCapability capability) {
+std::optional<ControlVendorTier>
+control_vendor_tier_for_capability(InspectorCapability capability) {
     for (const auto tier : {ControlVendorTier::Read, ControlVendorTier::Gesture,
                             ControlVendorTier::Render, ControlVendorTier::Destructive})
         if (control_vendor_tier_capability(tier) == capability)
@@ -484,7 +484,8 @@ parse_control_vendor_operations(std::string_view document, std::string_view bund
     if (!unknown.empty())
         return fail(ControlVendorOperationsError::UnknownField,
                     "vendor operation declaration contains unknown field '" + unknown + "'");
-    if (!root["schema"].isString() || root["schema"].getString() != kControlVendorOperationsSchemaId)
+    if (!root["schema"].isString() ||
+        root["schema"].getString() != kControlVendorOperationsSchemaId)
         return fail(ControlVendorOperationsError::UnsupportedSchema,
                     "schema must equal " + std::string(kControlVendorOperationsSchemaId));
     if (!root["vendor"].isString() || !control_vendor_id_is_valid(root["vendor"].getString()))
@@ -529,14 +530,15 @@ parse_control_vendor_operations(std::string_view document, std::string_view bund
         const auto parts = parse_control_vendor_operation_id(operation.id);
         if (!parts || parts->vendor_id != vendor_id)
             return fail(ControlVendorOperationsError::InvalidOperation,
-                        where + ".id must be dev.<vendor>/<name>@<version> for the declared vendor");
+                        where +
+                            ".id must be dev.<vendor>/<name>@<version> for the declared vendor");
         operation.version = parts->version;
         if (!ids.insert(operation.id).second)
             return fail(ControlVendorOperationsError::DuplicateOperation,
                         where + ".id is declared more than once");
-        const auto tier =
-            entry["tier"].isString() ? control_vendor_tier_from_id(entry["tier"].getString())
-                                     : std::nullopt;
+        const auto tier = entry["tier"].isString()
+                              ? control_vendor_tier_from_id(entry["tier"].getString())
+                              : std::nullopt;
         if (!tier)
             return fail(ControlVendorOperationsError::InvalidTier,
                         where + ".tier must be read, gesture, render, or destructive");

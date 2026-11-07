@@ -52,9 +52,8 @@ std::unique_ptr<format::StandaloneControlHost> make_control_standalone_host();
 /// the grant, consent and lease of the declared tier; a handler bound to an id
 /// that is not declared is dropped. Without an installed factory, declared
 /// operations fail as not implemented.
-using StandaloneVendorOperationsFactory =
-    std::shared_ptr<const ControlVendorOperationHandlers> (*)(format::Processor&,
-                                                              state::StateStore&);
+using StandaloneVendorOperationsFactory = std::shared_ptr<const ControlVendorOperationHandlers> (*)(
+    format::Processor&, state::StateStore&);
 /// Installs the process-wide factory once; later calls return false.
 bool install_standalone_vendor_operations_factory(
     StandaloneVendorOperationsFactory factory) noexcept;

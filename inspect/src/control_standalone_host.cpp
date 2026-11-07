@@ -15,12 +15,12 @@
 #include <pulp/inspect/control_sample_region_edit_executor.hpp>
 #include <pulp/inspect/control_sample_region_read_executor.hpp>
 #include <pulp/inspect/control_sequencer_state_executor.hpp>
-#include <pulp/inspect/control_vendor_operation_executor.hpp>
 #include <pulp/inspect/control_sequencer_transport_executor.hpp>
 #include <pulp/inspect/control_signal_graph_executor.hpp>
 #include <pulp/inspect/control_standalone_ui_adapter.hpp>
 #include <pulp/inspect/control_state_read_executor.hpp>
 #include <pulp/inspect/control_state_write_executor.hpp>
+#include <pulp/inspect/control_vendor_operation_executor.hpp>
 #include <pulp/inspect/motion_inspector.hpp>
 #include <pulp/inspect/motion_scrubber.hpp>
 #include <pulp/inspect/runtime_eval_component.hpp>
@@ -155,7 +155,8 @@ declared_vendor_handlers(const ControlManifest& manifest,
                          const std::shared_ptr<const ControlVendorOperationHandlers>& bound) {
     if (!bound || manifest.vendor_operations.empty())
         return {};
-    const auto table = parse_control_vendor_operations(manifest.vendor_operations, manifest.bundle_id);
+    const auto table =
+        parse_control_vendor_operations(manifest.vendor_operations, manifest.bundle_id);
     if (!table)
         return {};
     auto declared = std::make_shared<ControlVendorOperationHandlers>();
@@ -517,8 +518,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         auto fenced_vendor = main_vendor.executor();
         ControlOperationExecutor state_executor =
             [state_read = std::move(state_read), state_write = std::move(fenced_state_write),
-             vendor = std::move(fenced_vendor),
-             sequencer_read = std::move(fenced_sequencer_read),
+             vendor = std::move(fenced_vendor), sequencer_read = std::move(fenced_sequencer_read),
              sequencer_edit = std::move(fenced_sequencer_edit),
              gpu_health_read = std::move(gpu_health_read),
              transport_read = std::move(fenced_transport_read),

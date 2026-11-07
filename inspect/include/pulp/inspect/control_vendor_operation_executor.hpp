@@ -74,7 +74,7 @@ class ControlVendorOperationHandlers {
 /// Adapts vendor handlers onto the canonical executor contract. Compose it on
 /// the thread the handlers need (the Standalone host fences it onto the main
 /// thread). A handler exception becomes an internal failure, never a crash.
-ControlOperationExecutor
-make_control_vendor_operation_executor(std::shared_ptr<const ControlVendorOperationHandlers> handlers);
+ControlOperationExecutor make_control_vendor_operation_executor(
+    std::shared_ptr<const ControlVendorOperationHandlers> handlers);
 
 } // namespace pulp::inspect

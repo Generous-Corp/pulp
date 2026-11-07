@@ -19,8 +19,8 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -748,9 +748,8 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
         if (vendor_call) {
             const auto requested = required_string(*arguments, "operation_id");
             if (!requested || !is_control_vendor_operation_id(*requested))
-                return error_payload("invalid-arguments",
-                                     "operation_id must be a vendor operation "
-                                     "dev.<vendor>/<name>@<version>");
+                return error_payload("invalid-arguments", "operation_id must be a vendor operation "
+                                                          "dev.<vendor>/<name>@<version>");
             vendor_operation_id = *requested;
         }
         for (const auto field : {"request_id", "grant_id", "profile"}) {

@@ -767,8 +767,7 @@ std::string serialize_control_manifest(const ControlManifest& manifest) {
     // Emitted only when declared, so every manifest without vendor operations
     // keeps its existing canonical bytes and digest.
     if (!manifest.vendor_operations.empty())
-        out << ",\n  \"vendor_operations\": \"" << json_escape(manifest.vendor_operations)
-            << "\"";
+        out << ",\n  \"vendor_operations\": \"" << json_escape(manifest.vendor_operations) << "\"";
     out << "\n}\n";
     return out.str();
 }

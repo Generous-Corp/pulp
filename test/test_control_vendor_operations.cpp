@@ -87,9 +87,9 @@ ControlManifest vendor_manifest(std::string declaration = std::string(kDeclarati
     manifest.build_id = "build:0123456789abcdef0123456789abcdef";
     manifest.endpoint_included = true;
     manifest.capabilities = {
-        InspectorCapability::SessionDescribe,  InspectorCapability::SessionControl,
-        InspectorCapability::VendorRead,       InspectorCapability::VendorGesture,
-        InspectorCapability::VendorRender,     InspectorCapability::VendorDestructive,
+        InspectorCapability::SessionDescribe, InspectorCapability::SessionControl,
+        InspectorCapability::VendorRead,      InspectorCapability::VendorGesture,
+        InspectorCapability::VendorRender,    InspectorCapability::VendorDestructive,
     };
     manifest.vendor_operations = std::move(declaration);
     return manifest;
@@ -323,12 +323,13 @@ TEST_CASE("vendor declarations reject open, unbounded, or foreign schemas",
                       R"({"type": "string", "maxLength": 32, "pattern": "^a"})"),
          ControlVendorOperationsError::InvalidSchema},
         // A non-object root.
-        {replace_once(base,
-                      R"("output_schema": {"type": "object", "additionalProperties": false, "properties": {}}
+        {replace_once(
+             base,
+             R"("output_schema": {"type": "object", "additionalProperties": false, "properties": {}}
     },
     {
       "id": "dev.com.acme/notes.play@1")",
-                      R"("output_schema": {"type": "string", "maxLength": 4}
+             R"("output_schema": {"type": "string", "maxLength": 4}
     },
     {
       "id": "dev.com.acme/notes.play@1")"),
@@ -388,13 +389,14 @@ TEST_CASE("the control manifest carries and digests the exact vendor declaration
           ControlManifestError::InvalidCapabilitySet);
 
     auto invalid = manifest;
-    invalid.vendor_operations = replace_once(invalid.vendor_operations, R"("tier": "read")",
-                                             R"("tier": "everything")");
+    invalid.vendor_operations =
+        replace_once(invalid.vendor_operations, R"("tier": "read")", R"("tier": "everything")");
     CHECK(validate_control_manifest_detailed(invalid).code ==
           ControlManifestError::InvalidVendorOperations);
 
     auto bad_member = serialized;
-    bad_member = replace_once(bad_member, "\"vendor_operations\": \"", "\"vendor_operations\": 7, \"x\": \"");
+    bad_member = replace_once(bad_member, "\"vendor_operations\": \"",
+                              "\"vendor_operations\": 7, \"x\": \"");
     CHECK_FALSE(parse_control_manifest(bad_member));
 }
 
@@ -405,13 +407,13 @@ TEST_CASE("the broker resolves vendor operations only for the declaring registra
     REQUIRE(table);
     CHECK(table->operations().size() == 5);
 
-    const auto resolved = fixture.broker.resolve_operation(
-        fixture.registration.manifest_digest, "dev.com.acme/presets.count@1", 1);
+    const auto resolved = fixture.broker.resolve_operation(fixture.registration.manifest_digest,
+                                                           "dev.com.acme/presets.count@1", 1);
     REQUIRE(resolved);
     CHECK(resolved.vendor_table == table);
     CHECK_FALSE(fixture.broker.resolve_operation({}, "dev.com.acme/presets.count@1", 1));
-    CHECK_FALSE(fixture.broker.resolve_operation(std::string(64, 'f'),
-                                                 "dev.com.acme/presets.count@1", 1));
+    CHECK_FALSE(
+        fixture.broker.resolve_operation(std::string(64, 'f'), "dev.com.acme/presets.count@1", 1));
     CHECK_FALSE(fixture.broker.resolve_operation(fixture.registration.manifest_digest,
                                                  "dev.com.acme/presets.count@1", 2));
     // Pulp operations still resolve from the frozen registry.
@@ -421,9 +423,9 @@ TEST_CASE("the broker resolves vendor operations only for the declaring registra
     auto invalid = vendor_manifest(
         replace_once(std::string(kDeclaration), R"("tier": "read")", R"("tier": "root")"));
     const auto rejected = fixture.broker.register_instance(
-        fixture.host, ControlRegistrationRequest{ControlHostTier::Standalone, "session-bad",
-                                                 "instance-bad", "publication-bad",
-                                                 std::move(invalid), std::string(64, 'b')});
+        fixture.host,
+        ControlRegistrationRequest{ControlHostTier::Standalone, "session-bad", "instance-bad",
+                                   "publication-bad", std::move(invalid), std::string(64, 'b')});
     CHECK(rejected.status == ControlIdentityStatus::InvalidRequest);
     CHECK_FALSE(rejected.registration);
 }
@@ -478,17 +480,17 @@ TEST_CASE("vendor admission validates arguments, enforces tiers, and records rec
 
     SECTION("an undeclared vendor operation is unknown") {
         const auto denied = fixture.broker.admit_operation(
-            fixture.client, fixture.request(*read_grant.grant, "dev.com.acme/presets.purge@1",
-                                            "{}", "request-undeclared"));
+            fixture.client, fixture.request(*read_grant.grant, "dev.com.acme/presets.purge@1", "{}",
+                                            "request-undeclared"));
         CHECK(denied.status == ControlAdmissionStatus::UnknownOperation);
     }
 
     SECTION("a read grant authorizes no other tier") {
-        for (const auto* operation : {"dev.com.acme/notes.play@1", "dev.com.acme/presets.delete@1"}) {
+        for (const auto* operation :
+             {"dev.com.acme/notes.play@1", "dev.com.acme/presets.delete@1"}) {
             INFO(operation);
-            const auto params = std::string_view(operation).ends_with("delete@1")
-                                    ? R"({"name":"Lead"})"
-                                    : "{}";
+            const auto params =
+                std::string_view(operation).ends_with("delete@1") ? R"({"name":"Lead"})" : "{}";
             const auto denied = fixture.broker.admit_operation(
                 fixture.client,
                 fixture.request(*read_grant.grant, operation, params,
@@ -505,8 +507,7 @@ TEST_CASE("a single-operation vendor grant does not reach operations sharing its
     const auto scoped =
         fixture.grant({InspectorCapability::VendorRender}, {"dev.com.acme/notes.play@1"});
     REQUIRE(scoped.grant);
-    CHECK(scoped.grant->vendor_operations ==
-          std::vector<std::string>{"dev.com.acme/notes.play@1"});
+    CHECK(scoped.grant->vendor_operations == std::vector<std::string>{"dev.com.acme/notes.play@1"});
 
     const auto admitted = fixture.broker.admit_operation(
         fixture.client,
@@ -537,20 +538,20 @@ TEST_CASE("vendor handlers run only behind an admitted plan and fail closed",
           "[inspect][control][vendor][executor]") {
     auto handlers = std::make_shared<ControlVendorOperationHandlers>();
     std::vector<std::string> seen;
-    REQUIRE(handlers->add("dev.com.acme/presets.count@1", [&](const ControlVendorOperationCall& call) {
-        seen.emplace_back(call.arguments_json);
-        CHECK(call.tier == ControlVendorTier::Read);
-        CHECK(call.receipt_id == "receipt-vendor");
-        CHECK(call.still_authorized());
-        return ControlVendorOperationResult::success(R"({"count":3})");
-    }));
-    REQUIRE(handlers->add("dev.com.acme/patch.set@1", [](const ControlVendorOperationCall&)
-                              -> ControlVendorOperationResult {
-        throw std::runtime_error("patch store unavailable");
-    }));
+    REQUIRE(
+        handlers->add("dev.com.acme/presets.count@1", [&](const ControlVendorOperationCall& call) {
+            seen.emplace_back(call.arguments_json);
+            CHECK(call.tier == ControlVendorTier::Read);
+            CHECK(call.receipt_id == "receipt-vendor");
+            CHECK(call.still_authorized());
+            return ControlVendorOperationResult::success(R"({"count":3})");
+        }));
+    REQUIRE(handlers->add("dev.com.acme/patch.set@1",
+                          [](const ControlVendorOperationCall&) -> ControlVendorOperationResult {
+                              throw std::runtime_error("patch store unavailable");
+                          }));
     REQUIRE(handlers->add("dev.com.acme/notes.play@1", [](const ControlVendorOperationCall&) {
-        return ControlVendorOperationResult::failure(ControlResultCode::InvalidRequest,
-                                                     "no notes");
+        return ControlVendorOperationResult::failure(ControlResultCode::InvalidRequest, "no notes");
     }));
     CHECK_FALSE(handlers->add("dev.com.acme/presets.count@1", [](const auto&) {
         return ControlVendorOperationResult::success("{}");
@@ -562,22 +563,22 @@ TEST_CASE("vendor handlers run only behind an admitted plan and fail closed",
     const auto executor = make_control_vendor_operation_executor(handlers);
     const auto live = context_with(ControlExecutionCheckpoint::Continue);
 
-    const auto completed = executor(
-        vendor_plan("dev.com.acme/presets.count@1", InspectorCapability::VendorRead),
-        vendor_request("dev.com.acme/presets.count@1", R"({"bank":"factory"})"), live);
+    const auto completed =
+        executor(vendor_plan("dev.com.acme/presets.count@1", InspectorCapability::VendorRead),
+                 vendor_request("dev.com.acme/presets.count@1", R"({"bank":"factory"})"), live);
     CHECK(completed.terminal_state == ControlReceiptState::Completed);
     CHECK(completed.result.detail_json == R"({"count":3})");
     CHECK(seen == std::vector<std::string>{R"({"bank":"factory"})"});
 
-    const auto thrown = executor(
-        vendor_plan("dev.com.acme/patch.set@1", InspectorCapability::VendorGesture),
-        vendor_request("dev.com.acme/patch.set@1", R"({"value":0.5})"), live);
+    const auto thrown =
+        executor(vendor_plan("dev.com.acme/patch.set@1", InspectorCapability::VendorGesture),
+                 vendor_request("dev.com.acme/patch.set@1", R"({"value":0.5})"), live);
     CHECK(thrown.terminal_state == ControlReceiptState::Failed);
     CHECK(thrown.result.result_code == ControlResultCode::InternalError);
 
-    const auto failed = executor(
-        vendor_plan("dev.com.acme/notes.play@1", InspectorCapability::VendorRender),
-        vendor_request("dev.com.acme/notes.play@1", "{}"), live);
+    const auto failed =
+        executor(vendor_plan("dev.com.acme/notes.play@1", InspectorCapability::VendorRender),
+                 vendor_request("dev.com.acme/notes.play@1", "{}"), live);
     CHECK(failed.terminal_state == ControlReceiptState::Failed);
     CHECK(failed.result.explanation == "no notes");
 
@@ -588,19 +589,19 @@ TEST_CASE("vendor handlers run only behind an admitted plan and fail closed",
 
     // A plan that names another operation or a non-vendor capability never
     // reaches a handler.
-    const auto mismatched = executor(
-        vendor_plan("dev.com.acme/notes.play@1", InspectorCapability::VendorRender),
-        vendor_request("dev.com.acme/presets.count@1", "{}"), live);
+    const auto mismatched =
+        executor(vendor_plan("dev.com.acme/notes.play@1", InspectorCapability::VendorRender),
+                 vendor_request("dev.com.acme/presets.count@1", "{}"), live);
     CHECK(mismatched.result.result_code == ControlResultCode::PolicyDenied);
-    const auto not_vendor = executor(
-        vendor_plan("dev.com.acme/presets.count@1", InspectorCapability::StateRead),
-        vendor_request("dev.com.acme/presets.count@1", "{}"), live);
+    const auto not_vendor =
+        executor(vendor_plan("dev.com.acme/presets.count@1", InspectorCapability::StateRead),
+                 vendor_request("dev.com.acme/presets.count@1", "{}"), live);
     CHECK(not_vendor.result.result_code == ControlResultCode::PolicyDenied);
 
-    const auto revoked = executor(
-        vendor_plan("dev.com.acme/presets.count@1", InspectorCapability::VendorRead),
-        vendor_request("dev.com.acme/presets.count@1", "{}"),
-        context_with(ControlExecutionCheckpoint::AuthorityRevoked));
+    const auto revoked =
+        executor(vendor_plan("dev.com.acme/presets.count@1", InspectorCapability::VendorRead),
+                 vendor_request("dev.com.acme/presets.count@1", "{}"),
+                 context_with(ControlExecutionCheckpoint::AuthorityRevoked));
     CHECK(revoked.terminal_state == ControlReceiptState::Cancelled);
     CHECK(seen.size() == 1);
 }
