@@ -1032,6 +1032,31 @@ if(PULP_HAS_CLAP AND NOT IOS AND NOT ANDROID)
         PulpNoEditorLinkFloor_CLAP)
 endif()
 
+# Real VST3 and CLAP bundles of the Pulp Host Probe fixture
+# (test/fixtures/host_probe), loaded through PluginSlot::load. The probe reports
+# what its host delivered (transport, offline mode, sample rate, block size,
+# sidechain, mapped MIDI) and, on command, edits its own parameter or changes
+# its latency, so the test checks host behavior from inside a real plug-in.
+# The fixture directory is configured after test/, so gate on the same flags
+# it uses; target dependencies resolve at generate time.
+if((PULP_HAS_VST3 OR PULP_HAS_CLAP) AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN OR WIN32))
+    add_executable(pulp-test-host-probe-bundles test_host_probe_bundles.cpp)
+    target_link_libraries(pulp-test-host-probe-bundles
+        PRIVATE pulp::host pulp::format pulp::events Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-host-probe-bundles PRIVATE ${PULP_ROOT_DIR}/test)
+    if(PULP_HAS_VST3)
+        add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_VST3)
+        target_compile_definitions(pulp-test-host-probe-bundles PRIVATE
+            PULP_TEST_HOST_PROBE_VST3="${CMAKE_BINARY_DIR}/VST3/Pulp Host Probe.vst3")
+    endif()
+    if(PULP_HAS_CLAP)
+        add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_CLAP)
+        target_compile_definitions(pulp-test-host-probe-bundles PRIVATE
+            PULP_TEST_HOST_PROBE_CLAP="${CMAKE_BINARY_DIR}/CLAP/Pulp Host Probe.clap")
+    endif()
+    catch_discover_tests(pulp-test-host-probe-bundles)
+endif()
+
 # NetworkServiceDiscovery backend-dispatch tests
 pulp_add_test_suite(pulp-test-network-service-discovery LIBRARIES pulp::events)
 

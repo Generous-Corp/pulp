@@ -425,7 +425,7 @@ TEST_CASE("VST3 sidechain without a host sidechain gets silence through the lega
     CHECK(rig.processor->sidechain_sample == 0.0f);
 }
 
-TEST_CASE("VST3 plug-in receives notes, poly pressure, sysex, and mapped controllers",
+TEST_CASE("VST3 plug-in receives notes and poly pressure and sysex and mapped controllers",
           "[host][vst3][midi]") {
     Rig rig;
     REQUIRE(rig.slot->prepare(48000.0, 64));

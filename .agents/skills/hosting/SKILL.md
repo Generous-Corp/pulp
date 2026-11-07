@@ -58,6 +58,15 @@ bus matching or edit queuing in a backend is a review finding. The CLAP and
 VST3 slots are built this way; see `test_hosted_slot_process_request.cpp`,
 `test_clap_slot_process_fidelity.cpp`, and `test_vst3_slot_process_fidelity.cpp`.
 
+Those suites drive fake plugins. To check behavior from inside a real bundle,
+use the Pulp Host Probe fixture (`test/fixtures/host_probe`): it is built as a
+VST3 and a CLAP bundle, reports what its host delivered through read-only
+parameters, and on command edits its own parameter or changes its latency.
+`test_host_probe_bundles.cpp` loads both bundles through `PluginSlot::load`.
+Catch2 test names with commas are split into several filters by
+`catch_discover_tests`, so such a case runs nothing under ctest and still
+passes; keep host test names comma-free.
+
 ### SignalGraph determinism and replay
 
 When changing `SignalGraph` topology or its runtime plan, preserve canonical

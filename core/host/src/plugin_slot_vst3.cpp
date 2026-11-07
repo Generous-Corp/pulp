@@ -628,7 +628,7 @@ class Vst3Slot final : public detail::RequestDrivenSlot {
     // changes; build_input_parameters_() adds automation to the same queues.
     void queue_mapped_controller_(uint8_t channel, int32 controller, Vst::ParamValue value,
                                   int32 offset) noexcept {
-        if (channel >= 16 || controller < 0 || controller >= Vst::kCountCtrlNumber)
+        if (channel >= 16 || controller < 0 || controller >= kMappedControllers)
             return;
         const Vst::ParamID id = midi_map_[channel][(size_t)controller];
         if (id == Vst::kNoParamId)
@@ -771,7 +771,7 @@ class Vst3Slot final : public detail::RequestDrivenSlot {
             !mapping)
             return;
         for (int16 ch = 0; ch < 16; ++ch) {
-            for (int32 ctrl = 0; ctrl < Vst::kCountCtrlNumber; ++ctrl) {
+            for (int32 ctrl = 0; ctrl < kMappedControllers; ++ctrl) {
                 Vst::ParamID id = Vst::kNoParamId;
                 if (mapping->getMidiControllerAssignment(0, ch, (Vst::CtrlNumber)ctrl, id) ==
                     kResultTrue)
@@ -1198,7 +1198,10 @@ class Vst3Slot final : public detail::RequestDrivenSlot {
     // IMidiMapping table: [channel][controller] -> parameter, kNoParamId when
     // unmapped. Program-change step counts per channel turn a program number
     // into the normalized value of a list parameter.
-    std::array<std::array<Vst::ParamID, Vst::kCountCtrlNumber>, 16> midi_map_{};
+    // Controllers 0..127, channel pressure (128), pitch bend (129), and program
+    // change (130). kCountCtrlNumber stops at pitch bend, so it is one short.
+    static constexpr int32 kMappedControllers = Vst::kCtrlProgramChange + 1;
+    std::array<std::array<Vst::ParamID, kMappedControllers>, 16> midi_map_{};
     std::array<int32, 16> program_steps_{};
 
     std::atomic<bool> bypassed_{false};
