@@ -868,6 +868,8 @@ install(FILES
     # Included by PulpUtils.cmake: pulp_add_sparkle() for standalone apps.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSparkle.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpEmbedData.cmake"
+    # Included by PulpAppTargets.cmake: pulp_add_wgsl_shaders().
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWgslShaders.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFonts.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateMacIcns.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateWindowsIcon.ps1"
@@ -983,6 +985,7 @@ install(FILES
 # so find_package(Pulp) consumers can use the function.
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/encode_binary_data.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/embed_wgsl.py"
     # pulp_add_js_bytecode() builds its generator from this source against
     # the installed Pulp libraries, so the bytecode matches the product's engine.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_js_bytecode_main.cpp"
