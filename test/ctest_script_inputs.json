@@ -251,16 +251,23 @@
    "undeclared_sources": []
   },
   "pulp-test-audio-file-layout": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
+  "pulp-test-audio-file-layout-containers": {
    "data": "declared",
    "detected_sources": [
-    "test/test_audio_file_layout.cpp"
+    "test/test_audio_file_layout_containers.cpp"
    ],
    "inputs": [
     "test/fixtures/audio/inspect"
    ],
    "kind": "compiled",
    "sources": [
-    "test/test_audio_file_layout.cpp"
+    "test/test_audio_file_layout_containers.cpp"
    ],
    "undeclared_sources": []
   },
@@ -2817,6 +2824,7 @@
   "pulp-test-audio-doctor",
   "pulp-test-audio-edge-cases",
   "pulp-test-audio-file-layout",
+  "pulp-test-audio-file-layout-containers",
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
   "pulp-test-audio-reader-idle-wakeups",
