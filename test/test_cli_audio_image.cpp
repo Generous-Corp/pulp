@@ -199,6 +199,10 @@ TEST_CASE("audio image verbs validate arguments before touching audio",
     expect_error({"audio", "spectrogram", (ws / "missing.wav").string(), "--png", png},
                  "not a readable file");
     expect_error({"audio", "waveform", wav.string(), "--png", png, "--select", "2,1"}, "--select");
+    expect_error({"audio", "waveform", wav.string(), "--png", png, "--select", "0.1,9"},
+                 "outside the rendered range");
+    expect_error({"audio", "waveform", wav.string(), "--png", png, "--start", "0.2", "--select", "0.1,0.3"},
+                 "outside the rendered range");
     expect_error({"audio", "waveform", wav.string(), "--png", png, "--channel", "7"},
                  "out of range");
 
@@ -299,6 +303,13 @@ TEST_CASE("audio waveform reports float input above full scale without normalizi
     CHECK(json_number_after(json, "dbfs") == Catch::Approx(3.0).margin(0.02));
     CHECK(json.find("\"clipped\": true") != std::string::npos);
     CHECK(json.find("\"method\": \"sample_peak\"") != std::string::npos);
+
+    // A selection inside the range is echoed with full precision.
+    auto sel = run_pulp({"audio", "waveform", wav.string(), "--png", (ws / "sel.png").string(), "--select",
+                         "0.125,0.333333333"});
+    REQUIRE(sel.exit_code == 0);
+    CHECK(read_file(ws / "sel.png.json").find("\"selection_seconds\": [0.125, 0.333333333]") !=
+          std::string::npos);
 
     // The spectrogram of the same file reports the same unclamped peak.
     auto s =

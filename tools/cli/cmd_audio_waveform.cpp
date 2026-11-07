@@ -10,6 +10,7 @@
 #include <pulp/audio/waveform_overview.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -37,6 +38,12 @@ void print_usage() {
               << img::common_flags_help()
               << "\n"
                  "Exit codes: 0 rendered; 1 usage or I/O error; 2 nothing to render.\n";
+}
+
+std::string format_seconds(double value) {
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%.9g", value);
+    return buffer;
 }
 
 bool parse_selection(const std::string& text, double& start_s, double& end_s) {
@@ -138,9 +145,16 @@ int cmd_audio_waveform(const std::vector<std::string>& args) {
     ana::WaveformImageOptions image_options;
     image_options.plot_height = plot_height;
     if (selection_s) {
+        if (selection_s->first < input.start_s || selection_s->second > input.end_s) {
+            std::cerr << "Error: --select " << format_seconds(selection_s->first) << ","
+                      << format_seconds(selection_s->second) << " lies outside the rendered range "
+                      << format_seconds(input.start_s) << ".." << format_seconds(input.end_s)
+                      << " s\n";
+            return 1;
+        }
         const double span = input.end_s - input.start_s;
-        const double a = std::clamp((selection_s->first - input.start_s) / span, 0.0, 1.0);
-        const double b = std::clamp((selection_s->second - input.start_s) / span, 0.0, 1.0);
+        const double a = (selection_s->first - input.start_s) / span;
+        const double b = (selection_s->second - input.start_s) / span;
         image_options.selection_unit = std::make_pair(a, b);
     }
 
@@ -160,8 +174,8 @@ int cmd_audio_waveform(const std::vector<std::string>& args) {
                   << ", \"plot_width\": " << plot_width << ", \"plot_height\": " << plot_height
                   << ", \"clip_marker\": \"abs_sample_at_or_above_1\"";
     if (selection_s)
-        settings_json << ", \"selection_seconds\": [" << selection_s->first << ", "
-                      << selection_s->second << "]";
+        settings_json << ", \"selection_seconds\": [" << format_seconds(selection_s->first) << ", "
+                      << format_seconds(selection_s->second) << "]";
     settings_json << "}";
 
     img::SidecarFields fields;

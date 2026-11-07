@@ -140,7 +140,10 @@ TEST_CASE("spectrogram palette is clamped, deterministic and monotone in luminan
           "[audio][image][palette]") {
     CHECK(spectrogram_palette(-1.0) == spectrogram_palette(0.0));
     CHECK(spectrogram_palette(2.0) == spectrogram_palette(1.0));
-    CHECK(spectrogram_palette(0.5) == spectrogram_palette(0.5));
+    // Documented stops: near-black navy at the floor, pale yellow at the ceiling.
+    CHECK(spectrogram_palette(0.0) == Rgb8{8, 8, 24});
+    CHECK(spectrogram_palette(1.0) == Rgb8{255, 250, 200});
+    CHECK(spectrogram_palette(0.5) == Rgb8{170, 40, 180});  // the middle stop, magenta
     double previous = -1.0;
     for (int step = 0; step <= 100; ++step) {
         const double lum = luminance(spectrogram_palette(step / 100.0));
