@@ -582,7 +582,7 @@ artifact.
 Use `runtime::BackgroundJobService` for cancellable non-RT resource work such as
 IR loading, sample import, preset restore, waveform analysis, and other jobs
 that may allocate, block, report progress, or touch the filesystem. Jobs receive
-a `runtime::BackgroundJobContext` with a shared `CancellationToken` and a
+a `runtime::BackgroundJobContext` with a shared `CancelToken` and a
 progress publisher. Call `BackgroundJobHandle::wait()` only from a control,
 test, or teardown thread; never wait from `process()`.
 For owner teardown, call `BackgroundJobService::cancel_all()` and then
