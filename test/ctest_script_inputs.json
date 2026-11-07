@@ -5064,6 +5064,7 @@
    "entry": "tools/deps/test_audit_extra.py",
    "inputs": [
     "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/deps/audit.py",
     "tools/deps/test_audit_extra.py",
     "tools/packages/test-stubs"
@@ -5075,6 +5076,7 @@
    "inputs": [
     "tools/ci/tart-provision.sh",
     "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/cmake/PulpWclap.cmake",
     "tools/deps/audit.py",
     "tools/deps/test_audit.py",
@@ -5100,6 +5102,7 @@
    "entry": "tools/deps/audit.py",
    "inputs": [
     "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/deps/audit.py",
     "tools/packages/test-stubs"
    ],
