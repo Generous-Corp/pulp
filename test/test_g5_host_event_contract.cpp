@@ -205,7 +205,7 @@ TEST_CASE("G5 host projection preserves absolute offsets and sidecars",
     ump.reserve(4);
     ump.set_realtime_capacity_limit(true);
     midi.attach_ump(&ump);
-    mpe.reserve(8);
+    mpe.reserve(512);
     mpe.set_realtime_capacity_limit(true);
     pulp::midi::MpeVoiceTracker tracker;
 
@@ -237,6 +237,27 @@ TEST_CASE("G5 host projection refuses retiming and preserves destinations",
     REQUIRE(midi.add(pulp::midi::MidiEvent::note_off(1, 60)));
     REQUIRE(project_host_event_block(accepted, 40, 8, midi) == HostEventResult::OutputCapacity);
     REQUIRE(midi.size() == 1);
+}
+
+TEST_CASE("G5 host projection preflights bounded MPE fanout",
+          "[host][graph][g5][mpe][negative-control]") {
+    pulp::midi::MpeVoiceTracker tracker;
+    for (std::uint8_t note = 0; note < pulp::midi::MpeVoiceTracker::kMaxNotes; ++note)
+        REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, note, 100)));
+
+    std::array<HostEventRecord, 1> bend{
+        midi_event(1, 0, 1, 3, pulp::midi::MidiEvent::pitch_bend(1, 10'000))};
+    pulp::midi::MidiBuffer midi;
+    pulp::midi::MpeBuffer mpe;
+    midi.reserve(1);
+    midi.set_realtime_capacity_limit(true);
+    mpe.reserve(pulp::midi::MpeVoiceTracker::kMaxNotes - 1);
+    mpe.set_realtime_capacity_limit(true);
+
+    REQUIRE(project_host_event_block(bend, 0, 1, midi, &tracker, &mpe) ==
+            HostEventResult::OutputCapacity);
+    REQUIRE(midi.empty());
+    REQUIRE(mpe.empty());
 }
 
 TEST_CASE("G5 graph-authored event lane is partition invariant", "[host][graph][g5][events]") {

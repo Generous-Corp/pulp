@@ -223,6 +223,12 @@ inline HostEventResult derive_mpe(std::span<const HostEventRecord> events,
     bool dropped = false;
     int32_t offset = 0;
     midi::bind_tracker_to_buffer(tracker, out, offset, &dropped);
+    // A bounded tracker can defer note-offs when the previous block's sidecar
+    // was full. Flush that lifecycle queue at block start before consuming new
+    // host records, matching the tracker/sidecar contract and preserving note
+    // retirement order across blocks.
+    if (!tracker.flush_pending_note_offs())
+        return HostEventResult::Overflow;
     for (const auto& event : events) {
         if (event.absolute_sample < 0)
             return HostEventResult::OutOfRange;
@@ -288,12 +294,17 @@ inline HostEventResult project_host_event_block(std::span<const HostEventRecord>
         ump_count > ump->capacity() - std::min(ump->capacity(), ump->size()))
         return HostEventResult::OutputCapacity;
     if (mpe_out != nullptr) {
-        // A retrigger can retire one voice and publish its replacement in the
-        // same callback, so reserve a conservative two sidecar records per
-        // source event before mutating any destination.
-        const auto required_mpe = records.size() > std::numeric_limits<std::size_t>::max() / 2
-                                      ? std::numeric_limits<std::size_t>::max()
-                                      : records.size() * 2;
+        // Channel-level MPE expression can fan out to every active note. A
+        // note lifecycle contributes at most two records (retire + replace),
+        // so this is the exact fixed upper bound for one source record. Check
+        // the bound before deriving into the caller's sidecar; otherwise a
+        // full 128-note pitch-bend fan-out could partially mutate it before
+        // reporting overflow.
+        constexpr auto kMpeRecordsPerSource = midi::MpeVoiceTracker::kMaxNotes + 2;
+        const auto required_mpe =
+            records.size() > std::numeric_limits<std::size_t>::max() / kMpeRecordsPerSource
+                ? std::numeric_limits<std::size_t>::max()
+                : records.size() * kMpeRecordsPerSource;
         if (required_mpe > mpe_out->capacity() - std::min(mpe_out->capacity(), mpe_out->size()))
             return HostEventResult::OutputCapacity;
     }
