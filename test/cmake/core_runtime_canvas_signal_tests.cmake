@@ -396,6 +396,11 @@ pulp_add_test_suite(pulp-test-analysis-frontends
 pulp_add_test_suite(pulp-test-modulation-language
     SOURCES test_modulation_language.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+# Sustain point, release and legato retrigger of the breakpoint envelope, and
+# their interaction with loops.
+pulp_add_test_suite(pulp-test-signal-breakpoint-sustain
+    SOURCES test_signal_breakpoint_sustain.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-units GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-events GROUP pulp-test-group-core-signal

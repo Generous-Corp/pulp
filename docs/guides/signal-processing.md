@@ -306,6 +306,43 @@ buffer application, `reset()`, and accessors are real-time safe.
 
 ---
 
+### BreakpointEnvelope
+
+Fixed-capacity, sample-accurate breakpoint envelope with absolute times, per-segment curves, loops, and a sustain point. Header: `pulp/signal/breakpoint_envelope.hpp`; the curve vocabulary is in the [modulation language reference](../reference/modulation-language.md).
+
+```cpp
+signal::BreakpointEnvelope env;
+env.prepare(sample_rate);
+const std::array<signal::BreakpointEnvelopePoint, 4> adsr{{
+    {0.0f,  0.0f, {}},   // start
+    {10.0f, 1.0f, {}},   // attack peak
+    {80.0f, 0.6f, {}},   // decay to the sustain level
+    {400.0f, 0.0f, {}},  // release tail
+}};
+env.configure(adsr);
+env.set_sustain_point(2);          // hold the 0.6 level while the key is down
+
+// note on                          // note off                   // legato note
+env.trigger();                      env.release();                env.trigger_legato();
+
+for (int i = 0; i < num_samples; ++i)
+    gain[i] = env.next();
+```
+
+| Method | Description |
+|---|---|
+| `set_sustain_point(i)` / `clear_sustain_point()` | Hold point `i` until `release()`. |
+| `trigger()` | Open the gate and start at point zero. |
+| `trigger_legato()` | Open the gate without a jump: a gated envelope keeps going, a releasing one replays its first segment from the current value. |
+| `release()` | Close the gate: end the hold and play the remaining segments from the held level; loops stop repeating after the current pass. |
+| `holding()` / `gate()` | Report the state. |
+
+A loop repeats only while the gate is on. An endless loop with no sustain point therefore loops while held and plays out after release. A sustain point at or inside a loop is held first and the loop does not repeat while it holds; a sustain point after the loop is reached once the loop's repeats are done. Releasing before the sustain point is reached cancels the hold with no jump.
+
+**Real-time:** `next()`, `trigger()`, `trigger_legato()` and `release()` allocate nothing and do bounded work. `configure()` and `prepare()` are control-thread calls. Tests: `test/test_signal_breakpoint_sustain.cpp`.
+
+---
+
 ## 3. Oscillators
 
 This section covers only the legacy `signal::Oscillator` below. For the
