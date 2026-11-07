@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-preset-library-core",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T19:57:18Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/state/include/pulp/state/preset_library.hpp",
+    "core/state/include/pulp/state/preset_metadata_store.hpp",
+    "core/state/src/preset_library.cpp",
+    "core/state/src/preset_metadata_store.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Adds PresetLibrary and PresetMetadataStore in core/state: a searchable preset index with favourites, tag edits and display names kept in a shared overlay file. Additive; nothing existing changes behaviour, and the preset browser can adopt it once the next Vellum re-export carries it."
+}
