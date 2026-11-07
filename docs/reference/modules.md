@@ -23,6 +23,7 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 | Clipboard | `clipboard.hpp` | Cross-platform text clipboard access where implemented |
 | File dialogs | `file_dialog.hpp` | Native open/save panels where implemented |
 | Popup menus | `popup_menu.hpp` | Native menu affordances for UI surfaces |
+| Unique Objective-C classes | `objc_unique_class.hpp` | Registers Objective-C classes at run time under `<base>_<image token>`, so two Pulp binaries in one host process never share a class name and run each other's code. It adds methods from C functions and gives each instance a context slot. Apple platforms |
 
 ---
 
