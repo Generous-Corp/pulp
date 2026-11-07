@@ -38,6 +38,38 @@ struct DecodeLimits {
     }
 };
 
+/// One encoder setting a writer applies, with the value write() uses.
+struct FormatQualityOption {
+    std::string name;          ///< Stable identifier, e.g. "compression_level".
+    std::string description;   ///< What the setting controls.
+    std::string default_value; ///< The value write() applies.
+};
+
+/// What a reader accepts or a writer produces, for choosing a format before
+/// reading or writing. Empty lists mean "not restricted by this format", not
+/// "unknown"; a custom reader or writer that does not override capabilities()
+/// reports only its name.
+struct FormatCapabilities {
+    std::string format_name;
+    /// Lower-case extensions with the leading dot, e.g. ".flac".
+    std::vector<std::string> extensions;
+    /// Integer PCM bit depths. Empty for lossy formats, which store no depth.
+    std::vector<std::uint32_t> bit_depths;
+    /// True when 32-bit float samples are read or written.
+    bool float_samples = false;
+    /// Sample rates the format allows. Empty means any positive rate.
+    std::vector<std::uint32_t> sample_rates;
+    /// Most channels the format allows. Zero means no format limit.
+    std::uint32_t max_channels = 0;
+    /// True when the stored stream is compressed.
+    bool compressed = false;
+    /// False when encoding discards information.
+    bool lossless = true;
+    /// Encoder settings write() applies (writers only). None is selectable
+    /// through FormatWriter::write; each is reported at the value it uses.
+    std::vector<FormatQualityOption> quality_options;
+};
+
 /// Audio format reader interface
 class FormatReader {
 public:
@@ -62,6 +94,14 @@ public:
 
     /// Format name (e.g., "FLAC", "MP3")
     virtual std::string format_name() const = 0;
+
+    /// What this reader decodes. Built-in readers report their full support;
+    /// the default reports only format_name().
+    virtual FormatCapabilities capabilities() const {
+        FormatCapabilities caps;
+        caps.format_name = format_name();
+        return caps;
+    }
 };
 
 /// Audio format writer interface
@@ -77,6 +117,14 @@ public:
 
     /// Format name
     virtual std::string format_name() const = 0;
+
+    /// What write() produces. Built-in writers report their full support;
+    /// the default reports only format_name().
+    virtual FormatCapabilities capabilities() const {
+        FormatCapabilities caps;
+        caps.format_name = format_name();
+        return caps;
+    }
 };
 
 /// Registry of audio format readers and writers
@@ -115,7 +163,15 @@ public:
     /// List all supported write extensions
     std::vector<std::string> supported_write_extensions() const;
 
-private:
+    /// Capabilities of every registered reader, in registration order. A
+    /// format registered twice (for example a platform reader that also
+    /// opens WAV) appears once per reader.
+    std::vector<FormatCapabilities> reader_capabilities() const;
+
+    /// Capabilities of every registered writer, in registration order.
+    std::vector<FormatCapabilities> writer_capabilities() const;
+
+  private:
     FormatRegistry();
     std::vector<std::unique_ptr<FormatReader>> readers_;
     std::vector<std::unique_ptr<FormatWriter>> writers_;

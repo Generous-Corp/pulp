@@ -121,6 +121,7 @@ add_executable(pulp-cli
     cmd_audio_render_parse.cpp
     cmd_audio_heritage.cpp
     cmd_audio_sampler_mip.cpp
+    cmd_audio_formats.cpp
     cmd_audio_plugin_inspect.cpp
     cmd_audio_validate.cpp
     cmd_audio_compare.cpp
@@ -660,6 +661,11 @@ if(PULP_BUILD_TESTS)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-audio-help PROPERTIES
         PASS_REGULAR_EXPRESSION "pulp audio")
+
+    add_test(NAME cli-audio-formats-json
+        COMMAND pulp-cli audio formats --json)
+    set_tests_properties(cli-audio-formats-json PROPERTIES
+        PASS_REGULAR_EXPRESSION "\"writers\"")
 
     add_test(NAME cli-audio-sampler-mip-help
         COMMAND pulp-cli audio sampler-mip --help)

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <pulp/audio/format_registry.hpp>
+#include "format_capabilities_detail.hpp"
 #include <fdk-aac/aacenc_lib.h>
 #include <vector>
 #include <fstream>
@@ -104,6 +105,17 @@ public:
     }
 
     std::string format_name() const override { return "AAC"; }
+    FormatCapabilities capabilities() const override {
+        return {.format_name = "AAC",
+                .extensions = {".aac", ".m4a"},
+                .sample_rates = detail::aac_sample_rates(),
+                .max_channels = 2,
+                .compressed = true,
+                .lossless = false,
+                .quality_options = {{"profile", "AAC object type", "AAC-LC"},
+                                    {"bitrate", "Target bitrate in bits per second", "128000"},
+                                    {"container", "Stream framing", "ADTS"}}};
+    }
 };
 
 std::unique_ptr<FormatWriter> create_aac_writer() {

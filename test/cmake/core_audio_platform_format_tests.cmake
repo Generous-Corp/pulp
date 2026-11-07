@@ -50,6 +50,11 @@ pulp_add_test_suite(pulp-test-offline-tracing
 pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
+# Format capability reports: each reader and writer describes the bit depths,
+# rates, channel limits and encoder settings its codec actually has.
+pulp_add_test_suite(pulp-test-audio-format-capabilities GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
 # DecodeLimits contract for the codec-backed readers (FLAC, MP3, OGG Vorbis).
 # A container header is an untrusted size claim: the reader must refuse it
 # before allocating output, and bound an unknown-length stream as it decodes.

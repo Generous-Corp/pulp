@@ -344,6 +344,26 @@ auto info = FormatRegistry::instance().read_info("song.mp3");
 // info->duration_seconds, info->num_channels, info->sample_rate
 ```
 
+To choose a format before writing, ask the registry what each reader and writer
+supports. `reader_capabilities()` and `writer_capabilities()` return one
+`FormatCapabilities` per registered handler: its extensions, integer bit
+depths, whether it handles float samples, allowed sample rates, channel limit,
+whether the stream is compressed or lossy, and the encoder settings `write()`
+applies. An empty list means the format does not restrict that value. The
+registry write path uses each encoder setting at the value reported; none can
+be chosen per call yet.
+
+```cpp
+for (const auto& caps : FormatRegistry::instance().writer_capabilities()) {
+    // caps.format_name, caps.extensions, caps.bit_depths, caps.sample_rates,
+    // caps.max_channels, caps.compressed, caps.lossless, caps.quality_options
+}
+```
+
+`pulp audio formats` prints the same table for the current build, and
+`pulp audio formats --json` emits it as JSON with `readers` and `writers`
+arrays.
+
 For an already-resident RIFF/WAVE byte span, `inspect_wav()` and `decode_wav()`
 in `wav_decoder.hpp` provide a no-file-I/O, no-exceptions path with caller-set
 frame, channel, and decoded-byte ceilings. RF64, W64, and RIFX containers are

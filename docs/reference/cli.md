@@ -2106,6 +2106,7 @@ pulp audio model status [--json]                # Show configured + resolved mod
 pulp audio model activate <model-id> [--json]   # Activate an installed model
 pulp audio excerpt-find --text "warm analog pad" --input /path/to/wavs [options]
 pulp audio read-bundle <path-to-bundle> [--json]
+pulp audio formats [--json]                     # List registered file readers and writers with their limits
 pulp audio sampler-mip build <source.wav|source.aiff> [--levels 1|2] [--json]
 pulp audio heritage validate PROFILE [--json]
 pulp audio heritage canonicalize PROFILE --out FILE
