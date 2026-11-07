@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-render-gpu-pass-api-20261106",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T02:18:10Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/render/include/pulp/render/gpu_capabilities.hpp",
+    "core/render/include/pulp/render/gpu_pass.hpp",
+    "core/render/include/pulp/render/wgsl_diagnostics.hpp",
+    "core/render/src/gpu_capabilities.cpp",
+    "core/render/src/gpu_pass.cpp",
+    "core/render/src/gpu_pass_internal.hpp",
+    "core/render/src/gpu_readback.cpp",
+    "core/render/src/gpu_readback.hpp",
+    "core/render/src/gpu_readback_layout.hpp",
+    "core/render/src/wgsl_compile.cpp",
+    "core/render/src/wgsl_compile.hpp",
+    "core/render/src/wgsl_diagnostics.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "New files in the exported render directory: the typed GPU pass API (gpu_pass, gpu_capabilities, wgsl_diagnostics), its Dawn implementation, the WGSL compile helper shared with the build-time validator, and the padded-row readback helper. They join pulp-render, which the render-2d unit exports, and the closure manifest for that unit lists exactly these twelve paths, so the next re-export carries them and Vellum receives the code. The API obtains its device only from the forwarded GpuSurface (pulp/render/gpu_surface.hpp, which names gpu_runtime::GpuSurface on macOS) and never creates a second Dawn device. The scene shader, Renderer3D, the CMake helpers, tests, tools and docs are outside the closure and owe no decision."
+}
