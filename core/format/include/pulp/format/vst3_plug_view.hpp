@@ -14,6 +14,8 @@
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 
+#include <memory>
+
 // VST3 SDK
 #include <public.sdk/source/common/pluginview.h>
 
@@ -26,11 +28,13 @@ class PulpPlugView : public Steinberg::CPluginView {
 public:
     PulpPlugView(Processor& processor, state::StateStore& store,
                  runtime::AliveToken::Handle owner_alive = {});
+    ~PulpPlugView() override;
 
     // IPlugView overrides
     Steinberg::tresult PLUGIN_API isPlatformTypeSupported(Steinberg::FIDString type) override;
     Steinberg::tresult PLUGIN_API attached(void* parent, Steinberg::FIDString type) override;
     Steinberg::tresult PLUGIN_API removed() override;
+    Steinberg::tresult PLUGIN_API setFrame(Steinberg::IPlugFrame* frame) override;
     Steinberg::tresult PLUGIN_API getSize(Steinberg::ViewRect* size) override;
     Steinberg::tresult PLUGIN_API onSize(Steinberg::ViewRect* newSize) override;
     // Resize negotiation (proportional + aspect-locked). The host calls
@@ -49,7 +53,20 @@ public:
     Steinberg::tresult PLUGIN_API onKeyDown(Steinberg::char16 key, Steinberg::int16 keyCode,
                                             Steinberg::int16 modifiers) override;
 
-private:
+  private:
+#if defined(__linux__)
+    class LinuxFrameTimer;
+    friend class LinuxFrameTimer;
+    void register_linux_frame_timer();
+    void unregister_linux_frame_timer();
+    void on_linux_frame_timer();
+    std::unique_ptr<LinuxFrameTimer> linux_frame_timer_;
+    Steinberg::Linux::IRunLoop* linux_run_loop_ = nullptr;
+    bool linux_timer_registered_ = false;
+#else
+    void register_linux_frame_timer() {}
+    void unregister_linux_frame_timer() {}
+#endif
     friend struct PulpPlugViewTestAccess;
     Processor& processor_;
     state::StateStore& store_;
