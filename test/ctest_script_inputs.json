@@ -2142,6 +2142,20 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-lv2-host-slot": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-test-lv2-host-instrument"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_lv2_host_slot.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-mac-platform-harness": {
    "data": "declared",
    "detected_sources": [
@@ -3164,6 +3178,7 @@
   "pulp-test-lv2-adapter",
   "pulp-test-lv2-bundle-discovery-e2e",
   "pulp-test-lv2-host-discovery",
+  "pulp-test-lv2-host-slot",
   "pulp-test-lv2-rt",
   "pulp-test-mac-hover-cursor-live",
   "pulp-test-mac-platform-harness",
