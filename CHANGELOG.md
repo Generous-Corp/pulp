@@ -9,6 +9,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1820"></a>
+## [1.82.0] - 2026-11-07
+
+- release/version bump ([#11700](https://github.com/Generous-Corp/pulp/pull/11700))
+- codex/g10 wave2 20261106 ([#11691](https://github.com/Generous-Corp/pulp/pull/11691))
+
+<a id="v1810"></a>
+## [1.81.0] - 2026-11-06
+
+- release/version bump ([#11697](https://github.com/Generous-Corp/pulp/pull/11697))
+- feature/gpu runtime device forward ([#11596](https://github.com/Generous-Corp/pulp/pull/11596))
+
 <a id="v1800"></a>
 ## [1.80.0] - 2026-11-06
 
@@ -12414,6 +12426,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.82.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.82.0
+[1.81.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.81.0
 [1.80.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.80.0
 [1.79.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.79.0
 [1.78.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.78.0
