@@ -24,6 +24,31 @@ echoes do not change logical size or notify the processor. Validate with native
 sized backing surface alone does not prove the window fits it. The Windows
 `plugin-view-host` HiDPI regression covers this contract without a GPU adapter.
 
+## Native Metal surfaces (`integrations/pulp-native`)
+
+`pulp::native::MetalSurface` is for an editor that brings its own Metal
+renderer and does not go through `ViewBridge`. Two macOS behaviours shape both
+it and its tests, and both look like bugs until you know them:
+
+- **Hiding or showing a window posts no notification in an app that is not
+  active.** That includes a test binary and, likely, an AU helper process.
+  `orderOut:` and `orderFront` post no `NSWindowDidChangeOcclusionStateNotification`,
+  and `occlusionState` still reads visible after `orderOut:`. Visibility
+  therefore comes from `isVisible` and `isMiniaturized` as well as occlusion.
+  It is re-checked by `MetalSurface::poll_visibility()`, which a frame tick
+  calls. A visibility test that waits for the notification never sees one.
+- **`nextDrawable` does not block on Apple silicon.** On macOS 27 it returns in
+  about 8 ms even with every drawable held unpresented, or presented into a
+  hidden window. A test cannot produce a wait that reaches
+  `allowsNextDrawableTimeout`'s 1 s bound, so it can only prove that teardown
+  stays prompt while a client is acquiring. Holding drawables to force a block
+  will not fail the way you expect.
+
+The view's Objective-C class is registered at run time through
+`pulp/platform/objc_unique_class.hpp`, so two plug-ins never share it. Every
+override calls super through `super_implementation(<registered class>, sel)`,
+never through `object_getClass(self)`, which may be a KVO subclass.
+
 ## Standalone window factory ownership
 
 On Windows/Linux, standalone startup calls
