@@ -1293,6 +1293,13 @@ class ClosureMentionTests(unittest.TestCase):
             self.assertEqual(self.scan("uses pulp::audio here\n", name),
                              [f"mirror-product-symbol mention {name}:1: pulp::audio"], name)
 
+    def test_wgsl_shaders_are_scanned_as_text(self):
+        # pulp-render embeds core/render/shaders/*.wgsl, so a WGSL file in a
+        # closure is read for edges instead of refused as unclassified.
+        self.assertEqual(self.scan("@fragment fn fs() {}\n", "core/render/shaders/a.wgsl"), [])
+        self.assertEqual(self.scan("// mirrors pulp::audio here\n", "core/render/shaders/a.wgsl"),
+                         ["mirror-product-symbol mention core/render/shaders/a.wgsl:1: pulp::audio"])
+
     def test_an_unclassified_suffix_is_refused(self):
         found = self.scan("int x;\n", "core/x/a.weird")
         self.assertEqual(found, ["mirror-unclassified-suffix core/x/a.weird: .weird is neither scanned nor declared binary"])

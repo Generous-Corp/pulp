@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261107-render-gpu-pass-api-20261106-watch",
+  "created_at": "2026-11-07T02:18:09Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adds a typed C++ API for custom WGSL passes on the shared Dawn device (pulp/render/gpu_pass.hpp, gpu_capabilities.hpp, wgsl_diagnostics.hpp), a build-time WGSL embed/validate helper, and moves the Renderer3D scene shader into a .wgsl file with a shared padded-row readback helper. Rendering output is unchanged: Renderer3D compiles the same shader text and its tests pass. The new API only adds objects on the existing device and composites through the existing SkiaCanvas native-texture seam. No design-import, Chromium, rendering-authority or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-gpu-capabilities",
+    "ctest --test-dir build -R pulp-test-gpu-pass",
+    "python3 tools/cmake/scripts/test_embed_wgsl.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
