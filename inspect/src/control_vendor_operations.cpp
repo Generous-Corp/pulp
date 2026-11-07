@@ -148,6 +148,12 @@ struct SchemaChecker {
                           (schema["const"].isString() &&
                            schema["const"].getString().size() > kMaximumStringLength)))
             return fail(path, "const must be a bounded scalar");
+        // Nothing enforces a default, so it may not carry unbounded content.
+        if (schema.hasObjectMember("default") &&
+            (!is_scalar(schema["default"]) ||
+             (schema["default"].isString() &&
+              schema["default"].getString().size() > kControlVendorDescriptionMaximumBytes)))
+            return fail(path, "default must be a scalar, and a string default at most 512 bytes");
 
         if (has_alternatives) {
             const auto alternatives = schema["oneOf"];
@@ -289,6 +295,14 @@ control_vendor_tier_for_capability(InspectorCapability capability) {
 
 bool capability_is_vendor_tier(InspectorCapability capability) {
     return control_vendor_tier_for_capability(capability).has_value();
+}
+
+bool control_vendor_description_is_valid(std::string_view description) {
+    return !description.empty() && description.size() <= kControlVendorDescriptionMaximumBytes &&
+           std::ranges::all_of(description, [](char c) {
+               const auto byte = static_cast<unsigned char>(c);
+               return byte >= 0x20 && byte <= 0x7e;
+           });
 }
 
 bool control_vendor_id_is_valid(std::string_view vendor_id) {
@@ -543,10 +557,14 @@ parse_control_vendor_operations(std::string_view document, std::string_view bund
             return fail(ControlVendorOperationsError::InvalidTier,
                         where + ".tier must be read, gesture, render, or destructive");
         operation.tier = *tier;
-        if (!entry["description"].isString() || entry["description"].getString().empty() ||
-            entry["description"].getString().size() > kControlVendorDescriptionMaximumBytes)
+        // Agents read descriptions from discovery, so a description is one
+        // bounded line of printable ASCII. The check runs on the decoded
+        // string, so JSON escapes such as \n or \u0007 are refused too.
+        if (!entry["description"].isString() ||
+            !control_vendor_description_is_valid(entry["description"].getString()))
             return fail(ControlVendorOperationsError::InvalidDescription,
-                        where + ".description must be 1 to 512 bytes");
+                        where + ".description must be one line of 1 to 512 printable ASCII "
+                                "characters");
         operation.description = std::string(entry["description"].getString());
         for (const auto field : {"input_schema", "output_schema"}) {
             if (!entry.hasObjectMember(field))

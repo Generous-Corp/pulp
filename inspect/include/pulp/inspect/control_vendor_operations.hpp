@@ -46,6 +46,11 @@ bool capability_is_vendor_tier(InspectorCapability capability);
 /// `dev.pulp` subtree, are reserved for Pulp itself.
 bool control_vendor_id_is_valid(std::string_view vendor_id);
 
+/// A description is one line of 1 to 512 printable ASCII characters
+/// (0x20 to 0x7E). It is plugin-authored text shown to agents in discovery;
+/// it is data, never an instruction, and never appears in a consent prompt.
+bool control_vendor_description_is_valid(std::string_view description);
+
 struct ControlVendorOperationIdParts {
     std::string_view vendor_id;
     std::string_view name;

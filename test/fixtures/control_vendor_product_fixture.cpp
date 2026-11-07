@@ -19,7 +19,8 @@ extern "C" const volatile char pulp_control_standalone_host_markers_v1[];
     "PULP_INSPECT_CAPABILITY_DEV_PULP_SESSION_CONTROL_1_V1\0"
     "PULP_INSPECT_CAPABILITY_DEV_PULP_VENDOR_READ_1_V1\0"
     "PULP_INSPECT_CAPABILITY_DEV_PULP_VENDOR_GESTURE_1_V1\0"
-    "PULP_INSPECT_CAPABILITY_DEV_PULP_VENDOR_RENDER_1_V1";
+    "PULP_INSPECT_CAPABILITY_DEV_PULP_VENDOR_RENDER_1_V1\0"
+    "PULP_INSPECT_CAPABILITY_DEV_PULP_VENDOR_DESTRUCTIVE_1_V1";
 
 namespace {
 
@@ -76,6 +77,10 @@ vendor_operations(pulp::format::Processor&, pulp::state::StateStore& store) {
     });
     handlers->add("dev.org.example/render.ping@1", [](const ControlVendorOperationCall&) {
         return ControlVendorOperationResult::success(R"({"rendered":true})");
+    });
+    handlers->add("dev.org.example/preset.delete@1", [&store](const ControlVendorOperationCall&) {
+        store.set_value(kLevel, 0.0f);
+        return ControlVendorOperationResult::success(R"({"deleted":true})");
     });
     // Not declared, so the host drops it and the broker never routes to it.
     handlers->add("dev.org.example/level.reset@1", [&store](const ControlVendorOperationCall&) {

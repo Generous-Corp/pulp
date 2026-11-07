@@ -364,6 +364,16 @@ TEST_CASE("control MCP calls only vendor operations the exact instance declares"
     REQUIRE(adapter.tools_json_fragment().find("\"name\":\"pulp_control_vendor_call\"") !=
             std::string::npos);
 
+    // Discovery passes plugin-authored descriptions through as data, exactly
+    // as the broker reported them; the adapter neither rewrites nor executes them.
+    const auto instances = adapter.call_tool("pulp_control_instances", "{}");
+    REQUIRE(instances.find("\"isError\":true") == std::string::npos);
+    const auto parsed = choc::json::parse(instances);
+    const auto listed = parsed["structuredContent"]["instances"][0]["vendor_operations"];
+    REQUIRE(listed.size() == 2);
+    CHECK(listed[0]["description"].getString() == "Count presets");
+    CHECK(listed[1]["description"].getString() == "Render a phrase");
+
     // A Pulp-reserved or malformed id never reaches the broker.
     for (const auto* id : {"dev.pulp.state/read@1", "dev.com.acme/presets.count", "com.acme/x@1"}) {
         INFO(id);

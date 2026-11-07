@@ -199,7 +199,7 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
     // Discovery lists exactly the declared operations with tier and schemas.
     const auto listed = identity["vendor_operations"];
     REQUIRE(listed.isArray());
-    REQUIRE(listed.size() == 4);
+    REQUIRE(listed.size() == 6);
     std::vector<std::string> listed_ids;
     for (const auto entry : listed) {
         listed_ids.emplace_back(entry["id"].getString());
@@ -209,7 +209,8 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
     }
     CHECK(listed_ids == std::vector<std::string>{
                             "dev.org.example/level.read@1", "dev.org.example/level.set@1",
-                            "dev.org.example/render.ping@1", "dev.org.example/render.unbound@1"});
+                            "dev.org.example/render.ping@1", "dev.org.example/render.unbound@1",
+                            "dev.org.example/preset.delete@1", "dev.org.example/preset.purge@1"});
     CHECK(listed[1]["tier"].getString() == "gesture");
     CHECK(listed[1]["capability"].getString() == "dev.pulp.vendor/gesture@1");
 
@@ -312,6 +313,50 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
         call("dev.pulp.session/control@1", R"({"action":"release"})", develop_grant);
     REQUIRE(release.exit_code == 0);
 
+    // Destructive tier: a single-operation grant, the controller lease, and
+    // confinement to the consented id.
+    const auto level_now = [&] {
+        const auto current = call("dev.org.example/level.read@1", "{}", observe_grant);
+        REQUIRE(current.exit_code == 0);
+        return choc::json::parse(current.stdout_output)["detail"]["level"].getFloat64();
+    };
+    const auto profile_delete =
+        call("dev.org.example/preset.delete@1", R"({"name":"Lead"})", develop_grant);
+    CHECK(profile_delete.exit_code != 0);
+    const auto delete_grant = grant({"--operation", "dev.org.example/preset.delete@1"});
+    const auto without_lease =
+        call("dev.org.example/preset.delete@1", R"({"name":"Lead"})", delete_grant);
+    INFO(cli_failure_diagnostics(without_lease, operations));
+    CHECK(without_lease.exit_code != 0);
+    CHECK(std::abs(level_now() - 0.75) < 1e-6);
+    const auto destructive_lease =
+        call("dev.pulp.session/control@1", R"({"action":"acquire"})", develop_grant);
+    REQUIRE(destructive_lease.exit_code == 0);
+    const auto deleted =
+        call("dev.org.example/preset.delete@1", R"({"name":"Lead"})", delete_grant);
+    INFO(cli_failure_diagnostics(deleted, operations));
+    REQUIRE(deleted.exit_code == 0);
+    const auto deleted_receipt = choc::json::parse(deleted.stdout_output);
+    CHECK(deleted_receipt["detail"]["deleted"].getBool());
+    const auto deleted_durable =
+        wait_terminal_receipt(operations, std::string(deleted_receipt["receipt_id"].getString()));
+    CHECK(deleted_durable["capability_id"].getString() == "dev.pulp.vendor/destructive@1");
+    CHECK(deleted_durable["operation_id"].getString() == "dev.org.example/preset.delete@1");
+    CHECK(level_now() == 0.0);
+    // The lease is held, yet the confined grant still refuses the sibling
+    // before any handler runs.
+    const auto purge = call("dev.org.example/preset.purge@1", "{}", delete_grant);
+    CHECK(purge.exit_code != 0);
+    CHECK(cli_failure_diagnostics(purge, operations).find("not_implemented") == std::string::npos);
+    {
+        std::lock_guard lock(consent_mutex);
+        CHECK(std::ranges::find(consented_selectors, "dev.org.example/preset.delete@1") !=
+              consented_selectors.end());
+    }
+    const auto destructive_release =
+        call("dev.pulp.session/control@1", R"({"action":"release"})", develop_grant);
+    REQUIRE(destructive_release.exit_code == 0);
+
     // The same live instance through pulp-mcp.
     const auto responses = run_mcp(
         mcp, root.runtime,
@@ -334,7 +379,7 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
     for (const auto item : mcp_instances["instances"])
         if (item["instance_id"].getString() == instance)
             mcp_listed =
-                item["vendor_operations"].isArray() && item["vendor_operations"].size() == 4;
+                item["vendor_operations"].isArray() && item["vendor_operations"].size() == 6;
     CHECK(mcp_listed);
     CHECK(structured(1)["state"].getString() == "completed");
     const auto mcp_set = structured(2);

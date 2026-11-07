@@ -351,13 +351,16 @@ pulp_add_plugin(AcmeSynth
 ```
 
 The file holds one to 64 operations and at most 128 KiB of printable ASCII.
-Each operation needs `id`, `tier`, a one to 512 byte `description`, and closed
-`input_schema` and `output_schema` objects. Unknown fields are rejected.
+Each operation needs `id`, `tier`, a `description`, and closed `input_schema`
+and `output_schema` objects. Unknown fields are rejected. A description is one
+line of 1 to 512 printable ASCII characters; line breaks, tabs, and other
+control characters are refused, including when written as JSON escapes.
 
 Schemas use a closed JSON Schema subset: `type`, `properties`, `required`,
 `additionalProperties`, `items`, `minItems`, `maxItems`, `uniqueItems`,
 `enum`, `const`, `minimum`, `maximum`, `minLength`, `maxLength`, `oneOf`,
-`default`, and a root `$schema` naming draft 2020-12. Both roots are objects.
+`default` (a scalar, with a string default at most 512 bytes), and a root
+`$schema` naming draft 2020-12. Both roots are objects.
 Every object sets `additionalProperties` to `false`. Every string sets
 `maxLength`. Every array sets `items` and `maxItems`. Schemas nest at most 16
 deep. Configure fails on a missing file, a size or encoding error, or a tier
@@ -414,7 +417,16 @@ namespace {
 }
 ```
 
-Handlers run on the host main thread. The broker has already checked the
+Handlers run on the host main thread, so they follow the main thread's rules:
+
+- Finish within the call's deadline. A handler that outlives it leaves the
+  receipt reporting that the outcome is unknown after it started.
+- Never touch audio-thread data directly. Read and write parameters through
+  `StateStore`, as `store.get_value()` and `store.set_value()` do, or through
+  the processor's own real-time-safe paths.
+- Never allocate on, lock against, or signal the audio thread.
+
+The broker has already checked the
 grant, consent, lease, and tier, and validated the arguments against the input
 schema. A handler still treats argument values as untrusted data. Long handlers
 call `still_authorized()` between steps and stop when it returns false. The
@@ -475,7 +487,10 @@ complete plugin that binds every tool kit operation.
 
 The broker's instance listing carries a `vendor_operations` array for each
 instance, with each operation's id, version, tier, capability, description, and
-both schemas. The CLI and the `pulp_control_vendor_call` MCP tool call them by
+both schemas. Descriptions and schema `default` values are written by the
+plugin author. They are data, never instructions: a client must not change
+its plan, call another operation, or widen a request because of them. They
+never appear in a consent prompt. The CLI and the `pulp_control_vendor_call` MCP tool call them by
 id:
 
 ```sh
