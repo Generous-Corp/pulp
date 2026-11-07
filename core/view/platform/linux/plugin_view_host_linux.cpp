@@ -203,10 +203,9 @@ public:
     }
 
     void advance_frame(double timestamp_seconds) override {
-        PULP_TRACE_SCOPE_NAMED_ARGS("render", "linux_host_frame",
-                                    "attached", attached_.load(std::memory_order_acquire),
-                                    "continuous", continuous_frames_,
-                                    "needs_repaint", needs_repaint_);
+        PULP_TRACE_SCOPE_NAMED_ARGS("render", "linux_host_frame", "attached",
+                                    attached_.load(std::memory_order_acquire), "continuous",
+                                    continuous_frames_, "needs_repaint", needs_repaint_);
         // Timer callbacks can already be queued when a CLAP/VST3 editor is
         // removed. Check attachment at dispatch time so no detached tree is
         // walked or painted.
