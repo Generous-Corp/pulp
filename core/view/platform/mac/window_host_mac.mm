@@ -801,7 +801,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
     gke.is_repeat = event.isARepeat;
 
     if (auto* fv = [self liveFocusedView]) {
-        if (fv->on_key_event(gke)) {
+        if (pulp::view::deliver_key_event(*fv, gke)) {
             [self startAnimationTimerIfNeeded];
             [self setNeedsDisplay:YES];
             return YES;
@@ -874,7 +874,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
                 ke.modifiers = mods;
                 ke.is_down = true;
                 ke.is_repeat = event.isARepeat;
-                if (fv->on_key_event(ke)) {
+                if (pulp::view::deliver_key_event(*fv, ke)) {
                     [self startAnimationTimerIfNeeded];
                     [self setNeedsDisplay:YES];
                     return;
@@ -991,7 +991,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
                 ke.modifiers = mods;
                 ke.is_down = true;
                 ke.is_repeat = event.isARepeat;
-                fv->on_key_event(ke);
+                pulp::view::deliver_key_event(*fv, ke);
                 [self startAnimationTimerIfNeeded];
                 [self setNeedsDisplay:YES];
             }
@@ -1019,7 +1019,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
             ke.is_down = false;
             if (self.rootView && self.rootView->on_global_key)
                 self.rootView->on_global_key(ke);
-            if (auto* fv = [self liveFocusedView]) fv->on_key_event(ke);
+            if (auto* fv = [self liveFocusedView]) pulp::view::deliver_key_event(*fv, ke);
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {
             std::cerr << "MacWindowHost keyUp error: " << e.what() << "\n";

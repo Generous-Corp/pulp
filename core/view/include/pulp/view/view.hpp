@@ -711,9 +711,54 @@ public:
         return text_selection_region_;
     }
 
-    /// CSS :disabled equivalent — blocks input, reduces opacity
+    /// CSS :disabled equivalent — blocks input, reduces opacity.
+    ///
+    /// Input contract. A disabled view, and any view inside a disabled
+    /// ancestor, receives no key, text, gesture, pointer-enter, press, move,
+    /// drag or double-click. It does still receive the pointer-up (or cancel)
+    /// and the pointer-exit that finish an interaction already in progress, so
+    /// disabling a control mid-drag ends the drag with exactly one up, no
+    /// further moves, and nothing left stuck pressed. A gesture recognizer
+    /// already in flight on a disabled view is cancelled once rather than fed
+    /// further events. The cursor over a disabled view is the default cursor.
+    /// The pointer delivery verbs in pointer_dispatch.hpp enforce this, so a
+    /// platform host that routes through them gets it without extra checks.
     bool enabled() const { return enabled_; }
     void set_enabled(bool e) { enabled_ = e; }
+
+    /// True when this view and every ancestor are enabled. This, not
+    /// `enabled()`, is the question input delivery asks, because a disabled
+    /// ancestor disables its whole subtree.
+    bool effectively_enabled() const {
+        for (const View* v = this; v != nullptr; v = v->parent_)
+            if (!v->enabled_) return false;
+        return true;
+    }
+
+    /// While an instance is alive on this thread, `hit_test` stops treating a
+    /// disabled view as transparent and reports what is painted under the
+    /// point. Used to ask "is the pointer over something disabled" (cursor
+    /// resolution) without duplicating the hit-test geometry.
+    class DisabledHitTestScope {
+    public:
+        DisabledHitTestScope() { ++depth(); }
+        ~DisabledHitTestScope() { --depth(); }
+        DisabledHitTestScope(const DisabledHitTestScope&) = delete;
+        DisabledHitTestScope& operator=(const DisabledHitTestScope&) = delete;
+        static bool active() { return depth() > 0; }
+
+    private:
+        static int& depth() {
+            static thread_local int d = 0;
+            return d;
+        }
+    };
+
+    /// True when `hit_test` must skip this view because it is disabled.
+    /// `hit_test` overrides call this instead of reading `enabled()`.
+    bool hit_test_blocked_by_disabled() const {
+        return !enabled_ && !DisabledHitTestScope::active();
+    }
 
     /// CSS pointer-events: none — view is invisible to hit testing
     bool hit_testable() const { return hit_testable_; }

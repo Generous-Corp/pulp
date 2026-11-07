@@ -626,6 +626,11 @@ pulp_add_test_suite(pulp-test-pointer-delivery GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-gestures GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
+# Input contract of a disabled view: no key/text/gesture/hover-enter/press/
+# drag/double-click, but the release and exit that finish an interaction in
+# progress still arrive (test/test_disabled_input_contract.cpp).
+pulp_add_test_suite(pulp-test-disabled-input-contract GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # The Windows editor's input state machine. Deliberately NOT gated on WIN32:
 # win_plugin_input_router.hpp carries no <windows.h> dependency precisely so its
 # re-entrancy and capture rules run on the required macOS gate.

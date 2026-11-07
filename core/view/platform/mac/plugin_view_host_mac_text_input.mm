@@ -9,6 +9,7 @@
 
 #include <pulp/canvas/text_utf8.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
@@ -131,7 +132,7 @@ void pulp_plugin_insert_text(NSView* host,
     }
     pulp::view::TextInputEvent event;
     event.text = inspector_event.text;
-    fv->on_text_input(event);
+    pulp::view::deliver_text_input(*fv, event);
     pulp_plugin_request_text_redraw(host, root);
 }
 

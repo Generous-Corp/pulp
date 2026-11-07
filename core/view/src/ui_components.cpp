@@ -1347,7 +1347,7 @@ void ScrollView::paint(canvas::Canvas& canvas) {
 }
 
 View* ScrollView::hit_test(Point local_point) {
-    if (!visible() || !enabled() || !hit_testable()) return nullptr;
+    if (!visible() || hit_test_blocked_by_disabled() || !hit_testable()) return nullptr;
     if (!parent() && !inverse_scale_transform(local_point)) return nullptr;
     if (!local_bounds().contains(local_point)) return nullptr;
 

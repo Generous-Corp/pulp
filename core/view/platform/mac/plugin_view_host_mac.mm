@@ -908,7 +908,7 @@ bool pulp_plugin_key_equivalent(pulp::view::View* root, NSEvent* event) {
     ke.is_repeat = event.isARepeat;
     if (auto* fv = pulp_focus_under_root(root);
         fv && fv->accepts_text_input()) {
-        if (fv->on_key_event(ke)) {
+        if (pulp::view::deliver_key_event(*fv, ke)) {
             root->request_repaint();
             return true;
         }

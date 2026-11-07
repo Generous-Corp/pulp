@@ -155,6 +155,23 @@ View::focus_next(root, current_focus);
 View::focus_prev(root, current_focus);
 ```
 
+## Input Events
+
+### Disabled views
+
+`View::set_enabled(false)` disables a view and everything inside it. A disabled
+view receives no key, text, gesture, hover-enter, press, move, drag or
+double-click. It still receives the pointer-up and the pointer-exit that
+finish an interaction already under way, so disabling a control while the user
+is dragging it ends the drag with exactly one release and leaves nothing stuck
+pressed. A gesture recognizer in flight on the view is cancelled once. The
+cursor over a disabled view is the default cursor.
+
+The delivery functions in `pulp/view/pointer_dispatch.hpp` enforce this, so a
+host that routes pointer and key events through them gets it without extra
+checks. Use `View::effectively_enabled()` to ask whether a view and all of its
+ancestors are enabled.
+
 ## Accessibility
 
 Every widget has an access role, label, and value for screen readers:

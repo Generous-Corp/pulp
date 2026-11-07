@@ -699,6 +699,13 @@ void GestureArbiter::feed_session(View& root, PointerSession& session,
             candidate.recognizer->state() == GestureState::cancelled) {
             continue;
         }
+        // A view disabled mid-gesture is not fed further events. Its
+        // recognizer is cancelled once, which is how an in-flight gesture
+        // finishes without delivering anything new.
+        if (!candidate.owner->effectively_enabled()) {
+            candidate.recognizer->cancel();
+            continue;
+        }
         MouseEvent local_event = root_event;
         local_event.position = root_to_local(root_pos, candidate.owner, root);
         local_event.window_position = root_pos;

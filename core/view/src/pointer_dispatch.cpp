@@ -249,6 +249,17 @@ View* focused_input_under_root(View& root) {
     return still_in_tree(focused, &root) ? focused : nullptr;
 }
 
+bool deliver_key_event(View& target, const KeyEvent& event) {
+    if (!target.effectively_enabled()) return false;
+    return target.on_key_event(event);
+}
+
+bool deliver_text_input(View& target, const TextInputEvent& event) {
+    if (!target.effectively_enabled()) return false;
+    target.on_text_input(event);
+    return true;
+}
+
 void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers) {
     deliver_hover_move(root, root_pt, modifiers, PointerAttributes{});
 }
@@ -309,6 +320,9 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count,
                         MouseButton button, const PointerAttributes& pointer) {
     if (!still_in_tree(target, &root)) return;
+    // A drag in flight on a view that has since been disabled gets no further
+    // moves; the release that ends the drag is still delivered.
+    if (!target->effectively_enabled()) return;
 
     ViewCapture target_capture;
     target_capture.set(target);
@@ -388,6 +402,8 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
                         MouseButton button, const MouseDownHost& host,
                         const PointerAttributes& pointer) {
     if (!still_in_tree(target, &root)) return false;
+    // A disabled view takes no press and no double-click.
+    if (!target->effectively_enabled()) return false;
     const auto should_continue = [&] {
         return !host.should_continue || host.should_continue();
     };

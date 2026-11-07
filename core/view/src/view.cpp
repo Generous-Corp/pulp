@@ -1392,7 +1392,7 @@ std::vector<View*> View::sorted_children_by_z_index() const {
 }
 
 View* View::hit_test(Point local_point) {
-    if (!visible_ || !enabled_ || !hit_testable_) return nullptr;
+    if (!visible_ || hit_test_blocked_by_disabled() || !hit_testable_) return nullptr;
     if (!parent_ && !inverse_scale_transform(local_point)) return nullptr;
 
     // React Native pointerEvents:
@@ -2250,6 +2250,9 @@ bool View::has_pointer_capture(int pointer_id) const {
 
 void View::set_hovered(bool h) {
     if (hovered_ == h) return;
+    // A disabled view never gains hover. Losing it is always allowed, so a
+    // view disabled while hovered still receives its pointer-exit.
+    if (h && !effectively_enabled()) return;
     hovered_ = h;
     if (h) {
         on_mouse_enter();

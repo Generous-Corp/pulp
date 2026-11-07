@@ -1,6 +1,7 @@
 #include <pulp/view/plugin_key_routing.hpp>
 
 #include <pulp/view/overlay_dismissal.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/view.hpp>
 
 namespace pulp::view {
@@ -44,14 +45,14 @@ PluginKeyDisposition route_plugin_key(View& root, const PluginKeyOffer& offer) {
             // The widget answers; a scripted document that claimed navigation
             // focus is offered the key by the seam afterwards (it needs the
             // seam's own per-press de-duplication, so it is not policy).
-            return fv->on_key_event(ke) ? PluginKeyDisposition::consumed
+            return pulp::view::deliver_key_event(*fv, ke) ? PluginKeyDisposition::consumed
                                         : PluginKeyDisposition::forward_to_host;
         } else if (takes_text) {
             // A text field sees every key, because any printable character is
             // its content. Command handling (arrows, ⌘Z, ⌘A, Backspace) runs
             // first and its RETURN VALUE is the answer — a key it handled as a
             // command must not also be inserted as text.
-            if (fv->on_key_event(ke))
+            if (pulp::view::deliver_key_event(*fv, ke))
                 return PluginKeyDisposition::consumed;
             // It declined. A chord or a function key is not text, so there is
             // nothing left for the FIELD to do with it — but the editor's own
@@ -64,7 +65,7 @@ PluginKeyDisposition route_plugin_key(View& root, const PluginKeyOffer& offer) {
         }
         // Focused, but neither text nor navigation: it holds the slot without
         // claiming the keyboard. Offer the key and honor the answer.
-        else if (fv->on_key_event(ke))
+        else if (pulp::view::deliver_key_event(*fv, ke))
             return PluginKeyDisposition::consumed;
     }
 

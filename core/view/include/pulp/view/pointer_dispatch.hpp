@@ -161,6 +161,17 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count,
                         MouseButton button, const PointerAttributes& pointer);
 
+/// Offer a key event to `target`, honoring the disabled-input contract
+/// documented on `View::set_enabled`: a view that is disabled, or sits inside a
+/// disabled ancestor, is not offered the key and the call returns false (not
+/// handled). Otherwise returns what `on_key_event` returned. Hosts and routers
+/// call this instead of `on_key_event` directly.
+bool deliver_key_event(View& target, const KeyEvent& event);
+
+/// Offer committed text (keyboard or IME) to `target` under the same
+/// disabled-input contract. Returns true when the text was delivered.
+bool deliver_text_input(View& target, const TextInputEvent& event);
+
 /// Deliver one BUTTONLESS pointer move — a hover — to the view under
 /// `root_pt`, which is in root-view space.
 ///

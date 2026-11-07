@@ -257,7 +257,7 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
     // Returns true when the view holds focus afterwards.
     register_bridge_function(api, "setFocus", [&self](choc::javascript::ArgumentList args) {
         View* view = self.widget(args.get<std::string>(0, ""));
-        if (!view || !view->focusable() || !view->enabled())
+        if (!view || !view->focusable() || !view->effectively_enabled())
             return choc::value::createBool(false);
         for (View* cur = view; cur && cur != &self.root_; cur = cur->parent()) {
             if (!cur->visible()) return choc::value::createBool(false);

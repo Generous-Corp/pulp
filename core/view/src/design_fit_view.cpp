@@ -112,7 +112,7 @@ void DesignFitView::layout_children() {
 }
 
 View* DesignFitView::hit_test(Point local_point) {
-    if (!visible() || !enabled() || !hit_testable()) return nullptr;
+    if (!visible() || hit_test_blocked_by_disabled() || !hit_testable()) return nullptr;
     if (pointer_events() == PointerEvents::none) return nullptr;
 
     if (content_ && content_->visible() &&

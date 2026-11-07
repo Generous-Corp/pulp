@@ -409,13 +409,13 @@ public:
             return true;
         }
         View* target = focus_target_ ? focus_target_ : &root_;
-        bool handled = target->on_key_event(ke);
+        bool handled = pulp::view::deliver_key_event(*target, ke);
 
         const std::string text = text_for_key(event);
         if (!text.empty() && focus_target_) {
             TextInputEvent te;
             te.text = text;
-            focus_target_->on_text_input(te);
+            pulp::view::deliver_text_input(*focus_target_, te);
             handled = true;
         }
         if (handled) mark_dirty();
@@ -436,7 +436,7 @@ public:
         if (text.empty() || !focus_target_) return false;
         TextInputEvent te;
         te.text = text;
-        focus_target_->on_text_input(te);
+        pulp::view::deliver_text_input(*focus_target_, te);
         mark_dirty();
         return true;
     }

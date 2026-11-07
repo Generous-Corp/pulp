@@ -399,7 +399,7 @@ public:
         event.is_repeat = is_repeat;
         bool consumed = false;
         if (focused->accepts_text_input()) {
-            consumed = focused->on_key_event(event);
+            consumed = pulp::view::deliver_key_event(*focused, event);
         } else if (focused->accepts_navigation_input()) {
             constexpr std::uint16_t kHostChordModifiers =
                 kModCtrl | kModAlt | kModMeta | kModCmd;
@@ -409,7 +409,7 @@ public:
                 key == KeyCode::home || key == KeyCode::end_ ||
                 key == KeyCode::enter || key == KeyCode::escape);
             if (!allowed) return false;
-            consumed = focused->on_key_event(event);
+            consumed = pulp::view::deliver_key_event(*focused, event);
             if (!consumed) {
                 consumed = script_events::dispatch_key_for_root(
                     host_.input_root(), static_cast<int>(key), modifiers, is_down);
@@ -445,7 +445,7 @@ public:
         }
         pending_high_surrogate_ = 0;
         if (text.empty()) return true;
-        focused->on_text_input(TextInputEvent{.text = text});
+        pulp::view::deliver_text_input(*focused, TextInputEvent{.text = text});
         host_.input_request_repaint();
         return true;
     }
