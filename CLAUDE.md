@@ -1,8 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-Start with [`docs/dev/code-rules.md`](docs/dev/code-rules.md), the one-page card of design, style, file layout, real-time safety and test rules. This file covers the rest.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. Start with [`docs/dev/code-rules.md`](docs/dev/code-rules.md), the one-page rules card; this file covers the rest.
 
 ## What Is This
 
