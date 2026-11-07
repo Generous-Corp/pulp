@@ -56,6 +56,7 @@
         "tools/cmake/PulpDevSharedUi.cmake",
         "tools/cmake/PulpDocumentTypes.cmake",
         "tools/cmake/PulpEmbedData.cmake",
+        "tools/cmake/PulpWgslShaders.cmake",
         "tools/cmake/PulpFinalizeBuildInfo.cmake",
         "tools/cmake/PulpFindPluginval.cmake",
         "tools/cmake/PulpFonts.cmake",
