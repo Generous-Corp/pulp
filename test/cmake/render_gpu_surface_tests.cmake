@@ -406,12 +406,6 @@
                 target_include_directories(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
                     "${SKIA_INCLUDE_DIRS}/dawn")
             endif()
-            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
-                # The probe's test-only proc-table counter includes Dawn
-                # declarations, but the definitions remain in vellum-gpu.
-                target_link_libraries(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
-                    Vellum::Gpu Vellum::DawnHeaders)
-            endif()
             target_compile_definitions(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
                 PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
             set(_pulp_gpu_audio_shared_prelink_receipt
@@ -533,39 +527,6 @@
                 FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                 RESOURCE_LOCK pulp_gpu
                 TIMEOUT 60)
-
-            # D15 is intentionally consumed through Vellum's installed CMake
-            # package.  This exercises the coordinator's failure, re-entry,
-            # and idempotence contract in the same linkage shape Pulp uses,
-            # then proves the final executable did not acquire a second Dawn
-            # definition owner from Pulp's static dependency graph.
-            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
-                add_executable(pulp-test-gpu-dawn-vellum-bootstrap-contract
-                    test_gpu_dawn_vellum_bootstrap_contract.cpp)
-                target_link_libraries(pulp-test-gpu-dawn-vellum-bootstrap-contract PRIVATE
-                    Vellum::Gpu)
-                target_compile_definitions(pulp-test-gpu-dawn-vellum-bootstrap-contract PRIVATE
-                    "PULP_GPU_AUDIO_VELLUM_D15_PREFIX=\"${PULP_GPU_AUDIO_VELLUM_D15_PREFIX}\"")
-                add_test(NAME pulp-gpu-dawn-vellum-bootstrap-contract
-                    COMMAND pulp-test-gpu-dawn-vellum-bootstrap-contract)
-                set_tests_properties(pulp-gpu-dawn-vellum-bootstrap-contract PROPERTIES
-                    TIMEOUT 20)
-
-                add_test(NAME pulp-gpu-dawn-vellum-provider-topology
-                    COMMAND "${Python3_EXECUTABLE}"
-                        "${PROJECT_SOURCE_DIR}/test/verify_gpu_dawn_vellum_provider_topology.py"
-                        "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>"
-                        "$<TARGET_FILE:Vellum::Gpu>")
-                set_tests_properties(pulp-gpu-dawn-vellum-provider-topology PROPERTIES
-                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
-                    TIMEOUT 20)
-            endif()
-
-            add_test(NAME pulp-gpu-dawn-vellum-d15-source
-                COMMAND "${Python3_EXECUTABLE}"
-                    "${PROJECT_SOURCE_DIR}/test/test_gpu_dawn_vellum_d15_source.py")
-            set_tests_properties(pulp-gpu-dawn-vellum-d15-source PROPERTIES
-                TIMEOUT 20)
 
             # Exact-provider Forge convolution route probe. This target is
             # deliberately opt-in: it links the host catalog only when the
@@ -713,10 +674,6 @@
             endif()
             target_compile_definitions(pulp-gpu-shared-io-convolution-session-probe PRIVATE
                 PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
-            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
-                target_link_libraries(pulp-gpu-shared-io-convolution-session-probe PRIVATE
-                    Vellum::Gpu Vellum::DawnHeaders)
-            endif()
             add_dependencies(pulp-gpu-shared-io-convolution-session-probe
                 pulp-gpu-dawn-shared-io-provider-probe)
             add_test(NAME pulp-gpu-shared-io-convolution-session-probe
@@ -795,10 +752,6 @@
             endif()
             target_compile_definitions(pulp-gpu-dawn-wavenet-qualification PRIVATE
                 PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
-            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
-                target_link_libraries(pulp-gpu-dawn-wavenet-qualification PRIVATE
-                    Vellum::Gpu Vellum::DawnHeaders)
-            endif()
             add_dependencies(pulp-gpu-dawn-wavenet-qualification
                 pulp-gpu-dawn-shared-io-provider-probe)
             # Real-Dawn campaign for the WaveNet node's watchdog window: per-block
@@ -905,10 +858,6 @@
             endif()
             target_compile_definitions(pulp-gpu-dawn-wavenet-history-probe PRIVATE
                 PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
-            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
-                target_link_libraries(pulp-gpu-dawn-wavenet-history-probe PRIVATE
-                    Vellum::Gpu Vellum::DawnHeaders)
-            endif()
             add_dependencies(pulp-gpu-dawn-wavenet-history-probe
                 pulp-gpu-dawn-shared-io-provider-probe)
             add_test(NAME pulp-gpu-dawn-wavenet-history-probe
@@ -937,10 +886,6 @@
             endif()
             target_compile_definitions(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
                 PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
-            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
-                target_link_libraries(pulp-gpu-dawn-wavenet-staged-timestamps-probe PRIVATE
-                    Vellum::Gpu Vellum::DawnHeaders)
-            endif()
             add_dependencies(pulp-gpu-dawn-wavenet-staged-timestamps-probe
                 pulp-gpu-dawn-shared-io-provider-probe)
             add_test(NAME pulp-gpu-dawn-wavenet-staged-timestamps-probe

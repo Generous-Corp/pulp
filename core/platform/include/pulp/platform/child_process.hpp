@@ -138,8 +138,9 @@ public:
     /// signal a completed process.
     int process_id() const;
 
-    /// Request cancellation. Sends SIGTERM (POSIX) or TerminateProcess (Windows),
-    /// waits a short grace period, then sends SIGKILL if still alive.
+    /// Request cancellation. Sends SIGTERM to the private process group on
+    /// POSIX (or TerminateProcess on Windows), waits a short grace period,
+    /// then sends SIGKILL if the child or a descendant is still alive.
     void cancel();
 
     /// Wait for the process to complete and return the result.

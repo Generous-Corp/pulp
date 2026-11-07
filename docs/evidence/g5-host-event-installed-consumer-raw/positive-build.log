@@ -1,0 +1,5 @@
+[1/3] Building CXX object CMakeFiles/pulp-g5-host-event-consumer.dir/main.cpp.o
+[2/3] Rewriting Skia's libskunicode_icu.a with trimmed ICU data
+icu_data_subset: x86_64: 10876560 -> 4847120 bytes (717/2361 items)
+icu_data_subset: arm64: 10876560 -> 4847120 bytes (717/2361 items)
+[3/3] Linking CXX executable pulp-g5-host-event-consumer

@@ -181,6 +181,34 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        'include': 'pulp/host/plugin_identity.hpp',
+        'fingerprint': 'sha256:f5d1fe9c5e8038b5cbb564170a8cb23fe7abb79b0c6009f5f6ec8b0d8b578060',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema.',
+    },
+    {
+        'include': 'pulp/host/plugin_slot.hpp',
+        'fingerprint': 'sha256:9285bdcc1d97c35e6c8f2871d92eb938322d58d2817e9ed53a624340857df0e9',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema.',
+    },
+    {
+        'include': 'pulp/host/scanner.hpp',
+        'fingerprint': 'sha256:23c5d2b996ec52b881d3f7f24055af43e751d60f2a70d0bbc547c7730d316b80',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema.',
+    },
+    {
+        'include': 'pulp/host/graph_event_contract.hpp',
+        'fingerprint': 'sha256:edf30e0200f48972611b5253942f684befdc8133e10dbcde43fe0a045eb2032d',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Bounded host and graph-authored event boundary contract; it is not wired into SignalGraph admission or a generator-facing capability.',
+    },
+    {
         'include': 'pulp/audio/buffer.hpp',
         'fingerprint': 'sha256:d783b077cccb2137232cfcf34924a2fada3e356467f7768fce862785fdda977d',
         'disposition': 'infrastructure',
@@ -189,7 +217,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/trigger_graph.hpp',
-        'fingerprint': 'sha256:c553cd4a35d13a5d4cd6822f5ef8bc254c5f1a3613ea1ff269ddfb1bcf40bccb',
+        'fingerprint': 'sha256:f26b6613f55461f4f0d36fe4b2d027b45246b9220f18213b271d17831fbac68a',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded runtime typed trigger transport and framework onset/envelope factories; no complete G-5 or realtime qualification claim.',
@@ -202,6 +230,9 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         'rationale': 'Existing executor lowering infrastructure with graph-owned opaque spectral resolver; no public native spectral-stage registration or notation capability.',
     },
     {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:7184acce0063ba69aab4c271f79a4e65ca3e04fc01e68de2f27f84aa173b3e7a', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
+
+    {'include': 'pulp/midi/synthesiser.hpp', 'fingerprint': 'sha256:2611124e14f31cf1481b9605e99d6bdff7c46fe751073ff1922b01e73e97522c', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Polyphonic voice allocator used by instrument processors; reviewed when panic() was added. Not a generator-facing capability.'},
+    {'include': 'pulp/midi/panic.hpp', 'fingerprint': 'sha256:5de1b463081d7a2bb4c01c83886bc2b341d54b492c43259dace4a944b67e5495', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Pure MIDI 1.0 panic message generation and held-note offs used by processors and adapters; not a generator-facing capability.'},
 
     {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
 
@@ -404,6 +435,49 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "range; it is a bounded conversion primitive intended for composition inside "
             "delay kernels rather than an advertised generator DSP claim. It has no "
             "in-tree consumer today beyond the signal umbrella header."
+        ),
+    },
+    {
+        "include": "pulp/audio/buffering_reader.hpp",
+        "fingerprint": "sha256:051b0e39daded2b42ffa26e82bb2835546bfea02bd927de687d473b16974529f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Background pre-buffering ring for file playback whose worker the audio "
+            "thread wakes through runtime::WakeSignal; streaming infrastructure, not a "
+            "generator-facing DSP capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/streaming_sample_source.hpp",
+        "fingerprint": "sha256:c6545cbfd9556d958a6b3a8768b0c0358e654d228cc99fdb1655ac8b4d4d56f9",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Preloaded-head plus streamed-tail sample source with a background reader "
+            "woken by the audio thread; the sampler's disk-streaming infrastructure, "
+            "with no generator capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/audio/async_block_worker.hpp",
+        "fingerprint": "sha256:33f3ba40c7c017a7859242307bb29d51dc50e56f7827e3e262f1ea68795251d2",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Fixed-latency playout of worker-rendered audio and timed events for "
+            "variable host blocks; threading infrastructure a processor drives from "
+            "process(), not a generator-facing DSP capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/pull_rate_detector.hpp",
+        "fingerprint": "sha256:d6be164e1d3f435ae45c994b0ee9835a873895bf98f87652c515064253925c5f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Detects a host pulling audio faster than real time without declaring an "
+            "offline render; a scheduling helper with no DSP or generator claim."
         ),
     },
     {
@@ -658,7 +732,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/block_ops.hpp",
-        "fingerprint": "sha256:563569c0bb61029b1b374a8d91812a77818cb9f3db18cc2706a4c570860dd8a0",
+        "fingerprint": "sha256:7cc39d018aad8ab08ca1ef31a2af8c0ea3dc77ac63877a197434854770bc8d24",
         "disposition": "capability_support",
         "capability_keys": [
             "midi.arpeggiator", "midi.channel-routing", "midi.controller-mapping",
@@ -690,7 +764,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/mpe_buffer.hpp",
-        "fingerprint": "sha256:40f4e08a25956811f4466b031734e5fd418e313e4861007304dd33a33ca50e0e",
+        "fingerprint": "sha256:9b08b7224b5ce9c5aa833547fccd1827d70b18445d0c14fc3775bc21eb072cfb",
         "disposition": "capability_support",
         "capability_keys": ["midi.mpe-voice-tracker"],
         "rationale": (
@@ -1604,7 +1678,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/gain.hpp",
-        "fingerprint": "sha256:54651b70d3f4f19684907be44323e35fd4d726d7e9795b04c07eda1b79aab503",
+        "fingerprint": "sha256:26ea4471471e1af735f3d3e10d795212e9a351c89c50f39d45783802107a557c",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

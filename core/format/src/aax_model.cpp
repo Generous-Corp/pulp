@@ -195,7 +195,12 @@ DefinitionResult build_plugin_definition(ProcessorFactory factory, const PluginC
 
     if (!definition.descriptor.input_buses.empty()) {
         const auto& main_input_bus = definition.descriptor.input_buses.front();
-        if (main_input_bus.optional) {
+        // An effect's main input is its signal path, so it cannot be optional.
+        // An instrument that declares an optional input is a generator with an
+        // input stem (a vocoder-style synth); AAX carries that as a regular
+        // audio input on the SWGenerators component, so it is accepted.
+        if (main_input_bus.optional &&
+            definition.descriptor.category != PluginCategory::Instrument) {
             result.error = "AAX does not support an optional main input bus";
             return result;
         }

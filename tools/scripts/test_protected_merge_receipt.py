@@ -874,11 +874,13 @@ class ReuseStepRefusalReasonTest(unittest.TestCase):
                          len(parents) + 1)
         return sha
 
-    def run_step(self, sha: str, native: str = "true") -> tuple[str, str]:
-        runner_temp = self.root / f"rt-{sha[:12]}-{native}"
+    def run_step(self, sha: str, native: str = "true",
+                 classify_base: str = "") -> tuple[str, str]:
+        runner_temp = self.root / f"rt-{sha[:12]}-{native}-{classify_base[:8]}"
         runner_temp.mkdir()
         summary, output = runner_temp / "summary.md", runner_temp / "output"
         env = dict(os.environ, GITHUB_EVENT_NAME="merge_group", NATIVE_BUILD_REQUIRED=native,
+                   CLASSIFY_BASE=classify_base,
                    GITHUB_SHA=sha, RUNNER_TEMP=str(runner_temp),
                    GITHUB_STEP_SUMMARY=str(summary), GITHUB_OUTPUT=str(output),
                    ORIGINAL_MATRIX='{"include":[{"key":"macos"},{"key":"linux"}]}',
@@ -902,6 +904,24 @@ class ReuseStepRefusalReasonTest(unittest.TestCase):
             stdout, _ = self.run_step(sha)
             reason = f"the merge-group commit has {count} parent(s); reuse needs exactly two"
             self.assertEqual(self.decided_reasons(stdout), {"macos": reason, "linux": reason})
+
+    def test_group_stacked_on_unlanded_entries_is_refused_before_any_verifier(self) -> None:
+        # [a, c]: the group's first parent `a` is not main's tip `b`, as when
+        # merge_group.base_sha is a speculative group ahead in the queue. No
+        # receipt certifies that tree, and `a`'s tools/ are not protected code.
+        group = self.octopus([self.commits[0], self.commits[2]])
+        stdout, _ = self.run_step(group, classify_base=self.commits[1])
+        reason = (f"the merge group's first parent {self.commits[0][:12]} is not main's tip "
+                  f"{self.commits[1][:12]}; it is stacked on queue entries that have not landed")
+        self.assertEqual(self.decided_reasons(stdout), {"macos": reason, "linux": reason})
+        self.assertNotIn("protected base has no receipt verifier", stdout)
+
+    def test_missing_classify_base_refuses_reuse(self) -> None:
+        group = self.octopus([self.commits[0], self.commits[2]])
+        stdout, _ = self.run_step(group)
+        reasons = self.decided_reasons(stdout)
+        self.assertEqual(set(reasons), {"macos", "linux"})
+        self.assertIn("stacked on queue entries that have not landed", reasons["macos"])
 
     def test_unreadable_commit_is_not_reported_as_a_parent_count(self) -> None:
         stdout, _ = self.run_step("0" * 40)
@@ -958,6 +978,8 @@ if args[0] == "verify":
                    input_text="head\n")
         group = git(repo, "commit-tree", git(repo, "rev-parse", "HEAD^{tree}"),
                     "-p", base, "-p", head, input_text="group\n")
+        self.bases = getattr(self, "bases", {})
+        self.bases[group] = base
         # The workspace note/publish helpers are the real script.
         (scripts / "protected_merge_receipt.py").write_bytes(Path(receipt.__file__).read_bytes())
         return repo, group
@@ -974,7 +996,7 @@ if args[0] == "verify":
                    RECEIPT_TOKEN="unused", A2T_RECEIPT_VERIFICATION_REQUIRED="false",
                    GITHUB_REPOSITORY="example/repo", GITHUB_WORKSPACE=str(repo),
                    GITHUB_REF="refs/heads/gh-readonly-queue/main/pr-1-" + "a" * 40,
-                   STUB_LOG=str(log))
+                   STUB_LOG=str(log), CLASSIFY_BASE=self.bases[group])
         env.pop("AFFECTED_SLOW_REQUIRED", None)
         if required is not None:
             env["AFFECTED_SLOW_REQUIRED"] = required

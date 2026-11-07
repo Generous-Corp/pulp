@@ -1,0 +1,648 @@
+[
+  {
+    "executable_sha256": "202c3c8271b42bb99f94e35c20ca6b094728da420732d768718a9f3a648771e4",
+    "exit_code": 0,
+    "identity": [
+      "capability",
+      "signal.sample-region"
+    ],
+    "name": "capability_0",
+    "source_sha256": "8ba1c8c24b4e4684aa1a73e65b76ffafc76fd83f1abcaa5e69921a470798fe58",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "a453c909857ef7493b69b83e39b0e0cba300317f187f9516283950cba4e5aa2e",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "definition",
+      "pulp::host::SampleRegionDefinition"
+    ],
+    "name": "binding_0_0",
+    "source_sha256": "452fa3b53cd69f6c42e9cb5c4cbcae88d953ee51507f72369c3b77f1b5fdec60",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "11e6c24ac8badbfd1c514466d08c4922bcaa7a627f5a43b233c121b36ef70e9e",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "descriptor",
+      "pulp::host::SampleRegionDescriptor"
+    ],
+    "name": "binding_0_1",
+    "source_sha256": "4aeeebe4d8187da8664e0a5e44693d93c2aa76f466dfbdbb08d0b0af829d9616",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "482c7ed481736af8d9012bfb9c65aa9db4790fb61eca1409014ce2bb668886ca",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "result",
+      "pulp::host::SampleRegionResult"
+    ],
+    "name": "binding_0_2",
+    "source_sha256": "40f51325a594d2eefe8d76798db0a27919991b327c77cb4b86479505b749eb1e",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "9c1abc0d03e9a7aeb9f625fef052239d4b222734bd59833d5e0b0d886bc5e66d",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "promoted_parameter",
+      "pulp::host::SampleRegionPromotedParameter"
+    ],
+    "name": "binding_0_3",
+    "source_sha256": "7e022e20c046d826d542a2e33b71711be61ef8564025e2ce1c20ac95670d980d",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "08472bc5d7e65ab09bed2dc66b369abddaea566cf424921f7c3f1fdd98245478",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "proof",
+      "pulp::host::SampleRegionProof"
+    ],
+    "name": "binding_0_4",
+    "source_sha256": "e92a84c153df74d48add05b1131cefe256c00f82171a19647286e1147812df05",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "37d657c4c4230fd80c14c904768ed5346bbf8257c699566ef0e0fc38e64d0de5",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "limits",
+      "pulp::host::SampleRegionLimits"
+    ],
+    "name": "binding_0_5",
+    "source_sha256": "6229a810bd2182dd5ecd267e2938b61e771ff5b7282b240e0022b16c7da40d3d",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "7eff162d6691d35228af54ea7858be2b9679ecdb1b1075dce2632b17654cebc3",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "kernel_config",
+      "pulp::host::SampleKernelConfig"
+    ],
+    "name": "binding_0_6",
+    "source_sha256": "02c284c1b4f6ffb5c9f7f03c3e50f796dd3ab4ed8b388b5f693a0c8de383c7ce",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "2bf2c6de24213a7239e4b0f0a1b786919a4f40e0ce22f84eece7b033ed777d38",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "kernel_descriptor",
+      "pulp::host::SampleKernelDescriptor"
+    ],
+    "name": "binding_0_7",
+    "source_sha256": "3598dc546191ca5825b089ea63ecbb4e05378f25a510c5d6c3f36bf578c053d3",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "38e8c5bc21f1b97bdc0771179d6ff40c36e295c2953c5a0849810ac15b05ddac",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "graph",
+      "pulp::host::SignalGraph"
+    ],
+    "name": "binding_0_8",
+    "source_sha256": "a12e3a6c904fc1dc56b291d0896e0d2118e25e07fc8b7b7f52774ca78ef34599",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "4af9e6fdcaac2f6dab79d2903463c15343fded93914ba3662fd6f7da67f10029",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "parameter_contract",
+      "pulp::host::SampleRegionParameterContract"
+    ],
+    "name": "binding_0_9",
+    "source_sha256": "4c2232d4bd1d65f18c40de4be80ceeb174a016a007baeac6a0795b07e6ec536b",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "e70eec5af343c9db6edf164748b087edc40d717520fc9f57fc5811adcab1b63e",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "register_graph",
+      "pulp::host::register_builtin_sample_region_types"
+    ],
+    "name": "binding_0_10",
+    "source_sha256": "b83340517a3dbfc3f361d580549439f1fc480772d971b39f90bd29fa829f81a9",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "201ad853debe4ba4dec891b081df2bde6bebbb99713291558f484d66644dba20",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "register_edit",
+      "pulp::host::register_builtin_sample_region_types"
+    ],
+    "name": "binding_0_11",
+    "source_sha256": "24cc6803895094b1b0c932810ee1878aff707761e088aebbb560f2b04f042d2f",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "5ded66b5bab35b577031af83ae37afbed9d8afc5727bb6c2b7c3ece360908666",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "begin_edit",
+      "pulp::host::SignalGraph::begin_prepared_topology_edit"
+    ],
+    "name": "binding_0_12",
+    "source_sha256": "41d62bb84399ce396883c76cc29978c5bddc0210cd9b13edd48b00c3a506f5ef",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "57afa04562330209ee7d031f2cac653d604e2b16068778e4aeae93daddfe65ba",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_declare_sample_region",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::declare_sample_region"
+    ],
+    "name": "binding_0_13",
+    "source_sha256": "d55e2bafbd228b73dd6d7150da105f272b3a569f0bee626fb299907106f7d4d4",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "9744681229f6291e01b020e54aba6fa3b3b9bab00e622340bd9ea07a70c20f6b",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_remove_sample_region",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::remove_sample_region"
+    ],
+    "name": "binding_0_14",
+    "source_sha256": "8e29198326948e8817aaf36bec13a8a6617673aa943a08025b6944d7d0ac6548",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "33720315b2f3cc77ecbe1d40dea91b850019ac00ab00dfb8a41b907e6fabb30a",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_add_sample_region_member",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::add_sample_region_member"
+    ],
+    "name": "binding_0_15",
+    "source_sha256": "d26fb4dba18d715dc112bf7f2b6ec98ea337d5ca604ea09f95efe6c37cb48c35",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "5757bd3ec246934b4e555180d5cb3d20e1e93f636d378d7b519e2848a96f4b31",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_remove_sample_region_member",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::remove_sample_region_member"
+    ],
+    "name": "binding_0_16",
+    "source_sha256": "ad98b3724198b278110ac46b53548b45a1760ea3f18203d4467bc7689d22a0ef",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "47ece7e97ea3433fae0cd2954f6a13e8dce2e8a2484ac767ac4a77b3445e4c36",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_set_sample_kernel_config",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::set_sample_kernel_config"
+    ],
+    "name": "binding_0_17",
+    "source_sha256": "d4d82e24481b8d6ef85ef8489dfa8ed5b80e61701ecc2ea7209e8179b5b4510a",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "9e4c329724febaa0d3ef5db932da9bc0411cce68a08a805e600237737f7906fd",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_connect_in_sample_region",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::connect_in_sample_region"
+    ],
+    "name": "binding_0_18",
+    "source_sha256": "45a19917123fb829f98d424742e33d75e479a3db376b52a66a9ebe2d44b96469",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "374be567e8a31a128322533e582f795ddfd63e9ad73af68a28a912bb09f4410b",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_prove_sample_region",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::prove_sample_region"
+    ],
+    "name": "binding_0_19",
+    "source_sha256": "165450c256e356e5adc45a3b4884debe4fa7e92436155d134b0558fe7a362a87",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "078baffb2f8a91a876aa8c25d3433c82bb04007d3580212794262757fd6d290f",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_sample_region",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::sample_region"
+    ],
+    "name": "binding_0_20",
+    "source_sha256": "d9d4e3cf264729e16c052a2c9b7ccca117c5f8ecaad8d0bd49043f9d7f72df1e",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "01da4c8cd3dd7c0ddae35cba9430206593946d3bca2df494444f797cf0ce6cbc",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_sample_regions",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::sample_regions"
+    ],
+    "name": "binding_0_21",
+    "source_sha256": "92e06e274a2b209a975271bf28f824fc2e4259fe71e44eb89858ad8678bfa3ff",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "63a28bd8c38b9951323169be0f3cd9c5f9af4b6dd3f6cf8a31db63e078a7e8d9",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_sample_region_parameter_contract",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::sample_region_parameter_contract"
+    ],
+    "name": "binding_0_22",
+    "source_sha256": "c32534330f6757786c712d77a323c5a36eb4e2042a365a3374c290acad9e5b1a",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "9f27a9ccaed664599c01957be7fa0542e5dc82c8d55e7a3c5e1adf7eca760b1b",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_prepare",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::prepare"
+    ],
+    "name": "binding_0_23",
+    "source_sha256": "d0c650778e841eced1a850284e075c00b5a633e7c7d803ba013304243d5825a2",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "15af26cedb22b29dfaba244fd670e5b9ae796f4d272ba08d15494050902e44fa",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_commit",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::commit"
+    ],
+    "name": "binding_0_24",
+    "source_sha256": "98ac45444f6a4b24f8e488ee32cb64d4e096ea502a719f6d8da6481e436bba89",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "467fe44b2b36e68c5c78defaa90e28b903e58a7e9a5e7d348ef6f195b8e395f4",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "graph_prove_sample_region",
+      "pulp::host::SignalGraph::prove_sample_region"
+    ],
+    "name": "binding_0_25",
+    "source_sha256": "8d4d5e0291a684ce43c60517ee5fb81c0976132e5b437ba317b25add5304657b",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "dfca8268f3df4da5ee489474564ba97c757412bc9edf0d7f078163361fbcb0e7",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "graph_sample_region",
+      "pulp::host::SignalGraph::sample_region"
+    ],
+    "name": "binding_0_26",
+    "source_sha256": "e37cf7dad0fc8529af8b8ee334b3751d5a659a50f96fc4179cb6d1a9da202ae6",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "4cde0d85c6ebbf20baeb257f8c7576ed53194ff6365de3f5cf469663a1aa1ad2",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "graph_sample_regions",
+      "pulp::host::SignalGraph::sample_regions"
+    ],
+    "name": "binding_0_27",
+    "source_sha256": "31e6959c9459d953817200833907da3f2716488c82e4881f201ce5e1987e73cd",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "cfa090fec4df2bf4e100dd610e47af1b4e92de2563a68c99fca91e237d2ddae9",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "SampleRegionCandidate",
+      "pulp::host::SampleRegionCandidate"
+    ],
+    "name": "binding_0_28",
+    "source_sha256": "9050e6e0ff7702693ae5041f3e3a975bb9f4208d7beb673c586e614943413245",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "d000bbe4d5c6d9ff3f0c94de11f2411bba9d7ce2f269916aeb553fd5f68077db",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "SampleRegionGraphProof",
+      "pulp::host::SampleRegionGraphProof"
+    ],
+    "name": "binding_0_29",
+    "source_sha256": "8ffca54402fd073e779d6636e32f1296cdd5ae89f5f45403811275b8e0a4f677",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "fe3872c3648c7fbc6cd3d2b734f7aedf381ae28932929449984b86d50415b426",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "SampleRegionParserShape",
+      "pulp::host::SampleRegionParserShape"
+    ],
+    "name": "binding_0_30",
+    "source_sha256": "c1e78daa6943af66c0480c20fa86a45f861f2160eadcfe323530c6d4436e3cd5",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "d1c031794db22632e00acc934c0d7cdb6d59a0c6da37cd299d88b07ee77f34ef",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "SampleRegionParserProof",
+      "pulp::host::SampleRegionParserProof"
+    ],
+    "name": "binding_0_31",
+    "source_sha256": "a9c1b5c51936d53180969e66bde9dd39780a13837c76ab88c27dddc6fc4d036d",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "1702fa4d3e024f59875b33e67a45d3a1ed60d525223374dd3f88b3276371c845",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "SampleRegionKernelNode",
+      "pulp::host::SampleRegionKernelNode"
+    ],
+    "name": "binding_0_32",
+    "source_sha256": "fe5124118ee3f0d8e82d6d4af71f16324fd1bfced18fbe7d388a0ea40450a5bb",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "dd43ae57f81767333b87548ebb1a92cf3f907fc51eb65deaf272327515257cd4",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "SampleRegionConnection",
+      "pulp::host::SampleRegionConnection"
+    ],
+    "name": "binding_0_33",
+    "source_sha256": "7cb2b00f33a403085fb7b78ec9874244c46a3ae559ba9d90dc2567800caa175e",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "74cbbe3e7f40ebbaf4b09ced957b0aef98f35a9eedc13c6d8c22a0738a2224cc",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "SampleRegionResourceStats",
+      "pulp::host::SampleRegionResourceStats"
+    ],
+    "name": "binding_0_34",
+    "source_sha256": "dcb37f03d04f86c23edfa3c42ae9144ee843fe5bbae7f4f32d912239e2f05dab",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "94a7534e911110f5b550009d96b21ae68a7e82e9952ce5336fabb55ed2f563f6",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "SampleRegionKernelRegistryView",
+      "pulp::host::SampleRegionKernelRegistryView"
+    ],
+    "name": "binding_0_35",
+    "source_sha256": "4b15aabaa2affb3bf0d6bb19071e27d5145acb24a140e2c0fa41ff2ed66b6f8f",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "6a78bad6ecd3231b3294d1c152b3833146a2ef0af640c448bc114f57c430721c",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "proof_is_sample_region_v1_descriptor",
+      "pulp::host::is_sample_region_v1_descriptor"
+    ],
+    "name": "binding_0_36",
+    "source_sha256": "8435210e6c37238ea002f99f830c8db83b9dd778beab557f51606e61e6788b9c",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "97de0ebe045b2bc58d354de742947f83c5e408f7bc154a18474bad7e5cdf2fd0",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "proof_sample_region_config_matches",
+      "pulp::host::sample_region_config_matches"
+    ],
+    "name": "binding_0_37",
+    "source_sha256": "1792f647b1eebd5e69d143f4744749c94874b6eb2faa494858304547c300132d",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "679c04d023dd70c09d3c338be8e32bf3f5ab6f7d2016469313e382f09bf5cff1",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "proof_prove_sample_region",
+      "pulp::host::prove_sample_region"
+    ],
+    "name": "binding_0_38",
+    "source_sha256": "3900648b991c3f2b4602669cd60368cfa6c1c44e30ee48238175e3b171839791",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "9aa45de1f2b7f7a76ef69a1621f57e87414aaf494ffbe1f9517068fd9d14c74d",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "proof_prove_sample_regions",
+      "pulp::host::prove_sample_regions"
+    ],
+    "name": "binding_0_39",
+    "source_sha256": "ce16e9215037e0a64400115482cade7ed6e4f896f2e3f986d838f0418ce1964b",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "6130e7ec5a61bec5d865758e1e19bd39039d1b72d620f70b03518dc5da156fd3",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "proof_prove_sample_region_parser_shape",
+      "pulp::host::prove_sample_region_parser_shape"
+    ],
+    "name": "binding_0_40",
+    "source_sha256": "6979da32f9a2caa91d0eed48e0561e74d0cfb3d5c2371ce1374ff0be358a4a21",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "37c3456aa191a6a360fff88ab5b66ecc3e0d4047050f467c32877c31fa85333d",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "contract_from_regions",
+      "pulp::host::SampleRegionParameterContract::from_regions"
+    ],
+    "name": "binding_0_41",
+    "source_sha256": "542f420946128bbe2a58c88f4c457efb694059be2e2f447b925d1289be8c7134",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "abfd4a4845830709f7bb8cc3d75c63c6334aefb7555c211e660b84cd3e86ef23",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "contract_freeze",
+      "pulp::host::SampleRegionParameterContract::freeze"
+    ],
+    "name": "binding_0_42",
+    "source_sha256": "bd51b14f4112e7e9f5b12dc5f8ea585618725c414dc699154dbe56ec999a174e",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "7cfb92bf8c6eca4287bb28b2b5be9263cd0500f16dd52d361d28e6d4739f2a3f",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "contract_bind",
+      "pulp::host::SampleRegionParameterContract::bind"
+    ],
+    "name": "binding_0_43",
+    "source_sha256": "1a63ea3d229f65b38aa2edcad531f8e837c6888d4d2960dcbc16f037ba8e7956",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "b3f456e5c1bb6b40297f9573a29c1c5eb9e61bfa478820f252b5202d87ebf2c0",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_bind_parameters",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::bind_sample_region_parameters"
+    ],
+    "name": "binding_0_44",
+    "source_sha256": "5c194bf6665a1cd7cec27168747ac3598892019514d759108d2ff4d440d6b98a",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "b8dabf7e2dc9415680f57b1c86f85a1efd09f433a775dd277bbd134a062d5208",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_add_exact_node",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::add_custom_node"
+    ],
+    "name": "binding_0_45",
+    "source_sha256": "8de2297e73cbd26d2e0cf07670e7c2bb2eeed5af34f3f1e714c4c05a05b39f60",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "77966a6a9e9fd9883c195ad6f20f32674ab2e332a9f047ed9b9f1dc96de0e350",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.sample-region",
+      "edit_connect",
+      "pulp::host::SignalGraph::PreparedTopologyEdit::connect"
+    ],
+    "name": "binding_0_46",
+    "source_sha256": "b8d568534af98ef25e15198e7c6c917f689859cb793db5b025617463cd9c109d",
+    "target": "Pulp::host"
+  },
+  {
+    "executable_sha256": "82ab9f03eba9bf9cd835afc4af2dffe55c6d5407ba914615f5d0e5cbb0ab1f8c",
+    "exit_code": 0,
+    "identity": [
+      "capability",
+      "signal.unit-delay"
+    ],
+    "name": "capability_1",
+    "source_sha256": "c8275a1e20e97fc375bedee1568b3e2c3692635e23033a3c9b7edb459a021bdc",
+    "target": "Pulp::signal"
+  },
+  {
+    "executable_sha256": "5bf58a671a07ae1baeb9482478b9644e067b800cf5e5e8125181f3d33be04c9a",
+    "exit_code": 0,
+    "identity": [
+      "binding",
+      "signal.unit-delay",
+      "entrypoint",
+      "pulp::signal::UnitDelay"
+    ],
+    "name": "binding_1_0",
+    "source_sha256": "72c651b8570455b9cb23630f58669357943da37b6331107498bd4c254d730a6d",
+    "target": "Pulp::signal"
+  }
+]

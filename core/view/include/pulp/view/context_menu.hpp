@@ -44,6 +44,15 @@ public:
         bool checked = false;
         ControlKind control_kind = ControlKind::action;
         float normalized_value = 0.0f;
+        /// Text shown at the right end of a slider row ("2.50 Hz", "65%").
+        /// When set, the track stops short of it so the thumb never runs
+        /// under the text; the product keeps it current from `on_change`.
+        std::string value_label;
+        /// A toggle that is one of several sibling tabs (an "edit lane 1 /
+        /// edit lane 2" pair): painted as a row with a leading accent bar
+        /// when checked instead of a switch, since it selects rather than
+        /// enables.
+        bool tab = false;
         float normalized_step = 0.05f;
         std::vector<std::string> choices;
         std::size_t choice_index = 0;
@@ -127,7 +136,22 @@ public:
 
     ContextMenu() { set_focusable(true); }
 
-    void set_items(std::vector<Item> items) { items_ = std::move(items); }
+    void set_items(std::vector<Item> items) {
+        if (item_change_dispatch_depth_ != 0) {
+            deferred_items_ = std::move(items);
+            return;
+        }
+        replace_items(std::move(items));
+    }
+    /// Reserve a width so a family of menus that rebuild their rows (a
+    /// progressive-disclosure menu, a radio group whose labels differ in
+    /// length) keeps one stable panel width instead of resizing per state.
+    void set_min_width(float width) {
+        min_width_ = std::max(0.0f, width);
+    }
+    float min_width() const {
+        return min_width_;
+    }
     std::vector<Item>& items() {
         return items_;
     }
@@ -242,6 +266,9 @@ public:
     void adjust_control(Item& item, float delta);
     bool set_control_from_pointer(Item& item, const Rect& row, Point point);
     void fire_close(std::optional<int> result);
+    void replace_items(std::vector<Item> items);
+    void notify_item_change(Item& item);
+    void flush_deferred_items();
 
     std::vector<Item> items_;
     Point anchor_{0, 0};
@@ -250,6 +277,11 @@ public:
     int active_pointer_id_ = 0;
     bool closed_ = false;
     float scroll_ = 0.0f;
+    static float slider_track_right(const Item& item, const Rect& row);
+    static constexpr float kValueLabelWidth = 52.0f;
+    float min_width_ = 0.0f;
+    std::size_t item_change_dispatch_depth_ = 0;
+    std::optional<std::vector<Item>> deferred_items_;
 
     static constexpr float kRowHeight = 24.0f;
     static constexpr float kHPad = 34.0f;   // total horizontal label padding

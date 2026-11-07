@@ -388,3 +388,42 @@ TEST_CASE("Frequency selective masks preserve finite tails through the complete 
     };
     REQUIRE(render_tail(false) == render_tail(true));
 }
+
+TEST_CASE("Spectral batches carry canonical versioned frame fields",
+          "[host][spectral-ports][spectral-contract]") {
+    using namespace pulp::host;
+    using pulp::graph::SpectralFrameContract;
+    const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    const auto contract = identity.frame_contract();
+    REQUIRE(contract.version == 1);
+    REQUIRE(contract.profile == 1);
+    REQUIRE(contract.fft_size == 256);
+    REQUIRE(contract.hop == 64);
+    REQUIRE(contract.channels == 1);
+    REQUIRE(contract.bins == 129);
+    REQUIRE(contract.sample_rate_bits == identity.sample_rate_bits());
+    REQUIRE(contract.window == 1);
+    REQUIRE(contract.phase == 1);
+    REQUIRE(contract.normalization == 1);
+    REQUIRE(contract.precision == 1);
+
+    const auto encoded = contract.encode();
+    REQUIRE(encoded.size() == SpectralFrameContract::encoded_size);
+    const auto decoded = SpectralFrameContract::decode(encoded);
+    REQUIRE(decoded);
+    REQUIRE(*decoded.value == contract);
+    auto unsupported = encoded;
+    unsupported[0] = 2;
+    REQUIRE_FALSE(SpectralFrameContract::decode(unsupported));
+    REQUIRE(SpectralFrameContract::decode(unsupported).error == SpectralError::InvalidContract);
+    auto noncanonical = encoded;
+    noncanonical[31] = 1;
+    REQUIRE_FALSE(SpectralFrameContract::decode(noncanonical));
+
+    // Telemetry consumers persist these values; adding InvalidContract must
+    // not renumber any existing diagnostic.
+    REQUIRE(static_cast<std::uint8_t>(SpectralError::None) == 0);
+    REQUIRE(static_cast<std::uint8_t>(SpectralError::IdentityMismatch) == 3);
+    REQUIRE(static_cast<std::uint8_t>(SpectralError::OutputUnderrun) == 19);
+    REQUIRE(static_cast<std::uint8_t>(SpectralError::InvalidContract) == 20);
+}

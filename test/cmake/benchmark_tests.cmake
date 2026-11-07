@@ -36,6 +36,18 @@ if(PULP_BENCHMARK AND TARGET pulp-render)
         pulp_test_spawns(pulp-test-bench-integration pulp-ui-preview)
         catch_discover_tests(pulp-test-bench-integration)
     endif()
+
+    # Appendix A GPU-resident spectral-chain evidence probe.  This is an
+    # advisory, source-owned measurement executable; it does not add runtime
+    # graph/API surface or register a required test.
+    if(TARGET pulp-gpu-audio)
+        add_executable(pulp-gpu-spectral-chain-evidence
+            test_gpu_spectral_chain_evidence.cpp)
+        target_link_libraries(pulp-gpu-spectral-chain-evidence PRIVATE
+            pulp::gpu-audio pulp::gpu-device pulp::signal)
+        target_compile_definitions(pulp-gpu-spectral-chain-evidence PRIVATE
+            PULP_BENCHMARK)
+    endif()
 endif()
 
 # ── Retained graph direct-copy benchmark ────────────────────────────────────

@@ -14,6 +14,10 @@
 
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
+#include <algorithm>
+#include <array>
+#include <span>
 
 namespace pulp::midi {
 
@@ -72,6 +76,28 @@ inline bool copy_midi_block(const MidiBuffer& src, MidiBuffer& dst) noexcept {
         if (!dst.add(ev)) copied_all = false;
     }
     return copy_midi_sidecars(src, dst) && copied_all;
+}
+
+// Append an MPE sidecar while preserving producer order. The fixed chunk keeps
+// the copy bounded even when a caller supplies a large prepared buffer.
+inline bool copy_mpe_block(const MpeBuffer& src, MpeBuffer& dst) noexcept {
+    bool copied_all = src.dropped_event_count() == 0;
+    constexpr std::size_t kChunk = 64;
+    std::array<MpeExpressionEvent, kChunk> chunk{};
+    std::size_t offset = 0;
+    while (offset < src.size()) {
+        const auto count = std::min<std::size_t>(kChunk, src.size() - offset);
+        for (std::size_t i = 0; i < count; ++i)
+            chunk[i] = src[offset + i];
+        if (!dst.add_batch(std::span<const MpeExpressionEvent>(chunk.data(), count)))
+            copied_all = false;
+        offset += count;
+    }
+    return copied_all;
+}
+
+inline bool mpe_buffer_has_drops(const MpeBuffer& block) noexcept {
+    return block.dropped_event_count() != 0;
 }
 
 }  // namespace pulp::midi

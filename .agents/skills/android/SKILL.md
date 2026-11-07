@@ -50,6 +50,15 @@ without pulp-simd's compile definitions the header supplies the scalar kernels
 inline (`pulp::simd::active_backend_name == "inline-scalar"`). `PulpAndroid.cmake`'s
 hand-listed DSP include set carries it.
 
+## GPU device types are forward-declared in one place
+
+`GpuSurface`, `GpuCompute` and `bench::PerfCounters` are forward-declared only in
+`pulp/platform/gpu_fwd.hpp`; include it rather than writing `class GpuSurface;`
+in `pulp::render` (the Android surface headers included). On macOS those names
+are gpu-runtime's types, so a hand-written declaration there declares a second
+class and every use sees an incomplete type. `core_vellum_direction.py` refuses a
+raw forward declaration anywhere else.
+
 ## Architecture Overview
 
 ```

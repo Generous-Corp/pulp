@@ -186,6 +186,16 @@ pulp_add_test_suite(pulp-test-i18n GROUP pulp-test-group-core-runtime
 pulp_add_test_suite(pulp-test-state-tree GROUP pulp-test-group-core-state
     LIBRARIES pulp::state pulp::runtime)
 
+# StateTree transactions, undo recording, moves and checked edits
+pulp_add_test_suite(pulp-test-state-tree-transaction GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+pulp_add_test_suite(pulp-test-state-tree-undo GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+pulp_add_test_suite(pulp-test-state-tree-move GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+pulp_add_test_suite(pulp-test-state-tree-validated GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+
 # GUI component tests (table, toolbar, concertina, buttons, lasso)
 pulp_add_test_suite(pulp-test-gui-components GROUP pulp-test-group-core-view
     LIBRARIES pulp::view)
@@ -1158,6 +1168,11 @@ pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav GROUP pulp-te
 pulp_add_test_suite(pulp-test-standalone-transport-midi GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
+# The plug-in's state kept across launches next to the device selection:
+# restore at startup, save on quit and after a quiet period, and a clean start
+# when the saved blob is missing or unusable. Runs against a fake audio system.
+pulp_add_test_suite(pulp-test-standalone-state GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone pulp::audio)
 pulp_add_test_suite(pulp-test-standalone-musical-typing GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone)
 # Sparkle updater policy and menu wiring; pure values plus a process probe that
@@ -1200,18 +1215,30 @@ pulp_add_test_suite(pulp-test-visualization
     LIBRARIES pulp::view)
 # The benchmark-only VisualizationBridge API, compiled (never linked) with
 # PULP_BENCHMARK in every build so the opt-in benchmark consumers cannot rot.
+# Where the device layer is gpu-runtime's, the benchmark API also needs
+# gpu-runtime's benchmark declarations; these objects are never linked against
+# a device library, so naming GPU_RUNTIME_BENCHMARK here selects declarations
+# without mixing vtables. gpu-runtime-mode-consistency refuses a target-local
+# PULP_BENCHMARK on anything but an OBJECT library that does this.
+if(PULP_HAS_GPU_RUNTIME AND NOT PULP_BENCHMARK)
+    set(_pulp_bench_check_defs PULP_BENCHMARK GPU_RUNTIME_BENCHMARK=1)
+else()
+    set(_pulp_bench_check_defs PULP_BENCHMARK)
+endif()
 if(TARGET pulp-render)
     add_library(pulp-visualization-bench-consumer-check OBJECT
         fixtures/benchmark_consumer/visualization_bench_consumer.cpp)
     target_link_libraries(pulp-visualization-bench-consumer-check
         PRIVATE pulp::view-audio pulp::render)
-    target_compile_definitions(pulp-visualization-bench-consumer-check PRIVATE PULP_BENCHMARK)
+    target_compile_definitions(pulp-visualization-bench-consumer-check
+        PRIVATE ${_pulp_bench_check_defs})
 endif()
 # The bridge's own PULP_BENCHMARK body, compiled (never linked) the same way.
 add_library(pulp-visualization-bench-source-check OBJECT
     ${CMAKE_SOURCE_DIR}/core/dataplane/src/visualization_bridge.cpp)
 target_link_libraries(pulp-visualization-bench-source-check PRIVATE pulp::dataplane-audio)
-target_compile_definitions(pulp-visualization-bench-source-check PRIVATE PULP_BENCHMARK)
+target_compile_definitions(pulp-visualization-bench-source-check PRIVATE ${_pulp_bench_check_defs})
+unset(_pulp_bench_check_defs)
 
 # Clipboard tests
 pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform
@@ -1244,6 +1271,16 @@ pulp_add_test_suite(pulp-test-permissions GROUP pulp-test-group-core-platform
 pulp_add_test_suite(pulp-test-environment GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)
 
+# FixedFunction and the allocation-free BackgroundTaskLane handler. The probe
+# replaces global operator new, so this stays its own executable.
+pulp_add_test_suite(pulp-test-fixed-function
+    SOURCES test_fixed_function.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::runtime pulp::format)
+
+# Special directory resolution (pure per-OS layouts plus the host)
+pulp_add_test_suite(pulp-test-special-dir GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
+
 # Runtime tests
 pulp_add_test_suite(pulp-test-runtime
     SOURCES test_runtime.cpp harness/rt_allocation_probe.cpp
@@ -1262,6 +1299,10 @@ pulp_add_test_suite(pulp-test-durable-file-replacement GROUP pulp-test-group-cor
 pulp_add_test_suite(pulp-test-activity-channel GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime
     PROPERTIES LABELS lifecycle)
+
+# WakeSignal (realtime producer -> sleeping consumer wake, elided post)
+pulp_add_test_suite(pulp-test-wake-signal GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # SpscRingIndex (index-pair SPSC ring-buffer cursor management)
 pulp_add_test_suite(pulp-test-spsc-ring-index GROUP pulp-test-group-core-runtime

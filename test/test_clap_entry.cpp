@@ -1833,3 +1833,34 @@ TEST_CASE("PulpGain CLAP parses back the text it shows for every parameter",
         }
     }
 }
+
+TEST_CASE("CLAP instrument with declared inputs advertises its audio input ports",
+          "[clap][entry][instrument]") {
+    // Bitwig and other CLAP hosts route audio into an instrument through its
+    // input ports; the instrument feature does not hide them.
+    pulp::format::PluginDescriptor instrument{};
+    instrument.name = "InputInstrument";
+    instrument.manufacturer = "PulpTest";
+    instrument.bundle_id = "com.pulp.test.input-instrument";
+    instrument.version = "1.0.0";
+    instrument.category = pulp::format::PluginCategory::Instrument;
+    instrument.input_buses = {{"Main In", 2, true}, {"Side Chain", 2, true}};
+    instrument.output_buses = {{"Main Out", 2}};
+    instrument.accepts_midi = true;
+
+    pulp::format::clap_adapter::PulpClapPlugin data;
+    data.descriptor_snapshot = instrument;
+    clap_plugin_t plugin{};
+    plugin.plugin_data = &data;
+
+    REQUIRE(pulp::format::clap_generic::audio_ports_count(&plugin, true) == 2);
+    clap_audio_port_info_t port{};
+    REQUIRE(pulp::format::clap_generic::audio_ports_get(&plugin, 0, true, &port));
+    REQUIRE(std::string(port.name) == "Main In");
+    REQUIRE(port.channel_count == 2);
+    REQUIRE((port.flags & CLAP_AUDIO_PORT_IS_MAIN) != 0);
+    REQUIRE(pulp::format::clap_generic::audio_ports_get(&plugin, 1, true, &port));
+    REQUIRE(std::string(port.name) == "Side Chain");
+    REQUIRE((port.flags & CLAP_AUDIO_PORT_IS_MAIN) == 0);
+    REQUIRE(pulp::format::clap_generic::note_ports_count(&plugin, true) == 1);
+}

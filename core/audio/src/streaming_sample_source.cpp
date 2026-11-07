@@ -237,7 +237,7 @@ void StreamingSampleSource::stop_thread() noexcept {
     if (thread_.joinable()) {
         run_.store(false, std::memory_order_release);
         reader_stop_requested_.store(true, std::memory_order_release);
-        cv_.notify_all();
+        wake_.notify();
         thread_.join();
     }
 }
@@ -338,6 +338,7 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
     }
 
     std::uint64_t produced = 0;
+    const std::uint64_t start_pos = play_pos_.load(std::memory_order_relaxed);
     while (produced < frames) {
         std::uint64_t pos = play_pos_.load(std::memory_order_relaxed);
 
@@ -411,6 +412,10 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
                    static_cast<std::size_t>(frames - produced))
             .clear();
     }
+    // The play cursor moved: the reader may have room or read-ahead to fill.
+    // Realtime safe: a system call only while the reader is parked.
+    if (use_thread_ && play_pos_.load(std::memory_order_relaxed) != start_pos)
+        wake_.notify();
     return produced;
 }
 
@@ -488,19 +493,30 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
 }
 
 void StreamingSampleSource::reader_loop() noexcept {
+    const auto stopping = [this] { return !run_.load(std::memory_order_acquire); };
     while (run_.load(std::memory_order_acquire)) {
         const std::uint64_t pushed = pump_background();
-        std::unique_lock<std::mutex> lock(mutex_);
-        // Self-paced poll: a ring sized for tens of ms is refilled long before
-        // it drains, so a short sleep keeps the audio thread free of any
-        // wake-up signaling (notify from the audio thread would not be
-        // RT-safe). Wakes immediately on shutdown.
-        cv_.wait_for(lock, pushed > 0 ? 1ms : 5ms,
-                     [this] { return !run_.load(std::memory_order_acquire); });
+        if (deadline_.enabled) {
+            // Deadline-bound generated content: a zero read is producer
+            // backpressure that nothing signals, so keep the timed retry.
+            wake_.wait_for(stopping, pushed > 0 ? 1ms : 5ms);
+            continue;
+        }
+        if (pushed > 0)
+            continue; // room and source left: keep filling
+        // Nothing to read until the audio thread moves the play cursor (ring
+        // room, read-ahead horizon) or the source stops. pull() wakes this
+        // thread; an idle or finished stream costs no wakeups. The backstop
+        // only bounds the cost of a missed wake.
+        const std::uint64_t seen = play_pos_.load(std::memory_order_acquire);
+        wake_.wait_for(
+            [&] { return stopping() || play_pos_.load(std::memory_order_acquire) != seen; }, 1s);
     }
 }
 
-void StreamingSampleSource::notify_reader() noexcept { cv_.notify_all(); }
+void StreamingSampleSource::notify_reader() noexcept {
+    wake_.notify();
+}
 
 bool StreamingSampleSource::finished() const noexcept {
     // A zero-length source is immediately finished — there is nothing to play or

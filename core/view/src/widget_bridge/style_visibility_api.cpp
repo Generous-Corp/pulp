@@ -11,6 +11,14 @@ namespace pulp::view {
 void BridgeRegistrars::register_widget_style_visibility_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
+    // Retain static leaf pixels; command/style mutations still invalidate them.
+    register_bridge_function(api, "setRasterCached", [&self](choc::javascript::ArgumentList args) {
+        const auto id = args.get<std::string>(0, "");
+        if (auto* v = id.empty() ? &self.root_ : self.widget(id))
+            v->set_raster_cached(args.get<bool>(1, false));
+        return choc::value::Value();
+    });
+
     // setVisible(id, bool)
     register_bridge_function(api, "setVisible", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

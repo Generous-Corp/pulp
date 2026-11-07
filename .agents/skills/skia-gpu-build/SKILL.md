@@ -480,6 +480,23 @@ const bool usable = typeface && typeface->unicharToGlyph('A') != 0;
 any host that hands you an "empty" custom fontmgr, not just wasm — bundled fonts
 must be registered and then *proven* to draw.
 
+## One Dawn per process: run the binding census
+
+A process must hold at most one Dawn. Two copies (a statically linked Dawn in
+Pulp's standalone or GPU host plus Vellum's `libvellum-skia-dawn-provider.dylib`,
+for example) each keep their own proc table and device, and nothing fails at
+link time. `tools/scripts/dawn_binding_census.py <artifact>...` reads every
+image an artifact brings into a process (bundle images plus every non-system
+library they load) and fails when more than one defines Dawn, when a plug-in
+bundle's executable exports its Dawn instead of hiding it, or when an image
+other than the bootstrap calls `dawnProcSetProcs`. Local symbols count, so a
+hidden static Dawn is seen; a stripped one is not. Acceptance item 6a runs it
+over the editor-host slice. It caught Pulp's standalone host linking its own
+Dawn beside Vellum's provider in a UI-package Standalone; that Standalone now
+links the view-free `pulp::standalone-contract`, so the provider's is the only
+Dawn there. Anything that links Pulp's view or render stack into a UI-package
+artifact brings that second Dawn back.
+
 ## GPU bundles MUST be relocatable (the libwgpu_native.dylib rpath footgun)
 
 ## Start debugging from the installed recipe catalog

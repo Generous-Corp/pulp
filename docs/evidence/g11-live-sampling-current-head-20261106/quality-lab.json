@@ -1,0 +1,103 @@
+{
+  "schema": "quality_lab.compare.v1",
+  "profile": "tonal-balance",
+  "reference_role": "golden",
+  "verdict": "no_material_change_detected",
+  "summary": "No material tonal-balance change (LTAS centroid 441->441 Hz (brighter 0.0%)).",
+  "measurements": [
+    {
+      "axis": "tonal_balance",
+      "tool": "quality-lab:spectral_centroid",
+      "role": "detector",
+      "status": "measured",
+      "applicable": true,
+      "alignment": {
+        "policy": "not_required",
+        "reason": "global_ltas_metric"
+      },
+      "region": "global",
+      "coverage": 1.0,
+      "can_support_verdict": true,
+      "level_match": {
+        "applied": true,
+        "gain_db": 0.0,
+        "ref_rms_db": -10.969,
+        "cand_rms_db": -10.969
+      },
+      "materiality": {
+        "delta": 0.0,
+        "unit": "rel_centroid_shift",
+        "tolerance_class": "spectral_centroid.v1",
+        "threshold": 0.05,
+        "exceeds": false,
+        "direction_sign": 0
+      },
+      "payload": {
+        "kind": "scalar",
+        "ref_centroid_hz": 440.7,
+        "cand_centroid_hz": 440.7,
+        "rel_shift": 0.0,
+        "direction": "brighter"
+      }
+    }
+  ],
+  "headline_flags": [],
+  "advisory": {
+    "raw_comparators": [
+      {
+        "name": "null_residual",
+        "tool": "quality-lab:null_residual",
+        "unit": "db_rel_reference",
+        "maturity": "experimental",
+        "participates_in_verdict": false,
+        "note": "Sample-domain residual RMS relative to the reference (20*log10(rms(cand-ref)/rms(ref))); lower = more identical. Level-matched over the common region, with the shorter signal zero-padded so a dropped/added tail counts as residual \u2014 a truncated render cannot read as identity. `level_match_applied` is false when the overlap was too quiet to define a gain (the residual is then raw). Phase/delay-sensitive and alignment-free by contract: a measure of materiality, not audibility.",
+        "value": -160.0,
+        "detail": {
+          "ref_samples": 96000,
+          "cand_samples": 96000,
+          "level_match_applied": true
+        }
+      },
+      {
+        "name": "dc_offset",
+        "tool": "quality-lab:dc_offset",
+        "unit": "mean_amplitude",
+        "maturity": "experimental",
+        "participates_in_verdict": false,
+        "note": "Per-signal DC offset (mean sample value) and its magnitude relative to RMS. A DC component concentrates energy in LTAS bin 0, pulling the spectral centroid DOWN \u2014 a nonzero offset can read as tonal 'dulling' when nothing timbral changed. Informational only; never a verdict. `present` marks an offset large enough to bias the measurement.",
+        "ref_value": 0.0,
+        "cand_value": 0.0,
+        "delta": 0.0,
+        "detail": {
+          "ref_frac_of_rms": 0.0,
+          "cand_frac_of_rms": 0.0,
+          "present": false
+        }
+      }
+    ],
+    "corroboration": {
+      "status": "corroborated",
+      "participates_in_verdict": false,
+      "note": "Materiality cross-check under the level-matched global contract, NOT a trust score: the sample-domain residual is near the identity floor, agreeing that nothing material changed. Disagreement is legitimate \u2014 the raw residual (phase-sensitive) and the axis measure different things.",
+      "basis": {
+        "raw_comparator": "quality-lab:null_residual",
+        "residual_db": -160.0,
+        "residual_material_floor_db": -60.0,
+        "axis_exceeds": false,
+        "raw_material": false,
+        "ref_samples": 96000,
+        "cand_samples": 96000
+      }
+    }
+  },
+  "provenance": {
+    "reference": "/Volumes/Workshop/Code/agent-worktrees/g11-durable-20261106/.g11-evidence-2/artifacts/source-regular.wav",
+    "candidate": "/Volumes/Workshop/Code/agent-worktrees/g11-durable-20261106/.g11-evidence-2/artifacts/bake-regular.wav",
+    "ref_sha256": "a4d2693d3720d3122c16d91678780528599288710cab717208c9a225223323e9",
+    "cand_sha256": "a4d2693d3720d3122c16d91678780528599288710cab717208c9a225223323e9",
+    "sample_rate": 48000,
+    "ref_channels": 1,
+    "cand_channels": 1,
+    "profile": "tonal-balance"
+  }
+}

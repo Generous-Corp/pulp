@@ -907,3 +907,18 @@ if(APPLE AND NOT IOS AND TARGET pulp::host AND PROJECT_IS_TOP_LEVEL)
     set_tests_properties(host-lane-probe-requires-plugins host-lane-probe-unloadable-bundle-is-setup-error
         PROPERTIES LABELS "view;editor-open;tools" TIMEOUT 60)
 endif()
+
+# Exact CLAP descriptor selection uses a hermetic multi-descriptor factory.
+if(PULP_HAS_CLAP AND NOT IOS AND NOT ANDROID)
+    add_library(pulp-test-fixture-clap-identity MODULE fixtures/clap_identity/plugin.cpp)
+    target_link_libraries(pulp-test-fixture-clap-identity PRIVATE clap)
+    set_target_properties(pulp-test-fixture-clap-identity PROPERTIES
+        PREFIX "" SUFFIX ".clap")
+    add_executable(pulp-test-clap-identity test_clap_identity.cpp)
+    target_link_libraries(pulp-test-clap-identity PRIVATE pulp::host Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-clap-identity PRIVATE
+        PULP_CLAP_IDENTITY_FIXTURE="$<TARGET_FILE:pulp-test-fixture-clap-identity>"
+        PULP_CLAP_IDENTITY_WORKER="$<TARGET_FILE:pulp-scan-worker>")
+    add_dependencies(pulp-test-clap-identity pulp-test-fixture-clap-identity pulp-scan-worker)
+    catch_discover_tests(pulp-test-clap-identity)
+endif()

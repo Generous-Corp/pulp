@@ -142,12 +142,17 @@ def check_links(props: dict[str, str]) -> list[Violation]:
         violations.append(Violation(
             "api-not-interface",
             f"pulp-gpu-device-api must be an INTERFACE library, got {props['api.type']!r}"))
+    # Where the device layer is gpu-runtime's, the Pulp device headers forward to
+    # gpu-runtime's, so the API names exactly its header-only DeviceApi and
+    # nothing else.
     api_links = split_list(props["api.interface_link"])
-    if api_links:
+    allowed_api_links = (["VellumGpuRuntime::DeviceApi"]
+                         if props.get("gpu_runtime") == "1" else [])
+    if api_links != allowed_api_links:
         violations.append(Violation(
             "api-links-something",
-            "pulp-gpu-device-api must name no link dependency (its headers are "
-            f"Dawn-free and module-free), got {api_links}"))
+            "pulp-gpu-device-api must name no link dependency other than "
+            f"{allowed_api_links} (its headers are Dawn-free and module-free), got {api_links}"))
 
     device_links = split_list(props["device.link"])
     if not plain_names(device_links, "gpu-device-api"):

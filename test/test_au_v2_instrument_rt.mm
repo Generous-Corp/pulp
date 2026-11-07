@@ -69,6 +69,12 @@ class RtInstrumentProcessor : public format::Processor {
     std::array<SeenMidi, 32> seen_midi{};
     std::size_t seen_midi_count = 0;
 
+    // Panic requests serviced by the adapter before a block.
+    int panic_calls = 0;
+    void on_panic(format::PanicMode) override {
+        ++panic_calls;
+    }
+
     std::array<UInt8, 1024> observed_sysex{};
     std::size_t observed_sysex_size = 0;
 
@@ -388,4 +394,375 @@ TEST_CASE("AU v2 instrument delivers non-note channel-voice MIDI to the processo
     CHECK(seen.seen_midi[0].bytes[1] == 60);
 
     instrument.DoCleanup();
+}
+
+TEST_CASE("AU v2 instrument services panic requests as a voice reset without MIDI out",
+          "[au][au-v2][instrument][panic]") {
+    ScopedFactoryRegistration registration(create_rt_instrument);
+
+    constexpr double kSampleRate = 48000.0;
+    constexpr UInt32 kChannels = 2;
+    constexpr UInt32 kFrames = 256;
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(make_float_format(kSampleRate, kChannels)) ==
+            noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+    REQUIRE(g_last_rt_processor != nullptr);
+
+    // aumu without produces_midi: requests are serviced, but nothing is declared
+    // for the host MIDI-output callback to carry.
+    const auto caps = g_last_rt_processor->panic_capabilities();
+    CHECK(caps.serviced);
+    CHECK_FALSE(caps.midi_out);
+
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    timestamp.mSampleTime = 0;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    CHECK(g_last_rt_processor->panic_calls == 0);
+
+    g_last_rt_processor->request_panic();
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    CHECK(g_last_rt_processor->panic_calls == 1);
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    CHECK(g_last_rt_processor->panic_calls == 1);
+
+    instrument.DoCleanup();
+}
+
+// ── Instrument with audio input ───────────────────────────────────────────
+
+namespace {
+
+struct InputObservation {
+    int calls = 0;
+    std::size_t input_channels = 0;
+    bool sidechain_present = false;
+    std::size_t sidechain_channels = 0;
+};
+InputObservation g_input_seen;
+
+// Instrument that also processes audio: main input left channel to output
+// left, side-chain last channel to output right, so the test can prove which
+// element reached which bus from the rendered samples alone.
+class InputInstrumentProcessor : public format::Processor {
+  public:
+    format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AUInstrumentInputTest",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-instrument-input",
+            .version = "1.0.0",
+            .category = format::PluginCategory::Instrument,
+            .input_buses = {{"Main In", 2, true}, {"Side Chain", 2, true}},
+            .output_buses = {{"Audio Out", 2}},
+            .accepts_midi = true,
+        };
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const format::PrepareContext&) override {}
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+                 midi::MidiBuffer&, midi::MidiBuffer&, const format::ProcessContext&) override {
+        ++g_input_seen.calls;
+        g_input_seen.input_channels = input.num_channels();
+        const auto* sidechain = sidechain_input();
+        g_input_seen.sidechain_present = sidechain != nullptr;
+        g_input_seen.sidechain_channels = sidechain ? sidechain->num_channels() : 0;
+        for (std::size_t c = 0; c < output.num_channels(); ++c) {
+            float* dst = output.channel_ptr(c);
+            const float* src = nullptr;
+            if (c == 0 && input.num_channels() > 0)
+                src = input.channel_ptr(0);
+            if (c == 1 && sidechain && sidechain->num_channels() > 0)
+                src = sidechain->channel_ptr(sidechain->num_channels() - 1);
+            for (std::size_t n = 0; n < output.num_samples(); ++n)
+                dst[n] = src ? src[n] : 0.0f;
+        }
+    }
+};
+
+std::unique_ptr<format::Processor> create_input_instrument() {
+    return std::make_unique<InputInstrumentProcessor>();
+}
+
+struct InputSource {
+    float scale = 1.0f;
+    int pulls = 0;
+    UInt32 last_bus = 0;
+};
+
+OSStatus fill_input(void* ref, AudioUnitRenderActionFlags* flags, const AudioTimeStamp*, UInt32 bus,
+                    UInt32 frames, AudioBufferList* io) {
+    auto* source = static_cast<InputSource*>(ref);
+    ++source->pulls;
+    source->last_bus = bus;
+    // A silent upstream must not mark the instrument's own output silent.
+    *flags |= kAudioUnitRenderAction_OutputIsSilence;
+    for (UInt32 c = 0; c < io->mNumberBuffers; ++c) {
+        auto* dst = static_cast<float*>(io->mBuffers[c].mData);
+        for (UInt32 n = 0; n < frames; ++n)
+            dst[n] = static_cast<float>(n + 1 + 100 * c) * source->scale;
+    }
+    return noErr;
+}
+
+void install_input_callback(format::au::PulpAUInstrument& instrument, AudioUnitElement element,
+                            InputSource* source) {
+    AURenderCallbackStruct cb{fill_input, source};
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_SetRenderCallback,
+                                           kAudioUnitScope_Input, element, &cb,
+                                           sizeof(cb)) == noErr);
+}
+
+std::string input_element_name(format::au::PulpAUInstrument& instrument, AudioUnitElement element) {
+    CFStringRef name = nullptr;
+    if (instrument.DispatchGetProperty(kAudioUnitProperty_ElementName, kAudioUnitScope_Input,
+                                       element, &name) != noErr ||
+        name == nullptr)
+        return {};
+    char buffer[128] = {};
+    CFStringGetCString(name, buffer, sizeof(buffer), kCFStringEncodingUTF8);
+    CFRelease(name);
+    return buffer;
+}
+
+} // namespace
+
+TEST_CASE("AU v2 instrument with declared inputs exposes a main and a Side Chain element",
+          "[au][au-v2][instrument][sidechain]") {
+    ScopedFactoryRegistration registration(create_input_instrument);
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+
+    UInt32 count = 0;
+    REQUIRE(instrument.DispatchGetProperty(kAudioUnitProperty_ElementCount, kAudioUnitScope_Input,
+                                           0, &count) == noErr);
+    REQUIRE(count == 2);
+    REQUIRE(instrument.Input(0).GetStreamFormat().mChannelsPerFrame == 2);
+    REQUIRE(instrument.Input(1).GetStreamFormat().mChannelsPerFrame == 2);
+    REQUIRE(input_element_name(instrument, 1) == "Side Chain");
+
+    // Capability table: unconnected rows first, then the matched pairs.
+    const AUChannelInfo* info = nullptr;
+    const UInt32 pairs = instrument.SupportedNumChannels(&info);
+    REQUIRE(pairs == 4);
+    REQUIRE(info[0].inChannels == 0);
+    REQUIRE(info[3].inChannels == 2);
+    REQUIRE(info[3].outChannels == 2);
+}
+
+TEST_CASE("AU v2 instrument without declared inputs keeps zero input elements",
+          "[au][au-v2][instrument][sidechain]") {
+    ScopedFactoryRegistration registration(create_rt_instrument);
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    UInt32 count = 0;
+    REQUIRE(instrument.DispatchGetProperty(kAudioUnitProperty_ElementCount, kAudioUnitScope_Input,
+                                           0, &count) == noErr);
+    REQUIRE(count == 0);
+}
+
+TEST_CASE("AU v2 instrument delivers connected main and side-chain input to the processor",
+          "[au][au-v2][instrument][sidechain][render]") {
+    ScopedFactoryRegistration registration(create_input_instrument);
+
+    constexpr double kSampleRate = 48000.0;
+    constexpr UInt32 kFrames = 64;
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    const auto format = make_float_format(kSampleRate, 2);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+                                           0, &format, sizeof(format)) == noErr);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+                                           1, &format, sizeof(format)) == noErr);
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(format) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+
+    InputSource main_source{.scale = 1.0f};
+    InputSource sidechain_source{.scale = 1000.0f};
+    install_input_callback(instrument, 0, &main_source);
+    install_input_callback(instrument, 1, &sidechain_source);
+
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    timestamp.mSampleTime = 0;
+
+    g_input_seen = {};
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(main_source.pulls == 1);
+    REQUIRE(main_source.last_bus == 0);
+    REQUIRE(sidechain_source.pulls == 1);
+    REQUIRE(sidechain_source.last_bus == 1);
+    REQUIRE(g_input_seen.calls == 1);
+    REQUIRE(g_input_seen.input_channels == 2);
+    REQUIRE(g_input_seen.sidechain_present);
+    REQUIRE(g_input_seen.sidechain_channels == 2);
+    // The upstream silence flags stayed private to the pulls.
+    REQUIRE((flags & kAudioUnitRenderAction_OutputIsSilence) == 0);
+
+    const auto& out = instrument.GetOutput(0)->GetBufferList();
+    REQUIRE(out.mNumberBuffers == 2);
+    const auto* left = static_cast<const float*>(out.mBuffers[0].mData);
+    const auto* right = static_cast<const float*>(out.mBuffers[1].mData);
+    for (UInt32 n = 0; n < kFrames; ++n) {
+        INFO("frame " << n);
+        REQUIRE(left[n] == Catch::Approx(static_cast<float>(n + 1)));
+        REQUIRE(right[n] == Catch::Approx(static_cast<float>(n + 101) * 1000.0f));
+    }
+
+    // Steady state: the pulls read into the elements' preallocated lists, so
+    // the input path adds no allocation to the render.
+    OSStatus render_status = noErr;
+    std::size_t allocation_count = 0;
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        render_status = instrument.Render(flags, timestamp, kFrames);
+        allocation_count = probe.allocation_count();
+    }
+    REQUIRE(render_status == noErr);
+    REQUIRE(allocation_count == 0);
+
+    instrument.DoCleanup();
+}
+
+TEST_CASE("AU v2 instrument reports unconnected inputs as absent",
+          "[au][au-v2][instrument][sidechain][render]") {
+    ScopedFactoryRegistration registration(create_input_instrument);
+
+    constexpr UInt32 kFrames = 64;
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(make_float_format(48000.0, 2)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    g_input_seen = {};
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(g_input_seen.calls == 1);
+    REQUIRE(g_input_seen.input_channels == 0);
+    REQUIRE_FALSE(g_input_seen.sidechain_present);
+    const auto& out = instrument.GetOutput(0)->GetBufferList();
+    REQUIRE(static_cast<const float*>(out.mBuffers[0].mData)[3] == Catch::Approx(0.0f));
+
+    instrument.DoCleanup();
+}
+
+TEST_CASE("AU v2 instrument refuses an input and output channel pair it does not advertise",
+          "[au][au-v2][instrument][sidechain]") {
+    ScopedFactoryRegistration registration(create_input_instrument);
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    UInt32 max_frames = 64;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    const auto configure = [&](UInt32 in_ch, UInt32 out_ch) {
+        const auto in_format = make_float_format(48000.0, in_ch);
+        const auto out_format = make_float_format(48000.0, out_ch);
+        REQUIRE(instrument.Input(0).SetStreamFormat(in_format) == noErr);
+        REQUIRE(instrument.GetOutput(0)->SetStreamFormat(out_format) == noErr);
+    };
+    // The table is {0,1} {0,2} {1,1} {2,2}: the pairs auval probes and the
+    // unit must refuse are exactly the ones outside it.
+    SECTION("3 in / 1 out is refused, as auval sets it") {
+        configure(3, 1);
+        REQUIRE(instrument.DoInitialize() == kAudioUnitErr_FormatNotSupported);
+    }
+    SECTION("1 in / 2 out is refused") {
+        configure(1, 2);
+        REQUIRE(instrument.DoInitialize() == kAudioUnitErr_FormatNotSupported);
+    }
+    SECTION("2 in / 2 out initializes") {
+        configure(2, 2);
+        REQUIRE(instrument.DoInitialize() == noErr);
+        instrument.DoCleanup();
+    }
+    SECTION("0 in / 2 out initializes: the optional input left unconnected") {
+        configure(0, 2);
+        REQUIRE(instrument.DoInitialize() == noErr);
+        instrument.DoCleanup();
+    }
+}
+
+TEST_CASE("AU v2 instrument refuses stream format writes while it is initialized",
+          "[au][au-v2][instrument][sidechain]") {
+    // auval initializes at a supported pair, then writes an unsupported one
+    // and initializes again; the second Initialize is a no-op on an
+    // initialized unit, so the write itself has to be refused.
+    ScopedFactoryRegistration registration(create_input_instrument);
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    UInt32 max_frames = 64;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    const auto stereo = make_float_format(48000.0, 2);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+                                           0, &stereo, sizeof(stereo)) == noErr);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output,
+                                           0, &stereo, sizeof(stereo)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+    const auto three = make_float_format(48000.0, 3);
+    const auto mono = make_float_format(48000.0, 1);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+                                           0, &three,
+                                           sizeof(three)) == kAudioUnitErr_PropertyNotWritable);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output,
+                                           0, &mono,
+                                           sizeof(mono)) == kAudioUnitErr_PropertyNotWritable);
+    REQUIRE(instrument.Input(0).GetStreamFormat().mChannelsPerFrame == 2);
+    REQUIRE(instrument.GetOutput(0)->GetStreamFormat().mChannelsPerFrame == 2);
+    instrument.DoCleanup();
+    // Uninitialized again, the write lands and Initialize judges it.
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+                                           0, &three, sizeof(three)) == noErr);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output,
+                                           0, &mono, sizeof(mono)) == noErr);
+    REQUIRE(instrument.DoInitialize() == kAudioUnitErr_FormatNotSupported);
+}
+
+TEST_CASE("AU v2 instrument refuses a side-chain rate that differs from the output",
+          "[au][au-v2][instrument][sidechain]") {
+    ScopedFactoryRegistration registration(create_input_instrument);
+    format::au::PulpAUInstrument instrument(nullptr);
+    instrument.CreateElements();
+    const auto main_format = make_float_format(48000.0, 2);
+    const auto other_rate = make_float_format(44100.0, 2);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+                                           0, &main_format, sizeof(main_format)) == noErr);
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(main_format) == noErr);
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+                                           1, &other_rate, sizeof(other_rate)) == noErr);
+    UInt32 max_frames = 64;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+
+    SECTION("a connected side chain at another rate is refused") {
+        InputSource sidechain_source;
+        install_input_callback(instrument, 1, &sidechain_source);
+        REQUIRE(instrument.DoInitialize() == kAudioUnitErr_FormatNotSupported);
+    }
+    SECTION("an unconnected side chain is re-seeded to the output rate") {
+        REQUIRE(instrument.DoInitialize() == noErr);
+        REQUIRE(instrument.Input(1).GetStreamFormat().mSampleRate == 48000.0);
+        instrument.DoCleanup();
+    }
 }

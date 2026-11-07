@@ -582,7 +582,7 @@ artifact.
 Use `runtime::BackgroundJobService` for cancellable non-RT resource work such as
 IR loading, sample import, preset restore, waveform analysis, and other jobs
 that may allocate, block, report progress, or touch the filesystem. Jobs receive
-a `runtime::BackgroundJobContext` with a shared `CancellationToken` and a
+a `runtime::BackgroundJobContext` with a shared `CancelToken` and a
 progress publisher. Call `BackgroundJobHandle::wait()` only from a control,
 test, or teardown thread; never wait from `process()`.
 For owner teardown, call `BackgroundJobService::cancel_all()` and then
@@ -622,6 +622,28 @@ Common recipes:
 * Sample import: decode, normalize, build loop metadata, and prefetch pages in
   the job. Publish a prepared sample-map revision atomically; treat cache misses
   as control-thread work, not audio-thread file I/O.
+
+## Render on a worker at a fixed latency
+
+When the audio itself is produced off the audio thread (a hardware emulator,
+offloaded or ML DSP), use `audio::AsyncBlockWorker<Event>`. The callback calls
+`process()` with the host block, its timed events and the output view; a job
+you supply renders the same stream on a worker thread, in chunks of its own
+size. Latency is defined on stream positions, `latency_blocks * max_block`
+frames, so it stays exact when the host changes block size and cannot drift:
+a frame the worker has not finished in time plays as silence (counted in
+`stats().miss_frames`) and is never played late. Report `latency_samples()`
+from the processor's `latency_samples()`, and pass the processor's
+`flag_latency_changed()` as the latency listener so a change made through
+`request_latency_blocks()` or `set_worker_latency_samples()` reaches the host
+through every format adapter.
+
+Pass `AsyncBlockMode::Offline` for a declared offline render, so the bounce
+holds the worker's real output. `AsyncBlockMode::Auto` also waits while
+`audio::PullRateDetector` sees the host pulling faster than real time without
+declaring it, which some hosts do when they bounce or freeze; without it such
+a render is silent. Waits are bounded by the configured deadline. Zero latency
+blocks waits on every call, like rendering inline.
 
 ## Verifying the contract in tests
 

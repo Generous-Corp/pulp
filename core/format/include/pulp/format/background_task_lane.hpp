@@ -6,8 +6,10 @@
 #include <cstdint>
 #include <thread>
 #include <type_traits>
+#include <utility>
 
 #include <pulp/runtime/exceptions.hpp>
+#include <pulp/runtime/fixed_function.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 
@@ -21,12 +23,17 @@ enum class BackgroundTaskPolicy { Ordered, Latest };
 /// allocation-free after start. A lane has one consumer, so its handler is
 /// never re-entered; independent lanes run concurrently. Latest policy
 /// coalesces bursts to the newest trivially-copyable task.
+///
+/// The handler is a runtime::FixedFunction, so a capturing lambda is stored
+/// inline: no `void*` context to cast and no allocation, ever. An older
+/// function-pointer-and-context pair is still accepted.
 template <typename Task, std::size_t Capacity = 64>
 class BackgroundTaskLane {
     static_assert(std::is_trivially_copyable_v<Task>,
                   "RT task payloads must be trivially copyable");
 public:
     using Handler = void (*)(void*, const Task&);
+    using HandlerFunction = runtime::FixedFunction<void(const Task&), 48>;
 
     BackgroundTaskLane() = default;
     ~BackgroundTaskLane() { stop(); }
@@ -35,16 +42,24 @@ public:
 
     bool start(Handler handler, void* context = nullptr,
                BackgroundTaskPolicy policy = BackgroundTaskPolicy::Ordered) {
+        if (!handler)
+            return false;
+        return start(
+            HandlerFunction([handler, context](const Task& task) { handler(context, task); }),
+            policy);
+    }
+
+    bool start(HandlerFunction handler,
+               BackgroundTaskPolicy policy = BackgroundTaskPolicy::Ordered) {
         if (!handler || running_.load(std::memory_order_acquire)) return false;
-        handler_ = handler;
-        context_ = context;
+        handler_ = std::move(handler);
         policy_ = policy;
         latest_generation_.store(0, std::memory_order_relaxed);
         stopping_.store(false, std::memory_order_release);
         PULP_TRY {
             worker_ = std::thread([this] { worker_loop(); });
         } PULP_CATCH_ALL {
-            handler_ = nullptr;
+            handler_.reset();
             return false;
         }
         running_.store(true, std::memory_order_release);
@@ -97,7 +112,9 @@ private:
     }
 
     void invoke(const Task& task) noexcept {
-        PULP_TRY { handler_(context_, task); }
+        PULP_TRY {
+            handler_(task);
+        }
         PULP_CATCH_ALL {}
     }
 
@@ -106,8 +123,7 @@ private:
     std::atomic<std::uint64_t> latest_generation_{0};
     std::atomic<bool> running_{false};
     std::atomic<bool> stopping_{false};
-    Handler handler_ = nullptr;
-    void* context_ = nullptr;
+    HandlerFunction handler_;
     BackgroundTaskPolicy policy_ = BackgroundTaskPolicy::Ordered;
     std::thread worker_;
 };

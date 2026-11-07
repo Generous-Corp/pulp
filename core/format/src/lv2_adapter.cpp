@@ -173,15 +173,24 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
         ttl << "    [\n";
     };
 
-    // Audio input ports
+    // Audio input ports. An optional bus's ports may be left unconnected by
+    // the host (lv2:connectionOptional); the second input bus is the side
+    // chain (lv2:isSideChain), so a host that distinguishes side-chain inputs
+    // routes it as one. The flat numbering is unchanged by either property.
     int port_index = layout.audio_in_begin();
-    for (const auto& bus : desc.input_buses) {
+    for (std::size_t bus_index = 0; bus_index < desc.input_buses.size(); ++bus_index) {
+        const auto& bus = desc.input_buses[bus_index];
         for (int ch = 0; ch < bus.default_channels; ++ch) {
             open_port();
             ttl << "        a lv2:InputPort , lv2:AudioPort ;\n";
             ttl << "        lv2:index " << port_index << " ;\n";
             ttl << "        lv2:symbol \"audio_in_" << port_index << "\" ;\n";
-            ttl << "        lv2:name \"" << bus.name << " " << (ch + 1) << "\"\n";
+            ttl << "        lv2:name \"" << bus.name << " " << (ch + 1) << "\"";
+            if (bus.optional)
+                ttl << " ;\n        lv2:portProperty lv2:connectionOptional";
+            if (bus_index == 1)
+                ttl << " ;\n        lv2:portProperty lv2:isSideChain";
+            ttl << "\n";
             ttl << "    ]";
             port_index++;
         }

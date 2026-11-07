@@ -16,6 +16,7 @@ target_sources(pulp-platform PRIVATE
     src/registry.cpp
     src/clipboard_common.cpp
     src/environment.cpp
+    src/special_dir.cpp
     src/dbus.cpp
 )
 
@@ -100,12 +101,14 @@ set(PULP_PLATFORM_UNIT_HEADERS
     include/pulp/platform/device_capability.hpp
     include/pulp/platform/environment.hpp
     include/pulp/platform/file_dialog.hpp
+    include/pulp/platform/gpu_fwd.hpp
     include/pulp/platform/native_handle.hpp
     include/pulp/platform/permissions.hpp
     include/pulp/platform/platform.hpp
     include/pulp/platform/popup_menu.hpp
     include/pulp/platform/progress_parser.hpp
     include/pulp/platform/reveal_in_file_manager.hpp
+    include/pulp/platform/special_dir.hpp
     include/pulp/platform/win/registry.hpp
     include/pulp/platform/win32_sane.hpp
 )

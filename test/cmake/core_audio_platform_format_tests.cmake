@@ -176,6 +176,10 @@ pulp_add_test_suite(pulp-test-midi GROUP pulp-test-group-cap-midi
 pulp_add_test_suite(pulp-test-midi-file GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
 
+# MIDI panic message generation, held-note offs and classification
+pulp_add_test_suite(pulp-test-midi-panic GROUP pulp-test-group-cap-midi
+    LIBRARIES pulp::midi)
+
 pulp_add_test_suite(pulp-test-tuning GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
 
@@ -291,6 +295,9 @@ pulp_add_test_suite(pulp-test-headless GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-format-hardening GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
+# Processor-level MIDI panic: request, service, voice reset, MIDI-out emission
+pulp_add_test_suite(pulp-test-midi-panic-processor GROUP pulp-test-group-cap-format
+    LIBRARIES pulp::format pulp::midi)
 
 # Editor parameter-write provenance: host automation interleaved with editor
 # edits during an open gesture, exact begin/value/end ordering, one normalized
@@ -626,6 +633,51 @@ if(APPLE AND PULP_HAS_AUSDK)
         OBJCXX_STANDARD 23
     )
     catch_discover_tests(pulp-test-au-param-visibility)
+
+    # AUv3 MIDI output declaration: MIDIOutputNames gates the host's
+    # MIDIOutputEventBlock, and a producing processor's MIDI reaches that block.
+    # Compiles au_adapter.mm, mirroring the targets above.
+    add_executable(pulp-test-au-midi-output
+        test_au_midi_output.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_adapter.mm
+    )
+    target_link_libraries(pulp-test-au-midi-output PRIVATE
+        pulp::format
+        ausdk
+        Catch2::Catch2WithMain
+        "-framework AudioToolbox"
+        "-framework AVFoundation"
+        "-framework CoreAudioKit"
+        "-framework Foundation"
+    )
+    set_target_properties(pulp-test-au-midi-output PROPERTIES
+        CXX_STANDARD 23
+        OBJCXX_STANDARD 23
+    )
+    catch_discover_tests(pulp-test-au-midi-output)
+
+    
+    # one host bus per declared bus, mono/stereo negotiation through the bus
+    # objects, and every output bus rendered from one process() call. Compiles
+    # au_adapter.mm, mirroring the targets above.
+    add_executable(pulp-test-au-multibus
+        test_au_multibus.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_adapter.mm
+    )
+    target_link_libraries(pulp-test-au-multibus PRIVATE
+        pulp::format
+        ausdk
+        Catch2::Catch2WithMain
+        "-framework AudioToolbox"
+        "-framework AVFoundation"
+        "-framework CoreAudioKit"
+        "-framework Foundation"
+    )
+    set_target_properties(pulp-test-au-multibus PROPERTIES
+        CXX_STANDARD 23
+        OBJCXX_STANDARD 23
+    )
+    catch_discover_tests(pulp-test-au-multibus)
 
     # AU v2 instrument (aumu) render-path RT-safety guard. Drives
     # PulpAUInstrument::Render for one steady-state block under

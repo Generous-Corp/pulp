@@ -54,7 +54,9 @@ archives: `Pulp::hwy`, `Pulp::mbedcrypto`, `Pulp::mbedx509`, `Pulp::mbedtls`,
 `Pulp::everest`, and `Pulp::p256m`. They support runtime SIMD and cryptography;
 they are not additional timeline APIs. The external consumer smoke audits all
 seventeen targets and fails if canvas, view, GPU, graph, format, standalone, or
-host targets enter the closure.
+host targets enter the closure. Off Apple, `Pulp::signal` also links its muFFT
+FFT backend, so the installed closure gains an eighteenth target,
+`Pulp::signal-mufft`; Apple builds use vDSP and never export it.
 
 Plugin hosting is deliberately outside the engine. A desktop integration
 adapts its own instrument/effect ports; the caller owns audio-device I/O.

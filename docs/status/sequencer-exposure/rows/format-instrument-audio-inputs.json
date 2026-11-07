@@ -1,0 +1,49 @@
+{
+  "id": "format-instrument-audio-inputs",
+  "title": "Instruments with declared audio inputs across the format adapters",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "6e441eb0-ead7-4a7c-ab53-4b21a81af3f2",
+  "owned_paths": [
+    "core/format/include/pulp/format/lv2_adapter.hpp",
+    "docs/status/sequencer-exposure/rows/format-instrument-audio-inputs.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/format/include/pulp/format/lv2_adapter.hpp",
+      "needles": [
+        "num_main_audio_inputs",
+        "the Sidechain bus a second declared input bus maps to"
+      ]
+    },
+    {
+      "path": "core/format/include/pulp/format/au_v2_adapter.hpp",
+      "needles": [
+        "instrument_input_element_count",
+        "pulls no input itself"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The LV2 instance gains an adapter-internal field that the LV2 entry's run() reads to split the flat input ports into main and side chain; no sequencer capability, timeline type, or playback symbol is added to the installed SDK."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI verb, flag, or handler changes; the change is plug-in format bus plumbing."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Audio-input bus exposure for instruments is host routing, not a musician-facing control or operation."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No capability key or design-time manifest is added or changed."
+    }
+  }
+}

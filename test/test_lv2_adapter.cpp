@@ -1573,3 +1573,163 @@ TEST_CASE("LV2 instantiate refuses a descriptor past the channel ceiling", "[for
     REQUIRE(inst->num_audio_inputs == kMaxChannels);
     REQUIRE(inst->num_audio_outputs == kMaxChannels);
 }
+
+// ── Optional and side-chain input buses ──────────────────────────────────
+
+namespace {
+
+struct Lv2SidechainSeen {
+    int calls = 0;
+    std::size_t input_buses = 0;
+    std::size_t main_channels = 0;
+    bool sidechain_present = false;
+    std::size_t sidechain_channels = 0;
+    float sidechain_first_sample = 0.0f;
+};
+Lv2SidechainSeen g_lv2_sidechain_seen;
+
+// Instrument that also processes audio: an optional stereo main input and an
+// optional mono side chain. Output left copies main left, output right copies
+// the side chain, so the test reads the routing off the rendered samples.
+class Lv2SidechainProbeProcessor final : public Processor {
+  public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor desc;
+        desc.name = "Lv2SidechainProbe";
+        desc.manufacturer = "PulpTest";
+        desc.bundle_id = "com.pulp.test.lv2-sidechain-probe";
+        desc.version = "1.0.0";
+        desc.category = PluginCategory::Instrument;
+        desc.input_buses = {{"Main In", 2, true}, {"Side Chain", 1, true}};
+        desc.output_buses = {{"Output", 2}};
+        desc.accepts_midi = true;
+        return desc;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(audio::BufferView<float>& audio_output,
+                 const audio::BufferView<const float>& audio_input, midi::MidiBuffer&,
+                 midi::MidiBuffer&, const ProcessContext& context) override {
+        ++g_lv2_sidechain_seen.calls;
+        g_lv2_sidechain_seen.main_channels = audio_input.num_channels();
+        const auto* sidechain = sidechain_input();
+        g_lv2_sidechain_seen.sidechain_present = sidechain != nullptr;
+        g_lv2_sidechain_seen.sidechain_channels = sidechain ? sidechain->num_channels() : 0;
+        g_lv2_sidechain_seen.sidechain_first_sample =
+            (sidechain && sidechain->num_channels() > 0) ? sidechain->channel_ptr(0)[0] : 0.0f;
+        for (size_t c = 0; c < audio_output.num_channels(); ++c) {
+            const float* src = nullptr;
+            if (c == 0 && audio_input.num_channels() > 0)
+                src = audio_input.channel_ptr(0);
+            if (c == 1 && sidechain && sidechain->num_channels() > 0)
+                src = sidechain->channel_ptr(0);
+            auto* dst = audio_output.channel_ptr(c);
+            for (int i = 0; i < context.num_samples; ++i)
+                dst[i] = src ? src[i] : 0.0f;
+        }
+    }
+    void process(ProcessBuffers& audio, midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
+                 const ProcessContext& context) override {
+        g_lv2_sidechain_seen.input_buses = audio.inputs.size();
+        Processor::process(audio, midi_in, midi_out, context);
+    }
+};
+
+std::unique_ptr<Processor> make_lv2_sidechain_probe() {
+    return std::make_unique<Lv2SidechainProbeProcessor>();
+}
+
+} // namespace
+
+TEST_CASE("LV2 TTL marks optional and side-chain input ports", "[format][lv2][ports]") {
+    Lv2SidechainProbeProcessor probe;
+    state::StateStore store;
+    auto ttl = generate_plugin_ttl(probe.descriptor(), store,
+                                   "http://pulp.audio/plugins/test-lv2-sidechain");
+    // Both buses are optional, so every input port may be left unconnected.
+    REQUIRE_THAT(ttl, ContainsSubstring("lv2:name \"Main In 1\" ;\n"
+                                        "        lv2:portProperty lv2:connectionOptional\n"));
+    REQUIRE_THAT(ttl, ContainsSubstring("lv2:name \"Main In 2\" ;\n"
+                                        "        lv2:portProperty lv2:connectionOptional\n"));
+    // The second bus is the side chain.
+    REQUIRE_THAT(ttl, ContainsSubstring("lv2:name \"Side Chain 1\" ;\n"
+                                        "        lv2:portProperty lv2:connectionOptional ;\n"
+                                        "        lv2:portProperty lv2:isSideChain\n"));
+    // Output ports carry neither property.
+    REQUIRE_THAT(ttl, !ContainsSubstring("lv2:name \"Output 1\" ;\n        lv2:portProperty"));
+
+    // A required main input stays a plain port.
+    auto required = probe.descriptor();
+    required.input_buses = {{"Input", 1}};
+    auto plain = generate_plugin_ttl(required, store, "http://pulp.audio/plugins/test-lv2-plain");
+    REQUIRE_THAT(plain, !ContainsSubstring("connectionOptional"));
+    REQUIRE_THAT(plain, !ContainsSubstring("isSideChain"));
+}
+
+TEST_CASE("LV2 run routes the second input bus to the processor's side chain",
+          "[format][lv2][ports][sidechain]") {
+    Lv2FactoryGuard factory(&make_lv2_sidechain_probe);
+    Lv2FeatureBundle features;
+    Lv2HandleGuard handle{
+        lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "", features.features)};
+    REQUIRE(handle.handle != nullptr);
+    auto* inst = static_cast<PulpLv2Instance*>(handle.handle);
+    REQUIRE(inst->num_audio_inputs == 3);
+    REQUIRE(inst->num_main_audio_inputs == 2);
+    REQUIRE(inst->num_audio_outputs == 2);
+
+    float main_left[4] = {0.25f, -0.5f, 1.0f, 0.0f};
+    float main_right[4] = {0.1f, 0.2f, 0.3f, 0.4f};
+    float sidechain[4] = {0.75f, 0.5f, 0.25f, 0.0f};
+    float out_left[4] = {};
+    float out_right[4] = {};
+    LV2SequenceBuffer midi_in;
+    prepare_sequence(midi_in, inst->urid_atom_sequence);
+
+    // Ports: 0-1 main, 2 side chain, 3-4 outputs, 5 atom in, 6 latency.
+    lv2_generic::connect_port(handle.handle, 0, main_left);
+    lv2_generic::connect_port(handle.handle, 1, main_right);
+    lv2_generic::connect_port(handle.handle, 3, out_left);
+    lv2_generic::connect_port(handle.handle, 4, out_right);
+    lv2_generic::connect_port(handle.handle, 5, midi_in.as_seq());
+    lv2_generic::activate(handle.handle);
+
+    SECTION("side chain connected") {
+        lv2_generic::connect_port(handle.handle, 2, sidechain);
+        g_lv2_sidechain_seen = {};
+        lv2_generic::run(handle.handle, 4);
+        REQUIRE(g_lv2_sidechain_seen.calls == 1);
+        REQUIRE(g_lv2_sidechain_seen.input_buses == 2);
+        REQUIRE(g_lv2_sidechain_seen.main_channels == 2);
+        REQUIRE(g_lv2_sidechain_seen.sidechain_present);
+        REQUIRE(g_lv2_sidechain_seen.sidechain_channels == 1);
+        REQUIRE(g_lv2_sidechain_seen.sidechain_first_sample == 0.75f);
+        for (int i = 0; i < 4; ++i) {
+            REQUIRE(out_left[i] == main_left[i]);
+            REQUIRE(out_right[i] == sidechain[i]);
+        }
+    }
+    SECTION("side chain left unconnected reads as absent") {
+        g_lv2_sidechain_seen = {};
+        lv2_generic::run(handle.handle, 4);
+        REQUIRE(g_lv2_sidechain_seen.calls == 1);
+        REQUIRE(g_lv2_sidechain_seen.main_channels == 2);
+        REQUIRE_FALSE(g_lv2_sidechain_seen.sidechain_present);
+        for (int i = 0; i < 4; ++i)
+            REQUIRE(out_right[i] == 0.0f);
+    }
+    SECTION("main input left unconnected reads as absent while the side chain flows") {
+        lv2_generic::connect_port(handle.handle, 0, nullptr);
+        lv2_generic::connect_port(handle.handle, 1, nullptr);
+        lv2_generic::connect_port(handle.handle, 2, sidechain);
+        g_lv2_sidechain_seen = {};
+        lv2_generic::run(handle.handle, 4);
+        REQUIRE(g_lv2_sidechain_seen.main_channels == 0);
+        REQUIRE(g_lv2_sidechain_seen.sidechain_present);
+        for (int i = 0; i < 4; ++i) {
+            REQUIRE(out_left[i] == 0.0f);
+            REQUIRE(out_right[i] == sidechain[i]);
+        }
+    }
+    lv2_generic::deactivate(handle.handle);
+}

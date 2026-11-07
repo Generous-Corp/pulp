@@ -937,6 +937,7 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
     PluginFrameRenderer frame_renderer_;
+    RasterSceneCache raster_scene_cache_;
 
     // Tear the surface pair down and tell every consumer BEFORE the objects
     // die. Consumers hold a raw GpuSurface*; publishing after the reset would
@@ -988,9 +989,16 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
             return; // local surfaces retire before the first frame or publication
         }
 
+        // Snapshot validity before moving the owning pointers.  Calling
+        // `ok()` after the moves observes an intentionally emptied temporary
+        // and falsely reports a GPU initialization failure.
+        const bool surfaces_ok = surfaces.ok();
         partial_repaint_enabled_ = surfaces.partial_repaint;
         gpu_surface_ = std::move(surfaces.gpu);
         skia_surface_ = std::move(surfaces.skia);
+
+        if (!surfaces_ok)
+            return;
 
         damage_.mark_full(); // a new surface has no previous frame to preserve
         // The surface is live: tell the scripted UI (navigator.gpu) and anyone
@@ -1078,7 +1086,8 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
     std::vector<uint8_t> raster_render_rgba(uint32_t* out_w, uint32_t* out_h) {
         if (idle_callback_)
             idle_callback_();
-        return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h);
+        return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h,
+                                        canvas::TextRasterPolicy::legacy, &raster_scene_cache_);
     }
 
     std::vector<uint8_t> raster_capture_png() {

@@ -735,6 +735,22 @@ tools:
   availability: always
   skill: ci
   docs: guides/local-ci.md
+- name: dawn-binding-census
+  path: tools/scripts/dawn_binding_census.py
+  category: artifact-census
+  use_when: Before shipping or reviewing a plug-in or app that draws with Dawn (a Vellum editor, a GPU
+    view) — prove each artifact brings at most one Dawn into a process, keeps a bundled one hidden, and
+    installs the proc table only through the one bootstrap.
+  invocation: python3 tools/scripts/dawn_binding_census.py <artifact>... [--json out.json]
+  inputs: Built .vst3/.clap/.component/.app bundles, standalone executables or dylibs (macOS, Mach-O).
+  outputs: Per artifact, the image set (the bundle's images plus every non-system library they load),
+    which images define or export Dawn, which install its proc table and which is the bootstrap, and a
+    PASS/FAIL verdict with reasons; exit 0 pass, 1 a rule failed, 2 an artifact could not be read.
+  caveat: Reads symbol tables, so a Dawn linked privately into a STRIPPED image is invisible (an exported
+    one still shows), and a library loaded with dlopen() at run time is outside the static image set. A
+    PASS means no second Dawn was seen in what it could read, never that none exists.
+  availability: always
+  skill: skia-gpu-build
 - name: gate-suite-executed
   path: tools/scripts/gate_suite_executed.py
   category: test-evidence

@@ -165,5 +165,32 @@ class ViewCoreBoundaryTests(unittest.TestCase):
         self.assertEqual(self._run(REPO), 0)
 
 
+class LogicalLineTests(unittest.TestCase):
+    """Pin comment removal, splicing and reported line numbers."""
+
+    def lines(self, text):
+        return boundary._logical_preprocessor_lines(text)
+
+    def test_splice_reports_first_physical_line(self):
+        self.assertEqual(self.lines("int a;\n#inc\\\nlude <x/y.h>\nint b;\n"),
+                         [(1, "int a;"), (2, "#include <x/y.h>"), (4, "int b;")])
+
+    def test_block_comment_keeps_later_line_numbers(self):
+        text = "/* a\n b\n */ #include <x/y.h>\n#include <z.h>\n"
+        self.assertEqual(self.lines(text),
+                         [(1, " "), (1, " "), (1, "  #include <x/y.h>"), (4, "#include <z.h>")])
+
+    def test_comment_markers_inside_literals_are_kept(self):
+        self.assertEqual(self.lines('const char* s = "//";\n#include <a.h>\n'),
+                         [(1, 'const char* s = "//";'), (2, "#include <a.h>")])
+
+    def test_line_comment_is_removed(self):
+        self.assertEqual(self.lines("#include <a.h> // note\n"), [(1, "#include <a.h> ")])
+
+    def test_unterminated_block_comment_swallows_the_rest(self):
+        self.assertEqual(self.lines("x\n/* never ends\n#include <a.h>\n"),
+                         [(1, "x"), (2, " "), (2, " ")])
+
+
 if __name__ == "__main__":
     unittest.main()

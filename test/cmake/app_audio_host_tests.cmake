@@ -187,6 +187,20 @@ pulp_add_test_suite(pulp-test-undo-manager GROUP pulp-test-group-app-state
 pulp_add_test_suite(pulp-test-buffering-reader GROUP pulp-test-group-app-audio
     LIBRARIES pulp::audio)
 
+# BufferingReader / StreamingSampleSource wake through runtime::WakeSignal.
+# The prompt-refill cases gate; the idle-wakeup measurement
+# ([idle-wakeups], test/support/idle_wakeups.hpp) runs in the advisory
+# `performance` lane until it has flake evidence for the required gate.
+pulp_add_test_suite(pulp-test-audio-reader-idle-wakeups
+    LIBRARIES pulp::audio
+    TEST_SPEC "~[idle-wakeups]"
+    PROPERTIES RUN_SERIAL TRUE)
+catch_discover_tests(pulp-test-audio-reader-idle-wakeups
+    TEST_SPEC "[idle-wakeups]"
+    TEST_PREFIX "performance::"
+    LABELS performance
+    PROPERTIES RUN_SERIAL TRUE)
+
 # AudioWorkgroup tests
 pulp_add_test_suite(pulp-test-workgroup GROUP pulp-test-group-app-audio
     LIBRARIES pulp::audio)
@@ -470,6 +484,21 @@ if(PULP_HAS_VST3)
         PULP_VST3_GUI=1
     )
     catch_discover_tests(pulp-test-vst3-note-names)
+
+    # The factory-preset program list (IUnitInfo) and the program-change
+    # parameter that selects within it. Compiles vst3_plug_view.cpp for the GUI
+    # symbols PulpVst3Processor::createView() references, as above.
+    add_executable(pulp-test-vst3-program-list
+        test_vst3_program_list.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp
+    )
+    target_link_libraries(pulp-test-vst3-program-list
+        PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-vst3-program-list PRIVATE
+        PULP_VST3=1
+        PULP_VST3_GUI=1
+    )
+    catch_discover_tests(pulp-test-vst3-program-list)
 endif()
 
 if(PULP_HAS_VST3)
