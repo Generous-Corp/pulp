@@ -237,6 +237,20 @@
       ]
     },
     {
+      "name": "dead-test-guard",
+      "argv": [
+        "{repo}/tools/scripts/dead_test_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "dead-test-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_dead_test_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "decisions-contract-selftest",
       "argv": [
         "{repo}/tools/scripts/test_decisions_contract.py"

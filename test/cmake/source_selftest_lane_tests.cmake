@@ -104,9 +104,10 @@ add_test(NAME windows-vm-manifest-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_windows_vm_manifest.py")
 
+# Vendored-source and test-registration guards. Both read only the checkout.
 # deps-patches-verify proves each vendored dependency differs from its recorded
-# upstream only by the patches listed in tools/deps/patches.json. Both entries
-# read only the checkout.
+# upstream only by the patches listed in tools/deps/patches.json; dead-test-guard
+# fails when a test source under test/ is not named by any CMake file.
 add_test(NAME deps-patches-verify
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/deps/check_patches.py")
@@ -115,6 +116,14 @@ add_test(NAME deps-patches-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/deps/test_check_patches.py")
 set_tests_properties(deps-patches-selftest PROPERTIES TIMEOUT 120)
+add_test(NAME dead-test-guard
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/dead_test_guard.py")
+set_tests_properties(dead-test-guard PROPERTIES TIMEOUT 120)
+add_test(NAME dead-test-guard-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_dead_test_guard.py")
+set_tests_properties(dead-test-guard-selftest PROPERTIES TIMEOUT 120)
 
 set(_pulp_source_selftest_manifest "${CMAKE_SOURCE_DIR}/tools/ci/source_selftests.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

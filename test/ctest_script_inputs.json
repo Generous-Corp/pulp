@@ -5015,6 +5015,18 @@
    ],
    "kind": "python"
   },
+  "dead-test-guard": {
+   "entry": "tools/scripts/dead_test_guard.py",
+   "inputs": [],
+   "kind": "python"
+  },
+  "dead-test-guard-selftest": {
+   "entry": "tools/scripts/test_dead_test_guard.py",
+   "inputs": [
+    "test/CMakeLists.txt"
+   ],
+   "kind": "python"
+  },
   "decisions-contract-selftest": {
    "entry": "tools/scripts/test_decisions_contract.py",
    "inputs": [
