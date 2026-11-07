@@ -131,6 +131,7 @@ cmake -S examples/<dir> -B build/<dir> -DPulp_DIR=<sdk>/lib/cmake/Pulp
 | `trace-demo` | Perfetto trace that exposes one expensive DSP node; needs `PULP_TRACING` | `pulp build --examples --target pulp-trace-demo` |
 | `trace-plugin-chain` | Trace of a real three-plugin chain; needs `PULP_TRACING` | `pulp build --examples --target pulp-trace-plugin-chain` |
 | `host-bench-plugin` | Plugin that logs host behavior for the DAW validation scripts | `pulp build --examples --target PulpHostBench_Standalone` |
+| `agent-toolkit-synth` | Standalone synth exposing presets, patch, and offline render operations to agents through the capability broker | `pulp build --examples --target AgentToolkitSynth_Standalone` |
 | `capability-control` | Generated CLI and MCP walkthroughs for the control surface | `python3 examples/capability-control/generate_examples.py` |
 
 ## Proof consumers and test-only projects
