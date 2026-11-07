@@ -72,8 +72,7 @@ bool SignalGraph::inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
     // staged block without observing a partially published mailbox.
     if (events.size() > mailbox.writer_scratch.events.event_capacity() ||
         events.sysex().size() > mailbox.writer_scratch.events.sysex_capacity() ||
-        (events.ump() != nullptr &&
-         events.ump()->size() > mailbox.writer_scratch.ump.capacity()) ||
+        (events.ump() != nullptr && events.ump()->size() > mailbox.writer_scratch.ump.capacity()) ||
         (mpe != nullptr && mpe->size() > mailbox.writer_scratch.mpe.capacity()))
         return false;
     const uint64_t sequence = next_nonzero_mailbox_sequence(mailbox.next_sequence);
