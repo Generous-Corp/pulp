@@ -189,6 +189,38 @@ TEST_CASE("every audio decoder seed satisfies the shared oracle through the regi
         FAIL_CHECK(failure);
 }
 
+// Seeds where exactly one WAV path decodes, by design or by a tracked
+// difference (Generous-Corp/pulp issue 11788): the registry's CHOC reader is
+// lenient about chunk extents and knows RF64, the byte-span dr_wav decoder is
+// strict about the declared RIFF extent and refuses RF64. Each row is
+// (registry decodes, decode_wav decodes). A split not listed here is a
+// finding, and so is a row whose split no longer happens; the sample
+// comparison itself is never relaxed.
+struct ExpectedWavSplit {
+    const char* seed;
+    bool registry_decodes;
+    bool span_decodes;
+};
+const std::vector<ExpectedWavSplit>& expected_wav_splits() {
+    static const std::vector<ExpectedWavSplit> splits = {
+        {"wav-data-past-eof.wav", true, false},
+        {"wav-data-size-ffffffff-no-ds64.wav", true, false},
+        {"wav-declares-100000001-frames.wav", true, false},
+        {"wav-odd-chunk-eof-no-pad.wav", true, false},
+        {"wav-rf64-ds64.wav", true, false},
+        {"wav-riff-size-lying-small.wav", true, false},
+        {"wav-fmt-after-data.wav", false, true},
+    };
+    return splits;
+}
+
+const ExpectedWavSplit* find_expected_wav_split(const std::string& name) {
+    for (const auto& split : expected_wav_splits())
+        if (name == split.seed)
+            return &split;
+    return nullptr;
+}
+
 TEST_CASE("WAV seeds decode identically through the registry and the byte-span decoder",
           "[fuzz][audio][wav]") {
     std::vector<fs::path> wav_files;
@@ -207,6 +239,7 @@ TEST_CASE("WAV seeds decode identically through the registry and the byte-span d
     span_limits.max_output_bytes = limits.max_output_bytes;
 
     std::size_t both_decoded = 0;
+    std::set<std::string> splits_seen;
     for (const auto& file : wav_files) {
         const auto name = file.filename().string();
         const auto bytes = read_bytes(file);
@@ -214,6 +247,12 @@ TEST_CASE("WAV seeds decode identically through the registry and the byte-span d
         const auto span_data = pulp::audio::decode_wav(bytes, span_limits);
 
         if (registry_data.has_value() != span_data.has_value()) {
+            const auto* expected = find_expected_wav_split(name);
+            if (expected != nullptr && expected->registry_decodes == registry_data.has_value() &&
+                expected->span_decodes == span_data.has_value()) {
+                splits_seen.insert(name);
+                continue;
+            }
             FAIL_CHECK(name << ": registry (CHOC) " << (registry_data ? "decoded" : "refused")
                             << ", decode_wav (dr_wav) " << (span_data ? "decoded" : "refused"));
             continue;
@@ -246,6 +285,11 @@ TEST_CASE("WAV seeds decode identically through the registry and the byte-span d
                                 << rhs[first_mismatch]);
             }
         }
+    }
+    // A listed split that no longer happens is stale and must be removed.
+    for (const auto& split : expected_wav_splits()) {
+        INFO("expected split no longer observed: " << split.seed);
+        CHECK(splits_seen.count(split.seed) == 1);
     }
     // At least one seed must be well formed, or the differential measured nothing.
     REQUIRE(both_decoded > 0);

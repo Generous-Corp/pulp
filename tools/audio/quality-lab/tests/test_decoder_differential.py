@@ -41,6 +41,15 @@ EXPECTED_ACCEPTANCE_SPLITS: dict[str, tuple[bool, bool, str]] = {
         False, True, "the SSND chunk runs past the end of the file; Pulp refuses truncated streams"),
     "wav-w64-pcm16-mono.wav": (
         False, True, "Sony Wave64 envelope; Pulp registers no Wave64 reader"),
+    "aifc-sowt-pcm16-stereo.aifc": (
+        False, True, "AIFF-C 'sowt' (little-endian PCM) is not supported by the AIFF reader; "
+        "tracked in Generous-Corp/pulp issue 11788"),
+    "wav-data-size-zero.wav": (
+        False, True, "the registry refuses a zero-frame WAV; tracked in Generous-Corp/pulp "
+        "issue 11788"),
+    "wav-duplicate-fmt.wav": (
+        True, False, "two fmt chunks: the registry decodes by the last one, libsndfile refuses; "
+        "tracked in Generous-Corp/pulp issue 11788"),
 }
 
 
