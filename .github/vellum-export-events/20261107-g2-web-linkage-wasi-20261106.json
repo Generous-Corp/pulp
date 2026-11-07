@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-g2-web-linkage-wasi-20261106",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T04:33:32Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/runtime/src/durable_file_replacement.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Pulp-only WASI portability guard for the DurableFileReplacement runtime source used by the isolated web consumer; Vellum does not consume this Pulp runtime implementation."
+}

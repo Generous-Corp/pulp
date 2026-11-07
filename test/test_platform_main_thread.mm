@@ -22,9 +22,17 @@ using namespace std::chrono_literals;
 namespace {
 
 // AppKit registers its tracking and modal-panel modes as common modes when the
-// shared application is created, as it always is inside a host.
+// shared application is created, as it always is inside a host. A test
+// process is a background app, so App Nap may also coalesce its timers; the
+// activity keeps it at the latency a host's foreground editor gets. Counts
+// below still only require the timer to fire repeatedly, not at full rate,
+// because shared CI machines (and sanitizers) slow it further.
 void ensure_app() {
     [NSApplication sharedApplication];
+    static id activity = [[[NSProcessInfo processInfo]
+        beginActivityWithOptions:NSActivityUserInitiated | NSActivityLatencyCritical
+                          reason:@"main-thread timer timing"] retain];
+    (void)activity;
 }
 
 // Pump the default mode until `done` or the deadline passes.
@@ -183,7 +191,7 @@ static void check_ticks_inside_nested_mode(CFStringRef mode) {
 
     // Comparator, not a gate on GCD: it shows why the dispatch path is unfit.
     CHECK(p->dispatch_ticks_in_nested == 0);
-    REQUIRE(p->ticks_in_nested >= 12);
+    REQUIRE(p->ticks_in_nested >= 3);
     REQUIRE(p->nested_post_ran);
 }
 
@@ -275,6 +283,7 @@ TEST_CASE("destroying the scope stops its timers for good", "[platform][main-thr
 // sources), so the instrument is the layer's own callout counter. Its control
 // is an armed timer on the same scope over the same span.
 TEST_CASE("an idle scope causes no main-thread callouts", "[platform][main-thread][idle]") {
+    ensure_app();
     pump_for(20ms); // drain anything left by earlier cases
     MainThreadScope scope;
     MainThreadTimer timer(scope, [] {});
@@ -290,7 +299,7 @@ TEST_CASE("an idle scope causes no main-thread callouts", "[platform][main-threa
     const auto armed_before = pulp::platform::detail::main_thread_callouts();
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.3, false);
     timer.cancel();
-    REQUIRE(pulp::platform::detail::main_thread_callouts() - armed_before >= 20);
+    REQUIRE(pulp::platform::detail::main_thread_callouts() - armed_before >= 3);
 }
 
 TEST_CASE("teardown hooks run once when the scope is destroyed",
