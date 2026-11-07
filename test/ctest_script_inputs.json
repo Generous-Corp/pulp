@@ -2914,6 +2914,7 @@
   "pulp-test-coreaudio-default-follow",
   "pulp-test-coreaudio-input-only",
   "pulp-test-coreaudio-native-lifetime",
+  "pulp-test-coremidi-reconnect",
   "pulp-test-coremidi-shared-client",
   "pulp-test-create-template-app",
   "pulp-test-create-template-bare",
