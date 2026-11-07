@@ -20,6 +20,7 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/host/src/signal_graph_reference_walk.cpp"
         "${ROOT}/core/host/src/signal_graph_executor_routing.cpp"
         "${ROOT}/core/host/src/graph_serializer.cpp"
+        "${ROOT}/core/runtime/src/durable_file_replacement.cpp"
         "${ROOT}/core/host/src/processor_restore.cpp"
         "${ROOT}/core/host/src/anticipation_eligibility.cpp"
         "${ROOT}/core/host/src/anticipation_partition.cpp"
