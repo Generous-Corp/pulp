@@ -936,10 +936,14 @@ private:
             &x11_handle_, geometry, options_.present_policy,
             options_.enable_gpu_timing, env && env[0] == '1', "X11PluginViewHost");
 
+        // Check the pair while the temporary still owns both objects. Moving
+        // either unique_ptr first makes EditorSurfaces::ok() false even when
+        // creation succeeded, which incorrectly publishes CPU fallback.
+        const bool surfaces_ok = surfaces.ok();
         partial_repaint_enabled_ = surfaces.partial_repaint;
         gpu_surface_ = std::move(surfaces.gpu);
         skia_surface_ = std::move(surfaces.skia);
-        if (!surfaces.ok()) {
+        if (!surfaces_ok) {
             publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }

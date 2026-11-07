@@ -97,6 +97,36 @@ Display* open_test_display(const char* what) {
 
 } // namespace
 
+TEST_CASE("X11 GPU publication matches the owned surface pair",
+          "[view][plugin-view-host][gpu][linux]") {
+    // Xvfb's Venus adapter can expose a display without DRI3 presentation;
+    // creating a presentable Dawn surface there aborts the X connection. Keep
+    // this regression opt-in for a real X11 display with a usable GPU.
+    const char* require_gpu = std::getenv("PULP_TEST_REQUIRE_X11_GPU");
+    if (!require_gpu || std::strcmp(require_gpu, "1") != 0)
+        SKIP("set PULP_TEST_REQUIRE_X11_GPU=1 on a real X11 GPU display");
+
+    Display* display = open_test_display("GPU surface publication");
+
+    pulp::view::View root;
+    pulp::view::register_platform_plugin_view_host();
+    pulp::view::PluginViewHost::Options opts;
+    opts.size = {200, 150};
+    opts.use_gpu = true;
+    auto host = pulp::view::PluginViewHost::create(root, opts);
+    REQUIRE(host != nullptr);
+
+    // A real backend that creates both objects must publish ready after
+    // ownership is transferred. If the temporary is checked after either
+    // unique_ptr is moved, the host still owns a non-null surface but reports
+    // unavailable.
+    REQUIRE(host->gpu_surface() != nullptr);
+    REQUIRE(host->gpu_surface_state() == pulp::view::PluginViewHost::GpuSurfaceState::ready);
+
+    host.reset();
+    XCloseDisplay(display);
+}
+
 // ── XDND synthetic-source handshake (Linux X11 target, #3645) ────────────────
 //
 // The X11 plugin host advertises an XDND target on its child window and runs the
