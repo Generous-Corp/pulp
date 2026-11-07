@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "_comment": "Local changes carried on top of upstream sources. tools/deps/check_patches.py copies each in-tree file to scratch, reverse-applies the listed patches last to first, and requires the result to match upstream_sha256 byte for byte. A file edited in the tree without a patch here therefore fails. Dependencies with in_tree false are fetched at configure time and are recorded for provenance only. A fetched dependency may also list configure_time_patches: CMake functions that rewrite the fetched source, which the verifier checks still exist.",
+  "dependencies": [
+    {
+      "name": "miniz",
+      "in_tree": true,
+      "upstream_repo": "https://github.com/richgel999/miniz.git",
+      "upstream_ref": "3.1.2",
+      "upstream_commit": "77d0dce8627735138c51770d1799a1ef48f2117d",
+      "files": [
+        {
+          "path": "external/miniz/miniz.c",
+          "upstream_path": "miniz.c",
+          "upstream_sha256": "f23204efee2bfaffb72a974d2e28c64c3c1d9787144b5c5890f129c465e467bd"
+        },
+        {
+          "path": "external/miniz/miniz.h",
+          "upstream_path": "miniz.h",
+          "upstream_sha256": "f0b67217bdd8e45b74eb9b7c2c7ae20ed6760a1d76f3276b93617039ebd082df"
+        },
+        {
+          "path": "external/miniz/miniz_common.h",
+          "upstream_path": "miniz_common.h",
+          "upstream_sha256": "f1ba29821c8caef83585b328196aa346c5da7c82890a70a3d10d77c6cec0ed39"
+        },
+        {
+          "path": "external/miniz/miniz_tdef.c",
+          "upstream_path": "miniz_tdef.c",
+          "upstream_sha256": "85b93205232d51d092f24041934d951f11f9edc02df1f475e8ceb7b281a1e7f6"
+        },
+        {
+          "path": "external/miniz/miniz_tdef.h",
+          "upstream_path": "miniz_tdef.h",
+          "upstream_sha256": "d62da02953c3834dfcbde4db026c6d9345013ef9b0e53185131016a3a4e48c33"
+        },
+        {
+          "path": "external/miniz/miniz_tinfl.c",
+          "upstream_path": "miniz_tinfl.c",
+          "upstream_sha256": "2296ebd21ef9af5ebbefd5b454d4bb67d8fb4af2d24945e7fb32114374f75a76"
+        },
+        {
+          "path": "external/miniz/miniz_tinfl.h",
+          "upstream_path": "miniz_tinfl.h",
+          "upstream_sha256": "da4850920fdf09f8877d9affabe1ebba1852ce4b1ebbd121f2ba7a7ea8e57e5d"
+        },
+        {
+          "path": "external/miniz/miniz_zip.c",
+          "upstream_path": "miniz_zip.c",
+          "upstream_sha256": "b70e502c425e2a31146178c1466dccaf1874390009950774be2be9bd4ec908a9"
+        },
+        {
+          "path": "external/miniz/miniz_zip.h",
+          "upstream_path": "miniz_zip.h",
+          "upstream_sha256": "b062a5def545445c73fd1d664e35a89165dfb0d996ab848f507244e819cfcf04"
+        }
+      ],
+      "patches": [
+        "tools/deps/patches/miniz/0001-zip-add-in-place-single-open.patch"
+      ]
+    },
+    {
+      "name": "dr_libs",
+      "in_tree": true,
+      "upstream_repo": "https://github.com/mackron/dr_libs.git",
+      "upstream_ref": "4d74802a098a2abbef4d063dd211e89260521313",
+      "upstream_commit": "4d74802a098a2abbef4d063dd211e89260521313",
+      "files": [
+        {
+          "path": "external/dr_libs/dr_mp3.h",
+          "upstream_path": "dr_mp3.h",
+          "upstream_sha256": "0a7b99037523d2bf56959cf9fdc186ecd4cfa318d8b55b6591ac0bfb2f708e1a"
+        }
+      ],
+      "patches": [
+        "tools/deps/patches/dr_libs/0001-dr_mp3-64-bit-xing-frame-count.patch"
+      ]
+    },
+    {
+      "name": "pugixml",
+      "in_tree": true,
+      "upstream_repo": "https://github.com/zeux/pugixml.git",
+      "upstream_ref": "v1.16",
+      "upstream_commit": "c8033ce9d039e7f9d134877c363397b3cfe20816",
+      "files": [
+        {
+          "path": "external/pugixml/pugiconfig.hpp",
+          "upstream_path": "src/pugiconfig.hpp",
+          "upstream_sha256": "e6c51fbc9a765608bd214ea47d229d3bbd6b650036cdffc94b96b498c202495c"
+        },
+        {
+          "path": "external/pugixml/pugixml.cpp",
+          "upstream_path": "src/pugixml.cpp",
+          "upstream_sha256": "bd94cd9ec6ac67c0723422640bb243eab4a7c2d9fd5584dab77305a50fa31ef4"
+        },
+        {
+          "path": "external/pugixml/pugixml.hpp",
+          "upstream_path": "src/pugixml.hpp",
+          "upstream_sha256": "0b7c94701df3d50981ffafe57f177c77b940e347c6e5d01073e4161f61299212"
+        }
+      ],
+      "patches": []
+    },
+    {
+      "name": "CHOC",
+      "in_tree": false,
+      "upstream_repo": "https://github.com/Tracktion/choc.git",
+      "upstream_ref": "f0f5cdf5a938",
+      "fork_repo": "https://github.com/danielraffel/choc.git",
+      "fork_ref": "pulp-webview-dnd-poc2",
+      "fork_commit": "b586f33d1c9e8bee98c2b420a5b20bf525c3c7be",
+      "carried_commits": [
+        "f4b92556144a Added seek support to zlib read streams",
+        "5685fb59db9e Updated ArgumentList to support retrieving both single and double dash options",
+        "7604ed74ae51 Add cross-platform file drag-and-drop to choc::ui::WebView",
+        "c857ad87b068 Windows: implement inbound file drops (IDropTarget) for choc::ui::WebView",
+        "df148a41a6bc examples: add webview_drag_and_drop demonstrating file DnD both directions",
+        "84c785a50ca3 Fixed a bug when parsing unterminated strings in json",
+        "b586f33d1c9e tests: cover an unterminated JSON string hitting end of input"
+      ],
+      "files": [],
+      "patches": [],
+      "configure_time_patches": {
+        "file": "tools/cmake/PulpPatchChoc.cmake",
+        "functions": [
+          "pulp_patch_choc_v8",
+          "pulp_patch_choc_json_number_exponent",
+          "pulp_patch_choc_file_watcher"
+        ],
+        "note": "Applied to the fetched source at configure time. Each replacement stops the configure when the text it expects is gone, so these cannot drift silently."
+      }
+    }
+  ]
+}

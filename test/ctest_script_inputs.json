@@ -5088,6 +5088,16 @@
    ],
    "kind": "python"
   },
+  "deps-patches-selftest": {
+   "entry": "tools/deps/test_check_patches.py",
+   "inputs": [],
+   "kind": "python"
+  },
+  "deps-patches-verify": {
+   "entry": "tools/deps/check_patches.py",
+   "inputs": [],
+   "kind": "python"
+  },
   "design-unit-boundary": {
    "entry": "tools/scripts/design_unit_boundary_check.py",
    "inputs": [

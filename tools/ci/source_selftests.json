@@ -243,6 +243,20 @@
       ]
     },
     {
+      "name": "deps-patches-selftest",
+      "argv": [
+        "{repo}/tools/deps/test_check_patches.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "deps-patches-verify",
+      "argv": [
+        "{repo}/tools/deps/check_patches.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "diff-cover-targets-selftest",
       "argv": [
         "-m",
