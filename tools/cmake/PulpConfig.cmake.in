@@ -77,14 +77,15 @@ if(NOT DEFINED SheenBidi_DIR)
 endif()
 find_dependency(SheenBidi CONFIG)
 
-# Pulp::canvas links system ICU on Linux (UNIX-not-Apple-not-Android): the
-# bundled Skia statically links SkUnicode but does not export ICU's symbols, so
-# core/canvas links ICU::uc/i18n/data. Those are PRIVATE, but a STATIC lib
-# propagates private link deps into its exported interface — so a downstream
+# Pulp::canvas links system ICU on Linux only when the source SDK was explicitly
+# built with PULP_SYSTEM_ICU=ON. The portable release SDK leaves this OFF: a
+# host ICU major version must not become an ABI dependency of its static
+# archives. When enabled, ICU is PRIVATE in the source graph but a STATIC lib
+# propagates private link deps into its exported interface, so a downstream
 # find_package(Pulp) must re-find ICU or PulpTargets.cmake errors with
-# "target ICU::uc not found". macOS bundles ICU (libicucore) implicitly, so this
-# is Linux-only. (Surfaced building pulp-view-embed against the Linux SDK.)
-if(UNIX AND NOT APPLE AND NOT ANDROID)
+# "target ICU::uc not found". macOS bundles ICU (libicucore) implicitly.
+set(PULP_SYSTEM_ICU @PULP_SYSTEM_ICU@)
+if(PULP_SYSTEM_ICU AND UNIX AND NOT APPLE AND NOT ANDROID)
     find_dependency(ICU COMPONENTS uc i18n data)
 endif()
 

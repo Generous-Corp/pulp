@@ -6,6 +6,8 @@ This directory is the machine-readable dependency inventory and update-validatio
 
 - `manifest.json` — source of truth for tracked third-party dependencies, pins, licenses, and documentation requirements
 - `audit.py` — audits `DEPENDENCIES.md`, `NOTICE.md`, and `docs/reference/licensing.md` coverage against `manifest.json`; optionally checks upstream refs/tags
+- `patches.json` — for each vendored or forked dependency, its upstream ref, the SHA-256 of each touched file at that ref, and the ordered patch files carried on top (`patches/<name>/*.patch`)
+- `check_patches.py` — copies the touched files to scratch, reverse-applies the patch series last to first, and requires the result to equal upstream byte for byte
 - `validate_hosts.py` — runs outer-loop validation locally and on optional SSH targets
 - `wgpu_native_digests.py` — computes the `sha256` (archive) and `tree_sha256` (extracted tree) pinned for each wgpu-native release asset in the manifest's `artifacts` list
 
@@ -43,6 +45,17 @@ fails unless its `_vellum_expected_archive_sha256` equals the row's
 tuple` equals the row's `version`. The file is read from
 raw.githubusercontent.com, or with `git show` from the clone named by
 `PULP_VELLUM_CHECKOUT`; a read that fails fails `--strict`.
+
+## Vendored patches
+
+`external/` holds sources copied from upstream. Any change to one of those files must be recorded as a patch, so a version bump can re-apply it and a reviewer can see exactly what differs. `check_patches.py` fails on the first patch that does not reverse cleanly, and on any edit that no patch explains.
+
+```bash
+python3 tools/deps/check_patches.py                    # check the working tree
+python3 tools/deps/check_patches.py --verify-upstream  # also re-download each file at its upstream commit
+```
+
+To record a new local change: edit the file, write the diff with `diff -u -L a/<path> -L b/<path> <upstream copy> <path>` into `tools/deps/patches/<name>/NNNN-<subject>.patch`, and append the patch to that dependency's `patches` list, last. Dependencies fetched at configure time are listed for provenance only: their fork commits, and the CMake functions that rewrite their sources.
 
 ## Usage
 

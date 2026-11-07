@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pulp/runtime/async_stream.hpp>
+#include <pulp/runtime/cancel.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 
 #include <atomic>
@@ -31,16 +31,18 @@ struct BackgroundJobProgress {
 };
 
 class BackgroundJobContext {
-public:
-    BackgroundJobContext(CancellationToken cancellation,
+  public:
+    BackgroundJobContext(CancelToken cancellation,
                          std::function<void(BackgroundJobProgress)> progress);
 
     bool is_cancelled() const;
-    const CancellationToken& cancellation_token() const { return cancellation_; }
+    const CancelToken& cancellation_token() const {
+        return cancellation_;
+    }
     void publish_progress(BackgroundJobProgress progress) const;
 
-private:
-    CancellationToken cancellation_;
+  private:
+    CancelToken cancellation_;
     std::function<void(BackgroundJobProgress)> progress_;
 };
 
@@ -59,11 +61,12 @@ public:
 
 private:
     struct State {
-        explicit State(CancellationToken token_in) : token(std::move(token_in)) {}
+        State() : token(source.token()) {}
 
         mutable std::mutex mutex;
         std::condition_variable cv;
-        CancellationToken token;
+        CancelSource source;
+        CancelToken token;
         std::optional<BackgroundJobProgress> progress;
         bool started = false;
         bool finished = false;

@@ -1,5 +1,6 @@
 #include <cctype>
 #include <pulp/state/preset_manager.hpp>
+#include <pulp/platform/special_dir.hpp>
 #include <pulp/runtime/system.hpp>
 #include <choc/text/choc_JSON.h>
 #include <cmath>
@@ -97,24 +98,7 @@ std::string sanitize_windows_path_component(std::string_view value) {
 // ── Platform paths ───────────────────────────────────────────────────────
 
 fs::path PresetManager::platform_presets_root() {
-#ifdef __APPLE__
-    // ~/Library/Audio/Presets/
-    if (auto home = runtime::get_env("HOME"))
-        return fs::path(*home) / "Library" / "Audio" / "Presets";
-    return {};
-#elif defined(_WIN32)
-    // %APPDATA%/
-    if (auto appdata = runtime::get_env("APPDATA"))
-        return fs::path(*appdata);
-    return {};
-#else
-    // ~/.config/
-    if (auto xdg = runtime::get_env("XDG_CONFIG_HOME"))
-        return fs::path(*xdg);
-    if (auto home = runtime::get_env("HOME"))
-        return fs::path(*home) / ".config";
-    return {};
-#endif
+    return pulp::platform::special_dir(pulp::platform::SpecialDir::user_presets);
 }
 
 PresetManager::PresetManager(StateStore& store, const std::string& manufacturer,

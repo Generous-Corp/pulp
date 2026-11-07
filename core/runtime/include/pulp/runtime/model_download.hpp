@@ -16,7 +16,7 @@
 
 namespace pulp::runtime {
 
-class CancellationToken;  // async_stream.hpp
+class CancelToken; // cancel.hpp
 
 struct DownloadProgress {
     std::uint64_t downloaded = 0;  ///< Bytes written so far (includes resumed bytes).
@@ -97,6 +97,6 @@ using DownloadProgressFn = std::function<bool(const DownloadProgress&)>;
 /// call with `resume = true` continues it.
 DownloadResult download_file(const DownloadRequest& request,
                              const DownloadProgressFn& on_progress = {},
-                             const CancellationToken* cancel = nullptr);
+                             const CancelToken* cancel = nullptr);
 
 }  // namespace pulp::runtime

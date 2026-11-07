@@ -1,6 +1,7 @@
 # AGENTS.md
 
-Read `CLAUDE.md` before making any changes.
+Read [`docs/dev/code-rules.md`](docs/dev/code-rules.md) first: the one-page card of design, style, real-time safety and test rules.
+Then read `CLAUDE.md` before making any changes.
 
 Before changing files, run `tools/scripts/worktree_lineage.sh show --path .`.
 If the worktree is superseded, merged, or archived, follow its recorded
