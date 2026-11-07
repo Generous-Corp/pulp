@@ -2762,6 +2762,8 @@
   "pulp-test-anticipation-lane",
   "pulp-test-ara-scaffold",
   "pulp-test-au-bundle-entry",
+  "pulp-test-au-midi-output",
+  "pulp-test-au-multibus",
   "pulp-test-au-param-visibility",
   "pulp-test-au-plugin-state",
   "pulp-test-au-v2-cocoa-shipping",
@@ -2971,6 +2973,7 @@
   "pulp-test-fft-backend-accuracy-builtin",
   "pulp-test-fft-backend-accuracy-mufft",
   "pulp-test-fir-filter",
+  "pulp-test-fixed-function",
   "pulp-test-fixture-runner-cli",
   "pulp-test-foreign-framework-coexistence",
   "pulp-test-forge-analog-vcf-catalog",
@@ -3417,6 +3420,7 @@
   "pulp-test-vst3-note-names",
   "pulp-test-vst3-param-display",
   "pulp-test-vst3-plugin-state",
+  "pulp-test-vst3-program-list",
   "pulp-test-vst3-state-sync",
   "pulp-test-wam-adapter",
   "pulp-test-wam-wclap",
@@ -7790,7 +7794,9 @@
     ".github/workflows/build.yml",
     "tools/ci/fixtures/merge_group_hold/pr-10114-verdicts.json",
     "tools/ci/merge_group_hold_check.py",
-    "tools/ci/test_merge_group_hold_check.py"
+    "tools/ci/merge_queue_fixture.py",
+    "tools/ci/test_merge_group_hold_check.py",
+    "tools/scripts/resolve_classify_base.py"
    ],
    "kind": "python"
   },
@@ -9047,8 +9053,10 @@
    "entry": "tools/ci/test_queue_breaker.py",
    "inputs": [
     ".github/workflows/build.yml",
+    "tools/ci/merge_queue_fixture.py",
     "tools/ci/queue_breaker.py",
-    "tools/ci/test_queue_breaker.py"
+    "tools/ci/test_queue_breaker.py",
+    "tools/scripts/resolve_classify_base.py"
    ],
    "kind": "python"
   },
