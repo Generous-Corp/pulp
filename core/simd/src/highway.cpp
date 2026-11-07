@@ -5,16 +5,22 @@
 // picks the best one the running CPU supports, so the kernels are not limited
 // by the baseline ISA the rest of the build targets.
 
+#include <pulp/simd/scalar_kernels.hpp>
 #include <pulp/simd/simd.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 
 #undef HWY_TARGET_INCLUDE
 #define HWY_TARGET_INCLUDE "src/highway.cpp"
 #include <hwy/foreach_target.h>
 #include <hwy/highway.h>
+// Header-only vector math (Apache-2.0), used for atan2 here and for the
+// transcendental kernels. Compiled once per target like the code below.
+#include <hwy/contrib/math/math-inl.h>
 
 HWY_BEFORE_NAMESPACE();
 
@@ -277,6 +283,183 @@ void Decimate2T(const T* HWY_RESTRICT x, const T* HWY_RESTRICT h, T* HWY_RESTRIC
         y[i] = DotT(x + 2 * i, h, taps);
 }
 
+template <typename T> void SubT(const T* a, const T* b, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N)
+        hn::StoreU(hn::Sub(hn::LoadU(d, a + i), hn::LoadU(d, b + i)), d, dst + i);
+    for (; i < count; ++i)
+        dst[i] = a[i] - b[i];
+}
+
+template <typename T> void DivT(const T* a, const T* b, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N)
+        hn::StoreU(hn::Div(hn::LoadU(d, a + i), hn::LoadU(d, b + i)), d, dst + i);
+    for (; i < count; ++i)
+        dst[i] = a[i] / b[i];
+}
+
+template <typename T> void NegateT(const T* a, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N)
+        hn::StoreU(hn::Neg(hn::LoadU(d, a + i)), d, dst + i);
+    for (; i < count; ++i)
+        dst[i] = -a[i];
+}
+
+// The extremum is found with vector Max/Min; the index is then the first
+// element equal to it, so ties resolve to the lowest index like the scalar
+// reference.
+template <typename T> T FindMaximumT(const T* HWY_RESTRICT x, size_t count, size_t* index) {
+    const T m = MaximumT(x, count);
+    size_t at = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (x[i] == m) {
+            at = i;
+            break;
+        }
+    }
+    *index = at;
+    return m;
+}
+
+template <typename T> T FindMinimumT(const T* HWY_RESTRICT x, size_t count, size_t* index) {
+    const T m = MinimumT(x, count);
+    size_t at = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (x[i] == m) {
+            at = i;
+            break;
+        }
+    }
+    *index = at;
+    return m;
+}
+
+template <typename T> void ReplaceBelowT(const T* a, T threshold, T value, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    const auto vt = hn::Set(d, threshold);
+    const auto vv = hn::Set(d, value);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        const auto x = hn::LoadU(d, a + i);
+        hn::StoreU(hn::IfThenElse(hn::Lt(x, vt), vv, x), d, dst + i);
+    }
+    for (; i < count; ++i)
+        dst[i] = a[i] < threshold ? value : a[i];
+}
+
+template <typename T> void ReplaceAboveT(const T* a, T threshold, T value, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    const auto vt = hn::Set(d, threshold);
+    const auto vv = hn::Set(d, value);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        const auto x = hn::LoadU(d, a + i);
+        hn::StoreU(hn::IfThenElse(hn::Gt(x, vt), vv, x), d, dst + i);
+    }
+    for (; i < count; ++i)
+        dst[i] = a[i] > threshold ? value : a[i];
+}
+
+template <typename T, typename I> void FromIntT(const I* src, T scale, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const hn::Rebind<int32_t, decltype(d)> di32;
+    const hn::Rebind<I, decltype(d)> dsrc;
+    const size_t N = hn::Lanes(d);
+    const auto s = hn::Set(d, scale);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(di32)> wide;
+        if constexpr (sizeof(I) == 4)
+            wide = hn::LoadU(di32, src + i);
+        else
+            wide = hn::PromoteTo(di32, hn::LoadU(dsrc, src + i));
+        hn::Vec<decltype(d)> f;
+        if constexpr (sizeof(T) == 8)
+            f = hn::PromoteTo(d, wide);
+        else
+            f = hn::ConvertTo(d, wide);
+        hn::StoreU(hn::Mul(f, s), d, dst + i);
+    }
+    for (; i < count; ++i)
+        dst[i] = static_cast<T>(src[i]) * scale;
+}
+
+// float -> integer: scale, send NaN to 0, clamp to the representable range,
+// round half to even, then narrow. The scalar tail is the same sequence.
+template <typename T, typename I> void ToIntT(const T* src, T scale, I* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const hn::Rebind<int32_t, decltype(d)> di32;
+    const hn::Rebind<I, decltype(d)> ddst;
+    const size_t N = hn::Lanes(d);
+    constexpr T lo = static_cast<T>(std::numeric_limits<I>::min());
+    constexpr T hi = ::pulp::simd::detail::int_upper_bound<T, I>();
+    const auto s = hn::Set(d, scale);
+    const auto vlo = hn::Set(d, lo);
+    const auto vhi = hn::Set(d, hi);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        auto v = hn::Mul(hn::LoadU(d, src + i), s);
+        v = hn::IfThenElseZero(hn::Eq(v, v), v);
+        v = hn::Min(hn::Max(v, vlo), vhi);
+        hn::Vec<decltype(di32)> r;
+        if constexpr (sizeof(T) == 4)
+            r = hn::NearestInt(v);
+        else
+            r = hn::DemoteToNearestInt(di32, v);
+        if constexpr (sizeof(I) == 4)
+            hn::StoreU(r, di32, dst + i);
+        else
+            hn::StoreU(hn::DemoteTo(ddst, r), ddst, dst + i);
+    }
+    for (; i < count; ++i) {
+        T v = src[i] * scale;
+        if (v != v) {
+            dst[i] = 0;
+            continue;
+        }
+        v = v < lo ? lo : (v > hi ? hi : v);
+        dst[i] = static_cast<I>(std::nearbyint(v));
+    }
+}
+
+template <typename T> void Interleave2T(const T* l, const T* r, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N)
+        hn::StoreInterleaved2(hn::LoadU(d, l + i), hn::LoadU(d, r + i), d, dst + 2 * i);
+    for (; i < count; ++i) {
+        dst[2 * i] = l[i];
+        dst[2 * i + 1] = r[i];
+    }
+}
+
+template <typename T> void Deinterleave2T(const T* src, T* l, T* r, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> va, vb;
+        hn::LoadInterleaved2(d, src + 2 * i, va, vb);
+        hn::StoreU(va, d, l + i);
+        hn::StoreU(vb, d, r + i);
+    }
+    for (; i < count; ++i) {
+        l[i] = src[2 * i];
+        r[i] = src[2 * i + 1];
+    }
+}
+
 #define PULP_SIMD_HWY_INSTANTIATE(SUFFIX, T)                                                       \
     void Add##SUFFIX(const T* a, const T* b, T* dst, size_t n) {                                   \
         AddT(a, b, dst, n);                                                                        \
@@ -326,6 +509,45 @@ void Decimate2T(const T* HWY_RESTRICT x, const T* HWY_RESTRICT h, T* HWY_RESTRIC
     void Correlate##SUFFIX(const T* x, const T* h, T* y, size_t n_out, size_t taps) {              \
         CorrelateT(x, h, y, n_out, taps);                                                          \
     }                                                                                              \
+    void Sub##SUFFIX(const T* a, const T* b, T* dst, size_t n) {                                   \
+        SubT(a, b, dst, n);                                                                        \
+    }                                                                                              \
+    void Div##SUFFIX(const T* a, const T* b, T* dst, size_t n) {                                   \
+        DivT(a, b, dst, n);                                                                        \
+    }                                                                                              \
+    void Negate##SUFFIX(const T* a, T* dst, size_t n) {                                            \
+        NegateT(a, dst, n);                                                                        \
+    }                                                                                              \
+    T FindMaximum##SUFFIX(const T* x, size_t n, size_t* index) {                                   \
+        return FindMaximumT(x, n, index);                                                          \
+    }                                                                                              \
+    T FindMinimum##SUFFIX(const T* x, size_t n, size_t* index) {                                   \
+        return FindMinimumT(x, n, index);                                                          \
+    }                                                                                              \
+    void ReplaceBelow##SUFFIX(const T* a, T threshold, T value, T* dst, size_t n) {                \
+        ReplaceBelowT(a, threshold, value, dst, n);                                                \
+    }                                                                                              \
+    void ReplaceAbove##SUFFIX(const T* a, T threshold, T value, T* dst, size_t n) {                \
+        ReplaceAboveT(a, threshold, value, dst, n);                                                \
+    }                                                                                              \
+    void FromInt16##SUFFIX(const int16_t* src, T scale, T* dst, size_t n) {                        \
+        FromIntT(src, scale, dst, n);                                                              \
+    }                                                                                              \
+    void FromInt32##SUFFIX(const int32_t* src, T scale, T* dst, size_t n) {                        \
+        FromIntT(src, scale, dst, n);                                                              \
+    }                                                                                              \
+    void ToInt16##SUFFIX(const T* src, T scale, int16_t* dst, size_t n) {                          \
+        ToIntT(src, scale, dst, n);                                                                \
+    }                                                                                              \
+    void ToInt32##SUFFIX(const T* src, T scale, int32_t* dst, size_t n) {                          \
+        ToIntT(src, scale, dst, n);                                                                \
+    }                                                                                              \
+    void Interleave2##SUFFIX(const T* l, const T* r, T* dst, size_t n) {                           \
+        Interleave2T(l, r, dst, n);                                                                \
+    }                                                                                              \
+    void Deinterleave2##SUFFIX(const T* src, T* l, T* r, size_t n) {                               \
+        Deinterleave2T(src, l, r, n);                                                              \
+    }                                                                                              \
     void Decimate2##SUFFIX(const T* x, const T* h, T* y, size_t n_out, size_t taps) {              \
         Decimate2T(x, h, y, n_out, taps);                                                          \
     }
@@ -334,6 +556,484 @@ PULP_SIMD_HWY_INSTANTIATE(F32, float)
 PULP_SIMD_HWY_INSTANTIATE(F64, double)
 
 #undef PULP_SIMD_HWY_INSTANTIATE
+
+// ── complex kernels ──────────────────────────────────────────────────────────
+// One body serves both layouts. For an interleaved buffer the load splits a
+// vector's worth of complex values into real and imaginary registers and the
+// store merges them again; for split buffers they are plain loads and stores.
+// The scalar tail runs the strided reference loop on the remaining elements.
+
+template <typename T, bool kInterleaved, class D, class V>
+HWY_INLINE void LoadComplex(D d, const T* re, const T* im, size_t i, V& vr, V& vi) {
+    if constexpr (kInterleaved) {
+        (void)im;
+        hn::LoadInterleaved2(d, re + 2 * i, vr, vi);
+    } else {
+        vr = hn::LoadU(d, re + i);
+        vi = hn::LoadU(d, im + i);
+    }
+}
+
+template <typename T, bool kInterleaved, class D, class V>
+HWY_INLINE void StoreComplex(D d, V vr, V vi, T* re, T* im, size_t i) {
+    if constexpr (kInterleaved) {
+        (void)im;
+        hn::StoreInterleaved2(vr, vi, d, re + 2 * i);
+    } else {
+        hn::StoreU(vr, d, re + i);
+        hn::StoreU(vi, d, im + i);
+    }
+}
+
+template <typename T, bool I> constexpr size_t Stride() {
+    return I ? 2 : 1;
+}
+
+/// Imaginary pointer for the strided scalar reference: z + 1 when interleaved.
+template <bool I, typename P> HWY_INLINE P ImagOf(P re, P im) {
+    return I ? re + 1 : im;
+}
+
+template <typename T, bool I>
+void ComplexMultiplyT(const T* ar, const T* ai, const T* br, const T* bi, T* dr, T* di,
+                      size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi, yr, yi;
+        LoadComplex<T, I>(d, ar, ai, i, xr, xi);
+        LoadComplex<T, I>(d, br, bi, i, yr, yi);
+        const auto rr = hn::NegMulAdd(xi, yi, hn::Mul(xr, yr));
+        const auto ri = hn::MulAdd(xi, yr, hn::Mul(xr, yi));
+        StoreComplex<T, I>(d, rr, ri, dr, di, i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_multiply_impl(
+        ar + i * S, ImagOf<I>(ar, ai) + i * S, S, br + i * S, ImagOf<I>(br, bi) + i * S, S,
+        dr + i * S, ImagOf<I>(dr, di) + i * S, S, count - i);
+}
+
+template <typename T, bool I>
+void ComplexMultiplyConjT(const T* ar, const T* ai, const T* br, const T* bi, T* dr, T* di,
+                          size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi, yr, yi;
+        LoadComplex<T, I>(d, ar, ai, i, xr, xi);
+        LoadComplex<T, I>(d, br, bi, i, yr, yi);
+        const auto rr = hn::MulAdd(xi, yi, hn::Mul(xr, yr));
+        const auto ri = hn::NegMulAdd(xr, yi, hn::Mul(xi, yr));
+        StoreComplex<T, I>(d, rr, ri, dr, di, i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_multiply_conj_impl(
+        ar + i * S, ImagOf<I>(ar, ai) + i * S, S, br + i * S, ImagOf<I>(br, bi) + i * S, S,
+        dr + i * S, ImagOf<I>(dr, di) + i * S, S, count - i);
+}
+
+template <typename T, bool I>
+void ComplexMultiplyAccumulateT(const T* ar, const T* ai, const T* br, const T* bi, T* cr, T* ci,
+                                size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi, yr, yi, cur, cui;
+        LoadComplex<T, I>(d, ar, ai, i, xr, xi);
+        LoadComplex<T, I>(d, br, bi, i, yr, yi);
+        LoadComplex<T, I>(d, cr, ci, i, cur, cui);
+        // acc.re += xr*yr - xi*yi ; acc.im += xr*yi + xi*yr
+        cur = hn::NegMulAdd(xi, yi, hn::MulAdd(xr, yr, cur));
+        cui = hn::MulAdd(xi, yr, hn::MulAdd(xr, yi, cui));
+        StoreComplex<T, I>(d, cur, cui, cr, ci, i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_multiply_accumulate_impl(
+        ar + i * S, ImagOf<I>(ar, ai) + i * S, S, br + i * S, ImagOf<I>(br, bi) + i * S, S,
+        cr + i * S, ImagOf<I>(cr, ci) + i * S, S, count - i);
+}
+
+template <typename T, bool I>
+void ComplexMagnitudeSquaredT(const T* re, const T* im, T scale, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    const auto vs = hn::Set(d, scale);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi;
+        LoadComplex<T, I>(d, re, im, i, xr, xi);
+        hn::StoreU(hn::Mul(hn::MulAdd(xr, xr, hn::Mul(xi, xi)), vs), d, dst + i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_magnitude_squared_impl(re + i * S, ImagOf<I>(re, im) + i * S, S,
+                                                         scale, dst + i, count - i);
+}
+
+template <typename T, bool I>
+void ComplexMagnitudeT(const T* re, const T* im, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi;
+        LoadComplex<T, I>(d, re, im, i, xr, xi);
+        hn::StoreU(hn::Sqrt(hn::MulAdd(xr, xr, hn::Mul(xi, xi))), d, dst + i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_magnitude_impl(re + i * S, ImagOf<I>(re, im) + i * S, S, dst + i,
+                                                 count - i);
+}
+
+template <typename T, bool I> void ComplexPhaseT(const T* re, const T* im, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi;
+        LoadComplex<T, I>(d, re, im, i, xr, xi);
+        hn::StoreU(hn::Atan2(d, xi, xr), d, dst + i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_phase_impl(re + i * S, ImagOf<I>(re, im) + i * S, S, dst + i,
+                                             count - i);
+}
+
+#define PULP_SIMD_HWY_INSTANTIATE_COMPLEX(SUFFIX, T)                                               \
+    void ComplexMultiply##SUFFIX(const T* a, const T* b, T* dst, size_t n) {                       \
+        ComplexMultiplyT<T, true>(a, nullptr, b, nullptr, dst, nullptr, n);                        \
+    }                                                                                              \
+    void ComplexMultiplyConj##SUFFIX(const T* a, const T* b, T* dst, size_t n) {                   \
+        ComplexMultiplyConjT<T, true>(a, nullptr, b, nullptr, dst, nullptr, n);                    \
+    }                                                                                              \
+    void ComplexMultiplyAccumulate##SUFFIX(const T* a, const T* b, T* acc, size_t n) {             \
+        ComplexMultiplyAccumulateT<T, true>(a, nullptr, b, nullptr, acc, nullptr, n);              \
+    }                                                                                              \
+    void ComplexMagnitude##SUFFIX(const T* z, T* dst, size_t n) {                                  \
+        ComplexMagnitudeT<T, true>(z, nullptr, dst, n);                                            \
+    }                                                                                              \
+    void ComplexMagnitudeSquared##SUFFIX(const T* z, T scale, T* dst, size_t n) {                  \
+        ComplexMagnitudeSquaredT<T, true>(z, nullptr, scale, dst, n);                              \
+    }                                                                                              \
+    void ComplexPhase##SUFFIX(const T* z, T* dst, size_t n) {                                      \
+        ComplexPhaseT<T, true>(z, nullptr, dst, n);                                                \
+    }                                                                                              \
+    void ComplexMultiplySplit##SUFFIX(const T* ar, const T* ai, const T* br, const T* bi, T* dr,   \
+                                      T* di, size_t n) {                                           \
+        ComplexMultiplyT<T, false>(ar, ai, br, bi, dr, di, n);                                     \
+    }                                                                                              \
+    void ComplexMultiplyConjSplit##SUFFIX(const T* ar, const T* ai, const T* br, const T* bi,      \
+                                          T* dr, T* di, size_t n) {                                \
+        ComplexMultiplyConjT<T, false>(ar, ai, br, bi, dr, di, n);                                 \
+    }                                                                                              \
+    void ComplexMultiplyAccumulateSplit##SUFFIX(const T* ar, const T* ai, const T* br,             \
+                                                const T* bi, T* cr, T* ci, size_t n) {             \
+        ComplexMultiplyAccumulateT<T, false>(ar, ai, br, bi, cr, ci, n);                           \
+    }                                                                                              \
+    void ComplexMagnitudeSplit##SUFFIX(const T* re, const T* im, T* dst, size_t n) {               \
+        ComplexMagnitudeT<T, false>(re, im, dst, n);                                               \
+    }                                                                                              \
+    void ComplexMagnitudeSquaredSplit##SUFFIX(const T* re, const T* im, T scale, T* dst,           \
+                                              size_t n) {                                          \
+        ComplexMagnitudeSquaredT<T, false>(re, im, scale, dst, n);                                 \
+    }                                                                                              \
+    void ComplexPhaseSplit##SUFFIX(const T* re, const T* im, T* dst, size_t n) {                   \
+        ComplexPhaseT<T, false>(re, im, dst, n);                                                   \
+    }
+
+PULP_SIMD_HWY_INSTANTIATE_COMPLEX(F32, float)
+PULP_SIMD_HWY_INSTANTIATE_COMPLEX(F64, double)
+
+#undef PULP_SIMD_HWY_INSTANTIATE_COMPLEX
+
+// ── vector math ──────────────────────────────────────────────────────────────
+// `precise` is Highway's contrib/math (Apache-2.0, polynomial kernels written
+// per lane width). `fast` is a lower-degree float algorithm defined here; double
+// has no fast variant. The loops use a partial load/store for the tail, so an
+// element's result does not depend on its position in the buffer.
+
+/// Applies `op(d, v)` to every element, a full vector at a time and then one
+/// partial vector for the remainder.
+template <typename T, class Op> HWY_INLINE void MapT(const T* x, T* dst, size_t count, Op op) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N)
+        hn::StoreU(op(d, hn::LoadU(d, x + i)), d, dst + i);
+    if (i < count) {
+        const size_t rest = count - i;
+        hn::StoreN(op(d, hn::LoadN(d, x + i, rest)), d, dst + i, rest);
+    }
+}
+
+// exp(x) = 2^n * e^r with n = round(x / ln 2), |r| <= ln2 / 2 and e^r a degree-4
+// polynomial. x is clamped to [-87.3, 88], so the scale 2^n stays a normal
+// float; results outside that range saturate at exp(88) and exp(-87.3).
+template <class D, class V> HWY_INLINE V FastExpF(D d, V x) {
+    const hn::RebindToSigned<D> di;
+    x = hn::Min(hn::Max(x, hn::Set(d, -87.3f)), hn::Set(d, 88.0f));
+    const V n = hn::Round(hn::Mul(x, hn::Set(d, 1.44269504088896341f)));
+    V r = hn::NegMulAdd(n, hn::Set(d, 0.693359375f), x); // ln 2 in two parts
+    r = hn::NegMulAdd(n, hn::Set(d, -2.12194440e-4f), r);
+    V p = hn::Set(d, 0.04187564445237346f);
+    p = hn::MulAdd(p, r, hn::Set(d, 0.16792143016521863f));
+    p = hn::MulAdd(p, r, hn::Set(d, 0.4999937213862514f));
+    p = hn::MulAdd(p, r, hn::Set(d, 0.9999622946507595f));
+    p = hn::MulAdd(p, r, hn::Set(d, 1.0f));
+    const auto scale =
+        hn::BitCast(d, hn::ShiftLeft<23>(hn::Add(hn::ConvertTo(di, n), hn::Set(di, 127))));
+    return hn::Mul(p, scale);
+}
+
+// ln(x) = e * ln 2 + ln(m) with x = m * 2^e and m in [sqrt(1/2), sqrt(2)), and
+// ln(m) = 2 * (s + s^3 / 3 + s^5 / 5) for s = (m - 1) / (m + 1). Needs a positive
+// normal finite x (log() applies the floor first).
+template <class D, class V> HWY_INLINE V FastLogF(D d, V x) {
+    const hn::RebindToSigned<D> di;
+    const auto bits = hn::BitCast(di, x);
+    auto e = hn::Sub(hn::ShiftRight<23>(bits), hn::Set(di, 127));
+    V m = hn::BitCast(d, hn::Or(hn::And(bits, hn::Set(di, 0x007FFFFF)), hn::Set(di, 0x3F800000)));
+    const auto big = hn::Gt(m, hn::Set(d, 1.41421356f));
+    m = hn::IfThenElse(big, hn::Mul(m, hn::Set(d, 0.5f)), m);
+    e = hn::Add(e, hn::IfThenElseZero(hn::RebindMask(di, big), hn::Set(di, 1)));
+    const V one = hn::Set(d, 1.0f);
+    const V s = hn::Div(hn::Sub(m, one), hn::Add(m, one));
+    const V z = hn::Mul(s, s);
+    V poly = hn::MulAdd(hn::Set(d, 0.2f), z, hn::Set(d, 0.33333333f));
+    poly = hn::MulAdd(poly, z, one);
+    const V ln_m = hn::Mul(hn::Add(s, s), poly);
+    return hn::MulAdd(hn::ConvertTo(d, e), hn::Set(d, 0.69314718f), ln_m);
+}
+
+// sin and cos from r = x - k*pi (k = round(x / pi), |r| <= pi / 2, pi in three
+// parts) and low-degree polynomials in r^2; the sign flips with k's parity.
+template <class D, class V> HWY_INLINE void FastSinCosF(D d, V x, V& sin_out, V& cos_out) {
+    const hn::RebindToSigned<D> di;
+    const V k = hn::Round(hn::Mul(x, hn::Set(d, 0.31830988618379067f)));
+    V r = hn::NegMulAdd(k, hn::Set(d, 3.140625f), x);
+    r = hn::NegMulAdd(k, hn::Set(d, 0.0009675025939941406f), r);
+    r = hn::NegMulAdd(k, hn::Set(d, 1.5099580252808664e-07f), r);
+    const V r2 = hn::Mul(r, r);
+    V sp = hn::Set(d, 2.6051076353233456e-06f);
+    sp = hn::MulAdd(sp, r2, hn::Set(d, -0.00019809017408677578f));
+    sp = hn::MulAdd(sp, r2, hn::Set(d, 0.008333050170671794f));
+    sp = hn::MulAdd(sp, r2, hn::Set(d, -0.16666657947846006f));
+    sp = hn::MulAdd(sp, r2, hn::Set(d, 0.999999995698809f));
+    V cp = hn::Set(d, 2.3152416660013513e-05f);
+    cp = hn::MulAdd(cp, r2, hn::Set(d, -0.0013853629536177301f));
+    cp = hn::MulAdd(cp, r2, hn::Set(d, 0.041663573160188615f));
+    cp = hn::MulAdd(cp, r2, hn::Set(d, -0.4999990477779212f));
+    cp = hn::MulAdd(cp, r2, hn::Set(d, 0.9999999530275122f));
+    const V sign = hn::BitCast(d, hn::ShiftLeft<31>(hn::ConvertTo(di, k)));
+    sin_out = hn::Xor(hn::Mul(sp, r), sign);
+    cos_out = hn::Xor(cp, sign);
+}
+
+// tanh(x) = 1 - 2 / (e^(2x) + 1), with x clamped to +-9 (tanh(9) is 1 - 3e-8).
+template <class D, class V> HWY_INLINE V FastTanhF(D d, V x) {
+    x = hn::Min(hn::Max(x, hn::Set(d, -9.0f)), hn::Set(d, 9.0f));
+    const V e = FastExpF(d, hn::Add(x, x));
+    const V one = hn::Set(d, 1.0f);
+    return hn::Sub(one, hn::Div(hn::Add(one, one), hn::Add(e, one)));
+}
+
+// Highway's exp, log, sin and cos do not define the arguments at the ends of
+// the range. These wrappers pin the behaviour the C library has: exp overflows
+// to +inf and underflows to 0, log(+inf) is +inf, and a NaN argument gives NaN
+// (sin and cos of an infinity are NaN).
+template <class D, class V> HWY_INLINE V PreciseExp(D d, V x) {
+    using T = hn::TFromD<D>;
+    constexpr T kOverflow =
+        sizeof(T) == 4 ? static_cast<T>(88.72284) : static_cast<T>(709.782712893384);
+    constexpr T kUnderflow =
+        sizeof(T) == 4 ? static_cast<T>(-103.97208) : static_cast<T>(-745.1332191019411);
+    V r = hn::Exp(d, x);
+    r = hn::IfThenElse(hn::Gt(x, hn::Set(d, kOverflow)), hn::Inf(d), r);
+    r = hn::IfThenZeroElse(hn::Lt(x, hn::Set(d, kUnderflow)), r);
+    return hn::IfThenElse(hn::IsNaN(x), x, r);
+}
+
+template <class D, class V> HWY_INLINE V PreciseLog(D d, V x) {
+    V r = hn::Log(d, x);
+    r = hn::IfThenElse(hn::IsInf(x), x, r);
+    return hn::IfThenElse(hn::IsNaN(x), x, r);
+}
+
+template <class D, class V> HWY_INLINE V PreciseSin(D d, V x) {
+    const V r = hn::Sin(d, x);
+    return hn::IfThenElse(hn::Or(hn::IsInf(x), hn::IsNaN(x)), hn::Sub(x, x), r);
+}
+
+template <class D, class V> HWY_INLINE V PreciseCos(D d, V x) {
+    const V r = hn::Cos(d, x);
+    return hn::IfThenElse(hn::Or(hn::IsInf(x), hn::IsNaN(x)), hn::Sub(x, x), r);
+}
+
+template <typename T> void ExpT(const T* x, T* dst, size_t count, bool fast) {
+    if constexpr (sizeof(T) == 4) {
+        if (fast) {
+            MapT(x, dst, count, [](auto d, auto v) { return FastExpF(d, v); });
+            return;
+        }
+    }
+    (void)fast;
+    MapT(x, dst, count, [](auto d, auto v) { return PreciseExp(d, v); });
+}
+
+template <typename T> void LogT(const T* x, T floor, T* dst, size_t count, bool fast) {
+    const T f = ::pulp::simd::detail::effective_log_floor(floor);
+    if constexpr (sizeof(T) == 4) {
+        if (fast) {
+            MapT(x, dst, count, [f](auto d, auto v) {
+                const auto vf = hn::Set(d, f);
+                return FastLogF(d, hn::IfThenElse(hn::Lt(v, vf), vf, v));
+            });
+            return;
+        }
+    }
+    (void)fast;
+    MapT(x, dst, count, [f](auto d, auto v) {
+        const auto vf = hn::Set(d, f);
+        return PreciseLog(d, hn::IfThenElse(hn::Lt(v, vf), vf, v));
+    });
+}
+
+template <typename T> void SinT(const T* x, T* dst, size_t count, bool fast) {
+    if constexpr (sizeof(T) == 4) {
+        if (fast) {
+            MapT(x, dst, count, [](auto d, auto v) {
+                decltype(v) s, c;
+                FastSinCosF(d, v, s, c);
+                return s;
+            });
+            return;
+        }
+    }
+    (void)fast;
+    MapT(x, dst, count, [](auto d, auto v) { return PreciseSin(d, v); });
+}
+
+template <typename T> void CosT(const T* x, T* dst, size_t count, bool fast) {
+    if constexpr (sizeof(T) == 4) {
+        if (fast) {
+            MapT(x, dst, count, [](auto d, auto v) {
+                decltype(v) s, c;
+                FastSinCosF(d, v, s, c);
+                return c;
+            });
+            return;
+        }
+    }
+    (void)fast;
+    MapT(x, dst, count, [](auto d, auto v) { return PreciseCos(d, v); });
+}
+
+template <typename T> void SinCosT(const T* x, T* sin_out, T* cos_out, size_t count, bool fast) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    const auto one_step = [&](hn::Vec<decltype(d)> v, hn::Vec<decltype(d)>& s,
+                              hn::Vec<decltype(d)>& c) {
+        if constexpr (sizeof(T) == 4) {
+            if (fast) {
+                FastSinCosF(d, v, s, c);
+                return;
+            }
+        }
+        (void)fast;
+        hn::SinCos(d, v, s, c);
+        // As PreciseSin / PreciseCos: an infinite or NaN argument gives NaN.
+        const auto bad = hn::Or(hn::IsInf(v), hn::IsNaN(v));
+        s = hn::IfThenElse(bad, hn::Sub(v, v), s);
+        c = hn::IfThenElse(bad, hn::Sub(v, v), c);
+    };
+    size_t i = 0;
+    hn::Vec<decltype(d)> s, c;
+    for (; i + N <= count; i += N) {
+        one_step(hn::LoadU(d, x + i), s, c);
+        hn::StoreU(s, d, sin_out + i);
+        hn::StoreU(c, d, cos_out + i);
+    }
+    if (i < count) {
+        const size_t rest = count - i;
+        one_step(hn::LoadN(d, x + i, rest), s, c);
+        hn::StoreN(s, d, sin_out + i, rest);
+        hn::StoreN(c, d, cos_out + i, rest);
+    }
+}
+
+template <typename T> void TanhT(const T* x, T* dst, size_t count, bool fast) {
+    if constexpr (sizeof(T) == 4) {
+        if (fast) {
+            MapT(x, dst, count, [](auto d, auto v) { return FastTanhF(d, v); });
+            return;
+        }
+    }
+    (void)fast;
+    MapT(x, dst, count, [](auto d, auto v) { return hn::Tanh(d, v); });
+}
+
+template <typename T> void SqrtT(const T* x, T* dst, size_t count) {
+    MapT(x, dst, count, [](auto d, auto v) {
+        (void)d;
+        return hn::Sqrt(v);
+    });
+}
+
+// x - k * 2*pi with k = round(x / 2*pi), 2*pi split into three parts whose
+// leading ones have few enough bits that k times them is exact, so the result
+// is right to the last bit of the result for |x| up to about 1e4 (float) and
+// 1e6 (double) even where fused multiply-add is unavailable.
+template <typename T> void WrapPhaseT(const T* x, T* dst, size_t count) {
+    MapT(x, dst, count, [](auto d, auto v) {
+        using V = decltype(v);
+        V k, r;
+        if constexpr (sizeof(T) == 4) {
+            k = hn::Round(hn::Mul(v, hn::Set(d, 0.15915494309189535f)));
+            r = hn::NegMulAdd(k, hn::Set(d, 6.28125f), v);
+            r = hn::NegMulAdd(k, hn::Set(d, 0.0019350051879882812f), r);
+            r = hn::NegMulAdd(k, hn::Set(d, 3.019916050561733e-07f), r);
+        } else {
+            k = hn::Round(hn::Mul(v, hn::Set(d, 0.15915494309189535)));
+            r = hn::NegMulAdd(k, hn::Set(d, 6.283185303211212), v);
+            r = hn::NegMulAdd(k, hn::Set(d, 3.9683743166540886e-09), r);
+            r = hn::NegMulAdd(k, hn::Set(d, 2.068073192717642e-18), r);
+        }
+        return r;
+    });
+}
+
+#define PULP_SIMD_HWY_INSTANTIATE_MATH(SUFFIX, T)                                                  \
+    void Exp##SUFFIX(const T* x, T* dst, size_t n, bool fast) {                                    \
+        ExpT(x, dst, n, fast);                                                                     \
+    }                                                                                              \
+    void Log##SUFFIX(const T* x, T floor, T* dst, size_t n, bool fast) {                           \
+        LogT(x, floor, dst, n, fast);                                                              \
+    }                                                                                              \
+    void Sin##SUFFIX(const T* x, T* dst, size_t n, bool fast) {                                    \
+        SinT(x, dst, n, fast);                                                                     \
+    }                                                                                              \
+    void Cos##SUFFIX(const T* x, T* dst, size_t n, bool fast) {                                    \
+        CosT(x, dst, n, fast);                                                                     \
+    }                                                                                              \
+    void SinCos##SUFFIX(const T* x, T* s, T* c, size_t n, bool fast) {                             \
+        SinCosT(x, s, c, n, fast);                                                                 \
+    }                                                                                              \
+    void Tanh##SUFFIX(const T* x, T* dst, size_t n, bool fast) {                                   \
+        TanhT(x, dst, n, fast);                                                                    \
+    }                                                                                              \
+    void Sqrt##SUFFIX(const T* x, T* dst, size_t n) {                                              \
+        SqrtT(x, dst, n);                                                                          \
+    }                                                                                              \
+    void WrapPhase##SUFFIX(const T* x, T* dst, size_t n) {                                         \
+        WrapPhaseT(x, dst, n);                                                                     \
+    }
+
+PULP_SIMD_HWY_INSTANTIATE_MATH(F32, float)
+PULP_SIMD_HWY_INSTANTIATE_MATH(F64, double)
+
+#undef PULP_SIMD_HWY_INSTANTIATE_MATH
 
 } // namespace HWY_NAMESPACE
 } // namespace pulp::simd::backend::highway
@@ -377,6 +1077,19 @@ HWY_EXPORT(DoubleLanes);
     HWY_EXPORT(MaxAbs##SUFFIX);                                                                    \
     HWY_EXPORT(RampMul##SUFFIX);                                                                   \
     HWY_EXPORT(Correlate##SUFFIX);                                                                 \
+    HWY_EXPORT(Sub##SUFFIX);                                                                       \
+    HWY_EXPORT(Div##SUFFIX);                                                                       \
+    HWY_EXPORT(Negate##SUFFIX);                                                                    \
+    HWY_EXPORT(FindMaximum##SUFFIX);                                                               \
+    HWY_EXPORT(FindMinimum##SUFFIX);                                                               \
+    HWY_EXPORT(ReplaceBelow##SUFFIX);                                                              \
+    HWY_EXPORT(ReplaceAbove##SUFFIX);                                                              \
+    HWY_EXPORT(FromInt16##SUFFIX);                                                                 \
+    HWY_EXPORT(FromInt32##SUFFIX);                                                                 \
+    HWY_EXPORT(ToInt16##SUFFIX);                                                                   \
+    HWY_EXPORT(ToInt32##SUFFIX);                                                                   \
+    HWY_EXPORT(Interleave2##SUFFIX);                                                               \
+    HWY_EXPORT(Deinterleave2##SUFFIX);                                                             \
     HWY_EXPORT(Decimate2##SUFFIX);
 
 PULP_SIMD_HWY_EXPORT(F32)
@@ -433,6 +1146,51 @@ PULP_SIMD_HWY_EXPORT(F64)
     void correlate(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept {   \
         HWY_DYNAMIC_DISPATCH(Correlate##SUFFIX)(x, h, y, n_out, taps);                             \
     }                                                                                              \
+    void sub(const T* a, const T* b, T* dst, std::size_t n) noexcept {                             \
+        HWY_DYNAMIC_DISPATCH(Sub##SUFFIX)(a, b, dst, n);                                           \
+    }                                                                                              \
+    void div(const T* a, const T* b, T* dst, std::size_t n) noexcept {                             \
+        HWY_DYNAMIC_DISPATCH(Div##SUFFIX)(a, b, dst, n);                                           \
+    }                                                                                              \
+    void negate(const T* a, T* dst, std::size_t n) noexcept {                                      \
+        HWY_DYNAMIC_DISPATCH(Negate##SUFFIX)(a, dst, n);                                           \
+    }                                                                                              \
+    T mean(const T* x, std::size_t n) noexcept {                                                   \
+        return n == 0 ? T(0) : sum(x, n) / T(n);                                                   \
+    }                                                                                              \
+    T rms(const T* x, std::size_t n) noexcept {                                                    \
+        return n == 0 ? T(0) : std::sqrt(sum_squares(x, n) / T(n));                                \
+    }                                                                                              \
+    T find_maximum(const T* x, std::size_t n, std::size_t* index) noexcept {                       \
+        return HWY_DYNAMIC_DISPATCH(FindMaximum##SUFFIX)(x, n, index);                             \
+    }                                                                                              \
+    T find_minimum(const T* x, std::size_t n, std::size_t* index) noexcept {                       \
+        return HWY_DYNAMIC_DISPATCH(FindMinimum##SUFFIX)(x, n, index);                             \
+    }                                                                                              \
+    void replace_below(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {         \
+        HWY_DYNAMIC_DISPATCH(ReplaceBelow##SUFFIX)(a, threshold, value, dst, n);                   \
+    }                                                                                              \
+    void replace_above(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {         \
+        HWY_DYNAMIC_DISPATCH(ReplaceAbove##SUFFIX)(a, threshold, value, dst, n);                   \
+    }                                                                                              \
+    void from_int16(const std::int16_t* src, T scale, T* dst, std::size_t n) noexcept {            \
+        HWY_DYNAMIC_DISPATCH(FromInt16##SUFFIX)(src, scale, dst, n);                               \
+    }                                                                                              \
+    void from_int32(const std::int32_t* src, T scale, T* dst, std::size_t n) noexcept {            \
+        HWY_DYNAMIC_DISPATCH(FromInt32##SUFFIX)(src, scale, dst, n);                               \
+    }                                                                                              \
+    void to_int16(const T* src, T scale, std::int16_t* dst, std::size_t n) noexcept {              \
+        HWY_DYNAMIC_DISPATCH(ToInt16##SUFFIX)(src, scale, dst, n);                                 \
+    }                                                                                              \
+    void to_int32(const T* src, T scale, std::int32_t* dst, std::size_t n) noexcept {              \
+        HWY_DYNAMIC_DISPATCH(ToInt32##SUFFIX)(src, scale, dst, n);                                 \
+    }                                                                                              \
+    void interleave2(const T* l, const T* r, T* dst, std::size_t n) noexcept {                     \
+        HWY_DYNAMIC_DISPATCH(Interleave2##SUFFIX)(l, r, dst, n);                                   \
+    }                                                                                              \
+    void deinterleave2(const T* src, T* l, T* r, std::size_t n) noexcept {                         \
+        HWY_DYNAMIC_DISPATCH(Deinterleave2##SUFFIX)(src, l, r, n);                                 \
+    }                                                                                              \
     void decimate2(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept {   \
         HWY_DYNAMIC_DISPATCH(Decimate2##SUFFIX)(x, h, y, n_out, taps);                             \
     }
@@ -441,6 +1199,127 @@ PULP_SIMD_HWY_DEFINE(F32, float)
 PULP_SIMD_HWY_DEFINE(F64, double)
 
 #undef PULP_SIMD_HWY_DEFINE
+
+#define PULP_SIMD_HWY_EXPORT_COMPLEX(SUFFIX)                                                       \
+    HWY_EXPORT(ComplexMultiply##SUFFIX);                                                           \
+    HWY_EXPORT(ComplexMultiplyConj##SUFFIX);                                                       \
+    HWY_EXPORT(ComplexMultiplyAccumulate##SUFFIX);                                                 \
+    HWY_EXPORT(ComplexMagnitude##SUFFIX);                                                          \
+    HWY_EXPORT(ComplexMagnitudeSquared##SUFFIX);                                                   \
+    HWY_EXPORT(ComplexPhase##SUFFIX);                                                              \
+    HWY_EXPORT(ComplexMultiplySplit##SUFFIX);                                                      \
+    HWY_EXPORT(ComplexMultiplyConjSplit##SUFFIX);                                                  \
+    HWY_EXPORT(ComplexMultiplyAccumulateSplit##SUFFIX);                                            \
+    HWY_EXPORT(ComplexMagnitudeSplit##SUFFIX);                                                     \
+    HWY_EXPORT(ComplexMagnitudeSquaredSplit##SUFFIX);                                              \
+    HWY_EXPORT(ComplexPhaseSplit##SUFFIX);
+
+PULP_SIMD_HWY_EXPORT_COMPLEX(F32)
+PULP_SIMD_HWY_EXPORT_COMPLEX(F64)
+#undef PULP_SIMD_HWY_EXPORT_COMPLEX
+
+#define PULP_SIMD_HWY_DEFINE_COMPLEX(SUFFIX, T)                                                    \
+    void complex_multiply(const T* a, const T* b, T* dst, std::size_t n) noexcept {                \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiply##SUFFIX)(a, b, dst, n);                               \
+    }                                                                                              \
+    void complex_multiply_conj(const T* a, const T* b, T* dst, std::size_t n) noexcept {           \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiplyConj##SUFFIX)(a, b, dst, n);                           \
+    }                                                                                              \
+    void complex_multiply_accumulate(const T* a, const T* b, T* acc, std::size_t n) noexcept {     \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiplyAccumulate##SUFFIX)(a, b, acc, n);                     \
+    }                                                                                              \
+    void complex_magnitude(const T* z, T* dst, std::size_t n) noexcept {                           \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitude##SUFFIX)(z, dst, n);                                 \
+    }                                                                                              \
+    void complex_magnitude_squared(const T* z, T* dst, std::size_t n) noexcept {                   \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitudeSquared##SUFFIX)(z, T(1), dst, n);                    \
+    }                                                                                              \
+    void complex_phase(const T* z, T* dst, std::size_t n) noexcept {                               \
+        HWY_DYNAMIC_DISPATCH(ComplexPhase##SUFFIX)(z, dst, n);                                     \
+    }                                                                                              \
+    void complex_power_spectrum(const T* z, T scale, T* dst, std::size_t n) noexcept {             \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitudeSquared##SUFFIX)(z, scale, dst, n);                   \
+    }                                                                                              \
+    void complex_multiply_split(const T* a_re, const T* a_im, const T* b_re, const T* b_im,        \
+                                T* dst_re, T* dst_im, std::size_t n) noexcept {                    \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiplySplit##SUFFIX)(a_re, a_im, b_re, b_im, dst_re, dst_im, \
+                                                           n);                                     \
+    }                                                                                              \
+    void complex_multiply_conj_split(const T* a_re, const T* a_im, const T* b_re, const T* b_im,   \
+                                     T* dst_re, T* dst_im, std::size_t n) noexcept {               \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiplyConjSplit##SUFFIX)(a_re, a_im, b_re, b_im, dst_re,     \
+                                                               dst_im, n);                         \
+    }                                                                                              \
+    void complex_multiply_accumulate_split(const T* a_re, const T* a_im, const T* b_re,            \
+                                           const T* b_im, T* acc_re, T* acc_im,                    \
+                                           std::size_t n) noexcept {                               \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiplyAccumulateSplit##SUFFIX)(a_re, a_im, b_re, b_im,       \
+                                                                     acc_re, acc_im, n);           \
+    }                                                                                              \
+    void complex_magnitude_split(const T* re, const T* im, T* dst, std::size_t n) noexcept {       \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitudeSplit##SUFFIX)(re, im, dst, n);                       \
+    }                                                                                              \
+    void complex_magnitude_squared_split(const T* re, const T* im, T* dst,                         \
+                                         std::size_t n) noexcept {                                 \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitudeSquaredSplit##SUFFIX)(re, im, T(1), dst, n);          \
+    }                                                                                              \
+    void complex_phase_split(const T* re, const T* im, T* dst, std::size_t n) noexcept {           \
+        HWY_DYNAMIC_DISPATCH(ComplexPhaseSplit##SUFFIX)(re, im, dst, n);                           \
+    }                                                                                              \
+    void complex_power_spectrum_split(const T* re, const T* im, T scale, T* dst,                   \
+                                      std::size_t n) noexcept {                                    \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitudeSquaredSplit##SUFFIX)(re, im, scale, dst, n);         \
+    }
+
+PULP_SIMD_HWY_DEFINE_COMPLEX(F32, float)
+PULP_SIMD_HWY_DEFINE_COMPLEX(F64, double)
+
+#undef PULP_SIMD_HWY_DEFINE_COMPLEX
+
+#define PULP_SIMD_HWY_EXPORT_MATH(SUFFIX)                                                          \
+    HWY_EXPORT(Exp##SUFFIX);                                                                       \
+    HWY_EXPORT(Log##SUFFIX);                                                                       \
+    HWY_EXPORT(Sin##SUFFIX);                                                                       \
+    HWY_EXPORT(Cos##SUFFIX);                                                                       \
+    HWY_EXPORT(SinCos##SUFFIX);                                                                    \
+    HWY_EXPORT(Tanh##SUFFIX);                                                                      \
+    HWY_EXPORT(Sqrt##SUFFIX);                                                                      \
+    HWY_EXPORT(WrapPhase##SUFFIX);
+
+PULP_SIMD_HWY_EXPORT_MATH(F32)
+PULP_SIMD_HWY_EXPORT_MATH(F64)
+#undef PULP_SIMD_HWY_EXPORT_MATH
+
+#define PULP_SIMD_HWY_DEFINE_MATH(SUFFIX, T)                                                       \
+    void exp(const T* x, T* dst, std::size_t n, Accuracy accuracy) noexcept {                      \
+        HWY_DYNAMIC_DISPATCH(Exp##SUFFIX)(x, dst, n, accuracy == Accuracy::fast);                  \
+    }                                                                                              \
+    void log(const T* x, T floor, T* dst, std::size_t n, Accuracy accuracy) noexcept {             \
+        HWY_DYNAMIC_DISPATCH(Log##SUFFIX)(x, floor, dst, n, accuracy == Accuracy::fast);           \
+    }                                                                                              \
+    void sin(const T* x, T* dst, std::size_t n, Accuracy accuracy) noexcept {                      \
+        HWY_DYNAMIC_DISPATCH(Sin##SUFFIX)(x, dst, n, accuracy == Accuracy::fast);                  \
+    }                                                                                              \
+    void cos(const T* x, T* dst, std::size_t n, Accuracy accuracy) noexcept {                      \
+        HWY_DYNAMIC_DISPATCH(Cos##SUFFIX)(x, dst, n, accuracy == Accuracy::fast);                  \
+    }                                                                                              \
+    void sincos(const T* x, T* sin_out, T* cos_out, std::size_t n, Accuracy accuracy) noexcept {   \
+        HWY_DYNAMIC_DISPATCH(SinCos##SUFFIX)(x, sin_out, cos_out, n, accuracy == Accuracy::fast);  \
+    }                                                                                              \
+    void tanh(const T* x, T* dst, std::size_t n, Accuracy accuracy) noexcept {                     \
+        HWY_DYNAMIC_DISPATCH(Tanh##SUFFIX)(x, dst, n, accuracy == Accuracy::fast);                 \
+    }                                                                                              \
+    void sqrt(const T* x, T* dst, std::size_t n) noexcept {                                        \
+        HWY_DYNAMIC_DISPATCH(Sqrt##SUFFIX)(x, dst, n);                                             \
+    }                                                                                              \
+    void wrap_phase(const T* x, T* dst, std::size_t n) noexcept {                                  \
+        HWY_DYNAMIC_DISPATCH(WrapPhase##SUFFIX)(x, dst, n);                                        \
+    }
+
+PULP_SIMD_HWY_DEFINE_MATH(F32, float)
+PULP_SIMD_HWY_DEFINE_MATH(F64, double)
+
+#undef PULP_SIMD_HWY_DEFINE_MATH
 
 // HWY_DYNAMIC_DISPATCH expands its argument relative to the generated target
 // namespace. Keep these calls inside the backend namespace so the single-target

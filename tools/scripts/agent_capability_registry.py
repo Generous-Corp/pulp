@@ -1725,7 +1725,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/zero_latency_convolver.hpp",
-        "fingerprint": "sha256:f2ffe01d98618d870a3e7c7dee8e935948a3333090f01094d8bb0dd601a0861e",
+        "fingerprint": "sha256:8b48ec3c8df0ff7f8cac45f71468f29bf045452815393b2987253cf76e939db9",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
