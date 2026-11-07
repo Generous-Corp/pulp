@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <limits>
 #include <optional>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/live_dsp_telemetry.hpp>
@@ -56,6 +57,22 @@ class ProcessorNodeInstance;
 } // namespace pulp::format
 
 namespace pulp::host {
+
+namespace detail {
+
+// Selection generation is a process-local invalidation token. Saturating the
+// increment prevents an ABA after UINT64_MAX while retaining a lock-free,
+// control-side update for callers that flip routing policy before/after prepare.
+inline void advance_execution_selection_generation(std::atomic<std::uint64_t>& generation) noexcept {
+    auto current = generation.load(std::memory_order_relaxed);
+    while (current != std::numeric_limits<std::uint64_t>::max() &&
+           !generation.compare_exchange_weak(current, current + 1,
+                                              std::memory_order_relaxed,
+                                              std::memory_order_relaxed)) {
+    }
+}
+
+} // namespace detail
 
 class GraphSerializer;
 class SignalGraph;
@@ -715,7 +732,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Pick a path before starting a feedback graph and keep it for the stream.
     void set_canonical_executor_routing_enabled(bool enabled) noexcept {
         canonical_executor_routing_enabled_.store(enabled, std::memory_order_relaxed);
-        execution_selection_generation_.fetch_add(1, std::memory_order_relaxed);
+        detail::advance_execution_selection_generation(execution_selection_generation_);
     }
     // Returns the requested opt-in flag, not a promise that the current block
     // is taking the executor path. Actual dispatch also requires an eligible
@@ -735,7 +752,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // bit-identical across all three paths.
     void set_parallel_routing_enabled(bool enabled) noexcept {
         parallel_routing_enabled_.store(enabled, std::memory_order_relaxed);
-        execution_selection_generation_.fetch_add(1, std::memory_order_relaxed);
+        detail::advance_execution_selection_generation(execution_selection_generation_);
     }
     bool parallel_routing_enabled() const noexcept {
         return parallel_routing_enabled_.load(std::memory_order_relaxed);
@@ -826,7 +843,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // transport-sensitive nodes that anticipation forced exterior.
     void set_anticipation_enabled(bool enabled) noexcept {
         anticipation_enabled_.store(enabled, std::memory_order_relaxed);
-        execution_selection_generation_.fetch_add(1, std::memory_order_relaxed);
+        detail::advance_execution_selection_generation(execution_selection_generation_);
     }
     bool anticipation_enabled() const noexcept {
         return anticipation_enabled_.load(std::memory_order_relaxed);

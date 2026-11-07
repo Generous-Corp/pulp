@@ -6,6 +6,8 @@
 
 #include <array>
 #include <algorithm>
+#include <atomic>
+#include <limits>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -161,6 +163,8 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     REQUIRE(exported.value->connection_delay_samples.size() == 6);
     REQUIRE(exported.value->reads_in_place.size() == 6);
     REQUIRE(exported.value->pool_slot_count == exported.value->buffer_slot_count);
+    REQUIRE(exported.value->snapshot_id != 0);
+    REQUIRE(exported.value->pool_snapshot_id == exported.value->snapshot_id);
     REQUIRE(exported.value->executor_contract == "pulp.graph.canonical-executor.f32.v1");
     REQUIRE(exported.value->execution_mode == "serial");
     REQUIRE(exported.value->tie_break_contract == "ready-node-id-ascending.v1");
@@ -383,6 +387,14 @@ TEST_CASE("D4 execution selection ABA retires an exported snapshot") {
     graph.set_canonical_executor_routing_enabled(true);
     REQUIRE(snapshot.export_prepared_description().refusal ==
             PreparedDescriptionRefusal::SnapshotChanged);
+}
+
+TEST_CASE("D4 execution selection generation saturates") {
+    std::atomic<std::uint64_t> generation{std::numeric_limits<std::uint64_t>::max() - 1};
+    pulp::host::detail::advance_execution_selection_generation(generation);
+    REQUIRE(generation.load(std::memory_order_relaxed) == std::numeric_limits<std::uint64_t>::max());
+    pulp::host::detail::advance_execution_selection_generation(generation);
+    REQUIRE(generation.load(std::memory_order_relaxed) == std::numeric_limits<std::uint64_t>::max());
 }
 
 TEST_CASE("D4 selection mutation after binding requires a rebind") {

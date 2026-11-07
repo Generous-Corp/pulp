@@ -2067,6 +2067,25 @@ PreparedDescriptionResult SignalGraph::ExecutionSnapshot::export_prepared_descri
     const auto selection_generation = owner_->execution_selection_generation_.load(std::memory_order_relaxed);
     if (snapshot_->prepared_description->execution_selection_generation != selection_generation)
         return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
+    const auto& record = *snapshot_->prepared_description;
+    const auto& serial = snapshot_->routed.serial;
+    if (!serial.valid || !serial.snapshot.valid() ||
+        !serial.pool.bound_to(serial.snapshot) || record.snapshot_id != serial.snapshot.id() ||
+        record.pool_snapshot_id != serial.pool.bound_snapshot_id() ||
+        record.pool_snapshot_id != record.snapshot_id ||
+        record.buffer_slot_count != serial.snapshot.buffer_slot_count() ||
+        record.pool_slot_count != serial.pool.slot_count() ||
+        record.pool_max_frames != serial.pool.max_frames() ||
+        record.runtime_max_block_frames != serial.pool.max_frames() ||
+        record.max_block_frames > serial.pool.max_frames())
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
+    if (record.host_input_alias_eligible &&
+        (record.host_input_alias_mode != "conditional_direct_host_input" ||
+         record.host_input_alias_fallback != "internal_copy" ||
+         !record.host_input_alias_requires_full_width ||
+         !record.host_input_alias_requires_disjoint ||
+         record.host_input_alias_mappings.size() != record.channels.size()))
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
     try {
         auto copy = std::make_shared<PreparedDescriptionData>(*snapshot_->prepared_description);
         if (owner_->execution_selection_generation_.load(std::memory_order_relaxed) !=
@@ -2376,10 +2395,10 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             static_cast<std::uint64_t>(max_block_size) > capture->effective_max_block_frames)
             return last_result_ = Result::PreflightFailed;
         capture->snapshot_id = next->routed.serial.snapshot.id();
-        // bound_to() compares the pool's private binding identity to this
-        // snapshot. The public pool intentionally does not expose that token;
-        // retain the paired snapshot identity as the detached provenance.
-        capture->pool_snapshot_id = capture->snapshot_id;
+        // Preserve the pool's actual binding token. It is separate from the
+        // snapshot identity so an export cannot silently bless an unbound or
+        // mismatched pool that merely has matching capacities.
+        capture->pool_snapshot_id = next->routed.serial.pool.bound_snapshot_id();
         capture->execution_generation = next->execution_generation;
         capture->owner_generation = base_authoring_generation_;
         const auto& plan = next->routed.serial.snapshot.plan();
@@ -2405,7 +2424,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         capture->total_latency_samples = assignment.total_latency_samples;
         capture->connection_delay_samples = assignment.connection_delay_samples;
         capture->reads_in_place = assignment.reads_in_place;
-        if (!capture->serial_pool_bound || capture->pool_slot_count != capture->buffer_slot_count ||
+        if (!capture->serial_pool_bound || capture->pool_snapshot_id != capture->snapshot_id ||
+            capture->pool_slot_count != capture->buffer_slot_count ||
             capture->pool_max_frames < capture->max_block_frames)
             return last_result_ = Result::PreflightFailed;
         capture->host_input_alias_eligible = false;
