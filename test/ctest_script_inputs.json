@@ -3715,6 +3715,14 @@
    ],
    "kind": "python"
   },
+  "android-fixture-lane-selftest": {
+   "entry": "tools/ci/test_android_fixture_lane.py",
+   "inputs": [
+    "tools/ci/android-fixture-lane.sh",
+    "tools/ci/test_android_fixture_lane.py"
+   ],
+   "kind": "python"
+  },
   "android-jni-exports-selftest": {
    "entry": "tools/scripts/test_check_android_jni_exports.py",
    "inputs": [
