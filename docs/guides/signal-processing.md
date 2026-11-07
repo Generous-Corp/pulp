@@ -1518,6 +1518,31 @@ much as a plain peak + RMS pass.
 
 ---
 
+### SuperFlux onset detection
+
+`OnsetDetectionMethod::SuperFlux` is a novelty function for onset detection that ignores vibrato. It reduces each Hann-windowed spectrum to a logarithmic filterbank (24 bands per octave by default), compresses it with `log(lambda * x + 1)`, and sums the positive differences against a frame a few hops earlier whose bands have been max-filtered across frequency. A partial that has only drifted into the next band is not new energy; a real attack raises many bands at once. Header: `pulp/signal/analysis_frontends.hpp`; detector: `pulp/audio/onset_detector.hpp`.
+
+```cpp
+// Offline: markers for a sample, then slice points
+auto detection = audio::superflux_onset_config(sample_rate);   // 2048 window, 5 ms hop
+auto markers = audio::OnsetDetector{}.detect(source, detection).markers;
+
+// Or let the slice analyzer run the detection itself
+audio::SlicePointAnalysisConfig slicing;
+slicing.source_sample_rate = sample_rate;
+auto slices = audio::SlicePointAnalyzer{}.analyze_detected(source, detection, slicing);
+
+// Streaming novelty, one value per hop
+signal::OnsetNoveltyFrontEndT<float, 2048, 2> front_end;
+front_end.prepare(stream_config, signal::OnsetDetectionMethod::SuperFlux, signal::SuperFluxConfig{});
+```
+
+`SuperFluxConfig` carries the filterbank density and range, the compression, the width of the max filter (3 by default; 1 turns the vibrato suppression off) and the lag in frames (derived from the window and hop when 0). The detector needs `OnsetDetectionConfig::sample_rate` because the filterbank is laid out in hertz; `analyze_detected()` fills it from the source rate. Unlike the other methods, SuperFlux markers sit at the centre of the analysis window that produced them (where the novelty peaks), which puts them within about 10 ms of the hit for the default settings. Frame size must be a power of two up to 65536.
+
+**Real-time:** `prepare()` is a control-thread call. After it, the streaming front end allocates nothing; the filterbank, lag history and spectrum are fixed-size members. Detection and slice analysis are offline operations and allocate.
+
+**Reference:** Sebastian Böck and Gerhard Widmer, "Maximum Filter Vibrato Suppression for Onset Detection", DAFx 2013. Tests: `test/test_superflux_onset.cpp`.
+
 ### Spectrogram helpers
 
 `ColorMapper` and `FrequencyAxis` are fixed-state utilities for display-side spectral mapping. Their mapping methods are allocation-free. `SpectrogramBuffer::configure()` allocates pixel storage, so configure it off the audio thread; `push_column()` is allocation-free after configuration and can be used in bounded realtime or UI-adjacent analysis paths with caller-owned magnitude data.

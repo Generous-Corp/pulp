@@ -392,4 +392,18 @@ SlicePointAnalysisResult SlicePointAnalyzer::analyze(
     return result;
 }
 
+SlicePointAnalysisResult SlicePointAnalyzer::analyze_detected(
+    BufferView<const float> source,
+    const OnsetDetectionConfig& detection,
+    const SlicePointAnalysisConfig& config,
+    const SliceSelectionOptions& options) const {
+    if (!(config.source_sample_rate > 0.0) || !std::isfinite(config.source_sample_rate))
+        return {};
+    OnsetDetectionConfig effective = detection;
+    effective.sample_rate = config.source_sample_rate;
+    const auto detected = OnsetDetector{}.detect(source, effective);
+    if (!detected.ok) return {};
+    return analyze(source, detected.markers, config, options);
+}
+
 }  // namespace pulp::audio

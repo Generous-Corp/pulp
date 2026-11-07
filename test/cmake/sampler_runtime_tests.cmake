@@ -472,6 +472,12 @@ pulp_add_test_suite(pulp-test-loop-analysis GROUP pulp-test-group-sampler-audio
 pulp_add_test_suite(pulp-test-onset-slice-analysis GROUP pulp-test-group-sampler-audio
     LIBRARIES pulp::audio)
 
+# SuperFlux onset detection: the streaming novelty function, the offline
+# detector, vibrato suppression and the slice analyzer's detection option.
+pulp_add_test_suite(pulp-test-superflux-onset GROUP pulp-test-group-sampler-audio
+    SOURCES test_superflux_onset.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+
 # Analysis provider descriptors, package availability policy, and provenance sidecars.
 pulp_add_test_suite(pulp-test-analyzer-provider GROUP pulp-test-group-sampler-audio
     LIBRARIES pulp::audio)

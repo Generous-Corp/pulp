@@ -80,6 +80,16 @@ public:
                                      std::span<const OnsetMarker> onsets,
                                      const SlicePointAnalysisConfig& config,
                                      const SliceSelectionOptions& options) const;
+
+    // Off-real-time/background analysis that finds the onsets itself, with any
+    // OnsetDetectionMethod including SuperFlux (see superflux_onset_config()),
+    // then merges them as above. `detection.sample_rate` is replaced by
+    // `config.source_sample_rate`. Returns a result with ok == false if the
+    // detector rejects the source or settings.
+    SlicePointAnalysisResult analyze_detected(BufferView<const float> source,
+                                              const OnsetDetectionConfig& detection,
+                                              const SlicePointAnalysisConfig& config,
+                                              const SliceSelectionOptions& options = {}) const;
 };
 
 }  // namespace pulp::audio

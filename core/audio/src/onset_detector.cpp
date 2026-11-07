@@ -15,7 +15,8 @@ constexpr std::size_t kMaxAnalysisFrameSize = 65536;
 
 bool valid_config(const OnsetDetectionConfig& config) noexcept {
     return config.frame_size > 1 && config.hop_size > 0 && config.threshold_multiplier > 0.0 &&
-           config.min_confidence >= 0.0 && config.max_markers > 0;
+           config.min_confidence >= 0.0 && config.max_markers > 0 &&
+           std::isfinite(config.sample_rate) && config.sample_rate > 0.0;
 }
 
 bool power_of_two(std::uint32_t value) noexcept {
@@ -108,14 +109,14 @@ bool fill_streaming_novelty(BufferView<const float> source, const OnsetDetection
     using FrontEnd = signal::OnsetNoveltyFrontEndT<float, Capacity, kMaxAnalysisChannels>;
     auto front_end = std::make_unique<FrontEnd>();
     signal::StreamingAnalysisConfig stream_config;
-    // Novelty is indexed in samples and does not use hertz. Keep the legacy
-    // public detector layout intact while satisfying the reusable front end's
-    // explicit metadata contract.
-    stream_config.sample_rate = 48000.0;
+    // Only SuperFlux lays out its filterbank in hertz; the other novelty
+    // functions are indexed in samples and the default rate leaves them as
+    // they were.
+    stream_config.sample_rate = config.sample_rate;
     stream_config.channels = source.num_channels();
     stream_config.fft_size = config.frame_size;
     stream_config.hop_size = config.hop_size;
-    if (!front_end->prepare(stream_config, config.method))
+    if (!front_end->prepare(stream_config, config.method, config.superflux))
         return false;
 
     std::vector<const float*> channels(source.num_channels());
@@ -189,6 +190,10 @@ OnsetDetectionResult OnsetDetector::detect(BufferView<const float> source,
         source.num_channels() > kMaxAnalysisChannels ||
         config.frame_size > kMaxAnalysisFrameSize || config.hop_size > config.frame_size;
     if (needs_dynamic_offline) {
+        // The fixed-capacity SuperFlux front end is the only SuperFlux
+        // implementation; frames or channel counts beyond it are refused.
+        if (config.method == OnsetDetectionMethod::SuperFlux)
+            return result;
         if (!fill_offline_novelty(source, config, novelty))
             return result;
     } else {
@@ -222,6 +227,8 @@ OnsetDetectionResult OnsetDetector::detect(BufferView<const float> source,
 
         OnsetMarker marker;
         marker.frame = static_cast<std::uint64_t>(i) * config.hop_size;
+        if (config.method == OnsetDetectionMethod::SuperFlux)
+            marker.frame += config.frame_size / 2u;
         marker.confidence = confidence;
         marker.method = config.method;
         retain_onset(result.markers, marker, config.min_spacing_frames, config.max_markers);
