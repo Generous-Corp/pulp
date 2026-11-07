@@ -989,9 +989,16 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
             return; // local surfaces retire before the first frame or publication
         }
 
+        // Snapshot validity before moving the owning pointers.  Calling
+        // `ok()` after the moves observes an intentionally emptied temporary
+        // and falsely reports a GPU initialization failure.
+        const bool surfaces_ok = surfaces.ok();
         partial_repaint_enabled_ = surfaces.partial_repaint;
         gpu_surface_ = std::move(surfaces.gpu);
         skia_surface_ = std::move(surfaces.skia);
+
+        if (!surfaces_ok)
+            return;
 
         damage_.mark_full(); // a new surface has no previous frame to preserve
         // The surface is live: tell the scripted UI (navigator.gpu) and anyone

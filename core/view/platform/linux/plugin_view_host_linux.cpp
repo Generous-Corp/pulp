@@ -1001,10 +1001,15 @@ private:
             &x11_handle_, geometry, options_.present_policy,
             options_.enable_gpu_timing, env && env[0] == '1', "X11PluginViewHost");
 
+        // Snapshot validity before moving the owning pointers.  `ok()` checks
+        // both surfaces; after the moves the temporary is necessarily empty,
+        // which used to turn every successful GPU initialization into a false
+        // CPU-fallback report.
+        const bool surfaces_ok = surfaces.ok();
         partial_repaint_enabled_ = surfaces.partial_repaint;
         gpu_surface_ = std::move(surfaces.gpu);
         skia_surface_ = std::move(surfaces.skia);
-        if (!surfaces.ok()) {
+        if (!surfaces_ok) {
             publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
