@@ -111,6 +111,8 @@ target_sources(pulp-runtime PRIVATE
     src/socket.cpp
     src/named_pipe.cpp
     src/stream.cpp
+    src/cancel.cpp
+    src/log_sink.cpp
     src/async_stream.cpp
     src/background_job.cpp
     src/search_index.cpp
@@ -305,6 +307,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/assert.hpp
     include/pulp/runtime/async_stream.hpp
     include/pulp/runtime/background_job.hpp
+    include/pulp/runtime/cancel.hpp
     include/pulp/runtime/base64.hpp
     include/pulp/runtime/big_integer.hpp
     include/pulp/runtime/budget_policy.hpp
@@ -317,6 +320,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/expression.hpp
     include/pulp/runtime/external_input.hpp
     include/pulp/runtime/file_search_path.hpp
+    include/pulp/runtime/fixed_function.hpp
     include/pulp/runtime/high_resolution_timer.hpp
     include/pulp/runtime/http.hpp
     include/pulp/runtime/i18n.hpp
@@ -326,6 +330,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/json_rpc.hpp
     include/pulp/runtime/license.hpp
     include/pulp/runtime/log.hpp
+    include/pulp/runtime/log_sink.hpp
     include/pulp/runtime/mac_address.hpp
     include/pulp/runtime/memory_mapped_file.hpp
     include/pulp/runtime/memory_message_channel.hpp

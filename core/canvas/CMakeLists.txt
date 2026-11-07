@@ -368,13 +368,13 @@ if(PULP_HAS_SKIA)
         endif()
     endif()
 
-    # font_registry_stubs.cpp compiles direct icu::Locale / BreakIterator calls
-    # when PULP_HAS_SKIA and ICU public headers are on the include path (true on
-    # Linux with libicu-dev). The bundled Skia statically links SkUnicode but does
-    # NOT export ICU's own symbols, so link system ICU here or the Linux link
-    # fails with undefined `icu_NN::Locale::...`. macOS links libicucore
-    # implicitly; Linux must be explicit. (Surfaced by the local Linux VM CI lane.)
-    if(UNIX AND NOT APPLE AND NOT ANDROID)
+    # font_registry_stubs.cpp can use direct icu::Locale / BreakIterator calls
+    # when a source build explicitly opts into PULP_SYSTEM_ICU. The bundled
+    # Skia statically links SkUnicode but does NOT export ICU's own symbols, so
+    # that opt-in must link system ICU. Release SDKs keep this OFF: the host ICU
+    # major version would otherwise become an ABI dependency of static archives.
+    if(PULP_SYSTEM_ICU AND UNIX AND NOT APPLE AND NOT ANDROID)
+        target_compile_definitions(pulp-canvas PRIVATE PULP_SYSTEM_ICU=1)
         find_package(ICU COMPONENTS uc i18n data QUIET)
         if(ICU_FOUND)
             target_link_libraries(pulp-canvas PRIVATE ICU::uc ICU::i18n ICU::data)
