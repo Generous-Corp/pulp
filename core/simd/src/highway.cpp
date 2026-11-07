@@ -749,6 +749,294 @@ PULP_SIMD_HWY_INSTANTIATE_COMPLEX(F64, double)
 
 #undef PULP_SIMD_HWY_INSTANTIATE_COMPLEX
 
+// ── vector math ──────────────────────────────────────────────────────────────
+// `precise` is Highway's contrib/math (Apache-2.0, polynomial kernels written
+// per lane width). `fast` is a lower-degree float algorithm defined here; double
+// has no fast variant. The loops use a partial load/store for the tail, so an
+// element's result does not depend on its position in the buffer.
+
+/// Applies `op(d, v)` to every element, a full vector at a time and then one
+/// partial vector for the remainder.
+template <typename T, class Op> HWY_INLINE void MapT(const T* x, T* dst, size_t count, Op op) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N)
+        hn::StoreU(op(d, hn::LoadU(d, x + i)), d, dst + i);
+    if (i < count) {
+        const size_t rest = count - i;
+        hn::StoreN(op(d, hn::LoadN(d, x + i, rest)), d, dst + i, rest);
+    }
+}
+
+// exp(x) = 2^n * e^r with n = round(x / ln 2), |r| <= ln2 / 2 and e^r a degree-4
+// polynomial. x is clamped to [-87.3, 88], so the scale 2^n stays a normal
+// float; results outside that range saturate at exp(88) and exp(-87.3).
+template <class D, class V> HWY_INLINE V FastExpF(D d, V x) {
+    const hn::RebindToSigned<D> di;
+    x = hn::Min(hn::Max(x, hn::Set(d, -87.3f)), hn::Set(d, 88.0f));
+    const V n = hn::Round(hn::Mul(x, hn::Set(d, 1.44269504088896341f)));
+    V r = hn::NegMulAdd(n, hn::Set(d, 0.693359375f), x); // ln 2 in two parts
+    r = hn::NegMulAdd(n, hn::Set(d, -2.12194440e-4f), r);
+    V p = hn::Set(d, 0.04187564445237346f);
+    p = hn::MulAdd(p, r, hn::Set(d, 0.16792143016521863f));
+    p = hn::MulAdd(p, r, hn::Set(d, 0.4999937213862514f));
+    p = hn::MulAdd(p, r, hn::Set(d, 0.9999622946507595f));
+    p = hn::MulAdd(p, r, hn::Set(d, 1.0f));
+    const auto scale =
+        hn::BitCast(d, hn::ShiftLeft<23>(hn::Add(hn::ConvertTo(di, n), hn::Set(di, 127))));
+    return hn::Mul(p, scale);
+}
+
+// ln(x) = e * ln 2 + ln(m) with x = m * 2^e and m in [sqrt(1/2), sqrt(2)), and
+// ln(m) = 2 * (s + s^3 / 3 + s^5 / 5) for s = (m - 1) / (m + 1). Needs a positive
+// normal finite x (log() applies the floor first).
+template <class D, class V> HWY_INLINE V FastLogF(D d, V x) {
+    const hn::RebindToSigned<D> di;
+    const auto bits = hn::BitCast(di, x);
+    auto e = hn::Sub(hn::ShiftRight<23>(bits), hn::Set(di, 127));
+    V m = hn::BitCast(
+        d, hn::Or(hn::And(bits, hn::Set(di, 0x007FFFFF)), hn::Set(di, 0x3F800000)));
+    const auto big = hn::Gt(m, hn::Set(d, 1.41421356f));
+    m = hn::IfThenElse(big, hn::Mul(m, hn::Set(d, 0.5f)), m);
+    e = hn::Add(e, hn::IfThenElseZero(hn::RebindMask(di, big), hn::Set(di, 1)));
+    const V one = hn::Set(d, 1.0f);
+    const V s = hn::Div(hn::Sub(m, one), hn::Add(m, one));
+    const V z = hn::Mul(s, s);
+    V poly = hn::MulAdd(hn::Set(d, 0.2f), z, hn::Set(d, 0.33333333f));
+    poly = hn::MulAdd(poly, z, one);
+    const V ln_m = hn::Mul(hn::Add(s, s), poly);
+    return hn::MulAdd(hn::ConvertTo(d, e), hn::Set(d, 0.69314718f), ln_m);
+}
+
+// sin and cos from r = x - k*pi (k = round(x / pi), |r| <= pi / 2, pi in three
+// parts) and low-degree polynomials in r^2; the sign flips with k's parity.
+template <class D, class V> HWY_INLINE void FastSinCosF(D d, V x, V& sin_out, V& cos_out) {
+    const hn::RebindToSigned<D> di;
+    const V k = hn::Round(hn::Mul(x, hn::Set(d, 0.31830988618379067f)));
+    V r = hn::NegMulAdd(k, hn::Set(d, 3.140625f), x);
+    r = hn::NegMulAdd(k, hn::Set(d, 0.0009675025939941406f), r);
+    r = hn::NegMulAdd(k, hn::Set(d, 1.5099580252808664e-07f), r);
+    const V r2 = hn::Mul(r, r);
+    V sp = hn::Set(d, 2.6051076353233456e-06f);
+    sp = hn::MulAdd(sp, r2, hn::Set(d, -0.00019809017408677578f));
+    sp = hn::MulAdd(sp, r2, hn::Set(d, 0.008333050170671794f));
+    sp = hn::MulAdd(sp, r2, hn::Set(d, -0.16666657947846006f));
+    sp = hn::MulAdd(sp, r2, hn::Set(d, 0.999999995698809f));
+    V cp = hn::Set(d, 2.3152416660013513e-05f);
+    cp = hn::MulAdd(cp, r2, hn::Set(d, -0.0013853629536177301f));
+    cp = hn::MulAdd(cp, r2, hn::Set(d, 0.041663573160188615f));
+    cp = hn::MulAdd(cp, r2, hn::Set(d, -0.4999990477779212f));
+    cp = hn::MulAdd(cp, r2, hn::Set(d, 0.9999999530275122f));
+    const V sign = hn::BitCast(d, hn::ShiftLeft<31>(hn::ConvertTo(di, k)));
+    sin_out = hn::Xor(hn::Mul(sp, r), sign);
+    cos_out = hn::Xor(cp, sign);
+}
+
+// tanh(x) = 1 - 2 / (e^(2x) + 1), with x clamped to +-9 (tanh(9) is 1 - 3e-8).
+template <class D, class V> HWY_INLINE V FastTanhF(D d, V x) {
+    x = hn::Min(hn::Max(x, hn::Set(d, -9.0f)), hn::Set(d, 9.0f));
+    const V e = FastExpF(d, hn::Add(x, x));
+    const V one = hn::Set(d, 1.0f);
+    return hn::Sub(one, hn::Div(hn::Add(one, one), hn::Add(e, one)));
+}
+
+// Highway's exp, log, sin and cos do not define the arguments at the ends of
+// the range. These wrappers pin the behaviour the C library has: exp overflows
+// to +inf and underflows to 0, log(+inf) is +inf, and a NaN argument gives NaN
+// (sin and cos of an infinity are NaN).
+template <class D, class V> HWY_INLINE V PreciseExp(D d, V x) {
+    using T = hn::TFromD<D>;
+    constexpr T kOverflow = sizeof(T) == 4 ? static_cast<T>(88.72284) : static_cast<T>(709.782712893384);
+    constexpr T kUnderflow =
+        sizeof(T) == 4 ? static_cast<T>(-103.97208) : static_cast<T>(-745.1332191019411);
+    V r = hn::Exp(d, x);
+    r = hn::IfThenElse(hn::Gt(x, hn::Set(d, kOverflow)), hn::Inf(d), r);
+    r = hn::IfThenZeroElse(hn::Lt(x, hn::Set(d, kUnderflow)), r);
+    return hn::IfThenElse(hn::IsNaN(x), x, r);
+}
+
+template <class D, class V> HWY_INLINE V PreciseLog(D d, V x) {
+    V r = hn::Log(d, x);
+    r = hn::IfThenElse(hn::IsInf(x), x, r);
+    return hn::IfThenElse(hn::IsNaN(x), x, r);
+}
+
+template <class D, class V> HWY_INLINE V PreciseSin(D d, V x) {
+    const V r = hn::Sin(d, x);
+    return hn::IfThenElse(hn::Or(hn::IsInf(x), hn::IsNaN(x)), hn::Sub(x, x), r);
+}
+
+template <class D, class V> HWY_INLINE V PreciseCos(D d, V x) {
+    const V r = hn::Cos(d, x);
+    return hn::IfThenElse(hn::Or(hn::IsInf(x), hn::IsNaN(x)), hn::Sub(x, x), r);
+}
+
+template <typename T> void ExpT(const T* x, T* dst, size_t count, bool fast) {
+    if constexpr (sizeof(T) == 4) {
+        if (fast) {
+            MapT(x, dst, count, [](auto d, auto v) { return FastExpF(d, v); });
+            return;
+        }
+    }
+    (void)fast;
+    MapT(x, dst, count, [](auto d, auto v) { return PreciseExp(d, v); });
+}
+
+template <typename T> void LogT(const T* x, T floor, T* dst, size_t count, bool fast) {
+    const T f = ::pulp::simd::detail::effective_log_floor(floor);
+    if constexpr (sizeof(T) == 4) {
+        if (fast) {
+            MapT(x, dst, count, [f](auto d, auto v) {
+                const auto vf = hn::Set(d, f);
+                return FastLogF(d, hn::IfThenElse(hn::Lt(v, vf), vf, v));
+            });
+            return;
+        }
+    }
+    (void)fast;
+    MapT(x, dst, count, [f](auto d, auto v) {
+        const auto vf = hn::Set(d, f);
+        return PreciseLog(d, hn::IfThenElse(hn::Lt(v, vf), vf, v));
+    });
+}
+
+template <typename T> void SinT(const T* x, T* dst, size_t count, bool fast) {
+    if constexpr (sizeof(T) == 4) {
+        if (fast) {
+            MapT(x, dst, count, [](auto d, auto v) {
+                decltype(v) s, c;
+                FastSinCosF(d, v, s, c);
+                return s;
+            });
+            return;
+        }
+    }
+    (void)fast;
+    MapT(x, dst, count, [](auto d, auto v) { return PreciseSin(d, v); });
+}
+
+template <typename T> void CosT(const T* x, T* dst, size_t count, bool fast) {
+    if constexpr (sizeof(T) == 4) {
+        if (fast) {
+            MapT(x, dst, count, [](auto d, auto v) {
+                decltype(v) s, c;
+                FastSinCosF(d, v, s, c);
+                return c;
+            });
+            return;
+        }
+    }
+    (void)fast;
+    MapT(x, dst, count, [](auto d, auto v) { return PreciseCos(d, v); });
+}
+
+template <typename T>
+void SinCosT(const T* x, T* sin_out, T* cos_out, size_t count, bool fast) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    const auto one_step = [&](hn::Vec<decltype(d)> v, hn::Vec<decltype(d)>& s,
+                              hn::Vec<decltype(d)>& c) {
+        if constexpr (sizeof(T) == 4) {
+            if (fast) {
+                FastSinCosF(d, v, s, c);
+                return;
+            }
+        }
+        (void)fast;
+        hn::SinCos(d, v, s, c);
+        // As PreciseSin / PreciseCos: an infinite or NaN argument gives NaN.
+        const auto bad = hn::Or(hn::IsInf(v), hn::IsNaN(v));
+        s = hn::IfThenElse(bad, hn::Sub(v, v), s);
+        c = hn::IfThenElse(bad, hn::Sub(v, v), c);
+    };
+    size_t i = 0;
+    hn::Vec<decltype(d)> s, c;
+    for (; i + N <= count; i += N) {
+        one_step(hn::LoadU(d, x + i), s, c);
+        hn::StoreU(s, d, sin_out + i);
+        hn::StoreU(c, d, cos_out + i);
+    }
+    if (i < count) {
+        const size_t rest = count - i;
+        one_step(hn::LoadN(d, x + i, rest), s, c);
+        hn::StoreN(s, d, sin_out + i, rest);
+        hn::StoreN(c, d, cos_out + i, rest);
+    }
+}
+
+template <typename T> void TanhT(const T* x, T* dst, size_t count, bool fast) {
+    if constexpr (sizeof(T) == 4) {
+        if (fast) {
+            MapT(x, dst, count, [](auto d, auto v) { return FastTanhF(d, v); });
+            return;
+        }
+    }
+    (void)fast;
+    MapT(x, dst, count, [](auto d, auto v) { return hn::Tanh(d, v); });
+}
+
+template <typename T> void SqrtT(const T* x, T* dst, size_t count) {
+    MapT(x, dst, count, [](auto d, auto v) {
+        (void)d;
+        return hn::Sqrt(v);
+    });
+}
+
+// x - k * 2*pi with k = round(x / 2*pi), 2*pi split into three parts whose
+// leading ones have few enough bits that k times them is exact, so the result
+// is right to the last bit of the result for |x| up to about 1e4 (float) and
+// 1e6 (double) even where fused multiply-add is unavailable.
+template <typename T> void WrapPhaseT(const T* x, T* dst, size_t count) {
+    MapT(x, dst, count, [](auto d, auto v) {
+        using V = decltype(v);
+        V k, r;
+        if constexpr (sizeof(T) == 4) {
+            k = hn::Round(hn::Mul(v, hn::Set(d, 0.15915494309189535f)));
+            r = hn::NegMulAdd(k, hn::Set(d, 6.28125f), v);
+            r = hn::NegMulAdd(k, hn::Set(d, 0.0019350051879882812f), r);
+            r = hn::NegMulAdd(k, hn::Set(d, 3.019916050561733e-07f), r);
+        } else {
+            k = hn::Round(hn::Mul(v, hn::Set(d, 0.15915494309189535)));
+            r = hn::NegMulAdd(k, hn::Set(d, 6.283185303211212), v);
+            r = hn::NegMulAdd(k, hn::Set(d, 3.9683743166540886e-09), r);
+            r = hn::NegMulAdd(k, hn::Set(d, 2.068073192717642e-18), r);
+        }
+        return r;
+    });
+}
+
+#define PULP_SIMD_HWY_INSTANTIATE_MATH(SUFFIX, T)                                                  \
+    void Exp##SUFFIX(const T* x, T* dst, size_t n, bool fast) {                                    \
+        ExpT(x, dst, n, fast);                                                                     \
+    }                                                                                              \
+    void Log##SUFFIX(const T* x, T floor, T* dst, size_t n, bool fast) {                           \
+        LogT(x, floor, dst, n, fast);                                                              \
+    }                                                                                              \
+    void Sin##SUFFIX(const T* x, T* dst, size_t n, bool fast) {                                    \
+        SinT(x, dst, n, fast);                                                                     \
+    }                                                                                              \
+    void Cos##SUFFIX(const T* x, T* dst, size_t n, bool fast) {                                    \
+        CosT(x, dst, n, fast);                                                                     \
+    }                                                                                              \
+    void SinCos##SUFFIX(const T* x, T* s, T* c, size_t n, bool fast) {                             \
+        SinCosT(x, s, c, n, fast);                                                                 \
+    }                                                                                              \
+    void Tanh##SUFFIX(const T* x, T* dst, size_t n, bool fast) {                                   \
+        TanhT(x, dst, n, fast);                                                                    \
+    }                                                                                              \
+    void Sqrt##SUFFIX(const T* x, T* dst, size_t n) {                                              \
+        SqrtT(x, dst, n);                                                                          \
+    }                                                                                              \
+    void WrapPhase##SUFFIX(const T* x, T* dst, size_t n) {                                         \
+        WrapPhaseT(x, dst, n);                                                                     \
+    }
+
+PULP_SIMD_HWY_INSTANTIATE_MATH(F32, float)
+PULP_SIMD_HWY_INSTANTIATE_MATH(F64, double)
+
+#undef PULP_SIMD_HWY_INSTANTIATE_MATH
+
 } // namespace HWY_NAMESPACE
 } // namespace pulp::simd::backend::highway
 
@@ -989,6 +1277,51 @@ PULP_SIMD_HWY_DEFINE_COMPLEX(F32, float)
 PULP_SIMD_HWY_DEFINE_COMPLEX(F64, double)
 
 #undef PULP_SIMD_HWY_DEFINE_COMPLEX
+
+#define PULP_SIMD_HWY_EXPORT_MATH(SUFFIX) \
+    HWY_EXPORT(Exp##SUFFIX); \
+    HWY_EXPORT(Log##SUFFIX); \
+    HWY_EXPORT(Sin##SUFFIX); \
+    HWY_EXPORT(Cos##SUFFIX); \
+    HWY_EXPORT(SinCos##SUFFIX); \
+    HWY_EXPORT(Tanh##SUFFIX); \
+    HWY_EXPORT(Sqrt##SUFFIX); \
+    HWY_EXPORT(WrapPhase##SUFFIX);
+
+PULP_SIMD_HWY_EXPORT_MATH(F32)
+PULP_SIMD_HWY_EXPORT_MATH(F64)
+#undef PULP_SIMD_HWY_EXPORT_MATH
+
+#define PULP_SIMD_HWY_DEFINE_MATH(SUFFIX, T)                                                       \
+    void exp(const T* x, T* dst, std::size_t n, Accuracy accuracy) noexcept {                      \
+        HWY_DYNAMIC_DISPATCH(Exp##SUFFIX)(x, dst, n, accuracy == Accuracy::fast);                  \
+    }                                                                                              \
+    void log(const T* x, T floor, T* dst, std::size_t n, Accuracy accuracy) noexcept {             \
+        HWY_DYNAMIC_DISPATCH(Log##SUFFIX)(x, floor, dst, n, accuracy == Accuracy::fast);           \
+    }                                                                                              \
+    void sin(const T* x, T* dst, std::size_t n, Accuracy accuracy) noexcept {                      \
+        HWY_DYNAMIC_DISPATCH(Sin##SUFFIX)(x, dst, n, accuracy == Accuracy::fast);                  \
+    }                                                                                              \
+    void cos(const T* x, T* dst, std::size_t n, Accuracy accuracy) noexcept {                      \
+        HWY_DYNAMIC_DISPATCH(Cos##SUFFIX)(x, dst, n, accuracy == Accuracy::fast);                  \
+    }                                                                                              \
+    void sincos(const T* x, T* sin_out, T* cos_out, std::size_t n, Accuracy accuracy) noexcept {   \
+        HWY_DYNAMIC_DISPATCH(SinCos##SUFFIX)(x, sin_out, cos_out, n, accuracy == Accuracy::fast);  \
+    }                                                                                              \
+    void tanh(const T* x, T* dst, std::size_t n, Accuracy accuracy) noexcept {                     \
+        HWY_DYNAMIC_DISPATCH(Tanh##SUFFIX)(x, dst, n, accuracy == Accuracy::fast);                 \
+    }                                                                                              \
+    void sqrt(const T* x, T* dst, std::size_t n) noexcept {                                        \
+        HWY_DYNAMIC_DISPATCH(Sqrt##SUFFIX)(x, dst, n);                                             \
+    }                                                                                              \
+    void wrap_phase(const T* x, T* dst, std::size_t n) noexcept {                                  \
+        HWY_DYNAMIC_DISPATCH(WrapPhase##SUFFIX)(x, dst, n);                                        \
+    }
+
+PULP_SIMD_HWY_DEFINE_MATH(F32, float)
+PULP_SIMD_HWY_DEFINE_MATH(F64, double)
+
+#undef PULP_SIMD_HWY_DEFINE_MATH
 
 // HWY_DYNAMIC_DISPATCH expands its argument relative to the generated target
 // namespace. Keep these calls inside the backend namespace so the single-target

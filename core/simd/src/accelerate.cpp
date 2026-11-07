@@ -45,6 +45,24 @@ inline DSPDoubleSplitComplex as_split(const double* re, const double* im) noexce
     return DSPDoubleSplitComplex{const_cast<double*>(re), const_cast<double*>(im)};
 }
 
+// vForce takes an int count; long buffers go through in chunks.
+constexpr std::size_t kVForceChunk = std::size_t{1} << 24;
+
+template <typename F> inline void for_chunks(std::size_t n, F&& f) noexcept {
+    for (std::size_t i = 0; i < n; i += kVForceChunk) {
+        const int m = static_cast<int>(std::min(kVForceChunk, n - i));
+        f(i, &m);
+    }
+}
+
+/// dst[i] = x[i] < floor ? floor : x[i], with the floor made positive normal;
+/// NaN passes through. vvlog then runs in place on dst.
+template <typename T> inline void apply_log_floor(const T* x, T floor, T* dst, std::size_t n) noexcept {
+    const T f = detail::effective_log_floor(floor);
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = x[i] < f ? f : x[i];
+}
+
 } // namespace
 
 // ── float ────────────────────────────────────────────────────────────────────
@@ -610,6 +628,70 @@ void complex_phase_split(const double* re, const double* im, double* dst, std::s
 void complex_power_spectrum_split(const double* re, const double* im, double scale, double* dst,
                                   std::size_t n) noexcept {
     power_strided(re, im, 1, scale, dst, n);
+}
+
+// ── vector math (float) ───────────────────────────────────────────────────────────
+// Both accuracy tiers run vForce, which has a single algorithm per function.
+
+void exp(const float* x, float* dst, std::size_t n, Accuracy) noexcept {
+    for_chunks(n, [&](std::size_t i, const int* m) { vvexpf(dst + i, x + i, m); });
+}
+void log(const float* x, float floor, float* dst, std::size_t n, Accuracy) noexcept {
+    apply_log_floor(x, floor, dst, n);
+    for_chunks(n, [&](std::size_t i, const int* m) { vvlogf(dst + i, dst + i, m); });
+}
+void sin(const float* x, float* dst, std::size_t n, Accuracy) noexcept {
+    for_chunks(n, [&](std::size_t i, const int* m) { vvsinf(dst + i, x + i, m); });
+}
+void cos(const float* x, float* dst, std::size_t n, Accuracy) noexcept {
+    for_chunks(n, [&](std::size_t i, const int* m) { vvcosf(dst + i, x + i, m); });
+}
+void sincos(const float* x, float* sin_out, float* cos_out, std::size_t n, Accuracy) noexcept {
+    for_chunks(n, [&](std::size_t i, const int* m) {
+        vvsincosf(sin_out + i, cos_out + i, x + i, m);
+    });
+}
+void tanh(const float* x, float* dst, std::size_t n, Accuracy) noexcept {
+    for_chunks(n, [&](std::size_t i, const int* m) { vvtanhf(dst + i, x + i, m); });
+}
+// The hardware square root is correctly rounded; a plain loop compiles to it.
+void sqrt(const float* x, float* dst, std::size_t n) noexcept {
+    detail::sqrt_impl(x, dst, n);
+}
+void wrap_phase(const float* x, float* dst, std::size_t n) noexcept {
+    detail::wrap_phase_impl(x, dst, n);
+}
+
+// ── vector math (double) ───────────────────────────────────────────────────────────
+// Both accuracy tiers run vForce, which has a single algorithm per function.
+
+void exp(const double* x, double* dst, std::size_t n, Accuracy) noexcept {
+    for_chunks(n, [&](std::size_t i, const int* m) { vvexp(dst + i, x + i, m); });
+}
+void log(const double* x, double floor, double* dst, std::size_t n, Accuracy) noexcept {
+    apply_log_floor(x, floor, dst, n);
+    for_chunks(n, [&](std::size_t i, const int* m) { vvlog(dst + i, dst + i, m); });
+}
+void sin(const double* x, double* dst, std::size_t n, Accuracy) noexcept {
+    for_chunks(n, [&](std::size_t i, const int* m) { vvsin(dst + i, x + i, m); });
+}
+void cos(const double* x, double* dst, std::size_t n, Accuracy) noexcept {
+    for_chunks(n, [&](std::size_t i, const int* m) { vvcos(dst + i, x + i, m); });
+}
+void sincos(const double* x, double* sin_out, double* cos_out, std::size_t n, Accuracy) noexcept {
+    for_chunks(n, [&](std::size_t i, const int* m) {
+        vvsincos(sin_out + i, cos_out + i, x + i, m);
+    });
+}
+void tanh(const double* x, double* dst, std::size_t n, Accuracy) noexcept {
+    for_chunks(n, [&](std::size_t i, const int* m) { vvtanh(dst + i, x + i, m); });
+}
+// The hardware square root is correctly rounded; a plain loop compiles to it.
+void sqrt(const double* x, double* dst, std::size_t n) noexcept {
+    detail::sqrt_impl(x, dst, n);
+}
+void wrap_phase(const double* x, double* dst, std::size_t n) noexcept {
+    detail::wrap_phase_impl(x, dst, n);
 }
 
 } // namespace pulp::simd::backend::accelerate

@@ -312,6 +312,72 @@ inline void complex_phase_impl(const T* re, const T* im, std::size_t s, T* dst,
         dst[i] = std::atan2(im[i * s], re[i * s]);
 }
 
+// ── vector math ──────────────────────────────────────────────────────────────
+
+/// The floor actually applied by log(): a request at or below zero (or NaN)
+/// means "the smallest normal number", so the argument is never zero,
+/// subnormal or negative.
+template <typename T> inline T effective_log_floor(T floor) noexcept {
+    constexpr T kMin = std::numeric_limits<T>::min();
+    return floor > kMin ? floor : kMin;
+}
+
+template <typename T> inline void exp_impl(const T* x, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::exp(x[i]);
+}
+
+template <typename T>
+inline void log_impl(const T* x, T floor, T* dst, std::size_t n) noexcept {
+    const T f = effective_log_floor(floor);
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::log(x[i] < f ? f : x[i]);
+}
+
+template <typename T> inline void sin_impl(const T* x, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::sin(x[i]);
+}
+
+template <typename T> inline void cos_impl(const T* x, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::cos(x[i]);
+}
+
+template <typename T>
+inline void sincos_impl(const T* x, T* s, T* c, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T v = x[i];
+        s[i] = std::sin(v);
+        c[i] = std::cos(v);
+    }
+}
+
+template <typename T> inline void tanh_impl(const T* x, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::tanh(x[i]);
+}
+
+template <typename T> inline void sqrt_impl(const T* x, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::sqrt(x[i]);
+}
+
+/// x - 2*pi*round(x / 2*pi), formed in double with 2*pi as a double-double so
+/// the subtraction of the multiple is exact to the last bit of the result.
+template <typename T> inline void wrap_phase_impl(const T* x, T* dst, std::size_t n) noexcept {
+    constexpr double kInvTwoPi = 0.15915494309189535;
+    constexpr double kTwoPiHi = 6.283185307179586;
+    constexpr double kTwoPiLo = 2.4492935982947064e-16;
+    for (std::size_t i = 0; i < n; ++i) {
+        const double v = static_cast<double>(x[i]);
+        const double k = std::nearbyint(v * kInvTwoPi);
+        double r = std::fma(-k, kTwoPiHi, v);
+        r = std::fma(-k, kTwoPiLo, r);
+        dst[i] = static_cast<T>(r);
+    }
+}
+
 } // namespace pulp::simd::detail
 
 // Defines every kernel overload for element type T in the current namespace.
@@ -472,4 +538,33 @@ inline void complex_phase_impl(const T* re, const T* im, std::size_t s, T* dst,
     SPEC void complex_power_spectrum_split(const T* re, const T* im, T scale, T* dst,              \
                                            std::size_t n) noexcept {                               \
         ::pulp::simd::detail::complex_magnitude_squared_impl(re, im, 1, scale, dst, n);            \
+    }
+
+// Vector math. The Accuracy argument is accepted and ignored by this backend:
+// the C library functions are already at least as accurate as either tier.
+#define PULP_SIMD_SCALAR_DEFINE_MATH(SPEC, T)                                                      \
+    SPEC void exp(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy) noexcept {            \
+        ::pulp::simd::detail::exp_impl(x, dst, n);                                                 \
+    }                                                                                              \
+    SPEC void log(const T* x, T floor, T* dst, std::size_t n, ::pulp::simd::Accuracy) noexcept {   \
+        ::pulp::simd::detail::log_impl(x, floor, dst, n);                                          \
+    }                                                                                              \
+    SPEC void sin(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy) noexcept {            \
+        ::pulp::simd::detail::sin_impl(x, dst, n);                                                 \
+    }                                                                                              \
+    SPEC void cos(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy) noexcept {            \
+        ::pulp::simd::detail::cos_impl(x, dst, n);                                                 \
+    }                                                                                              \
+    SPEC void sincos(const T* x, T* sin_out, T* cos_out, std::size_t n,                            \
+                     ::pulp::simd::Accuracy) noexcept {                                            \
+        ::pulp::simd::detail::sincos_impl(x, sin_out, cos_out, n);                                 \
+    }                                                                                              \
+    SPEC void tanh(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy) noexcept {           \
+        ::pulp::simd::detail::tanh_impl(x, dst, n);                                                \
+    }                                                                                              \
+    SPEC void sqrt(const T* x, T* dst, std::size_t n) noexcept {                                   \
+        ::pulp::simd::detail::sqrt_impl(x, dst, n);                                                \
+    }                                                                                              \
+    SPEC void wrap_phase(const T* x, T* dst, std::size_t n) noexcept {                             \
+        ::pulp::simd::detail::wrap_phase_impl(x, dst, n);                                          \
     }

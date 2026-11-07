@@ -178,6 +178,64 @@
     void complex_power_spectrum_split(const T* re, const T* im, T scale, T* dst,                   \
                                       std::size_t count) noexcept;
 
+/// How close a vector math result must be to the true value.
+///
+///   precise   within a few units in the last place (ULP) of the true result
+///             over the documented input range, for float and double.
+///   fast      float only, a cheaper algorithm accurate to roughly six
+///             decimal digits (the exact bound is stated per function below).
+///             Double precision has no cheaper tier, so `fast` on double runs
+///             the `precise` kernel.
+///
+/// A backend may be more accurate than the tier it was asked for (the scalar
+/// backend and Accelerate have a single algorithm and ignore the argument);
+/// the stated bound is always an upper limit. Results do not depend on where
+/// an element falls in the buffer or on the buffer's alignment.
+namespace pulp::simd {
+enum class Accuracy { precise, fast };
+} // namespace pulp::simd
+
+// Vector math over buffers, for float and double.
+//
+//   exp(x, dst, n, acc)         dst[i] = e^x[i]
+//   log(x, floor, dst, n, acc)  dst[i] = ln(max(x[i], floor)); a floor at or
+//                               below zero (or NaN) means the smallest normal
+//                               number, so the argument is never zero, negative
+//                               or subnormal and the result is always finite
+//   sin(x, dst, n, acc)         dst[i] = sin(x[i]), x in radians
+//   cos(x, dst, n, acc)         dst[i] = cos(x[i])
+//   sincos(x, s, c, n, acc)     s[i] = sin(x[i]) and c[i] = cos(x[i]) from one
+//                               argument reduction
+//   tanh(x, dst, n, acc)        dst[i] = tanh(x[i])
+//   sqrt(x, dst, n)             dst[i] = sqrt(x[i]), correctly rounded on every
+//                               backend (the hardware square root is already
+//                               the fast path, so there is no cheaper tier)
+//   wrap_phase(x, dst, n)       dst[i] = x[i] - 2*pi*round(x[i] / 2*pi), the
+//                               phase brought into [-pi, pi] (to within one
+//                               ulp at the ends)
+//
+// The accuracy argument defaults to Accuracy::precise. dst may equal x exactly
+// (sincos: s or c may equal x). NaN in gives NaN out for the precise tier; the
+// fast tier does not define NaN. The measured error of every function and tier
+// is stated below the kernels' list in docs/reference/modules.md and checked by
+// the "[simd][accuracy]" cases in test/test_simd_math.cpp.
+
+#define PULP_SIMD_DECLARE_MATH_KERNELS(T)                                                          \
+    void exp(const T* x, T* dst, std::size_t count,                                                \
+             ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;          \
+    void log(const T* x, T floor, T* dst, std::size_t count,                                       \
+             ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;          \
+    void sin(const T* x, T* dst, std::size_t count,                                                \
+             ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;          \
+    void cos(const T* x, T* dst, std::size_t count,                                                \
+             ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;          \
+    void sincos(const T* x, T* sin_out, T* cos_out, std::size_t count,                             \
+                ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;       \
+    void tanh(const T* x, T* dst, std::size_t count,                                               \
+              ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;         \
+    void sqrt(const T* x, T* dst, std::size_t count) noexcept;                                     \
+    void wrap_phase(const T* x, T* dst, std::size_t count) noexcept;
+
 namespace pulp::simd {
 
 namespace backend {
@@ -187,6 +245,8 @@ PULP_SIMD_DECLARE_KERNELS(float)
 PULP_SIMD_DECLARE_KERNELS(double)
 PULP_SIMD_DECLARE_COMPLEX_KERNELS(float)
 PULP_SIMD_DECLARE_COMPLEX_KERNELS(double)
+PULP_SIMD_DECLARE_MATH_KERNELS(float)
+PULP_SIMD_DECLARE_MATH_KERNELS(double)
 } // namespace scalar
 
 #if defined(PULP_SIMD_HAS_HIGHWAY)
@@ -195,6 +255,8 @@ PULP_SIMD_DECLARE_KERNELS(float)
 PULP_SIMD_DECLARE_KERNELS(double)
 PULP_SIMD_DECLARE_COMPLEX_KERNELS(float)
 PULP_SIMD_DECLARE_COMPLEX_KERNELS(double)
+PULP_SIMD_DECLARE_MATH_KERNELS(float)
+PULP_SIMD_DECLARE_MATH_KERNELS(double)
 } // namespace highway
 #endif
 
@@ -204,6 +266,8 @@ PULP_SIMD_DECLARE_KERNELS(float)
 PULP_SIMD_DECLARE_KERNELS(double)
 PULP_SIMD_DECLARE_COMPLEX_KERNELS(float)
 PULP_SIMD_DECLARE_COMPLEX_KERNELS(double)
+PULP_SIMD_DECLARE_MATH_KERNELS(float)
+PULP_SIMD_DECLARE_MATH_KERNELS(double)
 } // namespace accelerate
 #endif
 
@@ -223,6 +287,8 @@ PULP_SIMD_SCALAR_DEFINE(inline, float)
 PULP_SIMD_SCALAR_DEFINE(inline, double)
 PULP_SIMD_SCALAR_DEFINE_COMPLEX(inline, float)
 PULP_SIMD_SCALAR_DEFINE_COMPLEX(inline, double)
+PULP_SIMD_SCALAR_DEFINE_MATH(inline, float)
+PULP_SIMD_SCALAR_DEFINE_MATH(inline, double)
 } // namespace pulp::simd::backend::inline_scalar
 #endif
 
@@ -248,6 +314,7 @@ using active_backend::add;
 using active_backend::add_scaled;
 using active_backend::clamp;
 using active_backend::correlate;
+using active_backend::cos;
 using active_backend::complex_magnitude;
 using active_backend::complex_magnitude_split;
 using active_backend::complex_magnitude_squared;
@@ -266,12 +333,14 @@ using active_backend::decimate2;
 using active_backend::deinterleave2;
 using active_backend::div;
 using active_backend::dot;
+using active_backend::exp;
 using active_backend::find_maximum;
 using active_backend::find_minimum;
 using active_backend::fma;
 using active_backend::from_int16;
 using active_backend::from_int32;
 using active_backend::interleave2;
+using active_backend::log;
 using active_backend::max_abs;
 using active_backend::maximum;
 using active_backend::mean;
@@ -284,11 +353,16 @@ using active_backend::replace_below;
 using active_backend::rms;
 using active_backend::scale;
 using active_backend::set;
+using active_backend::sin;
+using active_backend::sincos;
+using active_backend::sqrt;
 using active_backend::sub;
 using active_backend::sum;
 using active_backend::sum_squares;
+using active_backend::tanh;
 using active_backend::to_int16;
 using active_backend::to_int32;
+using active_backend::wrap_phase;
 
 #if defined(PULP_SIMD_HAS_HIGHWAY)
 /// Number of float lanes on the dispatched Highway target.
@@ -311,5 +385,6 @@ inline constexpr std::size_t double_lanes() noexcept {
 
 } // namespace pulp::simd
 
+#undef PULP_SIMD_DECLARE_MATH_KERNELS
 #undef PULP_SIMD_DECLARE_COMPLEX_KERNELS
 #undef PULP_SIMD_DECLARE_KERNELS

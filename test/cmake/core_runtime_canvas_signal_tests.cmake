@@ -301,6 +301,14 @@ pulp_add_test_suite(pulp-test-simd-complex
     SOURCES test_simd_complex.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
 
+# Vector math (exp, log, sin, cos, sincos, tanh, sqrt, wrap_phase) and the
+# precise / fast accuracy tiers: measured error against the documented bounds on
+# every compiled backend, special values, position independence and no
+# allocation. "pulp-test-simd-math [accuracy-report]" prints the measured maxima.
+pulp_add_test_suite(pulp-test-simd-math
+    SOURCES test_simd_math.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+
 # The header's inline scalar fallback for builds that list sources by hand:
 # only the include directory, deliberately no pulp::simd link.
 add_executable(pulp-test-simd-header-fallback test_simd_header_fallback.cpp)

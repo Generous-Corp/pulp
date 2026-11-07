@@ -8,6 +8,7 @@
 #include <pulp/simd/simd.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -42,6 +43,21 @@ TEST_CASE("pulp::simd resolves to the inline scalar kernels without the library"
     std::array<std::int16_t, 3> pcm{};
     pulp::simd::to_int16(loud.data(), 32768.0f, pcm.data(), pcm.size());
     CHECK(pcm == std::array<std::int16_t, 3>{16384, 32767, -32768});
+
+    const std::array<float, 3> arg{0.0f, 1.0f, 2.0f};
+    std::array<float, 3> e{};
+    pulp::simd::exp(arg.data(), e.data(), e.size(), pulp::simd::Accuracy::fast);
+    CHECK(e[0] == 1.0f);
+    CHECK(std::fabs(e[1] - 2.7182817f) < 1e-6f);
+    const std::array<float, 2> big{7.0f, -7.0f};
+    std::array<float, 2> w{};
+    pulp::simd::wrap_phase(big.data(), w.data(), w.size());
+    CHECK(std::fabs(w[0] - (7.0f - 6.2831855f)) < 1e-6f);
+    CHECK(std::fabs(w[1] - (-7.0f + 6.2831855f)) < 1e-6f);
+    const std::array<float, 4> z{1.0f, 0.0f, 0.0f, 2.0f};
+    std::array<float, 2> mag{};
+    pulp::simd::complex_magnitude(z.data(), mag.data(), 2);
+    CHECK(mag == std::array<float, 2>{1.0f, 2.0f});
 
     const std::array<double, 3> xd{0.5, 0.25, -1.0};
     CHECK(pulp::simd::sum(xd.data(), xd.size()) == -0.25);

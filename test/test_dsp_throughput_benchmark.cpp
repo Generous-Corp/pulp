@@ -1129,6 +1129,125 @@ void run_all_backend_kernels() {
 
 #undef PULP_BENCH_BACKEND
 
+// Kernels added after the first set: elementwise division, sample-format
+// conversion, stereo interleave, complex spectral products and vector math.
+// ns per element (per complex bin for the complex rows).
+#define PULP_BENCH_BACKEND_MORE(NAME, NS)                                                          \
+    run_backend_more_kernels(                                                                      \
+        NAME, [](const float* a, const float* b, float* d, std::size_t n) { NS::div(a, b, d, n); },   \
+        [](const float* x, float* d, std::size_t n) {                                              \
+            NS::to_int16(x, 32768.0f, reinterpret_cast<std::int16_t*>(d), n);                      \
+        },                                                                                         \
+        [](const float* l, const float* r, float* d, std::size_t n) {                              \
+            NS::interleave2(l, r, d, n);                                                           \
+        },                                                                                         \
+        [](const float* a, const float* b, float* acc, std::size_t n) {                            \
+            NS::complex_multiply_accumulate(a, b, acc, n);                                         \
+        },                                                                                         \
+        [](const float* z, float* d, std::size_t n) { NS::complex_magnitude(z, d, n); },           \
+        [](const float* z, float* d, std::size_t n) { NS::complex_phase(z, d, n); },               \
+        [](const float* x, float* d, std::size_t n, bool fast) {                                   \
+            NS::exp(x, d, n, fast ? pulp::simd::Accuracy::fast : pulp::simd::Accuracy::precise);   \
+        },                                                                                         \
+        [](const float* x, float* d, std::size_t n, bool fast) {                                   \
+            NS::log(x, 1e-12f, d, n,                                                               \
+                    fast ? pulp::simd::Accuracy::fast : pulp::simd::Accuracy::precise);            \
+        },                                                                                         \
+        [](const float* x, float* d, std::size_t n, bool fast) {                                   \
+            NS::sin(x, d, n, fast ? pulp::simd::Accuracy::fast : pulp::simd::Accuracy::precise);   \
+        },                                                                                         \
+        [](const float* x, float* d, std::size_t n, bool fast) {                                   \
+            NS::tanh(x, d, n, fast ? pulp::simd::Accuracy::fast : pulp::simd::Accuracy::precise);  \
+        },                                                                                         \
+        [](const float* x, float* d, std::size_t n) { NS::wrap_phase(x, d, n); })
+
+template <typename Div, typename ToInt, typename Interleave, typename Mac, typename Mag,
+          typename Phase, typename Exp, typename Log, typename Sin, typename Tanh, typename Wrap>
+void run_backend_more_kernels(const char* backend, Div div, ToInt to_int16, Interleave interleave2,
+                              Mac mac, Mag mag, Phase phase, Exp vexp, Log vlog, Sin vsin,
+                              Tanh vtanh, Wrap wrap) {
+    for (int N : {64, 512}) {
+        const auto n = std::size_t(N);
+        auto a = noise(2 * n + 256, 21), b = noise(2 * n + 256, 22), dst = noise(2 * n, 23);
+        for (auto& v : b)
+            v = v < 0.0f ? v - 1.5f : v + 1.5f; // keep divisors away from zero
+        std::vector<float> pos(n);
+        for (std::size_t i = 0; i < n; ++i)
+            pos[i] = std::fabs(a[i]) + 0.01f;
+        const std::string suffix = std::string(" ") + backend;
+        bench_kernel("kernel.div" + suffix, N, n, [&] {
+            clobber(a.data());
+            div(a.data(), b.data(), dst.data(), n);
+            clobber(dst.data());
+        });
+        bench_kernel("kernel.to_int16" + suffix, N, n, [&] {
+            clobber(a.data());
+            to_int16(a.data(), dst.data(), n);
+            clobber(dst.data());
+        });
+        bench_kernel("kernel.interleave2" + suffix, N, n, [&] {
+            clobber(a.data());
+            interleave2(a.data(), b.data(), dst.data(), n);
+            clobber(dst.data());
+        });
+        bench_kernel("kernel.complex_multiply_accumulate" + suffix, N, n, [&] {
+            clobber(a.data());
+            mac(a.data(), b.data(), dst.data(), n);
+            clobber(dst.data());
+        });
+        bench_kernel("kernel.complex_magnitude" + suffix, N, n, [&] {
+            clobber(a.data());
+            mag(a.data(), dst.data(), n);
+            clobber(dst.data());
+        });
+        bench_kernel("kernel.complex_phase" + suffix, N, n, [&] {
+            clobber(a.data());
+            phase(a.data(), dst.data(), n);
+            clobber(dst.data());
+        });
+        for (const bool fast : {false, true}) {
+            const std::string tier = fast ? " fast" : " precise";
+            bench_kernel("kernel.exp" + tier + suffix, N, n, [&] {
+                clobber(a.data());
+                vexp(a.data(), dst.data(), n, fast);
+                clobber(dst.data());
+            });
+            bench_kernel("kernel.log" + tier + suffix, N, n, [&] {
+                clobber(pos.data());
+                vlog(pos.data(), dst.data(), n, fast);
+                clobber(dst.data());
+            });
+            bench_kernel("kernel.sin" + tier + suffix, N, n, [&] {
+                clobber(a.data());
+                vsin(a.data(), dst.data(), n, fast);
+                clobber(dst.data());
+            });
+            bench_kernel("kernel.tanh" + tier + suffix, N, n, [&] {
+                clobber(a.data());
+                vtanh(a.data(), dst.data(), n, fast);
+                clobber(dst.data());
+            });
+        }
+        bench_kernel("kernel.wrap_phase" + suffix, N, n, [&] {
+            clobber(a.data());
+            wrap(a.data(), dst.data(), n);
+            clobber(dst.data());
+        });
+    }
+}
+
+void run_more_backend_kernels() {
+    PULP_BENCH_BACKEND_MORE("scalar-backend", pulp::simd::backend::scalar);
+#if defined(PULP_SIMD_HAS_HIGHWAY)
+    PULP_BENCH_BACKEND_MORE("highway", pulp::simd::backend::highway);
+#endif
+#if defined(PULP_SIMD_HAS_ACCELERATE)
+    PULP_BENCH_BACKEND_MORE("accelerate", pulp::simd::backend::accelerate);
+#endif
+}
+
+#undef PULP_BENCH_BACKEND_MORE
+
 // ── Environment and JSON ────────────────────────────────────────────────────
 
 std::string json_escape(const std::string& s) {
@@ -1621,6 +1740,7 @@ int main(int argc, char** argv) {
     for (int B : kBlockSizes) run_processors(B);
     run_kernels();
     run_all_backend_kernels();
+    run_more_backend_kernels();
     run_multi_instance_convolvers();
 
     if (!g_options.json_path.empty()) write_json(g_options.json_path, timer_overhead_ns);
