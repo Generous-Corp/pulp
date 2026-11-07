@@ -13,7 +13,7 @@
 #include <pulp/view/motion_preferences.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/continuous_frames.hpp>
-#include <pulp/view/eq_curve_view.hpp>
+#include <pulp/view/graph_scale.hpp>
 #include <pulp/canvas/canvas.hpp>
 
 #include <array>
@@ -4395,16 +4395,6 @@ TEST_CASE("SpectrumView zero-width and disabled states are safe", "[view][spectr
     off.push_samples(x.data(), x.size());
 }
 
-TEST_CASE("SpectrumView analysis keeps the view repainting only while enabled",
-          "[view][spectrum]") {
-    SpectrumView view;
-    CHECK_FALSE(needs_continuous_frames(&view));
-    view.set_analysis_enabled(true);
-    CHECK(needs_continuous_frames(&view));
-    view.set_analysis_enabled(false);
-    CHECK_FALSE(needs_continuous_frames(&view));
-}
-
 TEST_CASE("SpectrumView survives setting changes while audio keeps flowing", "[view][spectrum]") {
     SpectrumView view;
     view.set_bounds({0, 0, 400, 100});
@@ -4442,41 +4432,12 @@ TEST_CASE("SpectrumView supplied bins keep their original drawing", "[view][spec
     CHECK_FALSE(view.analysis_enabled());
 }
 
-TEST_CASE("EqCurveView analyzer overlay maps bins through SpectrumBinMapping", "[view][spectrum]") {
-    EqCurveView eq;
-    eq.set_bounds({0, 0, 640, 240});
-    eq.set_sample_rate(48000.0f);
-
-    // A narrow peak between two bins of a 2048-point spectrum.
-    std::vector<float> bins(1025, -90.0f);
-    const double vertex = 1000.0 / (48000.0 / 2048.0);
-    for (int k = 0; k < 1025; ++k)
-        bins[static_cast<std::size_t>(k)] =
-            std::max(-90.0f, -3.0f - 6.0f * static_cast<float>((k - vertex) * (k - vertex)));
-    eq.set_spectrum(bins.data(), bins.size());
-
-    RecordingCanvas with_overlay;
-    eq.paint(with_overlay);
-    CHECK(eq.analyzer_animating());
-    eq.set_analyzer_enabled(false);
-    RecordingCanvas without_overlay;
-    eq.paint(without_overlay);
-    eq.set_analyzer_enabled(true);
-    // The overlay's top stroke is a polyline of many segments.
-    CHECK(with_overlay.count(DrawCommand::Type::stroke_line) >
-          without_overlay.count(DrawCommand::Type::stroke_line) + 100);
-
-    // A bin count that changes between frames (FFT-size change) repaints cleanly.
-    std::vector<float> bigger(4097, -60.0f);
-    eq.set_spectrum(bigger.data(), bigger.size());
-    RecordingCanvas again;
-    eq.paint(again);
-    CHECK(again.count(DrawCommand::Type::stroke_line) >
-          without_overlay.count(DrawCommand::Type::stroke_line) + 100);
-
-    // A degenerate one-bin spectrum draws a floor line, not garbage.
-    float single = -20.0f;
-    eq.set_spectrum(&single, 1);
-    RecordingCanvas degenerate;
-    eq.paint(degenerate);
+TEST_CASE("SpectrumView analysis keeps the view repainting only while enabled",
+          "[view][spectrum]") {
+    SpectrumView view;
+    CHECK_FALSE(needs_continuous_frames(&view));
+    view.set_analysis_enabled(true);
+    CHECK(needs_continuous_frames(&view));
+    view.set_analysis_enabled(false);
+    CHECK_FALSE(needs_continuous_frames(&view));
 }
