@@ -580,6 +580,11 @@ pulp_add_test_suite(pulp-test-wasapi-share-modes GROUP pulp-test-group-view-host
 pulp_add_test_suite(pulp-test-alsa-input GROUP pulp-test-group-view-host-audio-devices
     LIBRARIES pulp::audio)
 
+# Conversion of driver-reported PCM capabilities into DeviceInfo lists
+# (used by the ALSA backend). Platform-independent.
+pulp_add_test_suite(pulp-test-pcm-capabilities GROUP pulp-test-group-view-host-audio-devices
+    LIBRARIES pulp::audio)
+
 # Cross-platform device-hotplug monitor. Lives in pulp::runtime so
 # both audio (AlsaSystem) and MIDI (AlsaMidiSystem) share it; libudev is the
 # Linux backend, no-op elsewhere — so this test runs on every platform.

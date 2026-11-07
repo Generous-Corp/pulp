@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/audio/device.hpp>
+#include <pulp/audio/pcm_capabilities.hpp>
 
 #ifndef __linux__
 #error "alsa_device.hpp is Linux-only"
@@ -80,6 +81,8 @@ private:
     uint64_t sample_position_ = 0;
     snd_pcm_uframes_t period_size_ = 0;
     int actual_channels_ = 0;
+    /// What the driver reported when the device was opened; empty before that.
+    std::optional<PcmCapabilities> capabilities_;
     std::atomic<bool> monotonic_timing_available_{false};
     std::atomic<std::uint64_t> route_instance_token_{0};
     mutable std::atomic<std::uint64_t> calibration_generation_{0};

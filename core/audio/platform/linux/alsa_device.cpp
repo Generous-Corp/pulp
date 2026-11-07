@@ -45,6 +45,84 @@ make_alsa_audio_io_timing(const AlsaTimingValues& values,
     return timing;
 }
 
+// ── Driver capability probing ────────────────────────────────────────────
+
+namespace {
+
+// Read what the driver allows from a hw_params space that has had its access
+// and format chosen. Rates are confirmed one by one with
+// snd_pcm_hw_params_test_rate, because a driver reports a continuous min..max
+// that often contains rates it cannot actually run.
+PcmCapabilities read_pcm_capabilities(snd_pcm_t* pcm, snd_pcm_hw_params_t* params) {
+    PcmCapabilities caps;
+    int dir = 0;
+    unsigned v = 0;
+
+    if (snd_pcm_hw_params_get_rate_min(params, &v, &dir) >= 0) caps.rate_min = v;
+    if (snd_pcm_hw_params_get_rate_max(params, &v, &dir) >= 0) caps.rate_max = v;
+    caps.rates_tested = true;
+    for (unsigned rate : standard_sample_rates()) {
+        if (rate < caps.rate_min || rate > caps.rate_max) continue;
+        if (snd_pcm_hw_params_test_rate(pcm, params, rate, 0) == 0) {
+            caps.accepted_rates.push_back(rate);
+        }
+    }
+    // A driver with one fixed rate may not be a standard one.
+    if (caps.rate_min != 0 && caps.rate_min == caps.rate_max
+        && snd_pcm_hw_params_test_rate(pcm, params, caps.rate_min, 0) == 0
+        && std::find(caps.accepted_rates.begin(), caps.accepted_rates.end(), caps.rate_min)
+               == caps.accepted_rates.end()) {
+        caps.accepted_rates.push_back(caps.rate_min);
+    }
+
+    if (snd_pcm_hw_params_get_channels_min(params, &v) >= 0) caps.channels_min = v;
+    if (snd_pcm_hw_params_get_channels_max(params, &v) >= 0) caps.channels_max = v;
+
+    snd_pcm_uframes_t frames = 0;
+    if (snd_pcm_hw_params_get_period_size_min(params, &frames, &dir) >= 0) caps.period_min = frames;
+    if (snd_pcm_hw_params_get_period_size_max(params, &frames, &dir) >= 0) caps.period_max = frames;
+    if (snd_pcm_hw_params_get_buffer_size_max(params, &frames) >= 0) caps.buffer_max = frames;
+    return caps;
+}
+
+// Open the device briefly in non-blocking mode and read its capabilities for
+// one direction. Empty when the device cannot be opened for that direction
+// (busy, missing, or no such direction).
+std::optional<PcmCapabilities> probe_pcm_capabilities(const std::string& id,
+                                                       snd_pcm_stream_t stream) {
+    snd_pcm_t* pcm = nullptr;
+    if (snd_pcm_open(&pcm, id.c_str(), stream, SND_PCM_NONBLOCK) < 0) return std::nullopt;
+
+    snd_pcm_hw_params_t* hw_params = nullptr;
+    snd_pcm_hw_params_alloca(&hw_params);
+    std::optional<PcmCapabilities> caps;
+    if (snd_pcm_hw_params_any(pcm, hw_params) >= 0
+        && snd_pcm_hw_params_set_access(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED) >= 0) {
+        // The stream is opened as float; if the hardware cannot do float
+        // natively, report the widest space rather than nothing.
+        snd_pcm_hw_params_t* with_format = nullptr;
+        snd_pcm_hw_params_alloca(&with_format);
+        snd_pcm_hw_params_copy(with_format, hw_params);
+        if (snd_pcm_hw_params_set_format(pcm, with_format, SND_PCM_FORMAT_FLOAT_LE) >= 0) {
+            caps = read_pcm_capabilities(pcm, with_format);
+        } else {
+            caps = read_pcm_capabilities(pcm, hw_params);
+        }
+    }
+    snd_pcm_close(pcm);
+    return caps;
+}
+
+// Fill rates, buffer sizes and channel counts for a device id from the driver.
+void fill_probed_capabilities(DeviceInfo& info) {
+    fill_device_info_from_capabilities(
+        info,
+        probe_pcm_capabilities(info.id, SND_PCM_STREAM_PLAYBACK),
+        probe_pcm_capabilities(info.id, SND_PCM_STREAM_CAPTURE));
+}
+
+}  // namespace
+
 // ── AlsaDevice ───────────────────────────────────────────────────────────
 
 AlsaDevice::AlsaDevice(const std::string& device_name,
@@ -90,6 +168,8 @@ bool AlsaDevice::open(const DeviceConfig& config) {
         close();
         return false;
     }
+
+    capabilities_ = read_pcm_capabilities(pcm_, hw_params);
 
     // Channels — pick the budget based on direction.
     actual_channels_ = (stream_ == SND_PCM_STREAM_CAPTURE)
@@ -182,6 +262,7 @@ void AlsaDevice::close() {
     channel_buffers_.clear();
     channel_ptrs_.clear();
     interleaved_.clear();
+    capabilities_.reset();
     is_open_ = false;
 }
 
@@ -288,8 +369,19 @@ DeviceInfo AlsaDevice::info() const {
         info.max_output_channels = actual_channels_ > 0 ? actual_channels_ : 2;
         info.max_input_channels  = 0;
     }
-    info.sample_rates = {44100, 48000, 88200, 96000};
-    info.buffer_sizes = {64, 128, 256, 512, 1024, 2048, 4096};
+    // Rates and buffer sizes come from the driver, read when the device was
+    // opened; before that, probe it now.
+    const auto caps = capabilities_ ? capabilities_ : probe_pcm_capabilities(device_name_, stream_);
+    if (caps) {
+        info.sample_rates = sample_rates_from(*caps);
+        info.buffer_sizes = buffer_sizes_from(*caps);
+    }
+    if (info.sample_rates.empty() || info.buffer_sizes.empty()) {
+        DeviceInfo fallback;
+        fill_device_info_from_capabilities(fallback, std::nullopt, std::nullopt);
+        if (info.sample_rates.empty()) info.sample_rates = fallback.sample_rates;
+        if (info.buffer_sizes.empty()) info.buffer_sizes = fallback.buffer_sizes;
+    }
     return info;
 }
 
@@ -399,44 +491,6 @@ void AlsaDevice::capture_thread_func() {
 
 // ── AlsaSystem ───────────────────────────────────────────────────────────
 
-namespace {
-
-// Probe an ALSA device for its real per-direction channel maximum by
-// briefly opening it in non-blocking mode and reading hw_params. Falls
-// back to 0 if the device can't be probed (busy, missing, no support
-// for that direction), instead of reporting a placeholder channel count.
-unsigned probe_max_channels(const std::string& id, snd_pcm_stream_t stream) {
-    snd_pcm_t* pcm = nullptr;
-    if (snd_pcm_open(&pcm, id.c_str(), stream, SND_PCM_NONBLOCK) < 0) {
-        return 0;
-    }
-
-    snd_pcm_hw_params_t* hw_params = nullptr;
-    snd_pcm_hw_params_alloca(&hw_params);
-    unsigned max_ch = 0;
-    if (snd_pcm_hw_params_any(pcm, hw_params) >= 0) {
-        snd_pcm_hw_params_get_channels_max(hw_params, &max_ch);
-    }
-    snd_pcm_close(pcm);
-    return max_ch;
-}
-
-void fill_real_channel_counts(DeviceInfo& info) {
-    const auto out_ch = probe_max_channels(info.id, SND_PCM_STREAM_PLAYBACK);
-    const auto in_ch  = probe_max_channels(info.id, SND_PCM_STREAM_CAPTURE);
-    if (out_ch > 0) info.max_output_channels = static_cast<int>(out_ch);
-    if (in_ch  > 0) info.max_input_channels  = static_cast<int>(in_ch);
-    // Fallbacks if probing failed entirely (e.g. CI runners with no
-    // audio at all) — keep the previous "stereo" placeholder so
-    // callers don't see 0 and bail out.
-    if (info.max_output_channels == 0 && info.max_input_channels == 0) {
-        info.max_output_channels = 2;
-        info.max_input_channels  = 2;
-    }
-}
-
-}  // namespace
-
 std::vector<DeviceInfo> AlsaSystem::enumerate_devices() {
     std::vector<DeviceInfo> devices;
 
@@ -449,9 +503,7 @@ std::vector<DeviceInfo> AlsaSystem::enumerate_devices() {
         info.name = "Default";
         info.is_default_output = true;
         info.is_default_input = true;
-        info.sample_rates = {44100, 48000, 88200, 96000};
-        info.buffer_sizes = {64, 128, 256, 512, 1024, 2048, 4096};
-        fill_real_channel_counts(info);
+        fill_probed_capabilities(info);
         devices.push_back(std::move(info));
     }
 
@@ -463,9 +515,7 @@ std::vector<DeviceInfo> AlsaSystem::enumerate_devices() {
             DeviceInfo info;
             info.id = "hw:" + std::to_string(card);
             info.name = name;
-            info.sample_rates = {44100, 48000, 88200, 96000};
-            info.buffer_sizes = {64, 128, 256, 512, 1024, 2048, 4096};
-            fill_real_channel_counts(info);
+            fill_probed_capabilities(info);
             devices.push_back(std::move(info));
             free(name);
         }
@@ -483,13 +533,11 @@ std::unique_ptr<AudioDevice> AlsaSystem::create_device(const std::string& device
     std::string name = device_id.empty() ? "default" : device_id;
     snd_pcm_stream_t stream = SND_PCM_STREAM_PLAYBACK;
 
-    // Previously we inferred capture-only from
-    //   probe_max_channels(playback) == 0 && probe_max_channels(capture) > 0
-    // but probe_max_channels returns 0 for ANY open-failure (including
-    // transient busy-device errors). On a playback-capable card whose
-    // playback probe fails just this once, the heuristic silently
-    // flipped the device into capture mode and output callers got a
-    // useless capture stream.
+    // Do not infer capture-only from a failed capability probe: a probe
+    // fails for ANY open error, including transient busy-device errors, and
+    // on a playback-capable card whose playback probe fails just once that
+    // would silently flip the device into capture mode and hand output
+    // callers a useless capture stream.
     //
     // Distinguish "open failed" (could be transient) from "opened but
     // reports 0 channels" (definitive not-supported) by re-opening
@@ -520,9 +568,7 @@ DeviceInfo AlsaSystem::default_output_device() {
     info.id = "default";
     info.name = "Default";
     info.is_default_output = true;
-    info.sample_rates = {44100, 48000, 88200, 96000};
-    info.buffer_sizes = {64, 128, 256, 512, 1024, 2048, 4096};
-    fill_real_channel_counts(info);
+    fill_probed_capabilities(info);
     return info;
 }
 
@@ -531,9 +577,7 @@ DeviceInfo AlsaSystem::default_input_device() {
     info.id = "default";
     info.name = "Default";
     info.is_default_input = true;
-    info.sample_rates = {44100, 48000, 88200, 96000};
-    info.buffer_sizes = {64, 128, 256, 512, 1024, 2048, 4096};
-    fill_real_channel_counts(info);
+    fill_probed_capabilities(info);
     return info;
 }
 
