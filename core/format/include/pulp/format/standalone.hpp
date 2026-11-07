@@ -20,12 +20,14 @@
 
 #include <atomic>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -73,6 +75,19 @@ struct StandaloneConfig {
     // false to always start from the configured defaults. Saved whenever settings change,
     // restored at startup (the first launch keeps the configured defaults).
     bool persist_settings = true;
+
+    // Remember the plug-in's own state (parameters plus anything it saves with
+    // serialize_plugin_state) across launches, in the same settings file as the
+    // device selection. Saved when the app quits and shortly after the state
+    // stops changing; restored at startup before the editor opens. Applies only
+    // while `persist_settings` is on, and never to a headless or screenshot
+    // launch, which must stay reproducible. A developer who wants device memory
+    // without state memory sets this false. States over 8 MiB are not saved.
+    bool persist_plugin_state = true;
+    // How long the state must stay unchanged before it is saved, in
+    // milliseconds. A knob being dragged keeps pushing the save back; one that
+    // has been changing for ten seconds is saved regardless.
+    int state_save_debounce_ms = 1500;
 
     // Development Inspector activation. Empty/"off" is inert, "local" owns
     // only the in-window overlay, and agent profiles start an authenticated
@@ -415,6 +430,38 @@ public:
     static bool save_persisted_config(std::string_view app_name,
                                       const StandaloneConfig& config);
 
+    // The plug-in state blob kept next to the persisted device selection (the
+    // host-facing blob plugin_state_io produces, base64 in the settings file).
+    // load returns nullopt when nothing is saved or the stored text is not valid
+    // base64; save returns false for an empty app name, a blob over
+    // kMaxPersistedStateBytes, or a settings location that cannot be written.
+    static constexpr std::size_t kMaxPersistedStateBytes = 8u * 1024u * 1024u;
+    static std::optional<std::vector<uint8_t>> load_persisted_state(std::string_view app_name);
+    static bool save_persisted_state(std::string_view app_name, std::span<const uint8_t> blob);
+
+    /// Main thread only. Saves the plug-in state when it has changed and then
+    /// stayed unchanged for `state_save_debounce_ms`. The built-in editors call
+    /// this from their idle loop; a host that runs its own loop calls it a few
+    /// times a second. Cheap when nothing changed. `now` is a test seam.
+    void service_state_persistence(
+        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+
+    /// Main thread only. Saves the plug-in state now when persistence is active.
+    /// Returns true when it wrote the file. Called on quit.
+    bool save_plugin_state_now();
+
+    /// True when this run restores and saves the plug-in state (see
+    /// StandaloneConfig::persist_plugin_state). Valid after start().
+    bool plugin_state_persistence_active() const noexcept {
+        return state_persist_.active;
+    }
+
+    /// How many times this run has written the plug-in state to the settings
+    /// file.
+    std::uint32_t plugin_state_save_count() const noexcept {
+        return state_persist_.saves;
+    }
+
   private:
     // run_with_editor() for a processor with an editor factory: the editor-host
     // contract editor in its own native window (detail/standalone_contract_editor.hpp).
@@ -486,6 +533,20 @@ public:
     std::unique_ptr<StandaloneControlHost> control_host_;
     StandaloneConfig config_;
     bool persisted_config_loaded_ = false;  // overlay persisted settings once, not on soft restarts
+
+    // Plug-in state persistence. Main thread only.
+    struct StatePersistence {
+        bool active = false;
+        bool pending = false;                // a change is waiting out its debounce
+        std::uint32_t saves = 0;             // times the settings file was written
+        std::uint64_t saved_fingerprint = 0; // what the settings file holds
+        std::uint64_t observed_fingerprint = 0;
+        std::chrono::steady_clock::time_point first_change{};
+        std::chrono::steady_clock::time_point last_change{};
+        std::chrono::steady_clock::time_point last_poll{};
+    } state_persist_;
+    void restore_persisted_state();
+    std::uint64_t state_fingerprint() const;
 
     /// Previous block's transport state, so the standalone driver derives the
     /// same change flags (`tempo_changed`, `transport_changed`,

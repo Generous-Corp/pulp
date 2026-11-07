@@ -240,6 +240,8 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     while (!delegate->closed) {
         pump_one_frame();
         session->tick();
+        if (options.on_idle)
+            options.on_idle();
         ++frame;
         if (!options.headless)
             continue;

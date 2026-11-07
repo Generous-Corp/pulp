@@ -832,6 +832,55 @@ Configuration options:
 
 The standalone host manages `AudioSystem`, `AudioDevice`, `MidiSystem`, and `MidiInput` instances. MIDI is buffered with a mutex between the MIDI callback and the audio callback.
 
+### What your standalone app saves
+
+A standalone app remembers two things between launches, both in one settings
+file named `settings.json` inside a folder named after your plug-in:
+
+| Platform | Settings folder |
+|---|---|
+| macOS | `~/Library/Preferences/<Plug-in name>/` |
+| Windows | `%APPDATA%\<Plug-in name>\` |
+| Linux | `~/.config/<Plug-in name>/` |
+
+- **Audio and MIDI choices:** the audio device, MIDI input, sample rate,
+  buffer size, channel counts, and the built-in transport (tempo, time
+  signature, playing and recording). They are saved when you change them in the
+  Settings tab.
+- **The plug-in's own state:** every parameter value, plus anything the
+  plug-in saves itself through `serialize_plugin_state()` (a loaded sample, a
+  wavetable, a preset name). This is the same data a DAW stores when it saves a
+  project.
+
+**When the state is saved.** The app saves it when you quit, and also a moment
+after you stop changing things: 1.5 seconds of quiet by default, set with
+`state_save_debounce_ms`. While you keep turning a knob the save waits, but a
+change that has been going on for ten seconds is saved anyway. Output meters and
+other read-only values do not count as changes, so an idle app never rewrites
+the file. If you quit without changing anything, the file is left alone.
+
+**When the state is restored.** The app puts the saved state back when it
+starts, before the editor opens, so the first thing you see is how you left it.
+
+**If the saved state cannot be used.** A first launch has nothing saved and
+starts with the plug-in's defaults. A saved state that is damaged, was written
+by a newer version of the app, or that the plug-in refuses to load is ignored:
+the app logs a warning and starts with the defaults. The old text stays in the
+file until the next save replaces it.
+
+**Limits and switches.**
+
+- States larger than 8 MiB are not saved, and the app logs a warning.
+- Set `persist_plugin_state = false` to keep remembering the audio and MIDI
+  choices but start the plug-in fresh every time.
+- Set `persist_settings = false` to remember nothing.
+- A headless or screenshot launch neither reads nor writes the saved state, so
+  automated captures always start from the defaults and never change what you
+  saved.
+- If your app runs its own event loop instead of a built-in editor, call
+  `StandaloneApp::service_state_persistence()` from it a few times a second to
+  get the quiet-period save. Saving on quit does not depend on it.
+
 ---
 
 ## HeadlessHost

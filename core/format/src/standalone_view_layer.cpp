@@ -282,12 +282,18 @@ bool StandaloneApp::run_view_editor(bool use_gpu, const StandaloneConfig& effect
     // screenshot path can extend it instead of clobbering it with a second
     // set_idle_callback.
     std::function<void()> pre_screenshot_idle;
+    // Settings-panel polling plus the debounced save of the plug-in state. Both
+    // run on the UI thread from the window's idle loop.
+    const std::function<void()> poll_settings = [this, settings_ptr] {
+        if (settings_ptr)
+            settings_ptr->poll();
+        service_state_persistence();
+    };
 #if PULP_STANDALONE_INSPECTOR
     if (inspector_runtime) {
         auto* inspector_runtime_ptr = inspector_runtime.get();
-        pre_screenshot_idle = [settings_ptr, inspector_runtime_ptr] {
-            if (settings_ptr)
-                settings_ptr->poll();
+        pre_screenshot_idle = [poll_settings, inspector_runtime_ptr] {
+            poll_settings();
             inspector_runtime_ptr->pump();
         };
         window->set_idle_callback(pre_screenshot_idle);
@@ -298,15 +304,11 @@ bool StandaloneApp::run_view_editor(bool use_gpu, const StandaloneConfig& effect
             runtime::log_info("Standalone: inspector enabled via PULP_INSPECTOR env var");
         }
     } else {
-        pre_screenshot_idle = detail::make_standalone_idle_callback(
-            {}, settings_ptr ? std::function<void()>{[settings_ptr] { settings_ptr->poll(); }}
-                             : std::function<void()>{});
+        pre_screenshot_idle = detail::make_standalone_idle_callback({}, poll_settings);
         window->set_idle_callback(pre_screenshot_idle);
     }
 #else
-    pre_screenshot_idle = detail::make_standalone_idle_callback(
-        {}, settings_ptr ? std::function<void()>{[settings_ptr] { settings_ptr->poll(); }}
-                         : std::function<void()>{});
+    pre_screenshot_idle = detail::make_standalone_idle_callback({}, poll_settings);
     window->set_idle_callback(pre_screenshot_idle);
 #endif
 

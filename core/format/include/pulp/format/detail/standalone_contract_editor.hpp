@@ -46,6 +46,8 @@ struct StandaloneContractEditorOptions {
     int key_frame_delay = 20;
     /// The host's transport: called for a Space the editor forwards.
     std::function<void()> on_transport_key;
+    /// Called once per frame of the window's loop, on the UI thread.
+    std::function<void()> on_idle;
 };
 
 /// True when this platform can host a contract editor in a native window.

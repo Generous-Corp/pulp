@@ -6,6 +6,8 @@
 #include <pulp/format/detail/standalone_key_driver.hpp>
 #include <pulp/format/detail/standalone_key_sequence.hpp>
 #include <pulp/format/detail/null_audio_device.hpp>
+#include <pulp/format/plugin_state_io.hpp>
+#include <pulp/runtime/base64.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/state/properties_file.hpp>
 
@@ -15,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -678,6 +681,7 @@ bool StandaloneApp::start() {
         processor_->set_editor_host_kind(EditorHostKind::standalone);
         processor_->set_state_store(&store_);
         processor_->define_parameters(store_);
+        restore_persisted_state();
     }
 
     const auto start_control_host = [this] {
@@ -902,6 +906,7 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
         test_input_host_.set_playing(playing);
         config_.transport_playing = playing;
     };
+    options.on_idle = [this] { service_state_persistence(); };
     return detail::run_standalone_contract_editor(*processor_, store_, factory, options);
 }
 
@@ -992,6 +997,11 @@ void StandaloneApp::stop() {
         control_host_.reset();
     }
     if (processor_) {
+        // Quit: keep the last state the user left the plug-in in. The audio
+        // device is already stopped, so nothing is mutating it.
+        if (state_persist_.active)
+            save_plugin_state_now();
+        state_persist_ = {};
         processor_->release();
         processor_.reset();
     }
@@ -1022,6 +1032,7 @@ constexpr std::string_view kKeyTimeSigNum     = "standalone.time_sig_num";
 constexpr std::string_view kKeyTimeSigDen     = "standalone.time_sig_den";
 constexpr std::string_view kKeyPlaying        = "standalone.transport_playing";
 constexpr std::string_view kKeyRecording      = "standalone.transport_recording";
+constexpr std::string_view kKeyPluginState = "standalone.plugin_state";
 
 }  // namespace
 
@@ -1072,6 +1083,164 @@ bool StandaloneApp::save_persisted_config(std::string_view app_name,
     // a proxy for "the platform let us pick a location to write to".
     props.save();
     return !user.path().empty();
+}
+
+std::optional<std::vector<uint8_t>> StandaloneApp::load_persisted_state(std::string_view app_name) {
+    if (app_name.empty())
+        return std::nullopt;
+
+    state::ApplicationProperties props(app_name);
+    props.load();
+    const auto text = props.user_settings().get_string(kKeyPluginState);
+    if (!text || text->empty())
+        return std::nullopt;
+    // Base64 carries 3 bytes in 4 characters; refuse a stored value that could
+    // not hold a state we would have written.
+    if (text->size() > (kMaxPersistedStateBytes / 3 + 1) * 4)
+        return std::nullopt;
+    return runtime::base64_decode(*text);
+}
+
+bool StandaloneApp::save_persisted_state(std::string_view app_name, std::span<const uint8_t> blob) {
+    if (app_name.empty())
+        return false;
+    if (blob.size() > kMaxPersistedStateBytes) {
+        runtime::log_warn(
+            "Standalone: plug-in state is {} bytes, over the {} byte limit; not saving it",
+            blob.size(), kMaxPersistedStateBytes);
+        return false;
+    }
+
+    state::ApplicationProperties props(app_name);
+    props.load(); // keep the device selection and any other keys already saved
+    auto& user = props.user_settings();
+    user.set_string(kKeyPluginState, runtime::base64_encode(blob.data(), blob.size()));
+    props.save();
+    return !user.path().empty();
+}
+
+// State parameters the user can change, hashed. Read-only parameters (meters)
+// are written by the processor on every block and are not part of what the user
+// would want back, so they must not count as a change.
+std::uint64_t StandaloneApp::state_fingerprint() const {
+    std::uint64_t hash = 1469598103934665603ull; // FNV-1a
+    const auto mix = [&hash](std::uint32_t word) {
+        for (int shift = 0; shift < 32; shift += 8) {
+            hash ^= (word >> shift) & 0xffu;
+            hash *= 1099511628211ull;
+        }
+    };
+    for (const auto& param : store_.all_params()) {
+        if (state::is_read_only_param(param))
+            continue;
+        const float value = store_.get_value(param.id);
+        std::uint32_t bits = 0;
+        static_assert(sizeof(bits) == sizeof(value));
+        std::memcpy(&bits, &value, sizeof(bits));
+        mix(param.id);
+        mix(bits);
+    }
+    return hash;
+}
+
+void StandaloneApp::restore_persisted_state() {
+    state_persist_ = {};
+    // A headless or screenshot launch is a reproducible capture: it neither
+    // reads the user's saved state nor overwrites it.
+    const bool capture = config_.headless || !config_.screenshot_path.empty();
+    if (!config_.persist_settings || !config_.persist_plugin_state || capture)
+        return;
+
+    const std::string name = processor_->descriptor().name;
+    if (name.empty())
+        return;
+    state_persist_.active = true;
+
+    const auto blob = load_persisted_state(name);
+    if (!blob) {
+        runtime::log_info("Standalone: no saved plug-in state for '{}'; starting clean", name);
+    } else {
+        // Reject what cannot be a state blob (a newer envelope, a truncated or
+        // corrupt write) before any of it reaches the processor.
+        const auto check = plugin_state_io::inspect_restore_blob(*blob);
+        if (!check.ok()) {
+            runtime::log_warn(
+                "Standalone: saved plug-in state for '{}' is unusable ({}); starting clean", name,
+                plugin_state_io::restore_diagnostic_status_name(check.status));
+        } else if (!plugin_state_io::deserialize(*blob, store_, *processor_)) {
+            // deserialize() rolls the parameters back to their defaults on
+            // failure; the processor is told to drop whatever it held.
+            processor_->deserialize_plugin_state({});
+            runtime::log_warn(
+                "Standalone: saved plug-in state for '{}' was refused by the plug-in; "
+                "starting clean",
+                name);
+        } else {
+            runtime::log_info("Standalone: restored saved plug-in state for '{}'", name);
+        }
+    }
+
+    // What is loaded now is what the file holds (or nothing needs saving), so
+    // only a change after this point counts.
+    processor_->consume_state_dirty_flag();
+    state_persist_.saved_fingerprint = state_fingerprint();
+    state_persist_.observed_fingerprint = state_persist_.saved_fingerprint;
+}
+
+void StandaloneApp::service_state_persistence(std::chrono::steady_clock::time_point now) {
+    if (!state_persist_.active || !processor_)
+        return;
+
+    // Throttle the work: the idle loop runs at the display rate.
+    constexpr auto kPollInterval = std::chrono::milliseconds(200);
+    if (state_persist_.last_poll != std::chrono::steady_clock::time_point{} &&
+        now - state_persist_.last_poll < kPollInterval)
+        return;
+    state_persist_.last_poll = now;
+
+    const std::uint64_t fingerprint = state_fingerprint();
+    // The plug-in flags state that is not a parameter (a loaded sample, a
+    // wavetable) as changed.
+    const bool plugin_changed = processor_->consume_state_dirty_flag();
+    if (fingerprint != state_persist_.observed_fingerprint || plugin_changed) {
+        state_persist_.observed_fingerprint = fingerprint;
+        if (!state_persist_.pending) {
+            state_persist_.pending = true;
+            state_persist_.first_change = now;
+        }
+        state_persist_.last_change = now;
+    }
+    if (!state_persist_.pending)
+        return;
+
+    const auto quiet = std::chrono::milliseconds(std::max(config_.state_save_debounce_ms, 0));
+    constexpr auto kMaxWait = std::chrono::seconds(10);
+    if (now - state_persist_.last_change >= quiet || now - state_persist_.first_change >= kMaxWait)
+        save_plugin_state_now();
+}
+
+bool StandaloneApp::save_plugin_state_now() {
+    if (!state_persist_.active || !processor_)
+        return false;
+
+    // Quit with nothing changed since the last save: the file already holds it.
+    const bool plugin_changed = processor_->consume_state_dirty_flag();
+    const std::uint64_t fingerprint = state_fingerprint();
+    if (!plugin_changed && !state_persist_.pending &&
+        fingerprint == state_persist_.saved_fingerprint)
+        return false;
+
+    const auto blob = plugin_state_io::serialize(store_, *processor_);
+    if (!save_persisted_state(processor_->descriptor().name, blob)) {
+        // Try again after another quiet period rather than on every poll.
+        state_persist_.last_change = std::chrono::steady_clock::now();
+        return false;
+    }
+    state_persist_.saved_fingerprint = fingerprint;
+    state_persist_.observed_fingerprint = fingerprint;
+    state_persist_.pending = false;
+    ++state_persist_.saves;
+    return true;
 }
 
 } // namespace pulp::format
