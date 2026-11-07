@@ -61,6 +61,7 @@
     "tools/cli/cmd_audio.cpp",
     "tools/cli/cmd_audio_compare.cpp",
     "tools/cli/cmd_audio_heritage.cpp",
+    "tools/cli/cmd_audio_inspect.cpp",
     "tools/cli/cmd_audio_plugin_common.cpp",
     "tools/cli/cmd_audio_plugin_inspect.cpp",
     "tools/cli/cmd_audio_render.cpp",
@@ -249,6 +250,20 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-audio-file-layout": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_audio_file_layout.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/audio/inspect"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_audio_file_layout.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-authoring-capsule-hostile": {
    "data": "declared",
    "detected_sources": [
@@ -353,6 +368,20 @@
    "sources": [
     "test/test_cli_audio_compare.cpp"
    ],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-audio-inspect": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
@@ -2787,6 +2816,7 @@
   "pulp-test-audio-device-manager",
   "pulp-test-audio-doctor",
   "pulp-test-audio-edge-cases",
+  "pulp-test-audio-file-layout",
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
   "pulp-test-audio-reader-idle-wakeups",
@@ -2826,6 +2856,7 @@
   "pulp-test-clap-webview",
   "pulp-test-cli-au-info-plist",
   "pulp-test-cli-audio-compare",
+  "pulp-test-cli-audio-inspect",
   "pulp-test-cli-audio-latency",
   "pulp-test-cli-audio-validate",
   "pulp-test-cli-bake",
