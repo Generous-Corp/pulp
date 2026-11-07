@@ -262,6 +262,16 @@ class MediaFoundationReader : public FormatReader {
     std::string format_name() const override {
         return "Media Foundation";
     }
+
+    FormatCapabilities capabilities() const override {
+        FormatCapabilities caps;
+        caps.format_name = format_name();
+        caps.extensions = {".m4a", ".aac", ".wma"};
+        caps.float_samples = true;
+        caps.compressed = true;
+        caps.lossless = false;
+        return caps;
+    }
 };
 
 } // namespace

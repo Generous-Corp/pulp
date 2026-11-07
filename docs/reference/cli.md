@@ -2106,6 +2106,7 @@ pulp audio model status [--json]                # Show configured + resolved mod
 pulp audio model activate <model-id> [--json]   # Activate an installed model
 pulp audio excerpt-find --text "warm analog pad" --input /path/to/wavs [options]
 pulp audio read-bundle <path-to-bundle> [--json]
+pulp audio formats [--json]                     # List registered file readers and writers with their limits
 pulp audio sampler-mip build <source.wav|source.aiff> [--levels 1|2] [--json]
 pulp audio heritage validate PROFILE [--json]
 pulp audio heritage canonicalize PROFILE --out FILE
@@ -2121,6 +2122,23 @@ pulp audio compare <reference.wav> <candidate.wav> [--profile tonal-balance|adde
 pulp audio plugin-inspect --plugin <bundle> [--format clap|vst3|au|auv3|lv2]
 pulp audio render --plugin <bundle> --out <file.wav> (--duration-ms <n> | --duration-frames <n>) [options]
 ```
+
+**`pulp audio formats --json`** prints one object with a `readers` array and a
+`writers` array, one entry per registered handler in registration order:
+
+| Field | Meaning |
+|-------|---------|
+| `name` | Handler name, such as `FLAC`. The Apple platform reader is `CoreAudio`, one entry covering every codec it decodes. |
+| `extensions` | Lower-case extensions with the leading dot. Empty for a handler that reports only its name. |
+| `bit_depths` | Integer PCM depths. Empty for lossy formats. |
+| `float_samples` | `true` when float samples are read or written (32-bit, and 64-bit for the WAV reader). |
+| `sample_rates` | Allowed rates. Empty means any positive rate. |
+| `max_channels` | Channel limit. `0` means the format sets none. |
+| `compressed`, `lossless` | Whether the stream is compressed, and whether encoding keeps every sample. |
+| `quality_options` | Writers only: `name`, `description` and `default` of each encoder setting `write()` applies. |
+
+The output carries no schema version; fields may be added but existing ones
+keep their meaning.
 
 **Exit codes** (`audio validate`, matching `audio compare`):
 

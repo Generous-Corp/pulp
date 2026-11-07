@@ -13,7 +13,10 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -80,10 +83,16 @@ double best_correlation(const std::vector<float>& source, const std::vector<floa
     return best;
 }
 
-void require_lossy_match(const AudioFileData& source, const AudioFileData& decoded) {
+void require_lossy_match(const AudioFileData& source, const AudioFileData& decoded,
+                         std::int64_t max_length_error = 1024) {
     REQUIRE(decoded.sample_rate == source.sample_rate);
     REQUIRE(decoded.num_channels() == source.num_channels());
-    REQUIRE(decoded.num_frames() >= source.num_frames() * 9 / 10);
+    // An M4A or CAF packet table trims encoder priming and padding, so the
+    // decoded length matches the source to within one AAC frame. ADTS has no
+    // such table, so its caller allows the 2112 priming frames as well.
+    const auto in_frames = static_cast<std::int64_t>(source.num_frames());
+    const auto out_frames = static_cast<std::int64_t>(decoded.num_frames());
+    REQUIRE(std::llabs(out_frames - in_frames) <= max_length_error);
     for (std::uint32_t c = 0; c < source.num_channels(); ++c) {
         const auto& in = source.channels[c];
         const auto& out = decoded.channels[c];
@@ -171,7 +180,7 @@ TEST_CASE("System codec writes AAC that reads back as the same signal", "[audio]
     options.container = SystemAudioContainer::ADTS;
     const auto adts = write_and_read(source, options, ".aac");
     REQUIRE(adts);
-    require_lossy_match(source, *adts);
+    require_lossy_match(source, *adts, 2112 + 1024);
 }
 
 TEST_CASE("System codec AAC bitrate option changes the encoded size", "[audio][system-codec]") {
@@ -243,6 +252,59 @@ TEST_CASE("FormatRegistry writes .m4a, .aac, .alac and .caf through the system c
     REQUIRE(registry.find_writer(".aiff")->format_name() == "AIFF");
 }
 
+TEST_CASE("A refused system codec write leaves the existing file untouched",
+          "[audio][system-codec]") {
+    TempFile file(".m4a");
+    {
+        std::ofstream previous(file.path, std::ios::binary);
+        previous << "previous take";
+    }
+    // AAC-LC does not accept 192 kHz, so the encoder refuses after the
+    // container would have been created.
+    REQUIRE_FALSE(write_system_audio_file(file.path.string(), stereo_tone(192000, 4096),
+                                          SystemAudioWriteOptions{}));
+    std::ifstream kept(file.path, std::ios::binary);
+    const std::string contents((std::istreambuf_iterator<char>(kept)),
+                               std::istreambuf_iterator<char>());
+    REQUIRE(contents == "previous take");
+    // No partial file is left beside it.
+    for (const auto& entry : fs::directory_iterator(file.path.parent_path()))
+        REQUIRE(entry.path().filename().string().find(file.path.stem().string() +
+                                                      ".pulp-partial-") == std::string::npos);
+
+    // A successful write replaces it.
+    REQUIRE(write_system_audio_file(file.path.string(), stereo_tone(48000, 4096),
+                                    SystemAudioWriteOptions{}));
+    REQUIRE(fs::file_size(file.path) > contents.size());
+}
+
+TEST_CASE("System codec rounds an AAC bitrate to one the encoder accepts",
+          "[audio][system-codec]") {
+    const auto source = stereo_tone(48000, 24000);
+    for (std::uint32_t bitrate : {1000u, 1000000u}) {
+        INFO(bitrate);
+        SystemAudioWriteOptions options;
+        options.aac_bitrate = bitrate;
+        TempFile file(".m4a");
+        REQUIRE(write_system_audio_file(file.path.string(), source, options));
+        REQUIRE(FormatRegistry::instance().read(file.path.string()));
+    }
+}
+
+TEST_CASE("The system codec writer reports its capabilities", "[audio][system-codec]") {
+    const auto writers = FormatRegistry::instance().writer_capabilities();
+    const auto it = std::find_if(writers.begin(), writers.end(), [](const FormatCapabilities& c) {
+        return c.format_name == "System codec";
+    });
+    REQUIRE(it != writers.end());
+    REQUIRE(it->extensions == std::vector<std::string>{".m4a", ".aac", ".alac", ".caf"});
+    REQUIRE(it->compressed);
+    REQUIRE_FALSE(it->lossless);
+    REQUIRE(it->float_samples);
+    REQUIRE(it->bit_depths == std::vector<std::uint32_t>{16});
+    REQUIRE(it->quality_options.size() == 1);
+}
+
 #elif defined(_WIN32)
 
 TEST_CASE("System codec writes AAC in M4A that Media Foundation reads back",
@@ -254,10 +316,18 @@ TEST_CASE("System codec writes AAC in M4A that Media Foundation reads back",
     REQUIRE(decoded);
     require_lossy_match(source, *decoded);
 
-    // The Windows encoder accepts 44.1 and 48 kHz only.
+    // The Windows encoder is offered at 44.1 and 48 kHz, mono or stereo.
     TempFile file(".m4a");
     REQUIRE_FALSE(write_system_audio_file(file.path.string(), stereo_tone(22050, 4096),
                                           SystemAudioWriteOptions{}));
+    AudioFileData six = stereo_tone(48000, 4096);
+    six.channels.resize(6, six.channels.front());
+    REQUIRE_FALSE(write_system_audio_file(file.path.string(), six, SystemAudioWriteOptions{}));
+
+    const auto readers = FormatRegistry::instance().reader_capabilities();
+    REQUIRE(std::any_of(readers.begin(), readers.end(), [](const FormatCapabilities& c) {
+        return c.format_name == "Media Foundation" && !c.extensions.empty();
+    }));
 }
 
 #else

@@ -67,6 +67,34 @@ class SystemAudioWriter : public FormatWriter {
         return "System codec";
     }
 
+    FormatCapabilities capabilities() const override {
+        // One entry covers every extension this platform writes, so it states
+        // the weakest case: compressed and lossy, as AAC is.
+        FormatCapabilities caps;
+        caps.format_name = format_name();
+        for (const char* ext : {".m4a", ".aac", ".alac", ".caf"}) {
+            SystemAudioWriteOptions options;
+            if (options_for_extension(ext, options))
+                caps.extensions.emplace_back(ext);
+        }
+        SystemAudioWriteOptions alac;
+        if (options_for_extension(".alac", alac))
+            caps.bit_depths = {16};
+        SystemAudioWriteOptions caf;
+        caps.float_samples = options_for_extension(".caf", caf);
+#ifdef _WIN32
+        caps.sample_rates = {44100, 48000};
+        caps.max_channels = 2;
+#endif
+        caps.compressed = true;
+        caps.lossless = false;
+        caps.quality_options = {{"aac_bitrate",
+                                 "AAC bitrate in bits per second, rounded to one the encoder "
+                                 "accepts; write_system_audio_file() can set it",
+                                 "codec default"}};
+        return caps;
+    }
+
   private:
     static bool options_for_extension(std::string_view ext, SystemAudioWriteOptions& options) {
         if (ext == ".m4a") {
