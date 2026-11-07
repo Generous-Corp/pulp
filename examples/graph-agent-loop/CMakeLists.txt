@@ -23,6 +23,26 @@ foreach(mutation IN ITEMS network-allowed plugin-allowed missing-action)
              COMMAND pulp-graph-agent-loop
                      "${CMAKE_CURRENT_BINARY_DIR}/mutation-${mutation}"
                      "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mutation-${mutation}.json")
-    set_tests_properties(graph-agent-loop-mutation-${mutation} PROPERTIES WILL_FAIL TRUE)
+    set_tests_properties(graph-agent-loop-mutation-${mutation} PROPERTIES
+        WILL_FAIL TRUE)
+    if(mutation STREQUAL "network-allowed")
+        set_tests_properties(graph-agent-loop-mutation-${mutation} PROPERTIES
+            PASS_REGULAR_EXPRESSION "rule=plan-network-allow")
+    elseif(mutation STREQUAL "plugin-allowed")
+        set_tests_properties(graph-agent-loop-mutation-${mutation} PROPERTIES
+            PASS_REGULAR_EXPRESSION "rule=plan-plugin-allow")
+    else()
+        set_tests_properties(graph-agent-loop-mutation-${mutation} PROPERTIES
+            PASS_REGULAR_EXPRESSION "rule=action-catalog")
+    endif()
 endforeach()
 
+
+# Read the receipt from the positive test's own output directory. This catches
+# regressions that silently write into the shared system temporary directory.
+add_test(NAME graph-agent-loop-consumer-action-log
+         COMMAND ${CMAKE_COMMAND} -E cat
+                 "${CMAKE_CURRENT_BINARY_DIR}/positive/a9-action-log.jsonl")
+set_tests_properties(graph-agent-loop-consumer-action-log PROPERTIES
+    DEPENDS graph-agent-loop-consumer
+    PASS_REGULAR_EXPRESSION "pulp.a9.action-log/v1")
