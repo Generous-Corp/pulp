@@ -102,9 +102,13 @@ TEST_CASE("X11 plugin host routes pointer input through nested editor windows",
     Display* daw = open_test_display("nested pointer routing");
 
     class InputProbe final : public View {
-    public:
-        bool wants_mouse_input() const override { return true; }
-        void on_mouse_event(const MouseEvent& event) override { events.push_back(event); }
+      public:
+        bool wants_mouse_input() const override {
+            return true;
+        }
+        void on_mouse_event(const MouseEvent& event) override {
+            events.push_back(event);
+        }
         std::vector<MouseEvent> events;
     };
 

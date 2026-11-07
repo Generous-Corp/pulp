@@ -516,9 +516,8 @@ public:
         // child during a drag.
         if (display_ &&
             XGrabPointer(display_, child_, True,
-                         ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-                         GrabModeAsync, GrabModeAsync, None, None,
-                         event.time) == GrabSuccess) {
+                         ButtonPressMask | ButtonReleaseMask | PointerMotionMask, GrabModeAsync,
+                         GrabModeAsync, None, None, event.time) == GrabSuccess) {
             pointer_grabbed_ = true;
         }
         if (!deliver_mouse_down(root_, pointer_capture_.live_in(root_), point,
