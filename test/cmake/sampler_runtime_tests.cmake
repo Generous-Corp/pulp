@@ -474,7 +474,8 @@ pulp_add_test_suite(pulp-test-onset-slice-analysis GROUP pulp-test-group-sampler
 
 # SuperFlux onset detection: the streaming novelty function, the offline
 # detector, vibrato suppression and the slice analyzer's detection option.
-pulp_add_test_suite(pulp-test-superflux-onset GROUP pulp-test-group-sampler-audio
+# Its own executable: the allocation probe replaces global operator new.
+pulp_add_test_suite(pulp-test-superflux-onset
     SOURCES test_superflux_onset.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
 
