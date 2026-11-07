@@ -260,8 +260,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     /// Start one absolute-sample host-event block for the active prepared
     /// trigger generation. The caller must publish before process_checked();
     /// the graph consumes the block exactly once during checked projection.
-    HostEventResult begin_host_event_block(std::uint64_t epoch,
-                                           std::uint64_t sample_start,
+    HostEventResult begin_host_event_block(std::uint64_t epoch, std::uint64_t sample_start,
                                            std::size_t frames) noexcept;
     /// Publish one immutable MIDI/UMP record into the prepared graph-owned
     /// ingress. Publication is bounded and refuses stale, late, unbound, or
@@ -1890,8 +1889,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
                                const format::ProcessContext* transport, CompiledGraph* snapshot,
                                bool trigger_admitted = false,
                                HostEventResult* host_event_result = nullptr);
-    HostEventResult project_host_events_(CompiledGraph& snapshot,
-                                         std::uint64_t sample_start,
+    HostEventResult project_host_events_(CompiledGraph& snapshot, std::uint64_t sample_start,
                                          std::size_t frames) noexcept;
     static bool inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
                                            const midi::MidiBuffer& events,
