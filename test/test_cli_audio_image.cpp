@@ -203,6 +203,13 @@ TEST_CASE("audio image verbs validate arguments before touching audio",
         {"audio", "waveform", wav.string(), "--png", (ws / "blocker" / "out.png").string()},
         "failed to write PNG");
 
+    // A sidecar that cannot be written takes the PNG back with it.
+    const fs::path orphan = ws / "orphan.png";
+    expect_error({"audio", "waveform", wav.string(), "--png", orphan.string(), "--json",
+                  (ws / "blocker" / "orphan.json").string()},
+                 "failed to write sidecar");
+    CHECK_FALSE(fs::exists(orphan));
+
     // Input shorter than one FFT is a refusal (2), not a crash.
     expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--fft", "65536"},
                  "shorter than --fft", 2);

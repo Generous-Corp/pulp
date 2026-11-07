@@ -379,6 +379,10 @@ int write_outputs(const ImageArgs& args, const pulp::test::audio::RasterImage& i
     }
     const std::string sidecar = sidecar_path(args);
     if (!write_file(sidecar, sidecar_json.data(), sidecar_json.size(), false)) {
+        // A PNG without its sidecar is an image nobody can account for; take
+        // it back so the failure leaves no half-written pair behind.
+        std::error_code ec;
+        fs::remove(args.png, ec);
         std::cerr << "Error: failed to write sidecar " << sidecar << "\n";
         return 1;
     }
