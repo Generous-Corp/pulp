@@ -329,9 +329,55 @@ auto guard = pulp::runtime::make_scope_guard([&] {
 pulp::runtime::log_info("Plugin loaded: {}", name);
 pulp::runtime::log_warn("Buffer underrun at sample {}", position);
 pulp::runtime::log_error("Failed to open device: {}", device_name);
+pulp::runtime::log_with_category("net", pulp::runtime::LogLevel::Info, "connected to {}", host);
 ```
 
-Logging is safe to call from any thread. Output goes to stderr.
+Records go to the platform log (os_log, the debugger output window) and stderr. Safe
+to call from any thread, but **logging is not realtime-safe**: formatting allocates and
+the writers take locks and do I/O. Never log from `process()` or any other audio-thread
+path. Post the event to a non-realtime thread (an `SpscQueue` drained by a worker) and
+log from there.
+
+### Sinks
+
+`set_log_sink` installs one process-wide callback that also receives every record as
+`(level, category, message)`. The swap is thread-safe and returns the previous sink.
+A sink that throws is ignored, and a record logged from inside a sink is not delivered
+back to it. The sink registry is per loaded binary, so a plugin does not receive its
+host's records.
+
+```cpp
+#include <pulp/runtime/log_sink.hpp>
+
+// A rotating file in <logs>/MyApp: owner-only, at most 1 MiB x 5 files.
+std::string error;
+pulp::runtime::FileLogSinkOptions options;
+options.app_name = "MyApp";
+if (auto file = pulp::runtime::FileLogSink::open(options, &error))
+    pulp::runtime::set_log_sink(*file);
+else
+    pulp::runtime::log_warn("File logging disabled: {}", error);
+
+// Tests and tooling: keep the last N records in memory.
+pulp::runtime::CaptureLogSink capture;
+pulp::runtime::ScopedLogSink scope(capture);     // restores the previous sink on exit
+code_under_test();
+REQUIRE(capture.contains("device lost"));
+```
+
+- `FileLogSink` writes `2026-11-06T17:02:03.123Z [info] category: message`, one record
+  per line. Line breaks and control characters inside a record are escaped, so a message
+  cannot forge another record. Records over 8 KiB are truncated.
+- It rotates by size (`max_file_bytes`, `max_files`) and filters by `min_level`.
+- `open` refuses and reports a location it cannot trust: a symlinked directory or file,
+  a directory or file writable by group or others, a file owned by someone else, or a
+  file with several hard links. Files are created `0600` and the directory `0700`.
+  On POSIX every file operation is relative to the opened directory, so swapping the
+  path for a link afterwards has no effect. Windows has no mode bits: it refuses
+  symlinks and junctions and relies on the per-user logs folder's ACL.
+- File logging is unavailable under WebAssembly.
+- `CaptureLogSink` is bounded; the oldest record is dropped (and counted) when full.
+  Use `records()`, `records_at_least()`, `take()` and `contains()` to inspect it.
 
 ## Assertions
 

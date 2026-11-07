@@ -652,6 +652,10 @@ pulp_add_test_suite(pulp-test-state-restore-gate GROUP pulp-test-group-fmt-forma
 pulp_test_spawns(pulp-test-au-v2-param-display NONE REASON "re-runs its own executable and nothing else the tree builds")
 pulp_test_spawns(pulp-test-group-fmt-ship NONE REASON "runs the system xar, pkgbuild and productbuild, nothing the tree builds")
 
+# Log sinks: set_log_sink, FileLogSink, CaptureLogSink
+pulp_add_test_suite(pulp-test-log-sink GROUP pulp-test-group-fmt-runtime
+    LIBRARIES pulp::runtime)
+
 # CancelSource / CancelToken / CancelRegistration
 pulp_add_test_suite(pulp-test-cancel GROUP pulp-test-group-fmt-runtime
     LIBRARIES pulp::runtime)

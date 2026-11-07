@@ -112,6 +112,7 @@ target_sources(pulp-runtime PRIVATE
     src/named_pipe.cpp
     src/stream.cpp
     src/cancel.cpp
+    src/log_sink.cpp
     src/async_stream.cpp
     src/background_job.cpp
     src/search_index.cpp
@@ -328,6 +329,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/json_rpc.hpp
     include/pulp/runtime/license.hpp
     include/pulp/runtime/log.hpp
+    include/pulp/runtime/log_sink.hpp
     include/pulp/runtime/mac_address.hpp
     include/pulp/runtime/memory_mapped_file.hpp
     include/pulp/runtime/memory_message_channel.hpp
