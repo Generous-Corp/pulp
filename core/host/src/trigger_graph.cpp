@@ -881,6 +881,23 @@ HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph, std::uin
         projection.ump.size() > destination.ump.capacity())
         return refuse(HostEventResult::OutputCapacity);
 
+    // derive_mpe() feeds bounded tracker callbacks while walking the
+    // projected records. A full sidecar can therefore mutate tracker state
+    // and append a prefix of expression events before reporting Overflow.
+    // Refusal restores the host ingress records, so preflight the same
+    // conservative fan-out bound here before touching either MPE object.
+    constexpr auto kMpeRecordsPerSource = midi::MpeVoiceTracker::kMaxNotes + 2;
+    const auto event_mpe = count > std::numeric_limits<std::size_t>::max() / kMpeRecordsPerSource
+                               ? std::numeric_limits<std::size_t>::max()
+                               : count * kMpeRecordsPerSource;
+    const auto pending_mpe = projection.host_event_tracker.pending_note_off_count();
+    const auto required_mpe = pending_mpe > std::numeric_limits<std::size_t>::max() - event_mpe
+                                  ? std::numeric_limits<std::size_t>::max()
+                                  : pending_mpe + event_mpe;
+    if (required_mpe >
+        projection.mpe.capacity() - std::min(projection.mpe.capacity(), projection.mpe.size()))
+        return refuse(HostEventResult::OutputCapacity);
+
     const auto mpe_result =
         derive_mpe(std::span<const HostEventRecord>(projection.records.data(), count), sample_start,
                    projection.host_event_tracker, projection.mpe);

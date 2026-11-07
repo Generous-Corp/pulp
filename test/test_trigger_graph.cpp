@@ -45,6 +45,18 @@ struct TriggerTestAccess {
             return 0;
         return pin->host_event_projection == nullptr ? 0 : pin->host_event_projection->mpe.size();
     }
+    static void reserve_host_projection_mpe(SignalGraph& g, std::size_t capacity) {
+        auto pin = g.live_slot_.live();
+        REQUIRE(pin);
+        REQUIRE(pin->host_event_projection != nullptr);
+        pin->host_event_projection->mpe.reserve(capacity);
+    }
+    static pulp::midi::MpeVoiceTracker& host_projection_tracker(SignalGraph& g) {
+        auto pin = g.live_slot_.live();
+        REQUIRE(pin);
+        REQUIRE(pin->host_event_projection != nullptr);
+        return pin->host_event_projection->host_event_tracker;
+    }
     static std::size_t routed_mpe_size(SignalGraph& g, NodeId id) {
         auto pin = g.live_slot_.live();
         if (!pin)
@@ -223,6 +235,41 @@ TEST_CASE("Host ingress projection refusal seals the active block",
           TriggerGraphResult::ProcessingFailure);
     CHECK(fixture.graph.reset_host_event_ingress(1) == HostEventResult::Accepted);
     CHECK(fixture.graph.process_checked(block.out, block.in, 1) == TriggerGraphResult::Accepted);
+}
+
+TEST_CASE("Host ingress preflights MPE fanout and retries without tracker mutation",
+          "[trigger][g5][host-ingress][mpe][negative-control]") {
+    Fixture fixture{2, 8, true};
+    Block block;
+    auto& tracker = Access::host_projection_tracker(fixture.graph);
+    for (std::uint8_t note = 0; note < pulp::midi::MpeVoiceTracker::kMaxNotes; ++note)
+        REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, note, 100)));
+
+    HostEventRecord event;
+    event.epoch = 1;
+    event.absolute_sample = 0;
+    event.producer = fixture.producer;
+    event.midi = pulp::midi::MidiEvent::pitch_bend(1, 10'000);
+    const auto before_bend = tracker.find(1, 0)->pitch_bend_semitones;
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 1) == HostEventResult::Accepted);
+    for (std::uint64_t sequence = 1; sequence <= 4; ++sequence) {
+        event.producer_sequence = sequence;
+        REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
+    }
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 1) ==
+            TriggerGraphResult::ProcessingFailure);
+
+    CHECK(tracker.active_count() == pulp::midi::MpeVoiceTracker::kMaxNotes);
+    CHECK(tracker.find(1, 0)->pitch_bend_semitones == before_bend);
+    CHECK(Access::host_projection_mpe_size(fixture.graph) == 0);
+
+    // The ingress block was rolled back and sealed. Clearing the deliberately
+    // overfull test tracker lets the same staged records retry without a
+    // second publication, proving the refusal did not consume them.
+    tracker.reset();
+    Access::reserve_host_projection_mpe(fixture.graph, 1024);
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 1) == HostEventResult::Accepted);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 1) == TriggerGraphResult::Accepted);
 }
 
 TEST_CASE("Typed render preflight preserves output and clock", "[trigger]") {
