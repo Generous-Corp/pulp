@@ -115,6 +115,14 @@ std::string PreparedDescriptionData::canonical_bytes() const {
     number(out, host_max_block_frames);
     out += ",\"max_estimated_work_units\":";
     number(out, host_max_estimated_work_units);
+    out += "},\"runtime\":{\"nodes\":";
+    number(out, runtime_max_nodes);
+    out += ",\"connections\":";
+    number(out, runtime_max_connections);
+    out += ",\"ports\":";
+    number(out, runtime_max_ports);
+    out += ",\"block_frames\":";
+    number(out, runtime_max_block_frames);
     out += "},\"effective\":{\"nodes\":";
     number(out, effective_max_nodes);
     out += ",\"connections\":";

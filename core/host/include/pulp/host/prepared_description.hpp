@@ -103,6 +103,10 @@ struct PreparedDescriptionData {
     std::uint64_t host_max_ports = 0;
     std::uint64_t host_max_block_frames = 0;
     std::uint64_t host_max_estimated_work_units = 0;
+    std::uint64_t runtime_max_nodes = 0;
+    std::uint64_t runtime_max_connections = 0;
+    std::uint64_t runtime_max_ports = 0;
+    std::uint64_t runtime_max_block_frames = 0;
     std::uint64_t effective_max_nodes = 0;
     std::uint64_t effective_max_connections = 0;
     std::uint64_t effective_max_ports = 0;

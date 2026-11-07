@@ -1577,14 +1577,20 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         capture->host_max_ports = limits.max_ports;
         capture->host_max_block_frames = static_cast<std::uint64_t>(limits.max_block_size);
         capture->host_max_estimated_work_units = limits.max_estimated_work_units;
-        capture->effective_max_nodes =
-            std::min<std::uint64_t>(capture->profile_max_nodes, capture->host_max_nodes);
-        capture->effective_max_connections = std::min<std::uint64_t>(
-            capture->profile_max_connections, capture->host_max_connections);
-        capture->effective_max_ports =
-            std::min<std::uint64_t>(capture->profile_max_ports, capture->host_max_ports);
-        capture->effective_max_block_frames = std::min<std::uint64_t>(
-            capture->profile_max_block_frames, capture->host_max_block_frames);
+        capture->runtime_max_nodes = capture->host_max_nodes;
+        capture->runtime_max_connections = capture->host_max_connections;
+        capture->runtime_max_ports = capture->host_max_ports;
+        capture->runtime_max_block_frames = capture->host_max_block_frames;
+        capture->effective_max_nodes = std::min(
+            {capture->profile_max_nodes, capture->host_max_nodes, capture->runtime_max_nodes});
+        capture->effective_max_connections =
+            std::min({capture->profile_max_connections, capture->host_max_connections,
+                      capture->runtime_max_connections});
+        capture->effective_max_ports = std::min(
+            {capture->profile_max_ports, capture->host_max_ports, capture->runtime_max_ports});
+        capture->effective_max_block_frames =
+            std::min({capture->profile_max_block_frames, capture->host_max_block_frames,
+                      capture->runtime_max_block_frames});
         if (capture->nodes.size() > capture->effective_max_nodes ||
             capture->edges.size() > capture->effective_max_connections) {
             return last_result_ = Result::PreflightFailed;
