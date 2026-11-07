@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 
 namespace pulp::simd::detail {
 
@@ -144,16 +145,35 @@ template <typename T> inline void negate_impl(const T* a, T* dst, std::size_t n)
         dst[i] = -a[i];
 }
 
+/// mean() and rms() accumulate in double for float buffers (and in double for
+/// double buffers), so a long float buffer does not lose digits to a running
+/// float sum: the error is at most about n * 2^-53 of the mean of |x| (or of
+/// x^2), plus the final rounding to T.
+template <typename T> using wide_accumulator_t = std::conditional_t<sizeof(T) < 8, double, T>;
+
 template <typename T> inline T mean_impl(const T* x, std::size_t n) noexcept {
-    return n == 0 ? T(0) : sum_impl(x, n) / T(n);
+    using W = wide_accumulator_t<T>;
+    if (n == 0)
+        return T(0);
+    W acc = 0;
+    for (std::size_t i = 0; i < n; ++i)
+        acc += static_cast<W>(x[i]);
+    return static_cast<T>(acc / static_cast<W>(n));
 }
 
 template <typename T> inline T rms_impl(const T* x, std::size_t n) noexcept {
-    return n == 0 ? T(0) : std::sqrt(sum_squares_impl(x, n) / T(n));
+    using W = wide_accumulator_t<T>;
+    if (n == 0)
+        return T(0);
+    W acc = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        const W v = static_cast<W>(x[i]);
+        acc += v * v;
+    }
+    return static_cast<T>(std::sqrt(acc / static_cast<W>(n)));
 }
 
-/// Lowest index whose element equals `value`; 0 when none does (only possible
-/// with NaN input, where the extremum is unspecified).
+/// Lowest index whose element equals `value`; 0 when none does.
 template <typename T>
 inline std::size_t first_index_of(const T* x, std::size_t n, T value) noexcept {
     for (std::size_t i = 0; i < n; ++i)
@@ -162,8 +182,22 @@ inline std::size_t first_index_of(const T* x, std::size_t n, T value) noexcept {
     return 0;
 }
 
+/// Lowest index holding a NaN, or n when there is none. find_maximum and
+/// find_minimum return that NaN and its index on every backend.
+template <typename T> inline std::size_t first_nan_index(const T* x, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        if (x[i] != x[i])
+            return i;
+    return n;
+}
+
 template <typename T>
 inline T find_maximum_impl(const T* x, std::size_t n, std::size_t* index) noexcept {
+    const std::size_t nan_at = first_nan_index(x, n);
+    if (nan_at < n) {
+        *index = nan_at;
+        return x[nan_at];
+    }
     T best = n == 0 ? T(0) : x[0];
     std::size_t at = 0;
     for (std::size_t i = 1; i < n; ++i) {
@@ -178,6 +212,11 @@ inline T find_maximum_impl(const T* x, std::size_t n, std::size_t* index) noexce
 
 template <typename T>
 inline T find_minimum_impl(const T* x, std::size_t n, std::size_t* index) noexcept {
+    const std::size_t nan_at = first_nan_index(x, n);
+    if (nan_at < n) {
+        *index = nan_at;
+        return x[nan_at];
+    }
     T best = n == 0 ? T(0) : x[0];
     std::size_t at = 0;
     for (std::size_t i = 1; i < n; ++i) {
@@ -363,15 +402,22 @@ template <typename T> inline void sqrt_impl(const T* x, T* dst, std::size_t n) n
 
 /// x - 2*pi*round(x / 2*pi), formed in double with 2*pi as a double-double so
 /// the subtraction of the multiple is exact to the last bit of the result.
+/// The multiple k comes from a rounded quotient, so when x is within rounding
+/// of a half turn k can be one off and leave r just outside [-pi, pi]; one
+/// compare steps k back and redoes the subtraction.
 template <typename T> inline void wrap_phase_impl(const T* x, T* dst, std::size_t n) noexcept {
     constexpr double kInvTwoPi = 0.15915494309189535;
     constexpr double kTwoPiHi = 6.283185307179586;
     constexpr double kTwoPiLo = 2.4492935982947064e-16;
+    constexpr double kPi = 3.141592653589793;
     for (std::size_t i = 0; i < n; ++i) {
         const double v = static_cast<double>(x[i]);
-        const double k = std::nearbyint(v * kInvTwoPi);
-        double r = std::fma(-k, kTwoPiHi, v);
-        r = std::fma(-k, kTwoPiLo, r);
+        double k = std::nearbyint(v * kInvTwoPi);
+        double r = std::fma(-k, kTwoPiLo, std::fma(-k, kTwoPiHi, v));
+        if (r > kPi || r < -kPi) {
+            k += r > 0 ? 1.0 : -1.0;
+            r = std::fma(-k, kTwoPiLo, std::fma(-k, kTwoPiHi, v));
+        }
         dst[i] = static_cast<T>(r);
     }
 }
@@ -540,24 +586,28 @@ template <typename T> inline void wrap_phase_impl(const T* x, T* dst, std::size_
 
 // Vector math. The Accuracy argument is accepted and ignored by this backend:
 // the C library functions are already at least as accurate as either tier.
-#define PULP_SIMD_SCALAR_DEFINE_MATH(SPEC, T)                                                      \
-    SPEC void exp(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy) noexcept {            \
+// DEFAULT is `= ::pulp::simd::Accuracy::precise` for the header fallback, which
+// has no other declaration, and empty for the compiled backend, whose
+// declarations in <pulp/simd/simd.hpp> already carry the default.
+#define PULP_SIMD_SCALAR_DEFINE_MATH(SPEC, T, DEFAULT)                                             \
+    SPEC void exp(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy DEFAULT) noexcept {    \
         ::pulp::simd::detail::exp_impl(x, dst, n);                                                 \
     }                                                                                              \
-    SPEC void log(const T* x, T floor, T* dst, std::size_t n, ::pulp::simd::Accuracy) noexcept {   \
+    SPEC void log(const T* x, T floor, T* dst, std::size_t n,                                      \
+                  ::pulp::simd::Accuracy DEFAULT) noexcept {                                       \
         ::pulp::simd::detail::log_impl(x, floor, dst, n);                                          \
     }                                                                                              \
-    SPEC void sin(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy) noexcept {            \
+    SPEC void sin(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy DEFAULT) noexcept {    \
         ::pulp::simd::detail::sin_impl(x, dst, n);                                                 \
     }                                                                                              \
-    SPEC void cos(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy) noexcept {            \
+    SPEC void cos(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy DEFAULT) noexcept {    \
         ::pulp::simd::detail::cos_impl(x, dst, n);                                                 \
     }                                                                                              \
     SPEC void sincos(const T* x, T* sin_out, T* cos_out, std::size_t n,                            \
-                     ::pulp::simd::Accuracy) noexcept {                                            \
+                     ::pulp::simd::Accuracy DEFAULT) noexcept {                                    \
         ::pulp::simd::detail::sincos_impl(x, sin_out, cos_out, n);                                 \
     }                                                                                              \
-    SPEC void tanh(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy) noexcept {           \
+    SPEC void tanh(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy DEFAULT) noexcept {   \
         ::pulp::simd::detail::tanh_impl(x, dst, n);                                                \
     }                                                                                              \
     SPEC void sqrt(const T* x, T* dst, std::size_t n) noexcept {                                   \

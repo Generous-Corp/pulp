@@ -212,10 +212,18 @@ TEMPLATE_TEST_CASE("pulp::simd precise vector math stays within its documented u
             k.name, "exp small", samples<T>({"", -1, 1, false}, 2),
             precise([&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, Accuracy::precise); }),
             [](double v) { return std::exp(v); }, kPreciseUlp);
-        // Toward overflow and into the subnormal range, where the result is
-        // still the nearest representable number.
+        // Toward overflow, where the result is still the nearest
+        // representable number.
         check_ulp<T>(
             k.name, "exp to overflow", samples<T>({"", 88, 88.72, false}, 10),
+            precise([&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, Accuracy::precise); }),
+            [](double v) { return std::exp(v); }, kPreciseUlp);
+        // Into the subnormal range: outputs below the smallest normal number,
+        // measured in units of the subnormal spacing.
+        const Case subnormal_exp = std::is_same_v<T, float> ? Case{"", -103.9, -87.4, false}
+                                                            : Case{"", -745.0, -708.5, false};
+        check_ulp<T>(
+            k.name, "exp subnormal", samples<T>(subnormal_exp, 11),
             precise([&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, Accuracy::precise); }),
             [](double v) { return std::exp(v); }, kPreciseUlp);
         // log: from tiny to huge, and around 1 where the result crosses zero.
@@ -227,8 +235,10 @@ TEMPLATE_TEST_CASE("pulp::simd precise vector math stays within its documented u
         check_ulp<T>(
             k.name, "log near one", samples<T>({"", 0.5, 2, false}, 4), log_run,
             [](double v) { return std::log(v); }, kPreciseUlp);
-        // sin and cos over |x| <= 1e4 and at the points where they nearly vanish.
-        for (const double range : {3.2, 1e3, 1e4}) {
+        // sin and cos over |x| <= 39000 (the range Highway documents for its
+        // float kernels, and the documented range here) and at the points
+        // where they nearly vanish.
+        for (const double range : {3.2, 1e3, 1e4, 3.9e4}) {
             const auto sin_run = precise(
                 [&](const T* x, T* y, std::size_t n) { k.sin(x, y, n, Accuracy::precise); });
             const auto cos_run = precise(
@@ -334,16 +344,49 @@ TEMPLATE_TEST_CASE("pulp::simd fast vector math stays within its documented erro
     }
 }
 
+/// The inputs where a rounded x / 2pi can pick the wrong multiple: the T
+/// nearest each half turn (m + 1/2) * 2pi with |x| <= limit and three
+/// neighbours either side, plus the T nearest every multiple of pi.
+template <typename T> std::vector<T> wrap_phase_adversaries(double limit) {
+    const T inf = std::numeric_limits<T>::infinity();
+    std::vector<T> x;
+    const long turns = static_cast<long>(limit / (2 * kPi)) + 1;
+    for (long m = -turns; m <= turns; ++m) {
+        T c = static_cast<T>((static_cast<double>(m) + 0.5) * 2 * kPi);
+        for (int s = 0; s < 3; ++s)
+            c = std::nextafter(c, -inf);
+        for (int s = 0; s < 7; ++s, c = std::nextafter(c, inf))
+            if (std::fabs(static_cast<double>(c)) <= limit)
+                x.push_back(c);
+    }
+    for (long m = -2 * turns; m <= 2 * turns; ++m) {
+        const T c = static_cast<T>(static_cast<double>(m) * kPi);
+        if (std::fabs(static_cast<double>(c)) <= limit)
+            x.push_back(c);
+    }
+    return x;
+}
+
 TEMPLATE_TEST_CASE("pulp::simd wrap_phase lands in [-pi, pi] on the right angle",
                    "[simd][math][accuracy]", float, double) {
     using T = TestType;
     const double limit = wrap_domain<T>();
     const double bound = std::is_same_v<T, float> ? kWrapAbsFloat : kWrapAbsDouble;
     const double kTwoPiHi = 6.283185307179586, kTwoPiLo = 2.4492935982947064e-16;
+    // [-pi, pi] to one ulp at the ends: the smallest T at or above pi. The
+    // float nearest pi is already above it; the double nearest is below.
+    const double top =
+        std::is_same_v<T, float>
+            ? static_cast<double>(static_cast<float>(kPi))
+            : std::nextafter(static_cast<double>(kPi), std::numeric_limits<double>::infinity());
+    const auto hard = wrap_phase_adversaries<T>(limit);
     for (const auto& k : all_kernels<T>()) {
         INFO("backend " << k.name);
-        for (const double range : {20.0, limit}) {
-            const auto x = uniform<T>(kCount, -range, range, 31);
+        for (int set = 0; set < 3; ++set) {
+            const double range = set == 0 ? 20.0 : limit;
+            const auto x = set == 2 ? hard : uniform<T>(kCount, -range, range, 31);
+            INFO((set == 2 ? "half turns and multiples of pi, " : "uniform, ")
+                 << x.size() << " points");
             std::vector<T> y(x.size());
             k.wrap_phase(x.data(), y.data(), x.size());
             double worst = 0, widest = 0;
@@ -356,7 +399,7 @@ TEMPLATE_TEST_CASE("pulp::simd wrap_phase lands in [-pi, pi] on the right angle"
             }
             INFO("range " << range << ": worst " << worst << ", widest " << widest);
             CHECK(worst <= bound);
-            CHECK(widest <= kPi * (1 + 4 * std::numeric_limits<T>::epsilon()));
+            CHECK(widest <= top);
         }
     }
 }
@@ -592,6 +635,8 @@ TEMPLATE_TEST_CASE("pulp::simd vector math accuracy report", "[.][accuracy-repor
     for (const auto& k : candidate_kernels<T>()) {
         for (const Accuracy acc : {Accuracy::precise, Accuracy::fast}) {
             const char* tier = acc == Accuracy::fast ? "fast" : "precise";
+            // Each tier over its documented range.
+            const double trig_range = acc == Accuracy::fast ? 1e4 : 3.9e4;
             const auto report = [&](const char* fn, const std::vector<T>& x, auto call,
                                     auto truth) {
                 std::vector<T> y(x.size());
@@ -606,15 +651,22 @@ TEMPLATE_TEST_CASE("pulp::simd vector math accuracy report", "[.][accuracy-repor
                 [&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, acc); },
                 [](double v) { return std::exp(v); });
             report(
+                "exp sub",
+                samples<T>(std::is_same_v<T, float> ? Case{"", -103.9, -87.4, false}
+                                                    : Case{"", -745.0, -708.5, false},
+                           11),
+                [&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, acc); },
+                [](double v) { return std::exp(v); });
+            report(
                 "log", samples<T>({"", 1e-30, 1e30, true}, 3),
                 [&](const T* x, T* y, std::size_t n) { k.log(x, T(0), y, n, acc); },
                 [](double v) { return std::log(v); });
             report(
-                "sin", samples<T>({"", -1e4, 1e4, false}, 5),
+                "sin", samples<T>({"", -trig_range, trig_range, false}, 5),
                 [&](const T* x, T* y, std::size_t n) { k.sin(x, y, n, acc); },
                 [](double v) { return std::sin(v); });
             report(
-                "cos", samples<T>({"", -1e4, 1e4, false}, 6),
+                "cos", samples<T>({"", -trig_range, trig_range, false}, 6),
                 [&](const T* x, T* y, std::size_t n) { k.cos(x, y, n, acc); },
                 [](double v) { return std::cos(v); });
             report(

@@ -48,6 +48,8 @@
 //   sum(x, n)                  sum of x[i]                     (0 when n == 0)
 //   maximum(x, n)              largest x[i]                    (0 when n == 0)
 //   minimum(x, n)              smallest x[i]                   (0 when n == 0)
+//                              With a NaN in the buffer, maximum, minimum and
+//                              max_abs are unspecified and differ by backend.
 //   abs(a, dst, n)             dst[i] = |a[i]|                 (dst == a ok)
 //   clamp(a, lo, hi, dst, n)   dst[i] = clamp(a[i], lo, hi)    (dst == a ok)
 //   dot(a, b, n)               sum of a[i] * b[i]              (0 when n == 0)
@@ -60,9 +62,15 @@
 //   negate(a, dst, n)          dst[i] = -a[i]                  (dst == a ok)
 //   mean(x, n)                 arithmetic mean of x[i]         (0 when n == 0)
 //   rms(x, n)                  sqrt(mean of x[i] * x[i])       (0 when n == 0)
+//                              Both accumulate in double, also for float, so
+//                              a long float buffer keeps float precision: the
+//                              error is at most about n * 2^-53 of the mean of
+//                              |x| (or x^2) plus one rounding to T.
 //   find_maximum(x, n, &i)     largest x[i]; *i is the lowest index holding it
 //   find_minimum(x, n, &i)     smallest x[i]; *i is the lowest index holding it
-//                              Both return 0 and set *i = 0 when n == 0.
+//                              Both return 0 and set *i = 0 when n == 0. If any
+//                              x[i] is NaN, both return the first NaN and set
+//                              *i to its index, on every backend.
 //   replace_below(a, threshold, value, dst, n)
 //                              dst[i] = a[i] < threshold ? value : a[i]   (dst == a ok)
 //   replace_above(a, threshold, value, dst, n)
@@ -155,6 +163,13 @@
 // infinity times zero, so they are for finite spectra. Magnitude does not
 // guard against overflow of re^2 + im^2. Phase of (0, 0) is 0; phase at a
 // signed-zero boundary (such as (-0, +0)) is not pinned across backends.
+// complex_multiply_conj(z, z) may leave a last-bit imaginary part where the
+// target fuses multiply-add; use complex_magnitude_squared for |z|^2.
+//
+// On a given backend an element's result does not depend on where it sits in
+// the buffer or how a long buffer is split into calls, so a caller that works
+// in chunks (as the zero-latency convolver's spectral multiply-accumulate
+// does) gets the same bits as one whole-buffer call.
 
 #define PULP_SIMD_DECLARE_COMPLEX_KERNELS(T)                                                       \
     void complex_multiply(const T* a, const T* b, T* dst, std::size_t count) noexcept;             \
@@ -203,8 +218,15 @@ enum class Accuracy { precise, fast };
 //                               below zero (or NaN) means the smallest normal
 //                               number, so the argument is never zero, negative
 //                               or subnormal, so the result is finite for every finite x
-//   sin(x, dst, n, acc)         dst[i] = sin(x[i]), x in radians
-//   cos(x, dst, n, acc)         dst[i] = cos(x[i])
+//   sin(x, dst, n, acc)         dst[i] = sin(x[i]), x in radians. The precise
+//                               float bound holds for |x| <= 39000 on every
+//                               backend; past that Highway's float kernel
+//                               degrades (measured within 4 ULP to about 4e6,
+//                               wrong past about 1e7) while Accelerate and the
+//                               scalar backend stay accurate. Double holds to
+//                               at least 1e8. Wrap an accumulating phase with
+//                               wrap_phase first.
+//   cos(x, dst, n, acc)         dst[i] = cos(x[i]), same range as sin
 //   sincos(x, s, c, n, acc)     s[i] = sin(x[i]) and c[i] = cos(x[i]) from one
 //                               argument reduction
 //   tanh(x, dst, n, acc)        dst[i] = tanh(x[i])
@@ -213,7 +235,9 @@ enum class Accuracy { precise, fast };
 //                               the fast path, so there is no cheaper tier)
 //   wrap_phase(x, dst, n)       dst[i] = x[i] - 2*pi*round(x[i] / 2*pi), the
 //                               phase brought into [-pi, pi] (to within one
-//                               ulp at the ends)
+//                               ulp at the ends) on every backend, including
+//                               inputs on a half turn, for |x| up to 1e4
+//                               (float) and 1e6 (double)
 //
 // The accuracy argument defaults to Accuracy::precise. dst may equal x exactly
 // (sincos: s or c may equal x). NaN in gives NaN out for the precise tier; the
@@ -288,8 +312,8 @@ PULP_SIMD_SCALAR_DEFINE(inline, float)
 PULP_SIMD_SCALAR_DEFINE(inline, double)
 PULP_SIMD_SCALAR_DEFINE_COMPLEX(inline, float)
 PULP_SIMD_SCALAR_DEFINE_COMPLEX(inline, double)
-PULP_SIMD_SCALAR_DEFINE_MATH(inline, float)
-PULP_SIMD_SCALAR_DEFINE_MATH(inline, double)
+PULP_SIMD_SCALAR_DEFINE_MATH(inline, float, = ::pulp::simd::Accuracy::precise)
+PULP_SIMD_SCALAR_DEFINE_MATH(inline, double, = ::pulp::simd::Accuracy::precise)
 } // namespace pulp::simd::backend::inline_scalar
 #endif
 

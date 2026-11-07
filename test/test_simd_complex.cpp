@@ -30,6 +30,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <random>
 #include <string>
@@ -287,9 +288,10 @@ void check_spectral(const ComplexKernels<T>& ref, const ComplexKernels<T>& k, co
     k.phase(a.z.data(), got.data(), n);
     k.phase_split(a.re.data(), a.im.data(), gsplit.data(), n);
     for (std::size_t i = 0; i < n; ++i) {
-        // Within the principal range, away from the +/- pi seam where a one-ulp
-        // difference in the input flips the sign of the result.
-        if (std::fabs(a.im[i]) < T(1e-3))
+        // Within the principal range, away from the +/- pi seam (negative real
+        // axis) where a one-ulp difference in the input flips the sign of the
+        // result. Near-zero phases on the positive real axis are checked.
+        if (a.re[i] < T(0) && std::fabs(a.im[i]) < T(1e-3))
             continue;
         check_close(want[i], got[i], T(16) * eps<T>() + slack<T>(), "phase", i);
         check_close(want[i], gsplit[i], T(16) * eps<T>() + slack<T>(), "phase_split", i);
@@ -446,5 +448,102 @@ TEMPLATE_TEST_CASE("pulp::simd complex kernels do not allocate", "[simd][rt-safe
         k.phase_split(a.re.data(), a.im.data(), r3.data(), n);
         k.power_spectrum_split(a.re.data(), a.im.data(), T(0.5), r3.data(), n);
         CHECK(probe.allocation_count() == 0);
+    }
+}
+
+namespace {
+
+/// Runs `call(out, i, m)` once over [0, n) and again in pieces of several
+/// sizes, and requires identical bits. Every element is then at some point in
+/// a full vector, a partial vector and a one-element call.
+template <typename T, typename Call>
+void check_split_invariant(const char* what, const std::vector<T>& init, std::size_t n, Call call) {
+    std::vector<T> whole = init;
+    call(whole.data(), std::size_t(0), n);
+    for (std::size_t piece : {1, 2, 3, 5, 7, 13, 37, 64}) {
+        std::vector<T> parts = init;
+        for (std::size_t i = 0; i < n; i += piece)
+            call(parts.data(), i, std::min(piece, n - i));
+        INFO(what << " in pieces of " << piece);
+        CHECK(std::memcmp(whole.data(), parts.data(), whole.size() * sizeof(T)) == 0);
+    }
+}
+
+} // namespace
+
+TEMPLATE_TEST_CASE("pulp::simd complex results do not depend on how the buffer is split",
+                   "[simd][complex]", float, double) {
+    using T = TestType;
+    // A chunked caller (the zero-latency convolver sizes its chunks by the
+    // host block) must get the same bits as one whole-buffer call on every
+    // backend. The inputs start one element past the allocation, so the
+    // loads are unaligned as well.
+    constexpr std::size_t n = 211;
+    auto all = candidate_kernels<T>();
+    all.push_back(reference_kernels<T>());
+    const auto a = make_signal<T>(n + 1, 71, false);
+    const auto b = make_signal<T>(n + 1, 72, false);
+    const auto c = make_signal<T>(n + 1, 73, false);
+    const T* az = a.z.data() + 2;
+    const T* bz = b.z.data() + 2;
+    const T *ar = a.re.data() + 1, *ai = a.im.data() + 1;
+    const T *br = b.re.data() + 1, *bi = b.im.data() + 1;
+    std::vector<T> acc_z(c.z.begin() + 2, c.z.end());
+    std::vector<T> acc_split(c.re.begin() + 1, c.re.end());
+    acc_split.insert(acc_split.end(), c.im.begin() + 1, c.im.end());
+    const std::vector<T> zero2(2 * n, T(0)), zero1(n, T(0));
+    for (const auto& k : all) {
+        INFO("backend " << k.name);
+        check_split_invariant<T>("multiply", zero2, n, [&](T* o, std::size_t i, std::size_t m) {
+            k.multiply(az + 2 * i, bz + 2 * i, o + 2 * i, m);
+        });
+        check_split_invariant<T>("multiply_conj", zero2, n,
+                                 [&](T* o, std::size_t i, std::size_t m) {
+                                     k.multiply_conj(az + 2 * i, bz + 2 * i, o + 2 * i, m);
+                                 });
+        check_split_invariant<T>("multiply_accumulate", acc_z, n,
+                                 [&](T* o, std::size_t i, std::size_t m) {
+                                     k.multiply_accumulate(az + 2 * i, bz + 2 * i, o + 2 * i, m);
+                                 });
+        check_split_invariant<T>("magnitude", zero1, n, [&](T* o, std::size_t i, std::size_t m) {
+            k.magnitude(az + 2 * i, o + i, m);
+        });
+        check_split_invariant<T>(
+            "magnitude_squared", zero1, n,
+            [&](T* o, std::size_t i, std::size_t m) { k.magnitude_squared(az + 2 * i, o + i, m); });
+        check_split_invariant<T>("phase", zero1, n, [&](T* o, std::size_t i, std::size_t m) {
+            k.phase(az + 2 * i, o + i, m);
+        });
+        check_split_invariant<T>("power_spectrum", zero1, n,
+                                 [&](T* o, std::size_t i, std::size_t m) {
+                                     k.power_spectrum(az + 2 * i, T(0.25), o + i, m);
+                                 });
+        check_split_invariant<T>(
+            "multiply_split", zero2, n, [&](T* o, std::size_t i, std::size_t m) {
+                k.multiply_split(ar + i, ai + i, br + i, bi + i, o + i, o + n + i, m);
+            });
+        check_split_invariant<T>(
+            "multiply_conj_split", zero2, n, [&](T* o, std::size_t i, std::size_t m) {
+                k.multiply_conj_split(ar + i, ai + i, br + i, bi + i, o + i, o + n + i, m);
+            });
+        check_split_invariant<T>(
+            "multiply_accumulate_split", acc_split, n, [&](T* o, std::size_t i, std::size_t m) {
+                k.multiply_accumulate_split(ar + i, ai + i, br + i, bi + i, o + i, o + n + i, m);
+            });
+        check_split_invariant<T>("magnitude_split", zero1, n,
+                                 [&](T* o, std::size_t i, std::size_t m) {
+                                     k.magnitude_split(ar + i, ai + i, o + i, m);
+                                 });
+        check_split_invariant<T>("magnitude_squared_split", zero1, n,
+                                 [&](T* o, std::size_t i, std::size_t m) {
+                                     k.magnitude_squared_split(ar + i, ai + i, o + i, m);
+                                 });
+        check_split_invariant<T>("phase_split", zero1, n, [&](T* o, std::size_t i, std::size_t m) {
+            k.phase_split(ar + i, ai + i, o + i, m);
+        });
+        check_split_invariant<T>("power_spectrum_split", zero1, n,
+                                 [&](T* o, std::size_t i, std::size_t m) {
+                                     k.power_spectrum_split(ar + i, ai + i, T(0.25), o + i, m);
+                                 });
     }
 }

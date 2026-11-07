@@ -49,6 +49,35 @@ TEST_CASE("pulp::simd resolves to the inline scalar kernels without the library"
     pulp::simd::exp(arg.data(), e.data(), e.size(), pulp::simd::Accuracy::fast);
     CHECK(e[0] == 1.0f);
     CHECK(std::fabs(e[1] - 2.7182817f) < 1e-6f);
+    // The documented call forms with the accuracy argument left out
+    // (Accuracy::precise), for every vector math function.
+    std::array<float, 3> m{}, m2{};
+    pulp::simd::exp(arg.data(), m.data(), m.size());
+    CHECK(m[0] == 1.0f);
+    CHECK(std::fabs(m[1] - 2.7182817f) < 1e-6f);
+    pulp::simd::log(m.data(), 0.0f, m2.data(), m2.size());
+    CHECK(std::fabs(m2[2] - 2.0f) < 1e-6f);
+    pulp::simd::sin(arg.data(), m.data(), m.size());
+    CHECK(std::fabs(m[1] - 0.84147096f) < 1e-6f);
+    pulp::simd::cos(arg.data(), m.data(), m.size());
+    CHECK(std::fabs(m[1] - 0.5403023f) < 1e-6f);
+    pulp::simd::tanh(arg.data(), m.data(), m.size());
+    CHECK(std::fabs(m[1] - 0.7615942f) < 1e-6f);
+    pulp::simd::sincos(arg.data(), m.data(), m2.data(), m.size());
+    CHECK(std::fabs(m[2] - 0.9092974f) < 1e-6f);
+    CHECK(std::fabs(m2[2] + 0.41614684f) < 1e-6f);
+    const std::array<double, 2> argd{0.0, 1.0};
+    std::array<double, 2> md{}, md2{};
+    pulp::simd::exp(argd.data(), md.data(), md.size());
+    CHECK(md[0] == 1.0);
+    pulp::simd::sincos(argd.data(), md.data(), md2.data(), md.size());
+    CHECK(md2[0] == 1.0);
+    // NaN in find_maximum: the first NaN and its index, as on the library.
+    const std::array<float, 4> with_nan{1.0f, std::nanf(""), 3.0f, std::nanf("")};
+    at = 99;
+    CHECK(std::isnan(pulp::simd::find_maximum(with_nan.data(), with_nan.size(), &at)));
+    CHECK(at == 1);
+
     const std::array<float, 2> big{7.0f, -7.0f};
     std::array<float, 2> w{};
     pulp::simd::wrap_phase(big.data(), w.data(), w.size());

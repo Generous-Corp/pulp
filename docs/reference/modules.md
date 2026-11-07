@@ -47,7 +47,20 @@ layout of `std::complex<T>`) and split (separate real and imaginary arrays,
 (`scale * |z|^2`). They use the plain product formulas, so unlike
 `std::complex::operator*` they do not recover a NaN from infinity times zero;
 use them on finite spectra. The zero-latency convolver's spectral
-multiply-accumulate runs on them.
+multiply-accumulate runs on them. On every backend an element's result does
+not depend on where it sits in the buffer or on how a long buffer is split
+into calls, so chunked processing gives the same bits as one call (checked by
+`test/test_simd_complex.cpp`). `complex_multiply_conj(z, z)` can leave a
+last-bit imaginary part where the target fuses multiply-add; use
+`complex_magnitude_squared` for `|z|^2`.
+
+`mean` and `rms` accumulate in `double`, also for `float` input, so a long
+buffer keeps its precision: over four million `float` samples near 1.0 the
+measured relative error is 5.8e-9 (mean) and 4.7e-8 (rms), one rounding to
+`float`, where a running `float` sum was 5e-4 off. For `double` the bound is
+about `n * 2^-53`. `find_maximum` and `find_minimum` return the first NaN and
+its index when the buffer holds one, on every backend; `maximum`, `minimum`
+and `max_abs` with a NaN in the buffer are unspecified and differ by backend.
 
 ### Vector math and accuracy tiers
 
@@ -76,6 +89,16 @@ pulp::simd::wrap_phase(phase, wrapped, n);              // into [-pi, pi]
   square root is already the fast path. `wrap_phase` has one implementation.
 - A result does not depend on where an element sits in the buffer, on the
   buffer length, or on whether the call is in place.
+- `wrap_phase` stays within `[-pi, pi]` (one ulp at the ends) on every
+  backend, including inputs that sit on a half turn, for `abs x` up to 1e4
+  (`float`) and 1e6 (`double`). The test checks every half turn and multiple
+  of pi in that range, not only random points.
+- `precise` `sin`, `cos` and `sincos` meet the bound for `abs x` up to 39000 on
+  every backend, the range Highway documents for its `float` kernels. Past it
+  Highway's `float` kernels degrade (measured within 4 ULP to about 4e6, wrong
+  past about 1e7), while Accelerate and the scalar backend stay accurate over
+  the whole `float` range, and `double` holds to at least 1e8 everywhere. Bring
+  an accumulating phase back with `wrap_phase` before taking its sine.
 
 Measured worst case over random inputs in the stated range, on arm64 macOS
 (Highway NEON, and Accelerate), as checked by the `[simd][math][accuracy]` cases
@@ -87,15 +110,16 @@ measured here, and the test asserts the bound on whatever machine runs it.
 | Function (range) | Tier | float, measured | double, measured | Documented bound |
 |---|---|---|---|---|
 | exp ([-87, 88]) | precise | 1.4 ULP | 1 ULP | 4 ULP |
+| exp (subnormal results: [-103.9, -87.4] float, [-745, -708.5] double) | precise | 0.91 ULP | 1 ULP | 4 ULP |
 | log (1e-30 to 1e30) | precise | 2.2 ULP | 2 ULP | 4 ULP |
-| sin, cos (abs x up to 1e4) | precise | 2.2 ULP | 3 ULP | 4 ULP |
+| sin, cos (abs x up to 39000) | precise | 2.2 ULP | 3 ULP | 4 ULP |
 | tanh (abs x up to 10) | precise | 2.4 ULP | 3 ULP | 4 ULP |
 | sqrt | both | exact | exact | correctly rounded |
 | exp ([-87, 88]) | fast | 3.6e-6 relative | as precise | 4e-6 relative |
 | log (floor to float max) | fast | 3.6e-6 relative (1.95e-6 absolute) | as precise | 4.5e-6 relative |
 | sin, cos (abs x up to 1e4) | fast | 1.2e-7, 1.9e-7 absolute | as precise | 2.5e-7 absolute |
 | tanh | fast | 1.6e-6 absolute | as precise | 2.2e-6 absolute |
-| wrap_phase (abs x up to 1e4 float, 1e6 double) | one | 1.2e-7 absolute | 4.4e-16 absolute | 3e-7 float, 1e-15 double |
+| wrap_phase (abs x up to 1e4 float, 1e6 double, half turns included) | one | 1.2e-7 absolute | 8.9e-16 absolute | 3e-7 float, 1e-15 double |
 
 ULP is measured against the C library in double. For `double` that makes the
 figure the distance from libm, which is itself well under one ULP. The `fast`
@@ -105,7 +129,8 @@ circle, because `pi` and `-pi` are the same angle.
 
 Edges. The `precise` tier gives `exp(+large)` = +inf, `exp(-large)` = 0,
 `log(+inf)` = +inf, `sin` and `cos` of an infinity = NaN, and NaN in gives NaN
-out. The `fast` tier does not define NaN or infinity, saturates `exp` at
+out. Accelerate's `double` `cos(0)` is `1 - 1.1e-16`, one ulp below 1, so do
+not test `cos(0) == 1` exactly. The `fast` tier does not define NaN or infinity, saturates `exp` at
 `exp(88)` and `exp(-87.3)`, and needs `log` input between the floor and the
 largest float (so the floor must be a positive normal number, which is the
 default when it is zero or negative).

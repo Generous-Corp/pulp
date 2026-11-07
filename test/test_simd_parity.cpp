@@ -760,3 +760,75 @@ TEMPLATE_TEST_CASE("pulp::simd kernels do not allocate", "[simd][rt-safety]", fl
         CHECK(std::isfinite(sink));
     }
 }
+
+TEMPLATE_TEST_CASE("pulp::simd find_maximum and find_minimum return the first NaN",
+                   "[simd][parity]", float, double) {
+    using T = TestType;
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    auto all = candidate_kernels<T>();
+    all.push_back(reference_kernels<T>());
+    // NaN early, late (past a full vector), first, and twice; the answer is the
+    // first NaN and its index on every backend and every Highway target.
+    const std::vector<std::vector<T>> inputs = {
+        {T(1), T(3), nan, T(2), T(3)},
+        {nan, T(3), T(1), T(2), T(3), T(1), T(2), T(3), T(1)},
+        {T(1),  T(2),  T(3),  T(4),  T(5),  T(6),  T(7),  T(8), T(9),  T(10),
+         T(11), T(12), T(13), T(14), T(15), T(16), T(17), nan,  T(-1), nan},
+    };
+    const std::size_t want[] = {2, 0, 17};
+    for (const auto& k : all) {
+        INFO("backend " << k.name);
+        for (std::size_t c = 0; c < inputs.size(); ++c) {
+            INFO("input " << c);
+            const auto& x = inputs[c];
+            std::size_t at = 99;
+            CHECK(std::isnan(k.find_maximum(x.data(), x.size(), &at)));
+            CHECK(at == want[c]);
+            at = 99;
+            CHECK(std::isnan(k.find_minimum(x.data(), x.size(), &at)));
+            CHECK(at == want[c]);
+        }
+        // Infinities are ordinary values, not NaN.
+        const T inf = std::numeric_limits<T>::infinity();
+        const T y[] = {T(1), inf, -inf, T(2)};
+        std::size_t at = 99;
+        CHECK(k.find_maximum(y, 4, &at) == inf);
+        CHECK(at == 1);
+        CHECK(k.find_minimum(y, 4, &at) == -inf);
+        CHECK(at == 2);
+    }
+}
+
+TEMPLATE_TEST_CASE("pulp::simd mean and rms keep their precision over long buffers",
+                   "[simd][parity][accuracy]", float, double) {
+    using T = TestType;
+    // A DC-heavy signal (0.9 to 1.1) over four million samples: a running float
+    // sum loses about four digits here (measured 5e-4 relative before the
+    // kernels accumulated in double). The truth is a long double sum.
+    constexpr std::size_t n = std::size_t{1} << 22;
+    std::mt19937 rng(97);
+    std::uniform_real_distribution<double> dist(0.9, 1.1);
+    std::vector<T> x(n);
+    long double s = 0, s2 = 0;
+    for (auto& v : x) {
+        v = static_cast<T>(dist(rng));
+        s += static_cast<long double>(v);
+        s2 += static_cast<long double>(v) * static_cast<long double>(v);
+    }
+    const double want_mean = static_cast<double>(s / n);
+    const double want_rms = std::sqrt(static_cast<double>(s2 / n));
+    // float: one rounding of a double-accurate value. double: the documented
+    // n * 2^-53 (the long double truth is itself only double on arm64).
+    const double bound = std::is_same_v<T, float> ? double(std::numeric_limits<float>::epsilon())
+                                                  : double(n) * 0x1p-53;
+    auto all = candidate_kernels<T>();
+    all.push_back(reference_kernels<T>());
+    for (const auto& k : all) {
+        INFO("backend " << k.name);
+        const double mean_err = std::fabs(double(k.mean(x.data(), n)) - want_mean) / want_mean;
+        const double rms_err = std::fabs(double(k.rms(x.data(), n)) - want_rms) / want_rms;
+        INFO("mean relative error " << mean_err << ", rms relative error " << rms_err);
+        CHECK(mean_err <= bound);
+        CHECK(rms_err <= bound);
+    }
+}

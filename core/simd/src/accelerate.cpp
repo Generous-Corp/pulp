@@ -17,6 +17,8 @@
 #include <Accelerate/Accelerate.h>
 
 #include <algorithm>
+#include <climits>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -62,6 +64,48 @@ inline void apply_log_floor(const T* x, T floor, T* dst, std::size_t n) noexcept
     const T f = detail::effective_log_floor(floor);
     for (std::size_t i = 0; i < n; ++i)
         dst[i] = x[i] < f ? f : x[i];
+}
+
+/// cblas copies take an int count; long buffers go through in chunks.
+template <typename F> inline void for_int_chunks(std::size_t n, F&& f) noexcept {
+    constexpr std::size_t kMax = INT_MAX;
+    for (std::size_t i = 0; i < n; i += kMax)
+        f(i, static_cast<int>(std::min(kMax, n - i)));
+}
+
+/// Sum (or sum of squares) of a float buffer accumulated in double: chunks are
+/// widened into a stack buffer and summed by vDSP in double, so a long buffer
+/// keeps float precision (vDSP_meanv and vDSP_rmsqv accumulate in float).
+template <bool kSquares> inline double wide_sum(const float* x, std::size_t n) noexcept {
+    constexpr std::size_t kChunk = 512; // 4 KB of stack, like the conversions
+    double wide[kChunk];
+    double total = 0;
+    for (std::size_t i = 0; i < n; i += kChunk) {
+        const std::size_t m = std::min(kChunk, n - i);
+        vDSP_vspdp(x + i, 1, wide, 1, len(m));
+        double part = 0;
+        if constexpr (kSquares)
+            vDSP_svesqD(wide, 1, &part, len(m));
+        else
+            vDSP_sveD(wide, 1, &part, len(m));
+        total += part;
+    }
+    return total;
+}
+
+/// Lowest index holding a NaN, or n. A NaN makes the sum NaN, so one vDSP pass
+/// rules it out; only a non-finite sum pays for the scalar scan.
+inline std::size_t first_nan(const float* x, std::size_t n) noexcept {
+    float s = 0;
+    if (n)
+        vDSP_sve(x, 1, &s, len(n));
+    return std::isfinite(s) ? n : detail::first_nan_index(x, n);
+}
+inline std::size_t first_nan(const double* x, std::size_t n) noexcept {
+    double s = 0;
+    if (n)
+        vDSP_sveD(x, 1, &s, len(n));
+    return std::isfinite(s) ? n : detail::first_nan_index(x, n);
 }
 
 } // namespace
@@ -167,23 +211,28 @@ void negate(const float* a, float* dst, std::size_t n) noexcept {
     vDSP_vneg(a, 1, dst, 1, len(n));
 }
 float mean(const float* x, std::size_t n) noexcept {
-    float r = 0;
-    if (n)
-        vDSP_meanv(x, 1, &r, len(n));
-    return r;
+    return n == 0 ? 0.0f : static_cast<float>(wide_sum<false>(x, n) / static_cast<double>(n));
 }
 float rms(const float* x, std::size_t n) noexcept {
-    float r = 0;
-    if (n)
-        vDSP_rmsqv(x, 1, &r, len(n));
-    return r;
+    return n == 0 ? 0.0f
+                  : static_cast<float>(std::sqrt(wide_sum<true>(x, n) / static_cast<double>(n)));
 }
 float find_maximum(const float* x, std::size_t n, std::size_t* index) noexcept {
+    const std::size_t nan_at = first_nan(x, n);
+    if (nan_at < n) {
+        *index = nan_at;
+        return x[nan_at];
+    }
     const float m = maximum(x, n);
     *index = detail::first_index_of(x, n, m);
     return m;
 }
 float find_minimum(const float* x, std::size_t n, std::size_t* index) noexcept {
+    const std::size_t nan_at = first_nan(x, n);
+    if (nan_at < n) {
+        *index = nan_at;
+        return x[nan_at];
+    }
     const float m = minimum(x, n);
     *index = detail::first_index_of(x, n, m);
     return m;
@@ -234,12 +283,16 @@ void to_int32(const float* src, float scale, std::int32_t* dst, std::size_t n) n
 }
 // Strided BLAS copies move whole elements, so the result is exact.
 void interleave2(const float* l, const float* r, float* dst, std::size_t n) noexcept {
-    cblas_scopy(static_cast<int>(n), l, 1, dst, 2);
-    cblas_scopy(static_cast<int>(n), r, 1, dst + 1, 2);
+    for_int_chunks(n, [&](std::size_t i, int m) {
+        cblas_scopy(m, l + i, 1, dst + 2 * i, 2);
+        cblas_scopy(m, r + i, 1, dst + 2 * i + 1, 2);
+    });
 }
 void deinterleave2(const float* src, float* l, float* r, std::size_t n) noexcept {
-    cblas_scopy(static_cast<int>(n), src, 2, l, 1);
-    cblas_scopy(static_cast<int>(n), src + 1, 2, r, 1);
+    for_int_chunks(n, [&](std::size_t i, int m) {
+        cblas_scopy(m, src + 2 * i, 2, l + i, 1);
+        cblas_scopy(m, src + 2 * i + 1, 2, r + i, 1);
+    });
 }
 
 // ── double ───────────────────────────────────────────────────────────────────
@@ -353,11 +406,21 @@ double rms(const double* x, std::size_t n) noexcept {
     return r;
 }
 double find_maximum(const double* x, std::size_t n, std::size_t* index) noexcept {
+    const std::size_t nan_at = first_nan(x, n);
+    if (nan_at < n) {
+        *index = nan_at;
+        return x[nan_at];
+    }
     const double m = maximum(x, n);
     *index = detail::first_index_of(x, n, m);
     return m;
 }
 double find_minimum(const double* x, std::size_t n, std::size_t* index) noexcept {
+    const std::size_t nan_at = first_nan(x, n);
+    if (nan_at < n) {
+        *index = nan_at;
+        return x[nan_at];
+    }
     const double m = minimum(x, n);
     *index = detail::first_index_of(x, n, m);
     return m;
@@ -408,17 +471,26 @@ void to_int32(const double* src, double scale, std::int32_t* dst, std::size_t n)
 }
 // Strided BLAS copies move whole elements, so the result is exact.
 void interleave2(const double* l, const double* r, double* dst, std::size_t n) noexcept {
-    cblas_dcopy(static_cast<int>(n), l, 1, dst, 2);
-    cblas_dcopy(static_cast<int>(n), r, 1, dst + 1, 2);
+    for_int_chunks(n, [&](std::size_t i, int m) {
+        cblas_dcopy(m, l + i, 1, dst + 2 * i, 2);
+        cblas_dcopy(m, r + i, 1, dst + 2 * i + 1, 2);
+    });
 }
 void deinterleave2(const double* src, double* l, double* r, std::size_t n) noexcept {
-    cblas_dcopy(static_cast<int>(n), src, 2, l, 1);
-    cblas_dcopy(static_cast<int>(n), src + 1, 2, r, 1);
+    for_int_chunks(n, [&](std::size_t i, int m) {
+        cblas_dcopy(m, src + 2 * i, 2, l + i, 1);
+        cblas_dcopy(m, src + 2 * i + 1, 2, r + i, 1);
+    });
 }
 
 // ── complex (float) ─────────────────────────────────────────────────────────────
 // The vDSP split-complex routines take a stride, so an interleaved buffer is
 // a split view with real part at z, imaginary part at z + 1 and stride 2.
+// At unit stride vDSP_zvmags and vDSP_zvphas finish the last few elements on a
+// different path from the body, so a result would depend on where it sits in
+// the call. The split magnitude-squared and power kernels therefore use the
+// plain loop (the compiler vectorises it with one formula throughout) and the
+// split phase uses vForce's atan2.
 
 namespace {
 
@@ -520,14 +592,16 @@ void complex_magnitude_split(const float* re, const float* im, float* dst, std::
 }
 void complex_magnitude_squared_split(const float* re, const float* im, float* dst,
                                      std::size_t n) noexcept {
-    power_strided(re, im, 1, float(1), dst, n);
+    detail::complex_magnitude_squared_impl(re, im, 1, float(1), dst, n);
 }
 void complex_phase_split(const float* re, const float* im, float* dst, std::size_t n) noexcept {
-    phase_strided(re, im, 1, dst, n);
+    // vDSP_zvphas at unit stride runs its last few elements on a different
+    // path, so a result would depend on its position; vForce does not.
+    for_chunks(n, [&](std::size_t i, const int* m) { vvatan2f(dst + i, im + i, re + i, m); });
 }
 void complex_power_spectrum_split(const float* re, const float* im, float scale, float* dst,
                                   std::size_t n) noexcept {
-    power_strided(re, im, 1, scale, dst, n);
+    detail::complex_magnitude_squared_impl(re, im, 1, scale, dst, n);
 }
 
 // ── complex (double) ─────────────────────────────────────────────────────────────
@@ -574,12 +648,12 @@ inline void power_strided(const double* re, const double* im, std::size_t s, dou
         vDSP_vsmulD(dst, 1, &scale, dst, 1, len(n));
 }
 
+// vDSP_zvabsD finishes the last elements on a different path from the body at
+// either stride, so a result would depend on its position; the plain loop
+// uses one formula throughout.
 inline void mag_strided(const double* re, const double* im, std::size_t s, double* dst,
                         std::size_t n) noexcept {
-    if (n == 0)
-        return;
-    const auto a = as_split(re, im);
-    vDSP_zvabsD(&a, static_cast<vDSP_Stride>(s), dst, 1, len(n));
+    detail::complex_magnitude_impl(re, im, s, dst, n);
 }
 
 inline void phase_strided(const double* re, const double* im, std::size_t s, double* dst,
@@ -635,14 +709,14 @@ void complex_magnitude_split(const double* re, const double* im, double* dst,
 }
 void complex_magnitude_squared_split(const double* re, const double* im, double* dst,
                                      std::size_t n) noexcept {
-    power_strided(re, im, 1, double(1), dst, n);
+    detail::complex_magnitude_squared_impl(re, im, 1, double(1), dst, n);
 }
 void complex_phase_split(const double* re, const double* im, double* dst, std::size_t n) noexcept {
-    phase_strided(re, im, 1, dst, n);
+    for_chunks(n, [&](std::size_t i, const int* m) { vvatan2(dst + i, im + i, re + i, m); });
 }
 void complex_power_spectrum_split(const double* re, const double* im, double scale, double* dst,
                                   std::size_t n) noexcept {
-    power_strided(re, im, 1, scale, dst, n);
+    detail::complex_magnitude_squared_impl(re, im, 1, scale, dst, n);
 }
 
 // ── vector math (float) ───────────────────────────────────────────────────────────

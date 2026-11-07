@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 
 #undef HWY_TARGET_INCLUDE
@@ -201,6 +202,48 @@ template <typename T> T SumSquaresT(const T* HWY_RESTRICT x, size_t count) {
     return DotT(x, x, count);
 }
 
+// Sum (or sum of squares) accumulated in double, for mean() and rms(). A float
+// buffer is widened lane by lane, so the error stays near double precision
+// instead of growing as n * 2^-24 with a float running sum.
+template <bool kSquares, typename T> double WideSumT(const T* HWY_RESTRICT x, size_t count) {
+#if HWY_TARGET == HWY_SCALAR
+    double acc = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const double v = static_cast<double>(x[i]);
+        acc += kSquares ? v * v : v;
+    }
+    return acc;
+#else
+    if constexpr (sizeof(T) == 8) {
+        return kSquares ? SumSquaresT(x, count) : SumT(x, count);
+    } else {
+        const hn::ScalableTag<float> df;
+        const hn::Repartition<double, decltype(df)> dd;
+        const size_t N = hn::Lanes(df);
+        auto lo = hn::Zero(dd), hi = hn::Zero(dd);
+        size_t i = 0;
+        for (; i + N <= count; i += N) {
+            const auto v = hn::LoadU(df, x + i);
+            const auto a = hn::PromoteLowerTo(dd, v);
+            const auto b = hn::PromoteUpperTo(dd, v);
+            if constexpr (kSquares) {
+                lo = hn::MulAdd(a, a, lo);
+                hi = hn::MulAdd(b, b, hi);
+            } else {
+                lo = hn::Add(lo, a);
+                hi = hn::Add(hi, b);
+            }
+        }
+        double acc = hn::ReduceSum(dd, hn::Add(lo, hi));
+        for (; i < count; ++i) {
+            const double v = static_cast<double>(x[i]);
+            acc += kSquares ? v * v : v;
+        }
+        return acc;
+    }
+#endif
+}
+
 template <typename T> T MaxAbsT(const T* HWY_RESTRICT x, size_t count) {
     const hn::ScalableTag<T> d;
     const size_t N = hn::Lanes(d);
@@ -313,10 +356,34 @@ template <typename T> void NegateT(const T* a, T* dst, size_t count) {
         dst[i] = -a[i];
 }
 
-// The extremum is found with vector Max/Min; the index is then the first
-// element equal to it, so ties resolve to the lowest index like the scalar
-// reference.
+/// Lowest index holding a NaN, or count when there is none. A vector pass
+/// decides whether there is one; only then does a scalar scan locate it.
+/// (Highway's Max and Min treat NaN differently per target, so NaN is settled
+/// here rather than left to them.)
+template <typename T> size_t FirstNaNT(const T* HWY_RESTRICT x, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    auto bad = hn::Zero(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N)
+        bad = hn::Or(bad, hn::VecFromMask(d, hn::IsNaN(hn::LoadU(d, x + i))));
+    if (i < count)
+        bad = hn::Or(bad, hn::VecFromMask(d, hn::IsNaN(hn::LoadN(d, x + i, count - i))));
+    if (hn::AllFalse(d, hn::MaskFromVec(bad)))
+        return count;
+    return ::pulp::simd::detail::first_nan_index(x, count);
+}
+
+// A NaN anywhere gives the first NaN and its index, as on every backend.
+// Otherwise the extremum is found with vector Max/Min; the index is then the
+// first element equal to it, so ties resolve to the lowest index like the
+// scalar reference.
 template <typename T> T FindMaximumT(const T* HWY_RESTRICT x, size_t count, size_t* index) {
+    const size_t nan_at = FirstNaNT(x, count);
+    if (nan_at < count) {
+        *index = nan_at;
+        return x[nan_at];
+    }
     const T m = MaximumT(x, count);
     size_t at = 0;
     for (size_t i = 0; i < count; ++i) {
@@ -330,6 +397,11 @@ template <typename T> T FindMaximumT(const T* HWY_RESTRICT x, size_t count, size
 }
 
 template <typename T> T FindMinimumT(const T* HWY_RESTRICT x, size_t count, size_t* index) {
+    const size_t nan_at = FirstNaNT(x, count);
+    if (nan_at < count) {
+        *index = nan_at;
+        return x[nan_at];
+    }
     const T m = MinimumT(x, count);
     size_t at = 0;
     for (size_t i = 0; i < count; ++i) {
@@ -500,6 +572,12 @@ template <typename T> void Deinterleave2T(const T* src, T* l, T* r, size_t count
     T SumSquares##SUFFIX(const T* x, size_t n) {                                                   \
         return SumSquaresT(x, n);                                                                  \
     }                                                                                              \
+    double WideSum##SUFFIX(const T* x, size_t n) {                                                 \
+        return WideSumT<false>(x, n);                                                              \
+    }                                                                                              \
+    double WideSumSquares##SUFFIX(const T* x, size_t n) {                                          \
+        return WideSumT<true>(x, n);                                                               \
+    }                                                                                              \
     T MaxAbs##SUFFIX(const T* x, size_t n) {                                                       \
         return MaxAbsT(x, n);                                                                      \
     }                                                                                              \
@@ -561,37 +639,62 @@ PULP_SIMD_HWY_INSTANTIATE(F64, double)
 // One body serves both layouts. For an interleaved buffer the load splits a
 // vector's worth of complex values into real and imaginary registers and the
 // store merges them again; for split buffers they are plain loads and stores.
-// The scalar tail runs the strided reference loop on the remaining elements.
+// The last, partial vector runs the same instructions on zero-padded lanes
+// (a stack copy for interleaved data, LoadN / StoreN for split data), so an
+// element's result does not depend on its position in the buffer or on how a
+// caller splits a long buffer into calls.
 
+/// Loads m (1 <= m <= Lanes(d)) complex values starting at element i.
 template <typename T, bool kInterleaved, class D, class V>
-HWY_INLINE void LoadComplex(D d, const T* re, const T* im, size_t i, V& vr, V& vi) {
+HWY_INLINE void LoadComplex(D d, const T* re, const T* im, size_t i, size_t m, V& vr, V& vi) {
+    const size_t N = hn::Lanes(d);
     if constexpr (kInterleaved) {
         (void)im;
-        hn::LoadInterleaved2(d, re + 2 * i, vr, vi);
-    } else {
+        if (m == N) {
+            hn::LoadInterleaved2(d, re + 2 * i, vr, vi);
+        } else {
+            HWY_ALIGN T buf[2 * HWY_MAX_LANES_D(D)] = {};
+            std::memcpy(buf, re + 2 * i, 2 * m * sizeof(T));
+            hn::LoadInterleaved2(d, buf, vr, vi);
+        }
+    } else if (m == N) {
         vr = hn::LoadU(d, re + i);
         vi = hn::LoadU(d, im + i);
+    } else {
+        vr = hn::LoadN(d, re + i, m);
+        vi = hn::LoadN(d, im + i, m);
     }
 }
 
+/// Stores the first m complex values of (vr, vi) at element i.
 template <typename T, bool kInterleaved, class D, class V>
-HWY_INLINE void StoreComplex(D d, V vr, V vi, T* re, T* im, size_t i) {
+HWY_INLINE void StoreComplex(D d, V vr, V vi, T* re, T* im, size_t i, size_t m) {
+    const size_t N = hn::Lanes(d);
     if constexpr (kInterleaved) {
         (void)im;
-        hn::StoreInterleaved2(vr, vi, d, re + 2 * i);
-    } else {
+        if (m == N) {
+            hn::StoreInterleaved2(vr, vi, d, re + 2 * i);
+        } else {
+            HWY_ALIGN T buf[2 * HWY_MAX_LANES_D(D)];
+            hn::StoreInterleaved2(vr, vi, d, buf);
+            std::memcpy(re + 2 * i, buf, 2 * m * sizeof(T));
+        }
+    } else if (m == N) {
         hn::StoreU(vr, d, re + i);
         hn::StoreU(vi, d, im + i);
+    } else {
+        hn::StoreN(vr, d, re + i, m);
+        hn::StoreN(vi, d, im + i, m);
     }
 }
 
-template <typename T, bool I> constexpr size_t Stride() {
-    return I ? 2 : 1;
-}
-
-/// Imaginary pointer for the strided scalar reference: z + 1 when interleaved.
-template <bool I, typename P> HWY_INLINE P ImagOf(P re, P im) {
-    return I ? re + 1 : im;
+/// Stores the first m lanes of a real result at dst + i.
+template <typename T, class D, class V>
+HWY_INLINE void StoreReal(D d, V v, T* dst, size_t i, size_t m) {
+    if (m == hn::Lanes(d))
+        hn::StoreU(v, d, dst + i);
+    else
+        hn::StoreN(v, d, dst + i, m);
 }
 
 template <typename T, bool I>
@@ -599,19 +702,15 @@ void ComplexMultiplyT(const T* ar, const T* ai, const T* br, const T* bi, T* dr,
                       size_t count) {
     const hn::ScalableTag<T> d;
     const size_t N = hn::Lanes(d);
-    size_t i = 0;
-    for (; i + N <= count; i += N) {
+    for (size_t i = 0; i < count; i += N) {
+        const size_t m = HWY_MIN(N, count - i);
         hn::Vec<decltype(d)> xr, xi, yr, yi;
-        LoadComplex<T, I>(d, ar, ai, i, xr, xi);
-        LoadComplex<T, I>(d, br, bi, i, yr, yi);
+        LoadComplex<T, I>(d, ar, ai, i, m, xr, xi);
+        LoadComplex<T, I>(d, br, bi, i, m, yr, yi);
         const auto rr = hn::NegMulAdd(xi, yi, hn::Mul(xr, yr));
         const auto ri = hn::MulAdd(xi, yr, hn::Mul(xr, yi));
-        StoreComplex<T, I>(d, rr, ri, dr, di, i);
+        StoreComplex<T, I>(d, rr, ri, dr, di, i, m);
     }
-    constexpr size_t S = Stride<T, I>();
-    ::pulp::simd::detail::complex_multiply_impl(
-        ar + i * S, ImagOf<I>(ar, ai) + i * S, S, br + i * S, ImagOf<I>(br, bi) + i * S, S,
-        dr + i * S, ImagOf<I>(dr, di) + i * S, S, count - i);
 }
 
 template <typename T, bool I>
@@ -619,19 +718,15 @@ void ComplexMultiplyConjT(const T* ar, const T* ai, const T* br, const T* bi, T*
                           size_t count) {
     const hn::ScalableTag<T> d;
     const size_t N = hn::Lanes(d);
-    size_t i = 0;
-    for (; i + N <= count; i += N) {
+    for (size_t i = 0; i < count; i += N) {
+        const size_t m = HWY_MIN(N, count - i);
         hn::Vec<decltype(d)> xr, xi, yr, yi;
-        LoadComplex<T, I>(d, ar, ai, i, xr, xi);
-        LoadComplex<T, I>(d, br, bi, i, yr, yi);
+        LoadComplex<T, I>(d, ar, ai, i, m, xr, xi);
+        LoadComplex<T, I>(d, br, bi, i, m, yr, yi);
         const auto rr = hn::MulAdd(xi, yi, hn::Mul(xr, yr));
         const auto ri = hn::NegMulAdd(xr, yi, hn::Mul(xi, yr));
-        StoreComplex<T, I>(d, rr, ri, dr, di, i);
+        StoreComplex<T, I>(d, rr, ri, dr, di, i, m);
     }
-    constexpr size_t S = Stride<T, I>();
-    ::pulp::simd::detail::complex_multiply_conj_impl(
-        ar + i * S, ImagOf<I>(ar, ai) + i * S, S, br + i * S, ImagOf<I>(br, bi) + i * S, S,
-        dr + i * S, ImagOf<I>(dr, di) + i * S, S, count - i);
 }
 
 template <typename T, bool I>
@@ -639,21 +734,17 @@ void ComplexMultiplyAccumulateT(const T* ar, const T* ai, const T* br, const T* 
                                 size_t count) {
     const hn::ScalableTag<T> d;
     const size_t N = hn::Lanes(d);
-    size_t i = 0;
-    for (; i + N <= count; i += N) {
+    for (size_t i = 0; i < count; i += N) {
+        const size_t m = HWY_MIN(N, count - i);
         hn::Vec<decltype(d)> xr, xi, yr, yi, cur, cui;
-        LoadComplex<T, I>(d, ar, ai, i, xr, xi);
-        LoadComplex<T, I>(d, br, bi, i, yr, yi);
-        LoadComplex<T, I>(d, cr, ci, i, cur, cui);
+        LoadComplex<T, I>(d, ar, ai, i, m, xr, xi);
+        LoadComplex<T, I>(d, br, bi, i, m, yr, yi);
+        LoadComplex<T, I>(d, cr, ci, i, m, cur, cui);
         // acc.re += xr*yr - xi*yi ; acc.im += xr*yi + xi*yr
         cur = hn::NegMulAdd(xi, yi, hn::MulAdd(xr, yr, cur));
         cui = hn::MulAdd(xi, yr, hn::MulAdd(xr, yi, cui));
-        StoreComplex<T, I>(d, cur, cui, cr, ci, i);
+        StoreComplex<T, I>(d, cur, cui, cr, ci, i, m);
     }
-    constexpr size_t S = Stride<T, I>();
-    ::pulp::simd::detail::complex_multiply_accumulate_impl(
-        ar + i * S, ImagOf<I>(ar, ai) + i * S, S, br + i * S, ImagOf<I>(br, bi) + i * S, S,
-        cr + i * S, ImagOf<I>(cr, ci) + i * S, S, count - i);
 }
 
 template <typename T, bool I>
@@ -661,44 +752,35 @@ void ComplexMagnitudeSquaredT(const T* re, const T* im, T scale, T* dst, size_t 
     const hn::ScalableTag<T> d;
     const size_t N = hn::Lanes(d);
     const auto vs = hn::Set(d, scale);
-    size_t i = 0;
-    for (; i + N <= count; i += N) {
+    for (size_t i = 0; i < count; i += N) {
+        const size_t m = HWY_MIN(N, count - i);
         hn::Vec<decltype(d)> xr, xi;
-        LoadComplex<T, I>(d, re, im, i, xr, xi);
-        hn::StoreU(hn::Mul(hn::MulAdd(xr, xr, hn::Mul(xi, xi)), vs), d, dst + i);
+        LoadComplex<T, I>(d, re, im, i, m, xr, xi);
+        StoreReal(d, hn::Mul(hn::MulAdd(xr, xr, hn::Mul(xi, xi)), vs), dst, i, m);
     }
-    constexpr size_t S = Stride<T, I>();
-    ::pulp::simd::detail::complex_magnitude_squared_impl(re + i * S, ImagOf<I>(re, im) + i * S, S,
-                                                         scale, dst + i, count - i);
 }
 
 template <typename T, bool I>
 void ComplexMagnitudeT(const T* re, const T* im, T* dst, size_t count) {
     const hn::ScalableTag<T> d;
     const size_t N = hn::Lanes(d);
-    size_t i = 0;
-    for (; i + N <= count; i += N) {
+    for (size_t i = 0; i < count; i += N) {
+        const size_t m = HWY_MIN(N, count - i);
         hn::Vec<decltype(d)> xr, xi;
-        LoadComplex<T, I>(d, re, im, i, xr, xi);
-        hn::StoreU(hn::Sqrt(hn::MulAdd(xr, xr, hn::Mul(xi, xi))), d, dst + i);
+        LoadComplex<T, I>(d, re, im, i, m, xr, xi);
+        StoreReal(d, hn::Sqrt(hn::MulAdd(xr, xr, hn::Mul(xi, xi))), dst, i, m);
     }
-    constexpr size_t S = Stride<T, I>();
-    ::pulp::simd::detail::complex_magnitude_impl(re + i * S, ImagOf<I>(re, im) + i * S, S, dst + i,
-                                                 count - i);
 }
 
 template <typename T, bool I> void ComplexPhaseT(const T* re, const T* im, T* dst, size_t count) {
     const hn::ScalableTag<T> d;
     const size_t N = hn::Lanes(d);
-    size_t i = 0;
-    for (; i + N <= count; i += N) {
+    for (size_t i = 0; i < count; i += N) {
+        const size_t m = HWY_MIN(N, count - i);
         hn::Vec<decltype(d)> xr, xi;
-        LoadComplex<T, I>(d, re, im, i, xr, xi);
-        hn::StoreU(hn::Atan2(d, xi, xr), d, dst + i);
+        LoadComplex<T, I>(d, re, im, i, m, xr, xi);
+        StoreReal(d, hn::Atan2(d, xi, xr), dst, i, m);
     }
-    constexpr size_t S = Stride<T, I>();
-    ::pulp::simd::detail::complex_phase_impl(re + i * S, ImagOf<I>(re, im) + i * S, S, dst + i,
-                                             count - i);
 }
 
 #define PULP_SIMD_HWY_INSTANTIATE_COMPLEX(SUFFIX, T)                                               \
@@ -809,6 +891,10 @@ template <class D, class V> HWY_INLINE V FastLogF(D d, V x) {
 
 // sin and cos from r = x - k*pi (k = round(x / pi), |r| <= pi / 2, pi in three
 // parts) and low-degree polynomials in r^2; the sign flips with k's parity.
+// The parts have 8, 11 and 24 bits: k * 0.00096750259 is exact only while
+// k < 2^13 (|x| < about 2.6e4) on targets without fused multiply-add, which
+// covers the documented |x| <= 1e4. Do not widen the range without changing
+// the split.
 template <class D, class V> HWY_INLINE void FastSinCosF(D d, V x, V& sin_out, V& cos_out) {
     const hn::RebindToSigned<D> di;
     const V k = hn::Round(hn::Mul(x, hn::Set(d, 0.31830988618379067f)));
@@ -985,22 +1071,36 @@ template <typename T> void SqrtT(const T* x, T* dst, size_t count) {
 // leading ones have few enough bits that k times them is exact, so the result
 // is right to the last bit of the result for |x| up to about 1e4 (float) and
 // 1e6 (double) even where fused multiply-add is unavailable.
+//
+// k comes from the rounded product x * (1 / 2pi), whose error grows with |x|,
+// so within rounding of a half turn k can be one off and the result lands
+// just past +-pi. One compare per lane steps k back toward the right side and
+// the three-part subtraction is redone; lanes that were already inside keep
+// the same k and therefore the same bits.
 template <typename T> void WrapPhaseT(const T* x, T* dst, size_t count) {
     MapT(x, dst, count, [](auto d, auto v) {
         using V = decltype(v);
-        V k, r;
-        if constexpr (sizeof(T) == 4) {
-            k = hn::Round(hn::Mul(v, hn::Set(d, 0.15915494309189535f)));
-            r = hn::NegMulAdd(k, hn::Set(d, 6.28125f), v);
-            r = hn::NegMulAdd(k, hn::Set(d, 0.0019350051879882812f), r);
-            r = hn::NegMulAdd(k, hn::Set(d, 3.019916050561733e-07f), r);
-        } else {
-            k = hn::Round(hn::Mul(v, hn::Set(d, 0.15915494309189535)));
-            r = hn::NegMulAdd(k, hn::Set(d, 6.283185303211212), v);
-            r = hn::NegMulAdd(k, hn::Set(d, 3.9683743166540886e-09), r);
-            r = hn::NegMulAdd(k, hn::Set(d, 2.068073192717642e-18), r);
-        }
-        return r;
+        const auto reduce = [&](V k) {
+            V r;
+            if constexpr (sizeof(T) == 4) {
+                r = hn::NegMulAdd(k, hn::Set(d, 6.28125f), v);
+                r = hn::NegMulAdd(k, hn::Set(d, 0.0019350051879882812f), r);
+                r = hn::NegMulAdd(k, hn::Set(d, 3.019916050561733e-07f), r);
+            } else {
+                r = hn::NegMulAdd(k, hn::Set(d, 6.283185303211212), v);
+                r = hn::NegMulAdd(k, hn::Set(d, 3.9683743166540886e-09), r);
+                r = hn::NegMulAdd(k, hn::Set(d, 2.068073192717642e-18), r);
+            }
+            return r;
+        };
+        V k = hn::Round(hn::Mul(v, hn::Set(d, T(0.15915494309189535))));
+        const V r = reduce(k);
+        // T(pi) is the representable value nearest pi: one ulp at the ends.
+        const V pi = hn::Set(d, T(3.14159265358979323846));
+        const V one = hn::Set(d, T(1));
+        k = hn::Add(k, hn::IfThenElseZero(hn::Gt(r, pi), one));
+        k = hn::Sub(k, hn::IfThenElseZero(hn::Lt(r, hn::Neg(pi)), one));
+        return reduce(k);
     });
 }
 
@@ -1074,6 +1174,8 @@ HWY_EXPORT(DoubleLanes);
     HWY_EXPORT(Clamp##SUFFIX);                                                                     \
     HWY_EXPORT(Dot##SUFFIX);                                                                       \
     HWY_EXPORT(SumSquares##SUFFIX);                                                                \
+    HWY_EXPORT(WideSum##SUFFIX);                                                                   \
+    HWY_EXPORT(WideSumSquares##SUFFIX);                                                            \
     HWY_EXPORT(MaxAbs##SUFFIX);                                                                    \
     HWY_EXPORT(RampMul##SUFFIX);                                                                   \
     HWY_EXPORT(Correlate##SUFFIX);                                                                 \
@@ -1156,10 +1258,15 @@ PULP_SIMD_HWY_EXPORT(F64)
         HWY_DYNAMIC_DISPATCH(Negate##SUFFIX)(a, dst, n);                                           \
     }                                                                                              \
     T mean(const T* x, std::size_t n) noexcept {                                                   \
-        return n == 0 ? T(0) : sum(x, n) / T(n);                                                   \
+        return n == 0 ? T(0)                                                                       \
+                      : static_cast<T>(HWY_DYNAMIC_DISPATCH(WideSum##SUFFIX)(x, n) /               \
+                                       static_cast<double>(n));                                    \
     }                                                                                              \
     T rms(const T* x, std::size_t n) noexcept {                                                    \
-        return n == 0 ? T(0) : std::sqrt(sum_squares(x, n) / T(n));                                \
+        return n == 0                                                                              \
+                   ? T(0)                                                                          \
+                   : static_cast<T>(std::sqrt(HWY_DYNAMIC_DISPATCH(WideSumSquares##SUFFIX)(x, n) / \
+                                              static_cast<double>(n)));                            \
     }                                                                                              \
     T find_maximum(const T* x, std::size_t n, std::size_t* index) noexcept {                       \
         return HWY_DYNAMIC_DISPATCH(FindMaximum##SUFFIX)(x, n, index);                             \
