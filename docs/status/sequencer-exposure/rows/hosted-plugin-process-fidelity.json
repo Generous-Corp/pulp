@@ -1,0 +1,87 @@
+{
+  "id": "hosted-plugin-process-fidelity",
+  "title": "Hosted CLAP and VST3 plugins receive transport, offline mode, every bus, full MIDI, and report edits and restarts",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "hosted-plugin-process-fidelity-20261106",
+  "owned_paths": [
+    "core/host/include/pulp/host/plugin_slot.hpp",
+    "core/host/include/pulp/host/signal_graph_runtime.hpp",
+    "core/host/include/pulp/host/timeline_offline_renderer.hpp",
+    "core/host/include/pulp/host/crossfade_plugin_slot.hpp",
+    "core/host/src/plugin_slot_process_request.hpp",
+    "core/host/src/plugin_slot_clap.cpp",
+    "core/host/src/plugin_slot_vst3.cpp",
+    "core/host/src/timeline_offline_renderer.cpp",
+    "test/test_clap_slot_process_fidelity.cpp",
+    "test/test_vst3_slot_process_fidelity.cpp",
+    "test/test_hosted_slot_process_request.cpp",
+    ".agents/skills/hosting/SKILL.md",
+    "docs/status/sequencer-exposure/rows/hosted-plugin-process-fidelity.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/plugin_slot.hpp",
+      "needles": [
+        "struct PluginHostSettings {",
+        "virtual std::uint64_t restart_request_count() const noexcept {"
+      ]
+    },
+    {
+      "path": "core/host/include/pulp/host/timeline_offline_renderer.hpp",
+      "needles": [
+        "format::ProcessMode hosted_plugin_mode = format::ProcessMode::Offline;"
+      ]
+    },
+    {
+      "path": "test/test_clap_slot_process_fidelity.cpp",
+      "needles": [
+        "CLAP latency change reaches SignalGraph latency compensation",
+        "SignalGraph hands its hosted process mode to hosted plugins at prepare"
+      ]
+    },
+    {
+      "path": "test/test_vst3_slot_process_fidelity.cpp",
+      "needles": [
+        "VST3 latency restart reaches SignalGraph latency compensation"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "PluginHostSettings, PluginParameterEdit, set_plugin_host_identity and the new PluginSlot virtuals (set_host_settings, drain_parameter_edits, restart_request_count, state_change_count) are appended after every existing virtual with neutral defaults, so a downstream slot keeps its layout and behaves as before. SignalGraph gains plugin_restart_pending, apply_plugin_restarts and set_hosted_plugin_process_mode; TimelineOfflineRenderConfig gains hosted_plugin_mode, defaulting to Offline for a bounce.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/plugin_slot.hpp",
+          "needles": [
+            "virtual bool set_host_settings(const PluginHostSettings& /*settings*/) {"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline command is added or altered. The headless timeline render instantiates no hosted devices, so the bounce's hosted process mode changes nothing it renders."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation is added, removed or changed."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No product control, grant or policy projection is created. The change is how a host slot talks to the plugin it hosts."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time authoring capability is added or altered; the new calls are host-embedding details."
+    }
+  }
+}
