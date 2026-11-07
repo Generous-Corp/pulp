@@ -5017,13 +5017,17 @@
   },
   "dead-test-guard": {
    "entry": "tools/scripts/dead_test_guard.py",
-   "inputs": [],
+   "inputs": [
+    "tools/scripts/dead_test_guard.py"
+   ],
    "kind": "python"
   },
   "dead-test-guard-selftest": {
    "entry": "tools/scripts/test_dead_test_guard.py",
    "inputs": [
-    "test/CMakeLists.txt"
+    "test/CMakeLists.txt",
+    "tools/scripts/dead_test_guard.py",
+    "tools/scripts/test_dead_test_guard.py"
    ],
    "kind": "python"
   },
@@ -5102,12 +5106,18 @@
   },
   "deps-patches-selftest": {
    "entry": "tools/deps/test_check_patches.py",
-   "inputs": [],
+   "inputs": [
+    "tools/deps/check_patches.py",
+    "tools/deps/patches.json",
+    "tools/deps/test_check_patches.py"
+   ],
    "kind": "python"
   },
   "deps-patches-verify": {
    "entry": "tools/deps/check_patches.py",
-   "inputs": [],
+   "inputs": [
+    "tools/deps/check_patches.py"
+   ],
    "kind": "python"
   },
   "design-unit-boundary": {
@@ -5357,12 +5367,17 @@
   },
   "examples-index-guard": {
    "entry": "tools/scripts/examples_index_guard.py",
-   "inputs": [],
+   "inputs": [
+    "tools/scripts/examples_index_guard.py"
+   ],
    "kind": "python"
   },
   "examples-index-guard-selftest": {
    "entry": "tools/scripts/test_examples_index_guard.py",
-   "inputs": [],
+   "inputs": [
+    "tools/scripts/examples_index_guard.py",
+    "tools/scripts/test_examples_index_guard.py"
+   ],
    "kind": "python"
   },
   "executable-keys-selftest": {
