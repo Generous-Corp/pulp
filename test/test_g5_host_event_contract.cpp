@@ -189,12 +189,9 @@ TEST_CASE("G5 MPE sidecar preserves projected sample offsets", "[host][graph][g5
 TEST_CASE("G5 host projection preserves absolute offsets and sidecars",
           "[host][graph][g5][events][mpe][ump]") {
     std::array<HostEventRecord, 3> records{};
-    records[0] = midi_event(1, 43, 1, 3,
-                             pulp::midi::MidiEvent::note_on(1, 60, 100));
-    records[1] = midi_event(1, 45, 2, 3,
-                             pulp::midi::MidiEvent::pitch_bend(1, 10'000));
-    records[2] = midi_event(1, 46, 3, 3,
-                             pulp::midi::MidiEvent::cc(1, 74, 90));
+    records[0] = midi_event(1, 43, 1, 3, pulp::midi::MidiEvent::note_on(1, 60, 100));
+    records[1] = midi_event(1, 45, 2, 3, pulp::midi::MidiEvent::pitch_bend(1, 10'000));
+    records[2] = midi_event(1, 46, 3, 3, pulp::midi::MidiEvent::cc(1, 74, 90));
     records[2].has_ump = true;
     records[2].ump.word_count = 2;
     records[2].ump.words[0] = 0x4010'3C00u;
@@ -238,8 +235,7 @@ TEST_CASE("G5 host projection refuses retiming and preserves destinations",
     std::array<HostEventRecord, 1> accepted{
         midi_event(1, 40, 1, 3, pulp::midi::MidiEvent::note_on(1, 60, 100))};
     REQUIRE(midi.add(pulp::midi::MidiEvent::note_off(1, 60)));
-    REQUIRE(project_host_event_block(accepted, 40, 8, midi) ==
-            HostEventResult::OutputCapacity);
+    REQUIRE(project_host_event_block(accepted, 40, 8, midi) == HostEventResult::OutputCapacity);
     REQUIRE(midi.size() == 1);
 }
 
