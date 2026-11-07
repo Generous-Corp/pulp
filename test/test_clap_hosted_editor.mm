@@ -340,17 +340,38 @@ TEST_CASE("CLAP editor resize request is denied without a handler", "[clap][edit
     REQUIRE_FALSE(host_gui->request_resize(fake.host, 800, 600));
 }
 
-TEST_CASE("CLAP host exposes only the gui extension it implements", "[clap][editor]") {
+TEST_CASE("CLAP host exposes only extensions it fully implements", "[clap][editor]") {
     FakeClapPlugin fake;
     auto slot = make_slot(fake);
     REQUIRE(slot != nullptr);
     REQUIRE(fake.host != nullptr);
 
-    REQUIRE(fake.host->get_extension(fake.host, CLAP_EXT_GUI) != nullptr);
     // Claiming an extension the host does not implement would invite the plugin
-    // to call into null function pointers.
-    REQUIRE(fake.host->get_extension(fake.host, "clap.params") == nullptr);
-    REQUIRE(fake.host->get_extension(fake.host, "definitely.not.an.extension") == nullptr);
+    // to call into null function pointers, so every advertised one is complete.
+    const auto* host = fake.host;
+    REQUIRE(host->get_extension(host, CLAP_EXT_GUI) != nullptr);
+    const auto* params =
+        static_cast<const clap_host_params_t*>(host->get_extension(host, CLAP_EXT_PARAMS));
+    REQUIRE(params != nullptr);
+    CHECK((params->rescan && params->clear && params->request_flush));
+    const auto* latency =
+        static_cast<const clap_host_latency_t*>(host->get_extension(host, CLAP_EXT_LATENCY));
+    REQUIRE(latency != nullptr);
+    CHECK(latency->changed != nullptr);
+    const auto* state =
+        static_cast<const clap_host_state_t*>(host->get_extension(host, CLAP_EXT_STATE));
+    REQUIRE(state != nullptr);
+    CHECK(state->mark_dirty != nullptr);
+    const auto* check = static_cast<const clap_host_thread_check_t*>(
+        host->get_extension(host, CLAP_EXT_THREAD_CHECK));
+    REQUIRE(check != nullptr);
+    CHECK((check->is_main_thread && check->is_audio_thread));
+    const auto* log = static_cast<const clap_host_log_t*>(host->get_extension(host, CLAP_EXT_LOG));
+    REQUIRE(log != nullptr);
+    CHECK(log->log != nullptr);
+    // Extensions the host does not implement stay unadvertised.
+    REQUIRE(host->get_extension(host, CLAP_EXT_TIMER_SUPPORT) == nullptr);
+    REQUIRE(host->get_extension(host, "definitely.not.an.extension") == nullptr);
 }
 
 TEST_CASE("CLAP set_hosted_editor_size refuses when no editor is open", "[clap][editor]") {

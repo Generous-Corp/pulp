@@ -130,6 +130,13 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
                                       id,
                                       "replacement plugin did not load");
     }
+    {
+        auto settings = loaded->host_settings();
+        if (settings.process_mode != hosted_plugin_process_mode_) {
+            settings.process_mode = hosted_plugin_process_mode_;
+            loaded->set_host_settings(settings);
+        }
+    }
     if (!loaded->prepare(live_slot_.live()->sample_rate, live_slot_.live()->max_block_size)) {
         return fail_swap_edit_locked_(LiveSwapFallbackReason::PrepareFailed,
                                       id,
@@ -241,6 +248,7 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
         std::move(new_params),
         new_latency,
         wants_transport,
+        loaded->restart_request_count(),
     };
     staged.warmed_load = warmed_load;
     staged.same_identity = same_identity;

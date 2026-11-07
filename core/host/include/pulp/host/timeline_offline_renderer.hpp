@@ -1,5 +1,7 @@
 #pragma once
 
+#include <pulp/format/process_block.hpp>
+
 // One-shot transport-aware offline renderer for a prepared Timeline graph.
 //
 // WHY THIS EXISTS AND WHY IT IS NOT OfflineSignalGraphHost.
@@ -67,6 +69,12 @@ struct TimelineOfflineRenderConfig {
     std::uint64_t max_output_frames = 0;
     /// Note-event capacity per track per block, forwarded to the binding.
     std::uint32_t maximum_note_events_per_track_per_block = 256;
+    /// Process mode hosted plugins are prepared in for this bounce (see
+    /// SignalGraph::set_hosted_plugin_process_mode). Offline by default, so a
+    /// hosted plugin can take its offline-quality path. The graph's previous
+    /// setting is restored when the render returns; re-prepare the graph
+    /// before live playback so the plugins return to realtime mode.
+    format::ProcessMode hosted_plugin_mode = format::ProcessMode::Offline;
 };
 
 /// One render request over a half-open tick region [start_tick, end_tick).

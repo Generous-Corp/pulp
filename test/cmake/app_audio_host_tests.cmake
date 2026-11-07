@@ -525,7 +525,31 @@ if(PULP_HAS_VST3)
     target_link_libraries(pulp-test-vst3-connection
         PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-vst3-connection)
+
+    # What a hosted VST3 plug-in sees from the VST3 slot: host name,
+    # ProcessContext transport, offline and 64-bit setup, sidechain and aux
+    # buses, the MIDI map both ways (IMidiMapping for controllers),
+    # IComponentHandler feedback, and latency restarts reaching SignalGraph.
+    # The EditController fake needs vsteditcontroller.cpp compiled in; this
+    # suite uses no SingleComponentEffect, so nothing duplicates its symbols.
+    add_executable(pulp-test-vst3-slot-process-fidelity
+        test_vst3_slot_process_fidelity.cpp
+        ${VST3_SDK_DIR}/public.sdk/source/vst/vsteditcontroller.cpp)
+    target_link_libraries(pulp-test-vst3-slot-process-fidelity
+        PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-vst3-slot-process-fidelity
+        PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    catch_discover_tests(pulp-test-vst3-slot-process-fidelity)
 endif()
+
+# The format-independent layer every hosted-plugin slot shares: bus binding,
+# the MIDI view, the plugin-edit inbox, and transport validity.
+add_executable(pulp-test-hosted-slot-process-request test_hosted_slot_process_request.cpp)
+target_link_libraries(pulp-test-hosted-slot-process-request
+    PRIVATE pulp::host Catch2::Catch2WithMain)
+target_include_directories(pulp-test-hosted-slot-process-request
+    PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+catch_discover_tests(pulp-test-hosted-slot-process-request)
 
 if(PULP_HAS_VST3)
     # Host-side VST3 editor (IPlugView) negotiation seam

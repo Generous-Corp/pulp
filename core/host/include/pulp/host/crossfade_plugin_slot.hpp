@@ -162,6 +162,26 @@ public:
     int tail_samples() const override { return new_slot_->tail_samples(); }
     void accept(NativeHandleVisitor& v) const override { new_slot_->accept(v); }
     bool wants_transport() const override { return new_slot_->wants_transport(); }
+    // Settings, feedback, and restart requests belong to the instance that
+    // stays: the new one.
+    bool set_host_settings(const PluginHostSettings& settings) override {
+        return new_slot_->set_host_settings(settings);
+    }
+    PluginHostSettings host_settings() const override {
+        return new_slot_->host_settings();
+    }
+    std::size_t drain_parameter_edits(std::span<PluginParameterEdit> out) override {
+        return new_slot_->drain_parameter_edits(out);
+    }
+    std::uint64_t dropped_parameter_edit_count() const noexcept override {
+        return new_slot_->dropped_parameter_edit_count();
+    }
+    std::uint64_t restart_request_count() const noexcept override {
+        return new_slot_->restart_request_count();
+    }
+    std::uint64_t state_change_count() const noexcept override {
+        return new_slot_->state_change_count();
+    }
 
 private:
     // True when there is nothing to blend for this ProcessBuffers block (fade already

@@ -396,6 +396,17 @@ if(PULP_HAS_CLAP)
         PRIVATE ${PULP_ROOT_DIR}/core/host/src)
     catch_discover_tests(pulp-test-clap-slot-channel-width)
 
+    # What a hosted CLAP plugin sees from the CLAP slot: host identity and
+    # extensions, transport, offline render mode, every declared audio port,
+    # note/MIDI/sysex both ways, parameter feedback, and restart requests
+    # reaching SignalGraph latency compensation. Fake plugin, no bundle.
+    add_executable(pulp-test-clap-slot-process-fidelity test_clap_slot_process_fidelity.cpp)
+    target_link_libraries(pulp-test-clap-slot-process-fidelity
+        PRIVATE pulp::host clap Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-clap-slot-process-fidelity
+        PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    catch_discover_tests(pulp-test-clap-slot-process-fidelity)
+
     # The CLAP adapter opening a processor's editor through the editor-host
     # contract, built the way a UI-package plug-in is: no PULP_CLAP_GUI, and
     # the view-free pulp-format-clap-core.

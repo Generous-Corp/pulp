@@ -95,6 +95,24 @@ class PreparedOwnedBuiltInSlot final : public PluginSlot {
     // latency at all is reported as confidently answering zero, and a caller
     // that checks before reading gets a fact where none exists.
     LatencyQuery latency_query() const override { return inner_->latency_query(); }
+    bool set_host_settings(const PluginHostSettings& settings) override {
+        return inner_->set_host_settings(settings);
+    }
+    PluginHostSettings host_settings() const override {
+        return inner_->host_settings();
+    }
+    std::size_t drain_parameter_edits(std::span<PluginParameterEdit> out) override {
+        return inner_->drain_parameter_edits(out);
+    }
+    std::uint64_t dropped_parameter_edit_count() const noexcept override {
+        return inner_->dropped_parameter_edit_count();
+    }
+    std::uint64_t restart_request_count() const noexcept override {
+        return inner_->restart_request_count();
+    }
+    std::uint64_t state_change_count() const noexcept override {
+        return inner_->state_change_count();
+    }
 
   private:
     std::unique_ptr<PluginSlot> inner_;
@@ -131,6 +149,9 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     candidate_->custom_registry_generation_ = owner.custom_registry_generation_;
     candidate_->next_id_ = owner.next_id_;
     candidate_->limits_ = owner.limits_;
+    candidate_->hosted_plugin_process_mode_ = owner.hosted_plugin_process_mode_;
+    candidate_->last_plugin_prepare_rate_ = owner.last_plugin_prepare_rate_;
+    candidate_->last_plugin_prepare_block_ = owner.last_plugin_prepare_block_;
     candidate_->prepared_plugin_meta_ = owner.prepared_plugin_meta_;
     candidate_->exact_parameter_event_claims_ = owner.exact_parameter_event_claims_;
     candidate_->canonical_executor_routing_enabled_.store(
@@ -1068,7 +1089,7 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             }
             candidate_->prepared_plugin_meta_[n.id] = SignalGraph::PreparedPluginMetadata{
                 n.plugin->parameters(), std::max(0, n.plugin->latency_samples()),
-                n.plugin->wants_transport()};
+                n.plugin->wants_transport(), n.plugin->restart_request_count()};
             continue;
         }
         if (old == nullptr) {

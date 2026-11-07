@@ -31,4 +31,10 @@ using ClapPluginCreator = std::function<const clap_plugin_t*(const clap_host_t* 
 /// creator yields no plugin. No dlopen, no bundle, no entry point.
 std::unique_ptr<PluginSlot> make_clap_slot(PluginInfo info, const ClapPluginCreator& create);
 
+/// Project Pulp's per-block transport onto CLAP's. Only fields the host
+/// supplied (see ProcessContext::transport_validity) set their CLAP flag, so a
+/// plugin never mistakes a compatibility default for a real tempo or position.
+void clap_transport_from_context(const format::ProcessContext& context,
+                                 clap_event_transport_t& out) noexcept;
+
 } // namespace pulp::host

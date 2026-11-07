@@ -1034,6 +1034,7 @@ subsystems:
   render: experimental
   view: usable
   osc: experimental
+  host: usable
 
 # ── Known limitations ────────────────────────────────────────────────────────
 #
@@ -1048,6 +1049,15 @@ subsystems:
 # Consistency rule enforced by check-docs-consistency.py (warn-mode):
 # every key under limitations: must resolve to a real entry in the matrix.
 limitations:
+  subsystems.host:
+    - text: "Host transport, offline render mode, 64-bit processing, every declared audio bus, the full MIDI map, plugin parameter feedback, and restart requests are implemented by the CLAP and VST3 slots. The AU and LV2 slots accept the same calls but still run realtime with a single main bus, see no host transport, and report no parameter edits or restart requests."
+      tracked_in: "../guides/hosting.md#limits"
+    - text: "A hosted plugin's process mode is fixed when it is prepared. A block whose ProcessContext says offline still runs in the mode the plugin was prepared in; SignalGraph::set_hosted_plugin_process_mode() takes effect at the next prepare()."
+      tracked_in: "../guides/hosting.md#process-mode-and-precision"
+    - text: "Latency changes and restart requests are counted, not acted on: the host decides when to call SignalGraph::apply_plugin_restarts(), which re-prepares the whole graph under the usual no-process contract."
+      tracked_in: "../guides/hosting.md#restart-requests-and-latency-changes"
+    - text: "VST3 plug-ins learn only the host name (IHostApplication has no vendor or version). VST3 controllers, channel pressure, pitch bend, and program change reach a plug-in only through its IMidiMapping; unmapped ones are dropped, and VST3 note expression is not sent. CLAP plugins receive MIDI 1.0 or CLAP note events, never the MIDI 2.0 dialect."
+      tracked_in: "../guides/hosting.md#midi"
   timeline_engine.cli_mcp:
     - text: "The headless render path emits arrangement audio only; it does not instantiate hosted devices or MIDI instruments, and unknown plugin-delay compensation remains null rather than being invented."
       tracked_in: "../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp"

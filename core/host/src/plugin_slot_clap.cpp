@@ -2,11 +2,14 @@
 //
 // Loads a .clap bundle via dlopen, resolves the clap_entry symbol, creates a
 // plugin instance, and implements the PluginSlot interface on top of the CLAP
-// C API. Minimal host implementation — enough to prepare, process audio, read
-// parameters, and toggle bypass.
+// C API: every declared audio port (sidechain and aux outputs included), host
+// transport, offline rendering, note/MIDI/sysex events in both directions,
+// parameter feedback, and the host extensions a plugin uses to report
+// latency, state, and restart needs.
 
 #include "plugin_slot_clap_internal.hpp"
 #include "plugin_identity_internal.hpp"
+#include "plugin_slot_process_request.hpp"
 
 #include <pulp/host/hosted_editor_container.hpp>
 #include <pulp/host/plugin_slot.hpp>
@@ -18,6 +21,7 @@
 #include <pulp/host/dl_shim.hpp>
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <thread>
 #include <filesystem>
@@ -72,20 +76,26 @@ std::string resolve_clap_binary(const std::string& path) {
     return path;
 }
 
-class ClapSlot final : public PluginSlot {
-public:
+class ClapSlot final : public detail::RequestDrivenSlot {
+    struct EventAny; // per-block event storage, defined with the members
+
+  public:
     ClapSlot(PluginInfo info, void* handle, const clap_plugin_entry_t* entry)
-        : info_(std::move(info)), handle_(handle), entry_(entry) {
+        : info_(std::move(info)), handle_(handle), entry_(entry),
+          identity_strings_(plugin_host_identity()) {
+        main_thread_.store(std::this_thread::get_id());
         host_.clap_version = CLAP_VERSION_INIT;
         host_.host_data = this;
-        host_.name = "Pulp";
-        host_.vendor = "Pulp";
-        host_.url = "https://github.com/Generous-Corp/pulp";
-        host_.version = "0.1";
+        // The plugin keeps these pointers for its lifetime, so they point into
+        // strings the slot owns.
+        host_.name = identity_strings_.name.c_str();
+        host_.vendor = identity_strings_.vendor.c_str();
+        host_.url = identity_strings_.url.c_str();
+        host_.version = identity_strings_.version.c_str();
         host_.get_extension = &ClapSlot::host_get_extension;
-        host_.request_restart = &ClapSlot::host_request_noop;
-        host_.request_process = &ClapSlot::host_request_noop;
-        host_.request_callback = &ClapSlot::host_request_noop;
+        host_.request_restart = &ClapSlot::host_request_restart;
+        host_.request_process = &ClapSlot::host_request_process;
+        host_.request_callback = &ClapSlot::host_request_callback;
     }
 
     ~ClapSlot() override {
@@ -186,33 +196,32 @@ public:
                 return false;
             }
         }
+        // Everything below runs while the plugin is deactivated, which is
+        // when CLAP allows the render mode and port layout to be settled.
+        main_thread_.store(std::this_thread::get_id());
+        const format::ProcessMode mode = apply_render_mode();
+        cache_note_dialect();
+        configure_buses(max_block_size);
         if (!plugin_->activate(plugin_, sample_rate, 1, (uint32_t)max_block_size)) {
             runtime::log_error("ClapSlot: activate failed for '{}'", info_.name);
             return false;
         }
         active_ = true;
+        set_prepared_mode(mode);
+        // Reserve per-block scratch so process() never reallocates: pending
+        // host edits, a full sample-accurate parameter-event queue, and the
+        // graph's realtime MIDI cap. Events past that capacity are dropped and
+        // counted rather than grown on the audio thread.
+        constexpr std::size_t kReservedMidiEvents = 1024;
+        in_event_storage_.clear();
+        in_event_storage_.reserve(params_.size() + ParameterEventQueue::kCapacity +
+                                  kReservedMidiEvents);
+        pending_edits_.reserve(params_.size());
         if (!plugin_->start_processing(plugin_)) {
             runtime::log_warn("ClapSlot: start_processing failed for '{}'", info_.name);
         } else {
             processing_ = true;
         }
-        // Reserve per-block scratch so the graph-driven RT path never
-        // reallocates in process(). Channels match the slot's declared port
-        // counts (the graph sizes node buffers from these, floored at stereo);
-        // events cover pending host edits + a full sample-accurate
-        // parameter-event queue + the graph's realtime MIDI cap. A direct
-        // caller passing more channels or an un-capacity-limited MidiBuffer is
-        // outside this contract; the PULP_DBG_ASSERTs in process() flag it in
-        // debug builds.
-        constexpr int kMinReservedChannels = 2;
-        constexpr std::size_t kReservedMidiEvents = 1024;
-        in_ptrs_.reserve(
-            static_cast<std::size_t>(std::max(info_.num_inputs, kMinReservedChannels)));
-        out_ptrs_.reserve(
-            static_cast<std::size_t>(std::max(info_.num_outputs, kMinReservedChannels)));
-        in_event_storage_.reserve(params_.size()
-                                  + ParameterEventQueue::kCapacity
-                                  + kReservedMidiEvents);
         return true;
     }
 
@@ -228,113 +237,25 @@ public:
         }
     }
 
-    void process(audio::BufferView<float>& output,
-                 const audio::BufferView<const float>& input,
-                 const midi::MidiBuffer& midi_in,
-                 midi::MidiBuffer& midi_out,
-                 const ParameterEventQueue& param_events,
-                 int num_samples) override {
-        begin_process();
+    void process_request(const detail::SlotProcessRequest& request) override {
+        auto& audio = *request.audio;
+        const int num_samples = request.num_samples;
         if (!plugin_ || !processing_ || bypassed_.load(std::memory_order_relaxed)) {
-            copy_or_zero(output, input, num_samples);
+            detail::SlotBusBinder::pass_through(audio, num_samples);
+            return;
+        }
+        // A block larger than the size the plugin was activated for breaks the
+        // activate() contract; refuse it rather than hand the plugin overrun.
+        if (!binder_.bind(audio, num_samples)) {
+            process_status_.store(ProcessStatus::failed, std::memory_order_release);
+            detail::SlotBusBinder::pass_through(audio, num_samples);
             return;
         }
 
-        const uint32_t nch_out = (uint32_t)output.num_channels();
-        const uint32_t nch_in = (uint32_t)input.num_channels();
+        const uint32_t in_count = fill_audio_buffers(/*is_input=*/true);
+        const uint32_t out_count = fill_audio_buffers(/*is_input=*/false);
 
-        PULP_DBG_ASSERT(in_ptrs_.capacity() >= nch_in,
-                        "CLAP slot in_ptrs_ would grow on the audio thread");
-        in_ptrs_.resize(nch_in);
-        for (uint32_t c = 0; c < nch_in; ++c) {
-            in_ptrs_[c] = const_cast<float*>(input.channel_ptr(c));
-        }
-        PULP_DBG_ASSERT(out_ptrs_.capacity() >= nch_out,
-                        "CLAP slot out_ptrs_ would grow on the audio thread");
-        out_ptrs_.resize(nch_out);
-        for (uint32_t c = 0; c < nch_out; ++c) {
-            out_ptrs_[c] = output.channel_ptr(c);
-        }
-
-        clap_audio_buffer_t in_buf{};
-        in_buf.data32 = in_ptrs_.empty() ? nullptr : in_ptrs_.data();
-        in_buf.channel_count = nch_in;
-        clap_audio_buffer_t out_buf{};
-        out_buf.data32 = out_ptrs_.empty() ? nullptr : out_ptrs_.data();
-        out_buf.channel_count = nch_out;
-
-        // Build the block's input event stream: parameter automation from
-        // the host's ParameterEventQueue (sample-accurate) + MIDI 1.0
-        // messages as CLAP_EVENT_MIDI events. Events are packed into an
-        // event-pointer array keyed by sample_offset so the plugin can
-        // iterate them in time order.
-        in_event_storage_.clear();
-        // Capacity is reserved in prepare(); capturing it lets the assert after
-        // the emplace loops prove no reallocation happened on the audio thread.
-        const std::size_t reserved_event_capacity = in_event_storage_.capacity();
-        // Drain host-initiated set_parameter edits as time=0 events. Uses
-        // try_lock so the audio thread never blocks on the host side;
-        // if contended, pending edits ride to the next block.
-        {
-            std::unique_lock<std::mutex> lock(pending_edits_mu_, std::try_to_lock);
-            if (lock.owns_lock() && !pending_edits_.empty()) {
-                for (const auto& [pid, pval] : pending_edits_) {
-                    clap_event_param_value_t ev{};
-                    ev.header.size = sizeof(ev);
-                    ev.header.time = 0;
-                    ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
-                    ev.header.type = CLAP_EVENT_PARAM_VALUE;
-                    ev.header.flags = 0;
-                    ev.param_id = (clap_id)pid;
-                    ev.cookie = nullptr;
-                    ev.note_id = -1;
-                    ev.port_index = -1;
-                    ev.channel = -1;
-                    ev.key = -1;
-                    ev.value = pval;
-                    in_event_storage_.emplace_back(
-                        EventAny{.param_value = ev, .kind = EventKind::ParamValue});
-                }
-                pending_edits_.clear();
-            }
-        }
-        for (const auto& pe : param_events) {
-            clap_event_param_value_t ev{};
-            ev.header.size = sizeof(ev);
-            ev.header.time = (uint32_t)pe.sample_offset;
-            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
-            ev.header.type = CLAP_EVENT_PARAM_VALUE;
-            ev.header.flags = 0;
-            ev.param_id = (clap_id)pe.param_id;
-            ev.cookie = nullptr;
-            ev.note_id = -1;
-            ev.port_index = -1;
-            ev.channel = -1;
-            ev.key = -1;
-            ev.value = pe.value;
-            in_event_storage_.emplace_back(EventAny{.param_value = ev, .kind = EventKind::ParamValue});
-        }
-        for (const auto& m : midi_in) {
-            clap_event_midi_t ev{};
-            ev.header.size = sizeof(ev);
-            ev.header.time = (uint32_t)m.sample_offset;
-            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
-            ev.header.type = CLAP_EVENT_MIDI;
-            ev.header.flags = 0;
-            ev.port_index = 0;
-            const auto& msg = m.message;
-            ev.data[0] = msg.data()[0];
-            ev.data[1] = msg.size() > 1 ? msg.data()[1] : 0;
-            ev.data[2] = msg.size() > 2 ? msg.data()[2] : 0;
-            in_event_storage_.emplace_back(EventAny{.midi = ev, .kind = EventKind::Midi});
-        }
-        PULP_DBG_ASSERT(in_event_storage_.capacity() == reserved_event_capacity,
-                        "CLAP slot in_event_storage_ reallocated on the audio thread");
-        // Sort by header.time.
-        std::sort(in_event_storage_.begin(), in_event_storage_.end(),
-                  [](const EventAny& a, const EventAny& b) {
-                      return a.header_time() < b.header_time();
-                  });
+        build_input_events(request);
 
         clap_input_events_t in_events{};
         in_events.ctx = this;
@@ -346,49 +267,290 @@ public:
                           -> const clap_event_header_t* {
             auto* self = static_cast<ClapSlot*>(list->ctx);
             if (i >= self->in_event_storage_.size()) return nullptr;
-            return &self->in_event_storage_[i].as_header();
+            return &self->in_event_storage_[i].header;
         };
 
-        out_midi_sink_ = &midi_out;
+        OutputSink sink{this, request.midi_out, /*from_audio_thread=*/true};
         clap_output_events_t out_events{};
-        out_events.ctx = this;
-        out_events.try_push = [](const clap_output_events_t* list,
-                                 const clap_event_header_t* ev) -> bool {
-            auto* self = static_cast<ClapSlot*>(list->ctx);
-            // Harvest MIDI events to the host's midi_out buffer. Param-change
-            // outbound events (plugin-initiated) are informational for the
-            // host UI; we drop them for now.
-            if (ev->space_id == CLAP_CORE_EVENT_SPACE_ID
-                && ev->type == CLAP_EVENT_MIDI && self->out_midi_sink_) {
-                // memcpy into a stack local to avoid UBSan "misaligned
-                // address" when ev isn't aligned to alignof(clap_event_midi_t).
-                clap_event_midi_t m;
-                std::memcpy(&m, ev, sizeof(m));
-                pulp::midi::MidiEvent e;
-                e.sample_offset = (int32_t)ev->time;
-                e.message = choc::midi::ShortMessage(m.data[0], m.data[1], m.data[2]);
-                self->out_midi_sink_->add(e);
-            }
-            return true;
-        };
+        out_events.ctx = &sink;
+        out_events.try_push = &ClapSlot::output_try_push;
+
+        // With no host transport the plugin is free-running, which CLAP
+        // expresses as a null transport.
+        clap_event_transport_t transport{};
+        if (request.transport != nullptr)
+            clap_transport_from_context(*request.transport, transport);
 
         clap_process_t p{};
         p.steady_time = steady_time_;
         p.frames_count = (uint32_t)num_samples;
-        p.transport = nullptr;
-        p.audio_inputs = nch_in ? &in_buf : nullptr;
-        p.audio_inputs_count = nch_in ? 1u : 0u;
-        p.audio_outputs = nch_out ? &out_buf : nullptr;
-        p.audio_outputs_count = nch_out ? 1u : 0u;
+        p.transport = request.transport != nullptr ? &transport : nullptr;
+        p.audio_inputs = in_count ? in_buffers_.data() : nullptr;
+        p.audio_inputs_count = in_count;
+        p.audio_outputs = out_count ? out_buffers_.data() : nullptr;
+        p.audio_outputs_count = out_count;
         p.in_events = &in_events;
         p.out_events = &out_events;
 
         auto status = plugin_->process(plugin_, &p);
         if (status == CLAP_PROCESS_ERROR) {
             process_status_.store(ProcessStatus::failed, std::memory_order_release);
-            runtime::log_warn("ClapSlot: process returned ERROR for '{}'", info_.name);
         }
+        binder_.finish(audio, num_samples);
         steady_time_ += num_samples;
+    }
+
+    // Audio buffers for one direction, from the binder's view of this block.
+    // A bus whose width comes from the host (no audio-ports extension) is only
+    // presented when the host actually passed channels for it.
+    uint32_t fill_audio_buffers(bool is_input) noexcept {
+        auto& buffers = is_input ? in_buffers_ : out_buffers_;
+        const std::size_t buses = is_input ? binder_.input_count() : binder_.output_count();
+        uint32_t count = 0;
+        for (std::size_t b = 0; b < buses && count < buffers.size(); ++b) {
+            const uint32_t channels =
+                is_input ? binder_.input_channels(b) : binder_.output_channels(b);
+            if (host_width_buses_ && channels == 0)
+                continue;
+            clap_audio_buffer_t buf{};
+            buf.channel_count = channels;
+            if (binder_.use_double())
+                buf.data64 = is_input ? binder_.input64(b) : binder_.output64(b);
+            else
+                buf.data32 = is_input ? binder_.input32(b) : binder_.output32(b);
+            buffers[count++] = buf;
+        }
+        return count;
+    }
+
+    // One block's input events: pending host edits, sample-accurate
+    // automation, then the host's MIDI in the plugin's preferred dialect.
+    // Ordered by time with insertion order breaking ties, so a controller
+    // queued before a note at the same offset still arrives first.
+    void build_input_events(const detail::SlotProcessRequest& request) noexcept {
+        in_event_storage_.clear();
+        next_event_order_ = 0;
+        const int last_frame = std::max(0, request.num_samples - 1);
+        auto at = [last_frame](int offset) { return (uint32_t)std::clamp(offset, 0, last_frame); };
+        pending_edits_.drain([this](uint32_t id, double value) { push_param_value(0, id, value); });
+        for (const auto& pe : *request.param_events)
+            push_param_value(at(pe.sample_offset), pe.param_id, pe.value);
+        detail::for_each_midi_in_time_order(
+            *request.midi_in,
+            [&](const midi::MidiEvent& m) { push_short_midi(at(m.sample_offset), m); },
+            [&](const midi::MidiBuffer::SysexEvent& sx) {
+                if (!accepts_midi_ || sx.data.empty())
+                    return;
+                EventAny e{};
+                e.sysex.header = event_header(at(sx.sample_offset), CLAP_EVENT_MIDI_SYSEX,
+                                              sizeof(clap_event_midi_sysex_t));
+                e.sysex.port_index = 0;
+                e.sysex.buffer = sx.data.data();
+                e.sysex.size = (uint32_t)sx.data.size();
+                push_event(e);
+            });
+        std::sort(in_event_storage_.begin(), in_event_storage_.end(),
+                  [](const EventAny& a, const EventAny& b) {
+                      if (a.header.time != b.header.time)
+                          return a.header.time < b.header.time;
+                      return a.order < b.order;
+                  });
+    }
+
+    static clap_event_header_t event_header(uint32_t time, uint16_t type, uint32_t size) noexcept {
+        clap_event_header_t h{};
+        h.size = size;
+        h.time = time;
+        h.space_id = CLAP_CORE_EVENT_SPACE_ID;
+        h.type = type;
+        h.flags = 0;
+        return h;
+    }
+
+    void push_event(EventAny& e) noexcept {
+        if (in_event_storage_.size() == in_event_storage_.capacity()) {
+            dropped_input_events_.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        e.order = next_event_order_++;
+        in_event_storage_.push_back(e);
+    }
+
+    void push_param_value(uint32_t time, uint32_t id, double value) noexcept {
+        EventAny e{};
+        e.param_value.header =
+            event_header(time, CLAP_EVENT_PARAM_VALUE, sizeof(clap_event_param_value_t));
+        e.param_value.param_id = (clap_id)id;
+        e.param_value.cookie = nullptr;
+        e.param_value.note_id = -1;
+        e.param_value.port_index = -1;
+        e.param_value.channel = -1;
+        e.param_value.key = -1;
+        e.param_value.value = value;
+        push_event(e);
+    }
+
+    // A MIDI 1.0 message, in the dialect the plugin's note port prefers. In the
+    // CLAP dialect notes become note events and polyphonic pressure becomes a
+    // pressure note-expression; everything else travels as raw MIDI when the
+    // port accepts it.
+    void push_short_midi(uint32_t time, const midi::MidiEvent& m) noexcept {
+        const auto decoded = detail::decode_short_midi(m.message.data(), m.message.length());
+        using K = detail::ShortMidi::Kind;
+        EventAny e{};
+        if (note_dialect_clap_ && (decoded.kind == K::note_on || decoded.kind == K::note_off)) {
+            const bool on = decoded.kind == K::note_on;
+            e.note.header = event_header(time, on ? CLAP_EVENT_NOTE_ON : CLAP_EVENT_NOTE_OFF,
+                                         sizeof(clap_event_note_t));
+            e.note.note_id = -1;
+            e.note.port_index = 0;
+            e.note.channel = decoded.channel;
+            e.note.key = decoded.data1;
+            e.note.velocity = decoded.data2 / 127.0;
+            push_event(e);
+            return;
+        }
+        if (note_dialect_clap_ && decoded.kind == K::poly_pressure) {
+            e.expression.header = event_header(time, CLAP_EVENT_NOTE_EXPRESSION,
+                                               sizeof(clap_event_note_expression_t));
+            e.expression.expression_id = CLAP_NOTE_EXPRESSION_PRESSURE;
+            e.expression.note_id = -1;
+            e.expression.port_index = 0;
+            e.expression.channel = decoded.channel;
+            e.expression.key = decoded.data1;
+            e.expression.value = decoded.data2 / 127.0;
+            push_event(e);
+            return;
+        }
+        if (!accepts_midi_)
+            return;
+        e.midi.header = event_header(time, CLAP_EVENT_MIDI, sizeof(clap_event_midi_t));
+        e.midi.port_index = 0;
+        const auto len = m.message.length();
+        e.midi.data[0] = m.message.data()[0];
+        e.midi.data[1] = len > 1 ? m.message.data()[1] : 0;
+        e.midi.data[2] = len > 2 ? m.message.data()[2] : 0;
+        push_event(e);
+    }
+
+    // Where a plugin's output events land. The same sink serves process() on
+    // the audio thread and params flush() on the main thread; only the edit
+    // lane differs.
+    struct OutputSink {
+        ClapSlot* self = nullptr;
+        midi::MidiBuffer* midi_out = nullptr;
+        bool from_audio_thread = true;
+    };
+
+    static bool CLAP_ABI output_try_push(const clap_output_events_t* list,
+                                         const clap_event_header_t* ev) {
+        auto* sink = static_cast<OutputSink*>(list->ctx);
+        if (sink == nullptr || ev == nullptr || ev->space_id != CLAP_CORE_EVENT_SPACE_ID)
+            return true;
+        sink->self->harvest_output_event(*sink, ev);
+        return true;
+    }
+
+    // Plugin events are copied into aligned locals: a plugin's event storage
+    // need not be aligned for the struct, and reading it in place is UB.
+    void harvest_output_event(const OutputSink& sink, const clap_event_header_t* ev) noexcept {
+        auto to_midi = [&](uint8_t status, uint8_t d1, uint8_t d2) {
+            if (sink.midi_out == nullptr)
+                return;
+            midi::MidiEvent out;
+            out.sample_offset = (int32_t)ev->time;
+            out.message = choc::midi::ShortMessage(status, d1, d2);
+            sink.midi_out->add(out);
+        };
+        auto velocity7 = [](double v, int floor) {
+            return (uint8_t)std::clamp((int)std::lround(v * 127.0), floor, 127);
+        };
+        switch (ev->type) {
+        case CLAP_EVENT_NOTE_ON:
+        case CLAP_EVENT_NOTE_OFF:
+        case CLAP_EVENT_NOTE_CHOKE: {
+            clap_event_note_t n;
+            std::memcpy(&n, ev, sizeof(n));
+            if (n.key < 0 || n.key > 127)
+                return;
+            const uint8_t ch = (uint8_t)(n.channel < 0 ? 0 : (n.channel & 0x0F));
+            if (ev->type == CLAP_EVENT_NOTE_ON)
+                to_midi((uint8_t)(0x90 | ch), (uint8_t)n.key, velocity7(n.velocity, 1));
+            else
+                to_midi((uint8_t)(0x80 | ch), (uint8_t)n.key, velocity7(n.velocity, 0));
+            return;
+        }
+        case CLAP_EVENT_NOTE_EXPRESSION: {
+            clap_event_note_expression_t x;
+            std::memcpy(&x, ev, sizeof(x));
+            if (x.expression_id != CLAP_NOTE_EXPRESSION_PRESSURE || x.key < 0 || x.key > 127)
+                return;
+            const uint8_t ch = (uint8_t)(x.channel < 0 ? 0 : (x.channel & 0x0F));
+            to_midi((uint8_t)(0xA0 | ch), (uint8_t)x.key, velocity7(x.value, 0));
+            return;
+        }
+        case CLAP_EVENT_MIDI: {
+            clap_event_midi_t m;
+            std::memcpy(&m, ev, sizeof(m));
+            to_midi(m.data[0], m.data[1], m.data[2]);
+            return;
+        }
+        case CLAP_EVENT_MIDI_SYSEX: {
+            clap_event_midi_sysex_t x;
+            std::memcpy(&x, ev, sizeof(x));
+            if (sink.midi_out != nullptr && x.buffer != nullptr && x.size > 0)
+                sink.midi_out->add_sysex_copy(x.buffer, x.size, (int32_t)ev->time);
+            return;
+        }
+        case CLAP_EVENT_PARAM_VALUE: {
+            clap_event_param_value_t v;
+            std::memcpy(&v, ev, sizeof(v));
+            note_plugin_edit(sink.from_audio_thread, {PluginParameterEdit::Kind::value,
+                                                      (uint32_t)v.param_id, (float)v.value});
+            return;
+        }
+        case CLAP_EVENT_PARAM_GESTURE_BEGIN:
+        case CLAP_EVENT_PARAM_GESTURE_END: {
+            clap_event_param_gesture_t g;
+            std::memcpy(&g, ev, sizeof(g));
+            note_plugin_edit(sink.from_audio_thread, {ev->type == CLAP_EVENT_PARAM_GESTURE_BEGIN
+                                                          ? PluginParameterEdit::Kind::begin_gesture
+                                                          : PluginParameterEdit::Kind::end_gesture,
+                                                      (uint32_t)g.param_id, 0.0f});
+            return;
+        }
+        default:
+            return;
+        }
+    }
+
+    // A value the plugin set itself replaces any host-side cached value, so
+    // get_parameter() does not keep reporting a stale host edit. The audio
+    // thread only ever overwrites an existing entry (no allocation) and skips
+    // the update when a control thread holds the cache.
+    void note_plugin_edit(bool from_audio_thread, const PluginParameterEdit& edit) noexcept {
+        if (from_audio_thread) {
+            edit_inbox().push_from_audio(edit);
+            if (edit.kind != PluginParameterEdit::Kind::value)
+                return;
+            std::unique_lock<std::mutex> lock(cache_mu_, std::try_to_lock);
+            if (!lock.owns_lock())
+                return;
+            auto it = cached_values_.find(edit.id);
+            if (it != cached_values_.end())
+                it->second = edit.plain_value;
+            return;
+        }
+        try {
+            edit_inbox().push_from_control(edit);
+            if (edit.kind != PluginParameterEdit::Kind::value)
+                return;
+            std::lock_guard<std::mutex> lock(cache_mu_);
+            auto it = cached_values_.find(edit.id);
+            if (it != cached_values_.end())
+                it->second = edit.plain_value;
+        } catch (...) {
+        }
     }
 
     void begin_process() noexcept override {
@@ -408,7 +570,7 @@ public:
         // Falls through to the plugin's own get_value if no cached
         // entry exists yet.
         {
-            std::lock_guard<std::mutex> lock(pending_edits_mu_);
+            std::lock_guard<std::mutex> lock(cache_mu_);
             auto it = cached_values_.find(id);
             if (it != cached_values_.end()) return it->second;
         }
@@ -433,13 +595,9 @@ public:
         // as a CLAP_EVENT_PARAM_VALUE at time=0.
         //
         // Thread model: set_parameter is called from host/UI threads;
-        // process() runs on the audio thread. We use a mutex but the
-        // audio thread uses try_lock — if the host side is writing when
-        // the block starts, this block's edits just wait one more block
-        // (the pending edit isn't lost, it's re-checked next process()).
-        // This trades one block of parameter latency for strict RT-safety
-        // on the audio thread, which is the right default for parameter
-        // automation (user-gesture rate, not sample rate).
+        // process() runs on the audio thread and drains with try_lock — if the
+        // host side is writing when the block starts, this block's edits wait
+        // one more block. See detail::PendingHostEdits.
         //
         // Param IDs that the plugin doesn't expose are rejected: we check
         // against the cached params_ list so invalid IDs fail visibly
@@ -450,9 +608,9 @@ public:
                 id, info_.name);
             return;
         }
-        std::lock_guard<std::mutex> lock(pending_edits_mu_);
-        pending_edits_[id] = value;  // coalesce: latest wins per id
-        cached_values_[id] = value;  // so get_parameter reads-back cleanly
+        pending_edits_.set(id, value); // coalesce: latest wins per id
+        std::lock_guard<std::mutex> lock(cache_mu_);
+        cached_values_[id] = value; // so get_parameter reads back cleanly
     }
 
     void set_bypass(bool bypassed) override {
@@ -513,8 +671,8 @@ public:
         };
         const bool restored = ext->load(plugin_, &is);
         if (restored) {
-            std::lock_guard<std::mutex> lock(pending_edits_mu_);
             pending_edits_.clear();
+            std::lock_guard<std::mutex> lock(cache_mu_);
             cached_values_.clear();
         }
         return restored;
@@ -669,6 +827,43 @@ public:
         return (int)ext->get(plugin_);
     }
 
+    // The control-thread pump. Besides handing over the plugin's own edits, it
+    // services the [thread-safe] requests a plugin can only make
+    // asynchronously: an on_main_thread() callback, and a parameter flush while
+    // the plugin is not processing (while it is, the next process() call
+    // carries the flush).
+    std::size_t drain_parameter_edits(std::span<PluginParameterEdit> out) override {
+        service_main_thread_requests();
+        return RequestDrivenSlot::drain_parameter_edits(out);
+    }
+
+    void service_main_thread_requests() {
+        if (!plugin_)
+            return;
+        if (callback_requested_.exchange(false) && plugin_->on_main_thread)
+            plugin_->on_main_thread(plugin_);
+        if (flush_requested_.load() && !processing_) {
+            flush_requested_.store(false);
+            if (params_ext_ && params_ext_->flush) {
+                clap_input_events_t in{};
+                in.ctx = nullptr;
+                in.size = [](const clap_input_events_t*) -> uint32_t { return 0; };
+                in.get = [](const clap_input_events_t*, uint32_t) -> const clap_event_header_t* {
+                    return nullptr;
+                };
+                OutputSink sink{this, nullptr, /*from_audio_thread=*/false};
+                clap_output_events_t out{};
+                out.ctx = &sink;
+                out.try_push = &ClapSlot::output_try_push;
+                params_ext_->flush(plugin_, &in, &out);
+            }
+        }
+    }
+
+    std::uint64_t dropped_input_event_count() const noexcept {
+        return dropped_input_events_.load(std::memory_order_relaxed);
+    }
+
     // Typed plugin introspection surfaces the underlying `const clap_plugin_t*`
     // and host struct so callers can reach into CLAP-specific extensions
     // without round-tripping through `void*`.
@@ -731,9 +926,208 @@ public:
     static const void* CLAP_ABI host_get_extension(const clap_host_t* host, const char* id) {
         if (!host || !id) return nullptr;
         if (std::strcmp(id, CLAP_EXT_GUI) == 0) return &s_host_gui;
+        if (std::strcmp(id, CLAP_EXT_PARAMS) == 0)
+            return &s_host_params;
+        if (std::strcmp(id, CLAP_EXT_LATENCY) == 0)
+            return &s_host_latency;
+        if (std::strcmp(id, CLAP_EXT_STATE) == 0)
+            return &s_host_state;
+        if (std::strcmp(id, CLAP_EXT_THREAD_CHECK) == 0)
+            return &s_host_thread_check;
+        if (std::strcmp(id, CLAP_EXT_LOG) == 0)
+            return &s_host_log;
+        if (std::strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0)
+            return &s_host_audio_ports;
         return nullptr;
     }
-    static void CLAP_ABI host_request_noop(const clap_host_t*) {}
+
+    // clap_host core requests. All [thread-safe].
+
+    // Deactivate + reactivate is the only answer CLAP defines; the host does it
+    // by re-preparing, which SignalGraph::apply_plugin_restarts() drives.
+    static void CLAP_ABI host_request_restart(const clap_host_t* host) {
+        if (auto* self = self_from(host))
+            self->note_restart_request();
+    }
+    // Pulp calls process() every block whether or not the plugin asks.
+    static void CLAP_ABI host_request_process(const clap_host_t*) {}
+    static void CLAP_ABI host_request_callback(const clap_host_t* host) {
+        if (auto* self = self_from(host))
+            self->callback_requested_.store(true);
+    }
+
+    // clap_host_params.
+
+    // [main-thread]. A changed parameter list is re-read; changed values only
+    // invalidate the host-side cache, so get_parameter() asks the plugin.
+    static void CLAP_ABI host_params_rescan(const clap_host_t* host,
+                                            clap_param_rescan_flags flags) {
+        auto* self = self_from(host);
+        if (!self || !self->plugin_)
+            return;
+        if (flags & (CLAP_PARAM_RESCAN_ALL | CLAP_PARAM_RESCAN_INFO | CLAP_PARAM_RESCAN_TEXT))
+            self->cache_params();
+        if (flags & (CLAP_PARAM_RESCAN_ALL | CLAP_PARAM_RESCAN_VALUES)) {
+            std::lock_guard<std::mutex> lock(self->cache_mu_);
+            self->cached_values_.clear();
+        }
+    }
+    // [main-thread]. Pulp holds no per-parameter automation or modulation of
+    // its own inside the slot, so there is nothing to clear.
+    static void CLAP_ABI host_params_clear(const clap_host_t*, clap_id, clap_param_clear_flags) {}
+    // [thread-safe]. Serviced by the control-thread pump (drain_parameter_edits).
+    static void CLAP_ABI host_params_request_flush(const clap_host_t* host) {
+        if (auto* self = self_from(host))
+            self->flush_requested_.store(true);
+    }
+
+    // clap_host_latency. [main-thread], legal only during activate() or after
+    // request_restart(); either way the graph must re-read it at prepare.
+    static void CLAP_ABI host_latency_changed(const clap_host_t* host) {
+        if (auto* self = self_from(host))
+            self->note_restart_request();
+    }
+
+    // clap_host_state.
+    static void CLAP_ABI host_state_mark_dirty(const clap_host_t* host) {
+        if (auto* self = self_from(host))
+            self->note_state_change();
+    }
+
+    // clap_host_thread_check. A thread inside this host's process call is the
+    // audio thread; the main thread is the one that created or last prepared
+    // the slot, when it is not processing.
+    static bool CLAP_ABI host_is_main_thread(const clap_host_t* host) {
+        auto* self = self_from(host);
+        if (!self || detail::AudioThreadScope::active())
+            return false;
+        return std::this_thread::get_id() == self->main_thread_.load();
+    }
+    static bool CLAP_ABI host_is_audio_thread(const clap_host_t*) {
+        return detail::AudioThreadScope::active();
+    }
+
+    // clap_host_log. [thread-safe] — but Pulp's logger is not realtime-safe,
+    // so a message logged from inside process() is counted and dropped.
+    static void CLAP_ABI host_log(const clap_host_t* host, clap_log_severity severity,
+                                  const char* msg) {
+        auto* self = self_from(host);
+        if (!self || !msg)
+            return;
+        if (detail::AudioThreadScope::active()) {
+            self->dropped_log_messages_.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        switch (severity) {
+        case CLAP_LOG_DEBUG:
+            runtime::log_debug("CLAP '{}': {}", self->info_.name, msg);
+            break;
+        case CLAP_LOG_INFO:
+            runtime::log_info("CLAP '{}': {}", self->info_.name, msg);
+            break;
+        case CLAP_LOG_WARNING:
+            runtime::log_warn("CLAP '{}': {}", self->info_.name, msg);
+            break;
+        default:
+            runtime::log_error("CLAP '{}': {}", self->info_.name, msg);
+            break;
+        }
+    }
+
+    // clap_host_audio_ports. A port change needs a deactivated plugin and a
+    // re-prepare, so every rescan is reported as a restart request.
+    static bool CLAP_ABI host_audio_ports_is_rescan_flag_supported(const clap_host_t*, uint32_t) {
+        return true;
+    }
+    static void CLAP_ABI host_audio_ports_rescan(const clap_host_t* host, uint32_t) {
+        if (auto* self = self_from(host))
+            self->note_restart_request();
+    }
+
+    static const clap_host_params_t s_host_params;
+    static const clap_host_latency_t s_host_latency;
+    static const clap_host_state_t s_host_state;
+    static const clap_host_thread_check_t s_host_thread_check;
+    static const clap_host_log_t s_host_log;
+    static const clap_host_audio_ports_t s_host_audio_ports;
+
+    // Offline rendering. clap_plugin_render::set is [main-thread] and settled
+    // before activate(). A plugin that declares a hard realtime requirement
+    // (it streams from hardware, say) keeps realtime mode.
+    format::ProcessMode apply_render_mode() {
+        const bool offline = settings().process_mode == format::ProcessMode::Offline;
+        auto* render =
+            (const clap_plugin_render_t*)plugin_->get_extension(plugin_, CLAP_EXT_RENDER);
+        if (offline && render && render->has_hard_realtime_requirement &&
+            render->has_hard_realtime_requirement(plugin_)) {
+            runtime::log_info("ClapSlot: '{}' requires realtime rendering; staying realtime",
+                              info_.name);
+            if (render->set)
+                render->set(plugin_, CLAP_RENDER_REALTIME);
+            return format::ProcessMode::Realtime;
+        }
+        if (render && render->set)
+            render->set(plugin_, offline ? CLAP_RENDER_OFFLINE : CLAP_RENDER_REALTIME);
+        return offline ? format::ProcessMode::Offline : format::ProcessMode::Realtime;
+    }
+
+    // Which note dialect the first input note port prefers. No note-ports
+    // extension (or no input port) keeps raw MIDI, which is what every
+    // MIDI-capable plugin understands.
+    void cache_note_dialect() {
+        note_dialect_clap_ = false;
+        accepts_midi_ = true;
+        auto* np =
+            (const clap_plugin_note_ports_t*)plugin_->get_extension(plugin_, CLAP_EXT_NOTE_PORTS);
+        if (!np || !np->count || !np->get || np->count(plugin_, true) == 0)
+            return;
+        clap_note_port_info_t port{};
+        if (!np->get(plugin_, 0, true, &port))
+            return;
+        accepts_midi_ = (port.supported_dialects & CLAP_NOTE_DIALECT_MIDI) != 0;
+        const bool clap_ok = (port.supported_dialects & CLAP_NOTE_DIALECT_CLAP) != 0;
+        note_dialect_clap_ =
+            clap_ok && (port.preferred_dialect == CLAP_NOTE_DIALECT_CLAP || !accepts_midi_);
+    }
+
+    // Every declared audio port becomes a bus. 64-bit processing needs every
+    // port to support it; otherwise the whole plugin runs 32-bit.
+    void configure_buses(int max_block_size) {
+        std::vector<detail::SlotBusDecl> ins;
+        std::vector<detail::SlotBusDecl> outs;
+        bool all_64 = true;
+        auto* ports =
+            (const clap_plugin_audio_ports_t*)plugin_->get_extension(plugin_, CLAP_EXT_AUDIO_PORTS);
+        host_width_buses_ = !(ports && ports->count && ports->get);
+        if (host_width_buses_) {
+            ins.push_back({detail::SlotBusDecl::kHostWidth, true});
+            outs.push_back({detail::SlotBusDecl::kHostWidth, true});
+            all_64 = false;
+        } else {
+            for (bool is_input : {true, false}) {
+                auto& decls = is_input ? ins : outs;
+                const uint32_t count = ports->count(plugin_, is_input);
+                bool saw_main = false;
+                for (uint32_t i = 0; i < count; ++i) {
+                    clap_audio_port_info_t port{};
+                    if (!ports->get(plugin_, i, is_input, &port))
+                        port.channel_count = 0;
+                    const bool is_main = (port.flags & CLAP_AUDIO_PORT_IS_MAIN) != 0 && !saw_main;
+                    saw_main = saw_main || is_main;
+                    all_64 = all_64 && (port.flags & CLAP_AUDIO_PORT_SUPPORTS_64BITS) != 0;
+                    decls.push_back({(int)port.channel_count, is_main});
+                }
+                // A plugin that flags no main port still has one: the first.
+                if (!saw_main && !decls.empty())
+                    decls.front().main = true;
+            }
+        }
+        const bool use_double =
+            settings().prefer_double_precision && all_64 && !(ins.empty() && outs.empty());
+        binder_.prepare(ins, outs, max_block_size, use_double);
+        in_buffers_.assign(ins.size(), clap_audio_buffer_t{});
+        out_buffers_.assign(outs.size(), clap_audio_buffer_t{});
+    }
 
     // clap_host_gui. Every callback is [main-thread] per clap/ext/gui.h.
 
@@ -858,24 +1252,11 @@ public:
         }
     }
 
-    static void copy_or_zero(audio::BufferView<float>& out,
-                             const audio::BufferView<const float>& in,
-                             int num_samples) {
-        const size_t nch_out = out.num_channels();
-        const size_t nch_in = in.num_channels();
-        for (size_t c = 0; c < nch_out; ++c) {
-            auto* dst = out.channel_ptr(c);
-            if (c < nch_in) {
-                std::memcpy(dst, in.channel_ptr(c), sizeof(float) * (size_t)num_samples);
-            } else {
-                std::memset(dst, 0, sizeof(float) * (size_t)num_samples);
-            }
-        }
-    }
-
     PluginInfo info_;
     void* handle_ = nullptr;
     const clap_plugin_entry_t* entry_ = nullptr;
+    // Backing storage for the clap_host_t identity strings.
+    PluginHostIdentity identity_strings_;
     const clap_plugin_t* plugin_ = nullptr;
     const clap_plugin_params_t* params_ext_ = nullptr;
     clap_host_t host_{};
@@ -898,37 +1279,48 @@ public:
     void* editor_container_ = nullptr;
     EditorResizeRequestHandler resize_request_handler_;
     std::vector<HostParamInfo> params_;
-    std::vector<float*> in_ptrs_;
-    std::vector<float*> out_ptrs_;
 
-    // Per-block event-list scratch. Each entry holds either a param-value
-    // or a MIDI event; a union variant because CLAP events are heterogeneous
-    // structs and the plugin expects pointers to clap_event_header_t.
-    enum class EventKind : uint8_t { ParamValue, Midi };
+    // Audio routing: the plugin's declared ports, bound to host buses per block.
+    detail::SlotBusBinder binder_;
+    std::vector<clap_audio_buffer_t> in_buffers_;
+    std::vector<clap_audio_buffer_t> out_buffers_;
+    // True when the plugin declares no audio ports and takes the host's width.
+    bool host_width_buses_ = true;
+
+    // Note-port dialect resolved at prepare.
+    bool note_dialect_clap_ = false;
+    bool accepts_midi_ = true;
+
+    // Per-block event-list scratch. Every CLAP event begins with
+    // clap_event_header_t, so the union's common initial sequence lets the
+    // plugin read any member through `header`. `order` keeps the sort stable.
     struct EventAny {
         union {
+            clap_event_header_t header;
             clap_event_param_value_t param_value;
-            clap_event_midi_t        midi;
+            clap_event_midi_t midi;
+            clap_event_note_t note;
+            clap_event_note_expression_t expression;
+            clap_event_midi_sysex_t sysex;
         };
-        EventKind kind;
-        uint32_t header_time() const {
-            return kind == EventKind::ParamValue
-                ? param_value.header.time : midi.header.time;
-        }
-        const clap_event_header_t& as_header() const {
-            return kind == EventKind::ParamValue
-                ? param_value.header : midi.header;
-        }
+        uint32_t order = 0;
     };
     std::vector<EventAny> in_event_storage_;
-    midi::MidiBuffer* out_midi_sink_ = nullptr;
+    uint32_t next_event_order_ = 0;
+    std::atomic<std::uint64_t> dropped_input_events_{0};
+    std::atomic<std::uint64_t> dropped_log_messages_{0};
 
-    // Host-initiated set_parameter queue. Mutex-guarded on the host side,
-    // try_lock on the audio side. unordered_map gives us latest-wins
-    // coalescing per param_id.
-    mutable std::mutex pending_edits_mu_;
-    std::unordered_map<uint32_t, float> pending_edits_;
+    // Host-initiated set_parameter edits, delivered at the next block.
+    detail::PendingHostEdits<double> pending_edits_;
+    // Last value the host set, so get_parameter() reads back before the plugin
+    // has processed the edit. Plugin-originated values overwrite entries.
+    mutable std::mutex cache_mu_;
     std::unordered_map<uint32_t, float> cached_values_;
+
+    // [thread-safe] plugin requests, serviced on the control thread.
+    std::atomic<bool> callback_requested_{false};
+    std::atomic<bool> flush_requested_{false};
+    std::atomic<std::thread::id> main_thread_{};
 
     std::optional<PluginResolvedIdentity> identity_;
     bool active_ = false;
@@ -942,6 +1334,29 @@ public:
     int64_t steady_time_ = 0;
 };
 
+const clap_host_params_t ClapSlot::s_host_params = {
+    .rescan = &ClapSlot::host_params_rescan,
+    .clear = &ClapSlot::host_params_clear,
+    .request_flush = &ClapSlot::host_params_request_flush,
+};
+const clap_host_latency_t ClapSlot::s_host_latency = {
+    .changed = &ClapSlot::host_latency_changed,
+};
+const clap_host_state_t ClapSlot::s_host_state = {
+    .mark_dirty = &ClapSlot::host_state_mark_dirty,
+};
+const clap_host_thread_check_t ClapSlot::s_host_thread_check = {
+    .is_main_thread = &ClapSlot::host_is_main_thread,
+    .is_audio_thread = &ClapSlot::host_is_audio_thread,
+};
+const clap_host_log_t ClapSlot::s_host_log = {
+    .log = &ClapSlot::host_log,
+};
+const clap_host_audio_ports_t ClapSlot::s_host_audio_ports = {
+    .is_rescan_flag_supported = &ClapSlot::host_audio_ports_is_rescan_flag_supported,
+    .rescan = &ClapSlot::host_audio_ports_rescan,
+};
+
 const clap_host_gui_t ClapSlot::s_host_gui = {
     .resize_hints_changed = &ClapSlot::host_gui_resize_hints_changed,
     .request_resize = &ClapSlot::host_gui_request_resize,
@@ -951,6 +1366,78 @@ const clap_host_gui_t ClapSlot::s_host_gui = {
 };
 
 } // namespace
+
+namespace {
+clap_beattime to_beattime(double beats) noexcept {
+    return (clap_beattime)std::llround(beats * (double)CLAP_BEATTIME_FACTOR);
+}
+clap_sectime to_sectime(double seconds) noexcept {
+    return (clap_sectime)std::llround(seconds * (double)CLAP_SECTIME_FACTOR);
+}
+} // namespace
+
+void clap_transport_from_context(const format::ProcessContext& context,
+                                 clap_event_transport_t& out) noexcept {
+    using F = format::TransportField;
+    out = clap_event_transport_t{};
+    out.header.size = sizeof(clap_event_transport_t);
+    out.header.time = 0;
+    out.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+    out.header.type = CLAP_EVENT_TRANSPORT;
+    out.header.flags = 0;
+    auto has = [&](F field) { return detail::transport_has(context, field); };
+
+    uint32_t flags = 0;
+    if (has(F::Playing) && context.is_playing)
+        flags |= CLAP_TRANSPORT_IS_PLAYING;
+    if (has(F::Recording) && context.is_recording)
+        flags |= CLAP_TRANSPORT_IS_RECORDING;
+    if (has(F::Looping) && context.is_looping)
+        flags |= CLAP_TRANSPORT_IS_LOOP_ACTIVE;
+
+    const bool tempo = has(F::Tempo) && context.tempo_bpm > 0.0 && std::isfinite(context.tempo_bpm);
+    if (tempo) {
+        flags |= CLAP_TRANSPORT_HAS_TEMPO;
+        out.tempo = context.tempo_bpm;
+        out.tempo_inc = 0.0;
+    }
+    const bool loop_range = detail::transport_has_loop_range(context);
+    const bool beats = has(F::BeatPosition) && std::isfinite(context.position_beats);
+    if (beats) {
+        flags |= CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
+        out.song_pos_beats = to_beattime(context.position_beats);
+        if (loop_range) {
+            out.loop_start_beats = to_beattime(context.loop_start_beats);
+            out.loop_end_beats = to_beattime(context.loop_end_beats);
+        }
+    }
+    if (has(F::SamplePosition) && context.sample_rate > 0.0) {
+        flags |= CLAP_TRANSPORT_HAS_SECONDS_TIMELINE;
+        out.song_pos_seconds = to_sectime((double)context.position_samples / context.sample_rate);
+        if (loop_range && tempo) {
+            out.loop_start_seconds =
+                to_sectime(context.loop_start_beats * 60.0 / context.tempo_bpm);
+            out.loop_end_seconds = to_sectime(context.loop_end_beats * 60.0 / context.tempo_bpm);
+        }
+    }
+    const bool tsig =
+        has(F::TimeSignature) && context.time_sig_numerator > 0 && context.time_sig_denominator > 0;
+    if (tsig) {
+        flags |= CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
+        out.tsig_num = (uint16_t)context.time_sig_numerator;
+        out.tsig_denom = (uint16_t)context.time_sig_denominator;
+    }
+    if (beats && tsig) {
+        // Quarter notes per bar, then the bar the playhead is in.
+        const double bar_beats =
+            4.0 * context.time_sig_numerator / (double)context.time_sig_denominator;
+        const int64_t bar =
+            has(F::Bar) ? context.bar : (int64_t)std::floor(context.position_beats / bar_beats);
+        out.bar_number = (int32_t)bar;
+        out.bar_start = to_beattime((double)bar * bar_beats);
+    }
+    out.flags = flags;
+}
 
 std::unique_ptr<PluginSlot> make_clap_slot(PluginInfo info, const ClapPluginCreator& create) {
     if (!create) return nullptr;

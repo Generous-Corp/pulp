@@ -494,6 +494,12 @@ class SignalGraph : public format::AudioWorkgroupClient {
     void abort_swap_edit();
     void release();
 
+    // Hosted-plugin restart requests and process mode (docs/guides/hosting.md).
+    bool plugin_restart_pending() const; // control thread
+    bool apply_plugin_restarts();        // re-prepare when pending; prepare() contract
+    void set_hosted_plugin_process_mode(format::ProcessMode mode); // at next prepare()
+    format::ProcessMode hosted_plugin_process_mode() const;
+
     bool set_node_live_swap_policy(NodeId id, NodeLiveSwapPolicy policy);
     bool set_node_hosted_editor_open(NodeId id, bool open);
     PluginCatalogToken register_scanned_plugin(const PluginInfo& info);
@@ -1409,6 +1415,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::uint64_t authoring_generation_{0};
     NodeId next_id_ = 1;
     NodeId last_prepare_custom_failure_node_ = 0;
+    format::ProcessMode hosted_plugin_process_mode_ = format::ProcessMode::Realtime;
+    double last_plugin_prepare_rate_ = 0.0;
+    int last_plugin_prepare_block_ = 0;
     GraphLimits limits_;
 
     // 2.2b prerequisite (planning/2026-07-07-signalgraph-swap-and-bake-implementation-plan.md,
@@ -1424,6 +1433,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::vector<HostParamInfo> parameters;
         int latency_samples = 0;
         bool wants_transport = false;
+        std::uint64_t restart_requests = 0; // PluginSlot::restart_request_count()
     };
     // Captured once per prepare() (cleared + rebuilt); read by compile_ / the
     // routing build / edit-time param validation instead of the live PluginSlot.

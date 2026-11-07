@@ -41,6 +41,23 @@ registry and no plug-in-per-file hooks; adding a format means:
 
 Everything else — tests, scanner, graph wiring — is format-agnostic.
 
+### One process request per block
+
+A backend does not implement the three `PluginSlot::process()` overloads. It
+derives from `detail::RequestDrivenSlot` (`core/host/src/plugin_slot_process_request.hpp`),
+which implements them once and hands `process_request()` a single
+`SlotProcessRequest`: every host bus, MIDI in/out, parameter events, the host
+transport (or null), and the prepared process mode. The same header holds the
+pieces every backend needs the same answer for: `SlotBusBinder` (host buses to
+the plugin's declared buses, with prepared scratch and 64-bit conversion),
+`ParameterEditInbox` (plugin edits back to the host from audio and control
+threads), `PendingHostEdits` (host edits to the plugin, swap-drained), and the
+MIDI view (`decode_short_midi`, `for_each_midi_in_time_order`). Keep format
+translation in the backend and shared policy in that header; a second copy of
+bus matching or edit queuing in a backend is a review finding. The CLAP and
+VST3 slots are built this way; see `test_hosted_slot_process_request.cpp`,
+`test_clap_slot_process_fidelity.cpp`, and `test_vst3_slot_process_fidelity.cpp`.
+
 ### SignalGraph determinism and replay
 
 When changing `SignalGraph` topology or its runtime plan, preserve canonical

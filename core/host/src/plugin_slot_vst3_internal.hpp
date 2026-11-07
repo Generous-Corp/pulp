@@ -21,6 +21,7 @@
 #include <pluginterfaces/vst/ivstaudioprocessor.h>
 #include <pluginterfaces/vst/ivstcomponent.h>
 #include <pluginterfaces/vst/ivsteditcontroller.h>
+#include <pluginterfaces/vst/ivsthostapplication.h>
 #include <pluginterfaces/vst/ivstprocesscontext.h>
 
 #include <cstdint>
@@ -39,10 +40,15 @@ public:
         sample_position_ = 0;
     }
 
+    /// The free-running clock used when the host supplies no transport. It
+    /// claims a running timeline in samples and nothing musical: no tempo, no
+    /// bar, no time signature, so a plug-in cannot mistake a default for one.
     void write(Steinberg::Vst::ProcessContext& context) const noexcept {
         context.sampleRate = sample_rate_;
         context.projectTimeSamples = sample_position_;
-        context.state = Steinberg::Vst::ProcessContext::kPlaying;
+        context.continousTimeSamples = sample_position_;
+        context.state = Steinberg::Vst::ProcessContext::kPlaying |
+                        Steinberg::Vst::ProcessContext::kContTimeValid;
     }
 
     void advance(int num_samples) noexcept {
@@ -57,6 +63,17 @@ private:
     double sample_rate_ = 44100.0;
     std::int64_t sample_position_ = 0;
 };
+
+/// Project Pulp's per-block transport onto a VST3 ProcessContext. Only fields
+/// the host supplied (see ProcessContext::transport_validity) set their VST3
+/// validity bit. `sample_rate` is the prepared rate, which wins over the
+/// context's own when both are present.
+void vst3_process_context_from(const format::ProcessContext& context, double sample_rate,
+                               Steinberg::Vst::ProcessContext& out) noexcept;
+
+/// The IHostApplication every hosted VST3 plug-in is initialized with. Its
+/// getName() reports plugin_host_identity().name.
+Steinberg::Vst::IHostApplication* vst3_host_application();
 
 /// Build a VST3 slot around already-created interfaces. `controller` may be the
 /// same object as `component` (a combined plug-in) or a separate one; the slot
