@@ -143,8 +143,7 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(const PortHa
     const auto& plan = cg->routed.serial.snapshot.plan();
     for (std::size_t i = 0; i < cg->connections.size(); ++i) {
         const auto& edge = cg->connections[i];
-        if ((!edge.automation && !edge.audio_rate_modulation) ||
-            edge.source_node != source.node ||
+        if ((!edge.automation && !edge.audio_rate_modulation) || edge.source_node != source.node ||
             edge.source_port != source.index || edge.dest_node != destination ||
             edge.automation_param_id != parameter_id)
             continue;

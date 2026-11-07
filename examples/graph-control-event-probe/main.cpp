@@ -127,8 +127,8 @@ void event_probe(bool planted) {
     GraphRuntimeExecutor executor;
     if (!planted)
         require(executor
-                    .process_routed(block, snapshot, pool, &midi, nullptr, {}, {}, {}, {}, {}, nullptr,
-                                    &probes)
+                    .process_routed(block, snapshot, pool, &midi, nullptr, {}, {}, {}, {}, {},
+                                    nullptr, &probes)
                     .ok(),
                 "event-process");
     GraphRuntimeProbeSample sample;
