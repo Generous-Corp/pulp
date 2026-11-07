@@ -96,6 +96,33 @@ std::string PreparedDescriptionData::canonical_bytes() const {
     number(out, prepared_plan_connection_count);
     out += ",\"serial_pool_bound\":";
     out += serial_pool_bound ? "true" : "false";
+    out += ",\"buffer_slot_count\":";
+    number(out, buffer_slot_count);
+    out += ",\"pool_slot_count\":";
+    number(out, pool_slot_count);
+    out += ",\"pool_max_frames\":";
+    number(out, pool_max_frames);
+    out += ",\"total_latency_samples\":";
+    number(out, total_latency_samples);
+    out += ",\"input_modes\":[";
+    for (std::size_t i = 0; i < input_modes.size(); ++i) {
+        if (i)
+            out.push_back(',');
+        quote(out, input_modes[i]);
+    }
+    out += "],\"connection_delay_samples\":[";
+    for (std::size_t i = 0; i < connection_delay_samples.size(); ++i) {
+        if (i)
+            out.push_back(',');
+        number(out, connection_delay_samples[i]);
+    }
+    out += "],\"reads_in_place\":[";
+    for (std::size_t i = 0; i < reads_in_place.size(); ++i) {
+        if (i)
+            out.push_back(',');
+        number(out, reads_in_place[i]);
+    }
+    out += "]";
     out += "}";
     out += ",\"limits\":{\"profile\":{\"nodes\":";
     number(out, profile_max_nodes);

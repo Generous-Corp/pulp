@@ -94,6 +94,13 @@ struct PreparedDescriptionData {
     std::uint64_t prepared_plan_node_count = 0;
     std::uint64_t prepared_plan_connection_count = 0;
     bool serial_pool_bound = false;
+    std::uint64_t buffer_slot_count = 0;
+    std::uint64_t pool_slot_count = 0;
+    std::uint64_t pool_max_frames = 0;
+    std::uint64_t total_latency_samples = 0;
+    std::vector<std::string> input_modes;
+    std::vector<std::uint32_t> connection_delay_samples;
+    std::vector<std::uint8_t> reads_in_place;
     std::uint64_t profile_max_nodes = 512;
     std::uint64_t profile_max_connections = 2048;
     std::uint64_t profile_max_ports = 4096;

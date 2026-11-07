@@ -1607,6 +1607,44 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         capture->prepared_plan_connection_count = plan.connections.size();
         capture->serial_pool_bound =
             next->routed.serial.pool.bound_to(next->routed.serial.snapshot);
+        const auto& assignment = next->routed.serial.snapshot.buffer_assignment();
+        capture->buffer_slot_count = assignment.slot_count;
+        capture->pool_slot_count = next->routed.serial.pool.slot_count();
+        capture->pool_max_frames = next->routed.serial.pool.max_frames();
+        capture->total_latency_samples = assignment.total_latency_samples;
+        capture->connection_delay_samples = assignment.connection_delay_samples;
+        capture->reads_in_place = assignment.reads_in_place;
+        const auto mode_name = [](format::GraphRuntimeSnapshot::InputPortSource::Mode mode) {
+            switch (mode) {
+            case format::GraphRuntimeSnapshot::InputPortSource::Mode::Zero:
+                return "zero";
+            case format::GraphRuntimeSnapshot::InputPortSource::Mode::InPlace:
+                return "in_place";
+            case format::GraphRuntimeSnapshot::InputPortSource::Mode::Copy:
+                return "copy";
+            case format::GraphRuntimeSnapshot::InputPortSource::Mode::Sum:
+                return "sum";
+            }
+            return "unknown";
+        };
+        capture->input_modes.clear();
+        for (std::uint32_t dense = 0; dense < plan.nodes.size(); ++dense) {
+            const auto authored = std::find_if(
+                candidate_->nodes_.begin(), candidate_->nodes_.end(),
+                [&](const GraphNode& node) { return node.id == plan.nodes[dense].id; });
+            if (authored == candidate_->nodes_.end() || dense >= assignment.nodes.size())
+                return last_result_ = Result::PreflightFailed;
+            const auto position = static_cast<std::size_t>(authored - candidate_->nodes_.begin());
+            if (position >= capture->nodes.size())
+                return last_result_ = Result::PreflightFailed;
+            const auto& key = capture->nodes[position].authored_key;
+            const auto sources = next->routed.serial.snapshot.input_port_sources(dense);
+            for (std::uint32_t port = 0; port < sources.size(); ++port) {
+                capture->input_modes.push_back(key + ":" + std::to_string(port) + ":" +
+                                               mode_name(sources[port].mode) + ":" +
+                                               std::to_string(sources[port].slot));
+            }
+        }
         for (const auto dense_index : plan.processing_order_indices) {
             if (dense_index >= plan.nodes.size())
                 return last_result_ = Result::PreflightFailed;

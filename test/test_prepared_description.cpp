@@ -116,6 +116,10 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     REQUIRE(exported.value->prepared_plan_node_count == 4);
     REQUIRE(exported.value->prepared_plan_connection_count == 6);
     REQUIRE(exported.value->serial_pool_bound);
+    REQUIRE(exported.value->input_modes.size() == 6);
+    REQUIRE(exported.value->connection_delay_samples.size() == 6);
+    REQUIRE(exported.value->reads_in_place.size() == 6);
+    REQUIRE(exported.value->pool_slot_count == exported.value->buffer_slot_count);
 }
 
 TEST_CASE("D4 rejects a swapped authored channel") {
