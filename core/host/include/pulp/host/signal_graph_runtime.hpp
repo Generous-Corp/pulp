@@ -585,8 +585,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // and slew, before the destination consumes the parameter events. The
     // destination is identified by NodeId + public parameter id because
     // automation edges do not have a destination audio port.
-    EdgeProbeStatus attach_control_edge_probe(const PortHandle& source,
-                                              NodeId destination,
+    EdgeProbeStatus attach_control_edge_probe(const PortHandle& source, NodeId destination,
                                               std::uint32_t parameter_id);
     void detach_control_edge_probe();
     bool read_control_edge_probe(graph::GraphRuntimeProbeSample& sample);

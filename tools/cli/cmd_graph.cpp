@@ -70,8 +70,7 @@ int probe_graph(const std::vector<std::string>& args) {
         if (edge_kind != "audio" && edge_kind != "control" && edge_kind != "event")
             return fail("invalid_edge_kind", "edge-kind must be audio, control or event");
     }
-    for (const auto* key :
-         {"--input", "--source-node", "--source-port", "--destination-node"})
+    for (const auto* key : {"--input", "--source-node", "--source-port", "--destination-node"})
         if (options[key].empty())
             return fail("missing_option", std::string("probe requires ") + key);
     if (edge_kind != "control" && options["--destination-port"].empty())
@@ -220,10 +219,9 @@ int probe_graph(const std::vector<std::string>& args) {
     }
     if (status != Graph::EdgeProbeStatus::Attached)
         return fail(status_name, "cannot attach the requested prepared control/event edge");
-    const auto identity = edge_kind == "audio"
-                              ? graph.audio_edge_probe_identity()
-                              : edge_kind == "control" ? graph.control_edge_probe_identity()
-                                                        : graph.event_edge_probe_identity();
+    const auto identity = edge_kind == "audio"     ? graph.audio_edge_probe_identity()
+                          : edge_kind == "control" ? graph.control_edge_probe_identity()
+                                                   : graph.event_edge_probe_identity();
     if (edge_kind == "event") {
         pulp::midi::MidiBuffer events;
         events.reserve(4);
@@ -256,8 +254,7 @@ int probe_graph(const std::vector<std::string>& args) {
             return graph.read_event_edge_probe(sample);
         };
         while (read_sample()) {
-            if (edge_kind == "audio" &&
-                (!std::isfinite(sample.peak) || !std::isfinite(sample.rms)))
+            if (edge_kind == "audio" && (!std::isfinite(sample.peak) || !std::isfinite(sample.rms)))
                 return fail("non_finite_sample",
                             "probe measurement is non-finite; no JSON sample report was published");
             auto record = choc::value::createObject("ProbeSample");
@@ -282,17 +279,16 @@ int probe_graph(const std::vector<std::string>& args) {
     report.addMember("valid", true);
     report.addMember("code", "Attached");
     report.addMember("edge_kind", edge_kind);
-    report.addMember("observation", edge_kind == "audio"
-                                         ? "source_before_mixing_and_pdc"
-                                         : edge_kind == "control" ? "mapped_parameter_before_consumer"
-                                                                   : "events_before_destination_consumer");
+    report.addMember("observation", edge_kind == "audio" ? "source_before_mixing_and_pdc"
+                                    : edge_kind == "control"
+                                        ? "mapped_parameter_before_consumer"
+                                        : "events_before_destination_consumer");
     report.addMember("sample_rate", static_cast<int64_t>(input->sample_rate));
     report.addMember("frames", static_cast<int64_t>(input->num_frames()));
     report.addMember("dropped", static_cast<int64_t>(
-                                     edge_kind == "audio"
-                                         ? graph.audio_edge_probe_dropped()
-                                         : edge_kind == "control" ? graph.control_edge_probe_dropped()
-                                                                   : graph.event_edge_probe_dropped()));
+                                    edge_kind == "audio"     ? graph.audio_edge_probe_dropped()
+                                    : edge_kind == "control" ? graph.control_edge_probe_dropped()
+                                                             : graph.event_edge_probe_dropped()));
     auto id = choc::value::createObject("ProbeIdentity");
     id.addMember("graph_identity", std::to_string(identity.authoring.graph_identity));
     id.addMember("generation", std::to_string(identity.authoring.generation));
