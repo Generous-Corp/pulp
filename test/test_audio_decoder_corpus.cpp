@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -76,6 +77,59 @@ std::vector<uint8_t> read_bytes(const fs::path& path) {
     REQUIRE(input.good());
     return std::vector<uint8_t>(std::istreambuf_iterator<char>(input), {});
 }
+
+// A canonical little-endian PCM WAV holding `codes` as mono samples at the
+// given integer depth (8-bit written unsigned, as the format requires).
+std::vector<uint8_t> make_pcm_wav(uint16_t bits, const std::vector<int32_t>& codes) {
+    const uint16_t bytes_per_sample = bits / 8;
+    const uint32_t data_size = static_cast<uint32_t>(codes.size()) * bytes_per_sample;
+    std::vector<uint8_t> out;
+    auto put32 = [&](uint32_t v) {
+        for (int i = 0; i < 4; ++i)
+            out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+    };
+    auto put16 = [&](uint16_t v) {
+        out.push_back(static_cast<uint8_t>(v));
+        out.push_back(static_cast<uint8_t>(v >> 8));
+    };
+    auto tag = [&](const char* t) { out.insert(out.end(), t, t + 4); };
+    const uint32_t pad = data_size & 1u;  // RIFF chunks are word aligned
+    tag("RIFF");
+    put32(36u + data_size + pad);
+    tag("WAVE");
+    tag("fmt ");
+    put32(16u);
+    put16(1u);                      // PCM
+    put16(1u);                      // mono
+    put32(44100u);
+    put32(44100u * bytes_per_sample);
+    put16(bytes_per_sample);
+    put16(bits);
+    tag("data");
+    put32(data_size);
+    for (int32_t code : codes) {
+        const uint32_t raw = bits == 8 ? static_cast<uint32_t>(code + 128) : static_cast<uint32_t>(code);
+        for (uint16_t b = 0; b < bytes_per_sample; ++b)
+            out.push_back(static_cast<uint8_t>(raw >> (8 * b)));
+    }
+    if (pad)
+        out.push_back(0u);
+    return out;
+}
+
+struct TempDir {
+    fs::path path;
+    TempDir() {
+        path = fs::temp_directory_path() /
+               ("pulp-audio-decoder-corpus-" +
+                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        fs::create_directories(path);
+    }
+    ~TempDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+};
 
 std::string describe(const OracleFailure& failure) {
     return fs::path(failure.path).filename().string() + ": " + failure.field + ": " +
@@ -196,4 +250,51 @@ TEST_CASE("WAV seeds decode identically through the registry and the byte-span d
     }
     // At least one seed must be well formed, or the differential measured nothing.
     REQUIRE(both_decoded > 0);
+}
+
+TEST_CASE("integer PCM WAV extremes decode by 2^(bits-1) on both WAV paths",
+          "[fuzz][audio][wav]") {
+    struct Depth {
+        uint16_t bits;
+        std::vector<int32_t> codes;
+        std::vector<float> expected;
+    };
+    const std::vector<Depth> depths = {
+        {8, {-128, 0, 127}, {-1.0f, 0.0f, 127.0f / 128.0f}},
+        {16, {-32768, 0, 32767}, {-1.0f, 0.0f, 32767.0f / 32768.0f}},
+        {24, {-8388608, 0, 8388607}, {-1.0f, 0.0f, 8388607.0f / 8388608.0f}},
+    };
+
+    TempDir dir;
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    for (const auto& depth : depths) {
+        INFO("bits = " << depth.bits);
+        const auto bytes = make_pcm_wav(depth.bits, depth.codes);
+        const auto path = dir.path / ("pcm" + std::to_string(depth.bits) + ".wav");
+        {
+            std::ofstream output(path, std::ios::binary);
+            REQUIRE(output.good());
+            output.write(reinterpret_cast<const char*>(bytes.data()),
+                         static_cast<std::streamsize>(bytes.size()));
+        }
+
+        const auto registry_data = registry.read(path.string());
+        REQUIRE(registry_data.has_value());
+        REQUIRE(registry_data->num_channels() == 1u);
+        REQUIRE(registry_data->num_frames() == depth.codes.size());
+        for (std::size_t i = 0; i < depth.codes.size(); ++i) {
+            INFO("code " << depth.codes[i]);
+            CHECK(registry_data->channels[0][i] == depth.expected[i]);
+        }
+
+        const auto span_data = pulp::audio::decode_wav(bytes);
+        REQUIRE(span_data.has_value());
+        REQUIRE(span_data->num_frames() == depth.codes.size());
+        for (std::size_t i = 0; i < depth.codes.size(); ++i) {
+            INFO("code " << depth.codes[i] << ": registry " << registry_data->channels[0][i]
+                         << ", decode_wav " << span_data->channels[0][i]);
+            CHECK(std::memcmp(&registry_data->channels[0][i], &span_data->channels[0][i],
+                              sizeof(float)) == 0);
+        }
+    }
 }
