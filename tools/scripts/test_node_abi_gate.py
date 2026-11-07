@@ -212,7 +212,7 @@ class NodeAbiFrozenUnitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             if current is not None:
-                (root / "editor_host.hpp").write_text(current)
+                (root / "editor_host.hpp").write_text(current, encoding="utf-8")
             with mock.patch.object(nag, "git_show", return_value=base):
                 return nag.check_surface(
                     root, "origin/main", "EditorContext", "editor_host.hpp", nag.FROZEN
@@ -239,7 +239,7 @@ class NodeAbiFrozenUnitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "editor_host.hpp").write_text(
-                self.BASE.replace("};", "  virtual void later();\n};")
+                self.BASE.replace("};", "  virtual void later();\n};"), encoding="utf-8"
             )
             with mock.patch.object(nag, "git_show", return_value=self.BASE):
                 self.assertIsNone(
@@ -383,10 +383,11 @@ class NodeAbiGateTests(unittest.TestCase):
             self.header("Editor", ["~Editor", "attach"])
             + self.header("EditorContext", ["~EditorContext", "query_extension",
                                             *extra_context_methods])
-            + self.header("EditorFactory", ["~EditorFactory", "create"])
+            + self.header("EditorFactory", ["~EditorFactory", "create"]),
+            encoding="utf-8",
         )
         (self.editor_host.parent / "native_surface_host.hpp").write_text(
-            self.header("NativeSurfaceHost", ["info", "observe"])
+            self.header("NativeSurfaceHost", ["info", "observe"]), encoding="utf-8"
         )
 
     @staticmethod
