@@ -2,6 +2,8 @@
 
 #include <pulp/audio/analysis/waveform_raster.hpp>
 
+#include <pulp/audio/waveform_overview.hpp>
+
 #include <algorithm>
 #include <cmath>
 

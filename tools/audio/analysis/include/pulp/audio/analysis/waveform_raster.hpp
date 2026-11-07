@@ -21,11 +21,19 @@
 
 #include "raster_image.hpp"
 
-#include <pulp/audio/waveform_overview.hpp>
-
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
+
+// The overview types are declared only: every function below takes or returns
+// them by reference or as an opaque value, so this header stays off the
+// buffer.hpp include chain. Callers include <pulp/audio/waveform_overview.hpp>.
+namespace pulp::audio {
+struct AudioPeak;
+struct OverviewLevel;
+class WaveformOverview;
+} // namespace pulp::audio
 
 namespace pulp::test::audio {
 

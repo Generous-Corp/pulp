@@ -2,6 +2,8 @@
 
 #include <pulp/audio/analysis/spectrogram_raster.hpp>
 
+#include <pulp/audio/analysis/audio_spectrum.hpp>
+
 #include <pulp/signal/fft.hpp>
 
 #include <algorithm>
@@ -206,6 +208,10 @@ double db_to_palette_unit(double db, double ceiling_db, double range_db) noexcep
 }
 
 // ── STFT grid ──────────────────────────────────────────────────────────────
+
+SpectrogramSettings::SpectrogramSettings()
+    : fft_length(2048), hop(512), window(Window::hann), scale(FrequencyScale::linear),
+      db_range(90.0) {}
 
 std::uint64_t spectrogram_grid_bytes(std::uint32_t columns, int fft_length) noexcept {
     if (fft_length <= 0)

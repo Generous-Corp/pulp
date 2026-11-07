@@ -5,6 +5,7 @@
 #include "cmd_audio_image_common.hpp"
 #include "json_writer.hpp"
 
+#include <pulp/audio/analysis/audio_spectrum.hpp>
 #include <pulp/audio/analysis/spectrogram_raster.hpp>
 
 #include <cstdio>

@@ -19,7 +19,6 @@
 /// a grid of `columns x bins` floats, so a 70-minute file costs the same as a
 /// 7-second one — only the input window moves.
 
-#include "audio_spectrum.hpp"
 #include "raster_image.hpp"
 
 #include <pulp/signal/fft.hpp>
@@ -33,6 +32,11 @@
 #include <vector>
 
 namespace pulp::test::audio {
+
+// Analysis window, defined in audio_spectrum.hpp. Declared opaquely here so
+// this header stays off the buffer/metrics include chain; callers that name
+// a window (`Window::hann`) include audio_spectrum.hpp themselves.
+enum class Window;
 
 // ── Frequency axis ─────────────────────────────────────────────────────────
 
@@ -103,11 +107,15 @@ double db_to_palette_unit(double db, double ceiling_db, double range_db) noexcep
 // ── STFT grid ──────────────────────────────────────────────────────────────
 
 struct SpectrogramSettings {
-    int fft_length = 2048; ///< power of two, at least 16
-    int hop = 512;         ///< at least 1
-    Window window = Window::hann;
-    FrequencyScale scale = FrequencyScale::linear;
-    double db_range = 90.0; ///< displayed dynamic range below 0 dBFS
+    /// Defaults: fft 2048, hop 512, hann, linear, 90 dB. The constructor is
+    /// out of line because `Window` is opaque in this header.
+    SpectrogramSettings();
+
+    int fft_length; ///< power of two, 16..kSpectrogramMaxFftLength
+    int hop;        ///< 1..fft_length
+    Window window;
+    FrequencyScale scale;
+    double db_range; ///< displayed dynamic range below 0 dBFS
 };
 
 /// Checks the settings a caller is about to render with. Returns an empty
