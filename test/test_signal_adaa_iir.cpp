@@ -302,7 +302,8 @@ TEST_CASE("Antiderivative IIR passes a capacity to breakpoints and truncates ext
     guarded.fill(-123.0);
     int seen = -1;
     const ManyKinksNonlinearity curve{&seen, 0};
-    const int wrote = curve.breakpoints(-10.0, 10.0, guarded.data() + 2, AntiderivativeIir::kMaxSplits);
+    const int wrote =
+        curve.breakpoints(-10.0, 10.0, guarded.data() + 2, AntiderivativeIir::kMaxSplits);
     CHECK(wrote == AntiderivativeIir::kMaxSplits);
     CHECK(guarded[0] == -123.0);
     CHECK(guarded[1] == -123.0);

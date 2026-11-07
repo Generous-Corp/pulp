@@ -1880,7 +1880,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/antiderivative_iir.hpp",
-        "fingerprint": "sha256:23a76aa340cfcfda2c127663cce3dd427ddafdfe8d3b8227d3bd8eaaadc47d2e",
+        "fingerprint": "sha256:5a32e2c25423ddd8ba30551f059c6e7822b4abbf854375f75460e227ee8734a3",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

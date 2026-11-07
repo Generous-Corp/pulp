@@ -321,9 +321,9 @@ class AntiderivativeIir {
             std::array<double, kMaxSplits> kinks{};
             // A curve must write at most kMaxSplits kinks; the returned count is
             // clamped as well so a miscounting curve cannot index past the arrays.
-            const int found =
-                std::clamp(f.breakpoints(std::min(x0, x), std::max(x0, x), kinks.data(), kMaxSplits),
-                           0, kMaxSplits);
+            const int found = std::clamp(
+                f.breakpoints(std::min(x0, x), std::max(x0, x), kinks.data(), kMaxSplits), 0,
+                kMaxSplits);
             std::array<double, kMaxSplits> ts{};
             for (int i = 0; i < found; ++i)
                 ts[static_cast<std::size_t>(i)] = (kinks[static_cast<std::size_t>(i)] - x0) / delta;
@@ -456,7 +456,8 @@ class AntiderivativeIir {
             for (std::size_t i = 0; i < sections; ++i) {
                 std::complex<double> acc = 0.0;
                 for (int j = 0; j < kNodes; ++j)
-                    acc += fv[static_cast<std::size_t>(j)] * node_factor[i][static_cast<std::size_t>(j)];
+                    acc += fv[static_cast<std::size_t>(j)] *
+                           node_factor[i][static_cast<std::size_t>(j)];
                 integral[i] += panel_factor[i] * acc;
                 panel_factor[i] *= panel_step[i];
             }

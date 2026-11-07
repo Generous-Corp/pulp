@@ -217,8 +217,7 @@ TEST_CASE("Korg35 survives parameter changes on every sample", "[signal][korg35]
         REQUIRE(std::isfinite(f.process(0.0)));
 }
 
-TEST_CASE("Korg35 mode change restarts the new topology from rest",
-          "[signal][korg35][mode]") {
+TEST_CASE("Korg35 mode change restarts the new topology from rest", "[signal][korg35][mode]") {
     // A resonant lowpass full of energy switches to highpass: the output must
     // be exactly that of a fresh highpass, not one started from lowpass states.
     for (const Mode from : {Mode::lowpass, Mode::highpass}) {
