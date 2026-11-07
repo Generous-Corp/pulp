@@ -182,8 +182,9 @@
 ///
 ///   precise   within a few units in the last place (ULP) of the true result
 ///             over the documented input range, for float and double.
-///   fast      float only, a cheaper algorithm accurate to roughly six
-///             decimal digits (the exact bound is stated per function below).
+///   fast      float only, a cheaper algorithm accurate to about five decimal
+///             digits (the measured bound is stated per function in
+///             docs/reference/modules.md).
 ///             Double precision has no cheaper tier, so `fast` on double runs
 ///             the `precise` kernel.
 ///
@@ -201,7 +202,7 @@ enum class Accuracy { precise, fast };
 //   log(x, floor, dst, n, acc)  dst[i] = ln(max(x[i], floor)); a floor at or
 //                               below zero (or NaN) means the smallest normal
 //                               number, so the argument is never zero, negative
-//                               or subnormal and the result is always finite
+//                               or subnormal, so the result is finite for every finite x
 //   sin(x, dst, n, acc)         dst[i] = sin(x[i]), x in radians
 //   cos(x, dst, n, acc)         dst[i] = cos(x[i])
 //   sincos(x, s, c, n, acc)     s[i] = sin(x[i]) and c[i] = cos(x[i]) from one

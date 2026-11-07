@@ -379,7 +379,15 @@ TEMPLATE_TEST_CASE("pulp::simd vector math agrees with itself across layouts", "
             k.sincos(x.data(), s.data(), c.data(), x.size(), acc);
             k.sin(x.data(), s1.data(), x.size(), acc);
             k.cos(x.data(), c1.data(), x.size(), acc);
-            const double tol = acc == Accuracy::fast ? 1e-6 : 1e-6;
+            // Either output may be computed in place over the input.
+            std::vector<T> in_s = x, in_c = x;
+            k.sincos(in_s.data(), in_s.data(), c1.data(), x.size(), acc);
+            k.sincos(in_c.data(), s1.data(), in_c.data(), x.size(), acc);
+            CHECK(std::memcmp(in_s.data(), s.data(), s.size() * sizeof(T)) == 0);
+            CHECK(std::memcmp(in_c.data(), c.data(), c.size() * sizeof(T)) == 0);
+            k.sin(x.data(), s1.data(), x.size(), acc);
+            k.cos(x.data(), c1.data(), x.size(), acc);
+            const double tol = 1e-6;
             for (std::size_t i = 0; i < x.size(); ++i) {
                 CHECK(std::fabs(double(s[i]) - double(s1[i])) <= tol);
                 CHECK(std::fabs(double(c[i]) - double(c1[i])) <= tol);
