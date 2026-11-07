@@ -152,7 +152,9 @@ int probe_graph(const std::vector<std::string>& args) {
     if (!source || !destination)
         return fail("unknown_node", "use existing unique source and destination node names");
     const auto source_port = source->out(options["--source-port"]);
-    const auto destination_port = destination->in(options["--destination-port"]);
+    const auto destination_port = edge_kind == "control"
+                                      ? pulp::host::PortHandle{}
+                                      : destination->in(options["--destination-port"]);
     auto input = pulp::audio::read_audio_file(options["--input"], [block](const auto& info) {
         return info.sample_rate >= 8000 && info.sample_rate <= 192000 && info.num_channels >= 1 &&
                info.num_channels <= 8 && info.num_frames >= 1 && info.num_frames <= 480000 &&
@@ -281,7 +283,7 @@ int probe_graph(const std::vector<std::string>& args) {
     report.addMember("edge_kind", edge_kind);
     report.addMember("observation", edge_kind == "audio" ? "source_before_mixing_and_pdc"
                                     : edge_kind == "control"
-                                        ? "mapped_parameter_before_consumer"
+                                        ? "per_edge_mapped_and_slewed_before_mixing_and_bounds"
                                         : "events_before_destination_consumer");
     report.addMember("sample_rate", static_cast<int64_t>(input->sample_rate));
     report.addMember("frames", static_cast<int64_t>(input->num_frames()));

@@ -13,3 +13,7 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING)
     set_tests_properties(cmake-graph-control-event-probe-sdk-consumer PROPERTIES
                          LABELS "cmake;sdk;graph;g7" TIMEOUT 600)
 endif()
+
+pulp_add_test_suite(pulp-test-graph-control-event-probe
+    SOURCES test_graph_control_event_probe.cpp
+    LIBRARIES pulp::host)

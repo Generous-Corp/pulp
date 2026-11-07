@@ -93,7 +93,7 @@ void control_probe(bool planted) {
             "control-oracle");
 }
 
-void event_probe() {
+void event_probe(bool planted) {
     using namespace graph;
     using namespace format;
     const std::array nodes = {
@@ -125,11 +125,12 @@ void event_probe() {
     block.sample_rate = 48000.0;
     block.frame_count = 8;
     GraphRuntimeExecutor executor;
-    require(executor
-                .process_routed(block, snapshot, pool, &midi, nullptr, {}, {}, {}, {}, {}, nullptr,
-                                &probes)
-                .ok(),
-            "event-process");
+    if (!planted)
+        require(executor
+                    .process_routed(block, snapshot, pool, &midi, nullptr, {}, {}, {}, {}, {}, nullptr,
+                                    &probes)
+                    .ok(),
+                "event-process");
     GraphRuntimeProbeSample sample;
     require(event.samples.try_pop(sample), "event-publication");
     require(sample.kind == GraphRuntimeProbeKind::Event && sample.payload_count == 1 &&
@@ -140,8 +141,9 @@ void event_probe() {
 } // namespace
 
 int main(int argc, char** argv) try {
-    control_probe(argc == 2 && std::string_view(argv[1]) == "--planted-missing-publication");
-    event_probe();
+    const auto argument = argc == 2 ? std::string_view(argv[1]) : std::string_view{};
+    control_probe(argument == "--planted-missing-publication");
+    event_probe(argument == "--planted-missing-event-publication");
     std::cout << "graph-control-event-probe PASS\n";
     return 0;
 } catch (const std::exception& error) {

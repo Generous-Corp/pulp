@@ -136,12 +136,15 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(const PortHa
         cg->pdc_execution_domain == PdcExecutionDomain::Legacy ||
         cg->pdc_execution_domain == PdcExecutionDomain::RoutedParallel)
         return EdgeProbeStatus::UnsupportedExecution;
-    if (source.kind != PortKind::Audio || !valid_probe_port(*this, source, true))
+    if (source.kind != PortKind::Audio)
+        return EdgeProbeStatus::UnsupportedKind;
+    if (!valid_probe_port(*this, source, true))
         return EdgeProbeStatus::UnknownPort;
     const auto& plan = cg->routed.serial.snapshot.plan();
     for (std::size_t i = 0; i < cg->connections.size(); ++i) {
         const auto& edge = cg->connections[i];
-        if (!edge.automation || edge.source_node != source.node ||
+        if ((!edge.automation && !edge.audio_rate_modulation) ||
+            edge.source_node != source.node ||
             edge.source_port != source.index || edge.dest_node != destination ||
             edge.automation_param_id != parameter_id)
             continue;
@@ -153,6 +156,12 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(const PortHa
                 resolved.source_port != source.index ||
                 resolved.automation.param_id != parameter_id)
                 continue;
+            // Dense audio-rate modulation is delivered through the borrowed
+            // per-sample lane below the sparse automation gather. There is no
+            // bounded control-edge record for that path, so fail closed rather
+            // than reporting an attached probe that can never publish.
+            if (resolved.automation.audio_rate)
+                return EdgeProbeStatus::UnsupportedExecution;
             auto probe = std::make_unique<format::GraphRuntimeControlEdgeProbe>();
             probe->source_index = resolved.source_index;
             probe->source_port = resolved.source_port;
