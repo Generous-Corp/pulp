@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261107-runtime-cancel-log-dirs-20261106-watch",
+  "created_at": "2026-11-07T02:33:33Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adds cancellation, logging-sink, special-directory and fixed-function building blocks under core/runtime and core/platform, and routes existing settings, preset, content and query-service lookups through them. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cancel",
+    "ctest --test-dir build -R pulp-test-fixed-function",
+    "ctest --test-dir build -R pulp-test-log-sink",
+    "ctest --test-dir build -R pulp-test-special-dir",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
