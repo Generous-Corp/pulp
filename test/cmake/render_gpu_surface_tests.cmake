@@ -179,6 +179,14 @@
         add_test(NAME pulp-wgsl-validate-rejects-invalid
             COMMAND pulp-wgsl-validate
                     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/wgsl/invalid_identifier.wgsl")
+        add_test(NAME pulp-wgsl-validate-creates-stamp-dir
+            COMMAND ${CMAKE_COMMAND}
+                    "-DVALIDATOR=$<TARGET_FILE:pulp-wgsl-validate>"
+                    "-DSHADER=${PROJECT_SOURCE_DIR}/core/render/shaders/renderer3d_scene.wgsl"
+                    "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/wgsl-stamp-dir-test"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/wgsl/check_stamp_dir.cmake")
+        set_tests_properties(pulp-wgsl-validate-creates-stamp-dir PROPERTIES
+            RESOURCE_LOCK pulp_gpu LABELS "render;wgsl" TIMEOUT 60)
         set_tests_properties(pulp-wgsl-validate-accepts-valid PROPERTIES
             SKIP_RETURN_CODE 77 RESOURCE_LOCK pulp_gpu LABELS "render;wgsl" TIMEOUT 60)
         # Inverting the exit status would let a skip read as a pass, so the

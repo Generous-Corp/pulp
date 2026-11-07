@@ -83,6 +83,9 @@ function(pulp_add_wgsl_shaders target)
             set(_stamp "${_out_dir}/${_var}.validated")
             add_custom_command(
                 OUTPUT "${_stamp}"
+                # Not every generator creates an output's directory before
+                # running its command (Unix Makefiles does not).
+                COMMAND "${CMAKE_COMMAND}" -E make_directory "${_out_dir}"
                 COMMAND pulp-wgsl-validate --stamp "${_stamp}" "${_abs}"
                 DEPENDS "${_abs}" pulp-wgsl-validate
                 COMMENT "Validating WGSL ${_stem}.wgsl"

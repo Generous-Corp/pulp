@@ -27,12 +27,14 @@
 
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -50,6 +52,12 @@ bool read_file(const std::string& path, std::string& out) {
 }
 
 bool write_stamp(const std::string& path, const std::string& text) {
+    // The stamp's directory may not exist yet: create it rather than rely on
+    // the build generator having done so.
+    std::error_code ec;
+    const auto parent = std::filesystem::path(path).parent_path();
+    if (!parent.empty())
+        std::filesystem::create_directories(parent, ec);
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out << text;
     return static_cast<bool>(out);
