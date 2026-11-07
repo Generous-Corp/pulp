@@ -12,6 +12,8 @@ target_sources(pulp-state PRIVATE
     src/state_migration.cpp
     src/param_json.cpp
     src/preset_manager.cpp
+    src/preset_metadata_store.cpp
+    src/preset_library.cpp
     src/content_capability_manifest.cpp
     src/state_tree.cpp
     src/state_tree_sync.cpp
