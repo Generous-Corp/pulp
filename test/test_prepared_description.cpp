@@ -337,6 +337,43 @@ TEST_CASE("D4 rejects a swapped authored channel") {
             .refusal == PreparedDescriptionRefusal::AuthoredBindingMismatch);
 }
 
+TEST_CASE("D4 rejects an event lane in the closed audio profile") {
+    SignalGraph graph;
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    const auto input = edit->add_input_node(2, "Input");
+    const auto gain_a = edit->add_gain_node("Gain A");
+    const auto gain_b = edit->add_gain_node("Gain B");
+    const auto output = edit->add_output_node(2, "Output");
+    REQUIRE(edit->connect(input, 1, gain_a, 1));
+    REQUIRE(edit->connect_midi(input, gain_a));
+    for (std::uint32_t channel = 0; channel < 2; ++channel) {
+        REQUIRE(edit->connect(gain_a, channel, gain_b, channel));
+        REQUIRE(edit->connect(gain_b, channel, output, channel));
+    }
+
+    AuthoredRuntimeBinding binding;
+    binding.nodes = {{input, "input"}, {gain_a, "gain_a"}, {gain_b, "gain_b"}, {output, "output"}};
+    const auto add_channels = [&](std::uint64_t node, bool output_direction, std::uint32_t count) {
+        for (std::uint32_t i = 0; i < count; ++i)
+            binding.channels.push_back({node, "audio", output_direction, i == 0 ? "L" : "R", i, i});
+    };
+    add_channels(input, true, 2);
+    add_channels(gain_a, false, 2);
+    add_channels(gain_a, true, 2);
+    add_channels(gain_b, false, 2);
+    add_channels(gain_b, true, 2);
+    add_channels(output, false, 2);
+    binding.interfaces = {
+        {"main-in", false, input, "audio", "L", 0, 0, 0},
+        {"main-in", false, input, "audio", "R", 1, 0, 1},
+        {"main-out", true, output, "audio", "L", 0, 0, 0},
+        {"main-out", true, output, "audio", "R", 1, 0, 1},
+    };
+    REQUIRE(edit->bind_authored_identity(stereo_payload(), binding).refusal ==
+            PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+}
+
 TEST_CASE("D4 rejects unknown and duplicate semantic fields") {
     SignalGraph graph;
     auto edit = graph.begin_prepared_topology_edit();
