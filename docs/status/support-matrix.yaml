@@ -160,7 +160,7 @@ plugin_extensions:
       (`kClapAraFactoryExtension`), AUv3 (`audioUnitARAFactory`), and VST3
       (`kVst3AraFactoryContextKey`). `host_supports_ara()` still returns false,
       and the published factory's document-controller callbacks are scaffold
-      no-ops until the production ARA workstream wires real controller behavior.
+      no-ops until real controller behavior is implemented.
       Celemony's ARA SDK is developer-supplied.
     limitations:
       - "AraDocumentController callback surface is scaffolded; playback renderer and content readers are not implemented."
@@ -186,15 +186,15 @@ plugin_extensions:
       - "Pulp ships the FFI skeleton, bindings, CMake/Cargo glue, and reference cores — not a bundled DSP framework or crate-selection opinions."
 # Known limitations per format. Keyed the same as `formats:`. The renderer
 # in capabilities.md surfaces these as a "Known limitations" link on each
-# row. Production-readiness workstream 08 sub-deliverable 8.5.
+# row.
 #
 # Adding an entry here is non-blocking — the entry's status in `formats:`
 # is the load-bearing label. `format_limitations:` exists so readers don't
 # confuse "the adapter compiles" with "the adapter is feature-complete."
 format_limitations:
   vst3:
-    - "Bus 0, one sidechain input, and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, and single-output processors leave aux buses silent (workstream 01)."
-    - "Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation (workstream 01)."
+    - "Bus 0, one sidechain input, and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, and single-output processors leave aux buses silent."
+    - "Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation."
   au_v2:
     - "Outbound MIDI IS wired: a plugin that sets produces_midi=true emits into midi_out during process(), and the adapter delivers it to the host via kAudioUnitProperty_MIDIOutputCallback (+ ...Info). Per-event sample offsets are preserved (offset N in -> N out), matching VST3/CLAP — proven by pulp-test-midi-out-offset-parity. produces_midi does NOT reclassify aufx->aumf: an aufx effect emits via the callback, while aumf is reserved for MIDI-ACCEPTING effects the host routes inbound MIDI to."
     - "Instruments (aumu / MusicDeviceBase) advertise one AU output ELEMENT per descriptor-declared output bus (main + aux), so an AU host lists every aux output and can route each to its own mixer channel (see examples/pulp-multi-out, an 8-voice / 8-bus synth; auval-validated multi-out). A processor that overrides process(ProcessBuffers&) writes each aux bus; one that only implements the simple process() leaves the aux buses silent (the adapter pre-zeroes every routed output bus). Buses a host leaves disconnected are delivered inactive/silent without reordering the bus->buffer mapping."
@@ -206,7 +206,7 @@ format_limitations:
     - "Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed."
     - "CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope."
   lv2:
-    - "Atom sysex is ignored — the run() loop only promotes 1–3-byte short MIDI messages out of the input atom sequence; sysex sidecar wiring remains part of format-adapter production-readiness work."
+    - "Atom sysex is ignored — the run() loop only promotes 1–3-byte short MIDI messages out of the input atom sequence; sysex sidecar wiring is not implemented."
     - "Host transport (time:Position) reaches Processor::process() only for plugins that declare accepts_midi: transport arrives as an atom on the MIDI input port, and a plugin without that port has none. A tempo-synced effect that takes no MIDI therefore sees no tempo, position, or play state; declaring an atom input port unconditionally would renumber every existing plugin's ports, so it is deliberately not done here."
     - "time:Position carries no record-arm, no cycle range, and no host clock, so is_recording / is_looping / loop_start_beats / loop_end_beats / host_time_ns stay marked unavailable in TransportValidity. time:framesPerSecond is the audio sample rate, not an SMPTE rate, so frame_rate stays unknown."
     - "No LV2 UI (lv2:ui) — a plugin's editor is unreachable under LV2 and hosts render the generic control-port strip. Presets (patch: / pset:), the worker extension, morph, and resize-port are likewise unimplemented."
@@ -221,8 +221,8 @@ format_limitations:
     - "The InsertOrAudioSuite role is declared, but no AAX_IHostProcessor is registered, so the dedicated AudioSuite offline-render path is not implemented. Implementing it is out of scope."
   auv3:
     - "Presets are advertised on both halves: factoryPresets serves the plugin bundle's Presets folder, and supportsUserPresets is YES with setCurrentPreset: restoring a negative preset number through AUAudioUnit's own preset store via presetStateFor: + fullState. Pulp owns no writable preset location of its own, so user presets live wherever the base class puts them. Neither half has been verified against a live host."
-    - "Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet (workstream 01)."
-    - "iOS jetsam pressure not modeled — heavy V8 / WebView workloads in the AUv3 process risk termination at ~50 MB (workstream 05)."
+    - "Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet."
+    - "iOS jetsam pressure not modeled — heavy V8 / WebView workloads in the AUv3 process risk termination at ~50 MB."
   wam_v2:
     - "Browser origin sandbox only; no Pulp-side capability manifest yet (security plan v4 §4.5)."
     - "Stereo, single-instance per node; no WamEnv/WamGroup host conformance or sample-accurate automation coverage yet."
@@ -1114,54 +1114,38 @@ limitations:
       tracked_in: "../guides/timeline-sdk.md#takes-comps-freeze-and-capture"
   formats.clap:
     - text: "Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed."
-      tracked_in: "planning/production-readiness/01-format-adapters.md#1.1"
     - text: "CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope."
-      tracked_in: "planning/production-readiness/01-format-adapters.md#1.1"
   formats.vst3:
     - text: "Bus 0, one sidechain input, and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, and single-output processors leave aux buses silent."
-      tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
     - text: "Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation."
-      tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
     - text: "Controller and per-note expression input is host-mediated: CC, pitch bend, and channel aftertouch arrive when the host honors IMidiMapping hidden parameters, and per-note tuning/pressure/timbre arrive for MPE-enabled plug-ins through INoteExpressionController. There is no separate raw poly-pressure event route."
-      tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
   formats.auv3:
     - text: "Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet."
-      tracked_in: "planning/production-readiness/01-format-adapters.md#1.4"
     - text: "iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge."
-      tracked_in: "planning/production-readiness/05-auv3-mobile.md"
   formats.lv2:
     - text: "Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process()."
-      tracked_in: "planning/production-readiness/01-format-adapters.md#1.5"
   audio_io.wasapi:
     - text: "Full-duplex render/capture is not exposed as one synchronized WASAPI device: a WasapiDevice wraps either one render endpoint or one capture endpoint, so callers that need synchronized input/output must open and synchronize two devices."
-      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.1"
     # Hotplug: IMMNotificationClient device-change callbacks are wired;
     # no stale stub limitation remains.
   audio_io.alsa:
     - text: "Hardcoded sample-rate list; no real enumeration."
-      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
   audio_io.jack:
     - text: "Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending."
-      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
   midi_io.coremidi:
     - text: "MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback."
-      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.6"
   midi_io.win32_midi:
     - text: "Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport and no hotplug; SysEx input is routed via MIM_LONGDATA. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK."
-      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.4"
   midi_io.alsa_midi:
     - text: "Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually."
-      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.5"
   platform_maturity.accessibility.windows:
     # UIA provider tree + event helpers are implemented in source. Remaining:
     # direct client/screen-reader regression coverage and hardening.
     - text: "Direct UIA client and screen-reader regression tests remain pending; provider tree, WM_GETOBJECT, and value/focus/name event helpers are implemented in source."
-      tracked_in: "planning/production-readiness/04-accessibility.md#4.1"
   platform_maturity.accessibility.linux:
     # AT-SPI object tree and event-hook marshalling are loopback-tested on the
     # session bus. Remaining: real a11y registry / Orca signal receipt.
     - text: "Real AT-SPI registry/Orca signal receipt remains pending; per-widget Accessible/Component/Value objects and event-hook marshalling are loopback-tested on the session bus."
-      tracked_in: "planning/production-readiness/04-accessibility.md#4.2"
 
 # ── Schema-v2 additions ──────────────────────────────────────────────────────
 #
@@ -1229,9 +1213,8 @@ ara:
     PULP_ENABLE_ARA, ara_companion_factory_for() returns nullptr and hosts treat
     plugins as non-ARA. With the SDK enabled, the published factory is an
     ABI-valid scaffold with no-op document-controller callbacks while
-    production-readiness workstream 06 finishes real ARA 2.x behavior across
-    VST3 + AU + CLAP.
-  tracked_in: "planning/production-readiness/06-ara.md"
+    real ARA 2.x behavior is implemented across
+    VST3, AU and CLAP.
 
 # Accessibility feature coverage (beyond platform bridge existence). This is
 # separate from platform_maturity.accessibility.* which records per-platform

@@ -32,7 +32,7 @@ Pulp's web-compat layer was audited against **28 web specifications** — 16 W3C
 | 24 | [Encoding](https://encoding.spec.whatwg.org/) | Living | ✅ Complete | TextEncoder, TextDecoder, atob/btoa | — |
 | 25 | [Web Crypto](https://www.w3.org/TR/WebCryptoAPI/) | — | ⚠️ Minimal | getRandomValues (not cryptographic) | SubtleCrypto |
 | 26 | [Structured Clone](https://html.spec.whatwg.org/multipage/structured-data.html) | Living | ✅ Complete | structuredClone (via JSON) | — |
-| 27 | [WebGPU](https://www.w3.org/TR/webgpu/) | — | ⚠️ Shader API | Dawn backend, setWidgetShader (SkSL), getGPUInfo | Full navigator.gpu pipeline |
+| 27 | [WebGPU](https://www.w3.org/TR/webgpu/) | — | ⚠️ Shader API | Dawn backend, setWidgetShader (SkSL), getGPUInfo | Full navigator.gpu API: it is a record-and-replay shim over Dawn, with no GPU readback and no page-level compute (see the `navigator_gpu` entry in `docs/status/support-matrix.yaml`) |
 | 28 | [Font Loading](https://www.w3.org/TR/css-font-loading-3/) | L3 | ⚠️ Partial | loadFont(path), registerFont(family, path) | FontFace constructor, document.fonts |
 **Legend:** ✅ Complete or nearly so — ⚠️ Partial, see details below — ❌ Not implemented
 
