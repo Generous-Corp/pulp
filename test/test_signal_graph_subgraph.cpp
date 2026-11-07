@@ -1,9 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_subgraph.hpp>
+#include <pulp/host/voice_identity.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <memory>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
 using namespace pulp::host;
 
@@ -352,4 +357,58 @@ TEST_CASE("nested subgraph rejects cycles and duplicate child keys before graph 
     CHECK_FALSE(duplicate_result);
     CHECK(duplicate_result.result.message().find("subgraph boundary") != std::string::npos);
     CHECK(graph.nodes().empty());
+}
+
+TEST_CASE("G4 voice bank fixture expands eight slots with stable exposed identity") {
+    SignalGraph graph;
+    std::vector<SubgraphInstance> slots;
+    std::unordered_set<std::string> identity_digests;
+    slots.reserve(8);
+
+    for (std::uint32_t slot = 0; slot < 8; ++slot) {
+        auto expanded = instantiate_subgraph(graph, gain_template(),
+                                             "voice-bank.voice-" + std::to_string(slot), slot);
+        REQUIRE(expanded);
+        REQUIRE(expanded.instance.ports.contains("input"));
+        REQUIRE(expanded.instance.ports.contains("output"));
+        REQUIRE(expanded.instance.parameters.contains("gain"));
+
+        VoiceIdentityKey key;
+        key.template_namespace = "test";
+        key.template_name = "voice-bank";
+        key.template_revision = 1;
+        key.bank_schema_version = 1;
+        key.slot_ordinal = slot;
+        key.path = {"node", "gain"};
+        key.has_parameter = true;
+        key.parameter = "gain";
+        const auto identity = canonical_voice_identity(key);
+        REQUIRE(identity.valid);
+        CHECK(identity_digests.insert(identity.sha256).second);
+        CHECK(identity.sha256 == canonical_voice_identity(key).sha256);
+
+        slots.emplace_back(std::move(expanded.instance));
+    }
+
+    REQUIRE(slots.size() == 8);
+    CHECK(graph.nodes().size() == 24);
+    for (std::size_t left = 0; left < slots.size(); ++left)
+        for (std::size_t right = left + 1; right < slots.size(); ++right) {
+            CHECK(slots[left].ports.at("input").node != slots[right].ports.at("input").node);
+            CHECK(slots[left].parameter_nodes.at("gain") !=
+                  slots[right].parameter_nodes.at("gain"));
+        }
+
+    auto changed = slots.at(3).save_state();
+    changed.parameters.at("gain") = 0.25f;
+    REQUIRE(restore_subgraph_state(graph, slots.at(3), changed));
+    for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+        const auto gain = graph.node_gain(slots.at(slot).parameter_nodes.at("gain"));
+        CHECK(gain == (slot == 3 ? 0.25f : 1.0f));
+    }
+
+    auto stale = slots.at(3).save_state();
+    stale.instance_identity = "voice-bank.other";
+    CHECK_FALSE(restore_subgraph_state(graph, slots.at(3), stale));
+    CHECK(graph.node_gain(slots.at(3).parameter_nodes.at("gain")) == 0.25f);
 }
