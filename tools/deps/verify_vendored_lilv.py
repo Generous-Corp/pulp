@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-VENDOR_DIR = ROOT / "external" / "lilv"
+VENDOR_DIR = ROOT / "external/lilv"
 RECORD = VENDOR_DIR / "vendored.json"
 KEPT = ("include", "src", "COPYING")
 

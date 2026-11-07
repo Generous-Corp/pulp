@@ -14,8 +14,13 @@ sys.path.insert(0, str(HERE))
 import verify_vendored_lilv as v  # noqa: E402
 
 
+# The tree this test reads, named so a test selector reruns it on any change.
+VENDORED = "external/lilv"
+
+
 class VendoredLilvTests(unittest.TestCase):
     def test_vendored_tree_matches_the_record(self):
+        self.assertEqual(v.VENDOR_DIR, v.ROOT / VENDORED)
         self.assertEqual(v.check(), [])
 
     def test_a_changed_byte_is_reported(self):
