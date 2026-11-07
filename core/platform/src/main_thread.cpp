@@ -43,6 +43,10 @@ struct MainThreadScopeState : std::enable_shared_from_this<MainThreadScopeState>
     CFRunLoopSourceRef source = nullptr;
     // Timers bound to this scope; touched only on the main thread.
     std::vector<MainThreadTimerState*> timers;
+    // Teardown hooks; touched only on the main thread.
+    std::vector<std::pair<std::uint64_t, std::function<void()>>> teardowns;
+    std::uint64_t next_teardown_id = 1;
+    bool tearing_down = false;
 
     ~MainThreadScopeState() {
         if (source != nullptr)
@@ -179,6 +183,28 @@ MainThreadScope::~MainThreadScope() {
     auto timers = std::move(state_->timers);
     for (auto* timer : timers)
         timer->invalidate();
+    state_->tearing_down = true;
+    auto teardowns = std::move(state_->teardowns);
+    for (auto& entry : teardowns)
+        run_contained(entry.second);
+}
+
+std::uint64_t MainThreadScope::add_teardown(std::function<void()> fn) {
+    if (!fn || state_->tearing_down)
+        return 0;
+    const std::uint64_t id = state_->next_teardown_id++;
+    state_->teardowns.emplace_back(id, std::move(fn));
+    return id;
+}
+
+void MainThreadScope::remove_teardown(std::uint64_t id) {
+    auto& list = state_->teardowns;
+    for (auto it = list.begin(); it != list.end(); ++it) {
+        if (it->first == id) {
+            list.erase(it);
+            return;
+        }
+    }
 }
 
 bool MainThreadScope::post(std::function<void()> fn) {
@@ -301,6 +327,10 @@ bool MainThreadScope::post(std::function<void()>) {
 MainThreadScope::Handle MainThreadScope::handle() const {
     return Handle(state_);
 }
+std::uint64_t MainThreadScope::add_teardown(std::function<void()>) {
+    return 0;
+}
+void MainThreadScope::remove_teardown(std::uint64_t) {}
 MainThreadScope::Handle::Handle(std::weak_ptr<detail::MainThreadScopeState> state)
     : state_(std::move(state)) {}
 bool MainThreadScope::Handle::post(std::function<void()>) const {
