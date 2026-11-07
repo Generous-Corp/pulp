@@ -42,6 +42,11 @@ bool PresetManager::load(const PresetInfo&) { return false; }
 
 bool PresetManager::load(const std::filesystem::path&) { return false; }
 
+std::optional<std::vector<ParamSetting>>
+PresetManager::read_values(const std::filesystem::path&) const {
+    return std::nullopt;
+}
+
 bool PresetManager::delete_preset(const PresetInfo&) { return false; }
 
 bool PresetManager::rename(const PresetInfo&, const std::string&) { return false; }

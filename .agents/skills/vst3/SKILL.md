@@ -1575,3 +1575,19 @@ processor and wraps `process()` with `service_panic()` before and
 `midi_out` claim (`docs/guides/midi-panic.md`). Keep both calls on any new
 process path (including f64) or `Processor::request_panic()` silently stops
 working there. Tests: test_vst3_audio_parity.cpp (note-off and legacy CC events on the output event list).
+
+## Factory presets (program list)
+
+`PulpVst3Processor::initialize()` builds a `FactoryProgramTable`
+(`factory_program_table.hpp`) from the bundle's `Contents/Resources/Presets`
+folder and, when it holds presets, publishes them as program list
+`kVst3FactoryProgramListId` on the root unit plus a `kIsProgramChange`
+parameter (`kVst3ProgramChangeParamId`, `detail/vst3_program_list.hpp`). The
+preset values are read once at init, so a program change delivered inside
+`process()` is a batch of `queue_param_write()` calls and never opens a file;
+the host-visible parameter objects are refreshed on the main thread in
+`deliver_pending_restart()` before `kParamValuesChanged` is sent. Selecting the
+program that is already current is ignored on purpose, so a host that replays
+the selection cannot undo edits. A plug-in with no presets publishes no list and
+no extra parameter. `set_factory_presets_directory()` re-points discovery and
+must run before `initialize()`. Tests: test_vst3_program_list.cpp.

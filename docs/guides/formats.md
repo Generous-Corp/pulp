@@ -226,6 +226,30 @@ note-expression events into Pulp's MPE sidecar.
   `setParamNormalized()`. Older blobs without a processor-owned payload still
   load and call `deserialize_plugin_state()` with empty bytes.
 
+### Factory Presets (Program List)
+
+A plug-in that ships factory presets shows them in the host's own preset menu.
+The adapter reads the preset files from the bundle's `Contents/Resources/Presets`
+folder (the same folder the Audio Unit adapters use), sorted by name, and
+publishes them as one program list called "Factory Presets" on the root unit.
+
+- **Choosing a preset:** the host writes the "Program" parameter, whose steps
+  map one-to-one onto the presets. The adapter then sets every parameter the
+  preset file names, tells the host to re-read parameter values, and leaves any
+  parameter the preset does not name alone.
+- **Automation and the audio thread:** the preset values are read once when the
+  plug-in is created, so a program change that arrives during playback never
+  touches the disk. The block that carries the change already renders with the
+  new values.
+- **Repeated selections:** selecting the preset that is already current does
+  nothing, so a host that re-sends the current program cannot undo your edits.
+- **Read-only:** `setUnitProgramData` can select a preset but refuses to replace
+  one with host-supplied data.
+- **No presets, no list:** a plug-in without a `Presets` folder publishes no
+  program list and no "Program" parameter, so its parameter list is unchanged.
+- **Pitch names:** if the processor names notes (`note_names()`), each program
+  reports them as program pitch names.
+
 ### Multi-Bus / Sidechain
 
 Audio buses from `descriptor().input_buses` and `descriptor().output_buses` are added during `initialize()`:

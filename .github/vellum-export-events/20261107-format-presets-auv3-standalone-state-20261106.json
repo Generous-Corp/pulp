@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-format-presets-auv3-standalone-state-20261106",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T03:22:59Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/state/include/pulp/state/preset_manager.hpp",
+    "core/state/src/preset_manager.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Adds PresetManager::read_values, which reads a preset file's parameter values without applying them; load() now applies what it returns. Behavior of load() is unchanged, so the next Vellum re-export can carry it."
+}
