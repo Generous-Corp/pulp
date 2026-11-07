@@ -3,10 +3,10 @@
 #include "cmd_audio_image_common.hpp"
 
 #include "cli_common.hpp"
+#include "cmd_audio_png.hpp"
 #include "json_writer.hpp"
 
 #include <pulp/audio/format_registry.hpp>
-#include <pulp/render/headless_surface.hpp>
 #include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
@@ -361,12 +361,8 @@ std::string build_sidecar_json(const ImageArgs& args, const OpenedInput& input,
 
 int write_outputs(const ImageArgs& args, const pulp::test::audio::RasterImage& image,
                   const std::string& sidecar_json) {
-    pulp::render::HeadlessSurface::Rgba rgba;
-    rgba.width = image.width;
-    rgba.height = image.height;
-    rgba.pixels = image.rgba;
     std::string png_error;
-    const auto png = pulp::render::HeadlessSurface::encode_png(rgba, &png_error);
+    const auto png = encode_png_rgba(image.width, image.height, image.rgba, &png_error);
     if (png.empty()) {
         std::cerr << "Error: failed to encode PNG";
         if (!png_error.empty())

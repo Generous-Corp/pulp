@@ -5,23 +5,22 @@
 // ticks, font, STFT grid, column reduction) and then end to end against
 // small golden PNGs under test/fixtures/audio/images/.
 //
-// Golden regeneration: build this target with pulp::render available, then
+// Golden regeneration (macOS):
 //     PULP_AUDIO_IMAGE_WRITE_GOLDENS=1 ./build/test/pulp-test-audio-image-raster "[golden]"
 // writes the fixtures and the test passes trivially for that run. Commit the
 // PNGs with the change that moved them and say why in the commit message.
-// Comparison decodes through ImageIO, so the golden cases run on macOS (the
-// required gate) and skip elsewhere; every other case runs everywhere.
+// Both comparison and regeneration go through ImageIO, so the golden cases
+// run on macOS (the required gate) and skip elsewhere; every other case runs
+// everywhere. The render layer is deliberately not linked here.
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/audio/analysis/audio_spectrum.hpp>
 #include <pulp/audio/analysis/raster_image.hpp>
 #include <pulp/audio/analysis/spectrogram_raster.hpp>
 #include <pulp/audio/analysis/waveform_raster.hpp>
-
-#if defined(PULP_TEST_HAS_RENDER)
-#include <pulp/render/headless_surface.hpp>
-#endif
+#include <pulp/audio/waveform_overview.hpp>
 
 #include <cmath>
 #include <cstdlib>
@@ -33,6 +32,7 @@
 
 #if defined(__APPLE__)
 std::vector<uint8_t> decode_png_rgba(const std::vector<uint8_t>& png, size_t& w, size_t& h);
+std::vector<uint8_t> encode_png_rgba(const std::vector<uint8_t>& rgba, size_t w, size_t h);
 #endif
 
 using namespace pulp::test::audio;
@@ -83,13 +83,8 @@ std::vector<uint8_t> read_bytes(const fs::path& path) {
 void check_against_golden(const RasterImage& image, const std::string& name) {
     const fs::path path = golden_dir() / name;
     if (std::getenv("PULP_AUDIO_IMAGE_WRITE_GOLDENS") != nullptr) {
-#if defined(PULP_TEST_HAS_RENDER)
-        pulp::render::HeadlessSurface::Rgba rgba;
-        rgba.width = image.width;
-        rgba.height = image.height;
-        rgba.pixels = image.rgba;
-        std::string error;
-        const auto png = pulp::render::HeadlessSurface::encode_png(rgba, &error);
+#if defined(__APPLE__)
+        const auto png = encode_png_rgba(image.rgba, image.width, image.height);
         REQUIRE_FALSE(png.empty());
         fs::create_directories(path.parent_path());
         std::ofstream out(path, std::ios::binary);
@@ -99,7 +94,7 @@ void check_against_golden(const RasterImage& image, const std::string& name) {
         SUCCEED("wrote golden " + path.string());
         return;
 #else
-        FAIL("golden regeneration needs a build with pulp::render");
+        FAIL("golden regeneration encodes through ImageIO and runs on macOS");
 #endif
     }
 #if defined(__APPLE__)

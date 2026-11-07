@@ -645,14 +645,10 @@ pulp_test_data(pulp-test-cli-audio-compare NO_DEFINE PATHS tools/packages/tool-r
 catch_discover_tests(pulp-test-cli-audio-compare)
 
 # Spectrogram and waveform image pipelines (tools/audio/analysis rasterizers).
-# Golden PNG comparison decodes through ImageIO, so those cases run on macOS and
-# skip elsewhere; regeneration encodes through pulp::render when it is built.
+# Golden PNG comparison and regeneration both go through ImageIO, so those cases
+# run on macOS and skip elsewhere; the render layer is not linked here.
 add_executable(pulp-test-audio-image-raster test_audio_image_raster.cpp)
 target_link_libraries(pulp-test-audio-image-raster PRIVATE pulp::audio-analysis Catch2::Catch2WithMain)
-if(TARGET pulp-render)
-    target_link_libraries(pulp-test-audio-image-raster PRIVATE pulp::render)
-    target_compile_definitions(pulp-test-audio-image-raster PRIVATE PULP_TEST_HAS_RENDER=1)
-endif()
 if(APPLE)
     target_sources(pulp-test-audio-image-raster PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/png_rgba_decode_apple.cpp)
     target_link_libraries(pulp-test-audio-image-raster PRIVATE

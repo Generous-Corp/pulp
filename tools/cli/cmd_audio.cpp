@@ -25,6 +25,7 @@
 #include "cmd_audio_compare.hpp"
 #include "cmd_audio_heritage.hpp"
 #include "cmd_audio_plugin_inspect.hpp"
+#include "cmd_audio_png.hpp"
 #include "cmd_audio_render.hpp"
 #include "cmd_audio_sampler_mip.hpp"
 #include "cmd_audio_spectrogram.hpp"
@@ -204,6 +205,20 @@ std::vector<std::uint8_t> render_scope_png(const pulp::audio::AudioScopeAcquisit
 
     return pulp::render::HeadlessSurface::encode_png(rgba, error_out);
 }
+
+} // namespace
+
+std::vector<std::uint8_t> encode_png_rgba(std::uint32_t width, std::uint32_t height,
+                                          const std::vector<std::uint8_t>& rgba,
+                                          std::string* error_out) {
+    pulp::render::HeadlessSurface::Rgba surface;
+    surface.width = width;
+    surface.height = height;
+    surface.pixels = rgba;
+    return pulp::render::HeadlessSurface::encode_png(surface, error_out);
+}
+
+namespace {
 
 int cmd_audio_scope_offline(const fs::path& input_wav, const fs::path& json_path,
                             const fs::path& png_path, int window, int channel,
