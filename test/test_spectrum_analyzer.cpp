@@ -5,9 +5,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <limits>
 #include <memory>
-#include <cmath>
 #include <numbers>
 #include <thread>
 #include <vector>
@@ -25,8 +25,8 @@ std::vector<float> sine(double hz, double sr, std::size_t n, double amp = 1.0) {
 }
 
 // The analyzer owns a lock-free ring and cannot be moved, so hand it out boxed.
-std::unique_ptr<SpectrumAnalyzer> make_analyzer(SpectrumLevelMode mode,
-                                                WindowFunction::Type window, int fft = 2048) {
+std::unique_ptr<SpectrumAnalyzer> make_analyzer(SpectrumLevelMode mode, WindowFunction::Type window,
+                                                int fft = 2048) {
     auto a = std::make_unique<SpectrumAnalyzer>();
     SpectrumAnalyzerConfig c;
     c.fft_size = fft;
@@ -105,8 +105,8 @@ TEST_CASE("SpectrumAnalyzer: 1 kHz sine lands in the 1 kHz column", "[signal][sp
     // chosen for amplitude accuracy, not localisation; they are held to 0.3 bin.
     for (auto window : {WindowFunction::Type::hann, WindowFunction::Type::blackman_harris,
                         WindowFunction::Type::flat_top, WindowFunction::Type::rectangular}) {
-        const bool localising = window == WindowFunction::Type::hann ||
-                                window == WindowFunction::Type::blackman_harris;
+        const bool localising =
+            window == WindowFunction::Type::hann || window == WindowFunction::Type::blackman_harris;
         auto box = make_analyzer(SpectrumLevelMode::peak, window, 2048);
         auto& a = *box;
         const auto x = sine(1000.0, sr, 8192);
@@ -118,8 +118,8 @@ TEST_CASE("SpectrumAnalyzer: 1 kHz sine lands in the 1 kHz column", "[signal][sp
             REQUIRE(m.configure({sr, 2048, columns, 20.0, 20000.0, -120.0f, 200.0f}));
             std::vector<float> out(columns);
             m.map(a.bins_db(), out, a.aggregation());
-            const auto best = static_cast<std::size_t>(
-                std::max_element(out.begin(), out.end()) - out.begin());
+            const auto best =
+                static_cast<std::size_t>(std::max_element(out.begin(), out.end()) - out.begin());
             const double expected = m.frequency_to_column(1000.0) - 0.5; // column index
             if (localising) {
                 CHECK(std::abs(static_cast<double>(best) - expected) <= 0.5);

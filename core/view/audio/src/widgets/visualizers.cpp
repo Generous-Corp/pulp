@@ -6,16 +6,16 @@
 #include <pulp/audio/waveform_overview.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/text_shaper.hpp>
+#include <pulp/signal/spectrum_analyzer.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/asset_manager.hpp>
+#include <pulp/view/audio_widgets.hpp>
 #include <pulp/view/capability_fallback.hpp>
 #include <pulp/view/frame_clock.hpp>
-#include <pulp/signal/spectrum_analyzer.hpp>
 #include <pulp/view/graph_scale.hpp>
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/text_overflow.hpp>
 #include <pulp/view/widgets.hpp>
-#include <pulp/view/audio_widgets.hpp>
 #include <pulp/view/window_host.hpp>
 
 #include <algorithm>
@@ -732,8 +732,7 @@ void SpectrumView::paint_analysis(canvas::Canvas& canvas, const Rect& b) {
     // Advance the analysis by the real time since the last paint, so the
     // release looks the same at any frame rate.
     const auto now = std::chrono::steady_clock::now();
-    const double dt =
-        last_paint_ ? std::chrono::duration<double>(now - *last_paint_).count() : 0.0;
+    const double dt = last_paint_ ? std::chrono::duration<double>(now - *last_paint_).count() : 0.0;
     last_paint_ = now;
     update_analysis(dt);
 
@@ -754,8 +753,8 @@ void SpectrumView::paint_analysis(canvas::Canvas& canvas, const Rect& b) {
     if (!mapping_.valid() || mc.columns != columns || mc.fft_size != cfg.fft_size ||
         mc.sample_rate != cfg.sample_rate || mc.min_hz != min_hz_ || mc.max_hz != max_hz_ ||
         mc.floor_db != cfg.floor_db) {
-        mapping_.configure({cfg.sample_rate, cfg.fft_size, columns, min_hz_, max_hz_, cfg.floor_db,
-                            200.0f});
+        mapping_.configure(
+            {cfg.sample_rate, cfg.fft_size, columns, min_hz_, max_hz_, cfg.floor_db, 200.0f});
     }
     mapping_.map(analyzer_->bins_db(), columns_, analyzer_->aggregation());
 

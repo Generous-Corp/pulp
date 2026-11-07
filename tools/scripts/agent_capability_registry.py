@@ -182,7 +182,7 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
         "include": "pulp/signal/spectrum_analyzer.hpp",
-        "fingerprint": "sha256:7cc2255c2b5918c4d87a9bba5f3bcdc5832f30bc5242758e093c60694484fc86",
+        "fingerprint": "sha256:dac81261d33dbf0bd8231d0898b26ea5b6f09ca9a914e05543aac9fc2aef897c",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -193,7 +193,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/spectrum_bin_mapping.hpp",
-        "fingerprint": "sha256:d23c0ff8893ad7f624d129a5e56a16ff5a62c84dfa74445b869e45afb9baa7b0",
+        "fingerprint": "sha256:1e4977f44a6ea834278ee0a9d505e9dca3d0af8c82acc792fab9361b7e00e235",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

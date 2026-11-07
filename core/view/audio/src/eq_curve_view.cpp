@@ -458,8 +458,9 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
         // One code path with SpectrumView: columns read the bins through
         // SpectrumBinMapping (parabolic interpolation where a column is
         // narrower than a bin, peak aggregation where it is wider).
-        const int fft_size =
-            spectrum_smoothed_.size() >= 2 ? static_cast<int>(spectrum_smoothed_.size() - 1) * 2 : 0;
+        const int fft_size = spectrum_smoothed_.size() >= 2
+                                 ? static_cast<int>(spectrum_smoothed_.size() - 1) * 2
+                                 : 0;
         const auto& mc = spectrum_mapping_.config();
         if (!spectrum_mapping_.valid() || mc.columns != columns || mc.fft_size != fft_size ||
             mc.sample_rate != static_cast<double>(sample_rate_) ||

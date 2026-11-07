@@ -1,10 +1,10 @@
 #pragma once
 
-#include <pulp/view/widgets.hpp>
 #include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/waveform_recorder_view.hpp>
+#include <pulp/view/widgets.hpp>
 
 #include <pulp/signal/spectrum_bin_mapping.hpp>
 #include <pulp/signal/windowing.hpp>
@@ -22,7 +22,7 @@ namespace pulp::signal {
 // Defined in pulp/signal/spectrum_analyzer.hpp, which pulls in the FFT backend
 // (and with it platform headers); keep it out of this widely included header.
 class SpectrumAnalyzer;
-}
+} // namespace pulp::signal
 namespace pulp::view {
 // ── Meter ────────────────────────────────────────────────────────────────────
 // Audio level meter with peak hold

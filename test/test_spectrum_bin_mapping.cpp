@@ -12,8 +12,8 @@ using Catch::Matchers::WithinAbs;
 
 namespace {
 
-SpectrumBinMapping make(std::size_t columns, int fft = 2048, double sr = 48000.0,
-                        double lo = 20.0, double hi = 20000.0) {
+SpectrumBinMapping make(std::size_t columns, int fft = 2048, double sr = 48000.0, double lo = 20.0,
+                        double hi = 20000.0) {
     SpectrumBinMapping m;
     REQUIRE(m.configure({sr, fft, columns, lo, hi, -200.0f, 200.0f}));
     return m;

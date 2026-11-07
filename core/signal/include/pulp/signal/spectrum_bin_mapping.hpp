@@ -65,8 +65,8 @@ struct SpectrumBinMappingConfig {
     std::size_t columns = 0;
     double min_hz = 20.0;
     double max_hz = 20000.0;
-    float floor_db = -200.0f;   ///< value for NaN/-inf input and above-Nyquist columns
-    float ceiling_db = 200.0f;  ///< clamp for +inf input
+    float floor_db = -200.0f;  ///< value for NaN/-inf input and above-Nyquist columns
+    float ceiling_db = 200.0f; ///< clamp for +inf input
 };
 
 class SpectrumBinMapping {

@@ -12,9 +12,9 @@
 #include <vector>
 
 using namespace pulp::view;
+using Catch::Matchers::WithinAbs;
 using pulp::canvas::DrawCommand;
 using pulp::canvas::RecordingCanvas;
-using Catch::Matchers::WithinAbs;
 
 namespace {
 
@@ -45,8 +45,8 @@ TEST_CASE("SpectrumView analysis puts a 1 kHz sine on the 1 kHz column", "[view]
     const std::size_t columns = 600;
     const auto cols = view.analysis_columns(columns);
     REQUIRE(cols.size() == columns);
-    const auto best = static_cast<std::size_t>(std::max_element(cols.begin(), cols.end()) -
-                                               cols.begin());
+    const auto best =
+        static_cast<std::size_t>(std::max_element(cols.begin(), cols.end()) - cols.begin());
     const LogFrequencyScale axis{20.0f, 20000.0f, 0.0f, static_cast<float>(columns)};
     const double expected_column = axis.to_x(1000.0f) - 0.5; // index of the column holding 1 kHz
     CHECK(std::abs(static_cast<double>(best) - expected_column) <= 0.5);
@@ -60,8 +60,8 @@ TEST_CASE("SpectrumView analysis puts a 1 kHz sine on the 1 kHz column", "[view]
 }
 
 TEST_CASE("SpectrumView analysis paints in every display type", "[view][spectrum]") {
-    for (auto style : {SpectrumView::Style::bars, SpectrumView::Style::line,
-                       SpectrumView::Style::filled}) {
+    for (auto style :
+         {SpectrumView::Style::bars, SpectrumView::Style::line, SpectrumView::Style::filled}) {
         SpectrumView view;
         view.set_bounds({0, 0, 300, 100});
         view.set_style(style);

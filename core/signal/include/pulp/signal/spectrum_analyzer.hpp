@@ -53,7 +53,7 @@ namespace pulp::signal {
 
 struct SpectrumAnalyzerConfig {
     double sample_rate = 48000.0;
-    int fft_size = 2048; ///< power of two in [kMinFftSize, kMaxFftSize]
+    int fft_size = 2048;  ///< power of two in [kMinFftSize, kMaxFftSize]
     float overlap = 0.5f; ///< fraction of a frame shared with the next, [0, 0.9375]
     WindowFunction::Type window = WindowFunction::Type::hann;
     SpectrumLevelMode level_mode = SpectrumLevelMode::peak;
@@ -73,7 +73,8 @@ class SpectrumAnalyzer {
     /// of the largest frames, so a UI hiccup of a few frames loses nothing.
     static constexpr int kRingCapacity = 4 * kMaxFftSize + 1;
 
-    SpectrumAnalyzer() : ring_(static_cast<std::size_t>(kRingCapacity), 0.0f), index_(kRingCapacity) {
+    SpectrumAnalyzer()
+        : ring_(static_cast<std::size_t>(kRingCapacity), 0.0f), index_(kRingCapacity) {
         configure(SpectrumAnalyzerConfig{});
     }
 
@@ -103,8 +104,8 @@ class SpectrumAnalyzer {
     /// the ring is discarded so no frame mixes two configurations.
     void configure(SpectrumAnalyzerConfig config) {
         config.fft_size = clamp_fft_size(config.fft_size);
-        config.overlap = std::isfinite(config.overlap) ? std::clamp(config.overlap, 0.0f, 0.9375f)
-                                                       : 0.5f;
+        config.overlap =
+            std::isfinite(config.overlap) ? std::clamp(config.overlap, 0.0f, 0.9375f) : 0.5f;
         if (!(config.sample_rate > 0.0) || !std::isfinite(config.sample_rate))
             config.sample_rate = 48000.0;
         if (!std::isfinite(config.floor_db))
@@ -128,8 +129,10 @@ class SpectrumAnalyzer {
         }
         coherent_gain_ = sum / n;
         // Guard a degenerate window; every shipped type has a positive sum.
-        if (!(coherent_gain_ > 1e-6)) coherent_gain_ = 1.0;
-        if (!(sum_sq > 1e-12)) sum_sq = n;
+        if (!(coherent_gain_ > 1e-6))
+            coherent_gain_ = 1.0;
+        if (!(sum_sq > 1e-12))
+            sum_sq = n;
         sum_sq_ = sum_sq;
 
         fft_ = std::make_unique<Fft>(n);
@@ -155,10 +158,9 @@ class SpectrumAnalyzer {
         const bool peak = config_.level_mode == SpectrumLevelMode::peak;
         // Frame-rate-independent release: the same decay per second whether
         // the UI runs at 30 or 144 Hz.
-        const float keep =
-            config_.release_seconds > 0.0f
-                ? static_cast<float>(std::exp(-dt_seconds / config_.release_seconds))
-                : 0.0f;
+        const float keep = config_.release_seconds > 0.0f
+                               ? static_cast<float>(std::exp(-dt_seconds / config_.release_seconds))
+                               : 0.0f;
         const float floor_db = config_.floor_db;
         for (std::size_t k = 0; k < display_db_.size(); ++k) {
             double v = fresh_[k];
@@ -295,8 +297,8 @@ class SpectrumAnalyzer {
         ++frames_total_;
 
         const double nd = n;
-        const double amp_scale = 1.0 / (nd * coherent_gain_);      // |X| -> amplitude/2
-        const double pow_scale = 1.0 / (nd * sum_sq_);              // |X|^2 -> power/2
+        const double amp_scale = 1.0 / (nd * coherent_gain_); // |X| -> amplitude/2
+        const double pow_scale = 1.0 / (nd * sum_sq_);        // |X|^2 -> power/2
         const double bin_hz = config_.sample_rate / nd;
         const auto last = static_cast<std::size_t>(num_bins_ - 1);
         for (std::size_t k = 0; k <= last; ++k) {
@@ -345,8 +347,8 @@ class SpectrumAnalyzer {
     std::vector<float> history_; // circular, last fft_size samples
     std::vector<float> frame_;
     std::vector<std::complex<float>> spectrum_;
-    std::vector<double> fresh_;      // linear power-like value gathered this update
-    std::vector<float> display_db_;  // released levels
+    std::vector<double> fresh_;     // linear power-like value gathered this update
+    std::vector<float> display_db_; // released levels
     double floor_linear_ = 1e-12;
     int filled_ = 0;
     int write_pos_ = 0;
