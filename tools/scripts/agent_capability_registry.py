@@ -217,7 +217,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/trigger_graph.hpp',
-        'fingerprint': 'sha256:c553cd4a35d13a5d4cd6822f5ef8bc254c5f1a3613ea1ff269ddfb1bcf40bccb',
+        'fingerprint': 'sha256:f26b6613f55461f4f0d36fe4b2d027b45246b9220f18213b271d17831fbac68a',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded runtime typed trigger transport and framework onset/envelope factories; no complete G-5 or realtime qualification claim.',
