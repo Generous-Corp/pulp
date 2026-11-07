@@ -1158,6 +1158,11 @@ pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav GROUP pulp-te
 pulp_add_test_suite(pulp-test-standalone-transport-midi GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
+# The plug-in's state kept across launches next to the device selection:
+# restore at startup, save on quit and after a quiet period, and a clean start
+# when the saved blob is missing or unusable. Runs against a fake audio system.
+pulp_add_test_suite(pulp-test-standalone-state GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone pulp::audio)
 pulp_add_test_suite(pulp-test-standalone-musical-typing GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone)
 # Sparkle updater policy and menu wiring; pure values plus a process probe that
