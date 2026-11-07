@@ -40,6 +40,8 @@
 
 #include <pulp/format/editor_host.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -159,26 +161,82 @@ class NativeSurfaceHostState final : public NativeSurfaceHost {
     NativeSurfaceHostState() = default;
     NativeSurfaceHostState(const NativeSurfaceHostState&) = delete;
     NativeSurfaceHostState& operator=(const NativeSurfaceHostState&) = delete;
-    ~NativeSurfaceHostState();
 
     NativeSurfaceHostInfo info() const override {
         return info_;
     }
+
     NativeSurfaceObservation
-    observe(std::function<void(const NativeSurfaceHostInfo&)> observer) override;
+    observe(std::function<void(const NativeSurfaceHostInfo&)> observer) override {
+        if (!observer)
+            return {};
+        auto slot = std::make_shared<Slot>();
+        slot->observer = std::move(observer);
+        slots_.push_back(slot);
+        std::weak_ptr<bool> alive = alive_;
+        std::weak_ptr<Slot> weak_slot = slot;
+        return NativeSurfaceObservation([this, alive, weak_slot] {
+            const auto target = weak_slot.lock();
+            if (!target)
+                return;
+            target->active = false;
+            // An observation that outlives this object must not reach into it.
+            if (alive.expired())
+                return;
+            slots_.erase(std::remove(slots_.begin(), slots_.end(), target), slots_.end());
+        });
+    }
 
     /// Each setter publishes a new generation only when the value changes.
     /// A non-finite or non-positive scale or rate reads as unknown (0).
-    void set_backing_scale(double scale);
-    void set_display(std::uint32_t display_id, double refresh_hz);
-    void set_visibility(NativeSurfaceVisibility visibility);
+    void set_backing_scale(double scale) {
+        const double value = known_or_zero(scale);
+        if (value == info_.backing_scale)
+            return;
+        info_.backing_scale = value;
+        publish();
+    }
+    void set_display(std::uint32_t display_id, double refresh_hz) {
+        const double rate = known_or_zero(refresh_hz);
+        if (display_id == info_.display_id && rate == info_.refresh_hz)
+            return;
+        info_.display_id = display_id;
+        info_.refresh_hz = rate;
+        publish();
+    }
+    void set_visibility(NativeSurfaceVisibility visibility) {
+        if (visibility == info_.visibility)
+            return;
+        info_.visibility = visibility;
+        publish();
+    }
 
     /// Number of live observations.
-    std::size_t observer_count() const noexcept;
+    std::size_t observer_count() const noexcept {
+        return slots_.size();
+    }
 
   private:
-    struct Slot;
-    void publish();
+    struct Slot {
+        std::function<void(const NativeSurfaceHostInfo&)> observer;
+        bool active = true;
+    };
+
+    static double known_or_zero(double value) {
+        return std::isfinite(value) && value > 0.0 ? value : 0.0;
+    }
+
+    void publish() {
+        ++info_.generation;
+        // Observers may add or remove observations while being called, so walk
+        // a copy and skip any slot cancelled since the walk began.
+        const auto snapshot = slots_;
+        const auto info = info_;
+        for (const auto& slot : snapshot) {
+            if (slot->active && slot->observer)
+                slot->observer(info);
+        }
+    }
 
     NativeSurfaceHostInfo info_{};
     std::vector<std::shared_ptr<Slot>> slots_;
