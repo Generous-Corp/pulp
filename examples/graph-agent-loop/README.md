@@ -12,16 +12,19 @@ installed `Pulp::host` target and follows the checked-in, pinned
 5. apply one bounded gain edit and prove the render changes;
 6. reload the original saved input and reproduce the baseline render exactly.
 
-The plan pins a deterministic offline action model, this tool version, and the
-audited source SHA. The executable parses the JSON with duplicate-key
-rejection, then executes the ordered plan steps and records each completed
-step. It declares `network_policy: deny` and
-`plugin_policy: deny-ambient`; the executable rejects URLs, allow policies,
-missing steps, and missing mutation declarations before opening a graph. A
-JSONL action log records the plan digest, every action result, the denial
-policies, and a topology-only semantic fingerprint. Parameter edits must
-change samples while preserving that fingerprint, and replay must restore the
-original samples and fingerprint.
+The plan pins a deterministic offline action model, a 64-hex `sha256:` model
+digest, this tool version, and the audited source SHA. The executable decodes
+JSON escapes (including Unicode surrogate pairs) before duplicate-key
+rejection, validates the complete root/action/assertion/mutation schema, then
+executes the ordered plan steps and records each completed step. It declares
+`network_policy: deny` and `plugin_policy: deny-ambient`; the executable
+rejects case-insensitive URI schemes, protocol-relative and UNC authorities,
+allow policies, unknown policy fields, missing or mistyped actions, and
+incorrect assertion or mutation relations before creating its output directory
+or action log. A JSONL action log records the plan digest, every action result,
+the denial policies, and a topology-only semantic fingerprint. Parameter edits
+must change samples while preserving that fingerprint, and replay must restore
+the original samples and fingerprint.
 
 Configure it against an installed SDK:
 

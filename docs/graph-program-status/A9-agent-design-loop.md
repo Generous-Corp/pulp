@@ -7,14 +7,17 @@ Status: **PARTIAL — bounded installed-SDK consumer and fail-closed action-plan
 The existing consumer now reads the checked-in
 [`fixtures/action-plan.json`](../../examples/graph-agent-loop/fixtures/action-plan.json),
 which pins a deterministic offline action model, tool version, and this exact
-source SHA. The executable parses the JSON with duplicate-key rejection, then
-executes the ordered steps from the plan and records each completed step. It
-refuses URLs, `network_policy: allow`,
-`plugin_policy: allow-ambient`, missing required steps, and missing planted
-mutation declarations before graph work begins. Its JSONL action log records a
-plan digest, ordered action results, explicit network/ambient-plugin denials,
-and a topology-only semantic fingerprint. A gain edit must change samples
-without changing that fingerprint; saved-input replay must restore the original
+source SHA. The executable decodes escaped and Unicode JSON keys before
+duplicate-key rejection, validates the complete root/action/assertion/mutation
+schema and 64-hex model digest, then executes the ordered steps from the plan
+and records each completed step. It refuses case-insensitive URI schemes,
+protocol-relative and UNC authorities, `network_policy: allow`,
+`plugin_policy: allow-ambient`, unknown policy URL fields, missing or mistyped
+actions, and incorrect assertion or mutation relations before creating an
+output directory, action log, or graph. Its JSONL action log records a plan
+digest, ordered action results, explicit network/ambient-plugin denials, and a
+topology-only semantic fingerprint. A gain edit must change samples without
+changing that fingerprint; saved-input replay must restore the original
 samples and fingerprint.
 
 The standalone CTest suite adds three independent planted-negative plans:

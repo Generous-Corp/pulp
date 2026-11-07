@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <choc/text/choc_JSON.h>
 #include <cmath>
 #include <cstdint>
@@ -6,6 +8,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <initializer_list>
 #include <pulp/host/forge_catalog_export.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
@@ -13,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <unordered_set>
 #include <vector>
 
@@ -75,22 +79,104 @@ class DuplicateKeyScanner {
             throw std::runtime_error("plan-json-structure");
         ++position_;
     }
+    static int hex_digit(char c) {
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
+        return -1;
+    }
+    void append_codepoint(std::string& out, std::uint32_t codepoint) {
+        if (codepoint <= 0x7f) {
+            out.push_back(static_cast<char>(codepoint));
+        } else if (codepoint <= 0x7ff) {
+            out.push_back(static_cast<char>(0xc0 | (codepoint >> 6)));
+            out.push_back(static_cast<char>(0x80 | (codepoint & 0x3f)));
+        } else if (codepoint <= 0xffff) {
+            out.push_back(static_cast<char>(0xe0 | (codepoint >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | (codepoint & 0x3f)));
+        } else if (codepoint <= 0x10ffff) {
+            out.push_back(static_cast<char>(0xf0 | (codepoint >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | (codepoint & 0x3f)));
+        } else {
+            throw std::runtime_error("plan-json-unicode");
+        }
+    }
+    std::uint32_t unicode_escape() {
+        if (position_ + 4 > text_.size())
+            throw std::runtime_error("plan-json-unicode");
+        std::uint32_t codepoint = 0;
+        for (int i = 0; i < 4; ++i) {
+            const auto digit = hex_digit(text_[position_++]);
+            if (digit < 0)
+                throw std::runtime_error("plan-json-unicode");
+            codepoint = (codepoint << 4) | static_cast<std::uint32_t>(digit);
+        }
+        return codepoint;
+    }
     std::string string_value() {
         expect('"');
-        std::string raw;
+        std::string decoded;
         while (position_ < text_.size()) {
             const char c = text_[position_++];
             if (c == '"')
-                return raw;
+                return decoded;
             if (c == '\\') {
                 if (position_ >= text_.size())
                     throw std::runtime_error("plan-json-string");
-                raw.push_back(c);
-                raw.push_back(text_[position_++]);
+                const char escaped = text_[position_++];
+                switch (escaped) {
+                case '"':
+                case '\\':
+                case '/':
+                    decoded.push_back(escaped);
+                    break;
+                case 'b':
+                    decoded.push_back('\b');
+                    break;
+                case 'f':
+                    decoded.push_back('\f');
+                    break;
+                case 'n':
+                    decoded.push_back('\n');
+                    break;
+                case 'r':
+                    decoded.push_back('\r');
+                    break;
+                case 't':
+                    decoded.push_back('\t');
+                    break;
+                case 'u': {
+                    const auto first = unicode_escape();
+                    if (first >= 0xd800 && first <= 0xdbff) {
+                        if (position_ + 2 > text_.size() || text_[position_] != '\\' ||
+                            text_[position_ + 1] != 'u')
+                            throw std::runtime_error("plan-json-unicode");
+                        position_ += 2;
+                        const auto second = unicode_escape();
+                        if (second < 0xdc00 || second > 0xdfff)
+                            throw std::runtime_error("plan-json-unicode");
+                        append_codepoint(decoded,
+                                         0x10000 + ((first - 0xd800) << 10) + (second - 0xdc00));
+                    } else if (first >= 0xdc00 && first <= 0xdfff) {
+                        throw std::runtime_error("plan-json-unicode");
+                    } else {
+                        append_codepoint(decoded, first);
+                    }
+                    break;
+                }
+                default:
+                    throw std::runtime_error("plan-json-string");
+                }
             } else {
                 if (static_cast<unsigned char>(c) < 0x20)
                     throw std::runtime_error("plan-json-string");
-                raw.push_back(c);
+                decoded.push_back(c);
             }
         }
         throw std::runtime_error("plan-json-string");
@@ -169,6 +255,15 @@ template <typename V> auto member(const V& object, const char* key, const char* 
     return object[key];
 }
 template <typename V>
+void only_fields(const V& object, std::initializer_list<std::string_view> allowed,
+                 const char* rule) {
+    require(object.isObject(), rule);
+    for (uint32_t i = 0; i < object.size(); ++i) {
+        const auto name = object.getObjectMemberAt(i).name;
+        require(std::find(allowed.begin(), allowed.end(), name) != allowed.end(), rule);
+    }
+}
+template <typename V>
 std::string string_member(const V& object, const char* key, const char* rule) {
     const auto value = member(object, key, rule);
     require(value.isString(), rule);
@@ -185,11 +280,59 @@ template <typename V> double number_member(const V& object, const char* key, con
     return value.isFloat64() || value.isFloat32() ? value.getFloat64()
                                                   : static_cast<double>(value.getInt64());
 }
+std::string lower_ascii(std::string_view text) {
+    std::string result;
+    result.reserve(text.size());
+    for (const auto c : text)
+        result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    return result;
+}
+bool is_hex_string(std::string_view text) {
+    return std::all_of(text.begin(), text.end(), [](const char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    });
+}
+bool is_uri_or_network_string(std::string_view value) {
+    std::size_t first = 0;
+    while (first < value.size() && std::isspace(static_cast<unsigned char>(value[first])))
+        ++first;
+    value.remove_prefix(first);
+    if (value.size() >= 2 &&
+        ((value[0] == '/' && value[1] == '/') || (value[0] == '\\' && value[1] == '\\')))
+        return true;
+    if (!value.empty() && value[0] == '[')
+        return true;
+    const auto colon = value.find(':');
+    if (colon != std::string_view::npos && std::isdigit(static_cast<unsigned char>(value[0]))) {
+        const auto host = value.substr(0, colon);
+        const auto port = value.substr(colon + 1);
+        const auto host_like = std::all_of(host.begin(), host.end(), [](const char c) {
+            return std::isdigit(static_cast<unsigned char>(c)) || c == '.' || c == ':' ||
+                   (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        });
+        const auto port_end = port.find_first_of("/\\?#");
+        const auto port_number = port.substr(0, port_end);
+        if (host_like && !port_number.empty() &&
+            std::all_of(port_number.begin(), port_number.end(),
+                        [](const char c) { return std::isdigit(static_cast<unsigned char>(c)); }))
+            return true;
+    }
+    if (colon == std::string_view::npos || colon == 0 ||
+        !std::isalpha(static_cast<unsigned char>(value[0])))
+        return false;
+    for (std::size_t i = 1; i < colon; ++i) {
+        const auto c = static_cast<unsigned char>(value[i]);
+        if (!std::isalnum(c) && value[i] != '+' && value[i] != '-' && value[i] != '.')
+            return false;
+    }
+    // sha256:<64 hex digits> is the plan's content-addressed model pin, not a URI.
+    return !(lower_ascii(value.substr(0, colon)) == "sha256" && value.size() == colon + 1 + 64 &&
+             is_hex_string(value.substr(colon + 1)));
+}
 template <typename V> void reject_urls(const V& value) {
     if (value.isString()) {
         const auto text = std::string(value.getString());
-        require(text.rfind("http://", 0) != 0 && text.rfind("https://", 0) != 0,
-                "plan-network-url");
+        require(!is_uri_or_network_string(text), "plan-network-url");
     } else if (value.isArray())
         for (uint32_t i = 0; i < value.size(); ++i)
             reject_urls(value[i]);
@@ -207,12 +350,17 @@ ActionPlan parse_action_plan(const std::string& text) {
         throw std::runtime_error("plan-json-parse");
     }
     require(root.isObject(), "plan-object");
-    reject_urls(root);
+    only_fields(root,
+                {"schema", "model_id", "model_digest", "tool_id", "tool_version", "source_sha",
+                 "network_policy", "plugin_policy", "steps", "assertions", "mutations"},
+                "plan-field");
     require(string_member(root, "schema", "plan-schema") == "pulp.a9.action-plan/v1",
             "plan-schema");
     require(string_member(root, "model_id", "model-pin") == "deterministic-offline-actions-v1",
             "model-pin");
-    require(string_member(root, "model_digest", "model-digest").rfind("sha256:", 0) == 0,
+    const auto model_digest = string_member(root, "model_digest", "model-digest");
+    require(model_digest.size() == 71 && model_digest.rfind("sha256:", 0) == 0 &&
+                is_hex_string(std::string_view(model_digest).substr(7)),
             "model-digest");
     require(string_member(root, "tool_id", "tool-pin") == "pulp-graph-agent-loop", "tool-pin");
     require(string_member(root, "tool_version", "tool-version") == "1", "tool-version");
@@ -220,20 +368,38 @@ ActionPlan parse_action_plan(const std::string& text) {
                 "2f3d36dae75c3dca283c58e47f7731356f088e0d",
             "source-pin");
     const auto network_policy = string_member(root, "network_policy", "plan-network-policy");
-    require(network_policy == "deny",
-            network_policy == "allow" ? "plan-network-allow" : "plan-network-policy");
+    const auto network_policy_lower = lower_ascii(network_policy);
+    require(network_policy_lower == "deny",
+            network_policy_lower == "allow" ? "plan-network-allow" : "plan-network-policy");
     const auto plugin_policy = string_member(root, "plugin_policy", "plan-plugin-policy");
-    require(plugin_policy == "deny-ambient",
-            plugin_policy == "allow-ambient" ? "plan-plugin-allow" : "plan-plugin-policy");
+    const auto plugin_policy_lower = lower_ascii(plugin_policy);
+    require(plugin_policy_lower == "deny-ambient",
+            plugin_policy_lower == "allow-ambient" ? "plan-plugin-allow" : "plan-plugin-policy");
+    // Apply the URI/network fence after validating the digest and policy fields so a malformed
+    // digest cannot be mistaken for a URI scheme, while all other strings remain fenced.
+    reject_urls(root);
     const auto& steps = member(root, "steps", "plan-steps");
     require(steps.isArray(), "plan-steps");
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 6> expected_steps = {{
+        {"catalog-discover", "catalog.discover"},
+        {"author-graph", "graph.author"},
+        {"validate-replay", "graph.validate"},
+        {"render-probe", "graph.render"},
+        {"bounded-edit", "graph.edit"},
+        {"saved-input-replay", "graph.replay"},
+    }};
+    require(steps.size() == expected_steps.size(), "action-catalog");
     ActionPlan plan;
     for (uint32_t i = 0; i < steps.size(); ++i) {
         const auto& entry = steps[i];
         require(entry.isObject(), "plan-action-object");
+        only_fields(entry, {"id", "kind", "target", "input", "value", "load_plugins", "edge_probe"},
+                    "plan-action-field");
         ActionStep step;
         step.id = string_member(entry, "id", "plan-action-id");
         step.kind = string_member(entry, "kind", "plan-action-kind");
+        require(step.id == expected_steps[i].first, "action-catalog");
+        require(step.kind == expected_steps[i].second, "action-kind");
         require(std::none_of(plan.steps.begin(), plan.steps.end(),
                              [&](const auto& prior) { return prior.id == step.id; }),
                 "plan-action-duplicate");
@@ -249,6 +415,31 @@ ActionPlan parse_action_plan(const std::string& text) {
             step.load_plugins = bool_member(entry, "load_plugins", "plan-plugin-load");
         if (entry.hasObjectMember("edge_probe"))
             step.edge_probe = bool_member(entry, "edge_probe", "plan-edge-probe");
+        if (i == 0 || i == 1)
+            require(!entry.hasObjectMember("target") && !entry.hasObjectMember("input") &&
+                        !entry.hasObjectMember("value") && !entry.hasObjectMember("load_plugins") &&
+                        !entry.hasObjectMember("edge_probe"),
+                    "plan-action-fields");
+        if (i == 2)
+            require(!entry.hasObjectMember("target") && !entry.hasObjectMember("input") &&
+                        !entry.hasObjectMember("value") && entry.hasObjectMember("load_plugins") &&
+                        !step.load_plugins && !entry.hasObjectMember("edge_probe"),
+                    "plan-plugin-load");
+        if (i == 3)
+            require(!entry.hasObjectMember("target") && !entry.hasObjectMember("input") &&
+                        !entry.hasObjectMember("value") && !entry.hasObjectMember("load_plugins") &&
+                        entry.hasObjectMember("edge_probe") && step.edge_probe,
+                    "plan-edge-probe");
+        if (i == 4)
+            require(!entry.hasObjectMember("input") && !entry.hasObjectMember("load_plugins") &&
+                        !entry.hasObjectMember("edge_probe") && entry.hasObjectMember("target") &&
+                        entry.hasObjectMember("value"),
+                    "action-edit");
+        if (i == 5)
+            require(!entry.hasObjectMember("target") && !entry.hasObjectMember("value") &&
+                        !entry.hasObjectMember("load_plugins") &&
+                        !entry.hasObjectMember("edge_probe") && entry.hasObjectMember("input"),
+                    "action-replay");
         plan.steps.push_back(std::move(step));
     }
     const auto has_step = [&](std::string_view id) {
@@ -281,28 +472,32 @@ ActionPlan parse_action_plan(const std::string& text) {
                                       [](const auto& step) { return step.id == "render-probe"; });
     require(probe.edge_probe, "plan-edge-probe");
     const auto& assertions = member(root, "assertions", "plan-assertions");
-    require(assertions.isArray(), "plan-assertions");
-    bool fingerprint = false;
-    for (uint32_t i = 0; i < assertions.size(); ++i)
-        if (assertions[i].isObject() && assertions[i].hasObjectMember("id") &&
-            assertions[i]["id"].isString() &&
-            assertions[i]["id"].getString() == "semantic_fingerprint")
-            fingerprint = true;
-    require(fingerprint, "fingerprint-rule");
+    require(assertions.isArray() && assertions.size() == 1, "plan-assertions");
+    const auto& fingerprint = assertions[0];
+    only_fields(fingerprint, {"id", "relation"}, "plan-assertion-field");
+    require(string_member(fingerprint, "id", "fingerprint-rule") == "semantic_fingerprint",
+            "fingerprint-rule");
+    require(string_member(fingerprint, "relation", "fingerprint-relation") ==
+                "baseline == replay; edit preserves topology",
+            "fingerprint-relation");
     const auto& mutations = member(root, "mutations", "plan-mutations");
-    require(mutations.isArray() && mutations.size() >= 2, "plan-mutations");
-    bool edit_mutation = false, replay_mutation = false;
+    require(mutations.isArray() && mutations.size() == 2, "plan-mutations");
+    constexpr std::array<std::array<std::string_view, 3>, 2> expected_mutations = {{
+        {"wrong-edit-oracle", "edit-changes-render", "reject"},
+        {"wrong-replay-input", "replay-baseline", "reject"},
+    }};
     for (uint32_t i = 0; i < mutations.size(); ++i) {
         const auto& mutation = mutations[i];
         require(mutation.isObject(), "plan-mutation-object");
+        only_fields(mutation, {"id", "target", "expected"}, "plan-mutation-field");
         const auto id = string_member(mutation, "id", "plan-mutation-id");
-        if (id == "wrong-edit-oracle")
-            edit_mutation = true;
-        if (id == "wrong-replay-input")
-            replay_mutation = true;
+        require(id == expected_mutations[i][0], "mutation-catalog");
+        require(string_member(mutation, "target", "mutation-target") == expected_mutations[i][1],
+                "mutation-target");
+        require(string_member(mutation, "expected", "mutation-expected") ==
+                    expected_mutations[i][2],
+                "mutation-expected");
     }
-    require(edit_mutation, "mutation-edit");
-    require(replay_mutation, "mutation-replay");
     return plan;
 }
 
@@ -410,12 +605,12 @@ int main(int argc, char** argv) try {
 #endif
     const auto action_plan =
         argc >= 3 ? std::filesystem::path(argv[2]) : std::filesystem::path(kDefaultActionPlan);
-    std::filesystem::create_directories(output);
     const auto baseline_path = output / "a9-baseline.pulpgraph";
     const auto edited_path = output / "a9-edited.pulpgraph";
     const auto action_log_path = output / "a9-action-log.jsonl";
     const auto plan_text = read_text(action_plan);
     const auto plan = parse_action_plan(plan_text);
+    std::filesystem::create_directories(output);
     const auto plan_digest = fnv1a_hex(plan_text);
     ActionLog action_log(action_log_path, plan_digest);
     decltype(forge_catalog_export_nodes()) catalog;
