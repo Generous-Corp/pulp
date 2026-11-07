@@ -125,6 +125,17 @@ add_test(NAME dead-test-guard-selftest
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_dead_test_guard.py")
 set_tests_properties(dead-test-guard-selftest PROPERTIES TIMEOUT 120)
 
+# examples/README.md indexes every example directory once; the guard fails when
+# a directory is added, removed or renamed without updating the index.
+add_test(NAME examples-index-guard
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/examples_index_guard.py")
+set_tests_properties(examples-index-guard PROPERTIES TIMEOUT 120)
+add_test(NAME examples-index-guard-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_examples_index_guard.py")
+set_tests_properties(examples-index-guard-selftest PROPERTIES TIMEOUT 120)
+
 set(_pulp_source_selftest_manifest "${CMAKE_SOURCE_DIR}/tools/ci/source_selftests.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_pulp_source_selftest_manifest}")

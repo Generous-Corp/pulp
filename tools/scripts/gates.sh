@@ -40,6 +40,7 @@
 #   - vendored-patch verifier (tools/deps/check_patches.py: each vendored file
 #     minus its recorded patches equals upstream, so an unrecorded edit fails)
 #   - dead-test guard (every test source under test/ is named by a CMake file)
+#   - examples index guard (examples/README.md lists every examples/ directory once)
 #   - worktree-lineage self-tests (continuity metadata cannot silently rot)
 #   - codecov-config (codecov.yml flags/components mirror the live core/* tree
 #     with no double-counts, and its ignore list mirrors diff_cover_excludes)
@@ -586,13 +587,14 @@ if [ -f "$ROOT/tools/deps/test_audit.py" ]; then
     fi
 fi
 
-# ── 7a-patches. vendored-patch verifier and dead-test guard ────────────────
-# Both read only the checkout and finish in seconds, so they run here directly
-# as well as inside the source-selftest suites below: a gate host that skips
-# those suites still refuses an unrecorded edit under external/ and a test
-# source no CMake file names.
+# ── 7a-patches. vendored-patch verifier, dead-test guard, examples index guard ────────────────
+# Each reads only the checkout and finishes in seconds, so they run here
+# directly as well as inside the source-selftest suites below: a gate host that
+# skips those suites still refuses an unrecorded edit under external/, a test
+# source no CMake file names, and an example directory missing from the index.
 for _guard in "tools/deps/check_patches.py:vendored-patch verifier" \
-              "tools/scripts/dead_test_guard.py:dead-test guard"; do
+              "tools/scripts/dead_test_guard.py:dead-test guard" \
+              "tools/scripts/examples_index_guard.py:examples index guard"; do
     _guard_path="${_guard%%:*}"
     _guard_label="${_guard#*:}"
     if [ -f "$ROOT/$_guard_path" ]; then

@@ -5355,6 +5355,16 @@
    ],
    "kind": "python"
   },
+  "examples-index-guard": {
+   "entry": "tools/scripts/examples_index_guard.py",
+   "inputs": [],
+   "kind": "python"
+  },
+  "examples-index-guard-selftest": {
+   "entry": "tools/scripts/test_examples_index_guard.py",
+   "inputs": [],
+   "kind": "python"
+  },
   "executable-keys-selftest": {
    "entry": "tools/ci/test_executable_keys.py",
    "inputs": [

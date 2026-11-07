@@ -318,6 +318,20 @@
       "timeout": 60.0
     },
     {
+      "name": "examples-index-guard",
+      "argv": [
+        "{repo}/tools/scripts/examples_index_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "examples-index-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_examples_index_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "fleet-remote-probe-selftest",
       "argv": [
         "{repo}/tools/fleet/test_probe_remote.py"

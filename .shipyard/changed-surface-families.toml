@@ -8260,6 +8260,8 @@ tests = [
   "deps-audit-vellum-drift-selftest",
   "drift-fast-selftest",
   "dsp-capability-registry-selftest",
+  "examples-index-guard",
+  "examples-index-guard-selftest",
   "fleet-remote-probe-selftest",
   "forced-restore-lint",
   "forced-restore-lint-selftest",
