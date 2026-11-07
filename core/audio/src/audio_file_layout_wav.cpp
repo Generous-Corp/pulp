@@ -11,6 +11,7 @@
 #include "audio_file_layout_detail.hpp"
 
 #include <pulp/audio/wav_metadata.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
 #include <array>
@@ -30,11 +31,8 @@ constexpr std::array<std::uint8_t, 12> kW64ChunkSuffix{0xF3, 0xAC, 0xD3, 0x11, 0
 struct Envelope {
     bool w64 = false;
     bool rf64 = false;
-    std::uint64_t header_size = 12u;      // bytes before the first chunk
-    std::uint64_t chunk_header_size = 8u; // id + size
-    std::uint64_t alignment = 2u;         // chunk start alignment
-    std::uint64_t declared_end = 0u;      // envelope end the header claims
-    bool declared_sentinel = false;       // RIFF size field is 0xFFFFFFFF
+    bool declared_sentinel = false; // RIFF size field is 0xFFFFFFFF
+    IffEnvelope iff;
 };
 
 struct Ds64 {
@@ -46,7 +44,6 @@ struct Ds64 {
 
 struct FormatFields {
     std::vector<std::uint8_t> payload;
-    std::uint64_t offset = 0u;
     std::uint16_t format_tag = 0u;
     std::uint16_t channels = 0u;
     std::uint32_t sample_rate = 0u;
@@ -55,7 +52,6 @@ struct FormatFields {
     std::uint16_t valid_bits = 0u;
     std::uint32_t channel_mask = 0u;
     bool extensible = false;
-    bool has_channel_mask = false;
 };
 
 struct Walk {
@@ -64,11 +60,14 @@ struct Walk {
     bool data_seen = false;
     std::uint64_t data_offset = 0u;
     std::uint64_t data_size = 0u; // size the decoder would use
-    std::uint64_t data_actual = 0u;
     std::optional<std::uint64_t> fact_frames;
     bool has_bext = false;
-    bool structural_fault = false; // the strict decoder stops here
-    std::string first_fault;
+    std::optional<std::string> first_fault; // where the strict decoder stops
+
+    void fault(std::string message) {
+        if (!first_fault)
+            first_fault = std::move(message);
+    }
 };
 
 LayoutRegionKind classify(std::string_view id) {
@@ -117,22 +116,24 @@ std::optional<Envelope> read_envelope(Builder& b) {
         if (head.size() < 40u)
             return std::nullopt;
         env.w64 = true;
-        env.header_size = 40u;
-        env.chunk_header_size = 24u;
-        env.alignment = 8u;
+        env.iff.header_size = 40u;
+        env.iff.chunk_header_size = 24u;
+        env.iff.alignment = 8u;
+        env.iff.pad_bytes = false;
         // Wave64 sizes include their own headers, so the riff size is the
         // whole file.
-        env.declared_end = read_u64le(head.data() + 16u);
-        auto& region = b.add_region(0u, 0u, env.declared_end, "riff", LayoutRegionKind::envelope);
+        env.iff.declared_end = read_u64le(head.data() + 16u);
+        auto& region =
+            b.add_region(0u, 0u, env.iff.declared_end, "riff", LayoutRegionKind::envelope);
         region.fields.push_back({"form", std::string("wave")});
-        region.fields.push_back({"riff_size", env.declared_end});
+        region.fields.push_back({"riff_size", env.iff.declared_end});
         return env;
     }
     const auto id = fourcc(head.data());
     env.rf64 = id == "RF64" || id == "BW64";
     const auto size = read_u32le(head.data() + 4u);
     env.declared_sentinel = size == kSizeSentinel;
-    env.declared_end = static_cast<std::uint64_t>(size) + 8u;
+    env.iff.declared_end = static_cast<std::uint64_t>(size) + 8u;
     auto& region = b.add_region(0u, 8u, size, id, LayoutRegionKind::envelope);
     region.fields.push_back({"form", fourcc(head.data() + 8u)});
     region.fields.push_back({"riff_size", static_cast<std::uint64_t>(size)});
@@ -141,25 +142,17 @@ std::optional<Envelope> read_envelope(Builder& b) {
 
 // Chunk header at `offset`: id and payload size. W64 chunks carry GUID ids
 // and sizes that include the 24-byte header; both are normalised here.
-struct ChunkHeader {
-    std::string id;
-    std::uint64_t declared = 0u;
-    bool sentinel = false;
-    bool printable = true;
-};
-
-std::optional<ChunkHeader> read_chunk_header(Builder& b, const Envelope& env,
-                                             std::uint64_t offset) {
+std::optional<IffChunk> read_chunk_header(Builder& b, const Envelope& env, std::uint64_t offset) {
     std::array<std::uint8_t, 24> raw{};
-    if (!b.reader.read_exact(offset, std::span(raw.data(), env.chunk_header_size)))
+    if (!b.reader.read_exact(offset, std::span(raw.data(), env.iff.chunk_header_size)))
         return std::nullopt;
-    ChunkHeader header;
+    IffChunk header;
     if (env.w64) {
         if (std::memcmp(raw.data() + 4u, kW64ChunkSuffix.data(), kW64ChunkSuffix.size()) == 0) {
             header.id = fourcc(raw.data());
             header.printable = raw_id_printable(raw.data(), 4u);
         } else {
-            header.id = hex_bytes(raw.data(), 16u);
+            header.id = runtime::hex_encode(raw.data(), 16u);
         }
         const auto total = read_u64le(raw.data() + 16u);
         header.declared = total >= 24u ? total - 24u : 0u;
@@ -186,20 +179,15 @@ void parse_fmt(Builder& b, LayoutRegion& region, Walk& walk, std::uint64_t paylo
         b.warn(LayoutWarningKind::fmt_after_data, region.offset,
                "fmt chunk follows the data chunk");
     }
-    auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, 1024u));
-    if (payload.size() < 16u) {
-        region.note = "fmt payload shorter than the 16-byte PCM header";
-        if (walk.fmt_count == 1u) {
-            FormatFields fields;
-            fields.payload = payload;
-            fields.offset = region.offset;
-            walk.fmt = std::move(fields);
-        }
-        return;
-    }
+    auto payload = b.reader.read_capped(payload_offset, declared, 1024u);
     FormatFields fields;
     fields.payload = payload;
-    fields.offset = region.offset;
+    if (payload.size() < 16u) {
+        region.note = "fmt payload shorter than the 16-byte PCM header";
+        if (walk.fmt_count == 1u)
+            walk.fmt = std::move(fields);
+        return;
+    }
     fields.format_tag = read_u16le(payload.data());
     fields.channels = read_u16le(payload.data() + 2u);
     fields.sample_rate = read_u32le(payload.data() + 4u);
@@ -222,12 +210,12 @@ void parse_fmt(Builder& b, LayoutRegion& region, Walk& walk, std::uint64_t paylo
         fields.extensible = true;
         fields.valid_bits = read_u16le(payload.data() + 18u);
         fields.channel_mask = read_u32le(payload.data() + 20u);
-        fields.has_channel_mask = true;
         region.fields.push_back({"valid_bits", static_cast<std::uint64_t>(fields.valid_bits)});
         region.fields.push_back({"channel_mask", static_cast<std::uint64_t>(fields.channel_mask)});
         region.fields.push_back(
             {"sub_format_tag", static_cast<std::uint64_t>(read_u16le(payload.data() + 24u))});
-        region.fields.push_back({"sub_format_guid", hex_bytes(payload.data() + 24u, 16u)});
+        region.fields.push_back(
+            {"sub_format_guid", runtime::hex_encode(payload.data() + 24u, 16u)});
         // The decoder reads the first fmt only, so a second fmt's field
         // disagreements are not warnings of their own; duplicate_fmt covers it.
         if (walk.fmt_count == 1u && fields.valid_bits > fields.bits_per_sample) {
@@ -251,7 +239,7 @@ void parse_fmt(Builder& b, LayoutRegion& region, Walk& walk, std::uint64_t paylo
 
 void parse_ds64(Builder& b, LayoutRegion& region, Ds64& ds64, std::uint64_t payload_offset,
                 std::uint64_t declared) {
-    auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, 4096u));
+    auto payload = b.reader.read_capped(payload_offset, declared, 4096u);
     if (payload.size() < 28u) {
         region.note = "ds64 too short: payload is under the 28-byte minimum";
         return;
@@ -277,8 +265,7 @@ void parse_ds64(Builder& b, LayoutRegion& region, Ds64& ds64, std::uint64_t payl
 
 void parse_bext(Builder& b, LayoutRegion& region, std::uint64_t payload_offset,
                 std::uint64_t declared) {
-    auto payload =
-        b.reader.read(payload_offset, std::min<std::uint64_t>(declared, kMaxPayloadRead));
+    auto payload = b.reader.read_capped(payload_offset, declared, kMaxPayloadRead);
     if (payload.size() < 602u) {
         region.note = "bext payload shorter than the 602-byte fixed header";
         return;
@@ -297,7 +284,6 @@ void parse_bext(Builder& b, LayoutRegion& region, std::uint64_t payload_offset,
         region.fields.push_back({"max_momentary_loudness", s16(418u)});
         region.fields.push_back({"max_short_term_loudness", s16(420u)});
     }
-    // Builder::text is the one place that decides whether free text is kept.
     if (const auto bext = decode_bext_chunk(payload.data(), payload.size())) {
         b.text("bext", "description", bext->description);
         b.text("bext", "originator", bext->originator);
@@ -310,8 +296,7 @@ void parse_bext(Builder& b, LayoutRegion& region, std::uint64_t payload_offset,
 
 void parse_list(Builder& b, LayoutRegion& region, std::uint64_t payload_offset,
                 std::uint64_t declared) {
-    auto payload =
-        b.reader.read(payload_offset, std::min<std::uint64_t>(declared, kMaxPayloadRead));
+    auto payload = b.reader.read_capped(payload_offset, declared, kMaxPayloadRead);
     if (payload.size() < 4u)
         return;
     const auto list_type = fourcc(payload.data());
@@ -337,7 +322,7 @@ void parse_list(Builder& b, LayoutRegion& region, std::uint64_t payload_offset,
 
 void parse_acid(Builder& b, LayoutRegion& region, std::uint64_t payload_offset,
                 std::uint64_t declared) {
-    auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, 64u));
+    auto payload = b.reader.read_capped(payload_offset, declared, 64u);
     if (const auto acid = decode_acid_chunk(payload.data(), payload.size())) {
         region.fields.push_back({"flags", static_cast<std::uint64_t>(acid->flags)});
         region.fields.push_back({"root_note", static_cast<std::uint64_t>(acid->root_note)});
@@ -350,19 +335,33 @@ void parse_acid(Builder& b, LayoutRegion& region, std::uint64_t payload_offset,
     }
 }
 
-void parse_xml_text(Builder& b, const std::string& id, std::uint64_t payload_offset,
-                    std::uint64_t declared) {
-    if (!b.options.include_metadata_text)
-        return;
-    auto payload =
-        b.reader.read(payload_offset, std::min<std::uint64_t>(declared, kMaxPayloadRead));
-    auto text = trimmed_text(payload.data(), payload.size());
-    if (declared > payload.size())
-        text += "\n[truncated at " + std::to_string(payload.size()) + " bytes]";
-    b.text(id, "xml", std::move(text));
+void parse_fact(Builder& b, LayoutRegion& region, Walk& walk, const Envelope& env,
+                const IffChunk& chunk) {
+    // dr_wav reads a fixed 4 bytes (8 in Wave64) from any fact chunk before
+    // data, then subtracts that from the declared size. A shorter chunk
+    // underflows and the seek to the next chunk fails, except when the
+    // underflow plus the pad byte lands back on zero (RIFF size 3, Wave64
+    // size 7), so the decoder stops exactly on sizes 0, 1, 2 (0 to 6 but 7
+    // for Wave64).
+    const std::uint64_t count_bytes = env.w64 ? 8u : 4u;
+    if (!env.rf64 && !walk.data_seen && chunk.declared < count_bytes &&
+        chunk.declared != count_bytes - 1u) {
+        walk.fault("fact chunk shorter than " + std::to_string(count_bytes) +
+                   " bytes stops the decoder before data");
+    }
+    auto payload = b.reader.read_capped(chunk.payload_offset, chunk.declared, count_bytes);
+    if (payload.size() == count_bytes) {
+        const std::uint64_t count =
+            env.w64 ? read_u64le(payload.data()) : read_u32le(payload.data());
+        region.fields.push_back({"sample_length", count});
+        if (!walk.fact_frames)
+            walk.fact_frames = count;
+    } else {
+        region.note = "fact payload shorter than its sample count";
+    }
 }
 
-void finish(Builder& b, const Envelope& env, Walk& walk, std::uint64_t walk_end) {
+void finish(Builder& b, const Envelope& env, Walk& walk) {
     auto& report = b.report;
     report.facts_confidence = FactsConfidence::parsed;
 
@@ -417,11 +416,11 @@ void finish(Builder& b, const Envelope& env, Walk& walk, std::uint64_t walk_end)
     LayoutDecodeVerdict verdict;
     if (env.w64 || env.rf64) {
         verdict.reason = "in-memory decoder accepts RIFF envelopes only";
-    } else if (env.declared_end != b.reader.size()) {
-        verdict.reason = "RIFF size " + std::to_string(env.declared_end - 8u) +
+    } else if (env.iff.declared_end != b.reader.size()) {
+        verdict.reason = "RIFF size " + std::to_string(env.iff.declared_end - 8u) +
                          " does not match file size " + std::to_string(b.reader.size());
-    } else if (walk.structural_fault) {
-        verdict.reason = walk.first_fault;
+    } else if (walk.first_fault) {
+        verdict.reason = *walk.first_fault;
     } else if (!walk.fmt) {
         verdict.reason = "no fmt chunk";
     } else if (!walk.data_seen) {
@@ -440,7 +439,6 @@ void finish(Builder& b, const Envelope& env, Walk& walk, std::uint64_t walk_end)
         verdict.decodable = true;
     }
     report.decode = verdict;
-    (void)walk_end;
 }
 
 } // namespace
@@ -459,16 +457,16 @@ void inspect_wav_layout(Builder& b) {
     bool have_ds64 = false;
 
     // RF64 resolves its envelope through ds64, which must be the first chunk.
-    std::uint64_t offset = env.header_size;
+    std::uint64_t offset = env.iff.header_size;
     if (env.rf64) {
         if (const auto first = read_chunk_header(b, env, offset); first && first->id == "ds64") {
-            auto& region = b.add_region(offset, env.chunk_header_size, first->declared, first->id,
-                                        LayoutRegionKind::envelope);
-            parse_ds64(b, region, ds64, offset + env.chunk_header_size, first->declared);
+            auto& region = b.add_region(offset, env.iff.chunk_header_size, first->declared,
+                                        first->id, LayoutRegionKind::envelope);
+            parse_ds64(b, region, ds64, offset + env.iff.chunk_header_size, first->declared);
             have_ds64 = region.fields.size() >= 4u;
             if (have_ds64 && env.declared_sentinel)
-                env.declared_end = ds64.riff_size + 8u;
-            offset += env.chunk_header_size + first->declared + (first->declared & 1u);
+                env.iff.declared_end = ds64.riff_size + 8u;
+            offset += env.iff.chunk_header_size + first->declared + (first->declared & 1u);
         }
         if (!have_ds64) {
             b.warn(LayoutWarningKind::sentinel_size_without_ds64, 0u,
@@ -476,174 +474,83 @@ void inspect_wav_layout(Builder& b) {
         }
     }
 
-    if (env.declared_end != file_size) {
+    if (env.iff.declared_end != file_size) {
         b.warn(LayoutWarningKind::envelope_size_mismatch, 0u,
-               "envelope declares " + std::to_string(env.declared_end) + " bytes, file holds " +
+               "envelope declares " + std::to_string(env.iff.declared_end) + " bytes, file holds " +
                    std::to_string(file_size));
     }
     // Walk to the smaller of the declared envelope and the file, except when
     // the declared size is unusable (zero or shorter than the header), where
     // the file size is the only bound left.
-    const auto walk_end =
-        env.declared_end >= env.header_size ? std::min(env.declared_end, file_size) : file_size;
-    while (offset < walk_end && !report.regions_truncated) {
-        if (walk_end - offset < env.chunk_header_size) {
-            auto& stub = b.add_region(offset, 0u, walk_end - offset, "", LayoutRegionKind::unknown);
-            stub.note = "shorter than a chunk header";
-            if (!walk.structural_fault) {
-                walk.structural_fault = true;
-                walk.first_fault = "trailing bytes shorter than a chunk header";
-            }
-            break;
-        }
-        const auto header = read_chunk_header(b, env, offset);
-        if (!header)
-            break;
-        const auto payload_offset = offset + env.chunk_header_size;
-        std::uint64_t declared = header->declared;
-        bool stop_after = false;
+    env.iff.walk_end = env.iff.declared_end >= env.iff.header_size
+                           ? std::min(env.iff.declared_end, file_size)
+                           : file_size;
 
-        if (header->sentinel) {
-            if (have_ds64 && header->id == "data") {
-                declared = ds64.data_size;
-            } else if (have_ds64 && ds64.table.count(header->id) != 0u) {
-                declared = ds64.table.at(header->id);
+    IffHooks hooks;
+    hooks.read_header = [&](std::uint64_t at) { return read_chunk_header(b, env, at); };
+    hooks.classify = classify;
+    hooks.fault = [&](std::string message) { walk.fault(std::move(message)); };
+    hooks.resolve = [&](IffChunk& chunk) {
+        if (chunk.sentinel) {
+            if (have_ds64 && chunk.id == "data") {
+                chunk.declared = ds64.data_size;
+            } else if (have_ds64 && ds64.table.count(chunk.id) != 0u) {
+                chunk.declared = ds64.table.at(chunk.id);
             } else {
-                b.warn(LayoutWarningKind::sentinel_size_without_ds64, offset,
-                       header->id + " chunk size is 0xFFFFFFFF with no ds64 entry");
-                declared = payload_offset <= file_size ? file_size - payload_offset : 0u;
-                stop_after = true;
-                if (!walk.structural_fault) {
-                    walk.structural_fault = true;
-                    walk.first_fault =
-                        header->id + " chunk size is 0xFFFFFFFF with no ds64 to resolve it";
-                }
+                b.warn(LayoutWarningKind::sentinel_size_without_ds64, chunk.offset,
+                       chunk.id + " chunk size is 0xFFFFFFFF with no ds64 entry");
+                chunk.declared =
+                    chunk.payload_offset <= file_size ? file_size - chunk.payload_offset : 0u;
+                chunk.stop_after = true;
+                walk.fault(chunk.id + " chunk size is 0xFFFFFFFF with no ds64 to resolve it");
             }
-        } else if (env.rf64 && have_ds64 && header->id == "data" && ds64.data_size != declared) {
+        } else if (env.rf64 && have_ds64 && chunk.id == "data" &&
+                   ds64.data_size != chunk.declared) {
             // The decoder trusts ds64 for the data size, so the payload it
             // reads extends past the 32-bit extent the walk uses.
-            if (ds64.data_size > declared) {
-                b.warn(LayoutWarningKind::chunk_overlap, offset,
+            if (ds64.data_size > chunk.declared) {
+                b.warn(LayoutWarningKind::chunk_overlap, chunk.offset,
                        "ds64 data size " + std::to_string(ds64.data_size) + " extends " +
-                           std::to_string(ds64.data_size - declared) +
-                           " bytes past the data chunk's own size " + std::to_string(declared) +
-                           ", over the chunks that follow");
+                           std::to_string(ds64.data_size - chunk.declared) +
+                           " bytes past the data chunk's own size " +
+                           std::to_string(chunk.declared) + ", over the chunks that follow");
             } else {
-                b.warn(LayoutWarningKind::chunk_overlap, offset,
+                b.warn(LayoutWarningKind::chunk_overlap, chunk.offset,
                        "ds64 data size " + std::to_string(ds64.data_size) +
-                           " disagrees with the data chunk size " + std::to_string(declared));
+                           " disagrees with the data chunk size " + std::to_string(chunk.declared));
             }
         }
-
-        const auto kind = header->printable ? classify(header->id) : LayoutRegionKind::unknown;
-        auto& region = b.add_region(offset, env.chunk_header_size, declared, header->id, kind);
-        if (!header->printable)
-            region.note =
-                "chunk id is not printable ASCII; the walk may be out of step with the file";
-
-        const bool past_eof = payload_offset > file_size || declared > file_size - payload_offset;
-        const auto chunk_end = past_eof ? file_size : payload_offset + declared;
-        if (past_eof) {
-            const auto missing = payload_offset + declared - file_size;
-            if (header->id == "data") {
-                b.warn(LayoutWarningKind::truncated_data, offset,
-                       "data declares " + std::to_string(declared) + " bytes, " +
-                           std::to_string(missing) + " past end of file");
-            } else {
-                b.warn(LayoutWarningKind::chunk_past_eof, offset,
-                       header->id + " declares " + std::to_string(declared) + " bytes, " +
-                           std::to_string(missing) + " past end of file");
-            }
-            if (!walk.structural_fault) {
-                walk.structural_fault = true;
-                walk.first_fault = header->id + " chunk extends past end of file";
-            }
-        }
-
-        std::uint64_t pad = 0u;
-        if (!env.w64 && (declared & 1u) != 0u) {
-            pad = 1u;
-            if (!past_eof && chunk_end >= file_size) {
-                b.warn(LayoutWarningKind::missing_pad_byte, offset,
-                       header->id + " has odd size " + std::to_string(declared) +
-                           " and ends the file without a pad byte");
-                if (!walk.structural_fault) {
-                    walk.structural_fault = true;
-                    walk.first_fault = header->id + " chunk is odd-sized with no pad byte";
-                }
-                pad = 0u;
-            }
-        } else if (env.w64) {
-            const auto total = env.chunk_header_size + declared;
-            pad = (env.alignment - (total % env.alignment)) % env.alignment;
-        }
-
-        if (header->id == "fmt ") {
-            parse_fmt(b, region, walk, payload_offset, declared);
-        } else if (header->id == "data") {
+    };
+    hooks.on_chunk = [&](const IffChunk& chunk, LayoutRegion& region) {
+        const auto& id = chunk.id;
+        if (id == "fmt ") {
+            parse_fmt(b, region, walk, chunk.payload_offset, chunk.declared);
+        } else if (id == "data") {
             if (!walk.data_seen) {
                 walk.data_seen = true;
-                walk.data_offset = offset;
-                walk.data_size = (env.rf64 && have_ds64) ? ds64.data_size : declared;
-                walk.data_actual = region.actual_size;
+                walk.data_offset = chunk.offset;
+                walk.data_size = (env.rf64 && have_ds64) ? ds64.data_size : chunk.declared;
             } else {
                 region.note = "second data chunk; the decoder uses the first";
             }
-        } else if (header->id == "fact") {
-            // dr_wav reads a fixed 4 bytes (8 in Wave64) from any fact chunk
-            // before data, then subtracts that from the declared size. A
-            // shorter chunk underflows and the seek to the next chunk fails,
-            // except when the underflow plus the pad byte lands back on zero
-            // (RIFF size 3, Wave64 size 7), so the decoder stops exactly on
-            // sizes 0, 1, 2 (0 to 6 but 7 for Wave64).
-            const std::uint64_t count_bytes = env.w64 ? 8u : 4u;
-            if (!env.rf64 && !walk.data_seen && declared < count_bytes &&
-                declared != count_bytes - 1u && !walk.structural_fault) {
-                walk.structural_fault = true;
-                walk.first_fault = "fact chunk shorter than " + std::to_string(count_bytes) +
-                                   " bytes stops the decoder before data";
-            }
-            auto payload =
-                b.reader.read(payload_offset, std::min<std::uint64_t>(declared, count_bytes));
-            if (payload.size() == count_bytes) {
-                const std::uint64_t count =
-                    env.w64 ? read_u64le(payload.data()) : read_u32le(payload.data());
-                region.fields.push_back({"sample_length", count});
-                if (!walk.fact_frames)
-                    walk.fact_frames = count;
-            } else {
-                region.note = "fact payload shorter than its sample count";
-            }
-        } else if (header->id == "ds64") {
+        } else if (id == "fact") {
+            parse_fact(b, region, walk, env, chunk);
+        } else if (id == "ds64") {
             region.note = "ds64 after the first chunk position; the decoder ignores it here";
-        } else if (header->id == "bext") {
+        } else if (id == "bext") {
             walk.has_bext = true;
-            b.present(header->id, offset, declared);
-            parse_bext(b, region, payload_offset, declared);
-        } else if (header->id == "LIST") {
-            b.present(header->id, offset, declared);
-            parse_list(b, region, payload_offset, declared);
-        } else if (header->id == "acid") {
-            b.present(header->id, offset, declared);
-            parse_acid(b, region, payload_offset, declared);
-        } else if (header->id == "iXML" || header->id == "axml" || header->id == "_PMX") {
-            b.present(header->id, offset, declared);
-            parse_xml_text(b, header->id, payload_offset, declared);
-        } else if (kind == LayoutRegionKind::metadata) {
-            b.present(header->id, offset, declared);
+            parse_bext(b, region, chunk.payload_offset, chunk.declared);
+        } else if (id == "LIST") {
+            parse_list(b, region, chunk.payload_offset, chunk.declared);
+        } else if (id == "acid") {
+            parse_acid(b, region, chunk.payload_offset, chunk.declared);
+        } else if (id == "iXML" || id == "axml" || id == "_PMX") {
+            b.read_text(id, "xml", chunk.payload_offset, chunk.declared);
         }
+    };
+    walk_iff_chunks(b, env.iff, offset, hooks);
 
-        if (stop_after || past_eof)
-            break;
-        offset = chunk_end + pad;
-    }
-    if (env.declared_end > env.header_size && env.declared_end < file_size) {
-        auto& trailing = b.add_region(env.declared_end, 0u, file_size - env.declared_end, "",
-                                      LayoutRegionKind::unknown);
-        trailing.note = "bytes after the declared envelope";
-    }
-
-    finish(b, env, walk, walk_end);
+    finish(b, env, walk);
 }
 
 } // namespace pulp::audio::layout_detail

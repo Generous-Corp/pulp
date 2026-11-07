@@ -7,6 +7,8 @@
 
 #include "audio_file_layout_detail.hpp"
 
+#include <pulp/runtime/crypto.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -118,7 +120,7 @@ void inspect_flac_layout(Builder& b) {
         if (type == 0u) {
             if (streaminfo_seen)
                 b.warn(LayoutWarningKind::duplicate_fmt, offset, "second STREAMINFO block");
-            auto p = b.reader.read(payload_offset, std::min<std::uint64_t>(length, 34u));
+            auto p = b.reader.read_capped(payload_offset, length, 34u);
             if (p.size() == 34u) {
                 const auto min_block = read_u16be(p.data());
                 const auto max_block = read_u16be(p.data() + 2u);
@@ -138,7 +140,7 @@ void inspect_flac_layout(Builder& b) {
                 region.fields.push_back({"bits_per_sample", static_cast<std::uint64_t>(bps)});
                 region.fields.push_back({"total_samples", samples});
                 region.fields.push_back({"variable_block_size", min_block != max_block});
-                region.fields.push_back({"md5", hex_bytes(p.data() + 18u, 16u)});
+                region.fields.push_back({"md5", runtime::hex_encode(p.data() + 18u, 16u)});
                 if (!streaminfo_seen) {
                     sample_rate = rate;
                     channels = ch;
@@ -151,21 +153,18 @@ void inspect_flac_layout(Builder& b) {
             streaminfo_seen = true;
         } else if (type == 3u) {
             region.fields.push_back({"seek_points", length / 18u});
-            b.present(id, offset, length);
         } else if (type == 4u) {
-            b.present(id, offset, length);
-            auto p =
-                b.reader.read(payload_offset, std::min<std::uint64_t>(length, kMaxPayloadRead));
+            auto p = b.reader.read_capped(payload_offset, length, kMaxPayloadRead);
             parse_vorbis_comments(b, region, id, p.data(), p.size());
         } else if (type == 2u) {
-            auto p = b.reader.read(payload_offset, std::min<std::uint64_t>(length, 4u));
+            auto p = b.reader.read_capped(payload_offset, length, 4u);
             if (p.size() == 4u)
-                region.fields.push_back({"application_id", raw_id_printable(p.data(), 4u)
-                                                               ? fourcc(p.data())
-                                                               : hex_bytes(p.data(), 4u)});
-            b.present(id, offset, length);
+                region.fields.push_back(
+                    {"application_id", raw_id_printable(p.data(), 4u)
+                                           ? fourcc(p.data())
+                                           : runtime::hex_encode(p.data(), 4u)});
         } else if (type == 6u) {
-            auto p = b.reader.read(payload_offset, std::min<std::uint64_t>(length, 512u));
+            auto p = b.reader.read_capped(payload_offset, length, 512u);
             if (p.size() >= 8u) {
                 region.fields.push_back(
                     {"picture_type", static_cast<std::uint64_t>(read_u32be(p.data()))});
@@ -195,9 +194,7 @@ void inspect_flac_layout(Builder& b) {
                     }
                 }
             }
-            b.present(id, offset, length);
         } else if (type == 5u) {
-            b.present(id, offset, length);
         }
 
         if (past_eof)
@@ -295,8 +292,7 @@ struct OggStream {
     bool comments_pending = false;
 };
 
-void identify(Builder& b, LayoutRegion& region, OggStream& stream, const std::uint8_t* p,
-              std::size_t size) {
+void identify(LayoutRegion& region, OggStream& stream, const std::uint8_t* p, std::size_t size) {
     if (size >= 30u && std::memcmp(p, "\x01vorbis", 7u) == 0) {
         stream.codec = "vorbis";
         stream.channels = p[11];
@@ -340,14 +336,13 @@ void identify(Builder& b, LayoutRegion& region, OggStream& stream, const std::ui
     } else {
         stream.codec = "unknown";
         region.fields.push_back(
-            {"first_packet_prefix", hex_bytes(p, std::min<std::size_t>(size, 8u))});
+            {"first_packet_prefix", runtime::hex_encode(p, std::min<std::size_t>(size, 8u))});
     }
     region.fields.push_back({"codec", stream.codec});
     if (stream.channels != 0u)
         region.fields.push_back({"channels", static_cast<std::uint64_t>(stream.channels)});
     if (stream.sample_rate != 0u)
         region.fields.push_back({"sample_rate", static_cast<std::uint64_t>(stream.sample_rate)});
-    (void)b;
 }
 
 } // namespace
@@ -398,22 +393,21 @@ void inspect_ogg_layout(Builder& b) {
             region.fields.push_back({"page_sequence", static_cast<std::uint64_t>(page.sequence)});
             region.fields.push_back({"bos", bos});
             region.fields.push_back({"segments", static_cast<std::uint64_t>(page.segments)});
-            auto body =
-                b.reader.read(page.body_offset, std::min<std::uint64_t>(page.body_size, 512u));
-            identify(b, region, *stream, body.data(), body.size());
+            auto body = b.reader.read_capped(page.body_offset, page.body_size, 512u);
+            identify(region, *stream, body.data(), body.size());
             region.note =
                 bos ? "identification header" : "page with no preceding BOS page for its serial";
         } else if (stream->comments_pending) {
             stream->comments_pending = false;
-            auto& region =
-                b.add_region(page.offset, 0u, page.size, "OggS", LayoutRegionKind::metadata);
+            // The comment header carries the codec's own tag name so the
+            // metadata listing names what the page holds, not the container.
+            auto& region = b.add_region(page.offset, 0u, page.size,
+                                        stream->codec == "opus" ? "OpusTags" : "VorbisComment",
+                                        LayoutRegionKind::metadata);
             region.fields.push_back({"serial", static_cast<std::uint64_t>(page.serial)});
             region.fields.push_back({"page_sequence", static_cast<std::uint64_t>(page.sequence)});
             region.note = "comment header";
-            b.present(stream->codec == "opus" ? "OpusTags" : "VorbisComment", page.offset,
-                      page.size);
-            auto body = b.reader.read(page.body_offset,
-                                      std::min<std::uint64_t>(page.body_size, kMaxPayloadRead));
+            auto body = b.reader.read_capped(page.body_offset, page.body_size, kMaxPayloadRead);
             std::size_t skip = 0u;
             if (stream->codec == "vorbis" && body.size() >= 7u)
                 skip = 7u;

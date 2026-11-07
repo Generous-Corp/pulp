@@ -14,10 +14,12 @@
 ///
 /// The WAV facts that drive decodability (rate, channels, bits, frames) come
 /// from the same dr_wav interpretation `inspect_wav` uses, through
-/// `interpret_wav_format`, and the accept/reject verdict mirrors the
-/// decoder's chunk-walk rules. A parity test holds the two together; the
-/// walk here is deliberately tolerant where the decoder is strict, so any
-/// new decoder-stopping condition must be mirrored in the WAV walker.
+/// `interpret_wav_format`. The accept/reject verdict is a mirror of the
+/// decoder's chunk-walk rules, and that mirrored list (exact envelope size,
+/// chunks within the file, pad bytes present, a readable fmt before or
+/// after data, a fact chunk the decoder can step over, whole frames) is
+/// the contract: a decoder-stopping condition that is not on it is a bug
+/// in this report, and the parity test is what catches it.
 
 #include <pulp/audio/wav_decoder.hpp>
 
@@ -27,6 +29,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -87,35 +90,6 @@ class FileByteSource final : public LayoutByteSource {
   private:
     int handle_ = -1;
     std::uint64_t size_ = 0u;
-};
-
-/// Decorator that counts bytes and read calls passing through another source.
-class CountingByteSource final : public LayoutByteSource {
-  public:
-    explicit CountingByteSource(LayoutByteSource& inner) noexcept : inner_(inner) {}
-
-    [[nodiscard]] std::uint64_t size() const noexcept override {
-        return inner_.size();
-    }
-    [[nodiscard]] std::size_t read_at(std::uint64_t offset,
-                                      std::span<std::uint8_t> out) noexcept override;
-
-    [[nodiscard]] std::uint64_t bytes_read() const noexcept {
-        return bytes_read_;
-    }
-    [[nodiscard]] std::uint64_t read_calls() const noexcept {
-        return read_calls_;
-    }
-    /// Highest file offset any read touched, exclusive.
-    [[nodiscard]] std::uint64_t high_water_offset() const noexcept {
-        return high_water_;
-    }
-
-  private:
-    LayoutByteSource& inner_;
-    std::uint64_t bytes_read_ = 0u;
-    std::uint64_t read_calls_ = 0u;
-    std::uint64_t high_water_ = 0u;
 };
 
 /// Container the inspector recognized from the leading bytes.
@@ -184,13 +158,6 @@ struct LayoutRegion {
     std::string note;                ///< one-line clarification when the id alone misleads
 };
 
-/// A metadata region named by id and location, without its contents.
-struct LayoutMetadataPresence {
-    std::string id;
-    std::uint64_t offset = 0u;
-    std::uint64_t size = 0u;
-};
-
 /// Free text lifted from a metadata region. Emitted only on request.
 struct LayoutMetadataText {
     std::string region_id;
@@ -221,10 +188,21 @@ struct LayoutDecodeVerdict {
 
 /// `decode_wav`'s allocation ceilings applied to the declared stream.
 struct LayoutDecodeLimitsFact {
-    bool exceeds = false;
-    std::vector<std::string> exceeded; ///< names of the limits exceeded, in check order
+    bool exceeds_frames = false;
+    bool exceeds_channels = false;
+    bool exceeds_output_bytes = false;
     WavDecodeLimits limits;
     std::uint64_t output_bytes = 0u; ///< frames x channels x sizeof(float), 0 on overflow
+
+    [[nodiscard]] bool exceeds() const noexcept {
+        return exceeds_frames || exceeds_channels || exceeds_output_bytes;
+    }
+    /// Names of the exceeded ceilings in check order: max_frames,
+    /// max_channels, max_output_bytes.
+    [[nodiscard]] std::vector<std::string_view> exceeded_names() const;
+    /// "max_frames=N max_channels=N" for each exceeded ceiling; empty when
+    /// none is.
+    [[nodiscard]] std::string describe() const;
 };
 
 /// Description of a headerless PCM payload. Every field is required; the
@@ -265,7 +243,6 @@ struct AudioFileLayoutReport {
     std::optional<LayoutStreamFacts> stream;
     std::optional<LayoutDecodeVerdict> decode;
     std::optional<LayoutDecodeLimitsFact> decode_limits;
-    std::vector<LayoutMetadataPresence> metadata_present;
     std::vector<LayoutMetadataText> metadata_text;
     /// Raw mode only: bytes after the last whole frame.
     std::optional<std::uint64_t> truncated_tail_bytes;
@@ -276,6 +253,8 @@ struct AudioFileLayoutReport {
     [[nodiscard]] bool is_standard() const noexcept {
         return warnings.empty();
     }
+    /// Regions of kind `metadata`, which is what `metadata.present` lists.
+    [[nodiscard]] std::vector<const LayoutRegion*> metadata_regions() const;
 };
 
 /// Inspect bytes through a source. Reads are bounded to headers and small
@@ -293,6 +272,10 @@ inspect_audio_file_layout(std::span<const std::uint8_t> bytes,
 [[nodiscard]] AudioFileLayoutReport
 inspect_audio_file_layout(const std::filesystem::path& path,
                           const LayoutInspectOptions& options = {});
+
+struct DecodeLimits;
+/// The format registry's decode ceilings as the inspector's option type.
+[[nodiscard]] WavDecodeLimits as_wav_decode_limits(const DecodeLimits& limits) noexcept;
 
 /// Names for the enumerations, as they appear in JSON.
 [[nodiscard]] const char* audio_container_name(AudioContainer container) noexcept;

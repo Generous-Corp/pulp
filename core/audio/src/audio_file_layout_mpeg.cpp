@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
-#include <functional>
+#include <optional>
 #include <string>
 
 namespace pulp::audio::layout_detail {
@@ -182,13 +182,12 @@ void inspect_mp3_layout(Builder& b) {
         region.fields.push_back({"unsynchronisation", (flags & 0x80u) != 0u});
         region.fields.push_back({"extended_header", (flags & 0x40u) != 0u});
         region.fields.push_back({"footer", footer});
-        b.present("ID3v2", 0u, total);
         if (total > file_size) {
             b.warn(LayoutWarningKind::chunk_past_eof, 0u,
                    "ID3v2 tag declares " + std::to_string(total) + " bytes, " +
                        std::to_string(total - file_size) + " past end of file");
         } else {
-            auto body = b.reader.read(10u, std::min<std::uint64_t>(tag_size, kMaxPayloadRead));
+            auto body = b.reader.read_capped(10u, tag_size, kMaxPayloadRead);
             // Unsynchronisation inserts a 0x00 after every 0xFF; undo it
             // before the frame walk reads sizes.
             if ((flags & 0x80u) != 0u && major <= 3u) {
@@ -224,7 +223,6 @@ void inspect_mp3_layout(Builder& b) {
             auto& region =
                 b.add_region(file_size - 128u, 0u, 128u, "ID3v1", LayoutRegionKind::metadata);
             region.fields.push_back({"has_track_number", tail[125] == 0u && tail[126] != 0u});
-            b.present("ID3v1", file_size - 128u, 128u);
             b.text("ID3v1", "title", trimmed_text(tail.data() + 3u, 30u));
             b.text("ID3v1", "artist", trimmed_text(tail.data() + 33u, 30u));
             b.text("ID3v1", "album", trimmed_text(tail.data() + 63u, 30u));
@@ -245,7 +243,6 @@ void inspect_mp3_layout(Builder& b) {
             region.fields.push_back({"version", static_cast<std::uint64_t>(version)});
             region.fields.push_back({"items", static_cast<std::uint64_t>(items)});
             region.fields.push_back({"has_header", has_header});
-            b.present("APEv2", start, total);
             if (total > audio_end) {
                 b.warn(LayoutWarningKind::chunk_overlap, start,
                        "APE tag declares " + std::to_string(total) + " bytes but only " +
@@ -320,8 +317,7 @@ void inspect_mp3_layout(Builder& b) {
         const bool mpeg1 = first->version_index == 3u;
         const std::size_t side_info =
             mpeg1 ? (first->channels == 1u ? 17u : 32u) : (first->channels == 1u ? 9u : 17u);
-        auto frame =
-            b.reader.read(first_offset, std::min<std::uint64_t>(first->frame_length, 2048u));
+        auto frame = b.reader.read_capped(first_offset, first->frame_length, 2048u);
         const std::size_t xing_at = 4u + side_info;
         if (frame.size() >= xing_at + 8u &&
             (std::memcmp(frame.data() + xing_at, "Xing", 4u) == 0 ||
@@ -402,21 +398,69 @@ struct Mp4Facts {
     bool audio_track_done = false;
 };
 
-LayoutRegionKind box_kind(std::string_view type) {
-    if (type == "ftyp")
-        return LayoutRegionKind::envelope;
-    if (type == "moov" || type == "trak" || type == "mdia" || type == "minf" || type == "stbl" ||
-        type == "mvhd" || type == "tkhd" || type == "mdhd" || type == "hdlr" || type == "stsd" ||
-        type == "stts" || type == "stsz" || type == "stsc" || type == "stco" || type == "co64" ||
-        type == "esds" || type == "elst" || type == "edts" || type == "smhd" || type == "dinf")
-        return LayoutRegionKind::fmt;
-    if (type == "mdat")
-        return LayoutRegionKind::data;
-    if (type == "free" || type == "skip" || type == "wide")
-        return LayoutRegionKind::padding;
-    if (type == "udta" || type == "meta" || type == "ilst" || type == "chpl" || type == "uuid")
-        return LayoutRegionKind::metadata;
-    return LayoutRegionKind::unknown;
+// What each box is and whether its body is more boxes. A type not listed is
+// an unknown leaf; a child of `ilst` is a container whatever its name.
+struct BoxTrait {
+    std::string_view type;
+    LayoutRegionKind kind;
+    bool container;
+};
+
+constexpr std::array<BoxTrait, 31> kBoxTraits{{
+    {"ftyp", LayoutRegionKind::envelope, false}, {"moov", LayoutRegionKind::fmt, true},
+    {"trak", LayoutRegionKind::fmt, true},       {"mdia", LayoutRegionKind::fmt, true},
+    {"minf", LayoutRegionKind::fmt, true},       {"stbl", LayoutRegionKind::fmt, true},
+    {"edts", LayoutRegionKind::fmt, true},       {"dinf", LayoutRegionKind::fmt, true},
+    {"mvhd", LayoutRegionKind::fmt, false},      {"tkhd", LayoutRegionKind::fmt, false},
+    {"mdhd", LayoutRegionKind::fmt, false},      {"hdlr", LayoutRegionKind::fmt, false},
+    {"stsd", LayoutRegionKind::fmt, false},      {"stts", LayoutRegionKind::fmt, false},
+    {"stsz", LayoutRegionKind::fmt, false},      {"stsc", LayoutRegionKind::fmt, false},
+    {"stco", LayoutRegionKind::fmt, false},      {"co64", LayoutRegionKind::fmt, false},
+    {"esds", LayoutRegionKind::fmt, false},      {"elst", LayoutRegionKind::fmt, false},
+    {"smhd", LayoutRegionKind::fmt, false},      {"mdat", LayoutRegionKind::data, false},
+    {"free", LayoutRegionKind::padding, false},  {"skip", LayoutRegionKind::padding, false},
+    {"wide", LayoutRegionKind::padding, false},  {"udta", LayoutRegionKind::metadata, true},
+    {"meta", LayoutRegionKind::metadata, true},  {"ilst", LayoutRegionKind::metadata, true},
+    {"chpl", LayoutRegionKind::metadata, false}, {"uuid", LayoutRegionKind::metadata, false},
+    {"dref", LayoutRegionKind::unknown, false},
+}};
+
+const BoxTrait* box_trait(std::string_view type) {
+    for (const auto& trait : kBoxTraits) {
+        if (trait.type == type)
+            return &trait;
+    }
+    return nullptr;
+}
+
+/// A box header read from `bytes` at `at`: the full box size (0 means "to
+/// the end"), the header length (16 with a largesize), and the type.
+struct BoxHeader {
+    std::uint64_t size = 0u;
+    std::uint64_t header = 8u;
+    std::string type;
+    bool printable = true;
+    bool largesize = false;
+};
+
+std::optional<BoxHeader> parse_box_header(std::span<const std::uint8_t> bytes, std::size_t at,
+                                          std::uint64_t extent) {
+    if (at + 8u > bytes.size())
+        return std::nullopt;
+    BoxHeader box;
+    box.size = read_u32be(bytes.data() + at);
+    box.type = fourcc(bytes.data() + at + 4u);
+    box.printable = raw_id_printable(bytes.data() + at + 4u, 4u);
+    if (box.size == 1u) {
+        if (at + 16u > bytes.size())
+            return std::nullopt;
+        box.size = read_u64be(bytes.data() + at + 8u);
+        box.header = 16u;
+        box.largesize = true;
+    } else if (box.size == 0u) {
+        box.size = extent - at;
+    }
+    return box;
 }
 
 // Reads an MPEG-4 descriptor's expandable length.
@@ -599,21 +643,14 @@ void walk_boxes(Builder& b, Mp4Facts& facts, std::span<const std::uint8_t> bytes
                 std::uint64_t base, std::size_t depth, const std::string& parent) {
     std::size_t at = 0u;
     while (at + 8u <= bytes.size() && !b.report.regions_truncated) {
-        std::uint64_t size = read_u32be(bytes.data() + at);
-        const auto type = fourcc(bytes.data() + at + 4u);
-        std::size_t header = 8u;
-        if (size == 1u) {
-            if (at + 16u > bytes.size())
-                break;
-            size = read_u64be(bytes.data() + at + 8u);
-            header = 16u;
-        } else if (size == 0u) {
-            size = bytes.size() - at;
-        }
-        if (size < header)
+        const auto box = parse_box_header(bytes, at, bytes.size());
+        if (!box || box->size < box->header)
             break;
-        const auto kind = raw_id_printable(bytes.data() + at + 4u, 4u) ? box_kind(type)
-                                                                       : LayoutRegionKind::unknown;
+        const auto size = box->size;
+        auto header = static_cast<std::size_t>(box->header);
+        const auto& type = box->type;
+        const auto* trait = box->printable ? box_trait(type) : nullptr;
+        const auto kind = trait ? trait->kind : LayoutRegionKind::unknown;
         auto& region = b.add_region(base + at, header, size - header, type, kind);
         if (at + size > bytes.size()) {
             // A child that runs past its parent is clamped to the parent's
@@ -632,12 +669,7 @@ void walk_boxes(Builder& b, Mp4Facts& facts, std::span<const std::uint8_t> bytes
             break;
         const auto body =
             bytes.subspan(at + header, static_cast<std::size_t>(body_end - at - header));
-        const bool container = type == "moov" || type == "trak" || type == "mdia" ||
-                               type == "minf" || type == "stbl" || type == "udta" ||
-                               type == "meta" || type == "ilst" || type == "edts" ||
-                               type == "dinf" || (parent == "ilst");
-        if (type == "udta" || type == "meta" || type == "ilst")
-            b.present(type, base + at, size);
+        const bool container = trait ? trait->container : parent == "ilst";
         if (container && depth + 1u < kMaxBoxDepth) {
             walk_boxes(b, facts, body, base + at + header, depth + 1u, type);
             if (type == "trak" && facts.handler == "soun")
@@ -660,29 +692,24 @@ void inspect_mp4_layout(Builder& b) {
     Mp4Facts facts;
     std::uint64_t offset = 0u;
     while (offset < file_size && !report.regions_truncated) {
-        std::array<std::uint8_t, 16> raw{};
-        if (file_size - offset < 8u || !b.reader.read_exact(offset, std::span(raw.data(), 8u))) {
+        // Sixteen bytes cover a largesize header; the parser reads what the
+        // size field says is there.
+        const auto raw = b.reader.read(offset, 16u);
+        const auto box =
+            raw.size() >= 8u ? parse_box_header(raw, 0u, file_size - offset) : std::nullopt;
+        if (!box) {
             auto& stub =
                 b.add_region(offset, 0u, file_size - offset, "", LayoutRegionKind::unknown);
             stub.note = "shorter than a box header";
             break;
         }
-        std::uint64_t size = read_u32be(raw.data());
-        const auto type = fourcc(raw.data() + 4u);
-        std::uint64_t header = 8u;
-        bool largesize = false;
-        if (size == 1u) {
-            if (!b.reader.read_exact(offset + 8u, std::span(raw.data() + 8u, 8u)))
-                break;
-            size = read_u64be(raw.data() + 8u);
-            header = 16u;
-            largesize = true;
-        } else if (size == 0u) {
-            size = file_size - offset;
-        }
-        const bool printable = raw_id_printable(raw.data() + 4u, 4u);
+        const auto size = box->size;
+        const auto header = box->header;
+        const auto& type = box->type;
+        const bool largesize = box->largesize;
+        const auto* trait = box->printable ? box_trait(type) : nullptr;
         auto& region = b.add_region(offset, header, size >= header ? size - header : 0u, type,
-                                    printable ? box_kind(type) : LayoutRegionKind::unknown);
+                                    trait ? trait->kind : LayoutRegionKind::unknown);
         if (largesize)
             region.fields.push_back({"largesize", true});
         if (size < header) {
@@ -698,8 +725,7 @@ void inspect_mp4_layout(Builder& b) {
                        std::to_string(offset + size - file_size) + " past end of file");
         }
         if (type == "ftyp") {
-            auto body =
-                b.reader.read(offset + header, std::min<std::uint64_t>(size - header, 256u));
+            auto body = b.reader.read_capped(offset + header, size - header, 256u);
             if (body.size() >= 8u) {
                 region.fields.push_back({"major_brand", fourcc(body.data())});
                 region.fields.push_back(
@@ -715,8 +741,7 @@ void inspect_mp4_layout(Builder& b) {
             }
         } else if (type == "moov") {
             const auto body_size = size - header;
-            auto body =
-                b.reader.read(offset + header, std::min<std::uint64_t>(body_size, kMaxMoovRead));
+            auto body = b.reader.read_capped(offset + header, body_size, kMaxMoovRead);
             if (body_size > body.size())
                 region.note = "moov read capped at " + std::to_string(body.size()) +
                               " bytes; boxes past the cap are not listed";

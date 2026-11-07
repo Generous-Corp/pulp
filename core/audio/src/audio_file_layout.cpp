@@ -4,9 +4,10 @@
 
 #include "audio_file_layout_detail.hpp"
 
+#include <pulp/audio/format_registry.hpp>
+
 #include <algorithm>
 #include <array>
-#include <bit>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -83,15 +84,6 @@ std::size_t FileByteSource::read_at(std::uint64_t offset, std::span<std::uint8_t
         copied += static_cast<std::size_t>(got);
     }
     return copied;
-}
-
-std::size_t CountingByteSource::read_at(std::uint64_t offset,
-                                        std::span<std::uint8_t> out) noexcept {
-    const auto got = inner_.read_at(offset, out);
-    bytes_read_ += got;
-    ++read_calls_;
-    high_water_ = std::max(high_water_, offset + got);
-    return got;
 }
 
 // ── Names ───────────────────────────────────────────────────────────────────
@@ -242,6 +234,52 @@ std::uint32_t raw_pcm_bytes_per_sample(RawPcmSpec::Format format) noexcept {
     return 2u;
 }
 
+WavDecodeLimits as_wav_decode_limits(const DecodeLimits& limits) noexcept {
+    WavDecodeLimits out;
+    out.max_frames = limits.max_frames;
+    out.max_channels = limits.max_channels;
+    out.max_output_bytes = limits.max_output_bytes;
+    return out;
+}
+
+std::vector<std::string_view> LayoutDecodeLimitsFact::exceeded_names() const {
+    std::vector<std::string_view> names;
+    if (exceeds_frames)
+        names.emplace_back("max_frames");
+    if (exceeds_channels)
+        names.emplace_back("max_channels");
+    if (exceeds_output_bytes)
+        names.emplace_back("max_output_bytes");
+    return names;
+}
+
+std::string LayoutDecodeLimitsFact::describe() const {
+    std::string out;
+    auto add = [&](std::string_view name, std::uint64_t value) {
+        if (!out.empty())
+            out += ' ';
+        out += name;
+        out += '=';
+        out += std::to_string(value);
+    };
+    if (exceeds_frames)
+        add("max_frames", limits.max_frames);
+    if (exceeds_channels)
+        add("max_channels", limits.max_channels);
+    if (exceeds_output_bytes)
+        add("max_output_bytes", limits.max_output_bytes);
+    return out;
+}
+
+std::vector<const LayoutRegion*> AudioFileLayoutReport::metadata_regions() const {
+    std::vector<const LayoutRegion*> out;
+    for (const auto& region : regions) {
+        if (region.kind == LayoutRegionKind::metadata)
+            out.push_back(&region);
+    }
+    return out;
+}
+
 namespace layout_detail {
 
 // ── Reader ──────────────────────────────────────────────────────────────────
@@ -259,6 +297,11 @@ std::vector<std::uint8_t> Reader::read(std::uint64_t offset, std::uint64_t lengt
     bytes_read_ += got;
     out.resize(got);
     return out;
+}
+
+std::vector<std::uint8_t> Reader::read_capped(std::uint64_t offset, std::uint64_t declared,
+                                              std::uint64_t cap) {
+    return read(offset, std::min(declared, cap));
 }
 
 bool Reader::read_exact(std::uint64_t offset, std::span<std::uint8_t> out) {
@@ -337,29 +380,11 @@ std::string escape_control(std::string text) {
     return out;
 }
 
-bool printable_id(std::string_view id) noexcept {
-    return std::all_of(id.begin(), id.end(), [](char c) {
-        const auto u = static_cast<unsigned char>(c);
-        return u >= 0x20u && u < 0x7fu;
-    });
-}
-
-std::string hex_bytes(const std::uint8_t* p, std::size_t count) {
-    static constexpr char kHex[] = "0123456789abcdef";
-    std::string out;
-    out.reserve(count * 2u);
-    for (std::size_t i = 0; i < count; ++i) {
-        out.push_back(kHex[p[i] >> 4u]);
-        out.push_back(kHex[p[i] & 0xfu]);
-    }
-    return out;
-}
-
 std::string trimmed_text(const std::uint8_t* p, std::size_t count) {
     std::string out(reinterpret_cast<const char*>(p), count);
     while (!out.empty() && (out.back() == '\0' || out.back() == ' '))
         out.pop_back();
-    return escape_control(std::move(out));
+    return out;
 }
 
 std::string utf16_to_utf8(const std::uint8_t* p, std::size_t count, bool big_endian) {
@@ -431,10 +456,6 @@ void Builder::warn(LayoutWarningKind kind, std::uint64_t offset, std::string det
     report.warnings.push_back(LayoutWarning{kind, offset, std::move(detail)});
 }
 
-void Builder::present(const std::string& id, std::uint64_t offset, std::uint64_t size) {
-    report.metadata_present.push_back(LayoutMetadataPresence{id, offset, size});
-}
-
 void Builder::text(const std::string& region_id, std::string key, std::string value) {
     if (!options.include_metadata_text || value.empty())
         return;
@@ -442,6 +463,17 @@ void Builder::text(const std::string& region_id, std::string key, std::string va
     // string can, so control bytes are escaped here, once, for every caller.
     report.metadata_text.push_back(LayoutMetadataText{region_id, escape_control(std::move(key)),
                                                       escape_control(std::move(value))});
+}
+
+void Builder::read_text(const std::string& region_id, std::string key, std::uint64_t payload_offset,
+                        std::uint64_t declared, std::uint64_t cap) {
+    if (!options.include_metadata_text)
+        return;
+    const auto payload = reader.read_capped(payload_offset, declared, cap);
+    auto value = trimmed_text(payload.data(), payload.size());
+    if (declared > payload.size())
+        value += "\n[truncated at " + std::to_string(payload.size()) + " bytes]";
+    text(region_id, std::move(key), std::move(value));
 }
 
 void Builder::set_decode_limits(std::uint64_t frames, std::uint32_t channels) {
@@ -454,13 +486,9 @@ void Builder::set_decode_limits(std::uint64_t frames, std::uint32_t channels) {
     if (fits)
         bytes = frames * channels * sizeof(float);
     fact.output_bytes = bytes;
-    if (frames > fact.limits.max_frames)
-        fact.exceeded.emplace_back("max_frames");
-    if (channels > fact.limits.max_channels)
-        fact.exceeded.emplace_back("max_channels");
-    if (!fits || bytes > fact.limits.max_output_bytes)
-        fact.exceeded.emplace_back("max_output_bytes");
-    fact.exceeds = !fact.exceeded.empty();
+    fact.exceeds_frames = frames > fact.limits.max_frames;
+    fact.exceeds_channels = channels > fact.limits.max_channels;
+    fact.exceeds_output_bytes = !fits || bytes > fact.limits.max_output_bytes;
     report.decode_limits = fact;
 }
 
@@ -542,6 +570,82 @@ AudioContainer sniff(Reader& reader, std::string& detail) {
 }
 
 } // namespace
+
+// ── IFF chunk walk ──────────────────────────────────────────────────────────
+
+void walk_iff_chunks(Builder& b, const IffEnvelope& env, std::uint64_t start,
+                     const IffHooks& hooks) {
+    auto& report = b.report;
+    const auto file_size = b.reader.size();
+    auto fault = [&](std::string message) {
+        if (hooks.fault)
+            hooks.fault(std::move(message));
+    };
+    std::uint64_t offset = start;
+    while (offset < env.walk_end && !report.regions_truncated) {
+        if (env.walk_end - offset < env.chunk_header_size) {
+            auto& stub =
+                b.add_region(offset, 0u, env.walk_end - offset, "", LayoutRegionKind::unknown);
+            stub.note = "shorter than a chunk header";
+            fault("trailing bytes shorter than a chunk header");
+            break;
+        }
+        auto header = hooks.read_header(offset);
+        if (!header)
+            break;
+        IffChunk& chunk = *header;
+        chunk.offset = offset;
+        chunk.payload_offset = offset + env.chunk_header_size;
+        if (hooks.resolve)
+            hooks.resolve(chunk);
+
+        const auto kind = chunk.printable ? hooks.classify(chunk.id) : LayoutRegionKind::unknown;
+        auto& region = b.add_region(offset, env.chunk_header_size, chunk.declared, chunk.id, kind);
+        if (!chunk.printable)
+            region.note =
+                "chunk id is not printable ASCII; the walk may be out of step with the file";
+
+        chunk.past_eof =
+            chunk.payload_offset > file_size || chunk.declared > file_size - chunk.payload_offset;
+        chunk.chunk_end = chunk.past_eof ? file_size : chunk.payload_offset + chunk.declared;
+        if (chunk.past_eof) {
+            const auto missing = chunk.payload_offset + chunk.declared - file_size;
+            b.warn(chunk.id == env.data_id ? LayoutWarningKind::truncated_data
+                                           : LayoutWarningKind::chunk_past_eof,
+                   offset,
+                   chunk.id + " declares " + std::to_string(chunk.declared) + " bytes, " +
+                       std::to_string(missing) + " past end of file");
+            fault(chunk.id + " chunk extends past end of file");
+        }
+
+        std::uint64_t pad = 0u;
+        if (env.pad_bytes) {
+            if ((chunk.declared & 1u) != 0u) {
+                pad = 1u;
+                if (!chunk.past_eof && chunk.chunk_end >= file_size) {
+                    b.warn(LayoutWarningKind::missing_pad_byte, offset,
+                           chunk.id + " has odd size " + std::to_string(chunk.declared) +
+                               " and ends the file without a pad byte");
+                    fault(chunk.id + " chunk is odd-sized with no pad byte");
+                    pad = 0u;
+                }
+            }
+        } else {
+            const auto total = env.chunk_header_size + chunk.declared;
+            pad = (env.alignment - (total % env.alignment)) % env.alignment;
+        }
+
+        hooks.on_chunk(chunk, region);
+        if (chunk.stop_after || chunk.past_eof)
+            break;
+        offset = chunk.chunk_end + pad;
+    }
+    if (env.declared_end > env.header_size && env.declared_end < file_size) {
+        auto& trailing = b.add_region(env.declared_end, 0u, file_size - env.declared_end, "",
+                                      LayoutRegionKind::unknown);
+        trailing.note = "bytes after the declared envelope";
+    }
+}
 
 // ── Raw PCM ─────────────────────────────────────────────────────────────────
 
