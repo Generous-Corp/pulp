@@ -1199,8 +1199,7 @@ TEST_CASE("AU v2 instrument delivers a panic to the host MIDI callback",
             MIDITimeStamp time_stamp = 0;
             std::memcpy(&time_stamp, &packet->timeStamp, sizeof(time_stamp));
             r->packets.push_back(
-                {time_stamp,
-                 std::vector<uint8_t>(packet->data, packet->data + packet->length)});
+                {time_stamp, std::vector<uint8_t>(packet->data, packet->data + packet->length)});
             packet = MIDIPacketNext(packet);
         }
         return noErr;
