@@ -97,6 +97,116 @@ Display* open_test_display(const char* what) {
 
 } // namespace
 
+TEST_CASE("X11 plugin host routes pointer input through nested editor windows",
+          "[view][plugin-view-host][input][linux]") {
+    Display* daw = open_test_display("nested pointer routing");
+
+    class InputProbe final : public View {
+    public:
+        bool wants_mouse_input() const override { return true; }
+        void on_mouse_event(const MouseEvent& event) override { events.push_back(event); }
+        std::vector<MouseEvent> events;
+    };
+
+    View root;
+    root.set_bounds({0, 0, 200, 150});
+    auto probe_owned = std::make_unique<InputProbe>();
+    auto* probe = probe_owned.get();
+    probe->set_bounds({0, 0, 200, 150});
+    probe->flex().flex_grow = 1.0f;
+    root.add_child(std::move(probe_owned));
+    register_platform_plugin_view_host();
+
+    PluginViewHost::Options opts;
+    opts.size = {200, 150};
+    opts.use_gpu = false;
+    auto host = PluginViewHost::create(root, opts);
+    REQUIRE(host);
+
+    const Window x_root = DefaultRootWindow(daw);
+    const Window outer = XCreateSimpleWindow(daw, x_root, 20, 20, 260, 210, 0, 0, 0);
+    const Window inner = XCreateSimpleWindow(daw, outer, 15, 10, 220, 170, 0, 0, 0);
+    XMapWindow(daw, outer);
+    XMapWindow(daw, inner);
+    XSync(daw, False);
+    host->attach_to_parent(reinterpret_cast<void*>(static_cast<uintptr_t>(inner)));
+    const Window child = static_cast<Window>(reinterpret_cast<uintptr_t>(host->native_handle()));
+    REQUIRE(child != 0);
+
+    bool viewable = false;
+    for (int i = 0; i < 200 && !viewable; ++i) {
+        XWindowAttributes attrs{};
+        viewable = XGetWindowAttributes(daw, child, &attrs) && attrs.map_state == IsViewable;
+        if (!viewable) {
+            host->pump_x_events();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+    REQUIRE(viewable);
+
+    auto send_button = [&](int type, int x, int y, unsigned state = 0) {
+        XEvent event{};
+        event.xbutton.type = type;
+        event.xbutton.display = daw;
+        event.xbutton.window = child;
+        event.xbutton.root = x_root;
+        event.xbutton.button = Button1;
+        event.xbutton.x = x;
+        event.xbutton.y = y;
+        event.xbutton.state = state;
+        event.xbutton.same_screen = True;
+        REQUIRE(XSendEvent(daw, child, False,
+                           type == ButtonPress ? ButtonPressMask : ButtonReleaseMask, &event));
+        XSync(daw, False);
+    };
+    auto send_motion = [&](int x, int y, unsigned state) {
+        XEvent event{};
+        event.xmotion.type = MotionNotify;
+        event.xmotion.display = daw;
+        event.xmotion.window = child;
+        event.xmotion.root = x_root;
+        event.xmotion.x = x;
+        event.xmotion.y = y;
+        event.xmotion.state = state;
+        event.xmotion.same_screen = True;
+        REQUIRE(XSendEvent(daw, child, False, PointerMotionMask, &event));
+        XSync(daw, False);
+    };
+    auto pump_until = [&](size_t count) {
+        for (int i = 0; i < 100 && probe->events.size() < count; ++i) {
+            host->pump_x_events();
+            if (probe->events.size() < count)
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(probe->events.size() >= count);
+    };
+
+    send_button(ButtonPress, 30, 40, ShiftMask);
+    pump_until(1);
+    CHECK(probe->events.front().phase == MousePhase::press);
+    CHECK(probe->events.front().position.x == 30);
+    CHECK(probe->events.front().position.y == 40);
+    CHECK(probe->events.front().modifiers == kModShift);
+
+    // The motion is outside the child; XGrabPointer must keep it routed to the
+    // host while the nested DAW wrapper remains the native parent.
+    send_motion(-20, 60, Button1Mask | ControlMask);
+    pump_until(2);
+    CHECK(probe->events.back().phase == MousePhase::drag);
+    CHECK(probe->events.back().position.x == -20);
+    CHECK(probe->events.back().position.y == 60);
+    CHECK(probe->events.back().modifiers == kModCtrl);
+
+    send_button(ButtonRelease, -20, 60, Button1Mask);
+    pump_until(3);
+    CHECK(probe->events.back().phase == MousePhase::release);
+
+    host->detach();
+    XDestroyWindow(daw, inner);
+    XDestroyWindow(daw, outer);
+    XCloseDisplay(daw);
+}
+
 // ── XDND synthetic-source handshake (Linux X11 target, #3645) ────────────────
 //
 // The X11 plugin host advertises an XDND target on its child window and runs the

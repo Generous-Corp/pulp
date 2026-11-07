@@ -148,6 +148,11 @@ public:
         release_gpu_surfaces(GpuSurfaceState::unavailable);
 #endif
         if (display_) {
+            if (pointer_grabbed_) {
+                XUngrabPointer(display_, CurrentTime);
+                XFlush(display_);
+                pointer_grabbed_ = false;
+            }
             if (gc_) XFreeGC(display_, gc_);
             if (child_) XDestroyWindow(display_, child_);
             XFlush(display_);
@@ -183,6 +188,13 @@ public:
 
     void detach() override {
         if (!display_ || !child_) return;
+        if (pointer_grabbed_) {
+            XUngrabPointer(display_, CurrentTime);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+        }
+        pointer_capture_.reset();
+        pointer_button_ = MouseButton::none;
         XUnmapWindow(display_, child_);
         Window root_win = RootWindow(display_, screen_);
         XReparentWindow(display_, child_, root_win, 0, 0);
@@ -476,6 +488,16 @@ public:
     }
 
     void handle_pointer_press(const XButtonEvent& event) {
+        // X11 wheel steps arrive as synthetic button presses, not as a
+        // press/release gesture. Route them through the shared wheel path and
+        // never leave a stale pointer capture behind.
+        if (event.button == Button4 || event.button == Button5) {
+            WheelHost wheel_host;
+            deliver_mouse_wheel(root_, pointer_point(event.x, event.y), 0.0f,
+                                event.button == Button4 ? -1.0f : 1.0f,
+                                pointer_modifiers(event.state), wheel_host);
+            return;
+        }
         const auto button = pointer_button(event.button);
         if (button == MouseButton::none)
             return;
@@ -488,9 +510,26 @@ public:
             return;
         }
         pointer_capture_.set(target);
+        // A nested DAW editor wrapper may own the pointer immediately after a
+        // press. Grab it from the child once the view tree accepts the target
+        // so motion/release remain in this editor while the pointer leaves the
+        // child during a drag.
+        if (display_ &&
+            XGrabPointer(display_, child_, True,
+                         ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+                         GrabModeAsync, GrabModeAsync, None, None,
+                         event.time) == GrabSuccess) {
+            pointer_grabbed_ = true;
+        }
         if (!deliver_mouse_down(root_, pointer_capture_.live_in(root_), point,
                                 pointer_modifiers(event.state), 1, true, button))
             pointer_capture_.reset();
+        if (!pointer_capture_.has_value() && pointer_grabbed_) {
+            XUngrabPointer(display_, event.time);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+            pointer_button_ = MouseButton::none;
+        }
     }
 
     void handle_pointer_motion(const XMotionEvent& event) {
@@ -524,6 +563,11 @@ public:
                          pointer_modifiers(event.state), 1, host, button, PointerAttributes{});
         pointer_capture_.reset();
         pointer_button_ = MouseButton::none;
+        if (display_ && pointer_grabbed_) {
+            XUngrabPointer(display_, event.time);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+        }
     }
 
     // Mirror set_size()'s surface sizing for a size the host already applied
@@ -583,6 +627,7 @@ private:
     bool in_frame_tick_ = false;
     ViewCapture pointer_capture_;
     MouseButton pointer_button_ = MouseButton::none;
+    bool pointer_grabbed_ = false;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
     X11ResizeEcho resize_echo_;
     float design_viewport_w_ = 0.0f;
