@@ -13,7 +13,7 @@ See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence 
 The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
 
 <!-- generated:start id=limitations -->
-### Known limitations (26 items across 18 capabilities)
+### Known limitations (22 items across 17 capabilities)
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
@@ -28,14 +28,10 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `formats.vst3` | Bus 0, one sidechain input, and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, and single-output processors leave aux buses silent. | `planning/production-readiness/01-format-adapters.md#1.2` |
 | `formats.vst3` | Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation. | `planning/production-readiness/01-format-adapters.md#1.2` |
 | `formats.vst3` | Controller and per-note expression input is host-mediated: CC, pitch bend, and channel aftertouch arrive when the host honors IMidiMapping hidden parameters, and per-note tuning/pressure/timbre arrive for MPE-enabled plug-ins through INoteExpressionController. There is no separate raw poly-pressure event route. | `planning/production-readiness/01-format-adapters.md#1.2` |
-| `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | `planning/production-readiness/01-format-adapters.md#1.3` |
-| `formats.au_v2` | Outbound MIDI from AU v2 effects is not wired yet; HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host. | `planning/production-readiness/01-format-adapters.md#1.3` |
 | `formats.auv3` | Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet. | `planning/production-readiness/01-format-adapters.md#1.4` |
-| `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | `planning/production-readiness/01-format-adapters.md#1.4` |
 | `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | `planning/production-readiness/05-auv3-mobile.md` |
 | `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | `planning/production-readiness/01-format-adapters.md#1.5` |
 | `audio_io.wasapi` | Full-duplex render/capture is not exposed as one synchronized WASAPI device: a WasapiDevice wraps either one render endpoint or one capture endpoint, so callers that need synchronized input/output must open and synchronize two devices. | `planning/production-readiness/02-audio-midi-io.md#2.1` |
-| `audio_io.alsa` | No input capture path. | `planning/production-readiness/02-audio-midi-io.md#2.2` |
 | `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | `planning/production-readiness/02-audio-midi-io.md#2.2` |
 | `audio_io.jack` | Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending. | `planning/production-readiness/02-audio-midi-io.md#2.2` |
 | `midi_io.coremidi` | MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback. | `planning/production-readiness/02-audio-midi-io.md#2.6` |
@@ -96,10 +92,14 @@ adapter compiles and loads — not that every host-facing feature is wired.
   with per-note modulation scope.
 - **LV2** — Atom sysex is ignored; the `run()` loop only promotes 1–3-byte
   short MIDI messages out of the input atom sequence.
-- **AAX** — Custom editor surface not wired; Pro Tools shows the
-  auto-generated parameter strip rather than a Pulp ViewBridge editor.
-  AudioSuite role is declared but not exercised end-to-end. Tracked:
-  `planning/signalgraph-and-bridge-followups-plan.md` rows 7 and 13.
+- **AAX** — The custom editor is wired (`CreateViewContainer` in
+  `aax_effect_gui.cpp` attaches the shared plugin view host on macOS and
+  Windows) but opt-in via `PULP_AAX_PLUGIN_WITH_GUI`, needs a Skia-enabled
+  build, and has not been validated in Pro Tools; plugins declared with plain
+  `PULP_AAX_PLUGIN` get the auto-generated parameter strip. AudioSuite
+  instances run in offline process mode, but no `AAX_IHostProcessor` is
+  registered and the role has not been exercised end-to-end. The SDK-gated AAX
+  suites have never been built by Pulp's own build.
 - **AUv3** — iOS jetsam pressure not modeled; heavy V8 / WebView workloads in
   the AUv3 process risk termination at ~50 MB. Tracked: workstream 05.
 - **WAM v2 / WebCLAP** — Browser origin sandbox only; no Pulp-side capability
@@ -292,13 +292,14 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | SpectrogramView (scrolling STFT) | usable | [view](modules.md#view) | |
 | MultiMeter, CorrelationMeter | usable | [view](modules.md#view) | |
 | PresetBrowser (search, categories, nav) | usable | [view](modules.md#view) | |
+| CodeEditor (syntax-highlighted viewer) | experimental | [view](modules.md#view) | Tokenizer and gutter are real and tested. Not editable: no key or mouse handling, `insert_text` only appends, `set_markers` is a no-op. Use Monaco in a WebView (`examples/webview-monaco`) for editing. |
 | MidiKeyboard (display + interaction) | usable | [view](modules.md#view) | |
 | WaveformEditor (selection, zoom, regions) | usable | [view](modules.md#view) | |
 | EqCurveView (draggable band handles) | usable | [view](modules.md#view) | |
 | FileBrowser, FileDropZone | usable | [view](modules.md#view) | |
 | GraphEditorView (canvas-based node editor) | usable | [view](modules.md#view) | SignalGraph UI |
 | ConcertinaPanel, SplitView, Breadcrumb, Toolbar | usable | [view](modules.md#view) | |
-| ColorPicker, Lasso, PropertyList, CodeEditor | usable | [view](modules.md#view) | |
+| ColorPicker, Lasso, PropertyList | usable | [view](modules.md#view) | |
 | CanvasWidget (25 draw commands) | usable | [view](modules.md#view) | [custom-rendering](../guides/custom-rendering.md) |
 | ModulationMatrixWidget (source-to-destination routes) | usable | [view](modules.md#view) | [widgets](widgets.md#audio-specific) |
 | TableListBox (sortable columns) | partial | [view](modules.md#view) | Click-to-sort columns and themed rows are implemented; built-in table scrolling/scrollbar remains planned |
@@ -355,6 +356,8 @@ Key headers: `pulp/view/view.hpp`, `pulp/view/widgets.hpp`, `pulp/view/theme.hpp
 | Dawn/D3D12 surface (Windows) | experimental | [render](modules.md#render) | Surface creation implemented, not runtime-validated |
 | Dawn/Vulkan surface (Linux) | experimental | [render](modules.md#render) | X11 surface creation implemented; Wayland extraction exists but presentation is not wired; not runtime-validated |
 | CoreGraphics fallback | usable | [render](modules.md#render) | Default render path on macOS |
+| Native 3D (glTF import, offscreen render) | experimental | [render](modules.md#render) | `core/scene` imports glTF via fastgltf; `Renderer3D` (`core/render/src/renderer3d.cpp`) renders to RGBA/PNG readback on Dawn. Wrapped half-Lambert-style diffuse, one light per type (directional, point, spot); PBR inputs approximated. No live on-screen 3D viewport. Tests: `pulp-test-renderer3d`, `pulp-test-scene3d`. |
+| Three.js in Views (`navigator.gpu` bridge) | experimental | [view](modules.md#view) | Real `three.webgpu.js` renders through a record-and-replay `navigator.gpu` shim over Dawn: macOS desktop demo (`examples/threejs-native-demo`, `pulp-test-threejs-bridge`) and iOS AUv3 under JavaScriptCore (`examples/ios-auv3-jsc-threejs`, simulator build documented, not device-validated). Buffer bytes are copied through JS arrays; no GPU readback or page-level compute. |
 | Skia Ganesh on WebGL2 (browser) | experimental | [render](modules.md#render) | The wasm render path. Paints `core/view`'s widget tree into a browser canvas, driven by a `requestAnimationFrame` render loop; DOM pointer/key events are translated into the View tree. |
 
 Native GPU rendering is **Skia Graphite over Dawn**. The browser is the one

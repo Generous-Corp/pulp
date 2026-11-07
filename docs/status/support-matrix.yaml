@@ -280,8 +280,10 @@ audio_io:
     status: experimental
     platform: linux
     notes: >-
-      Output path works. Input capture and real device-metadata
-      enumeration remain pending.
+      Output and input capture both work; an AlsaDevice is one direction, so
+      duplex means opening one input and one output device and routing between
+      them. Real device-metadata enumeration remains pending: the sample-rate
+      list is hardcoded.
   jack:
     status: experimental
     platform: linux
@@ -327,6 +329,27 @@ rendering:
     status: usable
     platform: macos
     notes: Current default render path for all macOS view hosts. Production-ready.
+  scene_3d_offscreen:
+    status: experimental
+    notes: >
+      Native 3D is an offscreen renderer, not a live viewport. core/scene imports
+      glTF through fastgltf into SceneData; Renderer3D::render_scene_data
+      (core/render/src/renderer3d.cpp) draws it on Dawn and reads back RGBA and
+      PNG bytes. Shading is a wrapped (half-Lambert-style) diffuse term with at
+      most one directional, one point and one spot light; PBR material inputs
+      are sampled but the result is an approximation, not a physically based
+      BRDF. There is no on-screen 3D view widget. Tests: pulp-test-renderer3d,
+      pulp-test-scene3d.
+  threejs_in_views:
+    status: experimental
+    notes: >
+      The real three.webgpu.js runs inside a View through the navigator.gpu
+      bridge (see runtime_apis.navigator_gpu). Desktop: examples/threejs-native-demo
+      renders cube, glTF and audio-reactive scenes on macOS (tests:
+      pulp-test-threejs-bridge). iOS: examples/ios-auv3-jsc-threejs runs the same
+      library under JavaScriptCore (no JIT) inside an AUv3 editor; it is a
+      demo with a documented simulator build and is not runtime-validated in a
+      shipping host. Windows and Linux are not claimed.
 
 css_parity:
   grid_layout:
@@ -606,9 +629,15 @@ widgets:
     status: usable
     notes: Marquee / drag-to-select overlay; CI coverage includes pulp-test-lasso. See core/view/include/pulp/view/lasso.hpp.
   code_editor:
-    status: usable
+    status: experimental
     ci_test: pulp-test-code-editor
-    notes: Syntax-highlighted text editor with gutter and line numbers; CI coverage includes pulp-test-code-editor. See core/view/include/pulp/view/code_editor.hpp.
+    notes: >
+      Read-only-style syntax-highlighted viewer with gutter and line numbers.
+      The tokenizer is real and covered by pulp-test-code-editor-tokenizer.
+      Editing is not wired. The widget handles no key or mouse input,
+      insert_text only appends to the end of the buffer, and set_markers is a
+      no-op. For an editable code surface, embed Monaco through a WebView
+      (examples/webview-monaco). See core/view/include/pulp/view/code_editor.hpp.
 
 js_authoring:
   web_compat_layer:
@@ -867,6 +896,25 @@ runtime_apis:
       SkSL body shader on a shader-capable widget, reporting compile errors rather
       than failing silently. getGPUInfo() queries backend. compileShader() validates.
       SkSL as a view post-effect (filtering already-rendered content) is not supported.
+  navigator_gpu:
+    status: experimental
+    notes: >
+      navigator.gpu is a record-and-replay shim over the shared Dawn device, not
+      a full WebGPU implementation. Adapter, device, buffer, texture, bind group,
+      render pipeline, render pass, render bundle and canvas-context objects are
+      JS-side objects that record commands; queue.submit and canvas present replay
+      the recorded draws through native bridge functions
+      (core/view/src/widget_bridge/gpu_api.cpp, core/view/js/web-compat-canvas-gpu.js).
+      Buffer contents live in JS typed arrays and are copied into JSON/base64
+      payloads (Array.from) at submit time, so large per-frame uploads are
+      costly. Not exposed: GPU readback (copyBufferToBuffer, copyTextureToBuffer
+      and copyBufferToTexture are recorded as no-ops and mapAsync resolves
+      immediately over the JS copy), and page-level compute (compute passes are
+      captured on the command buffer, but only the native dispatch entry point is
+      unit-tested; no end-to-end compute from navigator.gpu is claimed). The
+      real THREE.WebGPURenderer renders cube and glTF scenes through it on macOS
+      (tests: pulp-test-threejs-bridge; examples/threejs-native-demo). It needs
+      a GPU-enabled Skia/Dawn build; otherwise only mock objects are available.
 
 ai_shader_design:
   yoga_layout:
@@ -923,7 +971,6 @@ ai_shader_design:
       non-blocking shell-backed chat flows in local tools. Design workflows now
       carry provider/model/reasoning-effort metadata and expand command templates
       with {prompt_file}, {model}, {provider}, {reasoning_effort}, and {output_file}.
-      Full navigator.gpu pipeline API not exposed — Canvas 2D + shaders is the design.
   design_debug_harness:
     status: experimental
     notes: >
@@ -1077,15 +1124,8 @@ limitations:
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
     - text: "Controller and per-note expression input is host-mediated: CC, pitch bend, and channel aftertouch arrive when the host honors IMidiMapping hidden parameters, and per-note tuning/pressure/timbre arrive for MPE-enabled plug-ins through INoteExpressionController. There is no separate raw poly-pressure event route."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
-  formats.au_v2:
-    - text: "Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify)."
-      tracked_in: "planning/production-readiness/01-format-adapters.md#1.3"
-    - text: "Outbound MIDI from AU v2 effects is not wired yet; HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host."
-      tracked_in: "planning/production-readiness/01-format-adapters.md#1.3"
   formats.auv3:
     - text: "Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet."
-      tracked_in: "planning/production-readiness/01-format-adapters.md#1.4"
-    - text: "MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.4"
     - text: "iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge."
       tracked_in: "planning/production-readiness/05-auv3-mobile.md"
@@ -1098,8 +1138,6 @@ limitations:
     # Hotplug: IMMNotificationClient device-change callbacks are wired;
     # no stale stub limitation remains.
   audio_io.alsa:
-    - text: "No input capture path."
-      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
     - text: "Hardcoded sample-rate list; no real enumeration."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
   audio_io.jack:
@@ -1162,7 +1200,7 @@ widgets:
   eq_curve_view:    { status: usable, header: eq_curve_view.hpp }
   file_browser:     { status: usable, header: file_browser.hpp }
   file_drop_zone:   { status: usable, header: file_drop_zone.hpp }
-  code_editor:      { status: usable, header: code_editor.hpp }
+  code_editor:      { status: experimental, header: code_editor.hpp }
   breadcrumb:       { status: usable, header: breadcrumb.hpp }
   split_view:       { status: usable, header: split_view.hpp }
   concertina_panel: { status: usable, header: concertina_panel.hpp }

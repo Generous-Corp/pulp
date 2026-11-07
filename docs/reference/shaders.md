@@ -54,9 +54,12 @@ What is **not** covered by `Canvas::draw_with_sksl` and friends:
   compute path via the `GpuCompute` interface
   (`core/render/include/pulp/render/gpu_compute.hpp`) — it exposes
   spectral, batch-convolution, FFT, matmul, and neural-inference
-  primitives (see `gpu_compute.hpp` for the full surface). PBR materials
-  and Three.js bridging already ride this path. Direct WGSL authoring
-  lives behind the same interface; see existing call sites for the pattern.
+  primitives (see `gpu_compute.hpp` for the full surface). Direct WGSL
+  authoring lives behind the same interface; see existing call sites for the
+  pattern. Native 3D materials are drawn by `Renderer3D`
+  (`core/render/src/renderer3d.cpp`), and Three.js in a View runs through the
+  `navigator.gpu` bridge (`core/view/src/widget_bridge/gpu_api.cpp`), a
+  record-and-replay shim over the shared Dawn device. Neither uses `GpuCompute`.
 - **Raw vertex / index buffer authoring.** Out of scope through SkSL.
   Drop down to Dawn (`core/render/include/pulp/render/gpu_surface.hpp`)
   if you need it.
@@ -466,7 +469,7 @@ effect path can't express what you need:
 | Need                                      | Use                                                                  |
 |-------------------------------------------|----------------------------------------------------------------------|
 | Custom vertex / mesh / instanced draws    | Dawn directly (`core/render/include/pulp/render/gpu_surface.hpp`)    |
-| GPU compute (PBR, simulation, mipmap gen) | `GpuCompute` (`core/render/include/pulp/render/gpu_compute.hpp`)     |
+| GPU compute (simulation, mipmap gen)       | `GpuCompute` (`core/render/include/pulp/render/gpu_compute.hpp`)     |
 | Mixing native Dawn textures into a paint  | `Canvas::draw_native_dawn_texture` on `SkiaCanvas`                   |
 | Sampling external textures in SkSL        | `SkRuntimeShaderBuilder` directly with `uniform shader` children     |
 
