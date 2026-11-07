@@ -47,110 +47,154 @@ std::string instances_call(int id) {
 
 } // namespace
 
-TEST_CASE("vendor operations reach a live product through the broker, CLI, and MCP",
-          "[inspect][control][vendor][e2e]") {
 #ifdef __APPLE__
+/// Stages one built controlled host, starts a broker daemon that can launch
+/// it, launches it, and waits for its live registration.
+struct LiveProduct {
     Root root;
-    const auto executable = self();
-    REQUIRE_FALSE(executable.empty());
-    const auto bin = executable.parent_path();
-    const auto cli = bin / "pulp";
-    const auto mcp = bin / "pulp-mcp";
-    const auto broker = bin / "pulp-control-broker";
-    const auto built_host = std::filesystem::path{PULP_VENDOR_PRODUCT_FIXTURE};
-    REQUIRE(std::filesystem::exists(cli));
-    REQUIRE(std::filesystem::exists(mcp));
-    REQUIRE(std::filesystem::exists(broker));
-    REQUIRE(std::filesystem::exists(built_host));
-    const auto host_dir = root.path / "product";
-    REQUIRE(std::filesystem::create_directory(host_dir));
-    const auto host = host_dir / built_host.filename();
-    REQUIRE(std::filesystem::copy_file(built_host, host));
-    REQUIRE(std::filesystem::copy_file(built_host.string() + ".inspector-capabilities.json",
-                                       host.string() + ".inspector-capabilities.json"));
-    std::ifstream manifest_stream(host.string() + ".inspector-capabilities.json");
-    const std::string manifest_bytes(std::istreambuf_iterator<char>{manifest_stream}, {});
-    const auto manifest = choc::json::parse(manifest_bytes);
-    REQUIRE(manifest["bundle_id"].getString() == "org.example.vendor-product");
-    // The declaration rides in the manifest whose digest consent binds.
-    REQUIRE(manifest["vendor_operations"].isString());
-    REQUIRE(std::string(manifest["vendor_operations"].getString()).find("level.set@1") !=
-            std::string::npos);
-    const auto manifest_digest = pulp::runtime::sha256_hex(manifest_bytes);
-    std::filesystem::permissions(host, std::filesystem::perms::owner_all,
-                                 std::filesystem::perm_options::replace);
-    std::filesystem::permissions(host.string() + ".inspector-capabilities.json",
-                                 std::filesystem::perms::owner_read |
-                                     std::filesystem::perms::owner_write,
-                                 std::filesystem::perm_options::replace);
-
+    std::filesystem::path executable;
+    std::filesystem::path cli;
+    std::filesystem::path mcp;
+    choc::value::Value manifest;
+    std::string manifest_digest;
     std::mutex consent_mutex;
     std::vector<std::string> consented_selectors;
     std::atomic<std::uint64_t> consent_sequence{0};
-    ControlBrokerDaemon daemon(
-        {.runtime_root = root.runtime,
-         .state_root = root.state,
-         .sdk_version = "vendor-product",
-         .executable_path = executable,
-         .process_generation = 405,
-         .installed_host_selections =
-             {{.host_id = "vendor-product",
-               .intent = ControlTrustedHostLaunchIntent{.executable = host,
-                                                        .arguments = {},
-                                                        .working_directory = host.parent_path(),
-                                                        .host_tier = ControlHostTier::Standalone}}},
-         .decide_consent = [&](const ControlGrantConsentRequest& request) {
-             {
-                 std::lock_guard lock(consent_mutex);
-                 consented_selectors.push_back(request.selector_id);
-             }
-             return ControlConsentDecision{true,
-                                           ControlConsentAuthority::TrustedHostUi,
-                                           "vendor-e2e-consent-" +
-                                               std::to_string(consent_sequence.fetch_add(1)),
-                                           {}};
-         }});
-    REQUIRE(daemon.start());
-    ControlClientConnection management(
-        {.endpoint_path = daemon.endpoint_path(), .expected_broker_executable = broker});
-    REQUIRE(management.connect());
-    REQUIRE(management.manage("enroll").status_id == "accepted");
-    auto selection = choc::value::createObject("");
-    selection.addMember("host_id", "vendor-product");
-    const auto prepared =
-        management.manage("host-prepare-installed", choc::json::toString(selection, false), 10s);
-    INFO(prepared.explanation);
-    REQUIRE(prepared.status_id == "prepared");
-    auto launch = choc::value::createObject("");
-    launch.addMember("inventory_id",
-                     choc::value::createString(
-                         choc::json::parse(prepared.data_json)["inventory_id"].getString()));
-    const std::array<const char*, 6> child_environment = {"CI",
-                                                          "PULP_HEADLESS",
-                                                          "PULP_TEST_MODE",
-                                                          "PULP_SCREENSHOT",
-                                                          "PULP_SCREENSHOT_PATH",
-                                                          "PULP_SCREENSHOT_KEEP_AUDIO"};
-    std::array<std::optional<std::string>, 6> saved_environment;
-    for (std::size_t index = 0; index < child_environment.size(); ++index) {
-        if (const auto* value = std::getenv(child_environment[index]))
-            saved_environment[index] = value;
-        REQUIRE(unsetenv(child_environment[index]) == 0);
-    }
-    REQUIRE(setenv("PULP_AUDIO_DEVICE", "null", 1) == 0);
-    const auto launched =
-        management.manage("host-launch", choc::json::toString(launch, false), 10s);
-    REQUIRE(unsetenv("PULP_AUDIO_DEVICE") == 0);
-    for (std::size_t index = 0; index < child_environment.size(); ++index)
-        if (saved_environment[index])
-            REQUIRE(setenv(child_environment[index], saved_environment[index]->c_str(), 1) == 0);
-    INFO(launched.explanation);
-    REQUIRE(launched.status_id == "launched");
+    std::unique_ptr<ControlBrokerDaemon> daemon;
+    std::optional<ControlClientConnection> management;
+    choc::value::Value identity;
+    std::string instance;
 
-    const auto identity = wait_for_instance(management, "org.example.vendor-product");
-    const std::string instance(identity["instance_id"].getString());
-    REQUIRE_FALSE(instance.empty());
-    CHECK(identity["manifest_digest"].getString() == manifest_digest);
+    LiveProduct(const std::filesystem::path& built_host, std::string_view bundle_id,
+                std::string_view host_id) {
+        executable = self();
+        REQUIRE_FALSE(executable.empty());
+        const auto bin = executable.parent_path();
+        cli = bin / "pulp";
+        mcp = bin / "pulp-mcp";
+        const auto broker = bin / "pulp-control-broker";
+        REQUIRE(std::filesystem::exists(cli));
+        REQUIRE(std::filesystem::exists(mcp));
+        REQUIRE(std::filesystem::exists(broker));
+        REQUIRE(std::filesystem::exists(built_host));
+        const auto host_dir = root.path / "product";
+        REQUIRE(std::filesystem::create_directory(host_dir));
+        const auto host = host_dir / built_host.filename();
+        REQUIRE(std::filesystem::copy_file(built_host, host));
+        // Trusted launch requires library validation, which a pulp_add_plugin
+        // control host's linker signature does not carry.
+        REQUIRE(run("/usr/bin/codesign", root.runtime,
+                    {"--force", "--sign", "-", "--options", "library", host.string()})
+                    .exit_code == 0);
+        // A fixture's sidecar is named after its executable; a pulp_add_plugin
+        // control host's build tree names it after the target.
+        auto sidecar_name = built_host.filename().string() + ".inspector-capabilities.json";
+        if (!std::filesystem::exists(built_host.parent_path() / sidecar_name))
+            for (const auto& entry : std::filesystem::directory_iterator(built_host.parent_path()))
+                if (entry.path().filename().string().ends_with(".inspector-capabilities.json"))
+                    sidecar_name = entry.path().filename().string();
+        // The broker reads the sidecar under the staged executable's own name.
+        const auto sidecar = std::filesystem::path(host.string() + ".inspector-capabilities.json");
+        REQUIRE(std::filesystem::copy_file(built_host.parent_path() / sidecar_name, sidecar));
+        std::ifstream manifest_stream(sidecar);
+        const std::string manifest_bytes(std::istreambuf_iterator<char>{manifest_stream}, {});
+        manifest = choc::json::parse(manifest_bytes);
+        REQUIRE(manifest["bundle_id"].getString() == bundle_id);
+        // The declaration rides in the manifest whose digest consent binds.
+        REQUIRE(manifest["vendor_operations"].isString());
+        manifest_digest = pulp::runtime::sha256_hex(manifest_bytes);
+        std::filesystem::permissions(host, std::filesystem::perms::owner_all,
+                                     std::filesystem::perm_options::replace);
+        std::filesystem::permissions(
+            sidecar, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+            std::filesystem::perm_options::replace);
+
+        daemon = std::make_unique<ControlBrokerDaemon>(ControlBrokerDaemonConfig{
+            .runtime_root = root.runtime,
+            .state_root = root.state,
+            .sdk_version = "vendor-product",
+            .executable_path = executable,
+            .process_generation = 405,
+            .installed_host_selections = {{.host_id = std::string(host_id),
+                                           .intent =
+                                               ControlTrustedHostLaunchIntent{
+                                                   .executable = host,
+                                                   .arguments = {},
+                                                   .working_directory = host.parent_path(),
+                                                   .host_tier = ControlHostTier::Standalone}}},
+            .decide_consent = [&](const ControlGrantConsentRequest& request) {
+                {
+                    std::lock_guard lock(consent_mutex);
+                    consented_selectors.push_back(request.selector_id);
+                }
+                return ControlConsentDecision{true,
+                                              ControlConsentAuthority::TrustedHostUi,
+                                              "vendor-e2e-consent-" +
+                                                  std::to_string(consent_sequence.fetch_add(1)),
+                                              {}};
+            }});
+        REQUIRE(daemon->start());
+        management.emplace(ControlClientConnectionConfig{.endpoint_path = daemon->endpoint_path(),
+                                                         .expected_broker_executable = broker});
+        REQUIRE(management->connect());
+        REQUIRE(management->manage("enroll").status_id == "accepted");
+        auto selection = choc::value::createObject("");
+        selection.addMember("host_id", std::string(host_id));
+        const auto prepared = management->manage("host-prepare-installed",
+                                                 choc::json::toString(selection, false), 10s);
+        INFO(prepared.explanation);
+        REQUIRE(prepared.status_id == "prepared");
+        auto launch = choc::value::createObject("");
+        launch.addMember("inventory_id",
+                         choc::value::createString(
+                             choc::json::parse(prepared.data_json)["inventory_id"].getString()));
+        const std::array<const char*, 6> child_environment = {"CI",
+                                                              "PULP_HEADLESS",
+                                                              "PULP_TEST_MODE",
+                                                              "PULP_SCREENSHOT",
+                                                              "PULP_SCREENSHOT_PATH",
+                                                              "PULP_SCREENSHOT_KEEP_AUDIO"};
+        std::array<std::optional<std::string>, 6> saved_environment;
+        for (std::size_t index = 0; index < child_environment.size(); ++index) {
+            if (const auto* value = std::getenv(child_environment[index]))
+                saved_environment[index] = value;
+            REQUIRE(unsetenv(child_environment[index]) == 0);
+        }
+        REQUIRE(setenv("PULP_AUDIO_DEVICE", "null", 1) == 0);
+        const auto launched =
+            management->manage("host-launch", choc::json::toString(launch, false), 10s);
+        REQUIRE(unsetenv("PULP_AUDIO_DEVICE") == 0);
+        for (std::size_t index = 0; index < child_environment.size(); ++index)
+            if (saved_environment[index])
+                REQUIRE(setenv(child_environment[index], saved_environment[index]->c_str(), 1) ==
+                        0);
+        INFO(launched.explanation);
+        REQUIRE(launched.status_id == "launched");
+
+        identity = wait_for_instance(*management, bundle_id);
+        instance = std::string(identity["instance_id"].getString());
+        REQUIRE_FALSE(instance.empty());
+        CHECK(identity["manifest_digest"].getString() == manifest_digest);
+    }
+};
+#endif
+
+TEST_CASE("vendor operations reach a live product through the broker, CLI, and MCP",
+          "[inspect][control][vendor][e2e]") {
+#ifdef __APPLE__
+    LiveProduct product(PULP_VENDOR_PRODUCT_FIXTURE, "org.example.vendor-product",
+                        "vendor-product");
+    auto& root = product.root;
+    const auto& cli = product.cli;
+    const auto& mcp = product.mcp;
+    auto& daemon = *product.daemon;
+    const auto& identity = product.identity;
+    const auto& instance = product.instance;
+    const auto& manifest_digest = product.manifest_digest;
+    auto& consent_mutex = product.consent_mutex;
+    auto& consented_selectors = product.consented_selectors;
+    REQUIRE(std::string(product.manifest["vendor_operations"].getString()).find("level.set@1") !=
+            std::string::npos);
 
     // Discovery lists exactly the declared operations with tier and schemas.
     const auto listed = identity["vendor_operations"];
@@ -308,5 +352,54 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
     CHECK(structured(7)["state"].getString() == "completed");
 #else
     SKIP("the vendor operations product fixture is Apple-only");
+#endif
+}
+
+TEST_CASE("the agent tool kit example answers every tool kit operation over MCP",
+          "[inspect][control][vendor][toolkit][e2e]") {
+#if defined(__APPLE__) && defined(PULP_AGENT_TOOLKIT_PRODUCT)
+    LiveProduct product(PULP_AGENT_TOOLKIT_PRODUCT, "com.example.agent-toolkit-synth",
+                        "agent-toolkit-synth");
+    const auto& instance = product.instance;
+    std::vector<std::string> listed;
+    for (const auto entry : product.identity["vendor_operations"])
+        listed.emplace_back(entry["id"].getString());
+    CHECK(listed.size() == 9);
+
+    const auto responses = run_mcp(
+        product.mcp, product.root.runtime,
+        vendor_call(1, instance, "dev.com.example/patch.schema@1", "{}") +
+            vendor_call(2, instance, "dev.com.example/patch.get@1", R"({"ids":[1]})") +
+            mcp_call(3, "pulp_control_session_control", instance, R"({"action":"acquire"})") +
+            vendor_call(4, instance, "dev.com.example/patch.set@1",
+                        R"({"values":[{"id":1,"value":0.8}]})", "develop") +
+            vendor_call(5, instance, "dev.com.example/patch.randomize@1",
+                        R"({"seed":11,"ids":[2]})", "develop") +
+            vendor_call(6, instance, "dev.com.example/presets.list@1", "{}") +
+            vendor_call(
+                7, instance, "dev.com.example/notes.play@1",
+                R"({"duration_seconds":0.25,"notes":[{"note":69,"start_seconds":0,"duration_seconds":0.2}]})") +
+            vendor_call(8, instance, "dev.com.example/render.analyze@1",
+                        R"({"duration_seconds":0.1,"stimulus":"silence"})") +
+            mcp_call(9, "pulp_control_session_control", instance, R"({"action":"release"})"));
+    REQUIRE(responses.size() == 9);
+    for (std::size_t index = 0; index < responses.size(); ++index) {
+        INFO(choc::json::toString(responses[index], false));
+        CHECK_FALSE(responses[index]["result"]["isError"].getWithDefault<bool>(false));
+    }
+    const auto result = [&](std::size_t index) {
+        return choc::value::Value(responses[index]["result"]["structuredContent"]["result"]);
+    };
+    const auto schema = result(0);
+    CHECK(schema["parameters"].size() == 2);
+    const auto set = result(3);
+    CHECK(set["values"][0]["value"].getWithDefault<double>(0.0) > 0.79);
+    const auto played = result(6);
+    // The example renders the live patch, so the 0.8 level reaches the render.
+    CHECK(played["peak_dbfs"].getWithDefault<double>(-300.0) > -2.5);
+    const auto silent = result(7);
+    CHECK(silent["peak_dbfs"].getWithDefault<double>(0.0) <= -199.0);
+#else
+    SKIP("the agent tool kit example builds only with the full macOS Standalone adapter");
 #endif
 }
