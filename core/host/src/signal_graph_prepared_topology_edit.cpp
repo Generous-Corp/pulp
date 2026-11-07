@@ -2442,6 +2442,71 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         }
         if (plan.processing_order_indices.size() != plan.nodes.size())
             return last_result_ = Result::PreflightFailed;
+
+        // The portable binding was checked against the authored graph before
+        // preparation. Recheck the compiled plan's identity and every edge
+        // against that same graph before exporting: a planner or adapter
+        // substitution must not be able to preserve counts while changing a
+        // kind, port shape, gain binding, or endpoint tuple.
+        const auto expected_runtime_kind = [](NodeType type) {
+            switch (type) {
+            case NodeType::AudioInput:
+                return graph::GraphRuntimeNodeKind::AudioInput;
+            case NodeType::AudioOutput:
+                return graph::GraphRuntimeNodeKind::AudioOutput;
+            case NodeType::Gain:
+                return graph::GraphRuntimeNodeKind::Processor;
+            default:
+                return graph::GraphRuntimeNodeKind::Utility;
+            }
+        };
+        for (const auto& pnode : plan.nodes) {
+            const auto authored = std::find_if(
+                candidate_->nodes_.begin(), candidate_->nodes_.end(),
+                [&](const GraphNode& node) { return node.id == pnode.id; });
+            if (authored == candidate_->nodes_.end() ||
+                pnode.kind != expected_runtime_kind(authored->type) ||
+                pnode.input_ports != static_cast<std::uint32_t>(authored->num_input_ports) ||
+                pnode.output_ports != static_cast<std::uint32_t>(authored->num_output_ports))
+                return last_result_ = Result::PreflightFailed;
+            const auto authored_position = static_cast<std::size_t>(
+                std::distance(candidate_->nodes_.begin(), authored));
+            if (authored_position >= capture->nodes.size())
+                return last_result_ = Result::PreflightFailed;
+            const auto& bound = capture->nodes[authored_position];
+            if (bound.kind != prepared_kind(authored->type) ||
+                bound.input_ports != pnode.input_ports || bound.output_ports != pnode.output_ports ||
+                bound.gain_bits != std::bit_cast<std::uint32_t>(authored->gain))
+                return last_result_ = Result::PreflightFailed;
+        }
+        std::unordered_set<std::string> plan_edge_keys;
+        plan_edge_keys.reserve(plan.connections.size());
+        for (const auto& pconnection : plan.connections) {
+            if (pconnection.source_index >= plan.nodes.size() ||
+                pconnection.dest_index >= plan.nodes.size() || !graph::carries_audio(pconnection) ||
+                pconnection.feedback || pconnection.sidechain)
+                return last_result_ = Result::PreflightFailed;
+            const auto& source = plan.nodes[pconnection.source_index];
+            const auto& destination = plan.nodes[pconnection.dest_index];
+            const auto key = std::to_string(source.id) + ":" + std::to_string(pconnection.source_port) +
+                             ":" + std::to_string(destination.id) + ":" +
+                             std::to_string(pconnection.dest_port);
+            if (!plan_edge_keys.insert(key).second ||
+                std::none_of(candidate_->connections_.begin(), candidate_->connections_.end(),
+                             [&](const Connection& connection) {
+                                 return connection.source_node == source.id &&
+                                        connection.source_port == pconnection.source_port &&
+                                        connection.dest_node == destination.id &&
+                                        connection.dest_port == pconnection.dest_port &&
+                                        !connection.feedback && !connection.midi &&
+                                        !connection.automation &&
+                                        !connection.audio_rate_modulation && !connection.sidechain &&
+                                        !connection.spectral;
+                             }))
+                return last_result_ = Result::PreflightFailed;
+        }
+        if (plan_edge_keys.size() != candidate_->connections_.size())
+            return last_result_ = Result::PreflightFailed;
         capture->nodes.resize(plan.nodes.size());
         for (std::uint32_t dense = 0; dense < plan.nodes.size(); ++dense) {
             const auto authored = std::find_if(
@@ -2636,17 +2701,17 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                     return last_result_ = Result::PreflightFailed;
                 const auto slot = slots.output_base + port;
                 add_class(slot);
+                std::size_t last_reader = position;
+                for (const auto& connection : plan.connections)
+                    if (connection.source_index == dense && connection.source_port == port)
+                        last_reader = std::max(last_reader, processing_positions[connection.dest_index]);
                 if (pnode.kind == graph::GraphRuntimeNodeKind::AudioInput) {
                     add_value(key + ":port=audio:direction=out,role=external_input,channel=" +
                               capture->channels[port] + ",phase=execute,ordinal=" +
                               std::to_string(port) + ",mode=copy,class=" +
                               std::to_string(slot) + ",lifetime=[" + std::to_string(position) + "," +
-                              std::to_string(position + 1) + ")");
+                              std::to_string(last_reader + 1) + ")");
                 } else {
-                    std::size_t last_reader = position;
-                    for (const auto& connection : plan.connections)
-                        if (connection.source_index == dense && connection.source_port == port)
-                            last_reader = std::max(last_reader, processing_positions[connection.dest_index]);
                     add_value(key + ":port=audio:direction=out,role=node_output,channel=" +
                               capture->channels[port] + ",phase=execute,ordinal=" +
                               std::to_string(port) + ",mode=write,class=" + std::to_string(slot) +

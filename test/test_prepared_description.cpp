@@ -178,6 +178,15 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
                                      "input:audio:out:channel=R->input:audio:out:channel=R"});
     REQUIRE(exported.value->schedule ==
             std::vector<std::string>{"input", "gain_a", "gain_b", "output"});
+    // The detached vector retains plan order for diagnostics, while the
+    // portable encoder treats nodes as a logical-key map.
+    const auto canonical = exported.value->canonical_bytes();
+    REQUIRE(canonical.find("\"key\":\"gain_a\"") <
+            canonical.find("\"key\":\"gain_b\""));
+    REQUIRE(canonical.find("\"key\":\"gain_b\"") <
+            canonical.find("\"key\":\"input\""));
+    REQUIRE(canonical.find("\"key\":\"input\"") <
+            canonical.find("\"key\":\"output\""));
     // Independent topological oracle: derive the ready-node-id order from the
     // published graph edges rather than copying the exporter schedule.
     std::unordered_map<NodeId, std::size_t> indegree;
@@ -240,6 +249,16 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     REQUIRE(has_buffer_record("phase=output_copy"));
     REQUIRE(has_buffer_record("channel=L"));
     REQUIRE(has_buffer_record("channel=R"));
+    const auto external_input_lifetime = std::find_if(
+        exported.value->buffer_values.begin(), exported.value->buffer_values.end(),
+        [](const std::string& value) {
+            return value.find("input:port=audio:direction=out,role=external_input") !=
+                   std::string::npos;
+        });
+    REQUIRE(external_input_lifetime != exported.value->buffer_values.end());
+    // The AudioInput value remains live through its last reader (gain_a at
+    // processing position 1), rather than ending at the producer position.
+    REQUIRE(external_input_lifetime->find(",lifetime=[0,2)") != std::string::npos);
     REQUIRE(exported.value->nodes[0].kind == "AudioInput");
     REQUIRE(exported.value->nodes[1].kind == "Gain");
     REQUIRE(exported.value->nodes[1].gain_bits == 0x3f800000u);

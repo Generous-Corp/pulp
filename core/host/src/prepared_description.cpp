@@ -2,8 +2,11 @@
 
 #include <pulp/runtime/crypto.hpp>
 
+#include <algorithm>
 #include <bit>
 #include <charconv>
+#include <tuple>
+#include <vector>
 
 namespace pulp::host {
 namespace {
@@ -227,10 +230,19 @@ std::string PreparedDescriptionData::canonical_bytes() const {
         out += "]}";
     }
     out += "],\"nodes\":[";
-    for (std::size_t i = 0; i < nodes.size(); ++i) {
-        if (i)
+    // Nodes are a logical-key map in the D4 record. Keep the in-memory vector
+    // in authoring/plan order for diagnostics, but canonical bytes must not
+    // depend on that incidental order.
+    std::vector<std::size_t> node_order(nodes.size());
+    for (std::size_t i = 0; i < node_order.size(); ++i)
+        node_order[i] = i;
+    std::sort(node_order.begin(), node_order.end(), [&](std::size_t lhs, std::size_t rhs) {
+        return nodes[lhs].authored_key < nodes[rhs].authored_key;
+    });
+    for (std::size_t ordered = 0; ordered < node_order.size(); ++ordered) {
+        if (ordered)
             out.push_back(',');
-        const auto& node = nodes[i];
+        const auto& node = nodes[node_order[ordered]];
         out += "{\"key\":";
         quote(out, node.authored_key);
         out += ",\"kind\":";
@@ -258,10 +270,19 @@ std::string PreparedDescriptionData::canonical_bytes() const {
         out.push_back('}');
     }
     out += "],\"edges\":[";
-    for (std::size_t i = 0; i < edges.size(); ++i) {
-        if (i)
+    std::vector<std::size_t> edge_order(edges.size());
+    for (std::size_t i = 0; i < edge_order.size(); ++i)
+        edge_order[i] = i;
+    std::sort(edge_order.begin(), edge_order.end(), [&](std::size_t lhs, std::size_t rhs) {
+        const auto& left = edges[lhs];
+        const auto& right = edges[rhs];
+        return std::tie(left.source, left.destination, left.source_port, left.destination_port) <
+               std::tie(right.source, right.destination, right.source_port, right.destination_port);
+    });
+    for (std::size_t ordered = 0; ordered < edge_order.size(); ++ordered) {
+        if (ordered)
             out.push_back(',');
-        const auto& edge = edges[i];
+        const auto& edge = edges[edge_order[ordered]];
         out += "{\"source\":";
         quote(out, edge.source);
         out += ",\"destination\":";
