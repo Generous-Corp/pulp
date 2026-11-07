@@ -1134,7 +1134,8 @@ void run_all_backend_kernels() {
 // ns per element (per complex bin for the complex rows).
 #define PULP_BENCH_BACKEND_MORE(NAME, NS)                                                          \
     run_backend_more_kernels(                                                                      \
-        NAME, [](const float* a, const float* b, float* d, std::size_t n) { NS::div(a, b, d, n); },   \
+        NAME,                                                                                      \
+        [](const float* a, const float* b, float* d, std::size_t n) { NS::div(a, b, d, n); },      \
         [](const float* x, float* d, std::size_t n) {                                              \
             NS::to_int16(x, 32768.0f, reinterpret_cast<std::int16_t*>(d), n);                      \
         },                                                                                         \

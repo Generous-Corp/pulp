@@ -113,7 +113,7 @@
     T max_abs(const T* data, std::size_t count) noexcept;                                          \
     void ramp_mul(const T* x, T start, T step, T* dst, std::size_t count) noexcept;                \
     void correlate(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept;    \
-    void decimate2(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept;      \
+    void decimate2(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept;    \
     void sub(const T* a, const T* b, T* dst, std::size_t count) noexcept;                          \
     void div(const T* a, const T* b, T* dst, std::size_t count) noexcept;                          \
     void negate(const T* a, T* dst, std::size_t count) noexcept;                                   \
@@ -314,8 +314,6 @@ using active_backend::abs;
 using active_backend::add;
 using active_backend::add_scaled;
 using active_backend::clamp;
-using active_backend::correlate;
-using active_backend::cos;
 using active_backend::complex_magnitude;
 using active_backend::complex_magnitude_split;
 using active_backend::complex_magnitude_squared;
@@ -330,6 +328,8 @@ using active_backend::complex_phase;
 using active_backend::complex_phase_split;
 using active_backend::complex_power_spectrum;
 using active_backend::complex_power_spectrum_split;
+using active_backend::correlate;
+using active_backend::cos;
 using active_backend::decimate2;
 using active_backend::deinterleave2;
 using active_backend::div;

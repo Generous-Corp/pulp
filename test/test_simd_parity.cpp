@@ -301,15 +301,20 @@ void check_fir(const Kernels<T>& ref, const Kernels<T>& k, std::size_t n_out, st
 /// Samples that exercise the edges of the conversion and replace kernels.
 template <typename T> std::vector<T> edge_values() {
     const T inf = std::numeric_limits<T>::infinity();
-    return {T(0),      T(-0.0), T(0.5),     T(1.5),   T(2.5),    T(-0.5),    T(-1.5),
-            T(-2.5),   T(0.999969482421875), T(1),    T(-1),     T(1.00001), T(-1.00001),
-            T(1e30),   T(-1e30), inf,       -inf,     std::numeric_limits<T>::quiet_NaN(),
-            T(32767.5), T(-32768.5), T(65536), T(-65536)};
+    return {T(0),        T(-0.0),     T(0.5),
+            T(1.5),      T(2.5),      T(-0.5),
+            T(-1.5),     T(-2.5),     T(0.999969482421875),
+            T(1),        T(-1),       T(1.00001),
+            T(-1.00001), T(1e30),     T(-1e30),
+            inf,         -inf,        std::numeric_limits<T>::quiet_NaN(),
+            T(32767.5),  T(-32768.5), T(65536),
+            T(-65536)};
 }
 
 /// Same bits, except that any NaN matches any NaN (0 / 0 and a NaN input do
 /// not pin the sign or payload).
-template <typename T> void check_same_values(const std::vector<T>& want, const std::vector<T>& got) {
+template <typename T>
+void check_same_values(const std::vector<T>& want, const std::vector<T>& got) {
     REQUIRE(want.size() == got.size());
     for (std::size_t i = 0; i < want.size(); ++i) {
         if (std::isnan(want[i]))
@@ -320,8 +325,8 @@ template <typename T> void check_same_values(const std::vector<T>& want, const s
 }
 
 template <typename T>
-void check_new_elementwise(const Kernels<T>& ref, const Kernels<T>& k, std::size_t n,
-                           unsigned seed, bool subnormals) {
+void check_new_elementwise(const Kernels<T>& ref, const Kernels<T>& k, std::size_t n, unsigned seed,
+                           bool subnormals) {
     auto a = noise<T>(n, seed + 100), b = noise<T>(n, seed + 101);
     if (subnormals)
         sprinkle_subnormals(a);
@@ -381,9 +386,9 @@ void check_new_reductions(const Kernels<T>& ref, const Kernels<T>& k, std::size_
         sprinkle_subnormals(a);
     std::vector<T> ones(n, T(1));
 
-    const T mean_bound =
-        reduction_bound(n, sum_abs_products(a.data(), ones.data(), n)) / T(std::max<std::size_t>(n, 1)) +
-        subnormal_slack<T>();
+    const T mean_bound = reduction_bound(n, sum_abs_products(a.data(), ones.data(), n)) /
+                             T(std::max<std::size_t>(n, 1)) +
+                         subnormal_slack<T>();
     CHECK(std::fabs(ref.mean(a.data(), n) - k.mean(a.data(), n)) <= mean_bound);
     const T r = ref.rms(a.data(), n), g = k.rms(a.data(), n);
     CHECK(std::fabs(r - g) <= T(4) * T(n + 2) * eps<T>() * std::max(r, g) + subnormal_slack<T>());
@@ -459,8 +464,9 @@ void check_conversions(const Kernels<T>& ref, const Kernels<T>& k, std::size_t n
     // Ties round to even; saturation and NaN are pinned by value, not only
     // by agreement with the reference.
     if (n >= 8) {
-        const T tie[8] = {T(0.5), T(1.5), T(2.5), T(-0.5), T(-1.5), T(-2.5),
-                          std::numeric_limits<T>::quiet_NaN(), T(1e30)};
+        const T tie[8] = {
+            T(0.5), T(1.5), T(2.5), T(-0.5), T(-1.5), T(-2.5), std::numeric_limits<T>::quiet_NaN(),
+            T(1e30)};
         std::int16_t out[8];
         k.to_int16(tie, T(1), out, 8);
         const std::int16_t expect[8] = {0, 2, 2, 0, -2, -2, 0, 32767};
@@ -468,9 +474,8 @@ void check_conversions(const Kernels<T>& ref, const Kernels<T>& k, std::size_t n
             CHECK(out[i] == expect[i]);
         std::int32_t out32[8];
         k.to_int32(tie, T(1), out32, 8);
-        const std::int32_t expect32[8] = {0, 2, 2, 0, -2, -2, 0,
-                                          std::is_same_v<T, float> ? 2147483520
-                                                                    : INT32_MAX};
+        const std::int32_t expect32[8] = {
+            0, 2, 2, 0, -2, -2, 0, std::is_same_v<T, float> ? 2147483520 : INT32_MAX};
         for (int i = 0; i < 8; ++i)
             CHECK(out32[i] == expect32[i]);
     }

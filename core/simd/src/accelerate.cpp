@@ -57,7 +57,8 @@ template <typename F> inline void for_chunks(std::size_t n, F&& f) noexcept {
 
 /// dst[i] = x[i] < floor ? floor : x[i], with the floor made positive normal;
 /// NaN passes through. vvlog then runs in place on dst.
-template <typename T> inline void apply_log_floor(const T* x, T floor, T* dst, std::size_t n) noexcept {
+template <typename T>
+inline void apply_log_floor(const T* x, T floor, T* dst, std::size_t n) noexcept {
     const T f = detail::effective_log_floor(floor);
     for (std::size_t i = 0; i < n; ++i)
         dst[i] = x[i] < f ? f : x[i];
@@ -186,10 +187,12 @@ float find_minimum(const float* x, std::size_t n, std::size_t* index) noexcept {
 }
 // vDSP has no compare-and-replace; the plain loop vectorises under the
 // compiler and keeps the scalar reference's NaN behaviour.
-void replace_below(const float* a, float threshold, float value, float* dst, std::size_t n) noexcept {
+void replace_below(const float* a, float threshold, float value, float* dst,
+                   std::size_t n) noexcept {
     detail::replace_below_impl(a, threshold, value, dst, n);
 }
-void replace_above(const float* a, float threshold, float value, float* dst, std::size_t n) noexcept {
+void replace_above(const float* a, float threshold, float value, float* dst,
+                   std::size_t n) noexcept {
     detail::replace_above_impl(a, threshold, value, dst, n);
 }
 void from_int16(const std::int16_t* src, float scale, float* dst, std::size_t n) noexcept {
@@ -358,10 +361,12 @@ double find_minimum(const double* x, std::size_t n, std::size_t* index) noexcept
 }
 // vDSP has no compare-and-replace; the plain loop vectorises under the
 // compiler and keeps the scalar reference's NaN behaviour.
-void replace_below(const double* a, double threshold, double value, double* dst, std::size_t n) noexcept {
+void replace_below(const double* a, double threshold, double value, double* dst,
+                   std::size_t n) noexcept {
     detail::replace_below_impl(a, threshold, value, dst, n);
 }
-void replace_above(const double* a, double threshold, double value, double* dst, std::size_t n) noexcept {
+void replace_above(const double* a, double threshold, double value, double* dst,
+                   std::size_t n) noexcept {
     detail::replace_above_impl(a, threshold, value, dst, n);
 }
 void from_int16(const std::int16_t* src, double scale, double* dst, std::size_t n) noexcept {
@@ -414,9 +419,9 @@ void deinterleave2(const double* src, double* l, double* r, std::size_t n) noexc
 
 namespace {
 
-inline void cmul_strided(const float* ar, const float* ai, std::size_t sa, const float* br, const float* bi,
-                         std::size_t sb, float* dr, float* di, std::size_t sd, std::size_t n,
-                         bool conj_b) noexcept {
+inline void cmul_strided(const float* ar, const float* ai, std::size_t sa, const float* br,
+                         const float* bi, std::size_t sb, float* dr, float* di, std::size_t sd,
+                         std::size_t n, bool conj_b) noexcept {
     if (n == 0)
         return;
     const auto a = as_split(ar, ai);
@@ -424,21 +429,22 @@ inline void cmul_strided(const float* ar, const float* ai, std::size_t sa, const
     const auto d = as_split(dr, di);
     if (conj_b) // vDSP conjugates its first operand, so swap the operands
         vDSP_zvmul(&b, static_cast<vDSP_Stride>(sb), &a, static_cast<vDSP_Stride>(sa), &d,
-                      static_cast<vDSP_Stride>(sd), len(n), -1);
+                   static_cast<vDSP_Stride>(sd), len(n), -1);
     else
         vDSP_zvmul(&a, static_cast<vDSP_Stride>(sa), &b, static_cast<vDSP_Stride>(sb), &d,
-                      static_cast<vDSP_Stride>(sd), len(n), 1);
+                   static_cast<vDSP_Stride>(sd), len(n), 1);
 }
 
-inline void cmac_strided(const float* ar, const float* ai, std::size_t sa, const float* br, const float* bi,
-                         std::size_t sb, float* cr, float* ci, std::size_t sc, std::size_t n) noexcept {
+inline void cmac_strided(const float* ar, const float* ai, std::size_t sa, const float* br,
+                         const float* bi, std::size_t sb, float* cr, float* ci, std::size_t sc,
+                         std::size_t n) noexcept {
     if (n == 0)
         return;
     const auto a = as_split(ar, ai);
     const auto b = as_split(br, bi);
     const auto c = as_split(cr, ci);
     vDSP_zvma(&a, static_cast<vDSP_Stride>(sa), &b, static_cast<vDSP_Stride>(sb), &c,
-                 static_cast<vDSP_Stride>(sc), &c, static_cast<vDSP_Stride>(sc), len(n));
+              static_cast<vDSP_Stride>(sc), &c, static_cast<vDSP_Stride>(sc), len(n));
 }
 
 inline void power_strided(const float* re, const float* im, std::size_t s, float scale, float* dst,
@@ -475,7 +481,8 @@ void complex_multiply(const float* a, const float* b, float* dst, std::size_t n)
 void complex_multiply_conj(const float* a, const float* b, float* dst, std::size_t n) noexcept {
     cmul_strided(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n, true);
 }
-void complex_multiply_accumulate(const float* a, const float* b, float* acc, std::size_t n) noexcept {
+void complex_multiply_accumulate(const float* a, const float* b, float* acc,
+                                 std::size_t n) noexcept {
     cmac_strided(a, a + 1, 2, b, b + 1, 2, acc, acc + 1, 2, n);
 }
 void complex_magnitude(const float* z, float* dst, std::size_t n) noexcept {
@@ -490,8 +497,9 @@ void complex_phase(const float* z, float* dst, std::size_t n) noexcept {
 void complex_power_spectrum(const float* z, float scale, float* dst, std::size_t n) noexcept {
     power_strided(z, z + 1, 2, scale, dst, n);
 }
-void complex_multiply_split(const float* a_re, const float* a_im, const float* b_re, const float* b_im,
-                            float* dst_re, float* dst_im, std::size_t n) noexcept {
+void complex_multiply_split(const float* a_re, const float* a_im, const float* b_re,
+                            const float* b_im, float* dst_re, float* dst_im,
+                            std::size_t n) noexcept {
     cmul_strided(a_re, a_im, 1, b_re, b_im, 1, dst_re, dst_im, 1, n, false);
 }
 void complex_multiply_conj_split(const float* a_re, const float* a_im, const float* b_re,
@@ -525,9 +533,9 @@ void complex_power_spectrum_split(const float* re, const float* im, float scale,
 
 namespace {
 
-inline void cmul_strided(const double* ar, const double* ai, std::size_t sa, const double* br, const double* bi,
-                         std::size_t sb, double* dr, double* di, std::size_t sd, std::size_t n,
-                         bool conj_b) noexcept {
+inline void cmul_strided(const double* ar, const double* ai, std::size_t sa, const double* br,
+                         const double* bi, std::size_t sb, double* dr, double* di, std::size_t sd,
+                         std::size_t n, bool conj_b) noexcept {
     if (n == 0)
         return;
     const auto a = as_split(ar, ai);
@@ -535,25 +543,26 @@ inline void cmul_strided(const double* ar, const double* ai, std::size_t sa, con
     const auto d = as_split(dr, di);
     if (conj_b) // vDSP conjugates its first operand, so swap the operands
         vDSP_zvmulD(&b, static_cast<vDSP_Stride>(sb), &a, static_cast<vDSP_Stride>(sa), &d,
-                      static_cast<vDSP_Stride>(sd), len(n), -1);
+                    static_cast<vDSP_Stride>(sd), len(n), -1);
     else
         vDSP_zvmulD(&a, static_cast<vDSP_Stride>(sa), &b, static_cast<vDSP_Stride>(sb), &d,
-                      static_cast<vDSP_Stride>(sd), len(n), 1);
+                    static_cast<vDSP_Stride>(sd), len(n), 1);
 }
 
-inline void cmac_strided(const double* ar, const double* ai, std::size_t sa, const double* br, const double* bi,
-                         std::size_t sb, double* cr, double* ci, std::size_t sc, std::size_t n) noexcept {
+inline void cmac_strided(const double* ar, const double* ai, std::size_t sa, const double* br,
+                         const double* bi, std::size_t sb, double* cr, double* ci, std::size_t sc,
+                         std::size_t n) noexcept {
     if (n == 0)
         return;
     const auto a = as_split(ar, ai);
     const auto b = as_split(br, bi);
     const auto c = as_split(cr, ci);
     vDSP_zvmaD(&a, static_cast<vDSP_Stride>(sa), &b, static_cast<vDSP_Stride>(sb), &c,
-                 static_cast<vDSP_Stride>(sc), &c, static_cast<vDSP_Stride>(sc), len(n));
+               static_cast<vDSP_Stride>(sc), &c, static_cast<vDSP_Stride>(sc), len(n));
 }
 
-inline void power_strided(const double* re, const double* im, std::size_t s, double scale, double* dst,
-                          std::size_t n) noexcept {
+inline void power_strided(const double* re, const double* im, std::size_t s, double scale,
+                          double* dst, std::size_t n) noexcept {
     if (n == 0)
         return;
     const auto a = as_split(re, im);
@@ -586,7 +595,8 @@ void complex_multiply(const double* a, const double* b, double* dst, std::size_t
 void complex_multiply_conj(const double* a, const double* b, double* dst, std::size_t n) noexcept {
     cmul_strided(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n, true);
 }
-void complex_multiply_accumulate(const double* a, const double* b, double* acc, std::size_t n) noexcept {
+void complex_multiply_accumulate(const double* a, const double* b, double* acc,
+                                 std::size_t n) noexcept {
     cmac_strided(a, a + 1, 2, b, b + 1, 2, acc, acc + 1, 2, n);
 }
 void complex_magnitude(const double* z, double* dst, std::size_t n) noexcept {
@@ -601,8 +611,9 @@ void complex_phase(const double* z, double* dst, std::size_t n) noexcept {
 void complex_power_spectrum(const double* z, double scale, double* dst, std::size_t n) noexcept {
     power_strided(z, z + 1, 2, scale, dst, n);
 }
-void complex_multiply_split(const double* a_re, const double* a_im, const double* b_re, const double* b_im,
-                            double* dst_re, double* dst_im, std::size_t n) noexcept {
+void complex_multiply_split(const double* a_re, const double* a_im, const double* b_re,
+                            const double* b_im, double* dst_re, double* dst_im,
+                            std::size_t n) noexcept {
     cmul_strided(a_re, a_im, 1, b_re, b_im, 1, dst_re, dst_im, 1, n, false);
 }
 void complex_multiply_conj_split(const double* a_re, const double* a_im, const double* b_re,
@@ -615,7 +626,8 @@ void complex_multiply_accumulate_split(const double* a_re, const double* a_im, c
                                        std::size_t n) noexcept {
     cmac_strided(a_re, a_im, 1, b_re, b_im, 1, acc_re, acc_im, 1, n);
 }
-void complex_magnitude_split(const double* re, const double* im, double* dst, std::size_t n) noexcept {
+void complex_magnitude_split(const double* re, const double* im, double* dst,
+                             std::size_t n) noexcept {
     mag_strided(re, im, 1, dst, n);
 }
 void complex_magnitude_squared_split(const double* re, const double* im, double* dst,
@@ -647,9 +659,8 @@ void cos(const float* x, float* dst, std::size_t n, Accuracy) noexcept {
     for_chunks(n, [&](std::size_t i, const int* m) { vvcosf(dst + i, x + i, m); });
 }
 void sincos(const float* x, float* sin_out, float* cos_out, std::size_t n, Accuracy) noexcept {
-    for_chunks(n, [&](std::size_t i, const int* m) {
-        vvsincosf(sin_out + i, cos_out + i, x + i, m);
-    });
+    for_chunks(n,
+               [&](std::size_t i, const int* m) { vvsincosf(sin_out + i, cos_out + i, x + i, m); });
 }
 void tanh(const float* x, float* dst, std::size_t n, Accuracy) noexcept {
     for_chunks(n, [&](std::size_t i, const int* m) { vvtanhf(dst + i, x + i, m); });
@@ -679,9 +690,8 @@ void cos(const double* x, double* dst, std::size_t n, Accuracy) noexcept {
     for_chunks(n, [&](std::size_t i, const int* m) { vvcos(dst + i, x + i, m); });
 }
 void sincos(const double* x, double* sin_out, double* cos_out, std::size_t n, Accuracy) noexcept {
-    for_chunks(n, [&](std::size_t i, const int* m) {
-        vvsincos(sin_out + i, cos_out + i, x + i, m);
-    });
+    for_chunks(n,
+               [&](std::size_t i, const int* m) { vvsincos(sin_out + i, cos_out + i, x + i, m); });
 }
 void tanh(const double* x, double* dst, std::size_t n, Accuracy) noexcept {
     for_chunks(n, [&](std::size_t i, const int* m) { vvtanh(dst + i, x + i, m); });

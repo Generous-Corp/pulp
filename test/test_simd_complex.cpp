@@ -61,13 +61,12 @@ template <typename T> struct ComplexKernels {
 
 #define PULP_TEST_COMPLEX(NAME, NS)                                                                \
     ComplexKernels<T> {                                                                            \
-        NAME, &NS::complex_multiply, &NS::complex_multiply_conj,                                   \
-            &NS::complex_multiply_accumulate, &NS::complex_magnitude,                              \
-            &NS::complex_magnitude_squared, &NS::complex_phase, &NS::complex_power_spectrum,       \
-            &NS::complex_multiply_split, &NS::complex_multiply_conj_split,                         \
-            &NS::complex_multiply_accumulate_split, &NS::complex_magnitude_split,                  \
-            &NS::complex_magnitude_squared_split, &NS::complex_phase_split,                        \
-            &NS::complex_power_spectrum_split                                                      \
+        NAME, &NS::complex_multiply, &NS::complex_multiply_conj, &NS::complex_multiply_accumulate, \
+            &NS::complex_magnitude, &NS::complex_magnitude_squared, &NS::complex_phase,            \
+            &NS::complex_power_spectrum, &NS::complex_multiply_split,                              \
+            &NS::complex_multiply_conj_split, &NS::complex_multiply_accumulate_split,              \
+            &NS::complex_magnitude_split, &NS::complex_magnitude_squared_split,                    \
+            &NS::complex_phase_split, &NS::complex_power_spectrum_split                            \
     }
 
 template <typename T> ComplexKernels<T> reference_kernels() {
@@ -86,7 +85,8 @@ template <typename T> std::vector<ComplexKernels<T>> candidate_kernels() {
     return out;
 }
 
-constexpr std::size_t kLengths[] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 64, 65, 100, 255, 1023};
+constexpr std::size_t kLengths[] = {0,  1,  2,  3,  4,  5,  7,   8,   9,
+                                    15, 16, 17, 31, 64, 65, 100, 255, 1023};
 
 template <typename T> constexpr T eps() {
     return std::numeric_limits<T>::epsilon();
@@ -133,7 +133,8 @@ template <typename T> Signal<T> make_signal(std::size_t n, unsigned seed, bool s
     return s;
 }
 
-template <typename T> std::vector<T> interleave(const std::vector<T>& re, const std::vector<T>& im) {
+template <typename T>
+std::vector<T> interleave(const std::vector<T>& re, const std::vector<T>& im) {
     std::vector<T> z(2 * re.size());
     for (std::size_t i = 0; i < re.size(); ++i) {
         z[2 * i] = re[i];
@@ -148,8 +149,7 @@ template <typename T> struct Exact {
     long double re_mag, im_mag;
 };
 
-template <typename T>
-void check_close(T want, T got, T bound, const char* what, std::size_t i) {
+template <typename T> void check_close(T want, T got, T bound, const char* what, std::size_t i) {
     INFO(what << " at " << i << ": want " << want << " got " << got << " bound " << bound);
     CHECK(std::fabs(want - got) <= bound);
 }
@@ -165,8 +165,7 @@ void check_products(const ComplexKernels<T>& ref, const ComplexKernels<T>& k, co
     k.multiply(a.z.data(), b.z.data(), got.data(), n);
     ref.multiply_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), wre.data(), wim.data(),
                        n);
-    k.multiply_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), gre.data(), gim.data(),
-                     n);
+    k.multiply_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), gre.data(), gim.data(), n);
     for (std::size_t i = 0; i < n; ++i) {
         const T mr = std::fabs(a.re[i] * b.re[i]) + std::fabs(a.im[i] * b.im[i]);
         const T mi = std::fabs(a.re[i] * b.im[i]) + std::fabs(a.im[i] * b.re[i]);
@@ -211,8 +210,10 @@ void check_products(const ComplexKernels<T>& ref, const ComplexKernels<T>& k, co
     k.multiply_accumulate_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), gre.data(),
                                 gim.data(), n);
     for (std::size_t i = 0; i < n; ++i) {
-        const T mr = std::fabs(a.re[i] * b.re[i]) + std::fabs(a.im[i] * b.im[i]) + std::fabs(c.re[i]);
-        const T mi = std::fabs(a.re[i] * b.im[i]) + std::fabs(a.im[i] * b.re[i]) + std::fabs(c.im[i]);
+        const T mr =
+            std::fabs(a.re[i] * b.re[i]) + std::fabs(a.im[i] * b.im[i]) + std::fabs(c.re[i]);
+        const T mi =
+            std::fabs(a.re[i] * b.im[i]) + std::fabs(a.im[i] * b.re[i]) + std::fabs(c.im[i]);
         const T br = T(4) * eps<T>() * mr + slack<T>(), bi = T(4) * eps<T>() * mi + slack<T>();
         check_close(want[2 * i], got[2 * i], br, "mac re", i);
         check_close(want[2 * i + 1], got[2 * i + 1], bi, "mac im", i);
@@ -236,7 +237,8 @@ void check_products(const ComplexKernels<T>& ref, const ComplexKernels<T>& k, co
     }
     gre = a.re;
     gim = a.im;
-    ref.multiply_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), wre.data(), wim.data(), n);
+    ref.multiply_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), wre.data(), wim.data(),
+                       n);
     k.multiply_split(gre.data(), gim.data(), b.re.data(), b.im.data(), gre.data(), gim.data(), n);
     for (std::size_t i = 0; i < n; ++i) {
         check_close(wre[i], gre[i], T(8) * eps<T>() * 2 + slack<T>(), "split dst==a re", i);
@@ -256,7 +258,8 @@ void check_spectral(const ComplexKernels<T>& ref, const ComplexKernels<T>& k, co
     for (std::size_t i = 0; i < n; ++i) {
         const T m = a.re[i] * a.re[i] + a.im[i] * a.im[i];
         check_close(want[i], got[i], T(4) * eps<T>() * m + slack<T>(), "magnitude_squared", i);
-        check_close(want[i], gsplit[i], T(4) * eps<T>() * m + slack<T>(), "magnitude_squared_split", i);
+        check_close(want[i], gsplit[i], T(4) * eps<T>() * m + slack<T>(), "magnitude_squared_split",
+                    i);
     }
 
     ref.power_spectrum(a.z.data(), scale, want.data(), n);
@@ -265,7 +268,8 @@ void check_spectral(const ComplexKernels<T>& ref, const ComplexKernels<T>& k, co
     for (std::size_t i = 0; i < n; ++i) {
         const T m = (a.re[i] * a.re[i] + a.im[i] * a.im[i]) * scale;
         check_close(want[i], got[i], T(4) * eps<T>() * m + slack<T>(), "power_spectrum", i);
-        check_close(want[i], gsplit[i], T(4) * eps<T>() * m + slack<T>(), "power_spectrum_split", i);
+        check_close(want[i], gsplit[i], T(4) * eps<T>() * m + slack<T>(), "power_spectrum_split",
+                    i);
     }
 
     ref.magnitude(a.z.data(), want.data(), n);
@@ -319,9 +323,9 @@ template <typename T> void check_reference_against_long_double(std::size_t n, un
     std::vector<T> out(n);
     ref.phase(a.z.data(), out.data(), n);
     for (std::size_t i = 0; i < n; ++i)
-        CHECK(std::fabs(static_cast<long double>(out[i]) - std::atan2(static_cast<long double>(a.im[i]),
-                                                                       static_cast<long double>(a.re[i]))) <=
-              T(4) * eps<T>());
+        CHECK(std::fabs(static_cast<long double>(out[i]) -
+                        std::atan2(static_cast<long double>(a.im[i]),
+                                   static_cast<long double>(a.re[i]))) <= T(4) * eps<T>());
 }
 
 template <typename T> void run_complex(bool subnormals) {
@@ -364,12 +368,12 @@ TEMPLATE_TEST_CASE("pulp::simd complex phase axes and the origin", "[simd][compl
                    double) {
     using T = TestType;
     // (re, im) pairs on the axes and in each quadrant.
-    const std::vector<T> z = {T(1),  T(0),  T(0),  T(1), T(-1), T(0),  T(0),  T(-1),
-                              T(0),  T(0),  T(1),  T(1), T(-1), T(1),  T(-1), T(-1), T(1), T(-1)};
+    const std::vector<T> z = {T(1), T(0), T(0), T(1),  T(-1), T(0),  T(0),  T(-1), T(0),
+                              T(0), T(1), T(1), T(-1), T(1),  T(-1), T(-1), T(1),  T(-1)};
     const std::size_t n = z.size() / 2;
     const T pi = T(3.14159265358979323846L);
-    const T want[] = {T(0),         pi / 2,       pi,          -pi / 2,     T(0),
-                      pi / 4,       T(3) * pi / 4, -T(3) * pi / 4, -pi / 4};
+    const T want[] = {T(0),          pi / 2,         pi,     -pi / 2, T(0), pi / 4,
+                      T(3) * pi / 4, -T(3) * pi / 4, -pi / 4};
     auto all = candidate_kernels<T>();
     all.push_back(reference_kernels<T>());
     for (const auto& k : all) {
@@ -431,9 +435,12 @@ TEMPLATE_TEST_CASE("pulp::simd complex kernels do not allocate", "[simd][rt-safe
         k.magnitude_squared(a.z.data(), r1.data(), n);
         k.phase(a.z.data(), r1.data(), n);
         k.power_spectrum(a.z.data(), T(0.5), r1.data(), n);
-        k.multiply_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), r1.data(), r2.data(), n);
-        k.multiply_conj_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), r1.data(), r2.data(), n);
-        k.multiply_accumulate_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), r1.data(), r2.data(), n);
+        k.multiply_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), r1.data(), r2.data(),
+                         n);
+        k.multiply_conj_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), r1.data(),
+                              r2.data(), n);
+        k.multiply_accumulate_split(a.re.data(), a.im.data(), b.re.data(), b.im.data(), r1.data(),
+                                    r2.data(), n);
         k.magnitude_split(a.re.data(), a.im.data(), r3.data(), n);
         k.magnitude_squared_split(a.re.data(), a.im.data(), r3.data(), n);
         k.phase_split(a.re.data(), a.im.data(), r3.data(), n);

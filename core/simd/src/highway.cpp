@@ -370,8 +370,7 @@ template <typename T> void ReplaceAboveT(const T* a, T threshold, T value, T* ds
         dst[i] = a[i] > threshold ? value : a[i];
 }
 
-template <typename T, typename I>
-void FromIntT(const I* src, T scale, T* dst, size_t count) {
+template <typename T, typename I> void FromIntT(const I* src, T scale, T* dst, size_t count) {
     const hn::ScalableTag<T> d;
     const hn::Rebind<int32_t, decltype(d)> di32;
     const hn::Rebind<I, decltype(d)> dsrc;
@@ -610,9 +609,9 @@ void ComplexMultiplyT(const T* ar, const T* ai, const T* br, const T* bi, T* dr,
         StoreComplex<T, I>(d, rr, ri, dr, di, i);
     }
     constexpr size_t S = Stride<T, I>();
-    ::pulp::simd::detail::complex_multiply_impl(ar + i * S, ImagOf<I>(ar, ai) + i * S, S,
-                                                br + i * S, ImagOf<I>(br, bi) + i * S, S,
-                                                dr + i * S, ImagOf<I>(dr, di) + i * S, S, count - i);
+    ::pulp::simd::detail::complex_multiply_impl(
+        ar + i * S, ImagOf<I>(ar, ai) + i * S, S, br + i * S, ImagOf<I>(br, bi) + i * S, S,
+        dr + i * S, ImagOf<I>(dr, di) + i * S, S, count - i);
 }
 
 template <typename T, bool I>
@@ -795,8 +794,7 @@ template <class D, class V> HWY_INLINE V FastLogF(D d, V x) {
     const hn::RebindToSigned<D> di;
     const auto bits = hn::BitCast(di, x);
     auto e = hn::Sub(hn::ShiftRight<23>(bits), hn::Set(di, 127));
-    V m = hn::BitCast(
-        d, hn::Or(hn::And(bits, hn::Set(di, 0x007FFFFF)), hn::Set(di, 0x3F800000)));
+    V m = hn::BitCast(d, hn::Or(hn::And(bits, hn::Set(di, 0x007FFFFF)), hn::Set(di, 0x3F800000)));
     const auto big = hn::Gt(m, hn::Set(d, 1.41421356f));
     m = hn::IfThenElse(big, hn::Mul(m, hn::Set(d, 0.5f)), m);
     e = hn::Add(e, hn::IfThenElseZero(hn::RebindMask(di, big), hn::Set(di, 1)));
@@ -847,7 +845,8 @@ template <class D, class V> HWY_INLINE V FastTanhF(D d, V x) {
 // (sin and cos of an infinity are NaN).
 template <class D, class V> HWY_INLINE V PreciseExp(D d, V x) {
     using T = hn::TFromD<D>;
-    constexpr T kOverflow = sizeof(T) == 4 ? static_cast<T>(88.72284) : static_cast<T>(709.782712893384);
+    constexpr T kOverflow =
+        sizeof(T) == 4 ? static_cast<T>(88.72284) : static_cast<T>(709.782712893384);
     constexpr T kUnderflow =
         sizeof(T) == 4 ? static_cast<T>(-103.97208) : static_cast<T>(-745.1332191019411);
     V r = hn::Exp(d, x);
@@ -931,8 +930,7 @@ template <typename T> void CosT(const T* x, T* dst, size_t count, bool fast) {
     MapT(x, dst, count, [](auto d, auto v) { return PreciseCos(d, v); });
 }
 
-template <typename T>
-void SinCosT(const T* x, T* sin_out, T* cos_out, size_t count, bool fast) {
+template <typename T> void SinCosT(const T* x, T* sin_out, T* cos_out, size_t count, bool fast) {
     const hn::ScalableTag<T> d;
     const size_t N = hn::Lanes(d);
     const auto one_step = [&](hn::Vec<decltype(d)> v, hn::Vec<decltype(d)>& s,
@@ -1079,19 +1077,19 @@ HWY_EXPORT(DoubleLanes);
     HWY_EXPORT(MaxAbs##SUFFIX);                                                                    \
     HWY_EXPORT(RampMul##SUFFIX);                                                                   \
     HWY_EXPORT(Correlate##SUFFIX);                                                                 \
-    HWY_EXPORT(Sub##SUFFIX);                                                            \
-    HWY_EXPORT(Div##SUFFIX);                                                            \
-    HWY_EXPORT(Negate##SUFFIX);                                                         \
-    HWY_EXPORT(FindMaximum##SUFFIX);                                                    \
-    HWY_EXPORT(FindMinimum##SUFFIX);                                                    \
-    HWY_EXPORT(ReplaceBelow##SUFFIX);                                                   \
-    HWY_EXPORT(ReplaceAbove##SUFFIX);                                                   \
-    HWY_EXPORT(FromInt16##SUFFIX);                                                      \
-    HWY_EXPORT(FromInt32##SUFFIX);                                                      \
-    HWY_EXPORT(ToInt16##SUFFIX);                                                        \
-    HWY_EXPORT(ToInt32##SUFFIX);                                                        \
-    HWY_EXPORT(Interleave2##SUFFIX);                                                    \
-    HWY_EXPORT(Deinterleave2##SUFFIX);                                                  \
+    HWY_EXPORT(Sub##SUFFIX);                                                                       \
+    HWY_EXPORT(Div##SUFFIX);                                                                       \
+    HWY_EXPORT(Negate##SUFFIX);                                                                    \
+    HWY_EXPORT(FindMaximum##SUFFIX);                                                               \
+    HWY_EXPORT(FindMinimum##SUFFIX);                                                               \
+    HWY_EXPORT(ReplaceBelow##SUFFIX);                                                              \
+    HWY_EXPORT(ReplaceAbove##SUFFIX);                                                              \
+    HWY_EXPORT(FromInt16##SUFFIX);                                                                 \
+    HWY_EXPORT(FromInt32##SUFFIX);                                                                 \
+    HWY_EXPORT(ToInt16##SUFFIX);                                                                   \
+    HWY_EXPORT(ToInt32##SUFFIX);                                                                   \
+    HWY_EXPORT(Interleave2##SUFFIX);                                                               \
+    HWY_EXPORT(Deinterleave2##SUFFIX);                                                             \
     HWY_EXPORT(Decimate2##SUFFIX);
 
 PULP_SIMD_HWY_EXPORT(F32)
@@ -1202,18 +1200,18 @@ PULP_SIMD_HWY_DEFINE(F64, double)
 
 #undef PULP_SIMD_HWY_DEFINE
 
-#define PULP_SIMD_HWY_EXPORT_COMPLEX(SUFFIX) \
-    HWY_EXPORT(ComplexMultiply##SUFFIX); \
-    HWY_EXPORT(ComplexMultiplyConj##SUFFIX); \
-    HWY_EXPORT(ComplexMultiplyAccumulate##SUFFIX); \
-    HWY_EXPORT(ComplexMagnitude##SUFFIX); \
-    HWY_EXPORT(ComplexMagnitudeSquared##SUFFIX); \
-    HWY_EXPORT(ComplexPhase##SUFFIX); \
-    HWY_EXPORT(ComplexMultiplySplit##SUFFIX); \
-    HWY_EXPORT(ComplexMultiplyConjSplit##SUFFIX); \
-    HWY_EXPORT(ComplexMultiplyAccumulateSplit##SUFFIX); \
-    HWY_EXPORT(ComplexMagnitudeSplit##SUFFIX); \
-    HWY_EXPORT(ComplexMagnitudeSquaredSplit##SUFFIX); \
+#define PULP_SIMD_HWY_EXPORT_COMPLEX(SUFFIX)                                                       \
+    HWY_EXPORT(ComplexMultiply##SUFFIX);                                                           \
+    HWY_EXPORT(ComplexMultiplyConj##SUFFIX);                                                       \
+    HWY_EXPORT(ComplexMultiplyAccumulate##SUFFIX);                                                 \
+    HWY_EXPORT(ComplexMagnitude##SUFFIX);                                                          \
+    HWY_EXPORT(ComplexMagnitudeSquared##SUFFIX);                                                   \
+    HWY_EXPORT(ComplexPhase##SUFFIX);                                                              \
+    HWY_EXPORT(ComplexMultiplySplit##SUFFIX);                                                      \
+    HWY_EXPORT(ComplexMultiplyConjSplit##SUFFIX);                                                  \
+    HWY_EXPORT(ComplexMultiplyAccumulateSplit##SUFFIX);                                            \
+    HWY_EXPORT(ComplexMagnitudeSplit##SUFFIX);                                                     \
+    HWY_EXPORT(ComplexMagnitudeSquaredSplit##SUFFIX);                                              \
     HWY_EXPORT(ComplexPhaseSplit##SUFFIX);
 
 PULP_SIMD_HWY_EXPORT_COMPLEX(F32)
@@ -1278,14 +1276,14 @@ PULP_SIMD_HWY_DEFINE_COMPLEX(F64, double)
 
 #undef PULP_SIMD_HWY_DEFINE_COMPLEX
 
-#define PULP_SIMD_HWY_EXPORT_MATH(SUFFIX) \
-    HWY_EXPORT(Exp##SUFFIX); \
-    HWY_EXPORT(Log##SUFFIX); \
-    HWY_EXPORT(Sin##SUFFIX); \
-    HWY_EXPORT(Cos##SUFFIX); \
-    HWY_EXPORT(SinCos##SUFFIX); \
-    HWY_EXPORT(Tanh##SUFFIX); \
-    HWY_EXPORT(Sqrt##SUFFIX); \
+#define PULP_SIMD_HWY_EXPORT_MATH(SUFFIX)                                                          \
+    HWY_EXPORT(Exp##SUFFIX);                                                                       \
+    HWY_EXPORT(Log##SUFFIX);                                                                       \
+    HWY_EXPORT(Sin##SUFFIX);                                                                       \
+    HWY_EXPORT(Cos##SUFFIX);                                                                       \
+    HWY_EXPORT(SinCos##SUFFIX);                                                                    \
+    HWY_EXPORT(Tanh##SUFFIX);                                                                      \
+    HWY_EXPORT(Sqrt##SUFFIX);                                                                      \
     HWY_EXPORT(WrapPhase##SUFFIX);
 
 PULP_SIMD_HWY_EXPORT_MATH(F32)

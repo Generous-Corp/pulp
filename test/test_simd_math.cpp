@@ -86,8 +86,7 @@ template <typename T> std::vector<MathKernels<T>> all_kernels() {
 
 constexpr std::size_t kCount = 20003; // ragged: not a multiple of any lane count
 
-template <typename T>
-std::vector<T> uniform(std::size_t n, double lo, double hi, unsigned seed) {
+template <typename T> std::vector<T> uniform(std::size_t n, double lo, double hi, unsigned seed) {
     std::mt19937_64 rng(seed);
     std::uniform_real_distribution<double> dist(lo, hi);
     std::vector<T> v(n);
@@ -142,7 +141,6 @@ Errors measure(const std::vector<T>& x, Kernel kernel, Truth truth) {
     return e;
 }
 
-
 constexpr double kPi = 3.14159265358979323846264338327950288;
 
 /// Distance on the circle: a phase of pi and one of -pi are the same angle.
@@ -156,12 +154,12 @@ double circular_distance(double a, double b) {
 // precise tier: units in the last place of the result, float and double.
 constexpr double kPreciseUlp = 4.0;
 // fast tier (float): relative error of exp and log, absolute of the rest.
-constexpr double kFastExpRel = 4.0e-6;   // x in [-87, 88]
-constexpr double kFastLogRel = 4.5e-6;   // x in [floor, FLT_MAX]
+constexpr double kFastExpRel = 4.0e-6;    // x in [-87, 88]
+constexpr double kFastLogRel = 4.5e-6;    // x in [floor, FLT_MAX]
 constexpr double kFastSinCosAbs = 2.5e-7; // |x| <= 1e4
 constexpr double kFastTanhAbs = 2.2e-6;
 // wrap_phase: absolute distance (on the circle) from the exact reduction.
-constexpr double kWrapAbsFloat = 3.0e-7;  // |x| <= 1e4
+constexpr double kWrapAbsFloat = 3.0e-7;   // |x| <= 1e4
 constexpr double kWrapAbsDouble = 1.0e-15; // |x| <= 1e6
 
 template <typename T> constexpr double wrap_domain() {
@@ -206,51 +204,63 @@ TEMPLATE_TEST_CASE("pulp::simd precise vector math stays within its documented u
             return [=](const T* x, T* y, std::size_t n) { f(x, y, n); };
         };
         // exp: the whole range in which the result is a normal number.
-        check_ulp<T>(k.name, "exp", samples<T>({"", -87, 88, false}, 1),
-                     precise([&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, Accuracy::precise); }),
-                     [](double v) { return std::exp(v); }, kPreciseUlp);
-        check_ulp<T>(k.name, "exp small", samples<T>({"", -1, 1, false}, 2),
-                     precise([&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, Accuracy::precise); }),
-                     [](double v) { return std::exp(v); }, kPreciseUlp);
+        check_ulp<T>(
+            k.name, "exp", samples<T>({"", -87, 88, false}, 1),
+            precise([&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, Accuracy::precise); }),
+            [](double v) { return std::exp(v); }, kPreciseUlp);
+        check_ulp<T>(
+            k.name, "exp small", samples<T>({"", -1, 1, false}, 2),
+            precise([&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, Accuracy::precise); }),
+            [](double v) { return std::exp(v); }, kPreciseUlp);
         // Toward overflow and into the subnormal range, where the result is
         // still the nearest representable number.
-        check_ulp<T>(k.name, "exp to overflow", samples<T>({"", 88, 88.72, false}, 10),
-                     precise([&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, Accuracy::precise); }),
-                     [](double v) { return std::exp(v); }, kPreciseUlp);
+        check_ulp<T>(
+            k.name, "exp to overflow", samples<T>({"", 88, 88.72, false}, 10),
+            precise([&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, Accuracy::precise); }),
+            [](double v) { return std::exp(v); }, kPreciseUlp);
         // log: from tiny to huge, and around 1 where the result crosses zero.
         const auto log_run = precise(
             [&](const T* x, T* y, std::size_t n) { k.log(x, T(0), y, n, Accuracy::precise); });
-        check_ulp<T>(k.name, "log wide", samples<T>({"", 1e-30, 1e30, true}, 3), log_run,
-                     [](double v) { return std::log(v); }, kPreciseUlp);
-        check_ulp<T>(k.name, "log near one", samples<T>({"", 0.5, 2, false}, 4), log_run,
-                     [](double v) { return std::log(v); }, kPreciseUlp);
+        check_ulp<T>(
+            k.name, "log wide", samples<T>({"", 1e-30, 1e30, true}, 3), log_run,
+            [](double v) { return std::log(v); }, kPreciseUlp);
+        check_ulp<T>(
+            k.name, "log near one", samples<T>({"", 0.5, 2, false}, 4), log_run,
+            [](double v) { return std::log(v); }, kPreciseUlp);
         // sin and cos over |x| <= 1e4 and at the points where they nearly vanish.
         for (const double range : {3.2, 1e3, 1e4}) {
             const auto sin_run = precise(
                 [&](const T* x, T* y, std::size_t n) { k.sin(x, y, n, Accuracy::precise); });
             const auto cos_run = precise(
                 [&](const T* x, T* y, std::size_t n) { k.cos(x, y, n, Accuracy::precise); });
-            check_ulp<T>(k.name, "sin", samples<T>({"", -range, range, false}, 5), sin_run,
-                         [](double v) { return std::sin(v); }, kPreciseUlp);
-            check_ulp<T>(k.name, "cos", samples<T>({"", -range, range, false}, 6), cos_run,
-                         [](double v) { return std::cos(v); }, kPreciseUlp);
+            check_ulp<T>(
+                k.name, "sin", samples<T>({"", -range, range, false}, 5), sin_run,
+                [](double v) { return std::sin(v); }, kPreciseUlp);
+            check_ulp<T>(
+                k.name, "cos", samples<T>({"", -range, range, false}, 6), cos_run,
+                [](double v) { return std::cos(v); }, kPreciseUlp);
         }
-        check_ulp<T>(k.name, "sin near zeros", near_zero_points<T>(false),
-                     precise([&](const T* x, T* y, std::size_t n) { k.sin(x, y, n, Accuracy::precise); }),
-                     [](double v) { return std::sin(v); }, kPreciseUlp);
-        check_ulp<T>(k.name, "cos near zeros", near_zero_points<T>(true),
-                     precise([&](const T* x, T* y, std::size_t n) { k.cos(x, y, n, Accuracy::precise); }),
-                     [](double v) { return std::cos(v); }, kPreciseUlp);
+        check_ulp<T>(
+            k.name, "sin near zeros", near_zero_points<T>(false),
+            precise([&](const T* x, T* y, std::size_t n) { k.sin(x, y, n, Accuracy::precise); }),
+            [](double v) { return std::sin(v); }, kPreciseUlp);
+        check_ulp<T>(
+            k.name, "cos near zeros", near_zero_points<T>(true),
+            precise([&](const T* x, T* y, std::size_t n) { k.cos(x, y, n, Accuracy::precise); }),
+            [](double v) { return std::cos(v); }, kPreciseUlp);
         const auto tanh_run =
             precise([&](const T* x, T* y, std::size_t n) { k.tanh(x, y, n, Accuracy::precise); });
-        check_ulp<T>(k.name, "tanh", samples<T>({"", -10, 10, false}, 7), tanh_run,
-                     [](double v) { return std::tanh(v); }, kPreciseUlp);
-        check_ulp<T>(k.name, "tanh small", samples<T>({"", -0.1, 0.1, false}, 8), tanh_run,
-                     [](double v) { return std::tanh(v); }, kPreciseUlp);
+        check_ulp<T>(
+            k.name, "tanh", samples<T>({"", -10, 10, false}, 7), tanh_run,
+            [](double v) { return std::tanh(v); }, kPreciseUlp);
+        check_ulp<T>(
+            k.name, "tanh small", samples<T>({"", -0.1, 0.1, false}, 8), tanh_run,
+            [](double v) { return std::tanh(v); }, kPreciseUlp);
         // sqrt is correctly rounded: zero error, and the same on every backend.
-        check_ulp<T>(k.name, "sqrt", samples<T>({"", 1e-10, 1e10, true}, 9),
-                     precise([&](const T* x, T* y, std::size_t n) { k.sqrt(x, y, n); }),
-                     [](double v) { return std::sqrt(v); }, 0.5);
+        check_ulp<T>(
+            k.name, "sqrt", samples<T>({"", 1e-10, 1e10, true}, 9),
+            precise([&](const T* x, T* y, std::size_t n) { k.sqrt(x, y, n); }),
+            [](double v) { return std::sqrt(v); }, 0.5);
     }
 }
 
@@ -269,9 +279,10 @@ TEMPLATE_TEST_CASE("pulp::simd fast vector math stays within its documented erro
         const double sc_abs = std::is_same_v<T, float> ? kFastSinCosAbs : 1e-15;
         const double tanh_abs = std::is_same_v<T, float> ? kFastTanhAbs : 1e-15;
 
-        auto e = measure<T>(samples<T>({"", -87, 88, false}, 21),
-                            fast([&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, Accuracy::fast); }),
-                            [](double v) { return std::exp(v); });
+        auto e = measure<T>(
+            samples<T>({"", -87, 88, false}, 21),
+            fast([&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, Accuracy::fast); }),
+            [](double v) { return std::exp(v); });
         INFO("exp max rel " << e.rel);
         CHECK(e.rel <= exp_rel);
 
@@ -296,25 +307,29 @@ TEMPLATE_TEST_CASE("pulp::simd fast vector math stays within its documented erro
         CHECK(e.rel <= log_rel);
 
         for (const double range : {3.2, 1e3, 1e4}) {
-            e = measure<T>(samples<T>({"", -range, range, false}, 24),
-                           fast([&](const T* x, T* y, std::size_t n) { k.sin(x, y, n, Accuracy::fast); }),
-                           [](double v) { return std::sin(v); });
+            e = measure<T>(
+                samples<T>({"", -range, range, false}, 24),
+                fast([&](const T* x, T* y, std::size_t n) { k.sin(x, y, n, Accuracy::fast); }),
+                [](double v) { return std::sin(v); });
             INFO("sin max abs " << e.abs << " over +-" << range);
             CHECK(e.abs <= sc_abs);
-            e = measure<T>(samples<T>({"", -range, range, false}, 25),
-                           fast([&](const T* x, T* y, std::size_t n) { k.cos(x, y, n, Accuracy::fast); }),
-                           [](double v) { return std::cos(v); });
+            e = measure<T>(
+                samples<T>({"", -range, range, false}, 25),
+                fast([&](const T* x, T* y, std::size_t n) { k.cos(x, y, n, Accuracy::fast); }),
+                [](double v) { return std::cos(v); });
             INFO("cos max abs " << e.abs << " over +-" << range);
             CHECK(e.abs <= sc_abs);
         }
-        e = measure<T>(samples<T>({"", -10, 10, false}, 26),
-                       fast([&](const T* x, T* y, std::size_t n) { k.tanh(x, y, n, Accuracy::fast); }),
-                       [](double v) { return std::tanh(v); });
+        e = measure<T>(
+            samples<T>({"", -10, 10, false}, 26),
+            fast([&](const T* x, T* y, std::size_t n) { k.tanh(x, y, n, Accuracy::fast); }),
+            [](double v) { return std::tanh(v); });
         INFO("tanh max abs " << e.abs);
         CHECK(e.abs <= tanh_abs);
-        e = measure<T>(samples<T>({"", -1e-3, 1e-3, false}, 27),
-                       fast([&](const T* x, T* y, std::size_t n) { k.tanh(x, y, n, Accuracy::fast); }),
-                       [](double v) { return std::tanh(v); });
+        e = measure<T>(
+            samples<T>({"", -1e-3, 1e-3, false}, 27),
+            fast([&](const T* x, T* y, std::size_t n) { k.tanh(x, y, n, Accuracy::fast); }),
+            [](double v) { return std::tanh(v); });
         CHECK(e.abs <= tanh_abs);
     }
 }
@@ -466,13 +481,15 @@ TEMPLATE_TEST_CASE("pulp::simd vector math special values", "[simd][math]", floa
             CHECK(std::isnan(s2[2]));
             CHECK(std::isnan(c2[3]));
             CHECK(s[0] == T(0));
-            CHECK(std::fabs(double(c[0]) - 1.0) <= 1e-15); // Accelerate's double cos(0) is 1 - 1.1e-16
+            CHECK(std::fabs(double(c[0]) - 1.0) <=
+                  1e-15); // Accelerate's double cos(0) is 1 - 1.1e-16
             CHECK(std::isnan(s[1]));
             CHECK(std::isnan(c[1]));
         }
         {
-            const T x[] = {T(0), T(3.14159265358979), T(-3.14159265358979), T(6.283185307179586),
-                           T(7), nan, inf};
+            const T x[] = {
+                T(0), T(3.14159265358979), T(-3.14159265358979), T(6.283185307179586), T(7), nan,
+                inf};
             T y[7];
             k.wrap_phase(x, y, 7);
             CHECK(y[0] == T(0));
@@ -575,28 +592,35 @@ TEMPLATE_TEST_CASE("pulp::simd vector math accuracy report", "[.][accuracy-repor
     for (const auto& k : candidate_kernels<T>()) {
         for (const Accuracy acc : {Accuracy::precise, Accuracy::fast}) {
             const char* tier = acc == Accuracy::fast ? "fast" : "precise";
-            const auto report = [&](const char* fn, const std::vector<T>& x, auto call, auto truth) {
+            const auto report = [&](const char* fn, const std::vector<T>& x, auto call,
+                                    auto truth) {
                 std::vector<T> y(x.size());
                 call(x.data(), y.data(), x.size());
                 const auto e = measure<T>(x, call, truth);
-                std::printf("%-10s %-7s %-7s %-6s max %8.3g ulp  %9.3g abs  %9.3g rel\n", k.name, tier,
-                            std::is_same_v<T, float> ? "float" : "double", fn, e.ulp, e.abs, e.rel);
+                std::printf("%-10s %-7s %-7s %-6s max %8.3g ulp  %9.3g abs  %9.3g rel\n", k.name,
+                            tier, std::is_same_v<T, float> ? "float" : "double", fn, e.ulp, e.abs,
+                            e.rel);
             };
-            report("exp", samples<T>({"", -87, 88, false}, 1),
-                   [&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, acc); },
-                   [](double v) { return std::exp(v); });
-            report("log", samples<T>({"", 1e-30, 1e30, true}, 3),
-                   [&](const T* x, T* y, std::size_t n) { k.log(x, T(0), y, n, acc); },
-                   [](double v) { return std::log(v); });
-            report("sin", samples<T>({"", -1e4, 1e4, false}, 5),
-                   [&](const T* x, T* y, std::size_t n) { k.sin(x, y, n, acc); },
-                   [](double v) { return std::sin(v); });
-            report("cos", samples<T>({"", -1e4, 1e4, false}, 6),
-                   [&](const T* x, T* y, std::size_t n) { k.cos(x, y, n, acc); },
-                   [](double v) { return std::cos(v); });
-            report("tanh", samples<T>({"", -10, 10, false}, 7),
-                   [&](const T* x, T* y, std::size_t n) { k.tanh(x, y, n, acc); },
-                   [](double v) { return std::tanh(v); });
+            report(
+                "exp", samples<T>({"", -87, 88, false}, 1),
+                [&](const T* x, T* y, std::size_t n) { k.exp(x, y, n, acc); },
+                [](double v) { return std::exp(v); });
+            report(
+                "log", samples<T>({"", 1e-30, 1e30, true}, 3),
+                [&](const T* x, T* y, std::size_t n) { k.log(x, T(0), y, n, acc); },
+                [](double v) { return std::log(v); });
+            report(
+                "sin", samples<T>({"", -1e4, 1e4, false}, 5),
+                [&](const T* x, T* y, std::size_t n) { k.sin(x, y, n, acc); },
+                [](double v) { return std::sin(v); });
+            report(
+                "cos", samples<T>({"", -1e4, 1e4, false}, 6),
+                [&](const T* x, T* y, std::size_t n) { k.cos(x, y, n, acc); },
+                [](double v) { return std::cos(v); });
+            report(
+                "tanh", samples<T>({"", -10, 10, false}, 7),
+                [&](const T* x, T* y, std::size_t n) { k.tanh(x, y, n, acc); },
+                [](double v) { return std::tanh(v); });
         }
     }
 }

@@ -288,8 +288,8 @@ inline void complex_multiply_accumulate_impl(const T* ar, const T* ai, std::size
 }
 
 template <typename T>
-inline void complex_magnitude_squared_impl(const T* re, const T* im, std::size_t s, T scale,
-                                           T* dst, std::size_t n) noexcept {
+inline void complex_magnitude_squared_impl(const T* re, const T* im, std::size_t s, T scale, T* dst,
+                                           std::size_t n) noexcept {
     for (std::size_t i = 0; i < n; ++i) {
         const T x = re[i * s], y = im[i * s];
         dst[i] = (x * x + y * y) * scale;
@@ -327,8 +327,7 @@ template <typename T> inline void exp_impl(const T* x, T* dst, std::size_t n) no
         dst[i] = std::exp(x[i]);
 }
 
-template <typename T>
-inline void log_impl(const T* x, T floor, T* dst, std::size_t n) noexcept {
+template <typename T> inline void log_impl(const T* x, T floor, T* dst, std::size_t n) noexcept {
     const T f = effective_log_floor(floor);
     for (std::size_t i = 0; i < n; ++i)
         dst[i] = std::log(x[i] < f ? f : x[i]);
@@ -344,8 +343,7 @@ template <typename T> inline void cos_impl(const T* x, T* dst, std::size_t n) no
         dst[i] = std::cos(x[i]);
 }
 
-template <typename T>
-inline void sincos_impl(const T* x, T* s, T* c, std::size_t n) noexcept {
+template <typename T> inline void sincos_impl(const T* x, T* s, T* c, std::size_t n) noexcept {
     for (std::size_t i = 0; i < n; ++i) {
         const T v = x[i];
         s[i] = std::sin(v);
