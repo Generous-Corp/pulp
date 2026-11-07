@@ -1607,8 +1607,7 @@ std::optional<FrameContext> acquire_dawn_frame(
 // de-pads each row, tallies the distinct-color / non-transparent-pixel census,
 // and PNG-encodes the frame. Returns false (result.error set) on map timeout, a
 // null mapping, or PNG-encode failure. Not real-time safe.
-bool finish_frame_readback(FrameContext& ctx,
-                           Scene3DRenderResult& result,
+bool finish_frame_readback(FrameContext& ctx, Scene3DRenderResult& result,
                            const wgpu::Buffer& readback_buffer,
                            const detail::PaddedRowLayout& layout) {
     std::string readback_error;

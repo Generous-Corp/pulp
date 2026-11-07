@@ -200,8 +200,7 @@ GpuRenderTier pick_tier(const GpuDeviceFacts& facts) {
         return GpuRenderTier::basic;
 
     const bool large_limits = facts.max_texture_dimension_2d >= 16384 &&
-                              facts.max_color_attachments >= 8 &&
-                              facts.features.float32_blendable;
+                              facts.max_color_attachments >= 8 && facts.features.float32_blendable;
     if (facts.adapter == GpuAdapterKind::discrete || large_limits)
         return GpuRenderTier::high;
     return GpuRenderTier::standard;

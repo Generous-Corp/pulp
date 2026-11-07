@@ -33,8 +33,8 @@ std::optional<std::vector<std::uint8_t>> read_padded_buffer(const wgpu::Instance
         error = state->done ? "readback map failed" : "readback map timed out";
         return std::nullopt;
     }
-    const auto* padded = static_cast<const std::uint8_t*>(
-        buffer.GetConstMappedRange(0, layout.buffer_size));
+    const auto* padded =
+        static_cast<const std::uint8_t*>(buffer.GetConstMappedRange(0, layout.buffer_size));
     if (padded == nullptr) {
         error = "mapped readback returned null";
         buffer.Unmap();

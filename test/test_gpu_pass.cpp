@@ -76,7 +76,8 @@ struct Rig {
 
 // Declared order matters: the device must be released before the surface.
 // Rig's members are destroyed in reverse order, device first.
-std::unique_ptr<Rig> make_rig(bool allow_null, std::uint32_t width = 64, std::uint32_t height = 32) {
+std::unique_ptr<Rig> make_rig(bool allow_null, std::uint32_t width = 64,
+                              std::uint32_t height = 32) {
     auto try_backend = [&](GpuSurface::AdapterBackendPreference backend) -> std::unique_ptr<Rig> {
         auto rig = std::make_unique<Rig>();
         rig->surface = GpuSurface::create_dawn();
@@ -124,7 +125,8 @@ GpuRenderPipeline make_solid_pipeline(const GpuDevice& device, GpuFormat format)
 
 } // namespace
 
-TEST_CASE("GpuDevice wraps the surface device and reports capabilities", "[render][gpu][gpu-pass]") {
+TEST_CASE("GpuDevice wraps the surface device and reports capabilities",
+          "[render][gpu][gpu-pass]") {
     auto rig = make_rig(true);
     if (!rig)
         SKIP(kNoDawn);
@@ -144,15 +146,15 @@ TEST_CASE("GpuDevice wraps the surface device and reports capabilities", "[rende
     CHECK_FALSE(rig->device.is_lost());
 }
 
-TEST_CASE("A WGSL compile error returns line and column diagnostics", "[render][gpu][gpu-pass][wgsl]") {
+TEST_CASE("A WGSL compile error returns line and column diagnostics",
+          "[render][gpu][gpu-pass][wgsl]") {
     auto rig = make_rig(true);
     if (!rig)
         SKIP(kNoDawn);
-    constexpr const char* kBroken =
-        "@fragment\n"
-        "fn fs_main() -> @location(0) vec4f {\n"
-        "    return colour;\n"
-        "}\n";
+    constexpr const char* kBroken = "@fragment\n"
+                                    "fn fs_main() -> @location(0) vec4f {\n"
+                                    "    return colour;\n"
+                                    "}\n";
     auto shader = rig->device.create_shader_module(kBroken, "broken.wgsl");
     REQUIRE_FALSE(shader);
     const auto& error = shader.error();
@@ -312,7 +314,8 @@ TEST_CASE("Fullscreen triangle renders a known pixel into an offscreen target",
     }
 }
 
-TEST_CASE("Position-dependent pass reads back with top-left origin", "[render][gpu][gpu-pass][headless]") {
+TEST_CASE("Position-dependent pass reads back with top-left origin",
+          "[render][gpu][gpu-pass][headless]") {
     auto rig = make_rig(false);
     if (!rig)
         SKIP(kNoNativeGpu);

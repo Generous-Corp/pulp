@@ -399,8 +399,8 @@ struct ScopeResults {
             error = make_error(GpuError::Kind::device_lost,
                                "the Dawn instance shut down before the operation finished");
         } else if (status != wgpu::PopErrorScopeStatus::Success) {
-            error = make_error(GpuError::Kind::internal, "error scope could not be popped: " +
-                                                             to_string(message));
+            error = make_error(GpuError::Kind::internal,
+                               "error scope could not be popped: " + to_string(message));
         } else if (type != wgpu::ErrorType::NoError) {
             error = make_error(kind_of(type), to_string(message));
         }
@@ -420,11 +420,10 @@ void push_scopes(const wgpu::Device& device) {
 std::shared_ptr<ScopeResults> pop_scopes(const wgpu::Device& device) {
     auto results = std::make_shared<ScopeResults>();
     for (int i = 0; i < 3; ++i) {
-        device.PopErrorScope(wgpu::CallbackMode::AllowProcessEvents,
-                             [results](wgpu::PopErrorScopeStatus status, wgpu::ErrorType type,
-                                       wgpu::StringView message) {
-                                 results->record(status, type, message);
-                             });
+        device.PopErrorScope(
+            wgpu::CallbackMode::AllowProcessEvents,
+            [results](wgpu::PopErrorScopeStatus status, wgpu::ErrorType type,
+                      wgpu::StringView message) { results->record(status, type, message); });
     }
     return results;
 }
@@ -457,8 +456,7 @@ GpuStatus finish_scopes(const detail::GpuDeviceState& device,
 
 // Run `fn` (which creates Dawn objects) inside error scopes and report what
 // the scopes caught.
-template <typename Fn>
-GpuStatus run_scoped(const detail::GpuDeviceState& device, Fn&& fn) {
+template <typename Fn> GpuStatus run_scoped(const detail::GpuDeviceState& device, Fn&& fn) {
     push_scopes(device.device);
     fn();
     return finish_scopes(device, pop_scopes(device.device));
@@ -698,8 +696,8 @@ GpuResult<GpuBuffer> GpuDevice::create_buffer(const GpuBufferDesc& desc) const {
     if (desc.usage == GpuBufferUsage::none)
         return Err(make_error(GpuError::Kind::invalid_argument, "buffer usage is empty"));
     if (desc.size % 4 != 0)
-        return Err(make_error(GpuError::Kind::invalid_argument,
-                              "buffer size must be a multiple of 4"));
+        return Err(
+            make_error(GpuError::Kind::invalid_argument, "buffer size must be a multiple of 4"));
 
     auto buffer_state = std::make_shared<detail::GpuBufferState>();
     buffer_state->device = state_;
@@ -708,7 +706,8 @@ GpuResult<GpuBuffer> GpuDevice::create_buffer(const GpuBufferDesc& desc) const {
     bd.label = view_of(buffer_state->desc.label);
     bd.size = desc.size;
     bd.usage = static_cast<wgpu::BufferUsage>(static_cast<std::uint32_t>(desc.usage));
-    auto status = run_scoped(*state_, [&] { buffer_state->buffer = state_->device.CreateBuffer(&bd); });
+    auto status =
+        run_scoped(*state_, [&] { buffer_state->buffer = state_->device.CreateBuffer(&bd); });
     if (!status)
         return Err(status.error());
     if (!buffer_state->buffer)
@@ -730,7 +729,8 @@ GpuResult<GpuSampler> GpuDevice::create_sampler(const GpuSamplerDesc& desc) cons
     sd.addressModeU = sd.addressModeV = sd.addressModeW = address;
     const auto filter = desc.linear ? wgpu::FilterMode::Linear : wgpu::FilterMode::Nearest;
     sd.magFilter = sd.minFilter = filter;
-    sd.mipmapFilter = desc.linear ? wgpu::MipmapFilterMode::Linear : wgpu::MipmapFilterMode::Nearest;
+    sd.mipmapFilter =
+        desc.linear ? wgpu::MipmapFilterMode::Linear : wgpu::MipmapFilterMode::Nearest;
     auto status =
         run_scoped(*state_, [&] { sampler_state->sampler = state_->device.CreateSampler(&sd); });
     if (!status)
@@ -747,16 +747,17 @@ GpuResult<GpuShaderModule> GpuDevice::create_shader_module(std::string_view wgsl
     if (wgsl.empty())
         return Err(make_error(GpuError::Kind::invalid_argument, "WGSL source is empty"));
 
-    auto compiled = detail::compile_wgsl(state_->device, state_->instance, wgsl, label,
-                                         kScopeTimeout);
+    auto compiled =
+        detail::compile_wgsl(state_->device, state_->instance, wgsl, label, kScopeTimeout);
     if (state_->is_lost())
         return Err(make_error(GpuError::Kind::device_lost, "the GPU device was lost"));
     if (compiled.timed_out)
         return Err(make_error(GpuError::Kind::timeout, "shader compilation did not report back"));
     if (!compiled.ok()) {
-        GpuError error = make_error(GpuError::Kind::shader_compilation,
-                                    "WGSL compilation failed" +
-                                        (label.empty() ? std::string() : " for " + std::string(label)));
+        GpuError error =
+            make_error(GpuError::Kind::shader_compilation,
+                       "WGSL compilation failed" +
+                           (label.empty() ? std::string() : " for " + std::string(label)));
         error.diagnostics = std::move(compiled.diagnostics);
         if (!compiled.scope_error.empty()) {
             WgslDiagnostic diagnostic;
@@ -775,8 +776,8 @@ GpuResult<GpuShaderModule> GpuDevice::create_shader_module(std::string_view wgsl
     return Ok(std::move(out));
 }
 
-GpuResult<GpuRenderPipeline> GpuDevice::create_render_pipeline(
-    const GpuRenderPipelineDesc& desc) const {
+GpuResult<GpuRenderPipeline>
+GpuDevice::create_render_pipeline(const GpuRenderPipelineDesc& desc) const {
     if (auto ok = check_device(state_); !ok)
         return Err(ok.error());
     auto invalid = [](std::string message) {
@@ -784,7 +785,8 @@ GpuResult<GpuRenderPipeline> GpuDevice::create_render_pipeline(
     };
     if (!same_device(desc.module, state_))
         return invalid("render pipeline needs a shader module from this device");
-    const GpuShaderModule& fragment_module = desc.fragment_module ? *desc.fragment_module : desc.module;
+    const GpuShaderModule& fragment_module =
+        desc.fragment_module ? *desc.fragment_module : desc.module;
     if (!same_device(fragment_module, state_))
         return invalid("fragment module is not from this device");
     if (desc.color_targets.empty() && !desc.depth)
@@ -877,8 +879,8 @@ GpuResult<GpuRenderPipeline> GpuDevice::create_render_pipeline(
     return Ok(std::move(out));
 }
 
-GpuResult<GpuComputePipeline> GpuDevice::create_compute_pipeline(
-    const GpuComputePipelineDesc& desc) const {
+GpuResult<GpuComputePipeline>
+GpuDevice::create_compute_pipeline(const GpuComputePipelineDesc& desc) const {
     if (auto ok = check_device(state_); !ok)
         return Err(ok.error());
     if (!same_device(desc.module, state_))
@@ -968,15 +970,15 @@ GpuResult<GpuBindGroup> make_bind_group(const std::shared_ptr<detail::GpuDeviceS
 
 } // namespace
 
-GpuResult<GpuBindGroup> GpuDevice::create_bind_group(const GpuRenderPipeline& pipeline,
-                                                     std::uint32_t group,
-                                                     const std::vector<GpuBinding>& bindings) const {
+GpuResult<GpuBindGroup>
+GpuDevice::create_bind_group(const GpuRenderPipeline& pipeline, std::uint32_t group,
+                             const std::vector<GpuBinding>& bindings) const {
     return make_bind_group(state_, GpuAccess::state(pipeline), group, bindings);
 }
 
-GpuResult<GpuBindGroup> GpuDevice::create_bind_group(const GpuComputePipeline& pipeline,
-                                                     std::uint32_t group,
-                                                     const std::vector<GpuBinding>& bindings) const {
+GpuResult<GpuBindGroup>
+GpuDevice::create_bind_group(const GpuComputePipeline& pipeline, std::uint32_t group,
+                             const std::vector<GpuBinding>& bindings) const {
     return make_bind_group(state_, GpuAccess::state(pipeline), group, bindings);
 }
 
@@ -990,7 +992,8 @@ GpuResult<GpuTarget> GpuDevice::create_target(const GpuTargetDesc& desc) const {
     color_desc.format = desc.color_format;
     color_desc.usage =
         GpuTextureUsage::render_target | GpuTextureUsage::sampled | GpuTextureUsage::copy_src;
-    color_desc.label = desc.label.empty() ? std::string("Pulp GpuTarget color") : desc.label + " color";
+    color_desc.label =
+        desc.label.empty() ? std::string("Pulp GpuTarget color") : desc.label + " color";
     auto color = create_texture(color_desc);
     if (!color)
         return Err(color.error());
@@ -1090,8 +1093,9 @@ GpuResult<GpuPixels> GpuTarget::read_pixels(std::chrono::milliseconds timeout) c
     if (!bytes) {
         if (device->is_lost())
             return Err(make_error(GpuError::Kind::device_lost, "the GPU device was lost"));
-        return Err(make_error(error.find("timed out") != std::string::npos ? GpuError::Kind::timeout
-                                                                           : GpuError::Kind::internal,
+        return Err(make_error(error.find("timed out") != std::string::npos
+                                  ? GpuError::Kind::timeout
+                                  : GpuError::Kind::internal,
                               error));
     }
     GpuPixels pixels;
@@ -1131,10 +1135,9 @@ GpuSubmissionStatus GpuSubmission::poll() const {
         } else {
             state_->status = GpuSubmissionStatus::failed;
             if (!state_->error)
-                state_->error = make_error(lost ? GpuError::Kind::device_lost
-                                                : GpuError::Kind::internal,
-                                           lost ? "the GPU device was lost"
-                                                : "the queue reported the submission failed");
+                state_->error = make_error(
+                    lost ? GpuError::Kind::device_lost : GpuError::Kind::internal,
+                    lost ? "the GPU device was lost" : "the queue reported the submission failed");
         }
     }
     return state_->status;
@@ -1411,7 +1414,8 @@ GpuRenderPass GpuFrame::render_pass(const GpuRenderPassDesc& desc) {
     if (!state_)
         return GpuRenderPass(std::move(impl));
     auto fail = [&](std::string message) {
-        state_->record_error(GpuError::Kind::invalid_argument, "render_pass: " + std::move(message));
+        state_->record_error(GpuError::Kind::invalid_argument,
+                             "render_pass: " + std::move(message));
         return GpuRenderPass(std::move(impl));
     };
     if (state_->submitted)
@@ -1498,7 +1502,8 @@ GpuRenderPass GpuFrame::render_pass(const GpuRenderPassDesc& desc) {
         return fail("Dawn returned no render pass encoder");
 
     for (auto& texture : written) {
-        if (std::find(state_->writes.begin(), state_->writes.end(), texture) == state_->writes.end()) {
+        if (std::find(state_->writes.begin(), state_->writes.end(), texture) ==
+            state_->writes.end()) {
             ++texture->unsubmitted_writes;
             state_->writes.push_back(texture);
         }
@@ -1616,9 +1621,10 @@ GpuStatus draw_gpu_texture(canvas::Canvas& canvas, const GpuTexture& texture, fl
     const auto format = state->desc.format;
     if (format != GpuFormat::rgba8_unorm && format != GpuFormat::bgra8_unorm &&
         format != GpuFormat::rgba16_float)
-        return Err(make_error(GpuError::Kind::invalid_argument,
-                              std::string(gpu_format_name(format)) +
-                                  " cannot be composited; use rgba8unorm, bgra8unorm or rgba16float"));
+        return Err(
+            make_error(GpuError::Kind::invalid_argument,
+                       std::string(gpu_format_name(format)) +
+                           " cannot be composited; use rgba8unorm, bgra8unorm or rgba16float"));
     if (state->unsubmitted_writes > 0)
         return Err(make_error(GpuError::Kind::invalid_argument,
                               "an unsubmitted GpuFrame writes this texture; submit it first"));
@@ -1680,8 +1686,8 @@ GpuResult<GpuShaderModule> GpuDevice::create_shader_module(std::string_view,
 GpuResult<GpuRenderPipeline> GpuDevice::create_render_pipeline(const GpuRenderPipelineDesc&) const {
     return Err(no_dawn());
 }
-GpuResult<GpuComputePipeline> GpuDevice::create_compute_pipeline(
-    const GpuComputePipelineDesc&) const {
+GpuResult<GpuComputePipeline>
+GpuDevice::create_compute_pipeline(const GpuComputePipelineDesc&) const {
     return Err(no_dawn());
 }
 GpuResult<GpuBindGroup> GpuDevice::create_bind_group(const GpuRenderPipeline&, std::uint32_t,

@@ -114,8 +114,7 @@ struct GpuError {
 
 std::string_view gpu_error_kind_name(GpuError::Kind kind);
 
-template <typename T>
-using GpuResult = runtime::Result<T, GpuError>;
+template <typename T> using GpuResult = runtime::Result<T, GpuError>;
 /// Success is a default-constructed value.
 using GpuStatus = runtime::Result<void, GpuError>;
 
@@ -415,8 +414,8 @@ class GpuTarget {
     /// Copy the color texture to the CPU and wait for it (blocking, not for
     /// the audio thread). Submit the frame that drew the target first; work
     /// submitted earlier on the queue is complete when this returns.
-    GpuResult<GpuPixels> read_pixels(
-        std::chrono::milliseconds timeout = std::chrono::milliseconds(2000)) const;
+    GpuResult<GpuPixels>
+    read_pixels(std::chrono::milliseconds timeout = std::chrono::milliseconds(2000)) const;
 
   private:
     friend struct detail::GpuAccess;
@@ -490,9 +489,9 @@ struct GpuRenderPassDesc {
     std::string label;
 
     /// The target's color (cleared to `clear`) and its depth, if any.
-    static GpuRenderPassDesc for_target(const GpuTarget& target,
-                                        std::optional<std::array<float, 4>> clear =
-                                            std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
+    static GpuRenderPassDesc for_target(
+        const GpuTarget& target,
+        std::optional<std::array<float, 4>> clear = std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
 };
 
 class GpuFrame;

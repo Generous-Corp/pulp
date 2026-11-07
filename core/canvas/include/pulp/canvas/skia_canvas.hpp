@@ -453,14 +453,8 @@ public:
     // `texture_handle` is a `wgpu::Texture*` on the canvas's own device. When
     // `keep_alive` is set, the wrapped image holds it until Graphite releases
     // the texture, so the caller's owner of the texture may go away first.
-    bool draw_native_dawn_texture(void* texture_handle,
-                                  uint32_t width,
-                                  uint32_t height,
-                                  const std::string& format,
-                                  float x,
-                                  float y,
-                                  float w,
-                                  float h,
+    bool draw_native_dawn_texture(void* texture_handle, uint32_t width, uint32_t height,
+                                  const std::string& format, float x, float y, float w, float h,
                                   std::shared_ptr<const void> keep_alive = {});
 
     // Standalone text measurement. Returns full HTML5

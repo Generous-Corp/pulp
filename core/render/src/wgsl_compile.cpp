@@ -78,18 +78,17 @@ WgslCompileOutput compile_wgsl(const wgpu::Device& device, const wgpu::Instance&
     } else {
         state->info_done = true;
     }
-    device.PopErrorScope(wgpu::CallbackMode::AllowProcessEvents,
-                         [state](wgpu::PopErrorScopeStatus status, wgpu::ErrorType type,
-                                 wgpu::StringView message) {
-                             std::lock_guard<std::mutex> lock(state->mutex);
-                             if (status == wgpu::PopErrorScopeStatus::Success &&
-                                 type != wgpu::ErrorType::NoError) {
-                                 state->scope_error = to_string(message);
-                                 if (state->scope_error.empty())
-                                     state->scope_error = "shader module rejected";
-                             }
-                             state->scope_done = true;
-                         });
+    device.PopErrorScope(
+        wgpu::CallbackMode::AllowProcessEvents,
+        [state](wgpu::PopErrorScopeStatus status, wgpu::ErrorType type, wgpu::StringView message) {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            if (status == wgpu::PopErrorScopeStatus::Success && type != wgpu::ErrorType::NoError) {
+                state->scope_error = to_string(message);
+                if (state->scope_error.empty())
+                    state->scope_error = "shader module rejected";
+            }
+            state->scope_done = true;
+        });
 
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {

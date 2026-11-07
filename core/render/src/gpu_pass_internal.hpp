@@ -149,12 +149,10 @@ struct GpuFrameState {
 
 /// Reaches the private state of the public handles.
 struct GpuAccess {
-    template <typename Handle>
-    static auto& state(Handle& handle) {
+    template <typename Handle> static auto& state(Handle& handle) {
         return handle.state_;
     }
-    template <typename Handle>
-    static const auto& state(const Handle& handle) {
+    template <typename Handle> static const auto& state(const Handle& handle) {
         return handle.state_;
     }
 };

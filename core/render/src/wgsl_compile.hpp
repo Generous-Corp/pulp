@@ -27,7 +27,9 @@ struct WgslCompileOutput {
     std::string scope_error;
     bool timed_out = false;
 
-    bool ok() const { return module && !timed_out && !has_wgsl_errors(diagnostics) && scope_error.empty(); }
+    bool ok() const {
+        return module && !timed_out && !has_wgsl_errors(diagnostics) && scope_error.empty();
+    }
 };
 
 /// Create a shader module under a validation error scope and wait (spinning

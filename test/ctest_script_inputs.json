@@ -3002,6 +3002,7 @@
   "pulp-test-gpu-audio-plugin-boundary-continuity",
   "pulp-test-gpu-audio-trace",
   "pulp-test-gpu-audio-transport",
+  "pulp-test-gpu-capabilities",
   "pulp-test-gpu-compute",
   "pulp-test-gpu-compute-async",
   "pulp-test-gpu-compute-kernel-override",
@@ -3018,6 +3019,7 @@
   "pulp-test-gpu-neural-realtime-node",
   "pulp-test-gpu-neural-shadow-policy",
   "pulp-test-gpu-neural-shadow-simd",
+  "pulp-test-gpu-pass",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-proc-installer",
@@ -3442,6 +3444,7 @@
   "pulp-test-yoga-layout-bench",
   "pulp-ui-script-editor-probe",
   "pulp-unique-temp-dir-fixture",
+  "pulp-wgsl-validate",
   "sample-region-allpass-consumer"
  ],
  "executables_scanned_for": [
@@ -5277,6 +5280,13 @@
     "tools/scripts/dawn_binding_census.py",
     "tools/scripts/editor_host_acceptance.py",
     "tools/scripts/test_editor_host_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "embed-wgsl-selftest": {
+   "entry": "tools/cmake/scripts/test_embed_wgsl.py",
+   "inputs": [
+    "tools/cmake/scripts/test_embed_wgsl.py"
    ],
    "kind": "python"
   },

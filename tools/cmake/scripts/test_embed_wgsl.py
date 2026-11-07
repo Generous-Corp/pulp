@@ -17,7 +17,7 @@ def run(src: pathlib.Path, out: pathlib.Path, var: str = "glow_wgsl") -> subproc
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--src", str(src), "--out", str(out),
          "--namespace", "my::shaders", "--var", var],
-        capture_output=True, text=True, check=False)
+        capture_output=True, text=True, encoding="utf-8", check=False)
 
 
 class EmbedWgslTest(unittest.TestCase):
