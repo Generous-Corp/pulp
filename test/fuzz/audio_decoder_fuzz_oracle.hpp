@@ -27,9 +27,9 @@
 namespace pulp_fuzz::audio_decoder {
 
 struct OracleFailure {
-    std::string path;    // the file under test
-    std::string field;   // the property that failed, e.g. "num_frames"
-    std::string detail;  // both sides of the disagreement, human readable
+    std::string path;   // the file under test
+    std::string field;  // the property that failed, e.g. "num_frames"
+    std::string detail; // both sides of the disagreement, human readable
 };
 
 using FailureSink = std::function<void(const OracleFailure&)>;

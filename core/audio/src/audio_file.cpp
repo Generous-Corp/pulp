@@ -70,18 +70,23 @@ void float_to_int32(const float* src, int32_t* dst, size_t count) {
 // carries more than twice the bits of any PCM depth, so rounding the product
 // lands on the code), and rescaled here. Float files are read as they are.
 struct IntegerDepth {
-    double choc_full_scale;  // what CHOC divided the code by
-    float scale;             // 1 / 2^(bits-1)
+    double choc_full_scale; // what CHOC divided the code by
+    float scale;            // 1 / 2^(bits-1)
 };
 
 static std::optional<IntegerDepth> integer_depth(choc::audio::BitDepth depth) {
     using choc::audio::BitDepth;
     switch (depth) {
-        case BitDepth::int8: return IntegerDepth{127.0, 1.0f / 128.0f};
-        case BitDepth::int16: return IntegerDepth{32767.0, 1.0f / 32768.0f};
-        case BitDepth::int24: return IntegerDepth{8388607.0, 1.0f / 8388608.0f};
-        case BitDepth::int32: return IntegerDepth{2147483647.0, 1.0f / 2147483648.0f};
-        default: return std::nullopt;
+    case BitDepth::int8:
+        return IntegerDepth{127.0, 1.0f / 128.0f};
+    case BitDepth::int16:
+        return IntegerDepth{32767.0, 1.0f / 32768.0f};
+    case BitDepth::int24:
+        return IntegerDepth{8388607.0, 1.0f / 8388608.0f};
+    case BitDepth::int32:
+        return IntegerDepth{2147483647.0, 1.0f / 2147483648.0f};
+    default:
+        return std::nullopt;
     }
 }
 

@@ -62,8 +62,7 @@ const ScratchDir& scratch_dir() {
 }
 
 // The fuzzable set, indexed by the selector byte modulo its size.
-constexpr std::array<std::string_view, 5> kExtensions = {".wav", ".aiff", ".flac", ".mp3",
-                                                         ".ogg"};
+constexpr std::array<std::string_view, 5> kExtensions = {".wav", ".aiff", ".flac", ".mp3", ".ogg"};
 
 bool starts_with(const uint8_t* data, size_t size, std::string_view magic, size_t offset = 0) {
     return size >= offset + magic.size() &&
@@ -127,8 +126,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (!write_input(path, payload, payload_size))
         return 0;
 
-    (void)pulp_fuzz::audio_decoder::check_registry(path.string(),
-                                                   pulp_fuzz::audio_decoder::fuzz_limits(),
-                                                   trap_on_failure);
+    (void)pulp_fuzz::audio_decoder::check_registry(
+        path.string(), pulp_fuzz::audio_decoder::fuzz_limits(), trap_on_failure);
     return 0;
 }

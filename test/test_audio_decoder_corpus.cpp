@@ -63,10 +63,8 @@ std::vector<fs::path> corpus_files() {
 // these formats is a mis-pathed or half-populated corpus, not a passing one.
 const std::map<std::string, std::set<std::string>>& fuzzable_formats() {
     static const std::map<std::string, std::set<std::string>> formats = {
-        {"wav", {".wav", ".wave"}},
-        {"aiff", {".aiff", ".aif", ".aifc"}},
-        {"flac", {".flac"}},
-        {"mp3", {".mp3"}},
+        {"wav", {".wav", ".wave"}}, {"aiff", {".aiff", ".aif", ".aifc"}},
+        {"flac", {".flac"}},        {"mp3", {".mp3"}},
         {"ogg", {".ogg", ".oga"}},
     };
     return formats;
@@ -93,14 +91,14 @@ std::vector<uint8_t> make_pcm_wav(uint16_t bits, const std::vector<int32_t>& cod
         out.push_back(static_cast<uint8_t>(v >> 8));
     };
     auto tag = [&](const char* t) { out.insert(out.end(), t, t + 4); };
-    const uint32_t pad = data_size & 1u;  // RIFF chunks are word aligned
+    const uint32_t pad = data_size & 1u; // RIFF chunks are word aligned
     tag("RIFF");
     put32(36u + data_size + pad);
     tag("WAVE");
     tag("fmt ");
     put32(16u);
-    put16(1u);                      // PCM
-    put16(1u);                      // mono
+    put16(1u); // PCM
+    put16(1u); // mono
     put32(44100u);
     put32(44100u * bytes_per_sample);
     put16(bytes_per_sample);
@@ -108,7 +106,8 @@ std::vector<uint8_t> make_pcm_wav(uint16_t bits, const std::vector<int32_t>& cod
     tag("data");
     put32(data_size);
     for (int32_t code : codes) {
-        const uint32_t raw = bits == 8 ? static_cast<uint32_t>(code + 128) : static_cast<uint32_t>(code);
+        const uint32_t raw =
+            bits == 8 ? static_cast<uint32_t>(code + 128) : static_cast<uint32_t>(code);
         for (uint16_t b = 0; b < bytes_per_sample; ++b)
             out.push_back(static_cast<uint8_t>(raw >> (8 * b)));
     }
@@ -148,8 +147,9 @@ TEST_CASE("audio decoder corpus holds a seed for every fuzzable format", "[fuzz]
         present.insert(lower_extension(file));
 
     for (const auto& [format, extensions] : fuzzable_formats()) {
-        const bool found = std::any_of(extensions.begin(), extensions.end(),
-                                       [&](const std::string& ext) { return present.count(ext) > 0; });
+        const bool found =
+            std::any_of(extensions.begin(), extensions.end(),
+                        [&](const std::string& ext) { return present.count(ext) > 0; });
         INFO("format without a seed: " << format);
         CHECK(found);
     }
@@ -214,9 +214,8 @@ TEST_CASE("WAV seeds decode identically through the registry and the byte-span d
         const auto span_data = pulp::audio::decode_wav(bytes, span_limits);
 
         if (registry_data.has_value() != span_data.has_value()) {
-            FAIL_CHECK(name << ": registry (CHOC) "
-                            << (registry_data ? "decoded" : "refused") << ", decode_wav (dr_wav) "
-                            << (span_data ? "decoded" : "refused"));
+            FAIL_CHECK(name << ": registry (CHOC) " << (registry_data ? "decoded" : "refused")
+                            << ", decode_wav (dr_wav) " << (span_data ? "decoded" : "refused"));
             continue;
         }
         if (!registry_data)
@@ -243,8 +242,8 @@ TEST_CASE("WAV seeds decode identically through the registry and the byte-span d
             }
             if (first_mismatch != lhs.size()) {
                 FAIL_CHECK(name << ": channel " << c << " sample " << first_mismatch
-                                << " differs: registry " << lhs[first_mismatch]
-                                << ", decode_wav " << rhs[first_mismatch]);
+                                << " differs: registry " << lhs[first_mismatch] << ", decode_wav "
+                                << rhs[first_mismatch]);
             }
         }
     }
@@ -252,8 +251,7 @@ TEST_CASE("WAV seeds decode identically through the registry and the byte-span d
     REQUIRE(both_decoded > 0);
 }
 
-TEST_CASE("integer PCM WAV extremes decode by 2^(bits-1) on both WAV paths",
-          "[fuzz][audio][wav]") {
+TEST_CASE("integer PCM WAV extremes decode by 2^(bits-1) on both WAV paths", "[fuzz][audio][wav]") {
     struct Depth {
         uint16_t bits;
         std::vector<int32_t> codes;
