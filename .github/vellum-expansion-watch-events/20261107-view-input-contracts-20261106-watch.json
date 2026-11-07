@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261107-view-input-contracts-20261106-watch",
+  "created_at": "2026-11-07T02:33:31Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Four input contracts in core/view: a disabled view receives no key, text, gesture, hover-enter, press, drag or double-click but still gets the release and exit that finish an interaction; modifier-key changes reach the focused and drag-captured views; focus changes carry a cause and are reported to every ancestor; hover is re-evaluated when content moves under a stationary pointer. The change is pointer and keyboard routing in the view tree plus the script event layer. No design-import, Chromium, rendering, asset or packaging authority moves, and no paint output changes.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch",
+    "pulp build --target pulp-test-group-view-host, then run build/test/pulp-test-group-view-host \"[disabled],[modifiers],[focus],[hover]\""
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

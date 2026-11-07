@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-view-input-contracts-20261106",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T02:33:32Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/view/include/pulp/view/view.hpp",
+    "core/view/js/web-compat-document-selectors.js",
+    "core/view/js/web-compat-document.js",
+    "core/view/js/web-compat-element-events.js",
+    "core/view/platform/mac/window_host_mac.mm",
+    "core/view/platform/mac/window_host_mac_text_input.mm",
+    "core/view/src/context_menu.cpp",
+    "core/view/src/design_fit_view.cpp",
+    "core/view/src/hover_cursor.cpp",
+    "core/view/src/plugin_key_routing.cpp",
+    "core/view/src/ui_components.cpp",
+    "core/view/src/view.cpp",
+    "core/view/src/widget_bridge.cpp",
+    "core/view/src/widget_bridge/bridge_dispatch.cpp",
+    "core/view/src/widget_bridge/event_api.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "The exported view sources gain the disabled-view input contract, the modifier-key change notification, focus causes with descendant notification, and hover re-evaluation under a stationary pointer. All additions are source-compatible with existing widgets, and the script layer now turns native focus changes into focus, blur, focusin and focusout events. Nothing here depends on Pulp-only code, so the next re-export should carry it."
+}

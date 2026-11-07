@@ -497,6 +497,16 @@ will tell you when you have not.
 
 ## Browser-host rules
 
+### Modifier keys are reported from `handle_key`, not from a separate listener
+
+`WebInputRouter::handle_key` (`web_event_translate.hpp`) reports a change in the
+held modifier keys when a `keydown` or `keyup` for Shift, Control, Alt or Meta
+arrives and it is not an auto-repeat. The browser's own modifier flags on that
+event already describe the state after the key, so the router passes them
+straight to `deliver_modifier_keys_changed`. The router does not track which
+view a pointer press is captured by, so on this host only the focused view
+hears the change.
+
 ### Local demo HTTP servers are loopback-only, canonical, and non-reflecting
 
 Browser fixtures need real HTTP headers, but they are still test harnesses rather

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-view-input-contracts-20261106",
+  "kind": "change",
+  "created_at": "2026-11-07T02:33:32Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "retained-ui-kernel: pointer_dispatch gains delivery functions for key and text input, modifier-key changes, focus transfer with a cause, and stationary-pointer hover re-evaluation, and its press, drag and release delivery now honor the disabled-view contract; input_events gains the Modifiers alias; gesture cancels a recognizer whose view was disabled mid-gesture. Existing signatures are kept and new ones are additive, so no API or authority boundary moves. Pulp-only for now; the next re-export carries the additions.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp build --target pulp-test-group-view-host, then run build/test/pulp-test-group-view-host \"[disabled],[modifiers],[focus],[hover]\""
+  ],
+  "disposition": "pulp-only"
+}

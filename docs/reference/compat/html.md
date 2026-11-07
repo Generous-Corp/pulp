@@ -202,10 +202,19 @@ report are `SUPPORTED-NO-EVIDENCE` evidence-anchor refresh work.
 `appendChild` / `removeChild` / `insertBefore` / `replaceChild`,
 `cloneNode`, `addEventListener` (click, mouseenter/leave,
 pointerenter/leave, pointerdown/move/up/cancel, gesture*, input,
-change, focus, blur, wheel, drop), `dispatchEvent`, `setPointerCapture` /
+change, focus, blur, focusin, focusout, wheel, drop), `dispatchEvent`, `setPointerCapture` /
 `releasePointerCapture`, `getBoundingClientRect`, `offsetWidth` /
 `offsetHeight` / `clientWidth` / `clientHeight`, `nodeType` /
 `nodeName` (for React's reconciler hot path).
+
+## Focus events
+
+Native focus changes (a click, Tab, or `setFocus`) arrive as `focus` and `blur`
+on the element that changed, which do not bubble, and as `focusin` and
+`focusout`, which do. `document.activeElement` follows them. The event carries
+the cause of the change (`pointer`, `keyboard` or `programmatic`), and an
+element is `:focus-visible` only when focus came from the keyboard or from code.
+`element.focus()` and `element.blur()` dispatch the same events.
 
 ## Pulp-specific author hints
 
