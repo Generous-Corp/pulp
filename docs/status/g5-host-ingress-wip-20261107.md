@@ -1,6 +1,10 @@
 # G-5 host ingress WIP checkpoint — 2026-11-07
 
-Status: **BLOCKED ON LEAD-OWNED SIGNAL GRAPH SEAM**
+Status: **DOWNSTREAM ADAPTER INTEGRATED; PLUGIN VOICE DELIVERY REMAINS OPEN**
+
+The lead-owned seam checkpoint `d3995763f6d5c7f8a45f7b970da177722e663c17`
+is integrated locally as commit `51ef49ebbec9`. This worktree adds the public
+consumer coverage and does not duplicate the seam.
 
 The existing public `HostEventIngress` and `GraphAuthoredEventLane` contract
 is complete and bounded, but this slice cannot be wired end to end without
@@ -32,7 +36,7 @@ can proceed:
    fan-out, Plugin/MidiInput/MidiOutput, and legacy gather-node MIDI must remain
    refused or separate as specified by the G-5 packet.
 
-Once that exact seam is supplied, the implementation-owned files are:
+The supplied seam now covers the implementation-owned files:
 
 - `core/host/src/trigger_graph.cpp`: reset/stale/overflow/epoch plumbing and
   serial canonical projection;
@@ -44,6 +48,22 @@ Once that exact seam is supplied, the implementation-owned files are:
 
 No scheduler or second adapter should be added. The existing block mailbox and
 legacy gather-node MIDI path remain independent.
+
+## Validation receipt
+
+The governed Release target `pulp-test-group-trigger-graph` built successfully.
+The public consumer target `pulp-test-g5-host-event-consumer` built and ran with
+`g5-host-event-contract PASS checks=231 host_mpe_events=3 graph_events=9
+graph_ingress_events=5 partitions=1,32,64,127,256 planted_negative=5`.
+The focused CTest selection passed all 12 tests, including the G-5 contract
+cases, trigger runtime consumer, and host-event consumer. A mutation changing
+the planted reversed-tie expectation exited 1 with
+`FAIL rule=reversed-tie-negative`, then the unmutated positive rerun passed.
+
+Remaining gap: hosted Plugin/voice delivery of graph-owned host MIDI/MPE is
+still intentionally refused by trigger-plan admission. This receipt proves
+MIDI/UMP/MPE projection through the serial graph MIDI lane and existing
+Processor sidecar plumbing only; it does not claim plugin voice parity.
 
 The requested planning files were not present in this checkout or the adjacent
 planning repository; the repository's G-5 readiness packet and host-ingress
