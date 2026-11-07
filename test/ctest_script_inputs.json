@@ -2323,6 +2323,18 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-platform-objc-unique-class": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_platform_objc_unique_class.mm"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-plugin-manager-panel": {
    "data": "none",
    "inputs": [],
@@ -3205,8 +3217,10 @@
   "pulp-test-nam-tcn-adapter",
   "pulp-test-native-core-ffi",
   "pulp-test-native-core-processor",
+  "pulp-test-native-frame-pump",
   "pulp-test-native-metal-audio-comparator",
   "pulp-test-native-metal-compute",
+  "pulp-test-native-metal-surface",
   "pulp-test-negative-path",
   "pulp-test-network-service-discovery",
   "pulp-test-neural-cpu-simd",
@@ -3223,6 +3237,8 @@
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
+  "pulp-test-platform-main-thread",
+  "pulp-test-platform-objc-unique-class",
   "pulp-test-playback-audio-renderer",
   "pulp-test-playback-automation-cursor",
   "pulp-test-playback-capture-engine",
