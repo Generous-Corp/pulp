@@ -22,7 +22,11 @@ What must hold:
   time, so a long pull request or a large group is read in full;
 - build.yml runs the protected base branch's copy in the merge_group
   preamble, handing the token to that copy only; a failed base fetch fails,
-  and only a base without the check passes, with a notice.
+  and only a base without the check passes, with a notice;
+- the step scans from main's tip (the "Resolve the merge group's main base"
+  step), not merge_group.base_sha: on a real queue chain a HOLD on an entry
+  ahead in the batch fails the group that lands it, a clean batch passes, and
+  a base that did not resolve fails the group before the check runs.
 
 Run:
     python3 tools/ci/test_merge_group_hold_check.py
@@ -42,6 +46,7 @@ import unittest
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import merge_group_hold_check as hold  # noqa: E402
+from merge_queue_fixture import MergeQueueRepo  # noqa: E402
 
 ROOT = HERE.parents[1]
 BASE = "0" * 40
@@ -349,7 +354,13 @@ class MergeGroupHoldCheck(unittest.TestCase):
         step = classify[classify.index("- name: Refuse a merge group whose pull request is held"):
                         classify.index("- id: classify")]
         self.assertIn("if: ${{ github.event_name == 'merge_group' }}", step)
-        self.assertIn("github.event.merge_group.base_sha", step)
+        # main's tip, never base_sha: base_sha is the previous speculative
+        # group when entries are queued ahead.
+        self.assertIn("MERGE_GROUP_MAIN_BASE: ${{ steps.merge_group_base.outputs.base }}", step)
+        self.assertIn('--base "$MERGE_GROUP_MAIN_BASE"', step)
+        self.assertNotIn("github.event.merge_group.base_sha", step)
+        self.assertLess(classify.index("id: merge_group_base"),
+                        classify.index("- name: Refuse a merge group whose pull request is held"))
         self.assertNotIn("continue-on-error", step)
         # The token reaches only the protected base branch's copy of the
         # check, never the queue entry's checkout.
@@ -358,7 +369,8 @@ class MergeGroupHoldCheck(unittest.TestCase):
         self.assertNotIn("GH_TOKEN: ${{ github.token }}", step)
         self.assertNotIn("python3 tools/ci/merge_group_hold_check.py", step)
 
-    def run_step(self, git_fetch: int, has_check: bool) -> subprocess.CompletedProcess:
+    def run_step(self, git_fetch: int, has_check: bool,
+                 main_base: str = BASE) -> subprocess.CompletedProcess:
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         step = workflow[workflow.index("- name: Refuse a merge group whose pull request is held"):]
         script = step[step.index("run: |\n") + len("run: |\n"):step.index("- id: classify")]
@@ -371,11 +383,11 @@ class MergeGroupHoldCheck(unittest.TestCase):
                 "case \"$1\" in\n"
                 f"  fetch) exit {git_fetch} ;;\n"
                 f"  cat-file) exit {0 if has_check else 128} ;;\n"
-                "  show) echo 'import sys; print(\"check ran\"); sys.exit(1)' ;;\n"
+                "  show) echo 'import sys; print(\"check ran\", *sys.argv[1:]); sys.exit(1)' ;;\n"
                 "esac\n", encoding="utf-8")
             fake_git.chmod(0o755)
             env = dict(os.environ, PATH=f"{tmp}:{os.environ['PATH']}",
-                       MERGE_GROUP_BASE_REF="refs/heads/main", MERGE_GROUP_BASE_SHA=BASE,
+                       MERGE_GROUP_BASE_REF="refs/heads/main", MERGE_GROUP_MAIN_BASE=main_base,
                        MERGE_GROUP_HEAD_SHA=MERGE_B, GITHUB_REPOSITORY="o/r")
             return subprocess.run(["bash", "-c", script], env=env, capture_output=True,
                                   text=True, encoding="utf-8", timeout=60)
@@ -392,7 +404,82 @@ class MergeGroupHoldCheck(unittest.TestCase):
                       "yet", absent.stdout)
         present = self.run_step(git_fetch=0, has_check=True)
         self.assertEqual(present.returncode, 1, present.stdout + present.stderr)
-        self.assertIn("check ran", present.stdout)
+        self.assertIn(f"check ran --repo o/r --base {BASE} --head {MERGE_B}", present.stdout)
+
+    def test_an_unresolved_main_base_fails_closed_before_the_check(self) -> None:
+        # The resolve step prints origin/main when the chain does not reach
+        # main; the step must not fall back to a narrower scan.
+        for main_base in ("origin/main", ""):
+            with self.subTest(main_base=main_base):
+                unresolved = self.run_step(git_fetch=0, has_check=True, main_base=main_base)
+                self.assertEqual(unresolved.returncode, 1, unresolved.stdout)
+                self.assertIn("::error title=merge-group HOLD check::main's tip could not be "
+                              "resolved", unresolved.stdout)
+                self.assertNotIn("check ran", unresolved.stdout)
+
+
+class StackedQueueHoldCheck(unittest.TestCase):
+    """A real batch of three entries, #11 ahead of #12 ahead of #13.
+
+    #13's group has `merge_group.base_sha` = #12's speculative group, and it
+    lands all three. The base the workflow hands the check comes from running
+    build.yml's resolve step in a depth-1 checkout of that group.
+    """
+
+    def setUp(self) -> None:
+        self.queue = MergeQueueRepo([11, 12, 13])
+        self.addCleanup(self.queue.close)
+
+    def check(self, verdicts: dict, base: str) -> tuple:
+        fetch = self.queue.fetch("o/r", Fake(verdicts, commits={}))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = hold.main(["--repo", "o/r", "--base", base,
+                              "--head", self.queue.groups[13]], fetch=fetch)
+        return code, out.getvalue()
+
+    def test_the_resolve_step_hands_the_last_group_mains_tip(self) -> None:
+        self.assertNotEqual(self.queue.base_sha(13), self.queue.main)
+        self.assertEqual(self.queue.resolve_main_base(13), self.queue.main)
+
+    def test_a_hold_on_an_earlier_entry_fails_the_group_that_lands_it(self) -> None:
+        held = pr([node("shipyard-local", "CONTRIBUTOR", "2026-11-05T10:00:00Z",
+                        f"verdict: HOLD head:{self.queue.heads[11]}", url="https://x/hold")])
+        verdicts = {11: held, 12: pr([]), 13: pr([])}
+        code, out = self.check(verdicts, self.queue.resolve_main_base(13))
+        self.assertEqual(code, 1, out)
+        self.assertIn("::error title=merge-group HOLD check::#11 is held", out)
+        self.assertIn("https://x/hold", out)
+        # The negative control: from base_sha the same group only scans #13,
+        # so the HOLD two entries ahead goes unchecked. That is the bypass.
+        code, out = self.check(verdicts, self.queue.base_sha(13))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("#11", out)
+
+    def test_a_clean_batch_passes_and_every_entry_was_read(self) -> None:
+        verdicts = {n: pr([node("shipyard-local[bot]", "CONTRIBUTOR", "2026-11-05T10:00:00Z",
+                                f"verdict: APPROVE head:{self.queue.heads[n]}")])
+                    for n in (11, 12, 13)}
+        fake = Fake(verdicts, commits={})
+        fetch = self.queue.fetch("o/r", fake)
+        base = self.queue.resolve_main_base(13)
+        self.assertEqual(hold.group_entries(fetch, "o/r", base, self.queue.groups[13]),
+                         [(13, self.queue.heads[13]), (12, self.queue.heads[12]),
+                          (11, self.queue.heads[11])])
+        code, out = self.check(verdicts, base)
+        self.assertEqual(code, 0, out)
+        self.assertIn("no queued pull request is held", out)
+
+    def test_a_main_off_the_chain_resolves_to_the_fail_closed_fallback(self) -> None:
+        # A base ref that carries the resolver but whose tip the group's
+        # chain never reaches (main moved off the chain).
+        q = self.queue
+        q.git("checkout", "-q", "--detach", q.main)
+        q.git("commit", "-q", "--allow-empty", "-m", "main moved")
+        q.git("push", "-q", "origin", "HEAD:refs/heads/other")
+        self.assertEqual(q.resolve_main_base(13, "refs/heads/other"), "origin/main")
+        # The positive control on the same fixture: main itself resolves.
+        self.assertEqual(q.resolve_main_base(12), q.main)
 
 
 if __name__ == "__main__":

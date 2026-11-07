@@ -224,9 +224,10 @@ bool PresetManager::load(const PresetInfo& preset) {
     return load(preset.path);
 }
 
-bool PresetManager::load(const fs::path& path) {
+std::optional<std::vector<ParamSetting>> PresetManager::read_values(const fs::path& path) const {
     std::ifstream f(path);
-    if (!f.is_open()) return false;
+    if (!f.is_open())
+        return std::nullopt;
 
     std::string content((std::istreambuf_iterator<char>(f)),
                          std::istreambuf_iterator<char>());
@@ -234,12 +235,15 @@ bool PresetManager::load(const fs::path& path) {
     // Simple JSON parameter extraction
     // Look for "parameters": { "name": value, ... }
     auto params_pos = content.find("\"parameters\"");
-    if (params_pos == std::string::npos) return false;
+    if (params_pos == std::string::npos)
+        return std::nullopt;
 
     auto brace = content.find('{', params_pos);
-    if (brace == std::string::npos) return false;
+    if (brace == std::string::npos)
+        return std::nullopt;
 
     // Parse each "name": value pair
+    std::vector<ParamSetting> values;
     auto all_params = store_.all_params();
     for (const auto& param : all_params) {
         auto key_pos = content.find("\"" + param.name + "\"", brace);
@@ -260,11 +264,21 @@ bool PresetManager::load(const fs::path& path) {
             std::size_t parsed = 0;
             float value = std::stof(val_str, &parsed);
             if (!has_only_trailing_space(val_str, parsed)) continue;
-            store_.set_value(param.id, value);
+            values.push_back({param.id, value});
         } catch (...) {
             continue;
         }
     }
+    return values;
+}
+
+bool PresetManager::load(const fs::path& path) {
+    const auto values = read_values(path);
+    if (!values)
+        return false;
+
+    for (const auto& setting : *values)
+        store_.set_value(setting.id, setting.value);
 
     // Extract preset name from path
     current_name_ = path.stem().string();
