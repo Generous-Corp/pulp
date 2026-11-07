@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "_comment": "Test sources that a CMake foreach loop registers under a computed name, which the dead-test guard cannot read from the CMake text. Each entry needs a reason. An entry whose file is referenced directly, or no longer exists, fails the guard so the list cannot go stale.",
+  "allow": [
+    {
+      "path": "test/test_gpu_audio_trace.cpp",
+      "reason": "listed in the shared-I/O suite loop in test/cmake/core_runtime_canvas_signal_tests.cmake, which builds the file name from the suite name"
+    },
+    {
+      "path": "test/test_gpu_shared_io_convolution_pipeline.cpp",
+      "reason": "listed in the shared-I/O suite loop in test/cmake/core_runtime_canvas_signal_tests.cmake, which builds the file name from the suite name"
+    },
+    {
+      "path": "test/test_gpu_shared_io_convolution_session.cpp",
+      "reason": "listed in the shared-I/O suite loop in test/cmake/core_runtime_canvas_signal_tests.cmake, which builds the file name from the suite name"
+    }
+  ]
+}
