@@ -1794,3 +1794,134 @@ TEST_CASE("runtime content installer rejects archives missing declared exports",
     }));
     REQUIRE_FALSE(fs::exists(data_root / "Content"));
 }
+
+// ── Preset file schema 2, prepared presets, listing cache ───────────────────
+
+TEST_CASE("PresetManager save escapes parameter names so the file is strict JSON",
+          "[state][preset][reliability]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-escape-param-names");
+    StateStore store;
+    const std::string odd_name = R"(Out"put \ Gain)";
+    store.add_parameter({.id = 1, .name = odd_name, .range = {-60, 12, 0}});
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    store.set_value(1, -9.0f);
+    REQUIRE(pm.save("Odd"));
+
+    const auto preset = require_user_preset(pm, "Odd");
+    std::ifstream file(preset.path);
+    std::string content((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+
+    // A real JSON parser sees the exact parameter name and value.
+    auto doc = choc::json::parse(content);
+    REQUIRE(doc["parameters"].isObject());
+    REQUIRE(doc["parameters"].hasObjectMember(odd_name));
+    REQUIRE(doc["parameters"][odd_name].getWithDefault<double>(0.0) == Catch::Approx(-9.0));
+
+    store.set_value(1, 0.0f);
+    REQUIRE(pm.load(preset));
+    REQUIRE(store.get_value(1) == Catch::Approx(-9.0f));
+}
+
+TEST_CASE("PresetManager schema 2 round-trips author metadata", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-schema2");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    PresetMetadata meta;
+    meta.author = "A. Person";
+    meta.description = "Warm \"pad\"";
+    meta.tags = {"pad", "warm"};
+    meta.program = 12;
+    store.set_value(1, -3.0f);
+    REQUIRE(pm.save("Pad", "", meta));
+
+    const auto info = require_user_preset(pm, "Pad");
+    REQUIRE(info.author == "A. Person");
+    REQUIRE(info.description == "Warm \"pad\"");
+    REQUIRE(info.tags == std::vector<std::string>{"pad", "warm"});
+
+    auto prepared = pm.prepare(info.path);
+    REQUIRE(prepared.has_value());
+    REQUIRE(prepared->schema == 2);
+    REQUIRE(prepared->metadata.tags == meta.tags);
+    REQUIRE(prepared->metadata.program == 12);
+}
+
+TEST_CASE("PresetManager prepare leaves the store untouched and reports unknown and missing names",
+          "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-prepare");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    const auto file = sandbox.root / "legacy.json";
+    write_text_file(file, R"json({"name":"Legacy","parameters":{"Gain":-12,"Ghost":3}})json");
+    store.set_value(1, 5.0f);
+
+    auto prepared = pm.prepare(file);
+    REQUIRE(prepared.has_value());
+    REQUIRE(prepared->schema == 1);
+    REQUIRE(store.get_value(1) == Catch::Approx(5.0f)); // prepare did not apply
+    REQUIRE(prepared->unknown_params == std::vector<std::string>{"Ghost"});
+    REQUIRE(prepared->missing_params == std::vector<std::string>{"Mix"});
+    REQUIRE(prepared->writes.size() == 1);
+
+    REQUIRE(pm.apply(*prepared));
+    REQUIRE(store.get_value(1) == Catch::Approx(-12.0f));
+    REQUIRE(pm.current_preset_name() == "legacy");
+}
+
+TEST_CASE("PreparedPreset values are clamped at prepare time and apply_rt writes them",
+          "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-apply-rt");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    const auto file = sandbox.root / "loud.json";
+    write_text_file(file, R"json({"parameters":{"Gain":99,"Mix":-7}})json");
+    auto prepared = pm.prepare(file);
+    REQUIRE(prepared.has_value());
+    REQUIRE(prepared->writes.size() == 2);
+    for (const auto& w : prepared->writes) {
+        if (w.id == 1) REQUIRE(w.value == Catch::Approx(12.0f));
+        if (w.id == 2) REQUIRE(w.value == Catch::Approx(0.0f));
+    }
+
+    prepared->apply_rt(store);
+    REQUIRE(store.get_value(1) == Catch::Approx(12.0f));
+    REQUIRE(store.get_value(2) == Catch::Approx(0.0f));
+}
+
+TEST_CASE("PresetManager listing parses each unchanged file once", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-meta-cache");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    REQUIRE(pm.save("One"));
+    REQUIRE(pm.save("Two"));
+    REQUIRE(pm.save("Three"));
+
+    (void)pm.user_presets();
+    const auto after_first = pm.metadata_parse_count();
+    REQUIRE(after_first >= 3);
+
+    for (int i = 0; i < 5; ++i) (void)pm.all_presets();
+    REQUIRE(pm.metadata_parse_count() == after_first);
+
+    // Changing one file re-parses exactly that file.
+    const auto two = require_user_preset(pm, "Two");
+    write_text_file(two.path,
+                    R"json({"tags":["edited"],"parameters":{"Gain":-1,"Mix":1}, "author": "X"})json");
+    auto presets = pm.user_presets();
+    REQUIRE(pm.metadata_parse_count() == after_first + 1);
+    auto it = std::find_if(presets.begin(), presets.end(),
+                           [](const PresetInfo& p) { return p.name == "Two"; });
+    REQUIRE(it != presets.end());
+    REQUIRE(it->tags == std::vector<std::string>{"edited"});
+    REQUIRE(it->author == "X");
+}

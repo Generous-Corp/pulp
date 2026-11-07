@@ -94,6 +94,11 @@ docs:
     kind: guide
     summary: State and parameter system — ParamValue, StateStore, Binding, serialization
 
+  - slug: presets
+    path: guides/presets.md
+    kind: guide
+    summary: Preset files (schema 2), metadata, prepare/apply loading and the listing cache
+
   - slug: voice-runtime-facade
     path: guides/voice-runtime-facade.md
     kind: guide

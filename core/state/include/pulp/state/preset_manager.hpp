@@ -10,9 +10,46 @@
 #include <vector>
 #include <functional>
 #include <filesystem>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
+#include <unordered_map>
 
 namespace pulp::state {
+
+/// Author-supplied descriptive metadata carried by a preset file (schema 2).
+/// Distinct from the parameter payload; absent fields stay empty.
+struct PresetMetadata {
+    std::string author;
+    std::string description;
+    std::vector<std::string> tags;
+    /// Optional author hint for default program ordering; negative or absent
+    /// means "no hint".
+    std::optional<int> program;
+};
+
+/// A preset parsed and validated off the audio thread, ready to apply.
+///
+/// `PresetManager::prepare()` does all file IO, parsing, name resolution and
+/// range clamping; applying the result is a plain batch of parameter writes.
+/// Values are clamped to each parameter's range at prepare time, so
+/// `apply_rt()` can hand them to the real-time batch write unchanged.
+struct PreparedPreset {
+    std::string name;                         ///< File stem
+    std::filesystem::path path;               ///< Source file
+    int schema = 1;                           ///< 1 = legacy file, 2 = schema 2
+    PresetMetadata metadata;
+    std::vector<StateStore::ParamWrite> writes;
+    /// Names present in the file that match no registered parameter.
+    /// Only populated when the file parsed as strict JSON.
+    std::vector<std::string> unknown_params;
+    /// Registered parameters the file did not mention; they keep their value.
+    std::vector<std::string> missing_params;
+
+    /// Apply as one real-time-safe batch (see StateStore::set_values_rt).
+    /// Main-thread listeners are queued until StateStore::pump_listeners().
+    void apply_rt(StateStore& store) const;
+};
 
 
 /// Metadata for a single preset file.
@@ -67,12 +104,30 @@ public:
     ///   is rejected.
     bool save(const std::string& name, const std::string& folder = "");
 
+    /// Save with author-supplied metadata (written as schema 2 fields).
+    bool save(const std::string& name, const std::string& folder,
+              const PresetMetadata& metadata);
+
     /// Load a preset from a PresetInfo (sets all parameter values).
     /// @return True on success.
     bool load(const PresetInfo& preset);
 
     /// Load a preset by file path.
     bool load(const std::filesystem::path& path);
+
+    /// Parse and validate a preset file without touching the store. Returns
+    /// nullopt when the file cannot be read or has no parameter object.
+    /// Safe to call from any non-audio thread; allocates and reads disk.
+    std::optional<PreparedPreset> prepare(const std::filesystem::path& path) const;
+
+    /// Apply a prepared preset on the calling thread (per-parameter
+    /// StateStore::set_value, so main-thread listeners fire immediately) and
+    /// update current-preset tracking and `on_preset_loaded`.
+    bool apply(const PreparedPreset& prepared);
+
+    /// Number of preset files parsed for metadata since construction. A
+    /// repeated listing of unchanged files must not increase it.
+    std::size_t metadata_parse_count() const { return metadata_parse_count_; }
 
     /// Delete a user preset file. Factory presets cannot be deleted.
     bool delete_preset(const PresetInfo& preset);
@@ -191,6 +246,14 @@ private:
 
     std::vector<PresetInfo> cached_presets_;
     bool cache_valid_ = false;
+
+    struct MetadataCacheEntry {
+        std::filesystem::file_time_type mtime{};
+        std::uintmax_t size = 0;
+        PresetMetadata metadata;
+    };
+    mutable std::unordered_map<std::string, MetadataCacheEntry> metadata_cache_;
+    mutable std::size_t metadata_parse_count_ = 0;
 
     void scan_directory(const std::filesystem::path& dir, bool is_factory,
                         std::vector<PresetInfo>& out) const;
