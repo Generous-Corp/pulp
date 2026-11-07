@@ -269,6 +269,11 @@ docs:
     kind: guide
     summary: MIDI panic — CC 120 / 123 / 121 / 64 and pitch bend centre generation, held-note offs, scope and classification (pure, real-time safe)
 
+  - slug: mpe-configuration
+    path: guides/mpe-configuration.md
+    kind: guide
+    summary: MPE configuration messages — zone layout and pitch-bend-range RPNs read by MpeVoiceTracker, and the builders that send them
+
   - slug: signal-processing
     path: guides/signal-processing.md
     kind: guide

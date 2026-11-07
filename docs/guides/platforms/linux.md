@@ -84,6 +84,12 @@ auto devices = system->enumerate_devices();
 // Includes "default" (PulseAudio/PipeWire) + hardware devices (hw:0, hw:1, ...)
 ```
 
+Each device's `sample_rates`, `buffer_sizes` and channel counts are read from the
+driver. Sample rates are the standard rates the driver confirms; buffer sizes are
+the powers of two inside the driver's period range that still fit two periods in
+its largest buffer. A device that is busy or cannot be opened for probing reports
+a conservative default list instead.
+
 ### Route timing
 
 `pulp::audio::query_audio_io_timing()` reports Linux route timing only while
