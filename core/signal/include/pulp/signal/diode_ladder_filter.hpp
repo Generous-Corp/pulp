@@ -58,9 +58,8 @@
 
 namespace pulp::signal {
 
-template <typename SampleType = float>
-class DiodeLadderFilterT {
-public:
+template <typename SampleType = float> class DiodeLadderFilterT {
+  public:
     /// Feedback amount at which the linear filter reaches the stability edge.
     static constexpr double kSelfOscillationFeedback = 17.0;
     /// Frequency at which the closed loop reaches the stability edge, in
@@ -74,26 +73,32 @@ public:
     static constexpr SampleType kMaxLinearResonance = SampleType{0.9999};
     static constexpr SampleType kMaxDrive = SampleType{16};
 
-    DiodeLadderFilterT() { update(); }
+    DiodeLadderFilterT() {
+        update();
+    }
 
     void set_sample_rate(SampleType sr) {
-        if (sr > SampleType{0}) sample_rate_ = sr;
+        if (sr > SampleType{0})
+            sample_rate_ = sr;
         update();
     }
     /// Self-oscillation frequency in Hz (prewarped; the unresonant -3 dB corner
     /// is far below it, see kUnresonantCornerRatio).
     void set_frequency(SampleType hz) {
-        if (std::isfinite(static_cast<double>(hz))) freq_ = hz;
+        if (std::isfinite(static_cast<double>(hz)))
+            freq_ = hz;
         update();
     }
     /// 0 .. 1.25; 1 is the oscillation threshold (feedback k = 17).
     void set_resonance(SampleType r) {
-        if (std::isfinite(static_cast<double>(r))) resonance_ = r;
+        if (std::isfinite(static_cast<double>(r)))
+            resonance_ = r;
         update();
     }
     /// Feedback saturator `tanh(d x) / d`; 0 is a linear loop.
     void set_drive(SampleType d) {
-        if (std::isfinite(static_cast<double>(d))) drive_ = std::clamp(d, SampleType{0}, kMaxDrive);
+        if (std::isfinite(static_cast<double>(d)))
+            drive_ = std::clamp(d, SampleType{0}, kMaxDrive);
         update();
     }
     /// 0 .. 1: scales the input by `1 + amount * k`, so 1 keeps the passband
@@ -106,18 +111,28 @@ public:
 
     void configure(SampleType sample_rate, SampleType frequency, SampleType resonance,
                    SampleType drive = SampleType{1}) {
-        if (sample_rate > SampleType{0}) sample_rate_ = sample_rate;
-        if (std::isfinite(static_cast<double>(frequency))) freq_ = frequency;
-        if (std::isfinite(static_cast<double>(resonance))) resonance_ = resonance;
+        if (sample_rate > SampleType{0})
+            sample_rate_ = sample_rate;
+        if (std::isfinite(static_cast<double>(frequency)))
+            freq_ = frequency;
+        if (std::isfinite(static_cast<double>(resonance)))
+            resonance_ = resonance;
         if (std::isfinite(static_cast<double>(drive)))
             drive_ = std::clamp(drive, SampleType{0}, kMaxDrive);
         update();
     }
 
     /// The feedback amount `k` in force after clamping.
-    SampleType feedback() const { return k_; }
+    SampleType feedback() const {
+        return k_;
+    }
 
     SampleType process(SampleType x) {
+        // A non-finite sample would poison the stage memories for good.
+        if (!std::isfinite(static_cast<double>(x))) {
+            reset();
+            return SampleType{0};
+        }
         // Contribution of the stored state to every stage output.
         std::array<SampleType, 4> ms{};
         for (int i = 0; i < 4; ++i) {
@@ -142,13 +157,16 @@ public:
             buffer[i] = process(buffer[i]);
     }
 
-    void reset() { s_.fill(SampleType{0}); }
+    void reset() {
+        s_.fill(SampleType{0});
+    }
 
     /// Solves `y + ck T(y) = d` for the loop output, where `T(x) = tanh(d x)/d`
     /// is the feedback saturator (`drive` 0 means identity). Safeguarded Newton:
     /// the root lies in `[d - ck/drive, d + ck/drive]` because `|T| <= 1/drive`.
     static SampleType solve_loop(SampleType d, SampleType ck, SampleType drive) {
-        if (drive <= SampleType{0} || ck <= SampleType{0}) return d / (SampleType{1} + ck);
+        if (drive <= SampleType{0} || ck <= SampleType{0})
+            return d / (SampleType{1} + ck);
         const SampleType reach = ck / drive;
         SampleType lo = d - reach, hi = d + reach;
         // Start in the right regime: inside the steep part (|y| < 1/drive) the
@@ -160,11 +178,16 @@ public:
         for (int i = 0; i < kNewtonSteps; ++i) {
             const SampleType t = std::tanh(drive * y);
             const SampleType f = y + ck * (t / drive) - d;
-            if (f == SampleType{0}) break;
-            if (f > 0) hi = y; else lo = y;
+            if (f == SampleType{0})
+                break;
+            if (f > 0)
+                hi = y;
+            else
+                lo = y;
             const SampleType df = SampleType{1} + ck * (SampleType{1} - t * t);
             SampleType next = y - f / df;
-            if (!(next >= lo && next <= hi)) next = SampleType{0.5} * (lo + hi);
+            if (!(next >= lo && next <= hi))
+                next = SampleType{0.5} * (lo + hi);
             if (std::abs(next - y) <= kSolveTolerance * (SampleType{1} + std::abs(y))) {
                 y = next;
                 break;
@@ -174,20 +197,22 @@ public:
         return y;
     }
 
-private:
+  private:
     static constexpr int kNewtonSteps = 12;
     static constexpr SampleType kSolveTolerance =
         SampleType{16} * std::numeric_limits<SampleType>::epsilon();
 
     static SampleType saturate(SampleType x, SampleType drive) {
-        if (drive <= SampleType{0}) return x;
+        if (drive <= SampleType{0})
+            return x;
         return std::tanh(drive * x) / drive;
     }
 
     void update() {
         const double nyquist_limit = 0.49 * static_cast<double>(sample_rate_);
         const double hz = std::clamp(static_cast<double>(freq_), 1.0, nyquist_limit);
-        const double analog = std::tan(3.14159265358979323846 * hz / static_cast<double>(sample_rate_));
+        const double analog =
+            std::tan(3.14159265358979323846 * hz / static_cast<double>(sample_rate_));
         const double g = analog / kOscillationOmega;
 
         // M = I - g A, A the coupling matrix of the chain above.
@@ -204,7 +229,8 @@ private:
             for (int j = 0; j < 8; ++j)
                 m[i][j] /= pivot;
             for (int r = 0; r < 4; ++r) {
-                if (r == i) continue;
+                if (r == i)
+                    continue;
                 const double f = m[r][i];
                 for (int j = 0; j < 8; ++j)
                     m[r][j] -= f * m[i][j];

@@ -41,9 +41,11 @@ inline OnsetDetectionConfig superflux_onset_config(double sample_rate) {
     config.method = OnsetDetectionMethod::SuperFlux;
     config.sample_rate = sample_rate;
     config.frame_size = 2048;
-    config.hop_size = static_cast<std::uint32_t>(sample_rate > 0.0 ? sample_rate / 200.0 + 0.5 : 256);
+    config.hop_size =
+        static_cast<std::uint32_t>(sample_rate > 0.0 ? sample_rate / 200.0 + 0.5 : 256);
     config.adaptive_window_frames = 16;
-    config.min_spacing_frames = static_cast<std::uint64_t>(sample_rate > 0.0 ? sample_rate * 0.03 : 1024);
+    config.min_spacing_frames =
+        static_cast<std::uint64_t>(sample_rate > 0.0 ? sample_rate * 0.03 : 1024);
     config.threshold_multiplier = 2.0;
     config.min_confidence = 0.1;
     return config;

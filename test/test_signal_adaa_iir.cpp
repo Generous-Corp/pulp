@@ -134,8 +134,8 @@ TEST_CASE("Antiderivative IIR matches a brute-force reference across kinks",
           "[signal][adaa-iir][reference]") {
     // Large steps cross the clip thresholds repeatedly, land exactly on them,
     // stall (zero change) and reverse.
-    const std::vector<double> x = {0.0,  0.4,  1.0,  1.0,  1.0,  3.0,  -2.5, -1.0, -1.0, 0.0,
-                                   0.7,  0.7,  -0.7, 2.0,  50.0, -50.0, 0.3,  0.30000001, 5.0, 0.0};
+    const std::vector<double> x = {0.0, 0.4, 1.0,  1.0, 1.0,  3.0,   -2.5, -1.0,       -1.0, 0.0,
+                                   0.7, 0.7, -0.7, 2.0, 50.0, -50.0, 0.3,  0.30000001, 5.0,  0.0};
     for (const int order : {1, 2, 4}) {
         const auto kernel = AntiderivativeIirKernel::butterworth(order, 0.3);
         {
@@ -276,7 +276,8 @@ TEST_CASE("Saturator adaa_iir policy reports its delay and stays aligned with th
             continue;
         // Wet is delayed by `delay`, dry by the integer latency: the two agree to
         // the fractional remainder of the delay at 100 Hz.
-        const double expect = 0.1 * std::sin(2.0 * kPi * f0 * (n - 0.5 * (delay + sat.latency_samples())) / kFs);
+        const double expect =
+            0.1 * std::sin(2.0 * kPi * f0 * (n - 0.5 * (delay + sat.latency_samples())) / kFs);
         worst = std::max(worst, std::abs(y - expect));
     }
     CHECK(worst < 2e-3);
@@ -302,7 +303,8 @@ TEST_CASE("Saturator switches to adaa_iir without a step and accepts a custom ke
     CHECK_THAT(y, WithinAbs(settled, 1e-9));
 }
 
-TEST_CASE("Saturator adaa_iir handles the cubic clip boundary and bias", "[signal][adaa-iir][saturator][kink]") {
+TEST_CASE("Saturator adaa_iir handles the cubic clip boundary and bias",
+          "[signal][adaa-iir][saturator][kink]") {
     for (const double bias : {0.0, 0.4, -0.7}) {
         Saturator64 sat;
         sat.prepare(kFs);
@@ -330,6 +332,16 @@ TEST_CASE("Saturator adaa_iir handles the cubic clip boundary and bias", "[signa
         }
         INFO("bias " << bias);
         CHECK(worst < 5e-3);
+    }
+}
+
+TEST_CASE("Antiderivative IIR survives enormous steps", "[signal][adaa-iir][robustness]") {
+    AntiderivativeIir iir;
+    for (const double x : {1e30, -1e30, 0.5, 1e300, -1e300, 0.0}) {
+        const double y = iir.process(TanhNonlinearity{}, x);
+        const double z = iir.process(HardClipNonlinearity{}, -x);
+        CHECK(std::isfinite(y));
+        CHECK(std::isfinite(z));
     }
 }
 

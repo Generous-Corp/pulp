@@ -67,9 +67,15 @@ namespace pulp::signal {
 /// `tanh(x)`. Smooth; features are about one unit wide.
 struct TanhNonlinearity {
     static constexpr bool piecewise_linear = false;
-    double operator()(double x) const noexcept { return std::tanh(x); }
-    double length_scale() const noexcept { return 1.0; }
-    int breakpoints(double, double, double*) const noexcept { return 0; }
+    double operator()(double x) const noexcept {
+        return std::tanh(x);
+    }
+    double length_scale() const noexcept {
+        return 1.0;
+    }
+    int breakpoints(double, double, double*) const noexcept {
+        return 0;
+    }
 };
 
 /// Hard clip to `[-threshold, threshold]`. Piecewise linear, with kinks at
@@ -77,12 +83,18 @@ struct TanhNonlinearity {
 struct HardClipNonlinearity {
     static constexpr bool piecewise_linear = true;
     double threshold = 1.0;
-    double operator()(double x) const noexcept { return std::clamp(x, -threshold, threshold); }
-    double length_scale() const noexcept { return threshold; }
+    double operator()(double x) const noexcept {
+        return std::clamp(x, -threshold, threshold);
+    }
+    double length_scale() const noexcept {
+        return threshold;
+    }
     int breakpoints(double lo, double hi, double* out) const noexcept {
         int n = 0;
-        if (-threshold > lo && -threshold < hi) out[n++] = -threshold;
-        if (threshold > lo && threshold < hi) out[n++] = threshold;
+        if (-threshold > lo && -threshold < hi)
+            out[n++] = -threshold;
+        if (threshold > lo && threshold < hi)
+            out[n++] = threshold;
         return n;
     }
 };
@@ -91,15 +103,15 @@ struct HardClipNonlinearity {
 /// causal low-pass transfer function with unit gain at DC, in radians per
 /// sample (sample rate 1).
 class AntiderivativeIirKernel {
-public:
+  public:
     static constexpr std::size_t kMaxSections = 8;
     static constexpr int kMaxButterworthOrder = 8;
 
     struct Section {
-        bool pair = false;                 ///< conjugate pair (true) or one real pole
-        std::complex<double> pole{};       ///< `p` (upper half plane for a pair)
-        std::complex<double> weight{};     ///< `A` (real pole) or `2 B` (pair)
-        std::complex<double> decay{};      ///< `e^p`, one sample of decay
+        bool pair = false;                    ///< conjugate pair (true) or one real pole
+        std::complex<double> pole{};          ///< `p` (upper half plane for a pair)
+        std::complex<double> weight{};        ///< `A` (real pole) or `2 B` (pair)
+        std::complex<double> decay{};         ///< `e^p`, one sample of decay
         std::complex<double> unit_integral{}; ///< `integral_0^1 e^{p(1-t)} dt`
         std::complex<double> ramp_integral{}; ///< `integral_0^1 t e^{p(1-t)} dt`
     };
@@ -122,7 +134,8 @@ public:
             const auto pk = poles[static_cast<std::size_t>(k)];
             std::complex<double> denominator = 1.0;
             for (int j = 0; j < order; ++j)
-                if (j != k) denominator *= pk - poles[static_cast<std::size_t>(j)];
+                if (j != k)
+                    denominator *= pk - poles[static_cast<std::size_t>(j)];
             const std::complex<double> residue = std::pow(wc, order) / denominator;
             if (std::abs(pk.imag()) < 1e-12 * wc)
                 kernel.add_real(pk.real(), residue.real());
@@ -138,7 +151,8 @@ public:
     /// negative real part. Returns false if capacity is exceeded or a pole is
     /// unstable.
     bool add_real(double pole, double residue) {
-        if (count_ >= kMaxSections || !(pole < 0.0)) return false;
+        if (count_ >= kMaxSections || !(pole < 0.0))
+            return false;
         Section s;
         s.pair = false;
         s.pole = {pole, 0.0};
@@ -148,7 +162,8 @@ public:
         return true;
     }
     bool add_pair(std::complex<double> pole, std::complex<double> residue) {
-        if (count_ >= kMaxSections || !(pole.real() < 0.0) || !(pole.imag() > 0.0)) return false;
+        if (count_ >= kMaxSections || !(pole.real() < 0.0) || !(pole.imag() > 0.0))
+            return false;
         Section s;
         s.pair = true;
         s.pole = pole;
@@ -158,8 +173,12 @@ public:
         return true;
     }
 
-    std::size_t size() const noexcept { return count_; }
-    const Section& section(std::size_t i) const noexcept { return sections_[i]; }
+    std::size_t size() const noexcept {
+        return count_;
+    }
+    const Section& section(std::size_t i) const noexcept {
+        return sections_[i];
+    }
 
     /// `|H(j 2 pi f)|` for `f` in cycles per sample. A conjugate pair with
     /// residue `B` contributes `B / (jw - p) + conj(B) / (jw - conj(p))`.
@@ -198,7 +217,7 @@ public:
 
     static constexpr double kPi = 3.14159265358979323846;
 
-private:
+  private:
     static void finish(Section& s) {
         s.decay = std::exp(s.pole);
         s.unit_integral = (s.decay - 1.0) / s.pole;
@@ -212,7 +231,7 @@ private:
 /// The per-sample processor: holds the kernel, the previous input and one
 /// complex state per pole.
 class AntiderivativeIir {
-public:
+  public:
     /// Quadrature panels per kink-free span at most; beyond it the curve is
     /// treated as resolved at that density.
     static constexpr int kMaxPanels = 16;
@@ -225,8 +244,12 @@ public:
     /// hard clip, with a group delay of about 1.4 samples.
     static constexpr double kDefaultCutoffRatio = 0.30;
 
-    AntiderivativeIir() { set_kernel(AntiderivativeIirKernel::butterworth(4, kDefaultCutoffRatio)); }
-    explicit AntiderivativeIir(const AntiderivativeIirKernel& kernel) { set_kernel(kernel); }
+    AntiderivativeIir() {
+        set_kernel(AntiderivativeIirKernel::butterworth(4, kDefaultCutoffRatio));
+    }
+    explicit AntiderivativeIir(const AntiderivativeIirKernel& kernel) {
+        set_kernel(kernel);
+    }
 
     void set_kernel(const AntiderivativeIirKernel& kernel) {
         kernel_ = kernel;
@@ -240,7 +263,9 @@ public:
         }
         reset();
     }
-    const AntiderivativeIirKernel& kernel() const noexcept { return kernel_; }
+    const AntiderivativeIirKernel& kernel() const noexcept {
+        return kernel_;
+    }
 
     void reset() noexcept {
         previous_ = 0.0;
@@ -255,7 +280,9 @@ public:
             state_[i] = kernel_.steady_state(i, fx);
     }
 
-    double previous_input() const noexcept { return previous_; }
+    double previous_input() const noexcept {
+        return previous_;
+    }
 
     /// One sample through `nonlinearity`. A non-finite input resets the state
     /// and returns 0.
@@ -274,8 +301,8 @@ public:
         knots[static_cast<std::size_t>(knot_count++)] = 0.0;
         if (delta != 0.0) {
             std::array<double, kMaxSplits> kinks{};
-            const int found = std::min(
-                kMaxSplits, f.breakpoints(std::min(x0, x), std::max(x0, x), kinks.data()));
+            const int found =
+                std::min(kMaxSplits, f.breakpoints(std::min(x0, x), std::max(x0, x), kinks.data()));
             std::array<double, kMaxSplits> ts{};
             for (int i = 0; i < found; ++i)
                 ts[static_cast<std::size_t>(i)] = (kinks[static_cast<std::size_t>(i)] - x0) / delta;
@@ -306,7 +333,8 @@ public:
                 for (std::size_t i = 0; i < sections; ++i) {
                     std::complex<double> acc = 0.0;
                     for (int j = 0; j < kNodes; ++j)
-                        acc += fv[static_cast<std::size_t>(j)] * node_kernel_[i][static_cast<std::size_t>(j)];
+                        acc += fv[static_cast<std::size_t>(j)] *
+                               node_kernel_[i][static_cast<std::size_t>(j)];
                     integral[i] = acc;
                 }
             } else {
@@ -332,7 +360,7 @@ public:
         return y;
     }
 
-private:
+  private:
     static constexpr int kNodes = 8;
     static constexpr int kMaxSplits = 4;
     // Gauss-Legendre nodes and weights on [0, 1], eight points.
@@ -375,8 +403,10 @@ private:
     void add_smooth_span(const Nonlinearity& f, double x0, double delta, double ta, double tb,
                          Integral& integral) const {
         const double span = std::abs(delta) * (tb - ta);
-        const int panels = std::clamp(
-            static_cast<int>(std::ceil(span / (kPanelSpan * f.length_scale()))), 1, kMaxPanels);
+        // Clamp before converting: a huge span must not overflow the int.
+        const int panels =
+            static_cast<int>(std::clamp(std::ceil(span / (kPanelSpan * f.length_scale())), 1.0,
+                                        static_cast<double>(kMaxPanels)));
         const double h = (tb - ta) / panels;
         for (int p = 0; p < panels; ++p) {
             const double pa = ta + h * p;

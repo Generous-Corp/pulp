@@ -126,9 +126,9 @@ TEST_CASE("Svf legacy modes are unchanged and the new modes match process_all",
     static_assert(static_cast<int>(Mode::bandpass) == 2);
     static_assert(static_cast<int>(Mode::notch) == 3);
 
-    const std::array<Mode, 8> modes{Mode::lowpass,       Mode::highpass, Mode::bandpass,
-                                    Mode::notch,         Mode::unity_bandpass, Mode::allpass,
-                                    Mode::peak,          Mode::band_shelf};
+    const std::array<Mode, 8> modes{Mode::lowpass, Mode::highpass,       Mode::bandpass,
+                                    Mode::notch,   Mode::unity_bandpass, Mode::allpass,
+                                    Mode::peak,    Mode::band_shelf};
     for (const Mode mode : modes) {
         Svf64 single, bulk, block;
         for (Svf64* f : {&single, &bulk, &block}) {
@@ -143,8 +143,8 @@ TEST_CASE("Svf legacy modes are unchanged and the new modes match process_all",
         for (std::size_t i = 0; i < input.size(); ++i) {
             const double s = single.process(input[i]);
             const auto o = bulk.process_all(input[i]);
-            const double expect[] = {o.lowpass, o.highpass,       o.bandpass, o.notch,
-                                     o.unity_bandpass, o.allpass, o.peak,    o.band_shelf};
+            const double expect[] = {o.lowpass,        o.highpass, o.bandpass, o.notch,
+                                     o.unity_bandpass, o.allpass,  o.peak,     o.band_shelf};
             const double want = expect[static_cast<int>(mode)];
             REQUIRE_THAT(s, WithinAbs(want, 1e-12));
             REQUIRE_THAT(buffer[i], WithinAbs(want, 1e-9));

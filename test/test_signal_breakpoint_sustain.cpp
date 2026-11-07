@@ -30,7 +30,8 @@ constexpr double kSr = 1000.0;
 Env adsr(std::size_t sustain = 2) {
     Env env;
     REQUIRE(env.prepare(kSr) == BreakpointEnvelopeStatus::ok);
-    const std::array<Point, 4> points{{{0.0, 0.0, {}}, {10.0, 1.0, {}}, {30.0, 0.6, {}}, {50.0, 0.0, {}}}};
+    const std::array<Point, 4> points{
+        {{0.0, 0.0, {}}, {10.0, 1.0, {}}, {30.0, 0.6, {}}, {50.0, 0.0, {}}}};
     REQUIRE(env.configure(points) == BreakpointEnvelopeStatus::ok);
     if (sustain != Env::kNoSustain)
         REQUIRE(env.set_sustain_point(sustain) == BreakpointEnvelopeStatus::ok);
@@ -48,11 +49,8 @@ std::vector<double> run(Env& env, int samples) {
 Env loop_program() {
     Env env;
     REQUIRE(env.prepare(kSr) == BreakpointEnvelopeStatus::ok);
-    const std::array<Point, 5> points{{{0.0, 0.0, {}},
-                                       {10.0, 1.0, {}},
-                                       {20.0, 0.2, {}},
-                                       {30.0, 0.8, {}},
-                                       {50.0, 0.0, {}}}};
+    const std::array<Point, 5> points{
+        {{0.0, 0.0, {}}, {10.0, 1.0, {}}, {20.0, 0.2, {}}, {30.0, 0.8, {}}, {50.0, 0.0, {}}}};
     REQUIRE(env.configure(points) == BreakpointEnvelopeStatus::ok);
     return env;
 }
@@ -68,15 +66,16 @@ int samples_until_inactive(Env& env, int limit) {
 
 } // namespace
 
-TEST_CASE("Sustain holds at the sustain level while the gate is on", "[signal][breakpoint-envelope][sustain]") {
+TEST_CASE("Sustain holds at the sustain level while the gate is on",
+          "[signal][breakpoint-envelope][sustain]") {
     Env env = adsr();
     env.trigger();
     const auto out = run(env, 400);
     // Attack and decay follow the authored segments.
-    CHECK_THAT(out[4], WithinAbs(0.5, 1e-12));   // sample 5 of the attack
-    CHECK_THAT(out[9], WithinAbs(1.0, 1e-12));   // reaches the peak at sample 10
-    CHECK_THAT(out[19], WithinAbs(0.8, 1e-12));  // halfway down the decay
-    CHECK_THAT(out[29], WithinAbs(0.6, 1e-12));  // arrives at the sustain level
+    CHECK_THAT(out[4], WithinAbs(0.5, 1e-12));  // sample 5 of the attack
+    CHECK_THAT(out[9], WithinAbs(1.0, 1e-12));  // reaches the peak at sample 10
+    CHECK_THAT(out[19], WithinAbs(0.8, 1e-12)); // halfway down the decay
+    CHECK_THAT(out[29], WithinAbs(0.6, 1e-12)); // arrives at the sustain level
     for (std::size_t i = 29; i < out.size(); ++i)
         CHECK(out[i] == 0.6); // exactly, for as long as the gate is on
     CHECK(env.holding());
@@ -174,7 +173,8 @@ TEST_CASE("Legato retrigger keeps a gated envelope running and resumes a release
     }
 }
 
-TEST_CASE("Sustain on the last point holds until release then finishes", "[signal][breakpoint-envelope][sustain]") {
+TEST_CASE("Sustain on the last point holds until release then finishes",
+          "[signal][breakpoint-envelope][sustain]") {
     Env env;
     REQUIRE(env.prepare(kSr) == BreakpointEnvelopeStatus::ok);
     const std::array<Point, 2> points{{{0.0, 0.0, {}}, {10.0, 1.0, {}}}};
@@ -189,7 +189,8 @@ TEST_CASE("Sustain on the last point holds until release then finishes", "[signa
     CHECK(env.next() == 1.0);
 }
 
-TEST_CASE("Sustain on point zero holds the first level at once", "[signal][breakpoint-envelope][sustain]") {
+TEST_CASE("Sustain on point zero holds the first level at once",
+          "[signal][breakpoint-envelope][sustain]") {
     Env env = adsr(0);
     env.trigger();
     CHECK(env.holding());
@@ -233,7 +234,8 @@ TEST_CASE("An endless loop repeats until release, then plays out past the sustai
     CHECK(env.current() == 0.0);
 }
 
-TEST_CASE("A sustain point at the loop end wins over the loop", "[signal][breakpoint-envelope][sustain][loop]") {
+TEST_CASE("A sustain point at the loop end wins over the loop",
+          "[signal][breakpoint-envelope][sustain][loop]") {
     Env env = loop_program();
     REQUIRE(env.set_loop(1, 2, Env::kLoopForever) == BreakpointEnvelopeStatus::ok);
     REQUIRE(env.set_sustain_point(2) == BreakpointEnvelopeStatus::ok);
@@ -288,7 +290,8 @@ TEST_CASE("Release at the instant a loop is about to wrap does not wrap",
     CHECK(samples_until_inactive(env, 100) == 9 + 20);
 }
 
-TEST_CASE("Sustain configuration is validated and reset with the program", "[signal][breakpoint-envelope][sustain]") {
+TEST_CASE("Sustain configuration is validated and reset with the program",
+          "[signal][breakpoint-envelope][sustain]") {
     Env env = adsr();
     CHECK(env.set_sustain_point(4) == BreakpointEnvelopeStatus::invalid_sustain);
     CHECK(env.sustain_point() == 2); // a failed set leaves it alone
@@ -322,7 +325,8 @@ TEST_CASE("Moving or clearing the sustain point while holding resumes playback",
     CHECK(other.current() == 0.0);
 }
 
-TEST_CASE("Sustain, release and legato allocate nothing", "[signal][breakpoint-envelope][sustain][rt-safety]") {
+TEST_CASE("Sustain, release and legato allocate nothing",
+          "[signal][breakpoint-envelope][sustain][rt-safety]") {
     Env env = loop_program();
     REQUIRE(env.set_loop(1, 2, Env::kLoopForever) == BreakpointEnvelopeStatus::ok);
     REQUIRE(env.set_sustain_point(3) == BreakpointEnvelopeStatus::ok);

@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <limits>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -37,7 +38,8 @@ cplx open_loop(double w) {
     }
     for (int i = 0; i < 4; ++i) {
         for (int r = 0; r < 4; ++r) {
-            if (r == i) continue;
+            if (r == i)
+                continue;
             const cplx f = m[r][i] / m[i][i];
             for (int j = 0; j < 5; ++j)
                 m[r][j] -= f * m[i][j];
@@ -55,8 +57,7 @@ double normalized_omega(double hz, double cutoff) {
     return kWosc * std::tan(kPi * hz / kFs) / std::tan(kPi * cutoff / kFs);
 }
 
-template <typename Process>
-double sine_gain(Process&& process, double hz, double amplitude) {
+template <typename Process> double sine_gain(Process&& process, double hz, double amplitude) {
     const int settle = 30000, window = 4800;
     double sum = 0.0;
     for (int n = 0; n < settle + window; ++n) {
@@ -102,7 +103,8 @@ TEST_CASE("Diode ladder unresonant corner sits at the documented fraction of the
     }
 }
 
-TEST_CASE("Diode ladder response matches the analytic prototype", "[signal][diode-ladder][response]") {
+TEST_CASE("Diode ladder response matches the analytic prototype",
+          "[signal][diode-ladder][response]") {
     const double cutoff = 2500.0;
     for (const double resonance : {0.0, 0.3, 0.7, 0.9}) {
         const double k = Filter::kSelfOscillationFeedback * resonance;
@@ -134,16 +136,23 @@ TEST_CASE("Diode ladder rolls off at 24 dB per octave far above the cutoff",
     CHECK(octave_db < 25.0);
 }
 
-TEST_CASE("Diode ladder resonance peak lies near the analytic peak", "[signal][diode-ladder][peak]") {
+TEST_CASE("Diode ladder resonance peak lies near the analytic peak",
+          "[signal][diode-ladder][peak]") {
     const double cutoff = 1500.0;
     const double resonance = 0.95;
     const double k = 17.0 * resonance;
     double best_hz = 0.0, best = 0.0, best_model_hz = 0.0, best_model = 0.0;
     for (double hz = 500.0; hz <= 3000.0; hz += 10.0) {
         const double g = filter_gain(cutoff, resonance, 0.0, hz);
-        if (g > best) { best = g; best_hz = hz; }
+        if (g > best) {
+            best = g;
+            best_hz = hz;
+        }
         const double m = closed_loop_gain(k, normalized_omega(hz, cutoff));
-        if (m > best_model) { best_model = m; best_model_hz = hz; }
+        if (m > best_model) {
+            best_model = m;
+            best_model_hz = hz;
+        }
     }
     CHECK(std::abs(best_hz - best_model_hz) <= 30.0);
     CHECK(std::abs(best_hz - cutoff) / cutoff < 0.1);
@@ -169,12 +178,13 @@ TEST_CASE("Diode ladder self-oscillation threshold is a feedback of 17",
         std::vector<double> out;
         for (int n = 0; n < 60000 + 16384; ++n) {
             const double y = f.process(n == 0 ? 1.0 : 0.0);
-            if (n >= 60000) out.push_back(y);
+            if (n >= 60000)
+                out.push_back(y);
         }
         return out;
     };
-    CHECK(peak_abs(tail(0.96)) < 1e-4);      // k = 16.3: dies away
-    const auto ring = tail(1.08);            // k = 18.4: sustained
+    CHECK(peak_abs(tail(0.96)) < 1e-4); // k = 16.3: dies away
+    const auto ring = tail(1.08);       // k = 18.4: sustained
     CHECK(peak_abs(ring) > 0.02);
     CHECK(peak_abs(ring) < 10.0);
     CHECK(std::abs(zero_crossing_hz(ring) - osc_hz) / osc_hz < 0.03);
@@ -253,7 +263,8 @@ TEST_CASE("Diode ladder agrees with the transistor ladder below the cutoff at lo
         double dlo = corner, dhi = 40.0 * corner;
         for (int i = 0; i < 40; ++i) {
             const double mid = 0.5 * (dlo + dhi);
-            (filter_gain(mid, 0.0, 1.0, corner, amplitude) > 1.0 / std::sqrt(2.0) ? dhi : dlo) = mid;
+            (filter_gain(mid, 0.0, 1.0, corner, amplitude) > 1.0 / std::sqrt(2.0) ? dhi : dlo) =
+                mid;
         }
         return 0.5 * (dlo + dhi);
     };
@@ -276,6 +287,17 @@ TEST_CASE("Diode ladder agrees with the transistor ladder below the cutoff at lo
         mismatched_db = std::max(mismatched_db, std::abs(20.0 * std::log10(diode / ladder)));
     }
     CHECK(mismatched_db > 0.25);
+}
+
+TEST_CASE("Diode ladder recovers from a non-finite input", "[signal][diode-ladder][robustness]") {
+    Filter f;
+    f.configure(kFs, 1000.0, 0.9, 1.0);
+    for (int n = 0; n < 100; ++n)
+        f.process(0.5);
+    CHECK(f.process(std::numeric_limits<double>::quiet_NaN()) == 0.0);
+    CHECK(f.process(std::numeric_limits<double>::infinity()) == 0.0);
+    for (int n = 0; n < 100; ++n)
+        REQUIRE(std::isfinite(f.process(0.5)));
 }
 
 TEST_CASE("Diode ladder survives per-sample parameter changes and float precision",

@@ -53,9 +53,8 @@
 
 namespace pulp::signal {
 
-template <typename SampleType = float>
-class Korg35FilterT {
-public:
+template <typename SampleType = float> class Korg35FilterT {
+  public:
     enum class Mode { lowpass, highpass };
 
     /// Feedback amount at which the linear filter self-oscillates.
@@ -68,26 +67,34 @@ public:
     static constexpr SampleType kMaxLinearResonance = SampleType{0.9999};
     static constexpr SampleType kMaxDrive = SampleType{16};
 
-    Korg35FilterT() { update(); }
+    Korg35FilterT() {
+        update();
+    }
 
-    void set_mode(Mode mode) { mode_ = mode; }
+    void set_mode(Mode mode) {
+        mode_ = mode;
+    }
     void set_sample_rate(SampleType sr) {
-        if (sr > SampleType{0}) sample_rate_ = sr;
+        if (sr > SampleType{0})
+            sample_rate_ = sr;
         update();
     }
     void set_frequency(SampleType hz) {
-        if (std::isfinite(static_cast<double>(hz))) freq_ = hz;
+        if (std::isfinite(static_cast<double>(hz)))
+            freq_ = hz;
         update();
     }
     /// 0 .. 1.25; 1 is the self-oscillation threshold (feedback k = 2).
     void set_resonance(SampleType r) {
-        if (std::isfinite(static_cast<double>(r))) resonance_ = r;
+        if (std::isfinite(static_cast<double>(r)))
+            resonance_ = r;
         update();
     }
     /// Saturator drive `d` in the feedback path, `T(x) = tanh(d x) / d`. The
     /// small-signal gain is 1 for every `d`; 0 makes the loop linear.
     void set_drive(SampleType d) {
-        if (std::isfinite(static_cast<double>(d))) drive_ = std::clamp(d, SampleType{0}, kMaxDrive);
+        if (std::isfinite(static_cast<double>(d)))
+            drive_ = std::clamp(d, SampleType{0}, kMaxDrive);
         update();
     }
 
@@ -95,17 +102,24 @@ public:
     void configure(Mode mode, SampleType sample_rate, SampleType frequency, SampleType resonance,
                    SampleType drive = SampleType{1}) {
         mode_ = mode;
-        if (sample_rate > SampleType{0}) sample_rate_ = sample_rate;
-        if (std::isfinite(static_cast<double>(frequency))) freq_ = frequency;
-        if (std::isfinite(static_cast<double>(resonance))) resonance_ = resonance;
+        if (sample_rate > SampleType{0})
+            sample_rate_ = sample_rate;
+        if (std::isfinite(static_cast<double>(frequency)))
+            freq_ = frequency;
+        if (std::isfinite(static_cast<double>(resonance)))
+            resonance_ = resonance;
         if (std::isfinite(static_cast<double>(drive)))
             drive_ = std::clamp(drive, SampleType{0}, kMaxDrive);
         update();
     }
 
-    Mode mode() const { return mode_; }
+    Mode mode() const {
+        return mode_;
+    }
     /// The feedback amount `k` in force after clamping.
-    SampleType feedback() const { return k_; }
+    SampleType feedback() const {
+        return k_;
+    }
 
     /// Magnitude of the linear (unsaturated) prototype at `omega`, the
     /// frequency in units of the cutoff, for feedback amount `k`.
@@ -117,6 +131,11 @@ public:
     }
 
     SampleType process(SampleType x) {
+        // A non-finite sample would poison the integrator memories for good.
+        if (!std::isfinite(static_cast<double>(x))) {
+            reset();
+            return SampleType{0};
+        }
         const SampleType G = G_;
         const SampleType Gc = SampleType{1} - G;
         const SampleType S1 = Gc * s1_;
@@ -157,13 +176,16 @@ public:
             buffer[i] = process(buffer[i]);
     }
 
-    void reset() { s1_ = s2_ = s3_ = SampleType{0}; }
+    void reset() {
+        s1_ = s2_ = s3_ = SampleType{0};
+    }
 
     /// Solves `h = c + a T(h)` with `T(x) = tanh(drive x) / drive` (identity at
     /// drive 0). `F(h) = h - c - a T(h)` is monotonic for `a < 1`; Newton from
     /// the one-step fixed-point guess converges in a few iterations.
     static SampleType solve_loop(SampleType c, SampleType a, SampleType drive) {
-        if (drive <= SampleType{0}) return c / (SampleType{1} - a);
+        if (drive <= SampleType{0})
+            return c / (SampleType{1} - a);
         SampleType h = c + a * (std::tanh(drive * c) / drive);
         for (int i = 0; i < kNewtonSteps; ++i) {
             const SampleType t = std::tanh(drive * h);
@@ -174,15 +196,18 @@ public:
         return h;
     }
 
-private:
+  private:
     static constexpr int kNewtonSteps = 4;
 
     SampleType saturate(SampleType x) const {
-        if (drive_ <= SampleType{0}) return x;
+        if (drive_ <= SampleType{0})
+            return x;
         return std::tanh(drive_ * x) / drive_;
     }
 
-    SampleType solve(SampleType c) const { return solve_loop(c, a_, drive_); }
+    SampleType solve(SampleType c) const {
+        return solve_loop(c, a_, drive_);
+    }
 
     void update() {
         const double nyquist_limit = 0.49 * static_cast<double>(sample_rate_);

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using Catch::Matchers::WithinRel;
@@ -74,8 +75,7 @@ TEST_CASE("Korg35 linear loop matches the analytic prototype response",
         for (const double resonance : {0.0, 0.5, 0.9}) {
             for (const double hz : {200.0, 1500.0, 2500.0, 3000.0, 3600.0, 8000.0}) {
                 const double k = 2.0 * resonance;
-                const double want =
-                    Filter::prototype_magnitude(mode, k, warped_omega(hz, cutoff));
+                const double want = Filter::prototype_magnitude(mode, k, warped_omega(hz, cutoff));
                 const double got = gain_at(mode, cutoff, resonance, 0.0, hz);
                 INFO("mode " << static_cast<int>(mode) << " r " << resonance << " hz " << hz);
                 CHECK_THAT(got, WithinRel(want, 0.01));
@@ -92,10 +92,10 @@ TEST_CASE("Korg35 resonance peak sits at the predicted frequency near the cutoff
     for (const Mode mode : {Mode::lowpass, Mode::highpass}) {
         // The prototype peak: |H| of 1/(s^2 + d s + 1) peaks at sqrt(1 - d^2/2);
         // the highpass peaks at the reciprocal.
-        const double omega_peak = mode == Mode::lowpass ? std::sqrt(1.0 - damping * damping / 2.0)
-                                                        : 1.0 / std::sqrt(1.0 - damping * damping / 2.0);
-        const double want_hz =
-            kFs / kPi * std::atan(omega_peak * std::tan(kPi * cutoff / kFs));
+        const double omega_peak = mode == Mode::lowpass
+                                      ? std::sqrt(1.0 - damping * damping / 2.0)
+                                      : 1.0 / std::sqrt(1.0 - damping * damping / 2.0);
+        const double want_hz = kFs / kPi * std::atan(omega_peak * std::tan(kPi * cutoff / kFs));
         double best_hz = 0.0, best_gain = 0.0;
         for (double hz = 1700.0; hz <= 2300.0; hz += 10.0) {
             const double g = gain_at(mode, cutoff, resonance, 0.0, hz);
@@ -138,8 +138,8 @@ TEST_CASE("Korg35 stays finite and bounded across the parameter space",
                         REQUIRE(std::isfinite(y));
                         worst = std::max(worst, std::abs(y));
                     }
-                    INFO("mode " << static_cast<int>(mode) << " drive " << drive << " fc "
-                                 << cutoff << " r " << resonance);
+                    INFO("mode " << static_cast<int>(mode) << " drive " << drive << " fc " << cutoff
+                                 << " r " << resonance);
                     // A saturated loop is limited by the tanh; a linear loop is
                     // clamped below the stability edge, so a 1 V noise input
                     // cannot run away in either case.
@@ -223,6 +223,17 @@ TEST_CASE("Korg35 feedback solver matches bisection", "[signal][korg35][solver]"
             }
         }
     }
+}
+
+TEST_CASE("Korg35 recovers from a non-finite input", "[signal][korg35][robustness]") {
+    Filter f;
+    f.configure(Mode::lowpass, kFs, 1000.0, 0.9, 1.0);
+    for (int n = 0; n < 100; ++n)
+        f.process(0.5);
+    CHECK(f.process(std::numeric_limits<double>::quiet_NaN()) == 0.0);
+    CHECK(f.process(std::numeric_limits<double>::infinity()) == 0.0);
+    for (int n = 0; n < 100; ++n)
+        REQUIRE(std::isfinite(f.process(0.5)));
 }
 
 TEST_CASE("Korg35 float and double agree on a moderate setting", "[signal][korg35][precision]") {

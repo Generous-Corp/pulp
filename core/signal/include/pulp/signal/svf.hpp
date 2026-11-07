@@ -31,7 +31,7 @@ namespace pulp::signal {
 // Notch plus unity bandpass reconstructs the input exactly.
 template <typename SampleType = float>
 class SvfT {
-public:
+  public:
     // The first four values are the original API; the rest are appended so
     // existing numeric values never change.
     enum class Mode {
@@ -106,14 +106,22 @@ public:
         ic2_ = snap_recursion_state(SampleType{2.0f} * v2 - ic2_);
 
         switch (mode_) {
-            case Mode::lowpass:        return pick<Mode::lowpass>(input, v1, v2);
-            case Mode::highpass:       return pick<Mode::highpass>(input, v1, v2);
-            case Mode::bandpass:       return pick<Mode::bandpass>(input, v1, v2);
-            case Mode::notch:          return pick<Mode::notch>(input, v1, v2);
-            case Mode::unity_bandpass: return pick<Mode::unity_bandpass>(input, v1, v2);
-            case Mode::allpass:        return pick<Mode::allpass>(input, v1, v2);
-            case Mode::peak:           return pick<Mode::peak>(input, v1, v2);
-            case Mode::band_shelf:     return pick<Mode::band_shelf>(input, v1, v2);
+        case Mode::lowpass:
+            return pick<Mode::lowpass>(input, v1, v2);
+        case Mode::highpass:
+            return pick<Mode::highpass>(input, v1, v2);
+        case Mode::bandpass:
+            return pick<Mode::bandpass>(input, v1, v2);
+        case Mode::notch:
+            return pick<Mode::notch>(input, v1, v2);
+        case Mode::unity_bandpass:
+            return pick<Mode::unity_bandpass>(input, v1, v2);
+        case Mode::allpass:
+            return pick<Mode::allpass>(input, v1, v2);
+        case Mode::peak:
+            return pick<Mode::peak>(input, v1, v2);
+        case Mode::band_shelf:
+            return pick<Mode::band_shelf>(input, v1, v2);
         }
         return v2;
     }
@@ -138,14 +146,30 @@ public:
     /// per-sample path only once a tail is already below that level.
     void process(SampleType* buffer, int num_samples) {
         switch (mode_) {
-        case Mode::lowpass:        run_block<Mode::lowpass>(buffer, num_samples); return;
-        case Mode::highpass:       run_block<Mode::highpass>(buffer, num_samples); return;
-        case Mode::bandpass:       run_block<Mode::bandpass>(buffer, num_samples); return;
-        case Mode::notch:          run_block<Mode::notch>(buffer, num_samples); return;
-        case Mode::unity_bandpass: run_block<Mode::unity_bandpass>(buffer, num_samples); return;
-        case Mode::allpass:        run_block<Mode::allpass>(buffer, num_samples); return;
-        case Mode::peak:           run_block<Mode::peak>(buffer, num_samples); return;
-        case Mode::band_shelf:     run_block<Mode::band_shelf>(buffer, num_samples); return;
+        case Mode::lowpass:
+            run_block<Mode::lowpass>(buffer, num_samples);
+            return;
+        case Mode::highpass:
+            run_block<Mode::highpass>(buffer, num_samples);
+            return;
+        case Mode::bandpass:
+            run_block<Mode::bandpass>(buffer, num_samples);
+            return;
+        case Mode::notch:
+            run_block<Mode::notch>(buffer, num_samples);
+            return;
+        case Mode::unity_bandpass:
+            run_block<Mode::unity_bandpass>(buffer, num_samples);
+            return;
+        case Mode::allpass:
+            run_block<Mode::allpass>(buffer, num_samples);
+            return;
+        case Mode::peak:
+            run_block<Mode::peak>(buffer, num_samples);
+            return;
+        case Mode::band_shelf:
+            run_block<Mode::band_shelf>(buffer, num_samples);
+            return;
         }
         run_block<Mode::lowpass>(buffer, num_samples);
     }
@@ -188,10 +212,10 @@ private:
     }
 
     Outputs outputs(SampleType input, SampleType v1, SampleType v2) const {
-        return {pick<Mode::lowpass>(input, v1, v2),        pick<Mode::highpass>(input, v1, v2),
-                pick<Mode::bandpass>(input, v1, v2),       pick<Mode::unity_bandpass>(input, v1, v2),
-                pick<Mode::notch>(input, v1, v2),          pick<Mode::allpass>(input, v1, v2),
-                pick<Mode::peak>(input, v1, v2),           pick<Mode::band_shelf>(input, v1, v2)};
+        return {pick<Mode::lowpass>(input, v1, v2),  pick<Mode::highpass>(input, v1, v2),
+                pick<Mode::bandpass>(input, v1, v2), pick<Mode::unity_bandpass>(input, v1, v2),
+                pick<Mode::notch>(input, v1, v2),    pick<Mode::allpass>(input, v1, v2),
+                pick<Mode::peak>(input, v1, v2),     pick<Mode::band_shelf>(input, v1, v2)};
     }
 
     template <Mode M> void run_block(SampleType* buffer, int num_samples) {

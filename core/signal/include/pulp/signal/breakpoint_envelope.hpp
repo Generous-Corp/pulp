@@ -267,8 +267,7 @@ template <typename SampleType = float, std::size_t MaxPoints = 16> class Breakpo
         const SampleType from = legato_active_ && current_segment_ == 0
                                     ? legato_start_value_
                                     : points_[current_segment_].value;
-        value_ = interpolate_modulation_curve(from,
-                                              points_[current_segment_ + 1].value, progress,
+        value_ = interpolate_modulation_curve(from, points_[current_segment_ + 1].value, progress,
                                               points_[current_segment_].curve_to_next);
         if (segment_position_ >= length) {
             finish_segment_();

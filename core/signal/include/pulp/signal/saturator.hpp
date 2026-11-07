@@ -574,7 +574,9 @@ public:
         adaa_iir_.set_kernel(kernel);
         reseed_iir();
     }
-    const AntiderivativeIirKernel& adaa_iir_kernel() const { return adaa_iir_.kernel(); }
+    const AntiderivativeIirKernel& adaa_iir_kernel() const {
+        return adaa_iir_.kernel();
+    }
 
     void set_mix(double wet01) {
         if (!std::isfinite(wet01)) return;
@@ -866,14 +868,20 @@ private:
     struct ShaperCurve {
         static constexpr bool piecewise_linear = false;
         const SaturatorT* self;
-        double operator()(double x) const noexcept { return self->shaped(x); }
-        double length_scale() const noexcept { return 1.0 / self->drive_; }
+        double operator()(double x) const noexcept {
+            return self->shaped(x);
+        }
+        double length_scale() const noexcept {
+            return 1.0 / self->drive_;
+        }
         int breakpoints(double lo, double hi, double* out) const noexcept {
-            if (self->shape_ != Shape::cubic_soft) return 0;
+            if (self->shape_ != Shape::cubic_soft)
+                return 0;
             int n = 0;
             for (const double edge : {-1.0, 1.0}) {
                 const double x = (edge - self->bias_) / self->drive_;
-                if (x > lo && x < hi) out[n++] = x;
+                if (x > lo && x < hi)
+                    out[n++] = x;
             }
             return n;
         }

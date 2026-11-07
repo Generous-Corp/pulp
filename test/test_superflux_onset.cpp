@@ -65,7 +65,8 @@ std::vector<float> render_drums(const std::vector<DrumEvent>& events, double sec
             const double t = n / kFs;
             double v = 0.0;
             if (e.kind == 0) // kick: falling sine
-                v = 0.9 * std::sin(2.0 * kPi * (50.0 * t + 90.0 * 0.04 * (1.0 - std::exp(-t / 0.04)))) *
+                v = 0.9 *
+                    std::sin(2.0 * kPi * (50.0 * t + 90.0 * 0.04 * (1.0 - std::exp(-t / 0.04)))) *
                     std::exp(-t / 0.12);
             else if (e.kind == 1) // snare: noise plus a body tone
                 v = 0.6 * rng.next() * std::exp(-t / 0.06) +
@@ -89,7 +90,8 @@ std::vector<float> vibrato_with_hit(double depth_semitones, double hit_time, dou
     for (int n = 0; n < total; ++n) {
         const double t = n / kFs;
         const double env = std::min(1.0, t / 0.3);
-        const double f = 330.0 * std::pow(2.0, depth_semitones * std::sin(2.0 * kPi * 5.5 * t) / 12.0);
+        const double f =
+            330.0 * std::pow(2.0, depth_semitones * std::sin(2.0 * kPi * 5.5 * t) / 12.0);
         phase += 2.0 * kPi * f / kFs;
         double v = 0.0;
         for (int h = 1; h <= 10; ++h)
@@ -338,7 +340,8 @@ TEST_CASE("SlicePointAnalyzer can detect with SuperFlux and slices at the hits",
     CHECK_FALSE(analyzer.analyze_detected(source, superflux_onset_config(kFs), bad_rate).ok);
 }
 
-TEST_CASE("SuperFlux streaming allocates nothing after prepare", "[audio][onset][superflux][rt-safety]") {
+TEST_CASE("SuperFlux streaming allocates nothing after prepare",
+          "[audio][onset][superflux][rt-safety]") {
     pulp::signal::OnsetNoveltyFrontEndT<float, 2048, 1> front_end;
     StreamingAnalysisConfig config;
     config.sample_rate = kFs;
