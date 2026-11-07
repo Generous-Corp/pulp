@@ -25,19 +25,36 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 CORPUS_DIR = REPO_ROOT / "test" / "fixtures" / "fuzz" / "audio-decoder"
 DUMP_ENV = "PULP_AUDIO_DECODE_DUMP_BIN"
+# Set by the ctest registration behind PULP_AUDIO_QUALITY_LAB_GATE: there the
+# dependencies are promised, so a missing one is a failure, not a skip.
+REQUIRED_ENV = "PULP_AUDIO_DECODE_DUMP_REQUIRED"
 LOSSLESS_SUFFIXES = (".wav", ".wave", ".flac", ".aiff", ".aif", ".aifc")
 DUMP_REFUSED = 2
+
+
+def _unavailable(reason: str) -> None:
+    if os.environ.get(REQUIRED_ENV):
+        pytest.fail(f"{REQUIRED_ENV} is set but {reason}")
+    pytest.skip(reason)
 
 
 def _dump_binary() -> str:
     path = os.environ.get(DUMP_ENV, "")
     if not path:
-        pytest.skip(
+        _unavailable(
             f"{DUMP_ENV} is unset; point it at the pulp-audio-decode-dump built with the C++ tests"
         )
     if not (os.path.isfile(path) and os.access(path, os.X_OK)):
-        pytest.skip(f"{DUMP_ENV}={path!r} is not an executable file")
+        _unavailable(f"{DUMP_ENV}={path!r} is not an executable file")
     return path
+
+
+def _soundfile():
+    try:
+        import soundfile  # noqa: PLC0415 - optional dependency, imported on demand
+    except ImportError:
+        _unavailable("soundfile (libsndfile) is not installed")
+    return soundfile
 
 
 def _lossless_seeds() -> list[Path]:
@@ -69,7 +86,7 @@ def _soundfile_decode(sf, seed: Path):
 
 
 def test_cpp_decoders_match_libsndfile_bit_exactly():
-    sf = pytest.importorskip("soundfile", reason="soundfile (libsndfile) is not installed")
+    sf = _soundfile()
     binary = _dump_binary()
     seeds = _lossless_seeds()
     # The control: an empty or mis-pathed corpus must fail, not pass vacuously.

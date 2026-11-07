@@ -71,6 +71,23 @@ pulp_test_data(pulp-test-audio-decoder-corpus PATHS test/fixtures/fuzz/audio-dec
 # never a ctest of its own.
 add_executable(pulp-audio-decode-dump fuzz/audio_decode_dump_main.cpp)
 target_link_libraries(pulp-audio-decode-dump PRIVATE pulp::audio)
+# The lab differential itself is registered only behind the dependency-bearing
+# Quality Lab gate (declared in app_audio_host_tests.cmake), where soundfile
+# and pytest are known to exist; PULP_AUDIO_DECODE_DUMP_REQUIRED turns its
+# developer-lane skips into failures so a missing dependency cannot pass.
+if(PULP_AUDIO_QUALITY_LAB_GATE)
+    add_test(NAME quality-lab-decoder-differential
+        COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
+            "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_decoder_differential.py"
+            -q)
+    set_tests_properties(quality-lab-decoder-differential
+        PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+            ENVIRONMENT
+                "PULP_AUDIO_DECODE_DUMP_BIN=$<TARGET_FILE:pulp-audio-decode-dump>;PULP_AUDIO_DECODE_DUMP_REQUIRED=1;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+            LABELS "audio;fuzz;quality-lab;dependency-gate"
+            TIMEOUT 300)
+endif()
 
 # Coverage-guided lane over the WAV, AIFF, FLAC, MP3 and Ogg Vorbis readers,
 # one reader per input. Off by default; the timeline manifest, included
