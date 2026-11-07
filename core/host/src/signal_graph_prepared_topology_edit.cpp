@@ -269,7 +269,7 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
     if (!nodes.empty() && channel_names.size() != 2)
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::UnsupportedPreparedProfile);
-    std::string digest_preimage{"pulp.graph.semantic.v1", 20};
+    std::string digest_preimage{"pulp.graph.semantic.v1", 22};
     digest_preimage.push_back('\0');
     digest_preimage.append(canonical_semantic_payload.data(), canonical_semantic_payload.size());
     result->semantic_digest = runtime::sha256_hex(digest_preimage);
