@@ -109,14 +109,24 @@ public:
 
         std::vector<float> interleaved(static_cast<size_t>(totalFrames) * channels);
 
-        AudioBufferList bufferList;
-        bufferList.mNumberBuffers = 1;
-        bufferList.mBuffers[0].mNumberChannels = channels;
-        bufferList.mBuffers[0].mDataByteSize = static_cast<UInt32>(interleaved.size() * sizeof(float));
-        bufferList.mBuffers[0].mData = interleaved.data();
-
-        UInt32 framesToRead = totalFrames;
-        status = ExtAudioFileRead(file, &framesToRead, &bufferList);
+        // ExtAudioFileRead may return fewer frames than asked for (a PCM CAF
+        // read stops at an internal buffer boundary), so read until the
+        // stream ends or the claimed length is filled.
+        UInt32 framesToRead = 0;
+        while (framesToRead < totalFrames) {
+            AudioBufferList bufferList;
+            bufferList.mNumberBuffers = 1;
+            bufferList.mBuffers[0].mNumberChannels = channels;
+            bufferList.mBuffers[0].mDataByteSize =
+                static_cast<UInt32>((totalFrames - framesToRead) * channels * sizeof(float));
+            bufferList.mBuffers[0].mData =
+                interleaved.data() + static_cast<size_t>(framesToRead) * channels;
+            UInt32 chunk = totalFrames - framesToRead;
+            status = ExtAudioFileRead(file, &chunk, &bufferList);
+            if (status != noErr || chunk == 0)
+                break;
+            framesToRead += chunk;
+        }
         ExtAudioFileDispose(file);
 
         if (status != noErr) return std::nullopt;

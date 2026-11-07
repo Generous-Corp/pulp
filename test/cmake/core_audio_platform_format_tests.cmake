@@ -50,6 +50,11 @@ pulp_add_test_suite(pulp-test-offline-tracing
 pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
+# System codec writer: AAC, ALAC and PCM written through ExtAudioFile (Apple)
+# or Media Foundation (Windows) read back as the source signal.
+pulp_add_test_suite(pulp-test-system-audio-codec GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
 # DecodeLimits contract for the codec-backed readers (FLAC, MP3, OGG Vorbis).
 # A container header is an untrusted size claim: the reader must refuse it
 # before allocating output, and bound an unknown-length stream as it decodes.
