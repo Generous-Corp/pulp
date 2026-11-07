@@ -630,6 +630,23 @@ pulp_bind_cli_shellout_target(pulp-test-cli-audio-compare)
 pulp_test_data(pulp-test-cli-audio-compare NO_DEFINE PATHS tools/packages/tool-registry.json)
 catch_discover_tests(pulp-test-cli-audio-compare)
 
+# Spectrogram and waveform image pipelines (tools/audio/analysis rasterizers).
+# Golden PNG comparison decodes through ImageIO, so those cases run on macOS and
+# skip elsewhere; regeneration encodes through pulp::render when it is built.
+add_executable(pulp-test-audio-image-raster test_audio_image_raster.cpp)
+target_link_libraries(pulp-test-audio-image-raster PRIVATE pulp::audio-analysis Catch2::Catch2WithMain)
+if(TARGET pulp-render)
+    target_link_libraries(pulp-test-audio-image-raster PRIVATE pulp::render)
+    target_compile_definitions(pulp-test-audio-image-raster PRIVATE PULP_TEST_HAS_RENDER=1)
+endif()
+if(APPLE)
+    target_sources(pulp-test-audio-image-raster PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/png_rgba_decode_apple.cpp)
+    target_link_libraries(pulp-test-audio-image-raster PRIVATE
+        "-framework ImageIO" "-framework CoreGraphics" "-framework CoreFoundation")
+endif()
+pulp_test_data(pulp-test-audio-image-raster PATHS test/fixtures/audio/images)
+catch_discover_tests(pulp-test-audio-image-raster)
+
 add_executable(pulp-test-cli-audio-latency test_cli_audio_latency.cpp)
 target_link_libraries(pulp-test-cli-audio-latency PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-audio-latency)
