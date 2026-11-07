@@ -2323,6 +2323,20 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-platform-objc-unique-class": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-test-objc-unique-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_platform_objc_unique_class.mm"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-plugin-manager-panel": {
    "data": "none",
    "inputs": [],
@@ -3223,6 +3237,7 @@
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
+  "pulp-test-platform-objc-unique-class",
   "pulp-test-playback-audio-renderer",
   "pulp-test-playback-automation-cursor",
   "pulp-test-playback-capture-engine",
