@@ -352,7 +352,7 @@ TEST_CASE("G5 host projection preserves all destinations on pending MPE rejectio
     ump.reserve(2);
     ump.set_realtime_capacity_limit(true);
     midi.attach_ump(&ump);
-    mpe.reserve(pulp::midi::MpeVoiceTracker::kMaxNotes + 2);
+    mpe.reserve(pulp::midi::MpeVoiceTracker::kMaxNotes + 3);
     mpe.set_realtime_capacity_limit(true);
 
     auto midi_sentinel = pulp::midi::MidiEvent::note_off(2, 30);
@@ -372,7 +372,7 @@ TEST_CASE("G5 host projection preserves all destinations on pending MPE rejectio
         midi_event(1, 0, 1, 3, pulp::midi::MidiEvent::note_on(1, 62, 100))};
     records[0].has_ump = true;
     records[0].ump = pulp::midi::UmpPacket::midi1_note_on(0, 1, 62, 100);
-    REQUIRE(mpe.capacity() == pulp::midi::MpeVoiceTracker::kMaxNotes + 2);
+    REQUIRE(mpe.capacity() == pulp::midi::MpeVoiceTracker::kMaxNotes + 3);
     REQUIRE(project_host_event_block(records, 0, 1, midi, &tracker, &mpe) ==
             HostEventResult::OutputCapacity);
     REQUIRE(midi.size() == 1);
