@@ -298,3 +298,29 @@ TEST_CASE("integer PCM WAV extremes decode by 2^(bits-1) on both WAV paths",
         }
     }
 }
+
+TEST_CASE("readers refuse a seed whose declared length the decode cannot honour",
+          "[fuzz][audio]") {
+    // Each of these once returned a partial decode: the FLAC behind a
+    // STREAMINFO that declared more frames than the stream holds, the two Ogg
+    // files behind a zero (unknown) length. Pinned by name so the contract
+    // survives changes to the generic oracle case. read_info is a header
+    // read: it reports a declared length and refuses only an unknown one.
+    struct Seed {
+        const char* name;
+        bool info_declares_length;
+    };
+    const std::vector<Seed> seeds = {
+        {"flac-truncated-midframe.flac", true},
+        {"ogg-page-bad-crc.ogg", false},
+        {"ogg-truncated-page.ogg", false},
+    };
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    for (const auto& seed : seeds) {
+        const auto path = corpus_dir() / seed.name;
+        INFO(seed.name);
+        REQUIRE(fs::exists(path));
+        CHECK(registry.read_info(path.string()).has_value() == seed.info_declares_length);
+        CHECK_FALSE(registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
+    }
+}

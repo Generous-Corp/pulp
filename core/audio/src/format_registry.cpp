@@ -118,6 +118,13 @@ public:
     std::optional<AudioFileInfo> read_info(const std::string& path) override {
         drflac* flac = drflac_open_file(path.c_str(), nullptr);
         if (!flac) return std::nullopt;
+        // STREAMINFO's total is zero when the encoder did not know the
+        // length. A reader that cannot establish a frame count refuses the
+        // file rather than reporting the sentinel as a count.
+        if (flac->totalPCMFrameCount == 0) {
+            drflac_close(flac);
+            return std::nullopt;
+        }
 
         AudioFileInfo info;
         info.sample_rate = flac->sampleRate;
@@ -144,7 +151,7 @@ public:
         // means unknown); refuse before any output allocation.
         const uint64_t claimed_frames = flac->totalPCMFrameCount;
         const uint32_t channels = flac->channels;
-        if (channels == 0 ||
+        if (channels == 0 || claimed_frames == 0 ||
             !detail::within_decode_limits("FLAC", claimed_frames, channels, limits)) {
             drflac_close(flac);
             return std::nullopt;
@@ -172,7 +179,9 @@ public:
         }
         drflac_close(flac);
 
-        if (!within_limits || frames_read == 0)
+        // A truncated or damaged stream yields fewer frames than STREAMINFO
+        // declared; the file is refused rather than returned short.
+        if (!within_limits || frames_read == 0 || frames_read != claimed_frames)
             return std::nullopt;
         return data;
     }
