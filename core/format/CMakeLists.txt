@@ -58,6 +58,7 @@ target_sources(pulp-format-core PRIVATE
     src/graph_runtime_executor.cpp
     src/graph_runtime_worker_pool.cpp
     src/plugin_state_io.cpp
+    src/factory_program_table.cpp
     src/processor_block_adapter.cpp
     src/processor_node_adapter.cpp
     src/validation_harness.cpp

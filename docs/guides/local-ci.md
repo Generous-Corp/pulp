@@ -712,6 +712,16 @@ to the native build. Receipt reuse (`protected-receipt-reuse`) is refused for a
 group whose first parent is not that main tip, because a receipt certifies one
 pull request's tree on main and the verifier must load from protected code.
 
+The merge-group HOLD check (`tools/ci/merge_group_hold_check.py`) and the queue
+circuit breaker (`tools/ci/queue_breaker.py`) scan the same batch. The
+`classify` job's "Resolve the merge group's main base" step runs the protected
+base branch's copy of the resolver once, before any queue entry's code runs,
+and the HOLD check, the breaker and the classification all take its answer, so
+a HOLD, a fix or a `queue-unblock` on an entry further ahead in the batch
+counts for the group that lands it. When the base does not resolve, classify
+builds natively, the HOLD check fails the group, and a live breaker fails the
+group too, rather than narrowing either scan back to `base_sha`.
+
 ### The preamble slot
 
 `build.yml`'s preamble jobs (`resolve-provider`, `classify`,
