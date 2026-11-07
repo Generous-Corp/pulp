@@ -144,3 +144,24 @@ TEST_CASE("ValidatedTransaction begun from a commit burst refuses edits",
     REQUIRE(code == TreeEditErrorCode::kReentrantTransaction);
     REQUIRE_FALSE(root->has("echo"));
 }
+
+TEST_CASE("add_child_checked appends and re-appends an existing child",
+          "[state][tree][validated]") {
+    // Regression: the append index was once computed in the same call that
+    // moved the child pointer, which read a moved-from pointer on compilers
+    // that evaluate arguments right to left.
+    auto root = StateTree::create("root");
+    auto a = StateTree::create("a");
+    auto b = StateTree::create("b");
+    REQUIRE(root->add_child_checked(a).has_value());
+    REQUIRE(root->add_child_checked(b).has_value());
+    REQUIRE(root->add_child_checked(a).has_value()); // same parent: moves to the end
+    REQUIRE(root->child_count() == 2);
+    REQUIRE(root->child(0) == b);
+    REQUIRE(root->child(1) == a);
+
+    auto other = StateTree::create("other");
+    REQUIRE(other->add_child_checked(a).has_value()); // from another parent
+    REQUIRE(a->parent() == other.get());
+    REQUIRE(root->child_count() == 1);
+}

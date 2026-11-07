@@ -795,7 +795,10 @@ TreeEditResult StateTree::insert_child_checked(int index, Ptr child) {
 TreeEditResult StateTree::add_child_checked(Ptr child) {
     if (!child)
         return edit_err(TreeEditErrorCode::kNullChild, "child is null");
-    return insert_child_checked(child_count() - (child->parent_ == this ? 1 : 0), std::move(child));
+    // Compute the index before moving `child`: argument evaluation order is
+    // unspecified, and GCC moves the by-value parameter first.
+    const int index = child_count() - (child->parent_ == this ? 1 : 0);
+    return insert_child_checked(index, std::move(child));
 }
 
 void StateTree::add_child(Ptr child) {
