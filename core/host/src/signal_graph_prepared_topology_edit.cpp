@@ -2565,7 +2565,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                 if (bound.kind != prepared_kind(authored->type) ||
                     bound.input_ports != pnode.input_ports ||
                     bound.output_ports != pnode.output_ports ||
-                    bound.gain_bits != std::bit_cast<std::uint32_t>(authored->gain))
+                    (authored->type == NodeType::Gain &&
+                     bound.gain_bits != std::bit_cast<std::uint32_t>(authored->gain)))
                     return last_result_ = Result::PreflightFailed;
             }
             std::unordered_set<std::string> plan_edge_keys;
