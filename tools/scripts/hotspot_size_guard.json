@@ -162,8 +162,8 @@
     },
     {
       "path": "core/render/src/renderer3d.cpp",
-      "max_loc": 3350,
-      "note": "Renderer3D implementation hotspot after CPU value-type extraction; frame device-acquisition + readback/PNG tail shared via acquire_dawn_frame/finish_frame_readback; render_scene_data phase split + grouped SceneFeatureFlags (from_primitive/merge live in renderer3d_internal.hpp; only apply-to-result stays here)"
+      "max_loc": 3071,
+      "note": "Renderer3D implementation hotspot after CPU value-type extraction; frame device-acquisition + readback/PNG tail shared via acquire_dawn_frame/finish_frame_readback (padded-row map+compaction in gpu_readback.cpp); scene shader in core/render/shaders/renderer3d_scene.wgsl; render_scene_data phase split + grouped SceneFeatureFlags (from_primitive/merge live in renderer3d_internal.hpp; only apply-to-result stays here)"
     },
     {
       "path": "tools/import-design/pulp_import_design.cpp",
