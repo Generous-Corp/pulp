@@ -269,6 +269,11 @@ docs:
     kind: guide
     summary: Forge MIDI effects — all transforms and parameters, pattern/chord schemas, chain cookbook, exhaustive C++ method API, realtime lifecycle, and host validation
 
+  - slug: midi-learn
+    path: guides/midi-learn.md
+    kind: guide
+    summary: MIDI Learn engine — mapping CC, 14-bit CC, NRPN/RPN, pitch bend and pressure to parameters, relative encoders, takeover, and the learn flow
+
   - slug: midi-panic
     path: guides/midi-panic.md
     kind: guide
