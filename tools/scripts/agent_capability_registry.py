@@ -282,6 +282,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/audio/audio_reader.hpp",
+        "fingerprint": "sha256:ef34db95e7caaca0ff9d3119d69a83c88d4c3499aa3fc83649ecb301207db9e9",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Ranged audio file decoding (AudioReader over a path, memory or byte "
+            "source, bounded by DecodeLimits) is host infrastructure that sample "
+            "streaming and file playback consume; it is not an independently "
+            "selected generator-facing capability."
+        ),
+    },
+    {
         "include": "pulp/audio/audio_file.hpp",
         "fingerprint": "sha256:6a97b20f7bb9a869f33f6cc52367cc2f9629660a9cb1341b284bfdf3479ee990",
         "disposition": "infrastructure",

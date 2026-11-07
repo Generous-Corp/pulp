@@ -8,12 +8,10 @@
 /// RT-safe pull) — the audio thread never decodes or allocates.
 ///
 /// The returned callback retains one MemoryMappedAudioReader and delegates each
-/// request to read_frames(). Seek-readable formats (WAV, uncompressed AIFF,
-/// FLAC, MP3 and Ogg Vorbis) therefore decode only the requested range, so a
-/// long compressed file streams without being decoded whole. Formats without a
-/// ranged decoder use the reader's explicit decode-once fallback; callers can
-/// inspect supports_ranged_read before admitting a source under a strict
-/// streaming-memory policy.
+/// request to read_frames(). Seek-readable formats such as WAV therefore decode
+/// only the requested range. Formats without a ranged decoder use the reader's
+/// explicit decode-once fallback; callers can inspect supports_ranged_read before
+/// admitting a source under a strict streaming-memory policy.
 
 #include <algorithm>
 #include <array>
