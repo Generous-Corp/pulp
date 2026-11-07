@@ -1309,6 +1309,31 @@ aliasing and cycles.
 Existing scalar typed getters and `std::get_if` checks keep working; exhaustive
 `std::visit` handlers over `PropertyValue` should add Array/Object cases.
 
+#### Transactions, undo and moves
+
+Group edits with an RAII transaction. Edits apply at once; coalesced listeners
+receive one burst on commit, `abort()` reverts, and nested transactions join
+the outer one. Passing an `UndoManager` turns the whole transaction into one
+named undo step.
+
+```cpp
+UndoManager undo;
+{
+    auto tx = root->begin_transaction(&undo, "Rearrange voices");
+    StateTree::move_child(*root, 0, *root, 2);   // child_moved
+    root->remove_child(1);
+}
+undo.undo();
+```
+
+`move_child`, `remove_all_children`, `for_each_descendant`, `find_descendant`
+and `is_equivalent_to` cover structural edits and queries. The `*_checked`
+methods and `begin_validated_transaction()` return
+`pulp::runtime::Result<std::monostate, TreeEditError>` instead of ignoring an
+invalid edit, for scripted and remote callers. See the
+[state module guide](../guides/modules/state.md) for the listener contract,
+reentrancy rules and delivery modes.
+
 ### Persistent settings
 
 ```cpp

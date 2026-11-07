@@ -224,6 +224,11 @@ docs:
     kind: guide
     summary: OSC 1.0 sender/receiver over UDP
 
+  - slug: module-state
+    path: guides/modules/state.md
+    kind: guide
+    summary: StateTree transactions, undo steps, moves, checked edits and the listener contract
+
   - slug: docs-site
     path: guides/docs-site.md
     kind: guide

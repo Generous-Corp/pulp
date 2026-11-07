@@ -1021,6 +1021,22 @@ timeline_engine:
     status: experimental
     notes: SequenceProcessor projects host transport and a caller-owned immutable playback program into plugin-format processing without owning editing, media resolution, devices, or UI.
 
+state_tree:
+  transactions:
+    status: usable
+    ci_test:
+      - pulp-test-state-tree-transaction
+      - pulp-test-state-tree-move
+    notes: RAII StateTree::Transaction groups edits on one tree. Edits apply at once, coalesced listeners get one ordered burst on commit with repeated property edits merged, abort() reverts in reverse order (including edits to subtrees detached during the transaction), and nested transactions join the outer one. Immediate-delivery listeners, used by StateTreeSynchroniser and clone_synced(), see every edit and every revert. move_child, remove_all_children, descendant search and structural equivalence are covered. Message thread only.
+  undo:
+    status: usable
+    ci_test: pulp-test-state-tree-undo
+    notes: begin_transaction(UndoManager*, name) records set, remove, add, insert, remove-child, remove-all-children and move as one named UndoManager step. Undo and redo restore children by identity and deliver one coalesced burst. Aborted and empty transactions push no step.
+  checked_edits:
+    status: usable
+    ci_test: pulp-test-state-tree-validated
+    notes: set_checked, the other *_checked edits and ValidatedTransaction return pulp::runtime::Result values with a TreeEditError code instead of ignoring an invalid edit; a ValidatedTransaction with any refused edit aborts on commit. Property validation is a caller-supplied predicate; JSON-Schema validation and a JavaScript bridge for transactions are not provided.
+
 subsystems:
   runtime: stable
   events: usable

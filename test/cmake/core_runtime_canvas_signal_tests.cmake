@@ -186,6 +186,16 @@ pulp_add_test_suite(pulp-test-i18n GROUP pulp-test-group-core-runtime
 pulp_add_test_suite(pulp-test-state-tree GROUP pulp-test-group-core-state
     LIBRARIES pulp::state pulp::runtime)
 
+# StateTree transactions, undo recording, moves and checked edits
+pulp_add_test_suite(pulp-test-state-tree-transaction GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+pulp_add_test_suite(pulp-test-state-tree-undo GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+pulp_add_test_suite(pulp-test-state-tree-move GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+pulp_add_test_suite(pulp-test-state-tree-validated GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+
 # GUI component tests (table, toolbar, concertina, buttons, lasso)
 pulp_add_test_suite(pulp-test-gui-components GROUP pulp-test-group-core-view
     LIBRARIES pulp::view)

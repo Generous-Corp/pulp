@@ -155,7 +155,7 @@ modules:
     docs: reference/modules.md#signal
 
   - name: state
-    summary: Thread-safe parameters, reactive StateTree with JSON sync, PresetManager, PropertiesFile (JSON settings), EditHistory (global undo/redo with coalescing, Binding integration)
+    summary: Thread-safe parameters, reactive StateTree with JSON sync, transactions (coalesced notifications, abort, nesting) and undo steps, PresetManager, PropertiesFile (JSON settings), EditHistory (global undo/redo with coalescing, Binding integration)
     status: stable
     dependencies: [runtime]
     docs: reference/modules.md#state

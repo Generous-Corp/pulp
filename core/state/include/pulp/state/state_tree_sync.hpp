@@ -17,7 +17,8 @@ enum class SyncDeltaType : uint8_t {
     PropertySet = 1,
     PropertyRemove = 2,
     ChildAdd = 3,
-    ChildRemove = 4
+    ChildRemove = 4,
+    ChildMove = 5 ///< Reorder within one parent: child_index -> int64 value
 };
 
 /// A single change to synchronize
@@ -26,7 +27,7 @@ struct SyncDelta {
     std::string path;        // Dot-separated path to the node
     std::string key;         // Property name (for property ops) or child type (for child ops)
     PropertyValue value;     // New value (for PropertySet)
-    int child_index = -1;    // Index (for ChildAdd/ChildRemove)
+    int child_index = -1;    // Index (for ChildAdd/ChildRemove; source index for ChildMove)
 };
 
 /// Encodes StateTree changes as deltas for transmission
@@ -34,7 +35,9 @@ class StateTreeSynchroniser {
 public:
     StateTreeSynchroniser() = default;
 
-    /// Attach to a tree and start recording changes
+    /// Attach to a tree and start recording changes. Listeners use
+    /// immediate delivery, so every edit inside a StateTree transaction (and
+    /// every revert of an aborted one) produces a delta in edit order.
     void attach(StateTree::Ptr tree);
 
     /// Detach and stop recording
@@ -73,6 +76,7 @@ private:
     std::vector<std::pair<StateTree*, int>> property_listener_ids_;
     std::vector<std::pair<StateTree*, int>> child_added_listener_ids_;
     std::vector<std::pair<StateTree*, int>> child_removed_listener_ids_;
+    std::vector<std::pair<StateTree*, int>> child_moved_listener_ids_;
 };
 
 }  // namespace pulp::state
