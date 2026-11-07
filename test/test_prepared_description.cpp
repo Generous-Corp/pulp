@@ -2,7 +2,10 @@
 
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
+#include <pulp/format/graph_runtime_executor.hpp>
 
+#include <array>
+#include <algorithm>
 #include <string>
 
 using namespace pulp::host;
@@ -142,6 +145,97 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
             std::vector<std::string>{"input", "gain_a", "gain_b", "output"});
     REQUIRE_FALSE(exported.value->buffer_classes.empty());
     REQUIRE_FALSE(exported.value->buffer_values.empty());
+    REQUIRE(exported.value->nodes[0].kind == "AudioInput");
+    REQUIRE(exported.value->nodes[1].kind == "Gain");
+    REQUIRE(exported.value->nodes[1].gain_bits == 0x3f800000u);
+    REQUIRE(exported.value->nodes[2].kind == "Gain");
+    REQUIRE(exported.value->nodes[3].kind == "AudioOutput");
+    for (const auto& node : exported.value->nodes) {
+        REQUIRE(node.latency_samples == 0);
+        REQUIRE(node.tail_samples == 0);
+        REQUIRE_FALSE(node.transport_sensitive);
+    }
+    std::vector<std::string> actual_edges;
+    for (const auto& edge : exported.value->edges)
+        actual_edges.push_back(edge.source + "->" + edge.destination + ":" + edge.final_input_mode);
+    std::sort(actual_edges.begin(), actual_edges.end());
+    REQUIRE(actual_edges == std::vector<std::string>{
+                                "gain_a:0->gain_b:0:in_place",
+                                "gain_a:1->gain_b:1:in_place",
+                                "gain_b:0->output:0:in_place",
+                                "gain_b:1->output:1:in_place",
+                                "input:0->gain_a:0:in_place",
+                                "input:1->gain_a:1:in_place"});
+}
+
+TEST_CASE("D4 independent alias oracle covers width overlap and restoration") {
+    using namespace pulp::format;
+    pulp::graph::GraphRuntimePlan plan;
+    pulp::graph::GraphRuntimeNodePlan input_node{};
+    input_node.id = 1;
+    input_node.kind = pulp::graph::GraphRuntimeNodeKind::AudioInput;
+    input_node.output_ports = 2;
+    input_node.first_outbound_connection = 0;
+    input_node.outbound_connection_count = 2;
+    pulp::graph::GraphRuntimeNodePlan output_node{};
+    output_node.id = 2;
+    output_node.kind = pulp::graph::GraphRuntimeNodeKind::AudioOutput;
+    output_node.input_ports = 2;
+    output_node.first_inbound_connection = 0;
+    output_node.inbound_connection_count = 2;
+    plan.nodes = {input_node, output_node};
+    for (std::uint32_t channel = 0; channel < 2; ++channel) {
+        pulp::graph::GraphRuntimeConnectionPlan edge{};
+        edge.source_index = 0;
+        edge.source_port = channel;
+        edge.dest_index = 1;
+        edge.dest_port = channel;
+        plan.connections.push_back(edge);
+    }
+    plan.inbound_connection_indices = {0, 1};
+    plan.outbound_connection_indices = {0, 1};
+    plan.processing_order_indices = {0, 1};
+    std::array<GraphRuntimeNodeBinding, 2> bindings{{
+        GraphRuntimeNodeBinding{.node_id = 1, .required = false},
+        GraphRuntimeNodeBinding{.node_id = 2, .required = false},
+    }};
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(snapshot.reset(std::move(plan), bindings));
+    GraphRuntimeBufferPool pool;
+    REQUIRE(pool.reset(snapshot.buffer_slot_count(), 64));
+    REQUIRE(pool.bind(snapshot));
+
+    pulp::audio::Buffer<float> input_storage(2, 64);
+    pulp::audio::Buffer<float> output_storage(2, 64);
+    const std::array<const float*, 2> input_channels{
+        input_storage.view().channel_ptr(0), input_storage.view().channel_ptr(1)};
+    const pulp::audio::BufferView<const float> input_view(input_channels.data(), 2, 64);
+    const auto output_view = output_storage.view();
+    BusBuffer input_bus{"main", BusDirection::Input, BusRole::Main, true, input_view, {}};
+    BusBuffer output_bus{"main", BusDirection::Output, BusRole::Main, true, {}, output_view};
+    const auto* restored_left = pool.bound_node(1).inputs[0];
+    const auto* restored_right = pool.bound_node(1).inputs[1];
+    REQUIRE(pool.alias_host_input(&input_bus, &output_bus, 64));
+    REQUIRE(pool.bound_node(1).inputs[0] == input_channels[0]);
+    REQUIRE(pool.bound_node(1).inputs[1] == input_channels[1]);
+    pool.release_host_input();
+    REQUIRE(pool.bound_node(1).inputs[0] == restored_left);
+    REQUIRE(pool.bound_node(1).inputs[1] == restored_right);
+
+    pulp::audio::Buffer<float> narrow_storage(1, 64);
+    const std::array<const float*, 1> narrow_channels{narrow_storage.view().channel_ptr(0)};
+    const pulp::audio::BufferView<const float> narrow_view(narrow_channels.data(), 1, 64);
+    BusBuffer narrow_bus{"main", BusDirection::Input, BusRole::Main, true, narrow_view, {}};
+    REQUIRE_FALSE(pool.alias_host_input(&narrow_bus, &output_bus, 64));
+
+    pulp::audio::Buffer<float> overlap_storage(2, 64);
+    const std::array<const float*, 2> overlap_channels{
+        overlap_storage.view().channel_ptr(0), overlap_storage.view().channel_ptr(1)};
+    const pulp::audio::BufferView<const float> overlap_input(overlap_channels.data(), 2, 64);
+    const auto overlap_output = overlap_storage.view();
+    BusBuffer overlap_in{"main", BusDirection::Input, BusRole::Main, true, overlap_input, {}};
+    BusBuffer overlap_out{"main", BusDirection::Output, BusRole::Main, true, {}, overlap_output};
+    REQUIRE_FALSE(pool.alias_host_input(&overlap_in, &overlap_out, 64));
 }
 
 TEST_CASE("D4 binding mutation requires an explicit rebind") {

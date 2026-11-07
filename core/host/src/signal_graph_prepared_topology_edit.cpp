@@ -9,6 +9,7 @@
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <charconv>
 #include <cctype>
@@ -771,6 +772,56 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
     if (inputs != 1 || outputs != 1)
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+
+    // D4 admits one closed stereo path only.  A node-level bijection is not
+    // enough here: every active mono port must have exactly one audio edge,
+    // and no event/automation/sidechain/feedback lane may be smuggled into the
+    // prepared export.  Count the candidate's real port edges before comparing
+    // it with the authored document so disconnected, fan-in, and split graphs
+    // cannot be relabelled as this profile.
+    std::unordered_map<NodeId, std::array<std::uint8_t, 2>> input_edge_counts;
+    std::unordered_map<NodeId, std::array<std::uint8_t, 2>> output_edge_counts;
+    for (const auto& node : nodes) {
+        input_edge_counts.emplace(node.id, std::array<std::uint8_t, 2>{});
+        output_edge_counts.emplace(node.id, std::array<std::uint8_t, 2>{});
+    }
+    const auto find_node = [&](NodeId id) {
+        return std::find_if(nodes.begin(), nodes.end(),
+                            [&](const GraphNode& node) { return node.id == id; });
+    };
+    for (const auto& connection : candidate_->connections_) {
+        if (connection.feedback || connection.midi || connection.automation ||
+            connection.audio_rate_modulation || connection.sidechain || connection.spectral ||
+            connection.source_port > 1 || connection.dest_port > 1)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+        const auto source = find_node(connection.source_node);
+        const auto destination = find_node(connection.dest_node);
+        if (source == nodes.end() || destination == nodes.end() ||
+            connection.source_port >= static_cast<PortIndex>(source->num_output_ports) ||
+            connection.dest_port >= static_cast<PortIndex>(destination->num_input_ports) ||
+            connection.source_port != connection.dest_port)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        auto& source_count = output_edge_counts.at(source->id)[connection.source_port];
+        auto& destination_count = input_edge_counts.at(destination->id)[connection.dest_port];
+        if (source_count++ != 0 || destination_count++ != 0)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+    }
+    for (const auto& node : nodes) {
+        const auto& inputs_for_node = input_edge_counts.at(node.id);
+        const auto& outputs_for_node = output_edge_counts.at(node.id);
+        for (std::uint32_t port = 0; port < 2; ++port) {
+            const auto expected_input = port < static_cast<std::uint32_t>(node.num_input_ports);
+            const auto expected_output = port < static_cast<std::uint32_t>(node.num_output_ports);
+            if ((expected_input ? inputs_for_node[port] != 1 : inputs_for_node[port] != 0) ||
+                (expected_output ? outputs_for_node[port] != 1 : outputs_for_node[port] != 0))
+                return PreparedDescriptionResult::refused(
+                    PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+        }
+    }
+
     std::unordered_map<NodeId, std::string> keys;
     std::unordered_set<std::string> authored_keys;
     for (const auto& binding : bindings.nodes) {
@@ -847,18 +898,6 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
     if (!authored_edges.isObject() || authored_edges.size() != expected_edge_pairs.size())
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
-    const auto kind_for = [](NodeType type) -> std::string_view {
-        switch (type) {
-        case NodeType::AudioInput:
-            return "audio";
-        case NodeType::AudioOutput:
-            return "audio";
-        case NodeType::Gain:
-            return "audio";
-        default:
-            return {};
-        }
-    };
     for (const auto& connection : candidate_->connections_) {
         const auto source = std::find_if(nodes.begin(), nodes.end(), [&](const GraphNode& n) {
             return n.id == connection.source_node;
@@ -882,12 +921,8 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
         const auto pair_key = source_key + ":" + destination_key;
         runtime_edge_masks[pair_key] = static_cast<std::uint8_t>(
             runtime_edge_masks[pair_key] | (1u << connection.source_port));
-        const std::string edge_key = "[\"audio\",{\"direction\":\"out\",\"kind\":\"" +
-                                     std::string(kind_for(source->type)) + "\",\"node\":\"" +
-                                     source_key +
-                                     "\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"" +
-                                     std::string(kind_for(destination->type)) + "\",\"node\":\"" +
-                                     destination_key + "\",\"port\":\"audio\"},null]";
+        const std::string edge_key = canonical_edge_key(
+            source_key, "out", "audio", destination_key, "in", "audio");
         const auto edge = authored_edges[edge_key];
         if (!edge.isObject() || !edge["channel_map"].isArray() ||
             edge["channel_map"].size() != channel_names.size())
@@ -1008,24 +1043,26 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
 
     result->channels = channel_names;
-    for (const auto& interface : bindings.interfaces) {
-        const auto node = std::find_if(nodes.begin(), nodes.end(), [&](const GraphNode& n) {
-            return n.id == interface.node_id;
-        });
-        if (node == nodes.end())
+    // Preserve the authored interface order in the detached record.  Binding
+    // vectors are lookup inputs and may arrive in any order; using that order
+    // would make equivalent bindings produce different portable exports.
+    for (std::uint32_t index = 0; index < authored_interfaces.size(); ++index) {
+        const auto entry = authored_interfaces[index];
+        const bool output = entry["role"].getString() == "output";
+        const auto interface = std::find_if(
+            bindings.interfaces.begin(), bindings.interfaces.end(),
+            [&](const AuthoredInterfaceChannelBinding& binding) {
+                return binding.interface_key == entry["key"].getString() &&
+                       binding.output == output && binding.authored_ordinal == 0;
+            });
+        if (interface == bindings.interfaces.end())
             return PreparedDescriptionResult::refused(
                 PreparedDescriptionRefusal::AuthoredBindingMismatch);
-        auto existing = std::find_if(result->interfaces.begin(), result->interfaces.end(),
-                                      [&](const PreparedDescriptionInterface& value) {
-                                          return value.key == interface.interface_key &&
-                                                 value.output == interface.output;
-                                      });
-        if (existing == result->interfaces.end())
-            result->interfaces.push_back({interface.interface_key,
-                                          keys.at(interface.node_id),
-                                          interface.authored_port,
-                                          interface.output,
-                                          channel_names});
+        result->interfaces.push_back({interface->interface_key,
+                                      keys.at(interface->node_id),
+                                      interface->authored_port,
+                                      interface->output,
+                                      channel_names});
     }
     result->nodes.reserve(nodes.size());
     for (const auto& node : nodes) {
@@ -2337,7 +2374,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             if (!found)
                 return last_result_ = Result::PreflightFailed;
             const std::string_view mode = final_mode(connection.dest_index, connection.dest_port);
-            if (mode == "sum" || mode == "unknown" || connection.feedback ||
+            if (mode == "sum" || mode == "unknown" || !graph::carries_audio(connection) ||
+                connection.feedback ||
                 assignment.connection_delay_samples[index] != 0)
                 return last_result_ = Result::PreflightFailed;
             actual_edges.push_back({source_key + ":" + std::to_string(connection.source_port),
