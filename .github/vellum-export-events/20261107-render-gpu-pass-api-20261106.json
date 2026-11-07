@@ -18,6 +18,6 @@
     "core/render/src/wgsl_compile.hpp",
     "core/render/src/wgsl_diagnostics.cpp"
   ],
-  "vellum_inherits": false,
-  "rationale": "New files in the exported render directory: the typed GPU pass API (gpu_pass, gpu_capabilities, wgsl_diagnostics), its Dawn implementation, the WGSL compile helper shared with the build-time validator, and the padded-row readback helper Renderer3D now uses. The API obtains its device only from the forwarded GpuSurface (pulp/render/gpu_surface.hpp, which names gpu_runtime::GpuSurface on macOS) and never creates a second Dawn device. Vellum reimplements this contract rather than inheriting the files, so the next re-export does not carry them."
+  "vellum_inherits": true,
+  "rationale": "New files in the exported render directory: the typed GPU pass API (gpu_pass, gpu_capabilities, wgsl_diagnostics), its Dawn implementation, the WGSL compile helper shared with the build-time validator, and the padded-row readback helper. They join pulp-render, which the render-2d unit exports, and the closure manifest for that unit lists exactly these twelve paths, so the next re-export carries them and Vellum receives the code. The API obtains its device only from the forwarded GpuSurface (pulp/render/gpu_surface.hpp, which names gpu_runtime::GpuSurface on macOS) and never creates a second Dawn device. The scene shader, Renderer3D, the CMake helpers, tests, tools and docs are outside the closure and owe no decision."
 }
