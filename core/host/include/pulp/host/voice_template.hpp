@@ -32,7 +32,8 @@ struct VoiceBindingSpec {
     // A binding shared by slots would permit one slot to mutate another.  The
     // first bank schema admits only isolated per-slot bindings.
     bool shared_across_slots = false;
-    std::uint32_t ordinal = 0; // meaningful for port targets
+    std::uint32_t ordinal =
+        0; // meaningful for port targets; parameter ordinals canonicalize to zero
 };
 
 struct VoiceTemplateSchema {
@@ -92,7 +93,8 @@ struct VoiceBankPersistenceResult {
 };
 
 /// Encode state in a deterministic tagged, length-delimited wire form.  The
-/// manifest is checked first; malformed or stale state produces no bytes.
+/// manifest is checked first; malformed, stale, or over-bound state produces no
+/// bytes. The public state bound is 4096 parameter records.
 VoiceBankPersistenceResult encode_voice_bank_state(const VoiceBankManifest& manifest,
                                                    const VoiceBankState& state);
 
@@ -102,8 +104,8 @@ bool decode_voice_bank_state(std::span<const std::uint8_t> encoding, VoiceBankSt
                              std::string* error = nullptr);
 
 /// Transactionally validate and restore state.  `destination` is untouched on
-/// any failure, including a mismatched manifest, unsupported migration, alias,
-/// duplicate, or non-finite value.
+/// any failure, including a mismatched manifest, unsupported migration,
+/// canonical identity collision, duplicate, or non-finite value.
 bool restore_voice_bank_state(const VoiceBankManifest& manifest, const VoiceBankState& candidate,
                               VoiceBankState& destination, std::string* error = nullptr);
 

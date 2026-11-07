@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <limits>
+#include <string>
 
 using namespace pulp::host;
 
@@ -42,6 +43,40 @@ VoiceBankState state_for(const VoiceBankManifest& manifest, float value) {
     state.parameters.push_back({3, {"filter", "cutoff"}, "value", value});
     return state;
 }
+
+VoiceTemplateSchema wide_schema(std::size_t count) {
+    VoiceTemplateSchema s;
+    s.template_namespace = "com.pulp";
+    s.template_name = "wide-voice";
+    s.template_revision = 2;
+    s.bank_schema_version = 1;
+    s.bindings.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        s.bindings.push_back({{"parameter", std::to_string(i)},
+                              "value",
+                              VoiceBindingTarget::Parameter,
+                              VoiceBindingType::Control,
+                              VoiceBindingDirection::Input,
+                              VoiceBindingShape::Scalar,
+                              VoiceBindingRate::Block,
+                              false,
+                              0});
+    }
+    return s;
+}
+
+VoiceBankState wide_state(const VoiceBankManifest& manifest, std::size_t declaration_count,
+                          std::size_t count) {
+    VoiceBankState state;
+    state.manifest_sha256 = manifest.sha256;
+    state.parameters.reserve(count);
+    for (std::size_t i = 0; i < count; ++i)
+        state.parameters.push_back({static_cast<std::uint32_t>(i / declaration_count),
+                                    {"parameter", std::to_string(i % declaration_count)},
+                                    "value",
+                                    static_cast<float>(i)});
+    return state;
+}
 } // namespace
 
 TEST_CASE("G4 voice template expands eight isolated stable bindings") {
@@ -60,6 +95,20 @@ TEST_CASE("G4 voice template expands eight isolated stable bindings") {
     CHECK(second.manifest.sha256 == prepared.manifest.sha256);
 }
 
+TEST_CASE("G4 unused parameter ordinals canonicalize identity and manifest digest") {
+    auto ordinal = schema();
+    ordinal.bindings[0].ordinal = 91;
+    const auto canonical = prepare_voice_bank(schema());
+    const auto equivalent = prepare_voice_bank(ordinal);
+    REQUIRE(canonical.valid);
+    REQUIRE(equivalent.valid);
+    CHECK(canonical.manifest.sha256 == equivalent.manifest.sha256);
+    CHECK(canonical.manifest.bindings[1].spec.ordinal == 0);
+    CHECK(equivalent.manifest.bindings[1].spec.ordinal == 0);
+    CHECK(canonical.manifest.bindings[1].identity.encoding ==
+          equivalent.manifest.bindings[1].identity.encoding);
+}
+
 TEST_CASE("G4 voice template persistence restores atomically and supports edit undo") {
     const auto prepared = prepare_voice_bank(schema());
     REQUIRE(prepared.valid);
@@ -74,6 +123,10 @@ TEST_CASE("G4 voice template persistence restores atomically and supports edit u
     REQUIRE(decoded.parameters.size() == 1);
     CHECK(decoded.parameters.front().path == before.parameters.front().path);
     CHECK(decoded.parameters.front().target == before.parameters.front().target);
+    const auto reencoded = encode_voice_bank_state(prepared.manifest, decoded);
+    REQUIRE(reencoded.valid);
+    CHECK(reencoded.encoding == receipt.encoding);
+    CHECK(reencoded.sha256 == receipt.sha256);
 
     VoiceBankState live = state_for(prepared.manifest, 0.5f);
     REQUIRE(restore_voice_bank_state(prepared.manifest, before, live));
@@ -84,7 +137,11 @@ TEST_CASE("G4 voice template persistence restores atomically and supports edit u
     CHECK(live.parameters.front().value == 0.25f);
     auto truncated = receipt.encoding;
     truncated.pop_back();
-    CHECK_FALSE(decode_voice_bank_state(truncated, decoded));
+    auto decode_destination = state_for(prepared.manifest, 0.9f);
+    const auto decode_unchanged = decode_destination;
+    CHECK_FALSE(decode_voice_bank_state(truncated, decode_destination));
+    REQUIRE(decode_destination.parameters.size() == decode_unchanged.parameters.size());
+    CHECK(decode_destination.parameters.front().value == decode_unchanged.parameters.front().value);
     auto trailing = receipt.encoding;
     trailing.push_back(0);
     CHECK_FALSE(decode_voice_bank_state(trailing, decoded));
@@ -97,6 +154,35 @@ TEST_CASE("G4 voice template persistence restores atomically and supports edit u
     oversize[count_offset + 2] = 0x10;
     oversize[count_offset + 3] = 0x01;
     CHECK_FALSE(decode_voice_bank_state(oversize, decoded));
+}
+
+TEST_CASE("G4 persistence keeps the 4096 parameter bound transactional") {
+    constexpr std::size_t kAtLimitDeclarations = 512;
+    constexpr std::size_t kAtLimitRecords = 4096;
+    const auto at_limit = prepare_voice_bank(wide_schema(kAtLimitDeclarations));
+    REQUIRE(at_limit.valid);
+    auto bounded = wide_state(at_limit.manifest, kAtLimitDeclarations, kAtLimitRecords);
+    const auto bounded_receipt = encode_voice_bank_state(at_limit.manifest, bounded);
+    REQUIRE(bounded_receipt.valid);
+    VoiceBankState bounded_decoded;
+    REQUIRE(decode_voice_bank_state(bounded_receipt.encoding, bounded_decoded));
+    CHECK(bounded_decoded.parameters.size() == kAtLimitRecords);
+
+    VoiceBankState bounded_live = bounded_decoded;
+    REQUIRE(restore_voice_bank_state(at_limit.manifest, bounded_decoded, bounded_live));
+    CHECK(bounded_live.parameters.size() == kAtLimitRecords);
+
+    constexpr std::size_t kOverLimitDeclarations = 513;
+    constexpr std::size_t kOverLimitRecords = 4097;
+    const auto over_limit = prepare_voice_bank(wide_schema(kOverLimitDeclarations));
+    REQUIRE(over_limit.valid);
+    auto oversized = wide_state(over_limit.manifest, kOverLimitDeclarations, kOverLimitRecords);
+    CHECK_FALSE(encode_voice_bank_state(over_limit.manifest, oversized).valid);
+    VoiceBankState destination = wide_state(over_limit.manifest, kOverLimitDeclarations, 1);
+    const auto unchanged = destination;
+    CHECK_FALSE(restore_voice_bank_state(over_limit.manifest, oversized, destination));
+    REQUIRE(destination.parameters.size() == unchanged.parameters.size());
+    CHECK(destination.parameters.front().value == unchanged.parameters.front().value);
 }
 
 TEST_CASE(

@@ -16,6 +16,7 @@ namespace pulp::host {
 namespace {
 constexpr std::uint32_t kSlots = 8;
 constexpr std::uint32_t kSchemaVersion = 1;
+constexpr std::size_t kMaxParameters = 4096;
 constexpr std::string_view kWireSchema = "pulp.graph.voice-bank.state";
 
 bool valid_enum(VoiceBindingTarget value) noexcept {
@@ -135,6 +136,8 @@ bool normalize_binding(const VoiceBindingSpec& input, NormalizedBinding& output,
     output.spec = input;
     output.spec.path = output.path;
     output.spec.target = output.target;
+    if (output.spec.target_kind == VoiceBindingTarget::Parameter)
+        output.spec.ordinal = 0;
     return true;
 }
 
@@ -365,7 +368,7 @@ VoiceBankPersistenceResult encode_voice_bank_state(const VoiceBankManifest& mani
         result.error = "state schema or manifest identity does not match";
         return result;
     }
-    if (state.parameters.size() > 4096) {
+    if (state.parameters.size() > kMaxParameters) {
         result.error = "state parameter count is out of bounds";
         return result;
     }
@@ -473,7 +476,7 @@ bool decode_voice_bank_state(std::span<const std::uint8_t> encoding, VoiceBankSt
     if (!read_string(parsed.manifest_sha256) || parsed.manifest_sha256.size() != 64)
         return fail("invalid voice-bank manifest digest");
     std::uint32_t count = 0;
-    if (!read_u32(count) || count > 4096)
+    if (!read_u32(count) || count > kMaxParameters)
         return fail("voice-bank state parameter count is out of bounds");
     parsed.parameters.reserve(count);
     std::set<std::string> seen;
@@ -512,6 +515,8 @@ bool restore_voice_bank_state(const VoiceBankManifest& manifest, const VoiceBank
         return fail("manifest is not a verified prepared bank");
     if (candidate.schema_version != kSchemaVersion || candidate.manifest_sha256 != manifest.sha256)
         return fail("state schema or manifest identity does not match");
+    if (candidate.parameters.size() > kMaxParameters)
+        return fail("state parameter count is out of bounds");
     std::set<std::string> seen;
     VoiceBankState canonical = candidate;
     canonical.parameters.clear();
