@@ -16,6 +16,7 @@ The runtime module provides lock-free primitives, logging, assertions, and scope
 | Ordered event stream | `SpscQueue<T>` | MIDI events, UI commands |
 | Occurrence-only feedback | `ActivityChannel<N>` | MIDI pad flashes, clip lights |
 | Wake a sleeping worker | `WakeSignal` | Audio thread hands a block to a render or disk thread |
+| Callable handed to a realtime or worker lane | `FixedFunction<Sig, N>` | Task handlers that must not allocate |
 | Budgeted optional work | `evaluate_runtime_budget()` | Background analysis, voice/cache refresh, validation helpers |
 
 **Never use on the audio thread**: `std::mutex`, `std::condition_variable`, heap allocation, I/O.
@@ -240,6 +241,103 @@ Critical audio rendering should not be gated through this helper. Use it for
 noncritical graph previews, diagnostics, per-voice analysis, background refresh,
 and validation helpers where a degraded result is acceptable and visible.
 
+## Cancellation
+
+`CancelSource` owns a cancellation request and `CancelToken` observes it. Hand the
+token to the work being cancelled and keep the source with whoever may cancel it.
+
+```cpp
+#include <pulp/runtime/cancel.hpp>
+
+pulp::runtime::CancelSource source;
+auto token = source.token();                 // copyable observer
+
+worker = std::thread([token] {
+    while (!token.is_cancelled()) {          // lock-free; safe on the audio thread
+        do_a_slice_of_work();
+    }
+});
+
+auto registration = token.register_callback([] { wake_the_ui(); });
+bool stopped = token.wait_for_cancellation(std::chrono::seconds(5));
+
+source.cancel();                             // idempotent; also runs on destruction
+```
+
+- `CancelSource` is move-only and cancels when destroyed, so work never outlives
+  its owner without being told to stop.
+- A default-constructed `CancelToken` can never be cancelled, which makes
+  `const CancelToken& = {}` a safe "not cancellable" default parameter.
+- `is_cancelled()` is one acquire load. It never locks or allocates. Everything
+  else takes a mutex and stays off the audio thread.
+- `register_callback` returns a `CancelRegistration`. Callbacks run on the
+  cancelling thread, in registration order, or immediately if the token is
+  already cancelled. Destroying a registration waits for a callback that is
+  running on another thread, so captured state is safe to free afterwards.
+- `CancellationToken` is the former single type that both requested and observed
+  cancellation. It still works and converts to `CancelToken`.
+
+## FixedFunction
+
+`std::function` can allocate when constructed or copied and needs a copyable target,
+so it does not belong on a realtime path. `FixedFunction<Signature, Capacity>` is a
+move-only callable wrapper with inline storage.
+
+```cpp
+#include <pulp/runtime/fixed_function.hpp>
+
+pulp::runtime::FixedFunction<void(int), 32> apply =
+    [gain = &gain_](int db) { gain->store(db, std::memory_order_relaxed); };
+apply(-6);
+```
+
+- Constructing, moving, calling and destroying never allocate, lock or throw.
+- A target that is too large, over-aligned or not nothrow-move-constructible is a
+  `static_assert` failure at the construction site, never a silent heap fallback.
+  Capture pointers or indices instead of objects, or raise `Capacity`. The default
+  capacity is 32 bytes.
+- Targets may be move-only (a lambda owning a `unique_ptr`). Destroying the wrapper
+  runs the target's destructor on the destroying thread, so capture trivially
+  destructible state for objects that die on the audio thread.
+- Calling an empty `FixedFunction` is undefined behaviour; test it with
+  `explicit operator bool` when it can be empty.
+- `FixedFunction::fits<F>` reports at compile time whether `F` can be stored.
+- `format::BackgroundTaskLane`, the bounded audio-to-worker command lane, stores its
+  handler in one: `lane.start([this](const Task& t) { handle(t); })`. The older
+  function-pointer-plus-context overload still works.
+
+## Special directories
+
+`pulp::platform::special_dir` (in `pulp/platform/special_dir.hpp`, which this module
+depends on) is the one place that knows where each OS keeps the user's folders.
+Settings, presets, content and log code call it instead of carrying their own
+`#ifdef` ladders.
+
+```cpp
+#include <pulp/platform/special_dir.hpp>
+using pulp::platform::SpecialDir;
+
+auto logs   = pulp::platform::special_dir(SpecialDir::logs) / "MyApp";
+auto assets = pulp::platform::special_dir(SpecialDir::bundle_dir);   // resource root of this plugin or app
+```
+
+Kinds: `home`, `documents`, `desktop`, `music`, `app_data` (per user),
+`app_data_shared` (all users), `config` (per-user settings), `temp`, `cache`,
+`logs`, `current_executable`, `bundle_dir`, `user_presets`. The header lists the
+exact path each platform returns.
+
+- An empty path means the location is unavailable. Fail closed instead of falling
+  back to a shared folder such as `/tmp`.
+- Nothing is created or checked for existence.
+- `bundle_dir` is the resource root of the binary that contains the Pulp code, so
+  a plugin gets its own bundle, not its host's. `current_executable` is the host.
+- Android resolves under the directory given to the existing `set_app_data_dir`
+  hook. WebAssembly resolves inside the in-memory file system.
+- `set_special_dir_override` redirects a kind for tests or for mobile hosts that
+  learn their sandbox late.
+- `special_dir_for(os, kind, inputs)` computes any platform's layout from an
+  explicit environment, which is how the layouts are tested on every host.
+
 ## ScopeGuard
 
 RAII cleanup — runs a callable on scope exit.
@@ -261,9 +359,55 @@ auto guard = pulp::runtime::make_scope_guard([&] {
 pulp::runtime::log_info("Plugin loaded: {}", name);
 pulp::runtime::log_warn("Buffer underrun at sample {}", position);
 pulp::runtime::log_error("Failed to open device: {}", device_name);
+pulp::runtime::log_with_category("net", pulp::runtime::LogLevel::Info, "connected to {}", host);
 ```
 
-Logging is safe to call from any thread. Output goes to stderr.
+Records go to the platform log (os_log, the debugger output window) and stderr. Safe
+to call from any thread, but **logging is not realtime-safe**: formatting allocates and
+the writers take locks and do I/O. Never log from `process()` or any other audio-thread
+path. Post the event to a non-realtime thread (an `SpscQueue` drained by a worker) and
+log from there.
+
+### Sinks
+
+`set_log_sink` installs one process-wide callback that also receives every record as
+`(level, category, message)`. The swap is thread-safe and returns the previous sink.
+A sink that throws is ignored, and a record logged from inside a sink is not delivered
+back to it. The sink registry is per loaded binary, so a plugin does not receive its
+host's records.
+
+```cpp
+#include <pulp/runtime/log_sink.hpp>
+
+// A rotating file in <logs>/MyApp: owner-only, at most 1 MiB x 5 files.
+std::string error;
+pulp::runtime::FileLogSinkOptions options;
+options.app_name = "MyApp";
+if (auto file = pulp::runtime::FileLogSink::open(options, &error))
+    pulp::runtime::set_log_sink(*file);
+else
+    pulp::runtime::log_warn("File logging disabled: {}", error);
+
+// Tests and tooling: keep the last N records in memory.
+pulp::runtime::CaptureLogSink capture;
+pulp::runtime::ScopedLogSink scope(capture);     // restores the previous sink on exit
+code_under_test();
+REQUIRE(capture.contains("device lost"));
+```
+
+- `FileLogSink` writes `2026-11-06T17:02:03.123Z [info] category: message`, one record
+  per line. Line breaks and control characters inside a record are escaped, so a message
+  cannot forge another record. Records over 8 KiB are truncated.
+- It rotates by size (`max_file_bytes`, `max_files`) and filters by `min_level`.
+- `open` refuses and reports a location it cannot trust: a symlinked directory or file,
+  a directory or file writable by group or others, a file owned by someone else, or a
+  file with several hard links. Files are created `0600` and the directory `0700`.
+  On POSIX every file operation is relative to the opened directory, so swapping the
+  path for a link afterwards has no effect. Windows has no mode bits: it refuses
+  symlinks and junctions and relies on the per-user logs folder's ACL.
+- File logging is unavailable under WebAssembly.
+- `CaptureLogSink` is bounded; the oldest record is dropped (and counted) when full.
+  Use `records()`, `records_at_least()`, `take()` and `contains()` to inspect it.
 
 ## Assertions
 

@@ -182,7 +182,7 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
         "include": "pulp/signal/spectrum_analyzer.hpp",
-        "fingerprint": "sha256:89df9785e6b461680d5cb9f04636c5e89d483a4ca34fbada608ac659823be32f",
+        "fingerprint": "sha256:7cc2255c2b5918c4d87a9bba5f3bcdc5832f30bc5242758e093c60694484fc86",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -193,7 +193,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/spectrum_bin_mapping.hpp",
-        "fingerprint": "sha256:deeea13fe6702cba6804abde84ecf47d53b556a1ac0e51a3600e880c86e86884",
+        "fingerprint": "sha256:d23c0ff8893ad7f624d129a5e56a16ff5a62c84dfa74445b869e45afb9baa7b0",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -225,7 +225,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/graph_event_contract.hpp',
-        'fingerprint': 'sha256:d0e530c8e75604b4b7ef06afca2503335e4bb8a307c82e87edc8077a47d66ca0',
+        'fingerprint': 'sha256:edf30e0200f48972611b5253942f684befdc8133e10dbcde43fe0a045eb2032d',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded host and graph-authored event boundary contract; it is not wired into SignalGraph admission or a generator-facing capability.',
