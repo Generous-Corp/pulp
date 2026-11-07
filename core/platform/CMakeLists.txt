@@ -9,6 +9,7 @@ target_include_directories(pulp-platform
 
 target_sources(pulp-platform PRIVATE
     src/platform.cpp
+    src/main_thread.cpp
     src/file_dialog_stub.cpp
     src/reveal_in_file_manager.cpp
     src/popup_menu_stub.cpp
@@ -32,6 +33,7 @@ if(APPLE AND NOT IOS)
     )
     target_link_libraries(pulp-platform PRIVATE
         "-framework Cocoa"
+        "-framework CoreFoundation"
         "-framework UniformTypeIdentifiers"
     )
 elseif(IOS)
@@ -50,6 +52,7 @@ elseif(IOS)
     target_compile_definitions(pulp-platform PUBLIC PULP_PERMISSIONS_HAS_BACKEND=1)
     target_link_libraries(pulp-platform PRIVATE
         "-framework UIKit"
+        "-framework CoreFoundation"
         "-framework UniformTypeIdentifiers"
         "-framework AVFoundation"
         "-framework CoreBluetooth"
@@ -102,6 +105,7 @@ set(PULP_PLATFORM_UNIT_HEADERS
     include/pulp/platform/environment.hpp
     include/pulp/platform/file_dialog.hpp
     include/pulp/platform/gpu_fwd.hpp
+    include/pulp/platform/main_thread.hpp
     include/pulp/platform/native_handle.hpp
     include/pulp/platform/permissions.hpp
     include/pulp/platform/platform.hpp
