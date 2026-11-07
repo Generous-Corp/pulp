@@ -22,13 +22,6 @@ public:
 
         stb_vorbis_info info = stb_vorbis_get_info(v);
         unsigned int total = stb_vorbis_stream_length_in_samples(v);
-        // Zero means the last page's granule position could not be read. A
-        // reader that cannot establish a frame count refuses the file rather
-        // than reporting the sentinel as a count.
-        if (total == 0) {
-            stb_vorbis_close(v);
-            return std::nullopt;
-        }
 
         AudioFileInfo result;
         result.sample_rate = static_cast<uint32_t>(info.sample_rate);
@@ -63,8 +56,7 @@ public:
         // The last page's granule position is an untrusted length claim
         // (zero when unknown); refuse before any output allocation.
         const uint64_t claimed_frames = stb_vorbis_stream_length_in_samples(v);
-        if (claimed_frames == 0 ||
-            !detail::within_decode_limits("OGG Vorbis", claimed_frames, channels, limits)) {
+        if (!detail::within_decode_limits("OGG Vorbis", claimed_frames, channels, limits)) {
             stb_vorbis_close(v);
             return std::nullopt;
         }
@@ -96,11 +88,17 @@ public:
             detail::append_deinterleaved(data.channels, chunk.data(), got_frames, channels);
             frames_read += got_frames;
         }
+        // The decoder's last error, cleared by reading it. With no declared
+        // length the stream's own end is the only evidence of completeness.
+        const int decode_error = stb_vorbis_get_error(v);
         stb_vorbis_close(v);
 
-        // A truncated or damaged stream yields fewer frames than the last
-        // page declared; the file is refused rather than returned short.
-        if (!within_limits || frames_read == 0 || frames_read != claimed_frames)
+        // A declared frame count the stream does not deliver is a refusal
+        // (a truncated or damaged file); an undeclared length (zero) is
+        // decoded under the limits unless the decoder ended in an error.
+        if (!within_limits || frames_read == 0 ||
+            (claimed_frames != 0 && frames_read != claimed_frames) ||
+            (claimed_frames == 0 && decode_error != VORBIS__no_error))
             return std::nullopt;
         return data;
     }

@@ -299,28 +299,35 @@ TEST_CASE("integer PCM WAV extremes decode by 2^(bits-1) on both WAV paths",
     }
 }
 
-TEST_CASE("readers refuse a seed whose declared length the decode cannot honour",
+TEST_CASE("a declared length the stream does not deliver is refused, an undeclared one decoded",
           "[fuzz][audio]") {
-    // Each of these once returned a partial decode: the FLAC behind a
-    // STREAMINFO that declared more frames than the stream holds, the two Ogg
-    // files behind a zero (unknown) length. Pinned by name so the contract
-    // survives changes to the generic oracle case. read_info is a header
-    // read: it reports a declared length and refuses only an unknown one.
-    struct Seed {
-        const char* name;
-        bool info_declares_length;
-    };
-    const std::vector<Seed> seeds = {
-        {"flac-truncated-midframe.flac", true},
-        {"ogg-page-bad-crc.ogg", false},
-        {"ogg-truncated-page.ogg", false},
-    };
+    // Pinned by name so the contract survives changes to the generic oracle
+    // case: the FLAC's STREAMINFO declares 800 frames the stream does not
+    // hold, so read refuses while read_info still reports the declaration;
+    // the two Ogg files declare no length (0), so read_info reports 0 and a
+    // decode, if the decoder ends cleanly, is accepted under the limits.
     auto& registry = pulp::audio::FormatRegistry::instance();
-    for (const auto& seed : seeds) {
-        const auto path = corpus_dir() / seed.name;
-        INFO(seed.name);
+    const auto limits = pulp_fuzz::audio_decoder::fuzz_limits();
+
+    {
+        const auto path = corpus_dir() / "flac-truncated-midframe.flac";
         REQUIRE(fs::exists(path));
-        CHECK(registry.read_info(path.string()).has_value() == seed.info_declares_length);
-        CHECK_FALSE(registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
+        const auto info = registry.read_info(path.string());
+        REQUIRE(info.has_value());
+        CHECK(info->num_frames == 800u);
+        CHECK_FALSE(registry.read(path.string(), limits).has_value());
+    }
+
+    for (const char* name : {"ogg-page-bad-crc.ogg", "ogg-truncated-page.ogg"}) {
+        const auto path = corpus_dir() / name;
+        INFO(name);
+        REQUIRE(fs::exists(path));
+        const auto info = registry.read_info(path.string());
+        REQUIRE(info.has_value());
+        CHECK(info->num_frames == 0u);
+        if (const auto data = registry.read(path.string(), limits)) {
+            CHECK(data->sample_rate == info->sample_rate);
+            CHECK(data->num_channels() == info->num_channels);
+        }
     }
 }

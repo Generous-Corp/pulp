@@ -6,9 +6,10 @@
 //
 // Properties, given a path and DecodeLimits:
 //   - the reader neither crashes nor trips a sanitizer (implicit);
-//   - when read_info and read(limits) both succeed, they agree on sample rate,
-//     channel count and frame count, and the decoded planar buffers are
-//     num_channels long with num_frames samples each;
+//   - when read_info and read(limits) both succeed, they agree on sample rate
+//     and channel count, and on frame count unless info reports 0 (an
+//     undeclared length, decoded under the limits); the decoded planar
+//     buffers are num_channels long with num_frames samples each;
 //   - decoded output never exceeds the limits (bytes = frames x channels x 4).
 // A format whose info is an estimate is not special-cased here: a
 // disagreement is reported, and whoever owns the reader decides.
@@ -126,7 +127,9 @@ inline void check_agreement(const std::string& path, const pulp::audio::AudioFil
                "info " + std::to_string(info.num_channels) + ", decoded " +
                    std::to_string(data.num_channels()));
     }
-    if (info.num_frames != data.num_frames()) {
+    // Zero is the documented "length not declared" value; a declared count
+    // the decode does not deliver is the reader's refusal to make, not ours.
+    if (info.num_frames != 0 && info.num_frames != data.num_frames()) {
         report(fail, path, "num_frames",
                "info " + std::to_string(info.num_frames) + ", decoded " +
                    std::to_string(data.num_frames()));

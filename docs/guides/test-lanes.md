@@ -245,8 +245,11 @@ that read bytes a host, a downloaded pack or a dropped file hands the SDK:
   replay a seeded mutation corpus through oracles shared with the libFuzzer
   targets, and `pulp-test-audio-decoder-corpus` replays the committed
   audio-decoder seeds (CoreAudio extensions included on Apple) through the
-  oracle `pulp-fuzz-audio-decoder` shares. Runs on every PR that touches its
-  parse surface and on the nightly.
+  oracle `pulp-fuzz-audio-decoder` shares: info and decode agree on rate,
+  channels and frames, where a declared frame count that the stream does not
+  deliver is a refusal and an undeclared length (info reports 0) is decoded
+  under the limits. Runs on every PR that touches its parse surface and on
+  the nightly.
 - **Coverage-guided** (libFuzzer + ASan, `PULP_ENABLE_FUZZING=ON`, Linux,
   nightly and `workflow_dispatch` only): one target per parser, each with a
   seed corpus and a bounded `<target>-smoke` ctest (labels `fuzz;libfuzzer`)
