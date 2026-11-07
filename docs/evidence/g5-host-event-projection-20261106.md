@@ -2,7 +2,8 @@
 
 **Disposition: bounded ingress adapter implemented; G-5 remains PARTIAL.**
 
-At source head `87a6adc4c45167bf444afa16d891186deb8dbd99`,
+At source fix head `d17bdfe425ad`, based on live `origin/main`
+`2f3d36dae75c3dca283c58e47f7731356f088e0d`,
 `project_host_event_block` maps a projected `HostEventRecord` span from its
 epoch-local absolute sample domain into preallocated MIDI, UMP, and optional
 MPE sidecars. It validates the block window and all destination capacities
@@ -21,15 +22,19 @@ Focused Release validation:
 
 ```text
 ./build/pulp build --target pulp-test-group-trigger-graph
-ctest --test-dir build -R '^(G5|Typed trigger)' --output-on-failure
-11/11 tests passed
+build/test/pulp-test-group-trigger-graph "[g5]"
+All tests passed (322 assertions in 11 test cases)
 ```
 
 The positive control checks absolute-to-block offsets, UMP retention, MPE
 sidecar derivation, and destination ordering. The planted negatives check
-late-event refusal and capacity refusal with destination immutability. The
-existing G-5 contract cases continue to pass, including epoch, overflow,
-attempt-limit, reset, and partition controls.
+late-event refusal, destination-capacity refusal, and a full 128-note
+channel-expression fan-out with destination immutability. `derive_mpe` flushes
+the tracker pending note-off queue at block start before consuming new records.
+The existing G-5 contract cases continue to pass, including epoch, overflow,
+attempt-limit, reset, and partition controls. The CTest wrapper was not used
+for this receipt because it hung after printing only its project header; the
+filtered test executable is the durable focused receipt.
 
 The next full-semantics slice still requires a graph-owned host ingress
 adapter that binds epoch/reset ownership and block publication to the graph
