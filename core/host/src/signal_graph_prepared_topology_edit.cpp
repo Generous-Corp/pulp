@@ -146,10 +146,18 @@ class JsonDuplicateScanner {
         case '"':
             return string_token();
         default:
+            // A comma or closing delimiter cannot stand in for a JSON value.
+            // Without this guard the token loop below consumes zero bytes,
+            // which accidentally accepts trailing commas and missing object
+            // values before the real parser sees the payload.
+            if (text_[position_] == ',' || text_[position_] == ']' ||
+                text_[position_] == '}')
+                return false;
+            const auto start = position_;
             while (position_ < text_.size() && text_[position_] != ',' && text_[position_] != ']' &&
                    text_[position_] != '}' && !std::isspace(static_cast<unsigned char>(text_[position_])))
                 ++position_;
-            return true;
+            return position_ > start;
         }
     }
 
@@ -715,6 +723,7 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::LogicalIdentityMissing);
 
+    try {
     const auto result = std::make_shared<PreparedDescriptionData>();
     result->semantic_profile = "pulp.graph.authored-io-gain.v1";
     result->semantic_payload.assign(canonical_semantic_payload);
@@ -726,7 +735,9 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
             return PreparedDescriptionResult::refused(
                 PreparedDescriptionRefusal::AuthoredBindingMismatch);
         }
-    } catch (const std::exception& e) {
+    } catch (const std::bad_alloc&) {
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::AllocationFailed);
+    } catch (const std::exception&) {
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
     }
@@ -1100,6 +1111,12 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
     prepared_description_ = result;
     authored_binding_stale_ = false;
     return {PreparedDescriptionRefusal::None, result};
+    } catch (const std::bad_alloc&) {
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::AllocationFailed);
+    } catch (...) {
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    }
 }
 
 PreparedDescriptionResult
@@ -1110,10 +1127,17 @@ SignalGraph::PreparedTopologyEdit::build_prepared_description_(double sample_rat
         return PreparedDescriptionResult::refused(
             prepared_description_ ? PreparedDescriptionRefusal::UnsupportedPreparedProfile
                                   : PreparedDescriptionRefusal::LogicalIdentityMissing);
-    auto copy = std::make_shared<PreparedDescriptionData>(*prepared_description_);
-    copy->sample_rate = sample_rate;
-    copy->max_block_frames = static_cast<std::uint64_t>(max_block_size);
-    return {PreparedDescriptionRefusal::None, std::move(copy)};
+    try {
+        auto copy = std::make_shared<PreparedDescriptionData>(*prepared_description_);
+        copy->sample_rate = sample_rate;
+        copy->max_block_frames = static_cast<std::uint64_t>(max_block_size);
+        return {PreparedDescriptionRefusal::None, std::move(copy)};
+    } catch (const std::bad_alloc&) {
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::AllocationFailed);
+    } catch (...) {
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    }
 }
 
 SignalGraph::PreparedTopologyEdit::~PreparedTopologyEdit() {
@@ -1915,10 +1939,18 @@ PreparedDescriptionResult SignalGraph::ExecutionSnapshot::export_prepared_descri
     const auto selection_generation = owner_->execution_selection_generation_.load(std::memory_order_relaxed);
     if (snapshot_->prepared_description->execution_selection_generation != selection_generation)
         return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
-    auto copy = std::make_shared<PreparedDescriptionData>(*snapshot_->prepared_description);
-    if (owner_->execution_selection_generation_.load(std::memory_order_relaxed) != selection_generation)
-        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
-    return {PreparedDescriptionRefusal::None, std::move(copy)};
+    try {
+        auto copy = std::make_shared<PreparedDescriptionData>(*snapshot_->prepared_description);
+        if (owner_->execution_selection_generation_.load(std::memory_order_relaxed) !=
+            selection_generation)
+            return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
+        return {PreparedDescriptionRefusal::None, std::move(copy)};
+    } catch (const std::bad_alloc&) {
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::AllocationFailed);
+    } catch (...) {
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::LogicalIdentityMissing);
+    }
 }
 
 bool SignalGraph::PreparedTopologyEdit::routed_execution_ready(int block_size) const noexcept {
@@ -1965,6 +1997,7 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         return last_result_;
     prepare_attempted_ = true;
 
+    try {
     GraphMutationLock owner_lock(*owner_);
     if (!base_is_current_locked_() || owner_->in_swap_edit_) {
         return last_result_ = Result::StaleBase;
@@ -2463,14 +2496,37 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             for (std::uint32_t port = 0; port < pnode.output_ports; ++port) {
                 const auto slot = slots.output_base + port;
                 add_class(slot);
-                std::size_t last_reader = position;
-                for (const auto& connection : plan.connections)
-                    if (connection.source_index == dense && connection.source_port == port)
-                        last_reader = std::max(last_reader, processing_positions[connection.dest_index]);
-                add_value(key + ":port=audio:direction=out,role=node_output,channel=" +
-                          std::to_string(port) + ",phase=execute,ordinal=" + std::to_string(port) +
-                          ",mode=write,class=" + std::to_string(slot) + ",lifetime=[" +
-                          std::to_string(position) + "," + std::to_string(last_reader + 1) + ")");
+                if (pnode.kind == graph::GraphRuntimeNodeKind::AudioInput) {
+                    add_value(key + ":port=audio:direction=out,role=external_input,channel=" +
+                              std::to_string(port) + ",phase=execute,ordinal=" +
+                              std::to_string(port) + ",mode=copy,class=" +
+                              std::to_string(slot) + ",lifetime=[" + std::to_string(position) + "," +
+                              std::to_string(position + 1) + ")");
+                } else {
+                    std::size_t last_reader = position;
+                    for (const auto& connection : plan.connections)
+                        if (connection.source_index == dense && connection.source_port == port)
+                            last_reader = std::max(last_reader, processing_positions[connection.dest_index]);
+                    add_value(key + ":port=audio:direction=out,role=node_output,channel=" +
+                              std::to_string(port) + ",phase=execute,ordinal=" +
+                              std::to_string(port) + ",mode=write,class=" + std::to_string(slot) +
+                              ",lifetime=[" + std::to_string(position) + "," +
+                              std::to_string(last_reader + 1) + ")");
+                }
+            }
+            if (pnode.kind == graph::GraphRuntimeNodeKind::AudioOutput) {
+                for (std::uint32_t port = 0; port < pnode.input_ports; ++port) {
+                    const auto mode = sources[port].mode;
+                    const auto slot = mode == format::GraphRuntimeSnapshot::InputPortSource::Mode::InPlace
+                                          ? sources[port].slot
+                                          : slots.input_base + port;
+                    add_class(slot);
+                    add_value(key + ":port=audio:direction=in,role=external_output,channel=" +
+                              std::to_string(port) + ",phase=output_copy,ordinal=" +
+                              std::to_string(port) + ",mode=copy,class=" + std::to_string(slot) +
+                              ",lifetime=[" + std::to_string(position) + "," +
+                              std::to_string(position + 1) + ")");
+                }
             }
         }
         for (std::uint32_t slot = 0; slot < used_slots.size(); ++slot)
@@ -2514,11 +2570,22 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             if (!normalize_class(value))
                 return last_result_ = Result::PreflightFailed;
         std::sort(capture->buffer_values.begin(), capture->buffer_values.end());
+        const auto class_ordinal = [](const std::string& record) {
+            const auto marker = record.find("class=");
+            std::uint32_t ordinal = std::numeric_limits<std::uint32_t>::max();
+            if (marker != std::string::npos) {
+                const auto begin = marker + 6;
+                const auto end = record.find(',', begin);
+                const auto token = record.substr(begin, end == std::string::npos
+                                                           ? std::string::npos
+                                                           : end - begin);
+                (void)std::from_chars(token.data(), token.data() + token.size(), ordinal);
+            }
+            return ordinal;
+        };
         std::sort(capture->buffer_classes.begin(), capture->buffer_classes.end(),
-                  [](const std::string& lhs, const std::string& rhs) {
-                      const auto l = lhs.find("class=");
-                      const auto r = rhs.find("class=");
-                      return lhs.substr(l + 6) < rhs.substr(r + 6);
+                  [&](const std::string& lhs, const std::string& rhs) {
+                      return class_ordinal(lhs) < class_ordinal(rhs);
                   });
         next->prepared_description = std::move(capture);
     }
@@ -2640,6 +2707,13 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
 
     prepared_snapshot_ = std::move(next);
     return last_result_ = Result::Prepared;
+    } catch (const std::bad_alloc&) {
+        // Preparation is an isolated transaction.  Allocation failure must not
+        // publish a partial snapshot or escape as an exception to the owner.
+        return last_result_ = Result::PreflightFailed;
+    } catch (...) {
+        return last_result_ = Result::PreflightFailed;
+    }
 }
 
 SignalGraph::PreparedTopologyEdit::Result

@@ -145,6 +145,16 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
             std::vector<std::string>{"input", "gain_a", "gain_b", "output"});
     REQUIRE_FALSE(exported.value->buffer_classes.empty());
     REQUIRE_FALSE(exported.value->buffer_values.empty());
+    const auto has_buffer_record = [&](std::string_view text) {
+        return std::any_of(exported.value->buffer_values.begin(),
+                           exported.value->buffer_values.end(),
+                           [&](const std::string& value) {
+                               return value.find(text) != std::string::npos;
+                           });
+    };
+    REQUIRE(has_buffer_record("role=external_input"));
+    REQUIRE(has_buffer_record("role=external_output"));
+    REQUIRE(has_buffer_record("phase=output_copy"));
     REQUIRE(exported.value->nodes[0].kind == "AudioInput");
     REQUIRE(exported.value->nodes[1].kind == "Gain");
     REQUIRE(exported.value->nodes[1].gain_bits == 0x3f800000u);
@@ -387,5 +397,15 @@ TEST_CASE("D4 rejects unknown and duplicate semantic fields") {
         "{\"assets\":{},\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
         "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}";
     REQUIRE(edit->bind_authored_identity(duplicate, {}).refusal ==
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    const std::string trailing_comma =
+        "{\"assets\":{},\"edges\":{},\"interfaces\":[,],\"nodes\":{},"
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}";
+    REQUIRE(edit->bind_authored_identity(trailing_comma, {}).refusal ==
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    const std::string missing_value =
+        "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":}";
+    REQUIRE(edit->bind_authored_identity(missing_value, {}).refusal ==
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
 }
