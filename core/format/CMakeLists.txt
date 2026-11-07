@@ -82,6 +82,7 @@ target_sources(pulp-format-core PRIVATE
     src/value_channel_visual_port.cpp
     src/editor_package.cpp
     src/contract_editor_session.cpp
+    src/native_surface_host.cpp
     src/main_thread_timer.cpp
     src/ara.cpp
     src/ara_factory.cpp

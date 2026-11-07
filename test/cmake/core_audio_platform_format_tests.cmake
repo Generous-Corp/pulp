@@ -311,6 +311,11 @@ pulp_add_test_suite(pulp-test-host-parameter-edit GROUP pulp-test-group-cap-form
 pulp_add_test_suite(pulp-test-editor-host GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format pulp::state)
 
+# The native-surface editor-host extension: the null host, the contract
+# session as the offering host, and observer re-entrancy and lifetime.
+pulp_add_test_suite(pulp-test-native-surface-host GROUP pulp-test-group-cap-format
+    LIBRARIES pulp::format pulp::state)
+
 # The cancellable main-thread timer behind contract editors' idle ticks.
 pulp_add_test_suite(pulp-test-main-thread-timer GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)

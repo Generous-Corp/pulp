@@ -196,6 +196,91 @@ class NodeAbiSurfaceUnitTests(unittest.TestCase):
                 )
 
 
+class NodeAbiFrozenUnitTests(unittest.TestCase):
+    BASE = textwrap.dedent(
+        """\
+        class EditorContext {
+        public:
+          virtual ~EditorContext() = default;
+          virtual bool host_action(int request) = 0;
+          virtual void* query_extension(int id) { return nullptr; }
+        };
+        """
+    )
+
+    def check(self, current: str | None, base: str | None = BASE) -> str | None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            if current is not None:
+                (root / "editor_host.hpp").write_text(current)
+            with mock.patch.object(nag, "git_show", return_value=base):
+                return nag.check_surface(
+                    root, "origin/main", "EditorContext", "editor_host.hpp", nag.FROZEN
+                )
+
+    def test_unchanged_frozen_surface_passes(self) -> None:
+        self.assertIsNone(self.check(self.BASE))
+
+    def test_parameter_rename_passes(self) -> None:
+        self.assertIsNone(self.check(self.BASE.replace("int request", "int req")))
+
+    def test_appended_virtual_fails_a_frozen_surface(self) -> None:
+        appended = self.BASE.replace(
+            "  virtual void* query_extension",
+            "  virtual void* query_extension(int id) { return nullptr; }\n"
+            "  virtual void later();\n  virtual void* unused_tail",
+        )
+        finding = self.check(appended) or ""
+        self.assertIn("EditorContext: virtual set is frozen and changed", finding)
+        self.assertIn("added:   void later()", finding)
+        self.assertIn("query_extension() id instead", finding)
+        # The same edit is legal under the append policy, so the frozen
+        # verdict comes from the policy, not from a parse difference.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "editor_host.hpp").write_text(
+                self.BASE.replace("};", "  virtual void later();\n};")
+            )
+            with mock.patch.object(nag, "git_show", return_value=self.BASE):
+                self.assertIsNone(
+                    nag.check_surface(root, "origin/main", "EditorContext", "editor_host.hpp",
+                                      nag.APPEND)
+                )
+                self.assertIsNotNone(
+                    nag.check_surface(root, "origin/main", "EditorContext", "editor_host.hpp",
+                                      nag.FROZEN)
+                )
+
+    def test_reorder_and_removal_fail_a_frozen_surface(self) -> None:
+        reordered = textwrap.dedent(
+            """\
+            class EditorContext {
+            public:
+              virtual ~EditorContext() = default;
+              virtual void* query_extension(int id) { return nullptr; }
+              virtual bool host_action(int request) = 0;
+            };
+            """
+        )
+        self.assertIn("different order", self.check(reordered) or "")
+        removed = self.BASE.replace("  virtual bool host_action(int request) = 0;\n", "")
+        self.assertIn("removed: bool host_action(int)=0", self.check(removed) or "")
+
+    def test_a_new_frozen_surface_passes_but_a_missing_one_does_not(self) -> None:
+        self.assertIsNone(self.check(self.BASE, base=None))
+        self.assertIn("could not read", self.check(None, base=None) or "")
+
+    def test_every_editor_host_interface_is_frozen(self) -> None:
+        policies = {name: policy for name, _path, policy in nag.SURFACES}
+        for name in ("Editor", "EditorContext", "EditorFactory", "NativeSurfaceHost"):
+            self.assertEqual(policies.get(name), nag.FROZEN, name)
+        for name in ("Processor", "PluginSlot", "GpuAudioNode"):
+            self.assertEqual(policies.get(name), nag.APPEND, name)
+        # Every surface path resolves in this checkout.
+        for name, rel_path, _policy in nag.SURFACES:
+            self.assertTrue((REPO_ROOT / rel_path).exists(), f"{name}: {rel_path}")
+
+
 class NodeAbiMainUnitTests(unittest.TestCase):
     def test_main_returns_mode_specific_code_outside_repo(self) -> None:
         stderr = io.StringIO()
@@ -216,13 +301,15 @@ class NodeAbiMainUnitTests(unittest.TestCase):
     def test_main_reports_findings_and_hint_mode_stays_green(self) -> None:
         stderr = io.StringIO()
         with mock.patch.object(nag, "repo_root", return_value=Path("/repo")), \
-             mock.patch.object(nag, "check_surface", side_effect=["Processor: bad", None, None]), \
+             mock.patch.object(nag, "check_surface",
+                               side_effect=["Processor: bad"] + [None] * (len(nag.SURFACES) - 1)), \
              contextlib.redirect_stderr(stderr):
             self.assertEqual(nag.main(["--mode", "report"]), 1)
         self.assertIn("Processor: bad", stderr.getvalue())
 
         with mock.patch.object(nag, "repo_root", return_value=Path("/repo")), \
-             mock.patch.object(nag, "check_surface", side_effect=["Processor: bad", None, None]), \
+             mock.patch.object(nag, "check_surface",
+                               side_effect=["Processor: bad"] + [None] * (len(nag.SURFACES) - 1)), \
              contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(nag.main(["--mode", "hint"]), 0)
 
@@ -261,6 +348,10 @@ class NodeAbiGateTests(unittest.TestCase):
             / "gpu_audio"
             / "gpu_audio_node.hpp"
         )
+        self.editor_host = (
+            self.tmp / "core" / "format" / "include" / "pulp" / "format" / "editor_host.hpp"
+        )
+        self.write_editor_host([])
         self.write_headers(["~Processor", "descriptor", "prepare"],
                            ["~PluginSlot", "info", "process"],
                            ["~GpuAudioNode", "descriptor", "prepare"])
@@ -284,6 +375,18 @@ class NodeAbiGateTests(unittest.TestCase):
         self.plugin_slot.write_text(self.header("PluginSlot", slot_methods))
         self.gpu_audio_node.write_text(
             self.header("GpuAudioNode", gpu_audio_node_methods), encoding="utf-8"
+        )
+
+    def write_editor_host(self, extra_context_methods: list[str]) -> None:
+        self.editor_host.parent.mkdir(parents=True, exist_ok=True)
+        self.editor_host.write_text(
+            self.header("Editor", ["~Editor", "attach"])
+            + self.header("EditorContext", ["~EditorContext", "query_extension",
+                                            *extra_context_methods])
+            + self.header("EditorFactory", ["~EditorFactory", "create"])
+        )
+        (self.editor_host.parent / "native_surface_host.hpp").write_text(
+            self.header("NativeSurfaceHost", ["info", "observe"])
         )
 
     @staticmethod
@@ -315,6 +418,12 @@ class NodeAbiGateTests(unittest.TestCase):
         )
         code, out = self.gate()
         self.assertEqual(code, 0, out)
+
+    def test_appended_editor_context_virtual_fails(self) -> None:
+        self.write_editor_host(["appended"])
+        code, out = self.gate()
+        self.assertEqual(code, 1, out)
+        self.assertIn("EditorContext: virtual set is frozen and changed", out)
 
     def test_inserted_virtual_fails(self) -> None:
         self.write_headers(
