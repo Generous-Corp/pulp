@@ -651,6 +651,7 @@
       "pulp/platform/gpu_fwd.hpp",
       "pulp/platform/main_thread.hpp",
       "pulp/platform/native_handle.hpp",
+      "pulp/platform/objc_unique_class.hpp",
       "pulp/platform/open_url.hpp",
       "pulp/platform/permissions.hpp",
       "pulp/platform/platform.hpp",

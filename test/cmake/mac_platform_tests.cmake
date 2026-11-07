@@ -227,6 +227,7 @@ if(APPLE AND NOT PULP_IOS)
     target_link_libraries(pulp-test-platform-main-thread PRIVATE
         "-framework AppKit"
         "-framework CoreFoundation")
+endif()
 if(APPLE)
     # Per-binary unique Objective-C class names. The fixture dylib links its own
     # copy of pulp-platform, standing in for a second plug-in in the process.
@@ -250,4 +251,13 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_platform_async_dialogs.mm
         LIBRARIES pulp::platform)
     target_link_libraries(pulp-test-platform-async-dialogs PRIVATE "-framework Cocoa")
+endif()
+if(APPLE AND NOT PULP_IOS)
+    # Anchored menus: the NSMenu built from a model, selection reporting for the
+    # synchronous and asynchronous APIs, and tracking a real menu on an
+    # offscreen window. Own process: the cases run menu tracking loops.
+    pulp_add_test_suite(pulp-test-platform-async-menu
+        SOURCES test_platform_async_menu.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-async-menu PRIVATE "-framework Cocoa")
 endif()

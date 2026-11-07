@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-platform-async-menu",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-08T00:00:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/platform/include/pulp/platform/popup_menu.hpp",
+    "core/platform/platform/mac/popup_menu_mac.mm",
+    "core/platform/src/dialog_internal.hpp",
+    "core/platform/src/platform_dialogs_stub.cpp",
+    "core/platform/src/popup_menu_async.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Adds show_menu_async, an anchored asynchronous native menu with submenus, check marks, per-row text colour and a minimum width taken from the anchor, opened from a common-mode timer and closed when its MainThreadScope dies, plus build_native_menu so the NSMenu structure is checkable. It also fixes the synchronous PopupMenu, whose rows had no target and so could never report a selection. Host-neutral and free of view or render dependencies, so the next Vellum re-export of core/platform should carry it."
+}

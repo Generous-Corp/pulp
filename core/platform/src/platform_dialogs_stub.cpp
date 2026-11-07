@@ -22,6 +22,12 @@ present_native_save(NativeViewHandle, const FileDialog::SaveRequest&, std::optio
     return {};
 }
 
+std::function<void()> present_native_menu(MainThreadScope&, const MenuAnchor&, MenuModel,
+                                          MenuPlacement, std::function<void(std::optional<int>)>,
+                                          std::shared_ptr<void>&) {
+    return {};
+}
+
 bool native_open_url(const std::string&) {
     return false;
 }
