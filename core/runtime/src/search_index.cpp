@@ -88,7 +88,7 @@ std::optional<int> score_item(std::string_view needle, std::string_view haystack
 
 }  // namespace
 
-void SearchIndex::build(std::vector<std::string> items, const CancellationToken& cancel) {
+void SearchIndex::build(std::vector<std::string> items, const CancelToken& cancel) {
     items_ = std::move(items);
     normalized_.clear();
     normalized_.reserve(items_.size());
@@ -100,7 +100,7 @@ void SearchIndex::build(std::vector<std::string> items, const CancellationToken&
 
 std::vector<SearchIndex::Match> SearchIndex::query(std::string_view query_text,
                                                    const SearchQueryOptions& options,
-                                                   const CancellationToken& cancel) const {
+                                                   const CancelToken& cancel) const {
     std::vector<Match> matches;
 
     // Empty query: every item, original order.

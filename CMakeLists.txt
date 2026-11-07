@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.77.0
+    VERSION 1.88.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -221,6 +221,7 @@ if(PULP_INTEL_CANARY)
     message(STATUS "Pulp: Intel canary lint clean.")
 endif()
 option(PULP_TEXT_SHAPING "Enable SkParagraph text shaping (HarfBuzz/ICU via Skia). Default: ON when GPU enabled." ON)
+option(PULP_SYSTEM_ICU "Use the host ICU C++ API for canvas line/word breaking (OFF keeps SDK archives distro-portable)." OFF)
 # Lottie / Bodymovin JSON animation playback via the bundled skottie module.
 # Opt-in (default OFF): builds that don't use it link nothing extra and the
 # LottieView/LottieAnimation symbols compile to no-ops. Auto-disabled at
@@ -486,6 +487,9 @@ if(PULP_ENABLE_SCENE3D)
 endif()
 # Render must come before view so pulp-view can link pulp-render via if(TARGET)
 if(PULP_ENABLE_GPU)
+    # The shared GPU device layer the render and GPU-audio device targets
+    # forward to on macOS (sets PULP_HAS_GPU_RUNTIME).
+    include(tools/cmake/PulpGpuRuntime.cmake)
     add_subdirectory(core/render)
 endif()
 # After core/render so the GPU convolver node can link pulp::gpu-device when GPU is

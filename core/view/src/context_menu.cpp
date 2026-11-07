@@ -391,9 +391,32 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
             canvas.fill_rect(row.x + 1, iy, row.width - 2, rh);
         }
 
-        // Checkmark glyph for checked items. Toggle controls keep their state
-        // visible while the menu remains open.
-        if (it.checked) {
+        // A toggle is live state, so it reads as a switch at the right end
+        // of the row; a checkmark made such rows look like one-shot commands.
+        // A tab among siblings shows a leading accent bar when selected, and
+        // a checked action row keeps the checkmark.
+        const bool is_switch = it.control_kind == Item::ControlKind::toggle && !it.tab;
+        if (is_switch) {
+            const float switch_w = 28.0f;
+            const float switch_h = 14.0f;
+            const float sx = row.x + row.width - switch_w - 10.0f;
+            const float sy = iy + (rh - switch_h) * 0.5f;
+            const auto switch_on = resolve_color("control.fill", canvas::Color::rgba8(70, 98, 125));
+            const auto switch_off =
+                resolve_color("control.track", canvas::Color::rgba8(80, 80, 100));
+            const auto thumb_on =
+                resolve_color("control.thumb", canvas::Color::rgba8(238, 240, 232));
+            canvas.set_fill_color(it.checked ? switch_on : switch_off);
+            canvas.fill_rounded_rect(sx, sy, switch_w, switch_h, switch_h * 0.5f);
+            canvas.set_fill_color(it.checked ? thumb_on : text_dim);
+            canvas.fill_circle(sx + (it.checked ? switch_w - switch_h * 0.5f : switch_h * 0.5f),
+                               sy + switch_h * 0.5f, switch_h * 0.38f);
+        } else if (it.tab) {
+            if (it.checked) {
+                canvas.set_fill_color(accent_c);
+                canvas.fill_rect(row.x + 3.0f, iy + 3.0f, 2.0f, std::max(2.0f, rh - 6.0f));
+            }
+        } else if (it.checked) {
             auto check_color = (i == hover_index_ && it.enabled)
                                    ? canvas::Color::rgba8(255, 255, 255)
                                    : accent_c;
@@ -404,20 +427,25 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
         // Dim disabled rows; white text on the hovered row.
         canvas::Color row_text = text_c;
         if (!it.enabled) row_text = text_dim;
-        else if (i == hover_index_) row_text = canvas::Color::rgba8(255, 255, 255);
+        else if (i == hover_index_ || (it.tab && it.checked))
+            row_text = canvas::Color::rgba8(255, 255, 255);
         canvas.set_fill_color(row_text);
         canvas.set_text_align(canvas::TextAlign::left);
-        canvas.fill_text(it.label, row.x + 22, iy + rh * 0.5f + 4.0f);
+        canvas.fill_text(it.label, row.x + (it.tab ? 14.0f : 22.0f), iy + rh * 0.5f + 4.0f);
 
         if (it.control_kind == Item::ControlKind::slider) {
             const float left = row.x + std::min(90.0f, row.width * 0.45f);
             const float right = slider_track_right(it, row);
             const float cy = iy + rh * 0.5f;
-            canvas.set_stroke_color(text_dim);
+            // Track and thumb stay off the accent so they read on the
+            // accent-filled hovered row as well as on the plain one.
+            canvas.set_stroke_color(
+                resolve_color("slider.track", canvas::Color::rgba8(145, 153, 164)));
             canvas.set_line_width(2.0f);
             canvas.stroke_line(left, cy, right, cy);
             const float thumb = left + (right - left) * std::clamp(it.normalized_value, 0.0f, 1.0f);
-            canvas.set_fill_color(accent_c);
+            canvas.set_fill_color(
+                resolve_color("slider.thumb", canvas::Color::rgba8(232, 235, 228)));
             canvas.fill_circle(thumb, cy, 4.0f);
             if (!it.value_label.empty()) {
                 canvas.set_text_align(canvas::TextAlign::right);
@@ -504,6 +532,11 @@ void ContextMenu::on_mouse_event(const MouseEvent& event) {
             hover_index_ = row;
         else
             hover_index_ = -1;
+        // A slider row is a drag target, so the pointer says so.
+        const bool over_slider =
+            hover_index_ >= 0 &&
+            items_[static_cast<size_t>(hover_index_)].control_kind == Item::ControlKind::slider;
+        set_cursor(over_slider ? CursorStyle::pointer : CursorStyle::default_);
         request_repaint();
         return;
     }

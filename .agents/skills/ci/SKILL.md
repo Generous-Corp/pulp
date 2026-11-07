@@ -65,10 +65,11 @@ on a real PR. Do them in order.
      relative path through a `vellum/` directory) or a CMake file under `core/`
      names `find_package(Vellum`, a `Vellum::`/`vellum::` target, or fetches or
      adds a Vellum tree. Pulp core knows nothing about Vellum; the connection
-     belongs in an integration package. The only allowlisted edge is the opt-in
-     D15 GPU-audio provider, pinned by exact count, and it goes away when the
-     shared GPU runtime lands. Its source half is `include_boundary.py
-     --boundary core-vellum`.
+     belongs in an integration package. Nothing is allowlisted. gpu-runtime
+     (`VellumGpuRuntime::*`, fetched by `tools/cmake/PulpGpuRuntime.cmake`) is
+     the neutral device layer, not a Vellum edge: it depends on neither repo,
+     and its target names do not match the check. Its source half is
+     `include_boundary.py --boundary core-vellum`.
    - **change events** (`vellum_freeze_check.py`) — a range touching a path in
      a transferred slice of `.github/vellum-ownership.json` (e.g.
      `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a
@@ -522,6 +523,16 @@ The exact-generated-version-bump fast path and `protected-receipt-reuse` both
 apply only when the group's first parent is that main tip; a stacked group
 keeps the full matrix. If a merge group reports skip-safe, the
 `[classify-base]` lines in the classify log name the base it diffed.
+
+The merge-group HOLD check and the queue circuit breaker scan from that same
+main tip. The "Resolve the merge group's main base" step runs the protected
+copy of the resolver before any queue-entry code and classify reuses its
+`base` output, so the three cannot disagree. Do not hand either check
+`merge_group.base_sha`: from there a HOLD on an entry ahead in the batch is
+never re-checked by the group that lands it. An unresolved base (`origin/main`)
+fails the HOLD check and a live breaker closed. A group failing with "main's
+tip could not be resolved" is that fallback: read the step's `merge-group base:`
+line, then re-run classify or re-queue.
 
 ## Diff-scoped gates on merge_group use the entry's own base
 
@@ -1010,6 +1021,26 @@ its assertions never execute, and a local break-confirm is its only evidence.
 Files that predated the check are in `tools/scripts/unregistered_tests_baseline.json`,
 which only shrinks: registering or deleting one fails the check until its row is
 removed. Register a new test file in the same PR that adds it.
+
+### A C++ test source no CMake file names, and an edit under `external/` no patch explains
+
+`tools/scripts/dead_test_guard.py` is the C++ counterpart: it fails when a `.cpp`
+under `test/` (or `core/<module>/test(s)/`) is named by no CMake file, so a test
+that was never added to a target cannot sit in the tree looking like coverage.
+It reads CMake text, not the configured graph, so a source registered through a
+`foreach` that computes the file name is listed with a reason in
+`tools/scripts/dead_test_guard.json`; a stale entry fails too. When it flags a
+file, register it (`pulp_add_test_suite(pulp-test-<name>` derives
+`test_<name>.cpp`) or delete it and say why in the commit.
+
+`tools/deps/check_patches.py` reads `tools/deps/patches.json`, copies the touched
+vendored files to scratch, reverse-applies the patch series last to first, and
+requires the result to match the recorded upstream hash. A local fix to a file
+under `external/` therefore needs a patch under `tools/deps/patches/<name>/` and a
+manifest entry in the same change. `--verify-upstream` re-downloads each file at
+its upstream commit to prove the recorded hash. `tools/scripts/examples_index_guard.py`
+keeps `examples/README.md` listing every `examples/` directory once. All three run
+in `gates.sh` and in the source-selftest suites.
 
 ### An X11 case that skips on the Linux leg did not run
 

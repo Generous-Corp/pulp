@@ -12,6 +12,25 @@
 // end, never rename or reorder existing ones.
 #pragma once
 
+#if defined(PULP_GPU_RUNTIME)
+// This build's device layer is gpu-runtime's (tools/cmake/PulpGpuRuntime.cmake):
+// these are its types and functions under their Pulp names, so a Pulp object
+// and a gpu-runtime object are one and the same.
+#include <gpu_runtime/gpu_startup_report.hpp>
+// The Pulp names of the types it uses, as the header always provided.
+#include <pulp/render/gpu_diagnostics.hpp>
+#include <pulp/render/gpu_surface.hpp>
+
+namespace pulp::render {
+using gpu_runtime::adapter_type_label;
+using gpu_runtime::format_gpu_adapter_line;
+using gpu_runtime::format_gpu_diagnostics_line;
+using gpu_runtime::format_gpu_startup_line;
+using gpu_runtime::GpuStartupReport;
+using gpu_runtime::log_gpu_diagnostics_summary;
+} // namespace pulp::render
+#else // !PULP_GPU_RUNTIME
+
 #include <pulp/render/gpu_diagnostics.hpp>
 #include <pulp/render/gpu_surface.hpp>
 
@@ -62,3 +81,5 @@ std::string format_gpu_diagnostics_line(const SkiaLogBridgeState& bridge,
 void log_gpu_diagnostics_summary();
 
 } // namespace pulp::render
+
+#endif // PULP_GPU_RUNTIME

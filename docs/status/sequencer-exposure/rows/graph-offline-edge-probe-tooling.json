@@ -1,6 +1,6 @@
 {
   "id": "graph-offline-edge-probe-tooling",
-  "title": "Bounded offline audio edge probe CLI and installed MCP parity",
+  "title": "Bounded offline graph probe introspection and installed MCP parity",
   "classification": "offline_cli_mcp",
   "delivery_state": "pending",
   "claim_id": "g7-offline-probe-tooling-consumer",
@@ -16,7 +16,10 @@
       "path": "test/graph_edge_probe_sdk.py",
       "needles": [
         "graph-edge-probe installed CLI/MCP parity PASS",
-        "edge_index"
+        "edge_index",
+        "plan",
+        "latency_pdc",
+        "node_loads"
       ]
     },
     {
@@ -47,14 +50,20 @@
           "kind": "cli_handler",
           "path": "tools/cli/cmd_graph.cpp",
           "needles": [
-            "probe"
+            "probe",
+            "--plan",
+            "--latency",
+            "--node-loads"
           ]
         },
         {
           "kind": "test",
           "path": "test/graph_edge_probe_sdk.py",
           "needles": [
-            "graph-edge-probe installed CLI/MCP parity PASS"
+            "graph-edge-probe installed CLI/MCP parity PASS",
+            "plan",
+            "latency_pdc",
+            "node_loads"
           ]
         },
         {
@@ -96,7 +105,10 @@
           "needles": [
             "block_frames",
             "source_node",
-            "destination_node"
+            "destination_node",
+            "plan",
+            "latency",
+            "node_loads"
           ]
         }
       ],

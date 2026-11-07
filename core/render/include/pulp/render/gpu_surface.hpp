@@ -1,5 +1,17 @@
 #pragma once
 
+#if defined(PULP_GPU_RUNTIME)
+// This build's device layer is gpu-runtime's (tools/cmake/PulpGpuRuntime.cmake):
+// these are its types and functions under their Pulp names, so a Pulp object
+// and a gpu-runtime object are one and the same.
+#include <gpu_runtime/gpu_surface.hpp>
+
+namespace pulp::render {
+using gpu_runtime::GpuSurface;
+using gpu_runtime::SwapchainResizeState;
+} // namespace pulp::render
+#else // !PULP_GPU_RUNTIME
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -261,3 +273,5 @@ public:
 };
 
 } // namespace pulp::render
+
+#endif // PULP_GPU_RUNTIME

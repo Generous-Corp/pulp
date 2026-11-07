@@ -1,8 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_subgraph.hpp>
+#include <pulp/host/voice_identity.hpp>
 
 #include <cmath>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
 using namespace pulp::host;
 
@@ -40,6 +46,16 @@ SubgraphTemplate sink_stage_template() {
                        {"output", "output", 0, false, PortKind::Audio}};
     t.parameters = {{"gain", "gain", 1.0f, 0.0f, 2.0f}};
     return t;
+}
+
+SubgraphTemplate nested_gain_template() {
+    auto child = std::make_shared<SubgraphTemplate>(gain_template());
+    SubgraphTemplate parent;
+    parent.identity = "test.rack";
+    parent.children = {{"filter", std::move(child), 4}};
+    parent.exposed_ports = {{"input", "filter.input", 0, true, PortKind::Audio},
+                            {"output", "filter.output", 0, false, PortKind::Audio}};
+    return parent;
 }
 } // namespace
 
@@ -297,4 +313,102 @@ TEST_CASE("subgraph ports reject clear-reuse and cross-graph instances") {
     CHECK(foreign.code == GraphResult::Code::UnknownPort);
     CHECK(foreign.message().find("stale or unavailable") != std::string::npos);
     CHECK(other_graph.connections().size() == before_foreign);
+}
+
+TEST_CASE("nested subgraph macros namespace ports and state deterministically") {
+    SignalGraph graph;
+    auto expanded = instantiate_subgraph(graph, nested_gain_template(), "rack", 2);
+    REQUIRE(expanded);
+    REQUIRE(expanded.instance.nodes.size() == 3);
+    CHECK(graph.node(expanded.instance.nodes.front())->name == "rack.filter.in");
+    CHECK(expanded.instance.ports.at("input").output);
+    CHECK_FALSE(expanded.instance.ports.at("output").output);
+    CHECK(expanded.instance.parameters.at("filter.gain") == 1.0f);
+    CHECK(expanded.instance.child_template_identities.at("filter") == "test.gain");
+    CHECK(expanded.instance.child_instance_indices.at("filter") == 4);
+
+    auto state = expanded.instance.save_state();
+    state.parameters.at("filter.gain") = 0.25f;
+    REQUIRE(restore_subgraph_state(graph, expanded.instance, state));
+    CHECK(graph.node(expanded.instance.parameter_nodes.at("filter.gain"))->gain == 0.25f);
+
+    auto before = expanded.instance.save_state();
+    before.child_template_identities.at("filter") = "test.other";
+    const auto rejected = restore_subgraph_state(graph, expanded.instance, before);
+    CHECK_FALSE(rejected);
+    CHECK(rejected.message().find("subgraph boundary") != std::string::npos);
+    CHECK(expanded.instance.parameters.at("filter.gain") == 0.25f);
+}
+
+TEST_CASE("nested subgraph rejects cycles and duplicate child keys before graph mutation") {
+    SignalGraph graph;
+    auto cyclic = std::make_shared<SubgraphTemplate>();
+    cyclic->identity = "test.cycle";
+    cyclic->children = {{"loop", cyclic, 0}};
+    const auto cycle_result = instantiate_subgraph(graph, *cyclic, "cycle");
+    CHECK_FALSE(cycle_result);
+    CHECK(cycle_result.result.message().find("subgraph boundary") != std::string::npos);
+    CHECK(graph.nodes().empty());
+
+    auto duplicate = nested_gain_template();
+    duplicate.children.push_back(
+        {"filter", std::make_shared<SubgraphTemplate>(gain_template()), 5});
+    const auto duplicate_result = instantiate_subgraph(graph, duplicate, "duplicate");
+    CHECK_FALSE(duplicate_result);
+    CHECK(duplicate_result.result.message().find("subgraph boundary") != std::string::npos);
+    CHECK(graph.nodes().empty());
+}
+
+TEST_CASE("G4 voice bank fixture expands eight slots with stable exposed identity") {
+    SignalGraph graph;
+    std::vector<SubgraphInstance> slots;
+    std::unordered_set<std::string> identity_digests;
+    slots.reserve(8);
+
+    for (std::uint32_t slot = 0; slot < 8; ++slot) {
+        auto expanded = instantiate_subgraph(graph, gain_template(),
+                                             "voice-bank.voice-" + std::to_string(slot), slot);
+        REQUIRE(expanded);
+        REQUIRE(expanded.instance.ports.contains("input"));
+        REQUIRE(expanded.instance.ports.contains("output"));
+        REQUIRE(expanded.instance.parameters.contains("gain"));
+
+        VoiceIdentityKey key;
+        key.template_namespace = "test";
+        key.template_name = "voice-bank";
+        key.template_revision = 1;
+        key.bank_schema_version = 1;
+        key.slot_ordinal = slot;
+        key.path = {"node", "gain"};
+        key.has_parameter = true;
+        key.parameter = "gain";
+        const auto identity = canonical_voice_identity(key);
+        REQUIRE(identity.valid);
+        CHECK(identity_digests.insert(identity.sha256).second);
+        CHECK(identity.sha256 == canonical_voice_identity(key).sha256);
+
+        slots.emplace_back(std::move(expanded.instance));
+    }
+
+    REQUIRE(slots.size() == 8);
+    CHECK(graph.nodes().size() == 24);
+    for (std::size_t left = 0; left < slots.size(); ++left)
+        for (std::size_t right = left + 1; right < slots.size(); ++right) {
+            CHECK(slots[left].ports.at("input").node != slots[right].ports.at("input").node);
+            CHECK(slots[left].parameter_nodes.at("gain") !=
+                  slots[right].parameter_nodes.at("gain"));
+        }
+
+    auto changed = slots.at(3).save_state();
+    changed.parameters.at("gain") = 0.25f;
+    REQUIRE(restore_subgraph_state(graph, slots.at(3), changed));
+    for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+        const auto gain = graph.node_gain(slots.at(slot).parameter_nodes.at("gain"));
+        CHECK(gain == (slot == 3 ? 0.25f : 1.0f));
+    }
+
+    auto stale = slots.at(3).save_state();
+    stale.instance_identity = "voice-bank.other";
+    CHECK_FALSE(restore_subgraph_state(graph, slots.at(3), stale));
+    CHECK(graph.node_gain(slots.at(3).parameter_nodes.at("gain")) == 0.25f);
 }

@@ -80,6 +80,10 @@ set(PULP_PROFILE_ENFORCED_OPTIONS
     PULP_ENABLE_FUZZING
     PULP_BENCHMARK
     PULP_RT_WORK_COUNTERS)
+# Host ICU's C++ ABI is a distro/version-specific dependency. A release SDK
+# must use the portable canvas fallback rather than baking the builder's ICU
+# major version into static archives; source developers may opt in under dev.
+list(APPEND PULP_PROFILE_ENFORCED_OPTIONS PULP_SYSTEM_ICU)
 # The enforced list as C++ initializer lines for tools/cli/build_profile_gen.h.in,
 # so the CLI reads the same list this module enforces.
 set(PULP_PROFILE_ENFORCED_OPTIONS_CXX "")

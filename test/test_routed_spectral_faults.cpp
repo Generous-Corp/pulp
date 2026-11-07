@@ -459,6 +459,68 @@ TEST_CASE("Unsolicited duplicate frames never advance the scheduled grid",
     REQUIRE(stage->outputs.front()->count == 0);
 }
 
+TEST_CASE("A mismatched canonical frame contract fails closed",
+          "[host][spectral-fault][spectral-contract]") {
+    FaultGraph f;
+    std::array<float, 512> input{}, output{};
+    f.process(f.analysis, input, output);
+    auto* stage = f.bank.find(f.stage);
+    stage->input->contract.hop += 1;
+    f.bank.begin_block();
+    const float* ip[] = {input.data()};
+    float* op[] = {output.data()};
+    pulp::format::GraphRuntimeNodeProcessContext ctx;
+    ctx.node_inputs = {ip, 1, input.size()};
+    ctx.node_outputs = {op, 1, output.size()};
+    ctx.spectral_input = stage->input;
+    pulp::format::ProcessBlock block;
+    REQUIRE_FALSE(pulp::host::SpectralRuntimeBank::Node::process(block, ctx, stage));
+    REQUIRE(stage->first_error == pulp::host::SpectralError::IdentityMismatch);
+    REQUIRE(stage->sequence == 0);
+}
+
+TEST_CASE("A mutated canonical frame encoding fails before payload consumption",
+          "[host][spectral-fault][spectral-contract][mutation]") {
+    FaultGraph f;
+    std::array<float, 512> input{}, output{};
+    f.process(f.analysis, input, output);
+    auto* stage = f.bank.find(f.stage);
+    stage->input->encoded_contract[0] ^= 0x01;
+    f.bank.begin_block();
+    const float* ip[] = {input.data()};
+    float* op[] = {output.data()};
+    pulp::format::GraphRuntimeNodeProcessContext ctx;
+    ctx.node_inputs = {ip, 1, input.size()};
+    ctx.node_outputs = {op, 1, output.size()};
+    ctx.spectral_input = stage->input;
+    pulp::format::ProcessBlock block;
+    REQUIRE_FALSE(pulp::host::SpectralRuntimeBank::Node::process(block, ctx, stage));
+    REQUIRE(stage->first_error == pulp::host::SpectralError::IdentityMismatch);
+    REQUIRE(stage->sequence == 0);
+}
+
+TEST_CASE("Spectral frame edges reject automation and dense modulation",
+          "[host][spectral-fault][spectral-contract][automation]") {
+    using namespace pulp::host;
+    const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    SignalGraph graph;
+    const auto analysis = *graph.add_spectral_analysis(identity, "analysis").value;
+    const auto synthesis = *graph.add_spectral_synthesis(identity, "synthesis").value;
+    REQUIRE(graph.connect(analysis.frames, synthesis.frames));
+
+    auto forged = graph.connections().front();
+    forged.automation = true;
+    forged.audio_rate_modulation = false;
+    SpectralRuntimeBank bank;
+    REQUIRE(bank.prepare(graph.nodes(), std::span<const Connection>(&forged, 1), 48000, 64) ==
+            SpectralError::InvalidConnection);
+
+    forged.automation = false;
+    forged.audio_rate_modulation = true;
+    REQUIRE(bank.prepare(graph.nodes(), std::span<const Connection>(&forged, 1), 48000, 64) ==
+            SpectralError::InvalidConnection);
+}
+
 TEST_CASE("Mailbox refusal preserves ingress and egress exactly once",
           "[host][spectral-transition][spectral-mailbox]") {
     using namespace pulp::host;

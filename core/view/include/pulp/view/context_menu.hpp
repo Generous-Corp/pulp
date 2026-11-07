@@ -48,6 +48,11 @@ public:
         /// When set, the track stops short of it so the thumb never runs
         /// under the text; the product keeps it current from `on_change`.
         std::string value_label;
+        /// A toggle that is one of several sibling tabs (an "edit lane 1 /
+        /// edit lane 2" pair): painted as a row with a leading accent bar
+        /// when checked instead of a switch, since it selects rather than
+        /// enables.
+        bool tab = false;
         float normalized_step = 0.05f;
         std::vector<std::string> choices;
         std::size_t choice_index = 0;

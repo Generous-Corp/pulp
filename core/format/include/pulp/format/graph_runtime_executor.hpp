@@ -10,6 +10,7 @@
 #include <pulp/graph/graph_runtime_probe.hpp>
 #include <pulp/format/graph_runtime_worker_pool.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
@@ -91,6 +92,9 @@ struct GraphRuntimeNodeProcessContext {
     // to its own scratch.
     midi::MidiBuffer* node_midi_in = nullptr;
     midi::MidiBuffer* node_midi_out = nullptr;
+    // MPE expression sidecar gathered alongside node_midi_in. Null when the
+    // graph carries no sidecar; bindings pass it to Processor::mpe_input().
+    midi::MpeBuffer* node_mpe_in = nullptr;
     // Per-node parameter automation events (non-null only on the routing path
     // when the call supplies a GraphRuntimeAutomationScratch). The executor fills
     // it from this node's inbound automation connections before the binding runs;
@@ -507,6 +511,16 @@ public:
         return node_index < node_count_ ? &slots_[node_index]->out_buffer : nullptr;
     }
 
+    // RT-safe: this node's gathered MPE expression sidecar, or nullptr when
+    // the node index is out of range. The sidecar follows the same event-edge
+    // topology as MIDI and is reserved during reset().
+    midi::MpeBuffer* mpe_in(std::uint32_t node_index) noexcept {
+        return node_index < node_count_ ? &slots_[node_index]->in_mpe : nullptr;
+    }
+    midi::MpeBuffer* mpe_out(std::uint32_t node_index) noexcept {
+        return node_index < node_count_ ? &slots_[node_index]->out_mpe : nullptr;
+    }
+
     // Per-node incompleteness flags (a buffer dropped events, or carried an
     // upstream drop). Tracked so the host egress can report the same incomplete
     // state through extract_midi() that the legacy walk does.
@@ -533,6 +547,8 @@ private:
         midi::UmpBuffer in_ump;
         midi::MidiBuffer out_buffer;
         midi::UmpBuffer out_ump;
+        midi::MpeBuffer in_mpe;
+        midi::MpeBuffer out_mpe;
         bool in_incomplete = false;
         bool out_incomplete = false;
     };

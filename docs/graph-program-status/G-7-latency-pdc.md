@@ -59,3 +59,17 @@ full G-7 completion.
 The paced run is diagnostic continuity evidence for control-thread
 introspection. It does not qualify realtime scheduling or callback safety and
 does not add a CLI/MCP surface.
+
+## Wave 2 tooling status
+
+**PARTIAL — current mainline extension.** The bounded offline edge-probe CLI
+and installed MCP sibling now accept opt-in `--plan`, `--latency`, and
+`--node-loads` sections. Plan output is authored topology, latency output is
+copied from the prepared snapshot's deterministic node/PDC map, and node loads
+use the existing opt-in latest-value measurers. The default probe remains
+audio-only and does no per-node clock reads. Control/event taps remain
+deferred until a prepared lock-free producer/consumer contract exists;
+unsupported or unknown requests fail closed. The installed consumer parity
+fixture and planted unknown-option control are the acceptance evidence for
+this tooling slice; this status does not claim realtime qualification or full
+G-7 completion.

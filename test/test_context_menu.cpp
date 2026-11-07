@@ -828,3 +828,38 @@ TEST_CASE("ContextMenu slider callback that rebuilds the rows ends the gesture c
     menu->on_mouse_event(release);
     REQUIRE_FALSE(menu->has_pointer_capture(pointer));
 }
+
+TEST_CASE("ContextMenu shows the pointer cursor over a slider row and the default elsewhere",
+          "[view][context-menu]") {
+    auto root = make_root();
+    auto* menu =
+        ContextMenu::show(root.get(), {kAnchorX, kAnchorY},
+                          {{10, "Reset"}, Item::make_slider(2, "Rate", 0.5f, 0.01f, nullptr)},
+                          [](std::optional<int>) {});
+    MouseEvent hover;
+    hover.position = {kInsideX, row_center_y(*menu, 1)};
+    menu->on_mouse_event(hover);
+    REQUIRE(menu->cursor() == View::CursorStyle::pointer);
+    hover.position = {kInsideX, row_center_y(*menu, 0)};
+    menu->on_mouse_event(hover);
+    REQUIRE(menu->cursor() == View::CursorStyle::default_);
+}
+
+TEST_CASE("ContextMenu tab rows are toggles that select rather than enable",
+          "[view][context-menu]") {
+    auto tab = Item::make_toggle(1, "EDIT LFO 1", true, nullptr);
+    REQUIRE_FALSE(tab.tab);
+    tab.tab = true;
+    bool fired = false;
+    tab.on_change = [&](const Item&) { fired = true; };
+    tab.set_toggled(false);
+    REQUIRE(fired);
+    REQUIRE_FALSE(tab.checked);
+    // Painting a menu with a switch, a tab and a slider renders headlessly.
+    auto root = make_root();
+    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY},
+                                   {Item::make_toggle(2, "LFO 1", true, nullptr), tab,
+                                    Item::make_slider(3, "Depth", 0.3f, 0.01f, nullptr)},
+                                   [](std::optional<int>) {});
+    REQUIRE(menu->layout().rows.size() == 3);
+}

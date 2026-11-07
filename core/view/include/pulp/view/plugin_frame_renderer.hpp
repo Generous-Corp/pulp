@@ -119,9 +119,7 @@ void paint_plugin_scene(canvas::Canvas& canvas, View& root,
 #include <memory>
 #include <vector>
 
-namespace pulp::render {
-class GpuSurface;
-}
+#include <pulp/platform/gpu_fwd.hpp>
 
 namespace pulp::view {
 

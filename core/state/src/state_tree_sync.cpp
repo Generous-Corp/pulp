@@ -206,6 +206,7 @@ bool is_valid_delta_type(SyncDeltaType type) {
         case SyncDeltaType::PropertyRemove:
         case SyncDeltaType::ChildAdd:
         case SyncDeltaType::ChildRemove:
+        case SyncDeltaType::ChildMove:
             return true;
     }
     return false;
@@ -215,7 +216,8 @@ bool is_valid_delta_type(SyncDeltaType type) {
 
 void StateTreeSynchroniser::attach_node(StateTree& node) {
     int prop_id = node.add_listener(
-        [this](StateTree& n, std::string_view prop, const PropertyValue&, const PropertyValue& new_val) {
+        [this](StateTree& n, std::string_view prop, const PropertyValue&,
+               const PropertyValue& new_val) {
             SyncDelta delta;
             delta.type = std::holds_alternative<std::monostate>(new_val) && !n.has(prop)
                 ? SyncDeltaType::PropertyRemove
@@ -224,7 +226,8 @@ void StateTreeSynchroniser::attach_node(StateTree& node) {
             delta.key = std::string(prop);
             delta.value = new_val;
             pending_.push_back(std::move(delta));
-        });
+        },
+        ListenerDelivery::kImmediate);
     property_listener_ids_.push_back({&node, prop_id});
 
     int added_id = node.add_child_added_listener(
@@ -238,7 +241,8 @@ void StateTreeSynchroniser::attach_node(StateTree& node) {
             // Newly added subtrees must also be observed so their own
             // nested mutations produce deltas.
             attach_subtree(child);
-        });
+        },
+        ListenerDelivery::kImmediate);
     child_added_listener_ids_.push_back({&node, added_id});
 
     int removed_id = node.add_child_removed_listener(
@@ -253,8 +257,21 @@ void StateTreeSynchroniser::attach_node(StateTree& node) {
             // detach() never dereferences a freed StateTree*, and a
             // re-add of a surviving child does not stack duplicates.
             detach_subtree(child);
-        });
+        },
+        ListenerDelivery::kImmediate);
     child_removed_listener_ids_.push_back({&node, removed_id});
+
+    int moved_id = node.add_child_moved_listener(
+        [this](StateTree& parent, StateTree& /*child*/, int from, int to) {
+            SyncDelta delta;
+            delta.type = SyncDeltaType::ChildMove;
+            delta.path = compute_path(tree_.get(), &parent);
+            delta.child_index = from;
+            delta.value = static_cast<int64_t>(to);
+            pending_.push_back(std::move(delta));
+        },
+        ListenerDelivery::kImmediate);
+    child_moved_listener_ids_.push_back({&node, moved_id});
 }
 
 void StateTreeSynchroniser::detach_subtree(StateTree& node) {
@@ -289,6 +306,14 @@ void StateTreeSynchroniser::detach_subtree(StateTree& node) {
             ++it;
         }
     }
+    for (auto it = child_moved_listener_ids_.begin(); it != child_moved_listener_ids_.end();) {
+        if (it->first == &node) {
+            node.remove_child_moved_listener(it->second);
+            it = child_moved_listener_ids_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void StateTreeSynchroniser::attach_subtree(StateTree& node) {
@@ -312,9 +337,13 @@ void StateTreeSynchroniser::detach() {
         if (node) node->remove_child_added_listener(id);
     for (auto& [node, id] : child_removed_listener_ids_)
         if (node) node->remove_child_removed_listener(id);
+    for (auto& [node, id] : child_moved_listener_ids_)
+        if (node)
+            node->remove_child_moved_listener(id);
     property_listener_ids_.clear();
     child_added_listener_ids_.clear();
     child_removed_listener_ids_.clear();
+    child_moved_listener_ids_.clear();
     tree_ = nullptr;
     pending_.clear();
 }
@@ -399,7 +428,15 @@ void StateTreeSynchroniser::apply(StateTree& tree, const std::vector<SyncDelta>&
                 if (d.child_index >= 0 && d.child_index < target->child_count())
                     target->remove_child(d.child_index);
                 break;
-        }
+            case SyncDeltaType::ChildMove:
+                if (auto* to = std::get_if<int64_t>(&d.value)) {
+                    if (d.child_index >= 0 && d.child_index < target->child_count() && *to >= 0 &&
+                        *to < target->child_count())
+                        StateTree::move_child(*target, d.child_index, *target,
+                                              static_cast<int>(*to));
+                }
+                break;
+            }
     }
 }
 
