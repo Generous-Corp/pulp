@@ -223,6 +223,12 @@ inline HostEventResult derive_mpe(std::span<const HostEventRecord> events,
     bool dropped = false;
     int32_t offset = 0;
     midi::bind_tracker_to_buffer(tracker, out, offset, &dropped);
+    // A bounded tracker can defer note-offs when the previous block's sidecar
+    // was full. Flush that lifecycle queue at block start before consuming new
+    // host records, matching the tracker/sidecar contract and preserving note
+    // retirement order across blocks.
+    if (!tracker.flush_pending_note_offs())
+        return HostEventResult::Overflow;
     for (const auto& event : events) {
         if (event.absolute_sample < 0)
             return HostEventResult::OutOfRange;
@@ -238,6 +244,93 @@ inline HostEventResult derive_mpe(std::span<const HostEventRecord> events,
             (void)tracker.process(event.midi);
     }
     return dropped ? HostEventResult::Overflow : HostEventResult::Accepted;
+}
+
+/// Project an already-sorted absolute host-event block into the fixed MIDI,
+/// UMP, and optional MPE sidecars consumed by SignalGraph's existing ingress
+/// mailbox. The caller owns and prepares the destination buffers before the
+/// realtime boundary. Every record is checked before any destination is
+/// mutated, so an out-of-window record or insufficient sidecar capacity leaves
+/// all three destinations unchanged.
+///
+/// This is deliberately an adapter, not a scheduler: `block_start` and
+/// `frames` define the one block being delivered, and records outside that
+/// window are refused rather than retimed. The resulting buffers can be
+/// passed directly to `SignalGraph::inject_midi(node, midi, mpe)`; that API
+/// preserves the same payload on both the routed and legacy execution paths.
+inline HostEventResult project_host_event_block(std::span<const HostEventRecord> records,
+                                                std::uint64_t block_start, std::size_t frames,
+                                                midi::MidiBuffer& midi_out,
+                                                midi::MpeVoiceTracker* tracker = nullptr,
+                                                midi::MpeBuffer* mpe_out = nullptr) noexcept {
+    if (frames == 0 || frames > 4096 ||
+        block_start > std::numeric_limits<std::uint64_t>::max() - frames)
+        return HostEventResult::OutOfRange;
+    if ((tracker == nullptr) != (mpe_out == nullptr))
+        return HostEventResult::Unbound;
+
+    std::size_t midi_count = 0;
+    std::size_t ump_count = 0;
+    for (const auto& record : records) {
+        if (record.absolute_sample < 0)
+            return HostEventResult::OutOfRange;
+        const auto absolute = static_cast<std::uint64_t>(record.absolute_sample);
+        if (absolute < block_start || absolute >= block_start + frames ||
+            absolute - block_start >
+                static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()))
+            return HostEventResult::Late;
+        ++midi_count;
+        if (record.has_ump)
+            ++ump_count;
+    }
+    if (midi_out.realtime_capacity_limited() &&
+        midi_count >
+            midi_out.event_capacity() - std::min(midi_out.event_capacity(), midi_out.size()))
+        return HostEventResult::OutputCapacity;
+    auto* ump = midi_out.ump();
+    if (ump_count != 0 && ump == nullptr)
+        return HostEventResult::OutputCapacity;
+    if (ump != nullptr && ump->realtime_capacity_limited() &&
+        ump_count > ump->capacity() - std::min(ump->capacity(), ump->size()))
+        return HostEventResult::OutputCapacity;
+    if (mpe_out != nullptr) {
+        // Channel-level MPE expression can fan out to every active note. A
+        // note lifecycle contributes at most two records (retire + replace),
+        // so this is the exact fixed upper bound for one source record. Check
+        // the bound before deriving into the caller's sidecar; otherwise a
+        // full 128-note pitch-bend fan-out could partially mutate it before
+        // reporting overflow.
+        constexpr auto kMpeRecordsPerSource = midi::MpeVoiceTracker::kMaxNotes + 2;
+        const auto event_mpe =
+            records.size() > std::numeric_limits<std::size_t>::max() / kMpeRecordsPerSource
+                ? std::numeric_limits<std::size_t>::max()
+                : records.size() * kMpeRecordsPerSource;
+        const auto pending_mpe = tracker->pending_note_off_count();
+        const auto required_mpe = pending_mpe > std::numeric_limits<std::size_t>::max() - event_mpe
+                                      ? std::numeric_limits<std::size_t>::max()
+                                      : pending_mpe + event_mpe;
+        if (required_mpe > mpe_out->capacity() - std::min(mpe_out->capacity(), mpe_out->size()))
+            return HostEventResult::OutputCapacity;
+    }
+
+    for (const auto& record : records) {
+        auto event = record.midi;
+        event.sample_offset = static_cast<std::int32_t>(
+            static_cast<std::uint64_t>(record.absolute_sample) - block_start);
+        if (!midi_out.add(event))
+            return HostEventResult::OutputCapacity;
+        if (record.has_ump && !ump->add(record.ump, event.sample_offset))
+            return HostEventResult::OutputCapacity;
+    }
+    midi_out.sort();
+    if (ump != nullptr)
+        ump->sort();
+    if (tracker != nullptr && mpe_out != nullptr) {
+        const auto result = derive_mpe(records, block_start, *tracker, *mpe_out);
+        if (result != HostEventResult::Accepted)
+            return result;
+    }
+    return HostEventResult::Accepted;
 }
 
 enum class GraphEventResult : std::uint8_t {
