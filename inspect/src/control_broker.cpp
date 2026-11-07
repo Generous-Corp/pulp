@@ -7,6 +7,7 @@
 #include <chrono>
 #include <limits>
 #include <ranges>
+#include <set>
 #include <utility>
 
 namespace pulp::inspect {
@@ -215,7 +216,83 @@ ControlRegistrationResult
 ControlBroker::register_instance(const VerifiedControlPeerIdentity& host_peer,
                                  ControlRegistrationRequest request, bool publish) {
     std::lock_guard coordination_lock(coordination_mutex_);
+    if (!request.manifest.vendor_operations.empty()) {
+        const auto retained = retain_vendor_operations_locked(request.manifest);
+        if (retained != ControlIdentityStatus::Accepted) {
+            audit_denial("registration.register", host_peer,
+                         retained == ControlIdentityStatus::InvalidRequest
+                             ? "invalid-vendor-operations"
+                             : "vendor-operations-capacity");
+            return {.status = retained};
+        }
+    }
     return identities_.register_instance(host_peer, std::move(request), publish);
+}
+
+ControlIdentityStatus
+ControlBroker::retain_vendor_operations_locked(const ControlManifest& manifest) {
+    // Bounded independently of live registrations: an entry outlives its
+    // registration so receipts can still be completed and replayed, and is
+    // reclaimed only once nothing live or in flight names its digest.
+    constexpr std::size_t kMaximumVendorTables = 128;
+    // The whole manifest is validated first so a rejected registration never
+    // occupies a table slot.
+    if (!validate_control_manifest_detailed(manifest).valid)
+        return ControlIdentityStatus::InvalidRequest;
+    const auto digest = control_manifest_digest(manifest);
+    if (digest.empty())
+        return ControlIdentityStatus::InvalidRequest;
+    if (vendor_tables_.contains(digest))
+        return ControlIdentityStatus::Accepted;
+    auto table = parse_control_vendor_operations(manifest.vendor_operations, manifest.bundle_id);
+    if (!table)
+        return ControlIdentityStatus::InvalidRequest;
+    if (vendor_tables_.size() >= kMaximumVendorTables) {
+        std::set<std::string, std::less<>> referenced;
+        for (const auto& registration : identities_.registrations())
+            referenced.insert(registration.manifest_digest);
+        if (operation_store_ && operation_store_->is_open())
+            for (const auto& receipt : operation_store_->receipts())
+                if (!control_receipt_state_is_terminal(receipt.state))
+                    referenced.insert(receipt.binding.manifest_digest);
+        std::erase_if(vendor_tables_,
+                      [&](const auto& entry) { return !referenced.contains(entry.first); });
+        if (vendor_tables_.size() >= kMaximumVendorTables)
+            return ControlIdentityStatus::ResourceExhausted;
+    }
+    vendor_tables_.emplace(digest, std::move(table));
+    return ControlIdentityStatus::Accepted;
+}
+
+ControlResolvedOperation
+ControlBroker::resolve_operation_locked(std::string_view manifest_digest,
+                                        std::string_view operation_id,
+                                        std::uint32_t operation_version) const {
+    if (const auto* operation = resolve_control_operation(operation_id, operation_version))
+        return {.descriptor = operation};
+    if (manifest_digest.empty() || !is_control_vendor_operation_id(operation_id))
+        return {};
+    const auto found = vendor_tables_.find(manifest_digest);
+    if (found == vendor_tables_.end())
+        return {};
+    const auto* descriptor = found->second->descriptor(operation_id, operation_version);
+    if (!descriptor)
+        return {};
+    return {.descriptor = descriptor, .vendor_table = found->second};
+}
+
+ControlResolvedOperation ControlBroker::resolve_operation(std::string_view manifest_digest,
+                                                          std::string_view operation_id,
+                                                          std::uint32_t operation_version) const {
+    std::lock_guard coordination_lock(coordination_mutex_);
+    return resolve_operation_locked(manifest_digest, operation_id, operation_version);
+}
+
+std::shared_ptr<const ControlVendorOperationTable>
+ControlBroker::vendor_operations(std::string_view manifest_digest) const {
+    std::lock_guard coordination_lock(coordination_mutex_);
+    const auto found = vendor_tables_.find(manifest_digest);
+    return found == vendor_tables_.end() ? nullptr : found->second;
 }
 
 bool ControlBroker::publish_instance(const ControlRegistrationId& registration_id,
@@ -353,8 +430,15 @@ ControlBroker::admit_verified_operation(const VerifiedControlPeerIdentity& clien
         return result;
     }
 
-    const auto* operation =
-        resolve_control_operation(request.operation_id, request.operation_version);
+    // A vendor operation resolves only against the declaration of the exact
+    // registration the request names; an unknown or unregistered target makes
+    // every vendor id an unknown operation.
+    const auto admission_registration = identities_.registration(request.registration_id);
+    const auto resolved = resolve_operation_locked(
+        admission_registration ? std::string_view(admission_registration->manifest_digest)
+                               : std::string_view{},
+        request.operation_id, request.operation_version);
+    const auto* operation = resolved.descriptor;
     if (!operation) {
         result.status = ControlAdmissionStatus::UnknownOperation;
         audit_denial("operation.admit", client_peer, "unknown-operation", request.client_id,
@@ -395,9 +479,13 @@ ControlBroker::admit_verified_operation(const VerifiedControlPeerIdentity& clien
         admission_policy_.activated && admission_policy_.activated(*registration, *operation);
     const bool policy_eligible = admission_policy_.policy_eligible &&
                                  admission_policy_.policy_eligible(*registration, *operation);
-    const bool client_granted = grants_.is_granted(request.grant_id, request.client_id,
-                                                   request.registration_id, operation->capability);
+    const bool capability_granted = grants_.is_granted(
+        request.grant_id, request.client_id, request.registration_id, operation->capability);
     const auto grant = grants_.grant(request.grant_id);
+    const bool client_granted =
+        capability_granted &&
+        (!capability_is_vendor_tier(operation->capability) ||
+         (grant && grant->permits_vendor_operation(request.operation_id, operation->capability)));
     result.permission = evaluate_control_permission({
         .implemented = true,
         .built = built,
@@ -597,7 +685,9 @@ bool ControlBroker::revalidate_operation_locked(const VerifiedControlPeerIdentit
         registration->manifest_digest != plan.manifest_digest) {
         return false;
     }
-    const auto* operation = resolve_control_operation(plan.operation_id, plan.operation_version);
+    const auto resolved =
+        resolve_operation_locked(plan.manifest_digest, plan.operation_id, plan.operation_version);
+    const auto* operation = resolved.descriptor;
     if (!operation || operation->capability != plan.capability ||
         plan.capability == InspectorCapability::ArtifactRead) {
         return false;
@@ -609,7 +699,12 @@ bool ControlBroker::revalidate_operation_locked(const VerifiedControlPeerIdentit
         !admission_policy_.policy_eligible(*registration, *operation)) {
         return false;
     }
-    return grants_.is_granted(plan.grant_id, plan.client_id, plan.registration_id, plan.capability);
+    if (!grants_.is_granted(plan.grant_id, plan.client_id, plan.registration_id, plan.capability))
+        return false;
+    if (!capability_is_vendor_tier(plan.capability))
+        return true;
+    const auto grant = grants_.grant(plan.grant_id);
+    return grant && grant->permits_vendor_operation(plan.operation_id, plan.capability);
 }
 
 bool ControlBroker::operation_store_ready() const {
@@ -679,8 +774,11 @@ ControlBroker::finish_operation(const VerifiedControlPeerIdentity& client_peer,
                               terminal_state == ControlReceiptState::CompletedAfterRevocation;
     const bool authority_live = success_like && revalidate_operation_locked(client_peer, plan);
     if (success_like) {
-        const auto* operation = resolve_control_operation(current->binding.operation_id,
-                                                          current->binding.operation_version);
+        const auto resolved =
+            resolve_operation_locked(current->binding.manifest_digest,
+                                     current->binding.operation_id,
+                                     current->binding.operation_version);
+        const auto* operation = resolved.descriptor;
         ControlJsonSchemaDiagnostics diagnostics;
         if (!operation || !validate_control_output_json_schema(
                               result.detail_json, operation->output_schema_json, &diagnostics)) {
@@ -698,10 +796,12 @@ ControlBroker::finish_operation(const VerifiedControlPeerIdentity& client_peer,
             };
         }
     }
-    const auto* operation = success_like
-                                ? resolve_control_operation(current->binding.operation_id,
-                                                            current->binding.operation_version)
-                                : nullptr;
+    const auto resolved_result =
+        success_like ? resolve_operation_locked(current->binding.manifest_digest,
+                                                current->binding.operation_id,
+                                                current->binding.operation_version)
+                     : ControlResolvedOperation{};
+    const auto* operation = resolved_result.descriptor;
     if (!result.artifacts.empty() &&
         (!operation || !operation->artifact_binding.produced)) {
         return {
@@ -940,8 +1040,9 @@ bool ControlBroker::authorize_artifact_read_locked(const VerifiedControlPeerIden
     const auto client = identities_.client(authority.client_id);
     const auto registration = identities_.registration(authority.registration_id);
     const auto grant = grants_.grant(authority.grant_id);
-    const auto* operation =
-        resolve_control_operation(authority.operation_id, authority.operation_version);
+    const auto resolved = resolve_operation_locked(authority.manifest_digest, authority.operation_id,
+                                                   authority.operation_version);
+    const auto* operation = resolved.descriptor;
 
     const bool valid =
         artifact_lineage_matches_receipt(lineage, *receipt) &&
@@ -1016,8 +1117,9 @@ void ControlBroker::sweep_expired() {
                 const auto& binding = receipt.binding;
                 const auto client = identities_.client(binding.client_id);
                 const auto registration = identities_.registration(binding.registration_id);
-                const auto* operation =
-                    resolve_control_operation(binding.operation_id, binding.operation_version);
+                const auto resolved = resolve_operation_locked(
+                    binding.manifest_digest, binding.operation_id, binding.operation_version);
+                const auto* operation = resolved.descriptor;
                 const bool authority_live =
                     client && registration && operation &&
                     client->peer_fingerprint == binding.client_principal &&
@@ -1026,7 +1128,14 @@ void ControlBroker::sweep_expired() {
                     registration->publication_id == binding.publication_id &&
                     registration->manifest_digest == binding.manifest_digest &&
                     grants_.is_granted(binding.grant_id, binding.client_id,
-                                       binding.registration_id, operation->capability);
+                                       binding.registration_id, operation->capability) &&
+                    [&] {
+                        if (!capability_is_vendor_tier(operation->capability))
+                            return true;
+                        const auto grant = grants_.grant(binding.grant_id);
+                        return grant && grant->permits_vendor_operation(binding.operation_id,
+                                                                        operation->capability);
+                    }();
                 if (!authority_live || binding.deadline_unix_ms <= now) {
                     (void)operation_store_->request_cancellation(
                         receipt.receipt_id,

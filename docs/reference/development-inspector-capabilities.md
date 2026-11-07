@@ -72,6 +72,10 @@ availability.
 | `dev.pulp.graph/sample-region.read@1` (`graph.sample-region.read`) | yes | yes | Host-main bounded read of prepared sample-region summaries and, when requested, the closed structural definition. |
 | `dev.pulp.graph/sample-region.edit@1` (`graph.sample-region.edit`) | no | yes | Develop-only host-main transaction over one private prepared topology candidate; lease, generation, proof, cancellation, and atomic publication are required. |
 | `dev.pulp.graph/modulation-route.edit@1` (`graph.modulation-route.edit`) | no | yes | Host-backed modulation route lifecycle (insert, rewire, remove) through the canonical SignalGraph authority; bounded dense batches refuse overflow. |
+| `dev.pulp.vendor/read@1` (`vendor.read`) | yes | yes | Read tier for the target's own declared `dev.<vendor>/...` operations; the Standalone host fences each bound handler onto the main thread after the broker validates input against the declared closed schema, and output is schema-checked before the receipt completes |
+| `dev.pulp.vendor/gesture@1` (`vendor.gesture`) | no | yes | Reversible-edit tier for declared vendor operations; needs the controller lease and `dev.pulp.session/control@1`, and runs the bound handler on the fenced main thread |
+| `dev.pulp.vendor/render@1` (`vendor.render`) | no | no | Resource-consuming tier for declared vendor operations; no profile enables it, and each single-operation grant is confined to the exact operation id consented for |
+| `dev.pulp.vendor/destructive@1` (`vendor.destructive`) | no | no | Irreversible tier for declared vendor operations; no profile enables it, it needs the controller lease, and each single-operation grant is confined to the exact operation id consented for |
 | `dev.pulp.unavailable/operation@1` (`unavailable`) | no | no | Filesystem/editor-launch operations remain unavailable by policy |
 <!-- END GENERATED capability-matrix -->
 

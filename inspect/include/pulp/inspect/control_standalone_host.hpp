@@ -19,6 +19,7 @@ class SignalGraphControlAuthority;
 namespace pulp::inspect {
 
 class RuntimeEvaluator;
+class ControlVendorOperationHandlers;
 enum class ControlTelemetrySensitivity : std::uint8_t;
 
 } // namespace pulp::inspect
@@ -41,6 +42,24 @@ namespace pulp::inspect {
 /// control-enabled Standalone executable. A direct launch remains inert; only
 /// the broker's inherited, kernel-authenticated bootstrap can open the host.
 std::unique_ptr<format::StandaloneControlHost> make_control_standalone_host();
+
+/// Binds a plugin's vendor operation handlers to one live Processor and its
+/// StateStore. The factory runs on the host main thread when a controlled
+/// Standalone starts, and every handler it returns also runs there.
+///
+/// Handlers add no authority. The broker admits only operations listed in the
+/// target's build-time vendor declaration (`CONTROL_VENDOR_OPERATIONS`), under
+/// the grant, consent and lease of the declared tier; a handler bound to an id
+/// that is not declared is dropped. Without an installed factory, declared
+/// operations fail as not implemented.
+using StandaloneVendorOperationsFactory =
+    std::shared_ptr<const ControlVendorOperationHandlers> (*)(format::Processor&,
+                                                              state::StateStore&);
+/// Installs the process-wide factory once; later calls return false.
+bool install_standalone_vendor_operations_factory(
+    StandaloneVendorOperationsFactory factory) noexcept;
+std::shared_ptr<const ControlVendorOperationHandlers>
+create_standalone_vendor_operations(format::Processor& processor, state::StateStore& store);
 
 namespace detail {
 

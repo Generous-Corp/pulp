@@ -1,0 +1,46 @@
+{
+  "schema": "dev.pulp.control/vendor-operations@1",
+  "vendor": "org.example",
+  "operations": [
+    {
+      "id": "dev.org.example/level.read@1",
+      "tier": "read",
+      "description": "Read the output level as a value from 0 to 1.",
+      "input_schema": {"type": "object", "additionalProperties": false, "properties": {}},
+      "output_schema": {
+        "type": "object", "additionalProperties": false, "required": ["level"],
+        "properties": {"level": {"type": "number", "minimum": 0, "maximum": 1}}
+      }
+    },
+    {
+      "id": "dev.org.example/level.set@1",
+      "tier": "gesture",
+      "description": "Set the output level to a value from 0 to 1.",
+      "input_schema": {
+        "type": "object", "additionalProperties": false, "required": ["level"],
+        "properties": {"level": {"type": "number", "minimum": 0, "maximum": 1}}
+      },
+      "output_schema": {
+        "type": "object", "additionalProperties": false, "required": ["level"],
+        "properties": {"level": {"type": "number", "minimum": 0, "maximum": 1}}
+      }
+    },
+    {
+      "id": "dev.org.example/render.ping@1",
+      "tier": "render",
+      "description": "Report that the render path is reachable without rendering audio.",
+      "input_schema": {"type": "object", "additionalProperties": false, "properties": {}},
+      "output_schema": {
+        "type": "object", "additionalProperties": false, "required": ["rendered"],
+        "properties": {"rendered": {"type": "boolean"}}
+      }
+    },
+    {
+      "id": "dev.org.example/render.unbound@1",
+      "tier": "render",
+      "description": "A declared render operation with no bound handler.",
+      "input_schema": {"type": "object", "additionalProperties": false, "properties": {}},
+      "output_schema": {"type": "object", "additionalProperties": false, "properties": {}}
+    }
+  ]
+}

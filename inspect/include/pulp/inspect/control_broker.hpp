@@ -2,7 +2,9 @@
 
 #include <pulp/inspect/control_admission.hpp>
 #include <pulp/inspect/control_artifacts.hpp>
+#include <pulp/inspect/control_vendor_operations.hpp>
 
+#include <map>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -42,6 +44,18 @@ struct ControlBrokerLifecycleResult {
 /// service-manager integration, dispatch loop, or runtime activation. Callers
 /// must first obtain VerifiedControlPeerIdentity from the credential-bearing
 /// local carrier; request payloads cannot construct that type.
+/// One operation contract resolved for an exact control manifest. A vendor
+/// descriptor points into `vendor_table`, so keep this value alive while the
+/// descriptor is used. Pulp operations leave `vendor_table` empty.
+struct ControlResolvedOperation {
+    const ControlOperationDescriptor* descriptor = nullptr;
+    std::shared_ptr<const ControlVendorOperationTable> vendor_table;
+
+    explicit operator bool() const {
+        return descriptor != nullptr;
+    }
+};
+
 class ControlBroker {
   public:
     using Clock = ControlIdentityRegistry::Clock;
@@ -152,6 +166,16 @@ class ControlBroker {
     std::vector<ControlRegistration> registrations() const;
     std::optional<ControlGrant> grant(const ControlGrantId& grant_id);
 
+    /// Resolves a Pulp operation from the frozen registry, or a vendor
+    /// operation from the declaration the broker retained for the exact
+    /// manifest digest. A vendor id never resolves without that digest.
+    ControlResolvedOperation resolve_operation(std::string_view manifest_digest,
+                                               std::string_view operation_id,
+                                               std::uint32_t operation_version) const;
+    /// The validated vendor declaration of one registered manifest, if any.
+    std::shared_ptr<const ControlVendorOperationTable>
+    vendor_operations(std::string_view manifest_digest) const;
+
     void sweep_expired();
 
   private:
@@ -170,6 +194,10 @@ class ControlBroker {
                           const VerifiedControlPeerIdentity& client_peer) const;
     bool owns_registration_peer(const ControlRegistrationId& registration_id,
                                 const VerifiedControlPeerIdentity& host_peer) const;
+    ControlResolvedOperation resolve_operation_locked(std::string_view manifest_digest,
+                                                      std::string_view operation_id,
+                                                      std::uint32_t operation_version) const;
+    ControlIdentityStatus retain_vendor_operations_locked(const ControlManifest& manifest);
     void request_active_cancellation(const ControlClientId& client_id,
                                      const ControlRegistrationId& registration_id,
                                      const ControlGrantId& grant_id, std::string_view reason);
@@ -185,6 +213,11 @@ class ControlBroker {
     ControlOperationStore::WallClock wall_clock_;
     std::unique_ptr<ControlOperationStore> operation_store_;
     std::unique_ptr<ControlArtifactStore> artifact_store_;
+    /// Validated vendor declarations keyed by manifest digest. Receipts bind the
+    /// digest, so completion and replay resolve the same contract even after
+    /// the registration that introduced it has gone away.
+    std::map<std::string, std::shared_ptr<const ControlVendorOperationTable>, std::less<>>
+        vendor_tables_;
 };
 
 } // namespace pulp::inspect

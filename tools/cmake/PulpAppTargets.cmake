@@ -109,6 +109,9 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
         target_sources(${target}_Standalone PRIVATE "${_control_factory_source}")
         target_link_libraries(${target}_Standalone PRIVATE
             ${_PULP_CONTROL_STANDALONE_TARGET})
+        if(PULP_${target}_CONTROL_VENDOR_SOURCES)
+            target_sources(${target}_Standalone PRIVATE ${PULP_${target}_CONTROL_VENDOR_SOURCES})
+        endif()
 
         if("dev.pulp.ui/capture@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES OR
            "dev.pulp.ui/input@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
@@ -156,6 +159,9 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             "${_control_host_entry}")
         target_link_libraries(${target}_ControlHost PRIVATE
             ${target}_Core ${_standalone_target} ${_PULP_CONTROL_STANDALONE_TARGET})
+        if(PULP_${target}_CONTROL_VENDOR_SOURCES)
+            target_sources(${target}_ControlHost PRIVATE ${PULP_${target}_CONTROL_VENDOR_SOURCES})
+        endif()
         if("dev.pulp.graph/modulation-route.edit@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
             target_sources(${target}_ControlHost PRIVATE
                 "${_control_graph_authority_factory_source}")

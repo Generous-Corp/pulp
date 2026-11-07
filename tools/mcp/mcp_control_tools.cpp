@@ -11,6 +11,7 @@
 #include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/control_carrier.hpp>
 #include <pulp/inspect/control_manifest.hpp>
+#include <pulp/inspect/control_vendor_operations.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
 
@@ -22,6 +23,7 @@
 #include <cctype>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -39,7 +41,60 @@ constexpr std::string_view kStatusTool = "pulp_control_status";
 constexpr std::string_view kGrantTool = "pulp_control_grant_request";
 constexpr std::string_view kRevokeTool = "pulp_control_revoke";
 constexpr std::string_view kCancelTool = "pulp_control_cancel";
+constexpr std::string_view kVendorCallTool = "pulp_control_vendor_call";
 constexpr std::string_view kDefaultInstalledHostId = "ordinary-standalone";
+
+/// A vendor operation contract read from the exact instance's broker
+/// inventory. The descriptor's views point into the strings this value owns,
+/// so it is heap-allocated and never moved. The local schema check is a
+/// convenience; the broker validates the same declaration authoritatively.
+struct VendorOperationBinding {
+    std::string id;
+    std::string input_schema_id;
+    std::string input_schema;
+    std::string output_schema_id;
+    std::string output_schema;
+    ControlOperationDescriptor descriptor{};
+};
+
+std::unique_ptr<VendorOperationBinding> vendor_binding_for(const Value& item,
+                                                           std::string_view operation_id) {
+    const auto parts = parse_control_vendor_operation_id(operation_id);
+    if (!parts || !item.hasObjectMember("vendor_operations") ||
+        !item["vendor_operations"].isArray())
+        return {};
+    const auto operations = item["vendor_operations"];
+    for (std::uint32_t index = 0; index < operations.size(); ++index) {
+        const auto entry = operations[index];
+        if (!entry["id"].isString() || entry["id"].getString() != operation_id ||
+            !entry["tier"].isString() || !entry["input_schema"].isObject() ||
+            !entry["output_schema"].isObject())
+            continue;
+        const auto tier = control_vendor_tier_from_id(entry["tier"].getString());
+        if (!tier)
+            return {};
+        auto binding = std::make_unique<VendorOperationBinding>();
+        binding->id = std::string(operation_id);
+        binding->input_schema_id = binding->id + "#input";
+        binding->output_schema_id = binding->id + "#output";
+        binding->input_schema = choc::json::toString(entry["input_schema"], false);
+        binding->output_schema = choc::json::toString(entry["output_schema"], false);
+        binding->descriptor = ControlOperationDescriptor{
+            .id = binding->id,
+            .version = parts->version,
+            .capability = control_vendor_tier_capability(*tier),
+            .input_schema_id = binding->input_schema_id,
+            .input_schema_json = binding->input_schema,
+            .output_schema_id = binding->output_schema_id,
+            .output_schema_json = binding->output_schema,
+            .result_kind = "response",
+            .artifact_binding = {},
+            .receipt_binding = {},
+        };
+        return binding;
+    }
+    return {};
+}
 
 std::string quote(std::string_view value) {
     return json_string(std::string(value));
@@ -673,16 +728,30 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
         return success_payload(choc::json::toString(acknowledgement, false));
     }
     const auto* operation = detail::control_operation_for_tool(name);
+    const bool vendor_call = name == kVendorCallTool;
+    std::unique_ptr<VendorOperationBinding> vendor_binding;
+    std::string vendor_operation_id;
     std::optional<OperationDeadline> operation_deadline;
-    if (operation) {
+    if (operation || vendor_call) {
         static constexpr std::array<std::string_view, 7> allowed_fields{
             "instance_id", "request_id", "grant_id", "profile",
             "expected_state_generation", "timeout_ms", "input"};
         for (std::uint32_t index = 0; index < arguments->size(); ++index) {
             const auto member = arguments->getObjectMemberAt(index);
-            if (std::ranges::find(allowed_fields, member.name) == allowed_fields.end())
+            const bool allowed =
+                std::ranges::find(allowed_fields, member.name) != allowed_fields.end() ||
+                (vendor_call && std::string_view(member.name) == "operation_id");
+            if (!allowed)
                 return error_payload("invalid-arguments",
                                      "unexpected control argument: " + std::string(member.name));
+        }
+        if (vendor_call) {
+            const auto requested = required_string(*arguments, "operation_id");
+            if (!requested || !is_control_vendor_operation_id(*requested))
+                return error_payload("invalid-arguments",
+                                     "operation_id must be a vendor operation "
+                                     "dev.<vendor>/<name>@<version>");
+            vendor_operation_id = *requested;
         }
         for (const auto field : {"request_id", "grant_id", "profile"}) {
             if (arguments->hasObjectMember(field) &&
@@ -699,7 +768,8 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
             return error_payload("invalid-arguments", "input is required and must be an object");
         const auto input_json = choc::json::toString((*arguments)["input"], false);
         ControlJsonSchemaDiagnostics diagnostics;
-        if (!validate_control_json_schema(input_json, operation->input_schema_json, &diagnostics))
+        if (operation &&
+            !validate_control_json_schema(input_json, operation->input_schema_json, &diagnostics))
             return error_payload("invalid-arguments", diagnostics.explanation);
         const auto timeout_value = arguments->hasObjectMember("timeout_ms")
                                        ? (*arguments)["timeout_ms"].getInt64()
@@ -713,7 +783,7 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
     };
     if (operation_deadline && remaining() <= std::chrono::milliseconds::zero())
         return error_payload("timeout", "the control operation timed out");
-    if (!operation)
+    if (!operation && !vendor_call)
         if (auto unavailable = impl_->ensure_session(remaining()))
             return *unavailable;
 
@@ -793,9 +863,22 @@ std::string ControlMcpAdapter::call_tool(std::string_view name, std::string_view
         return error;
 
     ControlClient client(impl_->session->transport());
+    const auto input_json = choc::json::toString((*arguments)["input"], false);
+    if (vendor_call) {
+        // Only an operation the exact instance's manifest declares resolves;
+        // the broker repeats this check and the schema validation.
+        vendor_binding = vendor_binding_for(*item, vendor_operation_id);
+        if (!vendor_binding)
+            return error_payload("unknown-operation",
+                                 "the exact instance does not declare this vendor operation");
+        ControlJsonSchemaDiagnostics diagnostics;
+        if (!validate_control_json_schema(input_json, vendor_binding->descriptor.input_schema_json,
+                                          &diagnostics))
+            return error_payload("invalid-arguments", diagnostics.explanation);
+        operation = &vendor_binding->descriptor;
+    }
     if (!operation)
         return error_payload("unknown-tool", "unknown control tool");
-    const auto input_json = choc::json::toString((*arguments)["input"], false);
 
     if (operation->capability == InspectorCapability::ArtifactRead) {
         if (remaining() <= std::chrono::milliseconds::zero())

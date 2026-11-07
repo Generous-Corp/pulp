@@ -285,6 +285,164 @@ blank content, malformed producer data, reused lifecycle identity, and missing
 adapter identity all fail closed. This runtime operation remains absent from the
 design-time agent capability manifest.
 
+## Vendor operations
+
+A controlled Standalone target can expose its own operations next to the Pulp
+ones. A vendor operation goes through the same broker, grants, consent,
+controller leases, schema checks, and durable receipts as a `dev.pulp.*`
+operation. It adds no transport, socket, or port of its own.
+
+### Namespace rules
+
+- A vendor id is a lowercase reverse-DNS name of two to eight labels, such as
+  `com.acme` or `com.acme.synth`. Each label starts with a letter and holds
+  only `a-z`, `0-9`, and `-`.
+- The vendor id must equal the target's `BUNDLE_ID` or be one of its
+  reverse-DNS prefixes. A target with bundle id `com.acme.synth` can declare
+  vendor `com.acme` or `com.acme.synth`, never `org.other`.
+- Pulp reserves `dev.pulp`, everything below it, and every vendor whose first
+  label is `pulp`.
+- An operation id is `dev.<vendor>/<name>@<version>`, for example
+  `dev.com.acme/presets.load@1`. The name has one to six lowercase segments
+  separated by `/` or `.`. The version is a positive integer without a leading
+  zero.
+- A changed contract gets a new version. Keep the old version declared while
+  clients still call it.
+
+### Declare operations
+
+Write a declaration file and name it in `pulp_add_plugin`:
+
+```cmake
+pulp_add_plugin(AcmeSynth
+    FORMATS Standalone
+    BUNDLE_ID com.acme.synth
+    PROCESSOR_FACTORY acme::create_processor
+    CONTROL_PROFILE developer-local
+    CONTROL_CAPABILITIES
+        dev.pulp.instance/read@1
+        dev.pulp.session/control@1
+        dev.pulp.vendor/read@1
+        dev.pulp.vendor/gesture@1
+    CONTROL_VENDOR_OPERATIONS control/vendor-operations.json
+    CONTROL_VENDOR_SOURCES control/vendor_operations.cpp)
+```
+
+```json
+{
+  "schema": "dev.pulp.control/vendor-operations@1",
+  "vendor": "com.acme",
+  "operations": [
+    {
+      "id": "dev.com.acme/presets.count@1",
+      "tier": "read",
+      "description": "Count the presets in one bank.",
+      "input_schema": {
+        "type": "object", "additionalProperties": false,
+        "properties": {"bank": {"type": "string", "maxLength": 32}}
+      },
+      "output_schema": {
+        "type": "object", "additionalProperties": false, "required": ["count"],
+        "properties": {"count": {"type": "integer", "minimum": 0}}
+      }
+    }
+  ]
+}
+```
+
+The file holds one to 64 operations and at most 128 KiB of printable ASCII.
+Each operation needs `id`, `tier`, a one to 512 byte `description`, and closed
+`input_schema` and `output_schema` objects. Unknown fields are rejected.
+
+Schemas use a closed JSON Schema subset: `type`, `properties`, `required`,
+`additionalProperties`, `items`, `minItems`, `maxItems`, `uniqueItems`,
+`enum`, `const`, `minimum`, `maximum`, `minLength`, `maxLength`, `oneOf`,
+`default`, and a root `$schema` naming draft 2020-12. Both roots are objects.
+Every object sets `additionalProperties` to `false`. Every string sets
+`maxLength`. Every array sets `items` and `maxItems`. Schemas nest at most 16
+deep. Configure fails on a missing file, a size or encoding error, or a tier
+without its capability. The broker parses and validates the whole declaration
+again at registration and rejects the registration if it is invalid.
+
+### Tiers
+
+Each operation declares one tier. Each tier is carried by one fixed Pulp
+capability, so it is granted and consented like the Pulp operations of the
+same risk.
+
+| Tier | Capability | Use for | Grant |
+|---|---|---|---|
+| `read` | `dev.pulp.vendor/read@1` | No side effects | `inspect-readonly`, `observe`, or `develop` profile |
+| `gesture` | `dev.pulp.vendor/gesture@1` | Reversible edits such as loading a preset | `develop` profile; needs the controller lease |
+| `render` | `dev.pulp.vendor/render@1` | Work that spends CPU or memory, such as an offline render | Single-operation grant only |
+| `destructive` | `dev.pulp.vendor/destructive@1` | Changes that cannot be undone, such as deleting a user preset | Single-operation grant only; needs the controller lease |
+
+`CONTROL_CAPABILITIES` must list the capability of every tier the declaration
+uses, and must not list a vendor tier that no operation uses. The `gesture` and
+`destructive` tiers also need `dev.pulp.session/control@1`.
+
+A single-operation grant names one operation id, and the broker confines the
+grant to that id. Consenting to `dev.com.acme/notes.play@1` does not authorize
+another render-tier operation of the same target. A profile grant covers every
+operation of the tiers it contains.
+
+### Bind handlers
+
+The broker admits only declared operations. Code supplies the handlers through
+a factory installed once per process, before the Standalone host starts. Put
+that code in the files listed under `CONTROL_VENDOR_SOURCES`. They are built
+only into the controlled Standalone and the separate host the broker launches,
+never into other plugin formats. Install the factory from a namespace-scope
+initializer:
+
+```cpp
+#include <pulp/inspect/control_standalone_host.hpp>
+#include <pulp/inspect/control_vendor_operation_executor.hpp>
+
+std::shared_ptr<const pulp::inspect::ControlVendorOperationHandlers>
+acme_vendor_operations(pulp::format::Processor& processor, pulp::state::StateStore& store) {
+    auto handlers = std::make_shared<pulp::inspect::ControlVendorOperationHandlers>();
+    handlers->add("dev.com.acme/presets.count@1", [&](const auto& call) {
+        return pulp::inspect::ControlVendorOperationResult::success(R"({"count":3})");
+    });
+    return handlers;
+}
+
+namespace {
+[[maybe_unused]] const bool acme_vendor_operations_installed =
+    pulp::inspect::install_standalone_vendor_operations_factory(&acme_vendor_operations);
+}
+```
+
+Handlers run on the host main thread. The broker has already checked the
+grant, consent, lease, and tier, and validated the arguments against the input
+schema. A handler still treats argument values as untrusted data. Long handlers
+call `still_authorized()` between steps and stop when it returns false. The
+broker validates the result against the output schema before the receipt
+completes. A handler bound to an undeclared id is dropped. A declared operation
+without a handler fails as not implemented. An exception becomes an internal
+failure.
+
+### Discovery and contract history
+
+The broker's instance listing carries a `vendor_operations` array for each
+instance, with each operation's id, version, tier, capability, description, and
+both schemas. The CLI and the `pulp_control_vendor_call` MCP tool call them by
+id:
+
+```sh
+pulp control grant-request --instance <instance-id> --operation dev.com.acme/notes.play@1
+pulp control call --instance <instance-id> dev.com.acme/presets.count@1 --params '{"bank":"factory"}'
+```
+
+The control manifest embeds the exact declaration bytes in a
+`vendor_operations` member. The manifest digest covers those bytes, so consent
+and durable receipts bind the exact declared contract. Changing a schema,
+description, tier, or operation produces a new digest. Receipts made under an
+earlier digest keep resolving against the declaration they were made under.
+Manifests without vendor operations keep their previous canonical bytes and
+digest.
+
 ## Sample-region capability narrative
 
 Sample-region capabilities are reached through the Processor's graph/control contract. The capability registry and inspector can describe a declared region and its promoted parameters, but those rows do not grant execution by themselves. A candidate must pass the region proof, be reachable through the canonical executor, and have an independent receipt. Keep unsupported latency, retained-history, state-size, and projection cases as explicit refusals; do not create a second capability authority for them.
