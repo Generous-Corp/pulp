@@ -1,9 +1,16 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
+#include <cstdint>
 #include <iostream>
+#include <string>
 
-int main() {
+namespace {
+std::string stereo_payload() {
+    return R"({"assets":{},"edges":{"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"input\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"gain_a\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]]},"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"gain_a\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"gain_b\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]]},"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"gain_b\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"output\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]]}},"interfaces":[{"channels":["L","R"],"endpoint":{"direction":"out","kind":"audio","node":"input","port":"audio"},"key":"main-in","kind":"audio","role":"input"},{"channels":["L","R"],"endpoint":{"direction":"in","kind":"audio","node":"output","port":"audio"},"key":"main-out","kind":"audio","role":"output"}],"nodes":{"gain_a":{"config":{"gain":"f32:3f800000"},"kind":"gain"},"gain_b":{"config":{"gain":"f32:3f800000"},"kind":"gain"},"input":{"kind":"audio_input"},"output":{"kind":"audio_output"}},"policies":{},"profile":"pulp.graph.identity.v1"})";
+}
+
+int run_empty() {
     pulp::host::SignalGraph graph;
     auto edit = graph.begin_prepared_topology_edit();
     if (!edit)
@@ -17,10 +24,63 @@ int main() {
         return 3;
     if (edit->commit() != pulp::host::SignalGraph::PreparedTopologyEdit::Result::Committed)
         return 4;
-    const auto snapshot = edit->committed_execution_snapshot();
-    const auto description = snapshot.export_prepared_description();
+    const auto description = edit->committed_execution_snapshot().export_prepared_description();
     if (!description)
         return 5;
     std::cout << description.value->canonical_bytes() << '\n';
     return 0;
+}
+
+int run_stereo() {
+    pulp::host::SignalGraph graph;
+    auto edit = graph.begin_prepared_topology_edit();
+    if (!edit)
+        return 10;
+    const auto input = edit->add_input_node(2);
+    const auto gain_a = edit->add_gain_node();
+    const auto gain_b = edit->add_gain_node();
+    const auto output = edit->add_output_node(2);
+    for (std::uint32_t channel = 0; channel < 2; ++channel) {
+        if (!edit->connect(input, channel, gain_a, channel) ||
+            !edit->connect(gain_a, channel, gain_b, channel) ||
+            !edit->connect(gain_b, channel, output, channel))
+            return 11;
+    }
+    pulp::host::AuthoredRuntimeBinding binding;
+    binding.nodes = {{input, "input"}, {gain_a, "gain_a"}, {gain_b, "gain_b"}, {output, "output"}};
+    const auto add_channels = [&](std::uint64_t node, bool output_direction, std::uint32_t count) {
+        for (std::uint32_t i = 0; i < count; ++i)
+            binding.channels.push_back({node, "audio", output_direction, i == 0 ? "L" : "R", i, i});
+    };
+    add_channels(input, true, 2);
+    add_channels(gain_a, false, 2);
+    add_channels(gain_a, true, 2);
+    add_channels(gain_b, false, 2);
+    add_channels(gain_b, true, 2);
+    add_channels(output, false, 2);
+    binding.interfaces = {
+        {"main", false, input, "audio", "L", 0, 0, 0},
+        {"main", false, input, "audio", "R", 1, 0, 1},
+        {"main", true, output, "audio", "L", 0, 0, 0},
+        {"main", true, output, "audio", "R", 1, 0, 1},
+    };
+    if (!edit->bind_authored_identity(stereo_payload(), binding) ||
+        edit->prepare(48000.0, 128) !=
+            pulp::host::SignalGraph::PreparedTopologyEdit::Result::Prepared ||
+        edit->commit() != pulp::host::SignalGraph::PreparedTopologyEdit::Result::Committed)
+        return 12;
+    const auto description = edit->committed_execution_snapshot().export_prepared_description();
+    if (!description || description.value->nodes.size() != 4 ||
+        description.value->edges.size() != 6)
+        return 13;
+    std::cout << description.value->canonical_bytes() << '\n';
+    return 0;
+}
+} // namespace
+
+int main() {
+    const auto empty = run_empty();
+    if (empty != 0)
+        return empty;
+    return run_stereo();
 }
