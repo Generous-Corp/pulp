@@ -1,5 +1,6 @@
 #include <pulp/runtime/model_store.hpp>
 
+#include <pulp/runtime/cancel.hpp>
 #include <pulp/runtime/model_download.hpp>
 #include <pulp/runtime/system.hpp>
 
@@ -326,7 +327,7 @@ std::string to_json(const ActivateModelResult& result) {
 
 InstallModelResult install_model(const ModelEntry& model, std::string_view subsystem,
                                  const std::function<bool(const DownloadProgress&)>& on_progress,
-                                 const CancellationToken* cancel,
+                                 const CancelToken* cancel,
                                  const std::vector<std::pair<std::string, std::string>>& headers,
                                  const fs::path& pulp_home_override, bool allow_unverified) {
     InstallModelResult r;

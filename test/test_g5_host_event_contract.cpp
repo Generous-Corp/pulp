@@ -13,6 +13,7 @@ using pulp::host::GraphEventResult;
 using pulp::host::HostEventIngress;
 using pulp::host::HostEventRecord;
 using pulp::host::HostEventResult;
+using pulp::host::project_host_event_block;
 
 namespace pulp::host::detail {
 struct GraphEventLaneTestAccess {
@@ -183,6 +184,212 @@ TEST_CASE("G5 MPE sidecar preserves projected sample offsets", "[host][graph][g5
     REQUIRE(sidecar[0].kind == pulp::midi::MpeExpressionEvent::Kind::NoteOn);
     REQUIRE(sidecar[1].sample_offset == 5);
     REQUIRE(sidecar[1].kind == pulp::midi::MpeExpressionEvent::Kind::PitchBend);
+}
+
+TEST_CASE("G5 host projection preserves absolute offsets and sidecars",
+          "[host][graph][g5][events][mpe][ump]") {
+    std::array<HostEventRecord, 3> records{};
+    records[0] = midi_event(1, 43, 1, 3, pulp::midi::MidiEvent::note_on(1, 60, 100));
+    records[1] = midi_event(1, 45, 2, 3, pulp::midi::MidiEvent::pitch_bend(1, 10'000));
+    records[2] = midi_event(1, 46, 3, 3, pulp::midi::MidiEvent::cc(1, 74, 90));
+    records[2].has_ump = true;
+    records[2].ump.word_count = 2;
+    records[2].ump.words[0] = 0x4010'3C00u;
+    records[2].ump.words[1] = 0xFFFF'0000u;
+
+    pulp::midi::MidiBuffer midi;
+    pulp::midi::UmpBuffer ump;
+    pulp::midi::MpeBuffer mpe;
+    midi.reserve(4);
+    midi.set_realtime_capacity_limit(true);
+    ump.reserve(4);
+    ump.set_realtime_capacity_limit(true);
+    midi.attach_ump(&ump);
+    mpe.reserve(512);
+    mpe.set_realtime_capacity_limit(true);
+    pulp::midi::MpeVoiceTracker tracker;
+
+    REQUIRE(project_host_event_block(records, 40, 8, midi, &tracker, &mpe) ==
+            HostEventResult::Accepted);
+    REQUIRE(midi.size() == 3);
+    REQUIRE(midi[0].sample_offset == 3);
+    REQUIRE(midi[1].sample_offset == 5);
+    REQUIRE(midi[2].sample_offset == 6);
+    REQUIRE(ump.size() == 1);
+    REQUIRE(ump[0].sample_offset == 6);
+    REQUIRE(mpe.size() == 2);
+    REQUIRE(mpe[0].sample_offset == 3);
+    REQUIRE(mpe[1].sample_offset == 5);
+}
+
+TEST_CASE("G5 host projection refuses retiming and preserves destinations",
+          "[host][graph][g5][events][negative-control]") {
+    std::array<HostEventRecord, 1> late{
+        midi_event(1, 39, 1, 3, pulp::midi::MidiEvent::note_on(1, 60, 100))};
+    pulp::midi::MidiBuffer midi;
+    midi.reserve(1);
+    midi.set_realtime_capacity_limit(true);
+    REQUIRE(project_host_event_block(late, 40, 8, midi) == HostEventResult::Late);
+    REQUIRE(midi.empty());
+
+    std::array<HostEventRecord, 1> accepted{
+        midi_event(1, 40, 1, 3, pulp::midi::MidiEvent::note_on(1, 60, 100))};
+    REQUIRE(midi.add(pulp::midi::MidiEvent::note_off(1, 60)));
+    REQUIRE(project_host_event_block(accepted, 40, 8, midi) == HostEventResult::OutputCapacity);
+    REQUIRE(midi.size() == 1);
+}
+
+TEST_CASE("G5 host projection preflights bounded MPE fanout",
+          "[host][graph][g5][mpe][negative-control]") {
+    pulp::midi::MpeVoiceTracker tracker;
+    for (std::uint8_t note = 0; note < pulp::midi::MpeVoiceTracker::kMaxNotes; ++note)
+        REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, note, 100)));
+
+    std::array<HostEventRecord, 1> bend{
+        midi_event(1, 0, 1, 3, pulp::midi::MidiEvent::pitch_bend(1, 10'000))};
+    pulp::midi::MidiBuffer midi;
+    pulp::midi::MpeBuffer mpe;
+    midi.reserve(1);
+    midi.set_realtime_capacity_limit(true);
+    mpe.reserve(pulp::midi::MpeVoiceTracker::kMaxNotes - 1);
+    mpe.set_realtime_capacity_limit(true);
+
+    REQUIRE(project_host_event_block(bend, 0, 1, midi, &tracker, &mpe) ==
+            HostEventResult::OutputCapacity);
+    REQUIRE(midi.empty());
+    REQUIRE(mpe.empty());
+}
+
+TEST_CASE("G5 host projection preflights pending MPE release on an empty block",
+          "[host][graph][g5][mpe][negative-control]") {
+    pulp::midi::MpeVoiceTracker tracker;
+    REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, 60, 100)));
+    tracker.on_note_lifecycle = [](const pulp::midi::MpeNoteState*,
+                                   const pulp::midi::MpeNoteState*) { return false; };
+    REQUIRE(tracker.process(pulp::midi::MidiEvent::note_off(1, 60)));
+    REQUIRE(tracker.pending_note_off_count() == 1);
+
+    pulp::midi::MidiBuffer midi;
+    pulp::midi::MpeBuffer mpe(false);
+    midi.reserve(1);
+    midi.set_realtime_capacity_limit(true);
+    mpe.set_realtime_capacity_limit(true);
+    REQUIRE(project_host_event_block(std::span<const HostEventRecord>{}, 0, 1, midi, &tracker,
+                                     &mpe) == HostEventResult::OutputCapacity);
+    REQUIRE(midi.empty());
+    REQUIRE(mpe.empty());
+    REQUIRE(mpe.dropped_event_count() == 0);
+    REQUIRE(tracker.pending_note_off_count() == 1);
+}
+
+TEST_CASE("G5 host projection preflights pending release plus event bound",
+          "[host][graph][g5][mpe][negative-control]") {
+    pulp::midi::MpeVoiceTracker tracker;
+    REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, 60, 100)));
+    tracker.on_note_lifecycle = [](const pulp::midi::MpeNoteState*,
+                                   const pulp::midi::MpeNoteState*) { return false; };
+    REQUIRE(tracker.process(pulp::midi::MidiEvent::note_off(1, 60)));
+    REQUIRE(tracker.pending_note_off_count() == 1);
+
+    std::array<HostEventRecord, 1> records{
+        midi_event(1, 0, 1, 3, pulp::midi::MidiEvent::note_on(1, 62, 100))};
+    pulp::midi::MidiBuffer midi;
+    pulp::midi::MpeBuffer mpe;
+    midi.reserve(1);
+    midi.set_realtime_capacity_limit(true);
+    constexpr auto event_bound = pulp::midi::MpeVoiceTracker::kMaxNotes + 2;
+    mpe.reserve(event_bound);
+    mpe.set_realtime_capacity_limit(true);
+    REQUIRE(mpe.capacity() == event_bound);
+    REQUIRE(project_host_event_block(records, 0, 1, midi, &tracker, &mpe) ==
+            HostEventResult::OutputCapacity);
+    REQUIRE(midi.empty());
+    REQUIRE(mpe.empty());
+    REQUIRE(mpe.dropped_event_count() == 0);
+    REQUIRE(tracker.pending_note_off_count() == 1);
+}
+
+TEST_CASE("G5 host projection flushes a pending MPE release at full capacity",
+          "[host][graph][g5][mpe]") {
+    pulp::midi::MpeVoiceTracker tracker;
+    REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, 60, 100)));
+    tracker.on_note_lifecycle = [](const pulp::midi::MpeNoteState*,
+                                   const pulp::midi::MpeNoteState*) { return false; };
+    REQUIRE(tracker.process(pulp::midi::MidiEvent::note_off(1, 60)));
+    REQUIRE(tracker.pending_note_off_count() == 1);
+
+    pulp::midi::MidiBuffer midi;
+    pulp::midi::MpeBuffer mpe(false);
+    midi.reserve(1);
+    midi.set_realtime_capacity_limit(true);
+    mpe.reserve(1);
+    mpe.set_realtime_capacity_limit(true);
+    REQUIRE(project_host_event_block(std::span<const HostEventRecord>{}, 0, 1, midi, &tracker,
+                                     &mpe) == HostEventResult::Accepted);
+    REQUIRE(tracker.pending_note_off_count() == 0);
+    REQUIRE(mpe.size() == 1);
+    REQUIRE(mpe[0].sample_offset == 0);
+    REQUIRE(mpe[0].kind == pulp::midi::MpeExpressionEvent::Kind::NoteOff);
+    REQUIRE(mpe[0].state.note == 60);
+    REQUIRE(mpe[0].state.channel == 1);
+    REQUIRE(mpe[0].state.note_id != 0);
+}
+
+TEST_CASE("G5 host projection preserves all destinations on pending MPE rejection",
+          "[host][graph][g5][mpe][ump][negative-control]") {
+    pulp::midi::MpeVoiceTracker tracker;
+    REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, 60, 100)));
+    tracker.on_note_lifecycle = [](const pulp::midi::MpeNoteState*,
+                                   const pulp::midi::MpeNoteState*) { return false; };
+    REQUIRE(tracker.process(pulp::midi::MidiEvent::note_off(1, 60)));
+    REQUIRE(tracker.pending_note_off_count() == 1);
+
+    pulp::midi::MidiBuffer midi;
+    pulp::midi::UmpBuffer ump;
+    pulp::midi::MpeBuffer mpe(false);
+    midi.reserve(2);
+    midi.set_realtime_capacity_limit(true);
+    ump.reserve(2);
+    ump.set_realtime_capacity_limit(true);
+    midi.attach_ump(&ump);
+    mpe.reserve(pulp::midi::MpeVoiceTracker::kMaxNotes + 3);
+    mpe.set_realtime_capacity_limit(true);
+
+    auto midi_sentinel = pulp::midi::MidiEvent::note_off(2, 30);
+    midi_sentinel.sample_offset = 7;
+    REQUIRE(midi.add(midi_sentinel));
+    const auto ump_sentinel = pulp::midi::UmpPacket::midi1_note_on(0, 2, 64, 90);
+    REQUIRE(ump.add(ump_sentinel, 9));
+    pulp::midi::MpeExpressionEvent mpe_sentinel{};
+    mpe_sentinel.sample_offset = 11;
+    mpe_sentinel.kind = pulp::midi::MpeExpressionEvent::Kind::Pressure;
+    mpe_sentinel.state.channel = 3;
+    mpe_sentinel.state.note = 42;
+    mpe_sentinel.state.note_id = 17;
+    REQUIRE(mpe.add(mpe_sentinel));
+
+    std::array<HostEventRecord, 1> records{
+        midi_event(1, 0, 1, 3, pulp::midi::MidiEvent::note_on(1, 62, 100))};
+    records[0].has_ump = true;
+    records[0].ump = pulp::midi::UmpPacket::midi1_note_on(0, 1, 62, 100);
+    REQUIRE(mpe.capacity() == pulp::midi::MpeVoiceTracker::kMaxNotes + 3);
+    REQUIRE(project_host_event_block(records, 0, 1, midi, &tracker, &mpe) ==
+            HostEventResult::OutputCapacity);
+    REQUIRE(midi.size() == 1);
+    REQUIRE(midi[0].sample_offset == 7);
+    REQUIRE(midi[0].is_note_off());
+    REQUIRE(ump.size() == 1);
+    REQUIRE(ump[0].sample_offset == 9);
+    REQUIRE(ump[0].packet.words[0] == ump_sentinel.words[0]);
+    REQUIRE(ump[0].packet.words[1] == ump_sentinel.words[1]);
+    REQUIRE(mpe.size() == 1);
+    REQUIRE(mpe[0].sample_offset == 11);
+    REQUIRE(mpe[0].kind == pulp::midi::MpeExpressionEvent::Kind::Pressure);
+    REQUIRE(mpe[0].state.channel == 3);
+    REQUIRE(mpe[0].state.note == 42);
+    REQUIRE(mpe[0].state.note_id == 17);
+    REQUIRE(mpe.dropped_event_count() == 0);
+    REQUIRE(tracker.pending_note_off_count() == 1);
 }
 
 TEST_CASE("G5 graph-authored event lane is partition invariant", "[host][graph][g5][events]") {
