@@ -10,6 +10,8 @@
 #include <pulp/audio/analysis/audio_metrics.hpp>
 #include <pulp/audio/analysis/audio_spectrum.hpp>
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/audio/audio_file_layout.hpp>
+#include <pulp/audio/format_registry.hpp>
 #include <pulp/audio/buffer.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -39,7 +41,7 @@ constexpr int kExitCannotMeasure = 2;
 void print_validate_usage() {
     std::cout << "pulp audio validate — offline analysis of captured audio\n\n";
     std::cout << "Usage:\n";
-    std::cout << "  pulp audio validate summarize <file.wav> [--json]\n";
+    std::cout << "  pulp audio validate summarize <file.wav> [--json] [--absolute-paths]\n";
     std::cout << "  pulp audio validate doctor <file.wav> [--thd] "
                  "[--response f1,f2,...] [--fundamental <hz>] [--channel <n>]\n";
     std::cout << "  pulp audio validate compare <a.wav> <b.wav> "
@@ -75,6 +77,31 @@ std::optional<DecodedAudio> decode(const std::string& path) {
     }
     auto file = pulp::audio::read_audio_file(path);
     if (!file) {
+        // A header that declares more than the in-memory decoder admits is a
+        // limit, not corruption; say which limit so the caller can reach for
+        // `pulp audio inspect` instead of debugging the file.
+        // read_audio_file enforces the format registry's DecodeLimits, so
+        // the fact is evaluated against those ceilings, not the smaller
+        // in-memory WavDecodeLimits that `pulp audio inspect` reports.
+        pulp::audio::LayoutInspectOptions layout_options;
+        const pulp::audio::DecodeLimits registry_limits;
+        layout_options.decode_limits.max_frames = registry_limits.max_frames;
+        layout_options.decode_limits.max_channels = registry_limits.max_channels;
+        layout_options.decode_limits.max_output_bytes = registry_limits.max_output_bytes;
+        const auto layout = pulp::audio::inspect_audio_file_layout(fs::path(path), layout_options);
+        if (layout.decode_limits && layout.decode_limits->exceeds && layout.stream) {
+            std::cerr << "Error: audio file exceeds the in-memory decode limit: "
+                      << path << " declares " << layout.stream->frames << " frames x "
+                      << layout.stream->channels << " channels;";
+            for (const auto& name : layout.decode_limits->exceeded) {
+                std::cerr << " " << name << "=";
+                if (name == "max_frames") std::cerr << layout.decode_limits->limits.max_frames;
+                else if (name == "max_channels") std::cerr << layout.decode_limits->limits.max_channels;
+                else std::cerr << layout.decode_limits->limits.max_output_bytes;
+            }
+            std::cerr << ". `pulp audio inspect` reports the header without decoding.\n";
+            return std::nullopt;
+        }
         std::cerr << "Error: could not decode audio file (unsupported format "
                      "or corrupt): "
                   << path << "\n";
@@ -99,8 +126,10 @@ std::optional<DecodedAudio> decode(const std::string& path) {
 int run_summarize(const std::vector<std::string>& args) {
     std::string file;
     bool json_output = false;
+    bool absolute_paths = false;
     for (std::size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--json") json_output = true;
+        else if (args[i] == "--absolute-paths") absolute_paths = true;
         else if (file.empty() && !args[i].empty() && args[i][0] != '-')
             file = args[i];
         else {
@@ -123,7 +152,10 @@ int run_summarize(const std::vector<std::string>& args) {
         audio::estimate_frequency(view.channel(0), decoded->sample_rate);
 
     if (json_output) {
-        std::cout << audio::metrics_to_json(metrics, file) << "\n";
+        // The document names its input by basename unless asked otherwise, so
+        // a report attached to a shared artifact does not carry a local path.
+        const auto name = absolute_paths ? file : fs::path(file).filename().string();
+        std::cout << audio::metrics_to_json(metrics, name) << "\n";
         return 0;
     }
 

@@ -26,6 +26,7 @@
 #include "cmd_audio_heritage.hpp"
 #include "cmd_audio_plugin_inspect.hpp"
 #include "cmd_audio_render.hpp"
+#include "cmd_audio_inspect.hpp"
 #include "cmd_audio_sampler_mip.hpp"
 #include "cmd_audio_validate.hpp"
 
@@ -54,6 +55,8 @@ static void print_audio_usage() {
     std::cout
         << "  pulp audio plugin-inspect --plugin <bundle> [--format <fmt>] [--id <id>]  # JSON\n";
     std::cout << "  pulp audio sampler-mip build <source> [--levels <1|2>] [--json]\n";
+    std::cout << "  pulp audio inspect <file> [--json] [--include-metadata-text] [--absolute-paths] "
+                 "[--raw --format <fmt> --channels <n> --rate <hz> --endian <le|be> --offset <n>]\n";
     std::cout << "  pulp audio heritage <validate|canonicalize|inspect|render> ...\n";
 }
 
@@ -476,6 +479,9 @@ int cmd_audio(const std::vector<std::string>& args) {
 
     if (args[0] == "sampler-mip") {
         return cmd_audio_sampler_mip({args.begin() + 1, args.end()});
+    }
+    if (args[0] == "inspect") {
+        return cmd_audio_inspect({args.begin() + 1, args.end()});
     }
 
     if (args[0] == "heritage") {
