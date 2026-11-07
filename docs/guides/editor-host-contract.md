@@ -26,6 +26,21 @@ until they do.
 Roles are `editor`, `inspector` and `settings`; several editors, of one role or
 several, can be alive at once over one processor.
 
+## Choosing a UI stack
+
+The contract is toolkit-neutral, but Pulp has one default answer:
+
+| Stack | When | Cost to a build that does not use it |
+|---|---|---|
+| **Vellum on Skia/Dawn** (default) | Every new editor, imported design and generated UI, unless one of the rows below applies. | — |
+| **RmlUi** (opt-in Vellum component, its `rmlui/` subproject) | A product that already ships RML/RCSS skins or Lua skin scripts, or a developer who asks for it. | None: off unless enabled, and it needs neither Skia nor Dawn. |
+| **Native surface** (bring your own renderer) | An existing Metal or GL renderer that draws into the editor's window. It will be reached through `query_extension()`. Pulp does not ship one yet. | None: it needs system frameworks only. |
+
+The rows are alternatives, not rivals. Do not mix two stacks in one editor
+without a stated reason, and never put a Dawn device and a privately owned GPU
+device in the same editor. The `rmlui` agent skill
+(`.agents/skills/rmlui/SKILL.md`) says where RmlUi work lives.
+
 ## How a plug-in gets its default editor
 
 A plug-in's editor is wired per plug-in, never by a process-wide registration.
