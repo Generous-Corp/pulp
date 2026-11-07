@@ -1010,7 +1010,12 @@ class SignalGraph : public format::AudioWorkgroupClient {
             ump.reserve(kHostEventIngressCapacity);
             ump.set_realtime_capacity_limit(true);
             midi.attach_ump(&ump);
-            mpe.reserve(kHostEventIngressCapacity * 2);
+            // Match the graph mailbox's bounded MPE block capacity so a host
+            // block with several valid records can be projected atomically.
+            // The projection still refuses before mutation when the destination
+            // is smaller; tests and callers can explicitly reserve a larger
+            // destination for larger fanout.
+            mpe.reserve(state::ParameterEventQueue::kCapacity);
             mpe.set_realtime_capacity_limit(true);
         }
     };
