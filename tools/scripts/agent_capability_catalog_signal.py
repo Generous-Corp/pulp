@@ -822,7 +822,7 @@ EXPORTS = [
                     header_fingerprint="sha256:da89147c18e3c0479bf02294273bc7ec8ff76bc83cc7e198e645b14fe100a298"),
             binding(role="breakpoint", kind="cpp_type", include="pulp/signal/breakpoint_envelope.hpp",
                     qualified_name="pulp::signal::BreakpointEnvelopeT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:b8e3575a6a474b23bea4444a2e37aee070df4798ab0f88a653d32584c8876e95"),
+                    header_fingerprint="sha256:8a81865dd18a7bc3c9f3d9f1ecd452db5c3de6b9b3b7c6411e3afa6f651d2b69"),
             binding(role="rise_fall", kind="cpp_type", include="pulp/signal/rise_fall_generator.hpp",
                     qualified_name="pulp::signal::RiseFallGeneratorT<float>", target="Pulp::signal",
                     header_fingerprint="sha256:67185305462aff7fef2f089d00f0bf6eeaa5708436e3f042fca6b8271c4b3fa3"),

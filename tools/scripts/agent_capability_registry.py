@@ -1850,7 +1850,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/svf.hpp",
-        "fingerprint": "sha256:62234f80f6d98c8d06655f72a226dfc84ed7b8485d9fca16fadd496bfebe8e5e",
+        "fingerprint": "sha256:cec09c01f149641202c322667431ed0e25249d4b54f2249dcc8e67ca1af742b9",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1862,7 +1862,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/korg35_filter.hpp",
-        "fingerprint": "sha256:3aff9a5183b2bcf1a9d06800177b12933e0187dcbc250f6f855bf830f528dba0",
+        "fingerprint": "sha256:320f7a246d50cbfebae78135920e5d7b133267560eb7c6f0d2f853a4d66b2f80",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1871,7 +1871,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/diode_ladder_filter.hpp",
-        "fingerprint": "sha256:68bcae5c1c0aaa78942baeaa667deb7db5fbdd23ca0344b1b6e89027678c0c80",
+        "fingerprint": "sha256:a84ace865f9a8cf9c9a18939a431e40848ed5d727cf9887745be33349d44f2bd",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1880,7 +1880,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/antiderivative_iir.hpp",
-        "fingerprint": "sha256:a42ec81ba88290015ec908641e34b9d86684720835e1afc1aea1dbb3c58f25f5",
+        "fingerprint": "sha256:3743006ae7b5060e0cdcbc01947211a5713ebba65235ab876b2f661e877ff74e",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
