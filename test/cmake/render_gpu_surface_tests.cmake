@@ -151,6 +151,45 @@
     catch_discover_tests(pulp-test-headless-surface
         ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # Typed GPU pass API. The pure suite (format table, tier, readback layout,
+    # diagnostics) needs no device. The GPU suite draws on a native adapter
+    # and SKIPs without one; its validation cases fall back to Dawn's Null
+    # adapter, which still runs the WGSL compiler.
+    pulp_add_test_suite(pulp-test-gpu-capabilities
+        SOURCES test_gpu_capabilities.cpp
+        LIBRARIES pulp::render
+        INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/core/render/src)
+    add_executable(pulp-test-gpu-pass test_gpu_pass.cpp)
+    target_link_libraries(pulp-test-gpu-pass PRIVATE
+        pulp::render pulp::canvas Catch2::Catch2WithMain)
+    if(PULP_HAS_SKIA)
+        target_include_directories(pulp-test-gpu-pass PRIVATE ${SKIA_INCLUDE_DIRS})
+        if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+            target_include_directories(pulp-test-gpu-pass PRIVATE "${SKIA_INCLUDE_DIRS}/dawn")
+        endif()
+    endif()
+    catch_discover_tests(pulp-test-gpu-pass ${PULP_GPU_TEST_DISCOVERY_ARGS})
+
+    # pulp_add_wgsl_shaders' validator must reject a broken shader and accept
+    # a valid one; 77 (no Null adapter on the host) is a skip.
+    if(TARGET pulp-wgsl-validate)
+        add_test(NAME pulp-wgsl-validate-accepts-valid
+            COMMAND pulp-wgsl-validate
+                    "${PROJECT_SOURCE_DIR}/core/render/shaders/renderer3d_scene.wgsl")
+        add_test(NAME pulp-wgsl-validate-rejects-invalid
+            COMMAND pulp-wgsl-validate
+                    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/wgsl/invalid_identifier.wgsl")
+        set_tests_properties(pulp-wgsl-validate-accepts-valid PROPERTIES
+            SKIP_RETURN_CODE 77 RESOURCE_LOCK pulp_gpu LABELS "render;wgsl" TIMEOUT 60)
+        # Inverting the exit status would let a skip read as a pass, so the
+        # test passes only on the positioned diagnostic, which proves the
+        # compiler ran and rejected the file.
+        set_tests_properties(pulp-wgsl-validate-rejects-invalid PROPERTIES
+            SKIP_REGULAR_EXPRESSION "WGSL was not validated"
+            PASS_REGULAR_EXPRESSION "invalid_identifier\\.wgsl:3:[0-9]+: error: .*colour"
+            RESOURCE_LOCK pulp_gpu LABELS "render;wgsl" TIMEOUT 60)
+    endif()
+
     # Caller SkSL whose locals share Graphite's runtime-effect parameter names
     # (pos, inColor, destColor), drawn and read back on offscreen Graphite
     # against a control shader.

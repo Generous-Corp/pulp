@@ -450,6 +450,9 @@ public:
         BlendMode blend_mode = BlendMode::normal) override;
 
     // Draw a Dawn-backed texture into the current Skia canvas when Graphite is active.
+    // `texture_handle` is a `wgpu::Texture*` on the canvas's own device. When
+    // `keep_alive` is set, the wrapped image holds it until Graphite releases
+    // the texture, so the caller's owner of the texture may go away first.
     bool draw_native_dawn_texture(void* texture_handle,
                                   uint32_t width,
                                   uint32_t height,
@@ -457,7 +460,8 @@ public:
                                   float x,
                                   float y,
                                   float w,
-                                  float h);
+                                  float h,
+                                  std::shared_ptr<const void> keep_alive = {});
 
     // Standalone text measurement. Returns full HTML5
     // TextMetrics for `text` rendered with `family` at `size` pixels —

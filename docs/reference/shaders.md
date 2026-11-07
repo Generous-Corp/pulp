@@ -58,8 +58,10 @@ What is **not** covered by `Canvas::draw_with_sksl` and friends:
   and Three.js bridging already ride this path. Direct WGSL authoring
   lives behind the same interface; see existing call sites for the pattern.
 - **Raw vertex / index buffer authoring.** Out of scope through SkSL.
-  Drop down to Dawn (`core/render/include/pulp/render/gpu_surface.hpp`)
-  if you need it.
+  Write a WGSL pass with the typed API in
+  `core/render/include/pulp/render/gpu_pass.hpp` (see
+  [Your First WGSL Pass in a View](../guides/gpu-pass.md)), or drop down to
+  Dawn (`core/render/include/pulp/render/gpu_surface.hpp`).
 
 This matches the architectural ceiling laid out in
 [`docs/reference/layout-model.md`](layout-model.md) for layout — the
@@ -465,9 +467,10 @@ effect path can't express what you need:
 
 | Need                                      | Use                                                                  |
 |-------------------------------------------|----------------------------------------------------------------------|
-| Custom vertex / mesh / instanced draws    | Dawn directly (`core/render/include/pulp/render/gpu_surface.hpp`)    |
+| Custom vertex / mesh / instanced draws    | Typed WGSL passes (`core/render/include/pulp/render/gpu_pass.hpp`)   |
 | GPU compute (PBR, simulation, mipmap gen) | `GpuCompute` (`core/render/include/pulp/render/gpu_compute.hpp`)     |
-| Mixing native Dawn textures into a paint  | `Canvas::draw_native_dawn_texture` on `SkiaCanvas`                   |
+| Mixing a GPU pass result into a paint     | `draw_gpu_texture()` (`gpu_pass.hpp`)                                |
+| Anything the typed API does not cover     | Dawn directly (`core/render/include/pulp/render/gpu_surface.hpp`)    |
 | Sampling external textures in SkSL        | `SkRuntimeShaderBuilder` directly with `uniform shader` children     |
 
 These paths are intentionally separate — they are not promised to be

@@ -211,6 +211,16 @@ functions:
       - WIDGET_BRIDGE_SCRIPT
     docs: reference/cmake.md#pulp_add_js_bytecode
 
+  - name: pulp_add_wgsl_shaders
+    status: usable
+    summary: Embed .wgsl files as string constants and validate them at build time with Dawn's WGSL compiler.
+    required:
+      - FILES
+    optional:
+      - NAMESPACE
+      - NO_VALIDATE
+    docs: reference/cmake.md#pulp_add_wgsl_shaders
+
   - name: pulp_add_ios_auv3
     status: usable
     summary: Build an iOS AUv3 .appex extension bundle from a Pulp processor.

@@ -9,7 +9,8 @@ Pulp provides four layers of custom rendering, from re-skinning the stock widget
 | **A** — Paint / metrics delegates | `WidgetPainter`, `WidgetMetrics` | C++ | Yes (via Skia) | Re-skinning the **stock** widgets without subclassing them |
 | **B** — CanvasWidget | JS bridge canvas functions | JavaScript | Yes (via Skia) | Custom meters, visualizations, simple graphics |
 | **C** — Canvas API | `Canvas` abstract interface | C++ | Yes (via Skia) | Custom `View` subclasses, complex procedural drawing |
-| **C+** — Dawn/WebGPU | WebGPU render pipeline | C++ / WGSL | Direct GPU | Shader-driven visuals, particle systems, spectrograms |
+| **C+** — Typed GPU passes | `GpuDevice`, `GpuFrame`, `draw_gpu_texture` | C++ / WGSL | Direct GPU (shared device) | Your own vertex/fragment/compute WGSL passes composited into a `View` |
+| **C+** — Raw Dawn/WebGPU | `GpuSurface` device handles | C++ / WGSL | Direct GPU | Anything the typed API does not cover yet |
 
 Start with Layer A if the widget you want already exists and you only want it to
 *look* different. Move to Layer B for a bespoke visual. Move to Layer C when you
@@ -458,6 +459,16 @@ if (gpu && gpu->initialize_standalone()) {
 
 Read the header for the full primitive surface before calling — don't wrap it
 in a convenience layer that doesn't exist.
+
+### Typed WGSL passes
+
+To draw your own WGSL (vertex, fragment or compute) on the same device the UI
+draws with, use the typed API in `<pulp/render/gpu_pass.hpp>`: `GpuDevice`
+wraps the host's `GpuSurface`, `GpuFrame` records and submits passes, and
+`draw_gpu_texture()` composites the result through the canvas. WGSL compile
+errors come back as line/column diagnostics, and
+`pulp_add_wgsl_shaders()` embeds `.wgsl` files and validates them at build
+time. [Your First WGSL Pass in a View](gpu-pass.md) walks through it.
 
 ### Raw Dawn / WebGPU
 

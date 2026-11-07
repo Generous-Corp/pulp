@@ -337,6 +337,10 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpDocumentTypes.cmake")
 # include() preserves the existing public surface of `include(PulpUtils)`.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpEmbedData.cmake")
 
+# pulp_add_wgsl_shaders(): embed .wgsl files as string constants and validate
+# them at build time where the host can run Dawn.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpWgslShaders.cmake")
+
 # pulp_register_font() — public font-registration macro for plugin authors.
 # Lives in its own file so SDK consumers who only want
 # pulp_add_binary_data don't pay for the extra includes/parsing, and so the

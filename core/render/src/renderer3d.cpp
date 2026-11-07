@@ -5,7 +5,9 @@
 #include <pulp/scene/scene_data.hpp>
 
 #if defined(PULP_HAS_SKIA) && defined(PULP_HAS_WEBGPU)
+#include "gpu_readback.hpp"
 #include "renderer3d_internal.hpp"
+#include "renderer3d_scene_wgsl.hpp"
 
 #include "include/core/SkData.h"
 #include "include/core/SkImage.h"
@@ -21,6 +23,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -32,10 +35,6 @@ namespace pulp::render {
 namespace {
 
 #if defined(PULP_HAS_SKIA) && defined(PULP_HAS_WEBGPU)
-constexpr uint32_t align_to(uint32_t value, uint32_t alignment) {
-    return ((value + alignment - 1u) / alignment) * alignment;
-}
-
 bool node_has_non_identity_trs(const pulp::scene::NodeData& node) {
     constexpr float epsilon = 0.00001f;
     auto differs = [](float value, float expected) {
@@ -1611,45 +1610,15 @@ std::optional<FrameContext> acquire_dawn_frame(
 bool finish_frame_readback(FrameContext& ctx,
                            Scene3DRenderResult& result,
                            const wgpu::Buffer& readback_buffer,
-                           uint64_t readback_size,
-                           uint32_t padded_bytes_per_row,
-                           uint32_t compact_bytes_per_row) {
-    bool mapped = false;
-    bool map_ok = false;
-    readback_buffer.MapAsync(wgpu::MapMode::Read,
-                             0,
-                             readback_size,
-                             wgpu::CallbackMode::AllowProcessEvents,
-                             [&mapped, &map_ok](wgpu::MapAsyncStatus status,
-                                                wgpu::StringView) {
-                                 mapped = true;
-                                 map_ok = (status == wgpu::MapAsyncStatus::Success);
-                             });
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (!mapped && std::chrono::steady_clock::now() < deadline) {
-        ctx.instance.ProcessEvents();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    if (!mapped || !map_ok) {
-        result.error = "Renderer3D: readback map failed or timed out";
+                           const detail::PaddedRowLayout& layout) {
+    std::string readback_error;
+    auto pixels = detail::read_padded_buffer(ctx.instance, readback_buffer, layout,
+                                             std::chrono::seconds(2), readback_error);
+    if (!pixels) {
+        result.error = "Renderer3D: " + readback_error;
         return false;
     }
-
-    const auto* padded = static_cast<const uint8_t*>(
-        readback_buffer.GetConstMappedRange(0, readback_size));
-    if (padded == nullptr) {
-        result.error = "Renderer3D: mapped readback returned null";
-        readback_buffer.Unmap();
-        return false;
-    }
-
-    result.rgba.resize(static_cast<size_t>(compact_bytes_per_row) * ctx.height);
-    for (uint32_t y = 0; y < ctx.height; ++y) {
-        std::memcpy(result.rgba.data() + static_cast<size_t>(y) * compact_bytes_per_row,
-                    padded + static_cast<size_t>(y) * padded_bytes_per_row,
-                    compact_bytes_per_row);
-    }
-    readback_buffer.Unmap();
+    result.rgba = std::move(*pixels);
     result.readback_completed = true;
 
     std::unordered_set<uint32_t> colors;
@@ -1892,7 +1861,7 @@ std::optional<SceneAnalysis> analyze_scene_data(
 }
 
 // Per-primitive uniform block; layout mirrors the Uniforms struct in
-// kSceneShaderWgsl below and the two must be edited together.
+// core/render/shaders/renderer3d_scene.wgsl and the two must be edited together.
 struct SceneUniforms {
     float angle;
     float aspect;
@@ -1925,261 +1894,12 @@ struct SceneUniforms {
     float normal_texture_params[4];
 };
 
-constexpr const char* kSceneShaderWgsl = R"wgsl(
-struct Uniforms {
-    angle: f32,
-    aspect: f32,
-    pad0: f32,
-    pad1: f32,
-    base_color_factor: vec4f,
-    unlit: f32,
-    alpha_mask: f32,
-    alpha_cutoff: f32,
-    normal_shading: f32,
-    emissive_factor: vec4f,
-    light_color: vec4f,
-    light_direction: vec4f,
-    point_light_color: vec4f,
-    point_light_position: vec4f,
-    point_light_params: vec4f,
-    spot_light_color: vec4f,
-    spot_light_position: vec4f,
-    spot_light_direction: vec4f,
-    spot_light_params: vec4f,
-    camera_params: vec4f,
-    camera_offset: vec4f,
-    camera_right: vec4f,
-    camera_up: vec4f,
-    camera_depth: vec4f,
-    camera_depth_params: vec4f,
-    material_params: vec4f,
-    emissive_texture_params: vec4f,
-    occlusion_texture_params: vec4f,
-    normal_texture_params: vec4f,
-};
-
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var scene_texture: texture_2d<f32>;
-@group(0) @binding(2) var scene_sampler: sampler;
-@group(0) @binding(3) var emissive_texture: texture_2d<f32>;
-@group(0) @binding(4) var emissive_sampler: sampler;
-@group(0) @binding(5) var metallic_roughness_texture: texture_2d<f32>;
-@group(0) @binding(6) var metallic_roughness_sampler: sampler;
-@group(0) @binding(7) var occlusion_texture: texture_2d<f32>;
-@group(0) @binding(8) var occlusion_sampler: sampler;
-@group(0) @binding(9) var normal_texture: texture_2d<f32>;
-@group(0) @binding(10) var normal_sampler: sampler;
-
-struct VertexIn {
-    @location(0) position: vec3f,
-    @location(1) uv: vec2f,
-    @location(2) color: vec4f,
-    @location(3) normal: vec3f,
-    @location(4) tangent: vec4f,
-    @location(5) normal_uv: vec2f,
-    @location(6) metallic_roughness_uv: vec2f,
-    @location(7) occlusion_uv: vec2f,
-    @location(8) emissive_uv: vec2f,
-};
-
-struct VertexOut {
-    @builtin(position) position: vec4f,
-    @location(0) uv: vec2f,
-    @location(1) shade: f32,
-    @location(2) color: vec4f,
-    @location(3) normal: vec3f,
-    @location(4) local_position: vec3f,
-    @location(5) tangent: vec4f,
-    @location(6) normal_uv: vec2f,
-    @location(7) metallic_roughness_uv: vec2f,
-    @location(8) occlusion_uv: vec2f,
-    @location(9) emissive_uv: vec2f,
-};
-
-@vertex
-fn vs_main(input: VertexIn) -> VertexOut {
-    let cy = cos(uniforms.angle);
-    let sy = sin(uniforms.angle);
-    let cx = cos(0.35);
-    let sx = sin(0.35);
-
-    var p = input.position;
-    let x0 = p.x * cy + p.z * sy;
-    let z0 = -p.x * sy + p.z * cy;
-    let y0 = p.y * cx - z0 * sx;
-    let z1 = p.y * sx + z0 * cx;
-
-    var out: VertexOut;
-    let default_position = vec4f(x0 / uniforms.aspect,
-                                 y0,
-                                 0.5 - z1 * 0.30,
-                                 1.0);
-    let camera_relative = vec3f(x0, y0, z1) - uniforms.camera_offset.xyz;
-    let camera_x = dot(camera_relative, uniforms.camera_right.xyz);
-    let camera_y = dot(camera_relative, uniforms.camera_up.xyz);
-    let camera_z = dot(camera_relative, uniforms.camera_depth.xyz);
-    let camera_aspect = max(uniforms.camera_params.w, 0.0001);
-    let view_z = max(1.2 - camera_z * 0.20, 0.2);
-    let default_depth = 0.5 - camera_z * 0.30;
-    let camera_near = max(uniforms.camera_depth_params.y, 0.0001);
-    let camera_far = max(uniforms.camera_depth_params.z, camera_near + 0.0001);
-    let depth_distance = max(view_z, camera_near);
-    let ranged_depth = clamp((depth_distance - camera_near) /
-                                 (camera_far - camera_near),
-                             0.0,
-                             1.0);
-    let camera_depth_value = mix(default_depth,
-                                 ranged_depth,
-                                 uniforms.camera_depth_params.x);
-    let perspective_position = vec4f(
-        camera_x * uniforms.camera_params.y / (camera_aspect * view_z),
-        camera_y * uniforms.camera_params.y / view_z,
-        camera_depth_value,
-        1.0);
-    let orthographic_position = vec4f(
-        camera_x * uniforms.camera_params.y / camera_aspect,
-        camera_y * uniforms.camera_params.y,
-        camera_depth_value,
-        1.0);
-    let camera_position = mix(perspective_position,
-                              orthographic_position,
-                              uniforms.camera_params.z);
-    out.position = mix(default_position,
-                       camera_position,
-                       uniforms.camera_params.x);
-    out.uv = input.uv;
-    out.shade = clamp(0.82 - z1 * 0.22, 0.45, 1.0);
-    out.color = input.color;
-    out.normal = normalize(input.normal);
-    out.local_position = input.position;
-    out.tangent = input.tangent;
-    out.normal_uv = input.normal_uv;
-    out.metallic_roughness_uv = input.metallic_roughness_uv;
-    out.occlusion_uv = input.occlusion_uv;
-    out.emissive_uv = input.emissive_uv;
-    return out;
-}
-
-@fragment
-fn fs_main(input: VertexOut) -> @location(0) vec4f {
-    let texel = textureSample(scene_texture, scene_sampler, input.uv);
-    let light_dir = normalize(uniforms.light_direction.xyz);
-    let base_normal = normalize(input.normal);
-    let tangent = normalize(input.tangent.xyz);
-    let bitangent = normalize(cross(base_normal, tangent)) * input.tangent.w;
-    let normal_texel = textureSample(normal_texture,
-                                     normal_sampler,
-                                     input.normal_uv);
-    let tangent_normal_xy =
-        (normal_texel.xy * 2.0 - vec2f(1.0)) * uniforms.normal_texture_params.y;
-    let tangent_normal = normalize(vec3f(tangent_normal_xy,
-                                         normal_texel.z * 2.0 - 1.0));
-    let sampled_normal = normalize(tangent * tangent_normal.x +
-                                   bitangent * tangent_normal.y +
-                                   base_normal * tangent_normal.z);
-    let shading_normal = normalize(mix(base_normal,
-                                       sampled_normal,
-                                       uniforms.normal_texture_params.x));
-    let normal_light = clamp(dot(shading_normal, light_dir) * 0.55 + 0.45,
-                             0.18,
-                             1.0);
-    let point_light_dir = normalize(uniforms.point_light_position.xyz -
-                                    input.local_position);
-    let point_distance = length(uniforms.point_light_position.xyz -
-                                input.local_position);
-    let point_range_light = mix(
-        1.0,
-        clamp(1.0 - point_distance / max(uniforms.point_light_params.y, 0.0001),
-              0.0,
-              1.0),
-        uniforms.point_light_params.z);
-    let point_normal_light = clamp(dot(shading_normal, point_light_dir) *
-                                       0.55 + 0.45,
-                                   0.18,
-                                   1.0);
-    let point_light_rgb = uniforms.point_light_color.rgb *
-        point_normal_light * point_range_light * uniforms.point_light_params.x;
-    let spot_to_fragment = normalize(input.local_position -
-                                     uniforms.spot_light_position.xyz);
-    let spot_light_dir = normalize(uniforms.spot_light_position.xyz -
-                                   input.local_position);
-    let spot_distance = length(uniforms.spot_light_position.xyz -
-                               input.local_position);
-    let spot_range_light = mix(
-        1.0,
-        clamp(1.0 - spot_distance / max(uniforms.spot_light_params.w, 0.0001),
-              0.0,
-              1.0),
-        uniforms.spot_light_direction.w);
-    let spot_cone = dot(spot_to_fragment,
-                        normalize(uniforms.spot_light_direction.xyz));
-    let spot_denominator = max(uniforms.spot_light_params.y -
-                                   uniforms.spot_light_params.z,
-                               0.0001);
-    let spot_cone_light = clamp((spot_cone - uniforms.spot_light_params.z) /
-                                    spot_denominator,
-                                0.0,
-                                1.0);
-    let spot_normal_light = clamp(dot(shading_normal, spot_light_dir) *
-                                      0.55 + 0.45,
-                                  0.18,
-                                  1.0);
-    let spot_light_rgb = uniforms.spot_light_color.rgb *
-        spot_normal_light * spot_cone_light * spot_range_light *
-        uniforms.spot_light_params.x;
-    let lit_shade = mix(input.shade, input.shade * normal_light, uniforms.normal_shading);
-    let shade = mix(lit_shade, 1.0, uniforms.unlit);
-    let light_rgb = mix(uniforms.light_color.rgb, vec3f(1.0), uniforms.unlit);
-    let metallic_roughness_texel = textureSample(
-        metallic_roughness_texture,
-        metallic_roughness_sampler,
-        input.metallic_roughness_uv);
-    let metallic = clamp(
-        uniforms.material_params.x *
-            mix(1.0, metallic_roughness_texel.b, uniforms.material_params.z),
-        0.0,
-        1.0);
-    let roughness = clamp(
-        uniforms.material_params.y *
-            mix(1.0, metallic_roughness_texel.g, uniforms.material_params.z),
-        0.0,
-        1.0);
-    let pbr_energy = clamp(1.0 +
-                               (1.0 - metallic) * 0.25 +
-                               (1.0 - roughness) * 0.20,
-                           1.0,
-                           1.45);
-    let material_energy = mix(pbr_energy, 1.0, uniforms.unlit);
-    let alpha = texel.a * uniforms.base_color_factor.a * input.color.a;
-    if uniforms.alpha_mask > 0.5 && alpha < uniforms.alpha_cutoff {
-        discard;
-    }
-    let combined_light_rgb = min(light_rgb + point_light_rgb + spot_light_rgb,
-                                 vec3f(4.0));
-    let occlusion_texel = textureSample(occlusion_texture,
-                                        occlusion_sampler,
-                                        input.occlusion_uv);
-    let occlusion = mix(
-        1.0,
-        mix(1.0, occlusion_texel.r, uniforms.occlusion_texture_params.y),
-        uniforms.occlusion_texture_params.x);
-    let lit = texel.rgb * uniforms.base_color_factor.rgb * input.color.rgb *
-        shade * combined_light_rgb * material_energy * occlusion;
-    let emissive_texel = textureSample(emissive_texture,
-                                       emissive_sampler,
-                                       input.emissive_uv);
-    let emissive_rgb = mix(
-        uniforms.emissive_factor.rgb,
-        uniforms.emissive_factor.rgb * emissive_texel.rgb,
-        uniforms.emissive_texture_params.x);
-    let rgb = min(lit + emissive_rgb, vec3f(1.0));
-    return vec4f(rgb,
-                 alpha);
-}
-)wgsl";
+// The scene shader is core/render/shaders/renderer3d_scene.wgsl, embedded and
+// validated at build time by pulp_add_wgsl_shaders().
+constexpr std::string_view kSceneShaderWgsl = shaders::renderer3d_scene_wgsl;
 
 // Vertex attribute table for SceneVertex; offsets track the field order in
-// renderer3d_internal.hpp and the @location table in kSceneShaderWgsl.
+// renderer3d_internal.hpp and the @location table in renderer3d_scene.wgsl.
 std::array<wgpu::VertexAttribute, 9> scene_vertex_attributes() {
     std::array<wgpu::VertexAttribute, 9> attributes{};
     attributes[0].format = wgpu::VertexFormat::Float32x3;
@@ -2788,9 +2508,7 @@ bool build_scene_gpu_primitives(FrameContext& ctx,
 // finish_frame_readback needs to de-pad it.
 struct SceneReadback {
     wgpu::Buffer buffer;
-    uint64_t size = 0;
-    uint32_t padded_bytes_per_row = 0;
-    uint32_t compact_bytes_per_row = 0;
+    detail::PaddedRowLayout layout;
 };
 
 // Encode and submit the scene pass: clear, draw every primitive in the order
@@ -2821,14 +2539,10 @@ std::optional<SceneReadback> encode_scene_pass(
 
     const uint32_t bytes_per_pixel = 4;
     SceneReadback readback;
-    readback.compact_bytes_per_row = config.width * bytes_per_pixel;
-    readback.padded_bytes_per_row =
-        align_to(readback.compact_bytes_per_row, 256);
-    readback.size =
-        static_cast<uint64_t>(readback.padded_bytes_per_row) * config.height;
+    readback.layout = detail::padded_row_layout(config.width, config.height, bytes_per_pixel);
     wgpu::BufferDescriptor readback_desc{};
     readback_desc.label = "Pulp Renderer3D SceneData readback";
-    readback_desc.size = readback.size;
+    readback_desc.size = readback.layout.buffer_size;
     readback_desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
     readback.buffer = ctx.device.CreateBuffer(&readback_desc);
     if (!readback.buffer) {
@@ -2858,7 +2572,7 @@ std::optional<SceneReadback> encode_scene_pass(
     copy_src.aspect = wgpu::TextureAspect::All;
     wgpu::TexelCopyBufferInfo copy_dst{};
     copy_dst.buffer = readback.buffer;
-    copy_dst.layout.bytesPerRow = readback.padded_bytes_per_row;
+    copy_dst.layout.bytesPerRow = readback.layout.padded_bytes_per_row;
     copy_dst.layout.rowsPerImage = config.height;
     wgpu::Extent3D copy_size{config.width, config.height, 1};
     encoder.CopyTextureToBuffer(&copy_src, &copy_dst, &copy_size);
@@ -3218,13 +2932,11 @@ fn fs_main(input: VertexOut) -> @location(0) vec4f {
     pass_desc.depthStencilAttachment = &depth_attachment;
 
     const uint32_t bytes_per_pixel = 4;
-    const uint32_t compact_bytes_per_row = config.width * bytes_per_pixel;
-    const uint32_t padded_bytes_per_row = align_to(compact_bytes_per_row, 256);
-    const uint64_t readback_size =
-        static_cast<uint64_t>(padded_bytes_per_row) * config.height;
+    const auto readback_layout =
+        detail::padded_row_layout(config.width, config.height, bytes_per_pixel);
     wgpu::BufferDescriptor readback_desc{};
     readback_desc.label = "Pulp Renderer3D hardcoded cube readback";
-    readback_desc.size = readback_size;
+    readback_desc.size = readback_layout.buffer_size;
     readback_desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
     auto readback_buffer = device.CreateBuffer(&readback_desc);
     if (!readback_buffer) {
@@ -3251,7 +2963,7 @@ fn fs_main(input: VertexOut) -> @location(0) vec4f {
     copy_src.aspect = wgpu::TextureAspect::All;
     wgpu::TexelCopyBufferInfo copy_dst{};
     copy_dst.buffer = readback_buffer;
-    copy_dst.layout.bytesPerRow = padded_bytes_per_row;
+    copy_dst.layout.bytesPerRow = readback_layout.padded_bytes_per_row;
     copy_dst.layout.rowsPerImage = config.height;
     wgpu::Extent3D copy_size{config.width, config.height, 1};
     encoder.CopyTextureToBuffer(&copy_src, &copy_dst, &copy_size);
@@ -3260,8 +2972,7 @@ fn fs_main(input: VertexOut) -> @location(0) vec4f {
     queue.Submit(1, &command_buffer);
     result.command_submitted = true;
 
-    if (!finish_frame_readback(ctx, result, readback_buffer, readback_size,
-                               padded_bytes_per_row, compact_bytes_per_row)) {
+    if (!finish_frame_readback(ctx, result, readback_buffer, readback_layout)) {
         return result;
     }
 
@@ -3310,7 +3021,7 @@ Scene3DRenderResult Renderer3D::render_scene_data(
     auto& ctx = *frame;
 
     wgpu::ShaderSourceWGSL wgsl{};
-    wgsl.code = kSceneShaderWgsl;
+    wgsl.code = wgpu::StringView(kSceneShaderWgsl.data(), kSceneShaderWgsl.size());
     wgpu::ShaderModuleDescriptor shader_desc{};
     shader_desc.label = "Pulp Renderer3D SceneData shader";
     shader_desc.nextInChain = &wgsl;
@@ -3349,9 +3060,7 @@ Scene3DRenderResult Renderer3D::render_scene_data(
     auto readback = encode_scene_pass(ctx, config, gpu_primitives, result);
     if (!readback) return result;
 
-    if (!finish_frame_readback(ctx, result, readback->buffer, readback->size,
-                               readback->padded_bytes_per_row,
-                               readback->compact_bytes_per_row)) {
+    if (!finish_frame_readback(ctx, result, readback->buffer, readback->layout)) {
         return result;
     }
 
