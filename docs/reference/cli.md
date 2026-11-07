@@ -2281,10 +2281,12 @@ pulp audio waveform take.wav --png take-wave.png --select 12,18
 ```
 
 Input is read through `MemoryMappedAudioReader` in fixed windows, so a
-multi-hour file renders with bounded memory and never goes through the
-whole-file WAV decoder (which caps at 100,000,000 frames). Formats the ranged
-reader cannot seek (FLAC, MP3, Ogg) fall back to the registry's whole-file
-decode; lossy decoders on Apple platforms are CoreAudio and the sidecar says
+multi-hour WAV or AIFF renders with memory bounded by the window and never
+goes through the whole-file WAV decoder (which caps at 100,000,000 frames).
+Formats the ranged reader cannot seek (FLAC, MP3, Ogg, and the platform
+decoders) are decoded **whole-file once**: memory is then bounded by the
+decoded file, not the window, and the verb prints a one-line `note:` on stderr
+saying so. Lossy decoders on Apple platforms are CoreAudio and the sidecar says
 so. Float input above 0 dBFS is drawn clamped and reported unclamped; nothing
 is normalized.
 
@@ -2310,7 +2312,8 @@ column holds the peak over the STFT frames it covers; a trailing partial frame
 is dropped rather than zero-padded. A range shorter than one FFT exits `2`
 with the fix in the message.
 
-Waveform flags: `--select <start>,<end>` shades a selection in seconds. Peaks
+Waveform flags: `--select <start>,<end>` shades a selection in seconds; both
+ends must lie inside the rendered range. Peaks
 come from `WaveformOverview` at a base resolution chosen for the plot width;
 a column whose peak reaches full scale carries a red marker at the top and
 bottom edge.
@@ -2335,7 +2338,7 @@ Sidecar (`schema: "pulp.audio.image.v1"`), one object per image:
 | `channel` | The channel index rendered |
 | `settings` | Spectrogram: `fft`, `hop`, `window`, `scale`, `db_range`, `db_ceiling`, `mel_convention`, `column_reduction`, `stft_frames`, `bins`, `plot_width`, `plot_height`. Waveform: `samples_per_peak`, `peaks`, `plot_width`, `plot_height`, `clip_marker`, and `selection_seconds` when `--select` was given |
 | `image.png`, `image.width`, `image.height` | Output basename (or full path) and final pixel size including axes and footer |
-| `true_peak.method` | `sample_peak`: the maximum absolute sample value over the rendered range, not an oversampled inter-sample peak |
+| `true_peak.method` | `sample_peak`: the maximum absolute sample value over the rendered range of the rendered channel only, not an oversampled inter-sample peak |
 | `true_peak.linear`, `true_peak.dbfs` | That peak, unclamped (float above full scale reports above 1.0 / above 0 dBFS) |
 | `true_peak.clipped` | `true` when the peak is at or above full scale |
 

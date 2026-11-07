@@ -6,7 +6,10 @@
 //
 // Long inputs are read through `MemoryMappedAudioReader` in fixed windows and
 // never through `decode_wav` (which caps at 100,000,000 frames), so a
-// multi-hour WAV renders with bounded memory.
+// multi-hour WAV or AIFF renders with memory bounded by the window. Formats the
+// mapped reader cannot seek (FLAC, MP3, Ogg, platform decoders) fall back to
+// the registry's one-time whole-file decode, and the verbs print a one-line
+// note when that happens.
 //
 // Paths in the sidecar are basenames unless `--absolute-paths` is given, so a
 // sidecar attached to a public CI artifact never leaks a checkout layout.

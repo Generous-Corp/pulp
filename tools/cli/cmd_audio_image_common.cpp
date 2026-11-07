@@ -262,11 +262,24 @@ bool stream_channel(OpenedInput& input, std::uint32_t channel, std::uint64_t win
     for (std::uint32_t c = 0; c < buffers; ++c)
         pointers[c] = storage[c].data();
 
+    // Ranged reads keep memory bounded by the window. A format the mapped
+    // reader cannot seek (FLAC, MP3, Ogg, platform decoders) falls back to the
+    // registry's whole-file decode, cached once; say so once on stderr because
+    // the bounded-memory promise does not hold there.
+    bool noted_fallback = false;
     for (std::uint64_t frame = input.start_frame; frame < input.end_frame;) {
         const std::uint64_t count = std::min(window_frames, input.end_frame - frame);
-        if (!input.reader.read_frames(pointers.data(), buffers, frame, count)) {
-            std::cerr << "Error: failed to read frames " << frame << ".." << frame + count << "\n";
-            return false;
+        if (!input.reader.read_frames_ranged_only(pointers.data(), buffers, frame, count)) {
+            if (!noted_fallback) {
+                std::cerr << "note: " << input.decoder_name
+                          << " is not range-readable; decoding the whole file once (memory is "
+                             "bounded by the file, not the window)\n";
+                noted_fallback = true;
+            }
+            if (!input.reader.read_frames(pointers.data(), buffers, frame, count)) {
+                std::cerr << "Error: failed to read frames " << frame << ".." << frame + count << "\n";
+                return false;
+            }
         }
         std::span<const float> window(storage[channel].data(), static_cast<std::size_t>(count));
         for (float sample : window) {
