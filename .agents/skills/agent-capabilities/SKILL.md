@@ -142,6 +142,11 @@ evidence to the specific API or header fingerprint, not a literal global
 `SURFACE_INVENTORY_VERSION`; an unrelated inventory update must not invalidate
 that evidence. None of these source checks establishes installed execution.
 
+The G-7 control and event edge probe API is runtime diagnostics plumbing. Keep
+its public header fingerprint and surface inventory current when probe members
+change, but do not advertise probe attachment or live edge observation as a
+generator-facing capability.
+
 ### A legacy header that changes bytes cannot be re-fingerprinted
 
 `tools/agent-capabilities/legacy-unreviewed-baseline.json` is FROZEN: it may
