@@ -414,7 +414,14 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         runtime::log_error("SignalGraph: connection identity metadata is out of sync");
         return nullptr;
     }
-    auto cg = std::make_shared<CompiledGraph>(!compiling_trigger_state_);
+    // Trigger generations normally omit the ordinary MIDI egress scratch, but
+    // a G-5 host-ingress generation may carry a routed MidiOutput sink.  Keep
+    // that fixed scratch available whenever the topology admits one.
+    const bool has_midi_output = std::any_of(
+        nodes_.begin(), nodes_.end(), [](const auto& node) {
+            return node.type == NodeType::MidiOutput;
+        });
+    auto cg = std::make_shared<CompiledGraph>(!compiling_trigger_state_ || has_midi_output);
     cg->execution_generation = authoring_generation_;
     if (std::any_of(nodes_.begin(), nodes_.end(),
                     [](const auto& n) { return n.spectral_identity.has_value(); })) {
@@ -583,9 +590,12 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         }
         auto [runtime_it, inserted] = cg->runtime.emplace(n.id, std::move(rt));
         (void)inserted;
-        // Typed plans reject MIDI nodes and callbacks before compilation. Do not
-        // duplicate unused MIDI/SysEx arenas in their bounded generations.
-        if (!compiling_trigger_state_) {
+        // Every admitted routed generation owns fixed MIDI/UMP/MPE scratch.
+        // Trigger plans now admit the serial host-ingress lane, so leaving
+        // these arenas unprepared would make the graph silently drop the
+        // projected payload before a Processor or MidiOutput can consume it.
+        if (!compiling_trigger_state_ || n.type == NodeType::MidiInput ||
+            n.type == NodeType::MidiOutput || n.type == NodeType::Plugin) {
             prepare_midi_block_storage(runtime_it->second.midi_in, runtime_it->second.midi_in_ump);
             prepare_midi_block_storage(runtime_it->second.midi_out,
                                        runtime_it->second.midi_out_ump);
@@ -972,6 +982,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 const auto kind = plan.nodes[i].kind;
                 if (kind == graph::GraphRuntimeNodeKind::MidiInput) {
                     cg->routed.midi_inputs.push_back({i, plan.nodes[i].id});
+                    if (cg->trigger_state != nullptr && cg->host_event_midi_input == 0)
+                        cg->host_event_midi_input = plan.nodes[i].id;
                     plan_has_midi = true;
                 } else if (kind == graph::GraphRuntimeNodeKind::MidiOutput) {
                     cg->routed.midi_outputs.push_back({i, plan.nodes[i].id});
