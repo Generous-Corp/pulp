@@ -15,11 +15,15 @@
 #include <pulp/host/native_handle_visitor.hpp>
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/format/process_block.hpp>
+#include <pulp/format/process_context.hpp>
 #include <pulp/state/parameter.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <variant>
 #include <vector>
 #include <functional>
 #include <cstdint>
@@ -88,6 +92,56 @@ struct HostParamInfo {
 using ParamRate = state::ParamRate;
 
 struct PluginLoadResult;
+
+// ── Host identity and per-slot host settings ────────────────────────────
+
+/// How Pulp introduces itself to the plugins it hosts.
+///
+/// Process-wide, because a plugin may ask during its own initialization, before
+/// any slot exists to configure: CLAP reads `clap_host::name/vendor/url/version`
+/// and VST3 calls `IHostApplication::getName`. Set it once at startup, before
+/// loading plugins; slots that are already loaded keep what they were given.
+/// VST3 carries only the name.
+struct PluginHostIdentity {
+    std::string name = "Pulp";
+    std::string vendor = "Pulp";
+    std::string url = "https://github.com/Generous-Corp/pulp";
+    std::string version = "1";
+};
+
+void set_plugin_host_identity(PluginHostIdentity identity);
+PluginHostIdentity plugin_host_identity();
+
+/// Per-slot processing settings. Control thread only, and they take effect at
+/// the next prepare(): VST3 fixes its process mode and sample size in
+/// `setupProcessing`, and CLAP's render mode is a main-thread call.
+struct PluginHostSettings {
+    /// `Offline` tells the plugin it is rendering faster or slower than wall
+    /// clock (VST3 `kOffline`, CLAP `CLAP_RENDER_OFFLINE`), so it may pick its
+    /// higher-quality path. A CLAP plugin that declares a hard realtime
+    /// requirement stays in realtime mode.
+    format::ProcessMode process_mode = format::ProcessMode::Realtime;
+    /// Process in 64-bit floating point when the plugin supports it (VST3
+    /// `kSample64`, CLAP `CLAP_AUDIO_PORT_SUPPORTS_64BITS` on every port). The
+    /// host buffers stay 32-bit; the slot converts through prepared scratch.
+    bool prefer_double_precision = false;
+    /// Hand the plugin the host transport (tempo, position, play/record/loop
+    /// state). Turning this off makes the slot transport-insensitive, which keeps
+    /// it eligible for anticipative rendering; the plugin then sees a
+    /// free-running clock with no tempo.
+    bool deliver_transport = true;
+};
+
+/// A parameter change the PLUGIN made: an edit in its own editor, or a value it
+/// emitted from its process call. Gestures bracket a user drag so an automation
+/// recorder can tell a touch from a single jump.
+struct PluginParameterEdit {
+    enum class Kind : std::uint8_t { begin_gesture, value, end_gesture };
+    Kind kind = Kind::value;
+    std::uint32_t id = 0;
+    /// Plain (not normalized) value; meaningful for `Kind::value`.
+    float plain_value = 0.0f;
+};
 
 // ── Plugin Slot ─────────────────────────────────────────────────────────
 
@@ -407,6 +461,49 @@ class PluginSlot {
     /// Detached strict-load receipt; unavailable for legacy or unsupported loaders.
     virtual std::optional<PluginResolvedIdentity> resolved_identity() const {
         return std::nullopt;
+    }
+
+    // ── Host settings, plugin feedback, and restart requests ────────────────
+    // Appended last to preserve the existing PluginSlot virtual ordering.
+
+    /// Apply per-slot host settings; see PluginHostSettings. Control thread,
+    /// effective at the next prepare(). Returns false when this slot cannot
+    /// honor host settings at all (the default).
+    virtual bool set_host_settings(const PluginHostSettings& /*settings*/) {
+        return false;
+    }
+    virtual PluginHostSettings host_settings() const {
+        return {};
+    }
+
+    /// Move parameter edits the plugin made since the last call into `out`, in
+    /// the order they happened, and return how many were written. Control
+    /// thread. Edits that arrive from the audio thread travel through a bounded
+    /// lock-free queue; when it is full the newest edits are dropped and counted
+    /// in `dropped_parameter_edit_count()`.
+    virtual std::size_t drain_parameter_edits(std::span<PluginParameterEdit> /*out*/) {
+        return 0;
+    }
+    virtual std::uint64_t dropped_parameter_edit_count() const noexcept {
+        return 0;
+    }
+
+    /// Monotonic count of plugin requests that only a re-prepare can honor: a
+    /// latency change (VST3 `restartComponent(kLatencyChanged)`, CLAP
+    /// `clap_host_latency::changed`), an I/O change, or an explicit restart
+    /// request. Safe from any thread. A host compares it against the value it
+    /// saw at prepare(); SignalGraph does so in `plugin_restart_pending()` and
+    /// rebuilds its latency compensation in `apply_plugin_restarts()`.
+    virtual std::uint64_t restart_request_count() const noexcept {
+        return 0;
+    }
+
+    /// Monotonic count of plugin notices that its saved state changed in a way
+    /// no parameter edit describes (CLAP `clap_host_state::mark_dirty`, VST3
+    /// `IComponentHandler2::setDirty(true)`). A host uses it to mark a session
+    /// as needing a save. Safe from any thread.
+    virtual std::uint64_t state_change_count() const noexcept {
+        return 0;
     }
 };
 
