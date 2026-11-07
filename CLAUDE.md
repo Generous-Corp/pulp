@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Start with [`docs/dev/code-rules.md`](docs/dev/code-rules.md), the one-page card of design, style, file layout, real-time safety and test rules. This file covers the rest.
+
 ## What Is This
 
 Pulp is a cross-platform audio plugin and application framework. MIT-licensed. C++20 core, Swift on Apple, JS-scripted GPU UIs via Dawn/Skia/QuickJS. See `VISION.md` for the full picture.
