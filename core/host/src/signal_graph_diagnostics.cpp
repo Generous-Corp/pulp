@@ -6,6 +6,20 @@
 
 namespace pulp::host {
 
+namespace {
+
+bool valid_probe_port(const SignalGraph& graph, const PortHandle& handle, bool output) {
+    const auto* n = graph.node(handle.node);
+    if (!n || handle.output != output)
+        return false;
+    const auto& ports = output ? n->output_ports : n->input_ports;
+    return std::any_of(ports.begin(), ports.end(), [&](const auto& p) {
+        return p.name == handle.name && p.index == handle.index && p.kind == handle.kind;
+    });
+}
+
+} // namespace
+
 SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHandle& source,
                                                                   const PortHandle& destination) {
     GraphMutationLock lock(*this);
@@ -104,6 +118,186 @@ SignalGraph::EdgeProbeIdentity SignalGraph::audio_edge_probe_identity() const {
     GraphMutationLock lock(*this);
     const auto cg = read_snapshot_(true);
     return cg && cg->audio_edge_probe ? cg->audio_edge_probe_identity : EdgeProbeIdentity{};
+}
+
+SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(
+    const PortHandle& source, NodeId destination, std::uint32_t parameter_id) {
+    GraphMutationLock lock(*this);
+    if (refuse_spectral_mutation_())
+        return EdgeProbeStatus::UnsupportedExecution;
+    if (in_swap_edit_)
+        return EdgeProbeStatus::Busy;
+    const auto cg = read_snapshot_(true);
+    if (!cg)
+        return EdgeProbeStatus::Unprepared;
+    if (!canonical_executor_routing_enabled() || parallel_routing_enabled() ||
+        anticipation_enabled() || !cg->routed.serial.valid ||
+        cg->pdc_execution_domain == PdcExecutionDomain::Legacy ||
+        cg->pdc_execution_domain == PdcExecutionDomain::RoutedParallel)
+        return EdgeProbeStatus::UnsupportedExecution;
+    if (source.kind != PortKind::Audio || !valid_probe_port(*this, source, true))
+        return EdgeProbeStatus::UnknownPort;
+    const auto& plan = cg->routed.serial.snapshot.plan();
+    for (std::size_t i = 0; i < cg->connections.size(); ++i) {
+        const auto& edge = cg->connections[i];
+        if (!edge.automation || edge.source_node != source.node ||
+            edge.source_port != source.index || edge.dest_node != destination ||
+            edge.automation_param_id != parameter_id)
+            continue;
+        for (std::uint32_t j = 0; j < plan.connections.size(); ++j) {
+            const auto& resolved = plan.connections[j];
+            if (!graph::is_automation_conn(resolved) ||
+                plan.nodes[resolved.source_index].id != source.node ||
+                plan.nodes[resolved.dest_index].id != destination ||
+                resolved.source_port != source.index ||
+                resolved.automation.param_id != parameter_id)
+                continue;
+            auto probe = std::make_unique<format::GraphRuntimeControlEdgeProbe>();
+            probe->source_index = resolved.source_index;
+            probe->source_port = resolved.source_port;
+            probe->destination_index = resolved.dest_index;
+            probe->parameter_id = parameter_id;
+            probe->edge_index = j;
+            probe->samples.attach();
+            cg->control_edge_probe_identity = {{diagnostic_graph_identity_, authoring_generation_},
+                                               cg->connection_identities[i],
+                                               source.node,
+                                               destination,
+                                               source.index,
+                                               0,
+                                               parameter_id};
+            cg->control_edge_probe = std::move(probe);
+            return EdgeProbeStatus::Attached;
+        }
+        return EdgeProbeStatus::UnsupportedExecution;
+    }
+    return EdgeProbeStatus::MissingEdge;
+}
+
+void SignalGraph::detach_control_edge_probe() {
+    GraphMutationLock lock(*this);
+    if (refuse_spectral_mutation_())
+        return;
+    if (const auto cg = read_snapshot_(true)) {
+        cg->control_edge_probe.reset();
+        cg->control_edge_probe_identity = {};
+    }
+}
+
+bool SignalGraph::read_control_edge_probe(graph::GraphRuntimeProbeSample& sample) {
+    GraphMutationLock lock(*this);
+    const auto cg = read_snapshot_(true);
+    return cg && cg->control_edge_probe && cg->control_edge_probe->samples.try_pop(sample);
+}
+
+std::uint64_t SignalGraph::control_edge_probe_dropped() const {
+    GraphMutationLock lock(*this);
+    const auto cg = read_snapshot_(true);
+    return cg && cg->control_edge_probe ? cg->control_edge_probe->samples.dropped() : 0;
+}
+
+SignalGraph::EdgeProbeStatus SignalGraph::control_edge_probe_status() const {
+    GraphMutationLock lock(*this);
+    const auto cg = read_snapshot_(true);
+    if (!cg)
+        return EdgeProbeStatus::Unprepared;
+    return cg->control_edge_probe && cg->control_edge_probe->samples.attached()
+               ? EdgeProbeStatus::Attached
+               : EdgeProbeStatus::Detached;
+}
+
+SignalGraph::EdgeProbeIdentity SignalGraph::control_edge_probe_identity() const {
+    GraphMutationLock lock(*this);
+    const auto cg = read_snapshot_(true);
+    return cg && cg->control_edge_probe ? cg->control_edge_probe_identity : EdgeProbeIdentity{};
+}
+
+SignalGraph::EdgeProbeStatus SignalGraph::attach_event_edge_probe(const PortHandle& source,
+                                                                   const PortHandle& destination) {
+    GraphMutationLock lock(*this);
+    if (refuse_spectral_mutation_())
+        return EdgeProbeStatus::UnsupportedExecution;
+    if (in_swap_edit_)
+        return EdgeProbeStatus::Busy;
+    const auto cg = read_snapshot_(true);
+    if (!cg)
+        return EdgeProbeStatus::Unprepared;
+    if (!canonical_executor_routing_enabled() || parallel_routing_enabled() ||
+        anticipation_enabled() || !cg->routed.serial.valid ||
+        cg->pdc_execution_domain == PdcExecutionDomain::Legacy ||
+        cg->pdc_execution_domain == PdcExecutionDomain::RoutedParallel)
+        return EdgeProbeStatus::UnsupportedExecution;
+    if (source.kind != PortKind::Midi || destination.kind != PortKind::Midi)
+        return EdgeProbeStatus::UnsupportedKind;
+    if (!valid_probe_port(*this, source, true) || !valid_probe_port(*this, destination, false))
+        return EdgeProbeStatus::UnknownPort;
+    const auto& plan = cg->routed.serial.snapshot.plan();
+    for (std::size_t i = 0; i < cg->connections.size(); ++i) {
+        const auto& edge = cg->connections[i];
+        if (!edge.midi || edge.source_node != source.node || edge.dest_node != destination.node)
+            continue;
+        for (std::uint32_t j = 0; j < plan.connections.size(); ++j) {
+            const auto& resolved = plan.connections[j];
+            if (!graph::is_event(resolved) ||
+                plan.nodes[resolved.source_index].id != source.node ||
+                plan.nodes[resolved.dest_index].id != destination.node)
+                continue;
+            auto probe = std::make_unique<format::GraphRuntimeEventEdgeProbe>();
+            probe->source_index = resolved.source_index;
+            probe->destination_index = resolved.dest_index;
+            probe->edge_index = j;
+            probe->samples.attach();
+            cg->event_edge_probe_identity = {{diagnostic_graph_identity_, authoring_generation_},
+                                             cg->connection_identities[i],
+                                             source.node,
+                                             destination.node,
+                                             source.index,
+                                             destination.index,
+                                             0};
+            cg->event_edge_probe = std::move(probe);
+            return EdgeProbeStatus::Attached;
+        }
+        return EdgeProbeStatus::UnsupportedExecution;
+    }
+    return EdgeProbeStatus::MissingEdge;
+}
+
+void SignalGraph::detach_event_edge_probe() {
+    GraphMutationLock lock(*this);
+    if (refuse_spectral_mutation_())
+        return;
+    if (const auto cg = read_snapshot_(true)) {
+        cg->event_edge_probe.reset();
+        cg->event_edge_probe_identity = {};
+    }
+}
+
+bool SignalGraph::read_event_edge_probe(graph::GraphRuntimeProbeSample& sample) {
+    GraphMutationLock lock(*this);
+    const auto cg = read_snapshot_(true);
+    return cg && cg->event_edge_probe && cg->event_edge_probe->samples.try_pop(sample);
+}
+
+std::uint64_t SignalGraph::event_edge_probe_dropped() const {
+    GraphMutationLock lock(*this);
+    const auto cg = read_snapshot_(true);
+    return cg && cg->event_edge_probe ? cg->event_edge_probe->samples.dropped() : 0;
+}
+
+SignalGraph::EdgeProbeStatus SignalGraph::event_edge_probe_status() const {
+    GraphMutationLock lock(*this);
+    const auto cg = read_snapshot_(true);
+    if (!cg)
+        return EdgeProbeStatus::Unprepared;
+    return cg->event_edge_probe && cg->event_edge_probe->samples.attached()
+               ? EdgeProbeStatus::Attached
+               : EdgeProbeStatus::Detached;
+}
+
+SignalGraph::EdgeProbeIdentity SignalGraph::event_edge_probe_identity() const {
+    GraphMutationLock lock(*this);
+    const auto cg = read_snapshot_(true);
+    return cg && cg->event_edge_probe ? cg->event_edge_probe_identity : EdgeProbeIdentity{};
 }
 
 std::uint64_t SignalGraph::next_diagnostic_graph_identity_() noexcept {

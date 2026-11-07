@@ -188,7 +188,9 @@ std::string handle_graph(const std::string& params_json) {
                                         {"source_node", "--source-node"},
                                         {"source_port", "--source-port"},
                                         {"destination_node", "--destination-node"},
-                                        {"destination_port", "--destination-port"}}) {
+                                        {"destination_port", "--destination-port"},
+                                        {"edge_kind", "--edge-kind"},
+                                        {"destination_param", "--destination-param"}}) {
             const auto value = extract_string(params_json, key);
             if (!value.empty()) {
                 arguments.emplace_back(flag);
