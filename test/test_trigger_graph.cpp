@@ -264,6 +264,10 @@ TEST_CASE("Host ingress preflights MPE fanout and retries without tracker mutati
         event.producer_sequence = sequence;
         REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
     }
+    // Reserve the projection sidecar before the first attempt. The graph-owned
+    // destination remains at its smaller default reservation so this refusal
+    // exercises the destination-capacity preflight specifically.
+    Access::reserve_host_projection_mpe(fixture.graph, 2048);
     REQUIRE(fixture.graph.process_checked(block.out, block.in, 1) ==
             TriggerGraphResult::ProcessingFailure);
 
@@ -271,12 +275,9 @@ TEST_CASE("Host ingress preflights MPE fanout and retries without tracker mutati
     CHECK(tracker.find(1, 0)->pitch_bend_semitones == before_bend);
     CHECK(Access::host_projection_mpe_size(fixture.graph) == 0);
 
-    // The projection has enough room for the fanout, but the graph-owned
-    // destination starts at its smaller 1024-event reservation. Expanding
-    // both destinations lets the same staged records retry without a second
-    // publication, proving the destination refusal did not consume them or
-    // mutate tracker state.
-    Access::reserve_host_projection_mpe(fixture.graph, 2048);
+    // Expanding the graph-owned destination lets the same staged records retry
+    // without a second publication, proving the destination refusal did not
+    // consume them or mutate tracker state.
     Access::reserve_host_destination_mpe(fixture.graph, 2048);
     REQUIRE(fixture.graph.begin_host_event_block(1, 0, 1) == HostEventResult::Accepted);
     REQUIRE(fixture.graph.process_checked(block.out, block.in, 1) == TriggerGraphResult::Accepted);
