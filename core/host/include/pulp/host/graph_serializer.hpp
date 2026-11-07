@@ -18,6 +18,7 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/processor_restore.hpp>
 #include <filesystem>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -113,6 +114,31 @@ class GraphSerializer {
     // (x,y)) is optional — pass an empty map if the graph has no UI.
     static std::string to_json(const SignalGraph& graph,
                                const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout = {});
+
+    struct SaveResult {
+        enum class Code : std::uint8_t {
+            ok,
+            serialization_refused,
+            file_too_large,
+            parent_unavailable,
+            temporary_unavailable,
+            write_failed,
+            replace_failed,
+            directory_sync_failed,
+        };
+
+        bool ok = false;
+        Code code = Code::serialization_refused;
+        std::string error;
+    };
+
+    static const char* save_code_name(SaveResult::Code code) noexcept;
+
+    // Serialize one bounded graph file. The destination is replaced only
+    // after the complete canonical JSON payload has been written.
+    static SaveResult
+    to_file(const SignalGraph& graph, const std::filesystem::path& path,
+            const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout = {});
 
     // Result of a load attempt. Plugins that couldn't be re-resolved show
     // up in `missing_plugins` with their original identity tuple — the
