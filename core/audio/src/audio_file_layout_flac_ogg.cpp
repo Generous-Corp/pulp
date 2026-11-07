@@ -18,14 +18,22 @@ namespace {
 
 const char* flac_block_name(std::uint8_t type) {
     switch (type) {
-        case 0: return "STREAMINFO";
-        case 1: return "PADDING";
-        case 2: return "APPLICATION";
-        case 3: return "SEEKTABLE";
-        case 4: return "VORBIS_COMMENT";
-        case 5: return "CUESHEET";
-        case 6: return "PICTURE";
-        default: return "RESERVED";
+    case 0:
+        return "STREAMINFO";
+    case 1:
+        return "PADDING";
+    case 2:
+        return "APPLICATION";
+    case 3:
+        return "SEEKTABLE";
+    case 4:
+        return "VORBIS_COMMENT";
+    case 5:
+        return "CUESHEET";
+    case 6:
+        return "PICTURE";
+    default:
+        return "RESERVED";
     }
 }
 
@@ -78,7 +86,8 @@ void inspect_flac_layout(Builder& b) {
     while (!last && offset < file_size && !report.regions_truncated) {
         std::array<std::uint8_t, 4> header{};
         if (!b.reader.read_exact(offset, header)) {
-            auto& stub = b.add_region(offset, 0u, file_size - offset, "", LayoutRegionKind::unknown);
+            auto& stub =
+                b.add_region(offset, 0u, file_size - offset, "", LayoutRegionKind::unknown);
             stub.note = "shorter than a metadata block header";
             break;
         }
@@ -88,9 +97,12 @@ void inspect_flac_layout(Builder& b) {
         const auto payload_offset = offset + 4u;
         const std::string id = flac_block_name(type);
         LayoutRegionKind kind = LayoutRegionKind::metadata;
-        if (type == 0u) kind = LayoutRegionKind::fmt;
-        else if (type == 1u) kind = LayoutRegionKind::padding;
-        else if (type >= 7u) kind = LayoutRegionKind::unknown;
+        if (type == 0u)
+            kind = LayoutRegionKind::fmt;
+        else if (type == 1u)
+            kind = LayoutRegionKind::padding;
+        else if (type >= 7u)
+            kind = LayoutRegionKind::unknown;
         auto& region = b.add_region(offset, 4u, length, id, kind);
         region.fields.push_back({"block_type", static_cast<std::uint64_t>(type)});
         region.fields.push_back({"is_last", last});
@@ -141,30 +153,41 @@ void inspect_flac_layout(Builder& b) {
             b.present(id, offset, length);
         } else if (type == 4u) {
             b.present(id, offset, length);
-            auto p = b.reader.read(payload_offset, std::min<std::uint64_t>(length, kMaxPayloadRead));
+            auto p =
+                b.reader.read(payload_offset, std::min<std::uint64_t>(length, kMaxPayloadRead));
             parse_vorbis_comments(b, region, id, p.data(), p.size());
         } else if (type == 2u) {
             auto p = b.reader.read(payload_offset, std::min<std::uint64_t>(length, 4u));
             if (p.size() == 4u)
-                region.fields.push_back({"application_id", printable_id(fourcc(p.data())) ? fourcc(p.data()) : hex_bytes(p.data(), 4u)});
+                region.fields.push_back({"application_id", printable_id(fourcc(p.data()))
+                                                               ? fourcc(p.data())
+                                                               : hex_bytes(p.data(), 4u)});
             b.present(id, offset, length);
         } else if (type == 6u) {
             auto p = b.reader.read(payload_offset, std::min<std::uint64_t>(length, 512u));
             if (p.size() >= 8u) {
-                region.fields.push_back({"picture_type", static_cast<std::uint64_t>(read_u32be(p.data()))});
+                region.fields.push_back(
+                    {"picture_type", static_cast<std::uint64_t>(read_u32be(p.data()))});
                 const auto mime_length = read_u32be(p.data() + 4u);
                 std::size_t at = 8u;
                 if (mime_length <= p.size() - at) {
-                    region.fields.push_back({"mime_type", std::string(reinterpret_cast<const char*>(p.data() + at), mime_length)});
+                    region.fields.push_back(
+                        {"mime_type",
+                         std::string(reinterpret_cast<const char*>(p.data() + at), mime_length)});
                     at += mime_length;
                     if (at + 4u <= p.size()) {
                         const auto desc_length = read_u32be(p.data() + at);
                         at += 4u;
                         if (desc_length <= p.size() - at && at + desc_length + 20u <= p.size()) {
                             at += desc_length;
-                            region.fields.push_back({"width", static_cast<std::uint64_t>(read_u32be(p.data() + at))});
-                            region.fields.push_back({"height", static_cast<std::uint64_t>(read_u32be(p.data() + at + 4u))});
-                            region.fields.push_back({"data_length", static_cast<std::uint64_t>(read_u32be(p.data() + at + 16u))});
+                            region.fields.push_back(
+                                {"width", static_cast<std::uint64_t>(read_u32be(p.data() + at))});
+                            region.fields.push_back(
+                                {"height",
+                                 static_cast<std::uint64_t>(read_u32be(p.data() + at + 4u))});
+                            region.fields.push_back(
+                                {"data_length",
+                                 static_cast<std::uint64_t>(read_u32be(p.data() + at + 16u))});
                         }
                     }
                 }
@@ -181,15 +204,19 @@ void inspect_flac_layout(Builder& b) {
 
     // First frame header, when the metadata ended inside the file.
     if (last && offset < file_size) {
-        auto& frames = b.add_region(offset, 0u, file_size - offset, "frames", LayoutRegionKind::data);
+        auto& frames =
+            b.add_region(offset, 0u, file_size - offset, "frames", LayoutRegionKind::data);
         std::array<std::uint8_t, 4> header{};
         if (b.reader.read_exact(offset, header)) {
             const auto sync = static_cast<std::uint32_t>((header[0] << 6u) | (header[1] >> 2u));
             if (sync == 0x3FFEu) {
-                frames.fields.push_back({"first_frame_blocking_strategy",
-                                         std::string((header[1] & 0x1u) != 0u ? "variable" : "fixed")});
-                frames.fields.push_back({"first_frame_block_size_code", static_cast<std::uint64_t>(header[2] >> 4u)});
-                frames.fields.push_back({"first_frame_sample_rate_code", static_cast<std::uint64_t>(header[2] & 0xfu)});
+                frames.fields.push_back(
+                    {"first_frame_blocking_strategy",
+                     std::string((header[1] & 0x1u) != 0u ? "variable" : "fixed")});
+                frames.fields.push_back(
+                    {"first_frame_block_size_code", static_cast<std::uint64_t>(header[2] >> 4u)});
+                frames.fields.push_back(
+                    {"first_frame_sample_rate_code", static_cast<std::uint64_t>(header[2] & 0xfu)});
             } else {
                 frames.note = "bytes after the last metadata block do not start with a frame sync";
             }
@@ -203,7 +230,8 @@ void inspect_flac_layout(Builder& b) {
         stream.bits_per_sample = bits;
         stream.valid_bits = bits;
         stream.frames = total_samples;
-        stream.duration_seconds = sample_rate != 0u ? static_cast<double>(total_samples) / sample_rate : 0.0;
+        stream.duration_seconds =
+            sample_rate != 0u ? static_cast<double>(total_samples) / sample_rate : 0.0;
         stream.encoding = "flac";
         report.stream = stream;
         b.set_decode_limits(total_samples, channels);
@@ -220,7 +248,7 @@ constexpr std::size_t kMaxOggPages = 512u;
 
 struct OggPage {
     std::uint64_t offset = 0u;
-    std::uint64_t size = 0u;        // header + lacing + body
+    std::uint64_t size = 0u; // header + lacing + body
     std::uint64_t body_offset = 0u;
     std::uint64_t body_size = 0u;
     std::uint8_t header_type = 0u;
@@ -259,18 +287,21 @@ struct OggStream {
     std::uint32_t pre_skip = 0u;
     std::uint64_t last_granule = 0u;
     std::uint64_t pages = 0u;
-    std::size_t data_region = SIZE_MAX;   // index into report.regions, SIZE_MAX when none
+    std::size_t data_region = SIZE_MAX; // index into report.regions, SIZE_MAX when none
     bool eos = false;
     bool comments_pending = false;
 };
 
-void identify(Builder& b, LayoutRegion& region, OggStream& stream, const std::uint8_t* p, std::size_t size) {
+void identify(Builder& b, LayoutRegion& region, OggStream& stream, const std::uint8_t* p,
+              std::size_t size) {
     if (size >= 30u && std::memcmp(p, "\x01vorbis", 7u) == 0) {
         stream.codec = "vorbis";
         stream.channels = p[11];
         stream.sample_rate = read_u32le(p + 12u);
         region.fields.push_back({"vorbis_version", static_cast<std::uint64_t>(read_u32le(p + 7u))});
-        region.fields.push_back({"bitrate_nominal", static_cast<std::int64_t>(static_cast<std::int32_t>(read_u32le(p + 20u)))});
+        region.fields.push_back(
+            {"bitrate_nominal",
+             static_cast<std::int64_t>(static_cast<std::int32_t>(read_u32le(p + 20u)))});
     } else if (size >= 19u && std::memcmp(p, "OpusHead", 8u) == 0) {
         stream.codec = "opus";
         stream.channels = p[9];
@@ -278,15 +309,23 @@ void identify(Builder& b, LayoutRegion& region, OggStream& stream, const std::ui
         stream.sample_rate = 48000u;
         region.fields.push_back({"opus_version", static_cast<std::uint64_t>(p[8])});
         region.fields.push_back({"pre_skip", static_cast<std::uint64_t>(stream.pre_skip)});
-        region.fields.push_back({"input_sample_rate", static_cast<std::uint64_t>(read_u32le(p + 12u))});
-        region.fields.push_back({"output_gain", static_cast<std::int64_t>(static_cast<std::int16_t>(read_u16le(p + 16u)))});
+        region.fields.push_back(
+            {"input_sample_rate", static_cast<std::uint64_t>(read_u32le(p + 12u))});
+        region.fields.push_back({"output_gain", static_cast<std::int64_t>(static_cast<std::int16_t>(
+                                                    read_u16le(p + 16u)))});
         region.fields.push_back({"channel_mapping_family", static_cast<std::uint64_t>(p[18])});
-    } else if (size >= 51u && std::memcmp(p, "\x7f""FLAC", 5u) == 0 && std::memcmp(p + 9u, "fLaC", 4u) == 0) {
+    } else if (size >= 51u &&
+               std::memcmp(p,
+                           "\x7f"
+                           "FLAC",
+                           5u) == 0 &&
+               std::memcmp(p + 9u, "fLaC", 4u) == 0) {
         stream.codec = "flac";
         const auto packed = read_u64be(p + 17u + 10u);
         stream.sample_rate = static_cast<std::uint32_t>(packed >> 44u);
         stream.channels = static_cast<std::uint32_t>((packed >> 41u) & 0x7u) + 1u;
-        region.fields.push_back({"bits_per_sample", static_cast<std::uint64_t>(((packed >> 36u) & 0x1fu) + 1u)});
+        region.fields.push_back(
+            {"bits_per_sample", static_cast<std::uint64_t>(((packed >> 36u) & 0x1fu) + 1u)});
         region.fields.push_back({"total_samples", packed & ((1ull << 36u) - 1u)});
         region.fields.push_back({"header_packets", static_cast<std::uint64_t>(read_u16be(p + 7u))});
     } else if (size >= 8u && std::memcmp(p, "Speex   ", 8u) == 0) {
@@ -297,7 +336,8 @@ void identify(Builder& b, LayoutRegion& region, OggStream& stream, const std::ui
         }
     } else {
         stream.codec = "unknown";
-        region.fields.push_back({"first_packet_prefix", hex_bytes(p, std::min<std::size_t>(size, 8u))});
+        region.fields.push_back(
+            {"first_packet_prefix", hex_bytes(p, std::min<std::size_t>(size, 8u))});
     }
     region.fields.push_back({"codec", stream.codec});
     if (stream.channels != 0u)
@@ -321,8 +361,10 @@ void inspect_ogg_layout(Builder& b) {
     while (offset < file_size && pages < kMaxOggPages && !report.regions_truncated) {
         OggPage page;
         if (!read_page(b.reader, offset, page)) {
-            auto& stub = b.add_region(offset, 0u, file_size - offset, "", LayoutRegionKind::unknown);
-            stub.note = pages == 0u ? "first page header is malformed" : "bytes after the last whole page do not start a page";
+            auto& stub =
+                b.add_region(offset, 0u, file_size - offset, "", LayoutRegionKind::unknown);
+            stub.note = pages == 0u ? "first page header is malformed"
+                                    : "bytes after the last whole page do not start a page";
             break;
         }
         ++pages;
@@ -331,8 +373,9 @@ void inspect_ogg_layout(Builder& b) {
         const bool past_eof = page.offset + page.size > file_size;
         if (past_eof) {
             b.warn(LayoutWarningKind::chunk_past_eof, page.offset,
-                   "page " + std::to_string(page.sequence) + " declares " + std::to_string(page.size) +
-                       " bytes, " + std::to_string(page.offset + page.size - file_size) + " past end of file");
+                   "page " + std::to_string(page.sequence) + " declares " +
+                       std::to_string(page.size) + " bytes, " +
+                       std::to_string(page.offset + page.size - file_size) + " past end of file");
         }
 
         OggStream* stream = nullptr;
@@ -352,20 +395,27 @@ void inspect_ogg_layout(Builder& b) {
             region.fields.push_back({"page_sequence", static_cast<std::uint64_t>(page.sequence)});
             region.fields.push_back({"bos", bos});
             region.fields.push_back({"segments", static_cast<std::uint64_t>(page.segments)});
-            auto body = b.reader.read(page.body_offset, std::min<std::uint64_t>(page.body_size, 512u));
+            auto body =
+                b.reader.read(page.body_offset, std::min<std::uint64_t>(page.body_size, 512u));
             identify(b, region, *stream, body.data(), body.size());
-            region.note = bos ? "identification header" : "page with no preceding BOS page for its serial";
+            region.note =
+                bos ? "identification header" : "page with no preceding BOS page for its serial";
         } else if (stream->comments_pending) {
             stream->comments_pending = false;
-            auto& region = b.add_region(page.offset, 0u, page.size, "OggS", LayoutRegionKind::metadata);
+            auto& region =
+                b.add_region(page.offset, 0u, page.size, "OggS", LayoutRegionKind::metadata);
             region.fields.push_back({"serial", static_cast<std::uint64_t>(page.serial)});
             region.fields.push_back({"page_sequence", static_cast<std::uint64_t>(page.sequence)});
             region.note = "comment header";
-            b.present(stream->codec == "opus" ? "OpusTags" : "VorbisComment", page.offset, page.size);
-            auto body = b.reader.read(page.body_offset, std::min<std::uint64_t>(page.body_size, kMaxPayloadRead));
+            b.present(stream->codec == "opus" ? "OpusTags" : "VorbisComment", page.offset,
+                      page.size);
+            auto body = b.reader.read(page.body_offset,
+                                      std::min<std::uint64_t>(page.body_size, kMaxPayloadRead));
             std::size_t skip = 0u;
-            if (stream->codec == "vorbis" && body.size() >= 7u) skip = 7u;
-            else if (stream->codec == "opus" && body.size() >= 8u) skip = 8u;
+            if (stream->codec == "vorbis" && body.size() >= 7u)
+                skip = 7u;
+            else if (stream->codec == "opus" && body.size() >= 8u)
+                skip = 8u;
             if (skip != 0u || stream->codec == "flac")
                 parse_vorbis_comments(b, region, "OggS", body.data() + skip, body.size() - skip);
         } else {
@@ -415,12 +465,14 @@ void inspect_ogg_layout(Builder& b) {
     facts.encoding = first.codec;
     if (walk_complete && first.eos && streams.size() == 1u) {
         facts.frames = first.codec == "opus" && first.last_granule >= first.pre_skip
-            ? first.last_granule - first.pre_skip : first.last_granule;
-        facts.duration_seconds = facts.sample_rate != 0u
-            ? static_cast<double>(facts.frames) / facts.sample_rate : 0.0;
+                           ? first.last_granule - first.pre_skip
+                           : first.last_granule;
+        facts.duration_seconds =
+            facts.sample_rate != 0u ? static_cast<double>(facts.frames) / facts.sample_rate : 0.0;
     }
     report.stream = facts;
-    report.regions.front().fields.push_back({"logical_streams", static_cast<std::uint64_t>(streams.size())});
+    report.regions.front().fields.push_back(
+        {"logical_streams", static_cast<std::uint64_t>(streams.size())});
     report.regions.front().fields.push_back({"chained", streams.size() > 1u});
     report.regions.front().fields.push_back({"pages_walked", static_cast<std::uint64_t>(pages)});
     report.regions.front().fields.push_back({"page_walk_complete", walk_complete});

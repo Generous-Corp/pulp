@@ -162,7 +162,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/audio_file_layout.hpp",
-      "fingerprint": "sha256:25ad9111143d686c7473070b7e932dc9307db15d8d483676d37e35d32475bdc7",
+      "fingerprint": "sha256:99299a8f26504abe44e94850a16dec2f96413828a8432bb569d5ba40b502b173",
       "include": "pulp/audio/audio_file_layout.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1129,7 +1129,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/wav_decoder.hpp",
-      "fingerprint": "sha256:3eba2447c95d96e693aa13dc4e4d96192c75bb26faf61ed2e69ea43729a44f8e",
+      "fingerprint": "sha256:78e0bfc06ff17643493ebb343f9440348149324221e525de656a016d855be009",
       "include": "pulp/audio/wav_decoder.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

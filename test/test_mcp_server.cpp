@@ -1804,19 +1804,22 @@ TEST_CASE("MCP audio probe JSON reports missing project roots", "[mcp][tools][au
     REQUIRE(response.find("Unknown tool") == std::string::npos);
 }
 
-TEST_CASE("MCP audio file inspect validates its path before shelling out", "[mcp][tools][audio][inspect]") {
+TEST_CASE("MCP audio file inspect validates its path before shelling out",
+          "[mcp][tools][audio][inspect]") {
     ScopedCurrentPath cwd(repo_root_path());
     auto missing = handle_request(tool_call("57", "pulp_audio_file_inspect", R"JSON({})JSON"));
     require_contains(missing, R"JSON("id":57)JSON");
     require_contains(missing, "Error: path is required");
-    auto option = handle_request(tool_call("58", "pulp_audio_file_inspect", R"JSON({"path":"--json"})JSON"));
+    auto option =
+        handle_request(tool_call("58", "pulp_audio_file_inspect", R"JSON({"path":"--json"})JSON"));
     require_contains(option, "Error: path is required and must be a file path");
-    auto bad_raw = handle_request(
-        tool_call("59", "pulp_audio_file_inspect", R"JSON({"path":"a.pcm","raw_channels":"two"})JSON"));
+    auto bad_raw = handle_request(tool_call("59", "pulp_audio_file_inspect",
+                                            R"JSON({"path":"a.pcm","raw_channels":"two"})JSON"));
     require_contains(bad_raw, "raw_channels must be a non-negative integer");
 }
 
-TEST_CASE("MCP audio file inspect returns exactly the CLI's JSON document", "[mcp][tools][audio][inspect]") {
+TEST_CASE("MCP audio file inspect returns exactly the CLI's JSON document",
+          "[mcp][tools][audio][inspect]") {
     // The tool is a wrapper over `pulp audio inspect --json`; an agent must
     // see the same document either way, so both are parsed and compared.
     CliProjectRoot project(built_cli());
@@ -1826,19 +1829,40 @@ TEST_CASE("MCP audio file inspect returns exactly the CLI's JSON document", "[mc
         // 44-byte PCM header plus two 16-bit frames and a bext chunk with text.
         std::vector<std::uint8_t> bytes;
         auto put_id = [&](const char* id) { bytes.insert(bytes.end(), id, id + 4); };
-        auto put_u16 = [&](std::uint16_t v) { bytes.push_back(static_cast<std::uint8_t>(v)); bytes.push_back(static_cast<std::uint8_t>(v >> 8)); };
-        auto put_u32 = [&](std::uint32_t v) { for (unsigned s = 0; s < 32; s += 8) bytes.push_back(static_cast<std::uint8_t>(v >> s)); };
-        put_id("RIFF"); put_u32(0); put_id("WAVE");
-        put_id("fmt "); put_u32(16); put_u16(1); put_u16(1); put_u32(48000); put_u32(96000); put_u16(2); put_u16(16);
-        put_id("bext"); put_u32(602);
+        auto put_u16 = [&](std::uint16_t v) {
+            bytes.push_back(static_cast<std::uint8_t>(v));
+            bytes.push_back(static_cast<std::uint8_t>(v >> 8));
+        };
+        auto put_u32 = [&](std::uint32_t v) {
+            for (unsigned s = 0; s < 32; s += 8)
+                bytes.push_back(static_cast<std::uint8_t>(v >> s));
+        };
+        put_id("RIFF");
+        put_u32(0);
+        put_id("WAVE");
+        put_id("fmt ");
+        put_u32(16);
+        put_u16(1);
+        put_u16(1);
+        put_u32(48000);
+        put_u32(96000);
+        put_u16(2);
+        put_u16(16);
+        put_id("bext");
+        put_u32(602);
         const std::string description = "MCP parity description";
         bytes.insert(bytes.end(), description.begin(), description.end());
         bytes.insert(bytes.end(), 602u - description.size(), 0u);
-        put_id("data"); put_u32(4); put_u16(0); put_u16(1000);
+        put_id("data");
+        put_u32(4);
+        put_u16(0);
+        put_u16(1000);
         const auto riff = static_cast<std::uint32_t>(bytes.size() - 8);
-        for (unsigned s = 0; s < 32; s += 8) bytes[4 + s / 8] = static_cast<std::uint8_t>(riff >> s);
+        for (unsigned s = 0; s < 32; s += 8)
+            bytes[4 + s / 8] = static_cast<std::uint8_t>(riff >> s);
         std::ofstream out(wav, std::ios::binary);
-        out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        out.write(reinterpret_cast<const char*>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
     }
 
     auto compare = [&](const std::string& cli_flags, const std::string& tool_args) {
@@ -1865,9 +1889,9 @@ TEST_CASE("MCP audio file inspect returns exactly the CLI's JSON document", "[mc
     CHECK(full["metadata"].hasObjectMember("text"));
 
     // A tool error from the CLI (exit 1) surfaces as an error, not a document.
-    const auto broken = handle_request(tool_call(
-        "61", "pulp_audio_file_inspect",
-        "{\"path\":" + json_string(wav.string()) + ",\"raw_format\":\"s16\"}"));
+    const auto broken = handle_request(
+        tool_call("61", "pulp_audio_file_inspect",
+                  "{\"path\":" + json_string(wav.string()) + ",\"raw_format\":\"s16\"}"));
     require_contains(broken, "Error: pulp audio inspect failed.");
     require_contains(broken, "--raw requires every one of");
 }

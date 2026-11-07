@@ -117,8 +117,9 @@ std::string audio_file_layout_to_json(const AudioFileLayoutReport& report,
     } else {
         root.setMember("decode", choc::value::Value());
     }
-    root.setMember("exceeds_decode_limits",
-                   report.decode_limits ? limits_to_json(*report.decode_limits) : choc::value::Value());
+    root.setMember("exceeds_decode_limits", report.decode_limits
+                                                ? limits_to_json(*report.decode_limits)
+                                                : choc::value::Value());
 
     root.setMember("regions", regions_to_json(report));
     root.setMember("regions_truncated", report.regions_truncated);

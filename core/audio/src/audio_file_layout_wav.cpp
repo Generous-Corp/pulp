@@ -30,11 +30,11 @@ constexpr std::array<std::uint8_t, 12> kW64ChunkSuffix{0xF3, 0xAC, 0xD3, 0x11, 0
 struct Envelope {
     bool w64 = false;
     bool rf64 = false;
-    std::uint64_t header_size = 12u;       // bytes before the first chunk
-    std::uint64_t chunk_header_size = 8u;  // id + size
-    std::uint64_t alignment = 2u;          // chunk start alignment
-    std::uint64_t declared_end = 0u;       // envelope end the header claims
-    bool declared_sentinel = false;        // RIFF size field is 0xFFFFFFFF
+    std::uint64_t header_size = 12u;      // bytes before the first chunk
+    std::uint64_t chunk_header_size = 8u; // id + size
+    std::uint64_t alignment = 2u;         // chunk start alignment
+    std::uint64_t declared_end = 0u;      // envelope end the header claims
+    bool declared_sentinel = false;       // RIFF size field is 0xFFFFFFFF
 };
 
 struct Ds64 {
@@ -63,19 +63,19 @@ struct Walk {
     std::uint64_t fmt_count = 0u;
     bool data_seen = false;
     std::uint64_t data_offset = 0u;
-    std::uint64_t data_size = 0u;        // size the decoder would use
+    std::uint64_t data_size = 0u; // size the decoder would use
     std::uint64_t data_actual = 0u;
     std::optional<std::uint64_t> fact_frames;
     bool has_bext = false;
-    bool structural_fault = false;      // the strict decoder stops here
+    bool structural_fault = false; // the strict decoder stops here
     std::string first_fault;
 };
 
 LayoutRegionKind classify(std::string_view id) {
     static constexpr std::array<std::string_view, 24> kMetadata{
-        "bext", "iXML", "axml", "acid", "LIST", "cue ", "smpl", "inst", "plst", "labl",
-        "note", "ltxt", "PEAK", "ID3 ", "id3 ", "umid", "levl", "link", "chna", "minf",
-        "elm1", "CART", "_PMX", "DISP"};
+        "bext", "iXML", "axml", "acid", "LIST", "cue ", "smpl", "inst",
+        "plst", "labl", "note", "ltxt", "PEAK", "ID3 ", "id3 ", "umid",
+        "levl", "link", "chna", "minf", "elm1", "CART", "_PMX", "DISP"};
     if (id == "fmt " || id == "fact")
         return LayoutRegionKind::fmt;
     if (id == "data")
@@ -91,13 +91,20 @@ LayoutRegionKind classify(std::string_view id) {
 
 const char* encoding_name(std::uint16_t translated_tag) {
     switch (translated_tag) {
-        case 0x0001: return "pcm";
-        case 0x0002: return "adpcm";
-        case 0x0003: return "float";
-        case 0x0006: return "alaw";
-        case 0x0007: return "mulaw";
-        case 0x0011: return "adpcm";
-        default: return "unknown";
+    case 0x0001:
+        return "pcm";
+    case 0x0002:
+        return "adpcm";
+    case 0x0003:
+        return "float";
+    case 0x0006:
+        return "alaw";
+    case 0x0007:
+        return "mulaw";
+    case 0x0011:
+        return "adpcm";
+    default:
+        return "unknown";
     }
 }
 
@@ -141,7 +148,8 @@ struct ChunkHeader {
     bool printable = true;
 };
 
-std::optional<ChunkHeader> read_chunk_header(Builder& b, const Envelope& env, std::uint64_t offset) {
+std::optional<ChunkHeader> read_chunk_header(Builder& b, const Envelope& env,
+                                             std::uint64_t offset) {
     std::array<std::uint8_t, 24> raw{};
     if (!b.reader.read_exact(offset, std::span(raw.data(), env.chunk_header_size)))
         return std::nullopt;
@@ -202,9 +210,11 @@ void parse_fmt(Builder& b, LayoutRegion& region, Walk& walk, std::uint64_t paylo
     region.fields.push_back({"sample_rate", static_cast<std::uint64_t>(fields.sample_rate)});
     region.fields.push_back({"byte_rate", static_cast<std::uint64_t>(byte_rate)});
     region.fields.push_back({"block_align", static_cast<std::uint64_t>(fields.block_align)});
-    region.fields.push_back({"bits_per_sample", static_cast<std::uint64_t>(fields.bits_per_sample)});
+    region.fields.push_back(
+        {"bits_per_sample", static_cast<std::uint64_t>(fields.bits_per_sample)});
     if (payload.size() >= 18u) {
-        region.fields.push_back({"cb_size", static_cast<std::uint64_t>(read_u16le(payload.data() + 16u))});
+        region.fields.push_back(
+            {"cb_size", static_cast<std::uint64_t>(read_u16le(payload.data() + 16u))});
     }
     fields.valid_bits = fields.bits_per_sample;
     if (fields.format_tag == 0xFFFEu && payload.size() >= 40u) {
@@ -214,7 +224,8 @@ void parse_fmt(Builder& b, LayoutRegion& region, Walk& walk, std::uint64_t paylo
         fields.has_channel_mask = true;
         region.fields.push_back({"valid_bits", static_cast<std::uint64_t>(fields.valid_bits)});
         region.fields.push_back({"channel_mask", static_cast<std::uint64_t>(fields.channel_mask)});
-        region.fields.push_back({"sub_format_tag", static_cast<std::uint64_t>(read_u16le(payload.data() + 24u))});
+        region.fields.push_back(
+            {"sub_format_tag", static_cast<std::uint64_t>(read_u16le(payload.data() + 24u))});
         region.fields.push_back({"sub_format_guid", hex_bytes(payload.data() + 24u, 16u)});
         if (fields.valid_bits > fields.bits_per_sample) {
             b.warn(LayoutWarningKind::valid_bits_above_container, region.offset,
@@ -224,8 +235,8 @@ void parse_fmt(Builder& b, LayoutRegion& region, Walk& walk, std::uint64_t paylo
         const auto mask_channels = static_cast<std::uint32_t>(std::popcount(fields.channel_mask));
         if (fields.channel_mask != 0u && mask_channels != fields.channels) {
             b.warn(LayoutWarningKind::extensible_mask_channel_mismatch, region.offset,
-                   "channel mask names " + std::to_string(mask_channels) +
-                       " speakers for " + std::to_string(fields.channels) + " channels");
+                   "channel mask names " + std::to_string(mask_channels) + " speakers for " +
+                       std::to_string(fields.channels) + " channels");
         }
     } else if (fields.format_tag == 0xFFFEu) {
         region.note = "extensible format tag without the 40-byte extension";
@@ -261,8 +272,10 @@ void parse_ds64(Builder& b, LayoutRegion& region, Ds64& ds64, std::uint64_t payl
     }
 }
 
-void parse_bext(Builder& b, LayoutRegion& region, std::uint64_t payload_offset, std::uint64_t declared) {
-    auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, kMaxPayloadRead));
+void parse_bext(Builder& b, LayoutRegion& region, std::uint64_t payload_offset,
+                std::uint64_t declared) {
+    auto payload =
+        b.reader.read(payload_offset, std::min<std::uint64_t>(declared, kMaxPayloadRead));
     if (payload.size() < 602u) {
         region.note = "bext payload shorter than the 602-byte fixed header";
         return;
@@ -272,7 +285,8 @@ void parse_bext(Builder& b, LayoutRegion& region, std::uint64_t payload_offset, 
     region.fields.push_back({"time_reference", read_u64le(payload.data() + 338u)});
     if (version >= 2u) {
         auto s16 = [&](std::size_t at) {
-            return static_cast<std::int64_t>(static_cast<std::int16_t>(read_u16le(payload.data() + at)));
+            return static_cast<std::int64_t>(
+                static_cast<std::int16_t>(read_u16le(payload.data() + at)));
         };
         region.fields.push_back({"loudness_value", s16(412u)});
         region.fields.push_back({"loudness_range", s16(414u)});
@@ -291,8 +305,10 @@ void parse_bext(Builder& b, LayoutRegion& region, std::uint64_t payload_offset, 
     }
 }
 
-void parse_list(Builder& b, LayoutRegion& region, std::uint64_t payload_offset, std::uint64_t declared) {
-    auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, kMaxPayloadRead));
+void parse_list(Builder& b, LayoutRegion& region, std::uint64_t payload_offset,
+                std::uint64_t declared) {
+    auto payload =
+        b.reader.read(payload_offset, std::min<std::uint64_t>(declared, kMaxPayloadRead));
     if (payload.size() < 4u)
         return;
     const auto list_type = fourcc(payload.data());
@@ -316,22 +332,27 @@ void parse_list(Builder& b, LayoutRegion& region, std::uint64_t payload_offset, 
                       std::to_string(payload.size()) + " bytes";
 }
 
-void parse_acid(Builder& b, LayoutRegion& region, std::uint64_t payload_offset, std::uint64_t declared) {
+void parse_acid(Builder& b, LayoutRegion& region, std::uint64_t payload_offset,
+                std::uint64_t declared) {
     auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, 64u));
     if (const auto acid = decode_acid_chunk(payload.data(), payload.size())) {
         region.fields.push_back({"flags", static_cast<std::uint64_t>(acid->flags)});
         region.fields.push_back({"root_note", static_cast<std::uint64_t>(acid->root_note)});
         region.fields.push_back({"num_beats", static_cast<std::uint64_t>(acid->num_beats)});
-        region.fields.push_back({"meter_numerator", static_cast<std::uint64_t>(acid->meter_numerator)});
-        region.fields.push_back({"meter_denominator", static_cast<std::uint64_t>(acid->meter_denominator)});
+        region.fields.push_back(
+            {"meter_numerator", static_cast<std::uint64_t>(acid->meter_numerator)});
+        region.fields.push_back(
+            {"meter_denominator", static_cast<std::uint64_t>(acid->meter_denominator)});
         region.fields.push_back({"tempo_bpm", static_cast<double>(acid->tempo_bpm)});
     }
 }
 
-void parse_xml_text(Builder& b, const std::string& id, std::uint64_t payload_offset, std::uint64_t declared) {
+void parse_xml_text(Builder& b, const std::string& id, std::uint64_t payload_offset,
+                    std::uint64_t declared) {
     if (!b.options.include_metadata_text)
         return;
-    auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, kMaxPayloadRead));
+    auto payload =
+        b.reader.read(payload_offset, std::min<std::uint64_t>(declared, kMaxPayloadRead));
     auto text = trimmed_text(payload.data(), payload.size());
     if (declared > payload.size())
         text += "\n[truncated at " + std::to_string(payload.size()) + " bytes]";
@@ -370,20 +391,22 @@ void finish(Builder& b, const Envelope& env, Walk& walk, std::uint64_t walk_end)
         stream.bits_per_sample = facts->bits_per_sample;
         stream.valid_bits = walk.fmt->extensible ? walk.fmt->valid_bits : facts->bits_per_sample;
         stream.frames = facts->total_frames;
-        stream.duration_seconds = facts->sample_rate != 0u
-            ? static_cast<double>(facts->total_frames) / facts->sample_rate : 0.0;
+        stream.duration_seconds =
+            facts->sample_rate != 0u ? static_cast<double>(facts->total_frames) / facts->sample_rate
+                                     : 0.0;
         stream.encoding = encoding_name(facts->translated_format_tag);
         stream.bytes_per_frame = facts->bytes_per_frame;
         report.stream = stream;
         b.set_decode_limits(facts->total_frames, facts->channels);
-        const bool adpcm = facts->translated_format_tag == 0x0002u ||
-                           facts->translated_format_tag == 0x0011u;
+        const bool adpcm =
+            facts->translated_format_tag == 0x0002u || facts->translated_format_tag == 0x0011u;
         if (!adpcm && facts->bytes_per_frame != 0u &&
             walk.data_size % facts->bytes_per_frame != 0u) {
             whole_frames = false;
             b.warn(LayoutWarningKind::truncated_data, walk.data_offset,
-                   "data payload of " + std::to_string(walk.data_size) + " bytes is not a whole number of " +
-                       std::to_string(facts->bytes_per_frame) + "-byte frames");
+                   "data payload of " + std::to_string(walk.data_size) +
+                       " bytes is not a whole number of " + std::to_string(facts->bytes_per_frame) +
+                       "-byte frames");
         }
     }
 
@@ -392,8 +415,8 @@ void finish(Builder& b, const Envelope& env, Walk& walk, std::uint64_t walk_end)
     if (env.w64 || env.rf64) {
         verdict.reason = "in-memory decoder accepts RIFF envelopes only";
     } else if (env.declared_end != b.reader.size()) {
-        verdict.reason = "RIFF size " + std::to_string(env.declared_end - 8u) + " does not match file size " +
-                         std::to_string(b.reader.size());
+        verdict.reason = "RIFF size " + std::to_string(env.declared_end - 8u) +
+                         " does not match file size " + std::to_string(b.reader.size());
     } else if (walk.structural_fault) {
         verdict.reason = walk.first_fault;
     } else if (!walk.fmt) {
@@ -436,7 +459,8 @@ void inspect_wav_layout(Builder& b) {
     std::uint64_t offset = env.header_size;
     if (env.rf64) {
         if (const auto first = read_chunk_header(b, env, offset); first && first->id == "ds64") {
-            auto& region = b.add_region(offset, env.chunk_header_size, first->declared, first->id, LayoutRegionKind::envelope);
+            auto& region = b.add_region(offset, env.chunk_header_size, first->declared, first->id,
+                                        LayoutRegionKind::envelope);
             parse_ds64(b, region, ds64, offset + env.chunk_header_size, first->declared);
             have_ds64 = region.fields.size() >= 4u;
             if (have_ds64 && env.declared_sentinel)
@@ -457,8 +481,8 @@ void inspect_wav_layout(Builder& b) {
     // Walk to the smaller of the declared envelope and the file, except when
     // the declared size is unusable (zero or shorter than the header), where
     // the file size is the only bound left.
-    const auto walk_end = env.declared_end >= env.header_size
-        ? std::min(env.declared_end, file_size) : file_size;
+    const auto walk_end =
+        env.declared_end >= env.header_size ? std::min(env.declared_end, file_size) : file_size;
     while (offset < walk_end && !report.regions_truncated) {
         if (walk_end - offset < env.chunk_header_size) {
             auto& stub = b.add_region(offset, 0u, walk_end - offset, "", LayoutRegionKind::unknown);
@@ -488,7 +512,8 @@ void inspect_wav_layout(Builder& b) {
                 stop_after = true;
                 if (!walk.structural_fault) {
                     walk.structural_fault = true;
-                    walk.first_fault = header->id + " chunk size is 0xFFFFFFFF with no ds64 to resolve it";
+                    walk.first_fault =
+                        header->id + " chunk size is 0xFFFFFFFF with no ds64 to resolve it";
                 }
             }
         } else if (env.rf64 && have_ds64 && header->id == "data" && ds64.data_size != declared) {
@@ -497,19 +522,21 @@ void inspect_wav_layout(Builder& b) {
             if (ds64.data_size > declared) {
                 b.warn(LayoutWarningKind::chunk_overlap, offset,
                        "ds64 data size " + std::to_string(ds64.data_size) + " extends " +
-                           std::to_string(ds64.data_size - declared) + " bytes past the data chunk's own size " +
-                           std::to_string(declared) + ", over the chunks that follow");
+                           std::to_string(ds64.data_size - declared) +
+                           " bytes past the data chunk's own size " + std::to_string(declared) +
+                           ", over the chunks that follow");
             } else {
                 b.warn(LayoutWarningKind::chunk_overlap, offset,
-                       "ds64 data size " + std::to_string(ds64.data_size) + " disagrees with the data chunk size " +
-                           std::to_string(declared));
+                       "ds64 data size " + std::to_string(ds64.data_size) +
+                           " disagrees with the data chunk size " + std::to_string(declared));
             }
         }
 
         const auto kind = header->printable ? classify(header->id) : LayoutRegionKind::unknown;
         auto& region = b.add_region(offset, env.chunk_header_size, declared, header->id, kind);
         if (!header->printable)
-            region.note = "chunk id is not printable ASCII; the walk may be out of step with the file";
+            region.note =
+                "chunk id is not printable ASCII; the walk may be out of step with the file";
 
         const bool past_eof = payload_offset > file_size || declared > file_size - payload_offset;
         const auto chunk_end = past_eof ? file_size : payload_offset + declared;
@@ -517,8 +544,8 @@ void inspect_wav_layout(Builder& b) {
             const auto missing = payload_offset + declared - file_size;
             if (header->id == "data") {
                 b.warn(LayoutWarningKind::truncated_data, offset,
-                       "data declares " + std::to_string(declared) + " bytes, " + std::to_string(missing) +
-                           " past end of file");
+                       "data declares " + std::to_string(declared) + " bytes, " +
+                           std::to_string(missing) + " past end of file");
             } else {
                 b.warn(LayoutWarningKind::chunk_past_eof, offset,
                        header->id + " declares " + std::to_string(declared) + " bytes, " +
@@ -535,7 +562,8 @@ void inspect_wav_layout(Builder& b) {
             pad = 1u;
             if (!past_eof && chunk_end >= file_size) {
                 b.warn(LayoutWarningKind::missing_pad_byte, offset,
-                       header->id + " has odd size " + std::to_string(declared) + " and ends the file without a pad byte");
+                       header->id + " has odd size " + std::to_string(declared) +
+                           " and ends the file without a pad byte");
                 if (!walk.structural_fault) {
                     walk.structural_fault = true;
                     walk.first_fault = header->id + " chunk is odd-sized with no pad byte";

@@ -53,7 +53,8 @@ void print_usage() {
 }
 
 bool parse_u64(const std::string& text, std::uint64_t& value) {
-    if (text.empty() || !std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }))
+    if (text.empty() ||
+        !std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }))
         return false;
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value, 10);
     return error == std::errc{} && end == text.data() + text.size();
@@ -90,9 +91,9 @@ void print_table(const pulp::audio::AudioFileLayoutReport& report, const std::st
         std::cout << "/" << report.container_detail;
     if (report.profile)
         std::cout << "  profile " << wav_profile_name(*report.profile);
-    std::cout << "  " << (report.is_standard() ? "standard" : "violations")
-              << "  " << facts_confidence_name(report.facts_confidence)
-              << "  (" << report.file_size << " bytes, read " << report.bytes_read << ")\n";
+    std::cout << "  " << (report.is_standard() ? "standard" : "violations") << "  "
+              << facts_confidence_name(report.facts_confidence) << "  (" << report.file_size
+              << " bytes, read " << report.bytes_read << ")\n";
     if (!report.error.empty())
         std::cout << "error: " << report.error << "\n";
     if (report.stream) {
@@ -121,9 +122,9 @@ void print_table(const pulp::audio::AudioFileLayoutReport& report, const std::st
         std::cout << "exceeds decode limits:";
         for (const auto& name_ : report.decode_limits->exceeded)
             std::cout << " " << name_;
-        std::cout << " (max_frames " << report.decode_limits->limits.max_frames
-                  << ", max_channels " << report.decode_limits->limits.max_channels
-                  << ", max_output_bytes " << report.decode_limits->limits.max_output_bytes << ")\n";
+        std::cout << " (max_frames " << report.decode_limits->limits.max_frames << ", max_channels "
+                  << report.decode_limits->limits.max_channels << ", max_output_bytes "
+                  << report.decode_limits->limits.max_output_bytes << ")\n";
     }
     if (report.truncated_tail_bytes)
         std::cout << "truncated tail bytes: " << *report.truncated_tail_bytes << "\n";
@@ -136,9 +137,9 @@ void print_table(const pulp::audio::AudioFileLayoutReport& report, const std::st
         size_text << region.declared_size;
         if (region.actual_size != region.declared_size)
             size_text << "/" << region.actual_size;
-        std::cout << "  " << std::left << std::setw(12) << region.offset << std::setw(12) << size_text.str()
-                  << std::setw(16) << (region.id.empty() ? "-" : region.id) << std::setw(10)
-                  << layout_region_kind_name(region.kind);
+        std::cout << "  " << std::left << std::setw(12) << region.offset << std::setw(12)
+                  << size_text.str() << std::setw(16) << (region.id.empty() ? "-" : region.id)
+                  << std::setw(10) << layout_region_kind_name(region.kind);
         bool first = true;
         for (const auto& field : region.fields) {
             std::cout << (first ? "" : " ") << field.name << "=" << field_to_text(field.value);
@@ -153,8 +154,8 @@ void print_table(const pulp::audio::AudioFileLayoutReport& report, const std::st
     if (!report.warnings.empty()) {
         std::cout << "warnings:\n";
         for (const auto& warning : report.warnings)
-            std::cout << "  - " << layout_warning_kind_name(warning.kind) << " @" << warning.offset << ": "
-                      << warning.detail << "\n";
+            std::cout << "  - " << layout_warning_kind_name(warning.kind) << " @" << warning.offset
+                      << ": " << warning.detail << "\n";
     }
     if (!report.metadata_present.empty()) {
         std::cout << "metadata present:";
@@ -203,19 +204,25 @@ int cmd_audio_inspect(const std::vector<std::string>& args) {
         } else if (arg == "--raw") {
             raw = true;
         } else if (arg == "--format") {
-            if (!value(text)) return usage_error("--format requires a value");
+            if (!value(text))
+                return usage_error("--format requires a value");
             raw_format = text;
         } else if (arg == "--endian") {
-            if (!value(text)) return usage_error("--endian requires a value");
+            if (!value(text))
+                return usage_error("--endian requires a value");
             raw_endian = text;
         } else if (arg == "--channels" || arg == "--rate" || arg == "--offset") {
-            if (!value(text)) return usage_error(arg + " requires a value");
+            if (!value(text))
+                return usage_error(arg + " requires a value");
             std::uint64_t parsed = 0u;
             if (!parse_u64(text, parsed))
                 return usage_error(arg + " requires an unsigned integer");
-            if (arg == "--channels") raw_channels = parsed;
-            else if (arg == "--rate") raw_rate = parsed;
-            else raw_offset = parsed;
+            if (arg == "--channels")
+                raw_channels = parsed;
+            else if (arg == "--rate")
+                raw_rate = parsed;
+            else
+                raw_offset = parsed;
         } else if (arg == "--help" || arg == "-h") {
             print_usage();
             return 0;
@@ -237,25 +244,35 @@ int cmd_audio_inspect(const std::vector<std::string>& args) {
         // Every field is required: the inspector never guesses a raw PCM
         // shape from its content, and a partial description would be one.
         std::vector<std::string> missing;
-        if (!raw_format) missing.emplace_back("--format");
-        if (!raw_channels) missing.emplace_back("--channels");
-        if (!raw_rate) missing.emplace_back("--rate");
-        if (!raw_endian) missing.emplace_back("--endian");
-        if (!raw_offset) missing.emplace_back("--offset");
+        if (!raw_format)
+            missing.emplace_back("--format");
+        if (!raw_channels)
+            missing.emplace_back("--channels");
+        if (!raw_rate)
+            missing.emplace_back("--rate");
+        if (!raw_endian)
+            missing.emplace_back("--endian");
+        if (!raw_offset)
+            missing.emplace_back("--offset");
         if (!missing.empty()) {
             std::string list;
             for (const auto& name : missing)
                 list += (list.empty() ? "" : ", ") + name;
-            return usage_error("--raw requires every one of --format, --channels, --rate, --endian, --offset; missing " + list);
+            return usage_error("--raw requires every one of --format, --channels, --rate, "
+                               "--endian, --offset; missing " +
+                               list);
         }
         pulp::audio::RawPcmSpec spec;
         const auto format = pulp::audio::parse_raw_pcm_format(*raw_format);
         if (!format)
             return usage_error("--format must be one of s8, u8, s16, s24, s32, f32, f64");
         spec.format = *format;
-        if (*raw_endian == "little") spec.endian = pulp::audio::RawPcmSpec::Endian::little;
-        else if (*raw_endian == "big") spec.endian = pulp::audio::RawPcmSpec::Endian::big;
-        else return usage_error("--endian must be little or big");
+        if (*raw_endian == "little")
+            spec.endian = pulp::audio::RawPcmSpec::Endian::little;
+        else if (*raw_endian == "big")
+            spec.endian = pulp::audio::RawPcmSpec::Endian::big;
+        else
+            return usage_error("--endian must be little or big");
         if (*raw_channels == 0u || *raw_channels > std::numeric_limits<std::uint32_t>::max())
             return usage_error("--channels must be between 1 and 4294967295");
         if (*raw_rate == 0u || *raw_rate > std::numeric_limits<std::uint32_t>::max())
@@ -265,7 +282,8 @@ int cmd_audio_inspect(const std::vector<std::string>& args) {
         spec.offset = *raw_offset;
         options.raw = spec;
     } else if (any_raw_field) {
-        return usage_error("--format, --channels, --rate, --endian and --offset apply only with --raw");
+        return usage_error(
+            "--format, --channels, --rate, --endian and --offset apply only with --raw");
     }
 
     std::error_code ec;

@@ -18,8 +18,8 @@
 #include <string_view>
 
 #if defined(_WIN32)
-#include <io.h>
 #include <fcntl.h>
+#include <io.h>
 #include <sys/stat.h>
 #else
 #include <fcntl.h>
@@ -76,8 +76,9 @@ std::size_t FileByteSource::read_at(std::uint64_t offset, std::span<std::uint8_t
 #if defined(_WIN32)
         if (_lseeki64(handle_, static_cast<long long>(offset + copied), SEEK_SET) < 0)
             break;
-        const auto got = _read(handle_, out.data() + copied,
-                               static_cast<unsigned>(std::min<std::size_t>(out.size() - copied, 1u << 30)));
+        const auto got =
+            _read(handle_, out.data() + copied,
+                  static_cast<unsigned>(std::min<std::size_t>(out.size() - copied, 1u << 30)));
 #else
         const auto got = ::pread(handle_, out.data() + copied, out.size() - copied,
                                  static_cast<off_t>(offset + copied));
@@ -89,7 +90,8 @@ std::size_t FileByteSource::read_at(std::uint64_t offset, std::span<std::uint8_t
     return copied;
 }
 
-std::size_t CountingByteSource::read_at(std::uint64_t offset, std::span<std::uint8_t> out) noexcept {
+std::size_t CountingByteSource::read_at(std::uint64_t offset,
+                                        std::span<std::uint8_t> out) noexcept {
     const auto got = inner_.read_at(offset, out);
     bytes_read_ += got;
     ++read_calls_;
@@ -101,39 +103,60 @@ std::size_t CountingByteSource::read_at(std::uint64_t offset, std::span<std::uin
 
 const char* audio_container_name(AudioContainer container) noexcept {
     switch (container) {
-        case AudioContainer::wav: return "wav";
-        case AudioContainer::aiff: return "aiff";
-        case AudioContainer::aifc: return "aifc";
-        case AudioContainer::flac: return "flac";
-        case AudioContainer::ogg: return "ogg";
-        case AudioContainer::mp3: return "mp3";
-        case AudioContainer::mp4: return "mp4";
-        case AudioContainer::raw: return "raw";
-        case AudioContainer::unknown: break;
+    case AudioContainer::wav:
+        return "wav";
+    case AudioContainer::aiff:
+        return "aiff";
+    case AudioContainer::aifc:
+        return "aifc";
+    case AudioContainer::flac:
+        return "flac";
+    case AudioContainer::ogg:
+        return "ogg";
+    case AudioContainer::mp3:
+        return "mp3";
+    case AudioContainer::mp4:
+        return "mp4";
+    case AudioContainer::raw:
+        return "raw";
+    case AudioContainer::unknown:
+        break;
     }
     return "unknown";
 }
 
 const char* layout_region_kind_name(LayoutRegionKind kind) noexcept {
     switch (kind) {
-        case LayoutRegionKind::envelope: return "envelope";
-        case LayoutRegionKind::fmt: return "fmt";
-        case LayoutRegionKind::data: return "data";
-        case LayoutRegionKind::metadata: return "metadata";
-        case LayoutRegionKind::padding: return "padding";
-        case LayoutRegionKind::unknown: break;
+    case LayoutRegionKind::envelope:
+        return "envelope";
+    case LayoutRegionKind::fmt:
+        return "fmt";
+    case LayoutRegionKind::data:
+        return "data";
+    case LayoutRegionKind::metadata:
+        return "metadata";
+    case LayoutRegionKind::padding:
+        return "padding";
+    case LayoutRegionKind::unknown:
+        break;
     }
     return "unknown";
 }
 
 const char* wav_profile_name(WavProfile profile) noexcept {
     switch (profile) {
-        case WavProfile::pcm44: return "pcm44";
-        case WavProfile::bwf: return "bwf";
-        case WavProfile::floating: return "float";
-        case WavProfile::extensible: return "extensible";
-        case WavProfile::rf64: return "rf64";
-        case WavProfile::w64: return "w64";
+    case WavProfile::pcm44:
+        return "pcm44";
+    case WavProfile::bwf:
+        return "bwf";
+    case WavProfile::floating:
+        return "float";
+    case WavProfile::extensible:
+        return "extensible";
+    case WavProfile::rf64:
+        return "rf64";
+    case WavProfile::w64:
+        return "w64";
     }
     return "pcm44";
 }
@@ -144,30 +167,46 @@ const char* facts_confidence_name(FactsConfidence confidence) noexcept {
 
 const char* layout_warning_kind_name(LayoutWarningKind kind) noexcept {
     switch (kind) {
-        case LayoutWarningKind::envelope_size_mismatch: return "envelope_size_mismatch";
-        case LayoutWarningKind::missing_pad_byte: return "missing_pad_byte";
-        case LayoutWarningKind::duplicate_fmt: return "duplicate_fmt";
-        case LayoutWarningKind::fmt_after_data: return "fmt_after_data";
-        case LayoutWarningKind::truncated_data: return "truncated_data";
-        case LayoutWarningKind::sentinel_size_without_ds64: return "sentinel_size_without_ds64";
-        case LayoutWarningKind::chunk_overlap: return "chunk_overlap";
-        case LayoutWarningKind::chunk_past_eof: return "chunk_past_eof";
-        case LayoutWarningKind::extensible_mask_channel_mismatch:
-            return "extensible_mask_channel_mismatch";
-        case LayoutWarningKind::valid_bits_above_container: return "valid_bits_above_container";
+    case LayoutWarningKind::envelope_size_mismatch:
+        return "envelope_size_mismatch";
+    case LayoutWarningKind::missing_pad_byte:
+        return "missing_pad_byte";
+    case LayoutWarningKind::duplicate_fmt:
+        return "duplicate_fmt";
+    case LayoutWarningKind::fmt_after_data:
+        return "fmt_after_data";
+    case LayoutWarningKind::truncated_data:
+        return "truncated_data";
+    case LayoutWarningKind::sentinel_size_without_ds64:
+        return "sentinel_size_without_ds64";
+    case LayoutWarningKind::chunk_overlap:
+        return "chunk_overlap";
+    case LayoutWarningKind::chunk_past_eof:
+        return "chunk_past_eof";
+    case LayoutWarningKind::extensible_mask_channel_mismatch:
+        return "extensible_mask_channel_mismatch";
+    case LayoutWarningKind::valid_bits_above_container:
+        return "valid_bits_above_container";
     }
     return "unknown";
 }
 
 const char* raw_pcm_format_name(RawPcmSpec::Format format) noexcept {
     switch (format) {
-        case RawPcmSpec::Format::s8: return "s8";
-        case RawPcmSpec::Format::u8: return "u8";
-        case RawPcmSpec::Format::s16: return "s16";
-        case RawPcmSpec::Format::s24: return "s24";
-        case RawPcmSpec::Format::s32: return "s32";
-        case RawPcmSpec::Format::f32: return "f32";
-        case RawPcmSpec::Format::f64: return "f64";
+    case RawPcmSpec::Format::s8:
+        return "s8";
+    case RawPcmSpec::Format::u8:
+        return "u8";
+    case RawPcmSpec::Format::s16:
+        return "s16";
+    case RawPcmSpec::Format::s24:
+        return "s24";
+    case RawPcmSpec::Format::s32:
+        return "s32";
+    case RawPcmSpec::Format::f32:
+        return "f32";
+    case RawPcmSpec::Format::f64:
+        return "f64";
     }
     return "s16";
 }
@@ -175,8 +214,13 @@ const char* raw_pcm_format_name(RawPcmSpec::Format format) noexcept {
 std::optional<RawPcmSpec::Format> parse_raw_pcm_format(std::string_view name) noexcept {
     using F = RawPcmSpec::Format;
     constexpr std::array<std::pair<std::string_view, F>, 7> kNames{{
-        {"s8", F::s8}, {"u8", F::u8}, {"s16", F::s16}, {"s24", F::s24},
-        {"s32", F::s32}, {"f32", F::f32}, {"f64", F::f64},
+        {"s8", F::s8},
+        {"u8", F::u8},
+        {"s16", F::s16},
+        {"s24", F::s24},
+        {"s32", F::s32},
+        {"f32", F::f32},
+        {"f64", F::f64},
     }};
     for (const auto& [text, value] : kNames) {
         if (text == name)
@@ -187,13 +231,18 @@ std::optional<RawPcmSpec::Format> parse_raw_pcm_format(std::string_view name) no
 
 std::uint32_t raw_pcm_bytes_per_sample(RawPcmSpec::Format format) noexcept {
     switch (format) {
-        case RawPcmSpec::Format::s8:
-        case RawPcmSpec::Format::u8: return 1u;
-        case RawPcmSpec::Format::s16: return 2u;
-        case RawPcmSpec::Format::s24: return 3u;
-        case RawPcmSpec::Format::s32:
-        case RawPcmSpec::Format::f32: return 4u;
-        case RawPcmSpec::Format::f64: return 8u;
+    case RawPcmSpec::Format::s8:
+    case RawPcmSpec::Format::u8:
+        return 1u;
+    case RawPcmSpec::Format::s16:
+        return 2u;
+    case RawPcmSpec::Format::s24:
+        return 3u;
+    case RawPcmSpec::Format::s32:
+    case RawPcmSpec::Format::f32:
+        return 4u;
+    case RawPcmSpec::Format::f64:
+        return 8u;
     }
     return 2u;
 }
@@ -284,8 +333,13 @@ std::string utf16_to_utf8(const std::uint8_t* p, std::size_t count, bool big_end
     std::string out;
     std::size_t i = 0u;
     if (count >= 2u) {
-        if (p[0] == 0xff && p[1] == 0xfe) { big_endian = false; i = 2u; }
-        else if (p[0] == 0xfe && p[1] == 0xff) { big_endian = true; i = 2u; }
+        if (p[0] == 0xff && p[1] == 0xfe) {
+            big_endian = false;
+            i = 2u;
+        } else if (p[0] == 0xfe && p[1] == 0xff) {
+            big_endian = true;
+            i = 2u;
+        }
     }
     auto unit = [&](std::size_t at) -> std::uint32_t {
         return big_endian ? read_u16be(p + at) : read_u16le(p + at);
@@ -322,8 +376,8 @@ std::string utf16_to_utf8(const std::uint8_t* p, std::size_t count, bool big_end
 
 // ── Report building ─────────────────────────────────────────────────────────
 
-LayoutRegion& Builder::add_region(std::uint64_t offset, std::uint64_t header_size, std::uint64_t declared,
-                                  std::string id, LayoutRegionKind kind) {
+LayoutRegion& Builder::add_region(std::uint64_t offset, std::uint64_t header_size,
+                                  std::uint64_t declared, std::string id, LayoutRegionKind kind) {
     if (report.regions.size() >= kMaxRegions) {
         report.regions_truncated = true;
         return overflow_;
@@ -358,9 +412,9 @@ void Builder::set_decode_limits(std::uint64_t frames, std::uint32_t channels) {
     LayoutDecodeLimitsFact fact;
     fact.limits = options.decode_limits;
     std::uint64_t bytes = 0u;
-    const bool fits = channels != 0u &&
-                      frames <= std::numeric_limits<std::uint64_t>::max() / channels &&
-                      frames * channels <= std::numeric_limits<std::uint64_t>::max() / sizeof(float);
+    const bool fits =
+        channels != 0u && frames <= std::numeric_limits<std::uint64_t>::max() / channels &&
+        frames * channels <= std::numeric_limits<std::uint64_t>::max() / sizeof(float);
     if (fits)
         bytes = frames * channels * sizeof(float);
     fact.output_bytes = bytes;
@@ -390,10 +444,10 @@ bool starts_with(std::span<const std::uint8_t> bytes, std::string_view magic, st
 bool mp3_frame_header_valid(const std::uint8_t* h) noexcept {
     if (h[0] != 0xffu || (h[1] & 0xe0u) != 0xe0u)
         return false;
-    const auto version = (h[1] >> 3u) & 0x3u;   // 1 is reserved
-    const auto layer = (h[1] >> 1u) & 0x3u;     // 0 is reserved
-    const auto bitrate = h[2] >> 4u;            // 0 free, 15 bad
-    const auto rate = (h[2] >> 2u) & 0x3u;      // 3 reserved
+    const auto version = (h[1] >> 3u) & 0x3u; // 1 is reserved
+    const auto layer = (h[1] >> 1u) & 0x3u;   // 0 is reserved
+    const auto bitrate = h[2] >> 4u;          // 0 free, 15 bad
+    const auto rate = (h[2] >> 2u) & 0x3u;    // 3 reserved
     return version != 1u && layer != 0u && bitrate != 0u && bitrate != 15u && rate != 3u;
 }
 
@@ -406,8 +460,14 @@ AudioContainer sniff(Reader& reader, std::string& detail) {
             return AudioContainer::wav;
         }
         if (starts_with(head, "FORM")) {
-            if (starts_with(head, "AIFF", 8u)) { detail = "FORM"; return AudioContainer::aiff; }
-            if (starts_with(head, "AIFC", 8u)) { detail = "FORM"; return AudioContainer::aifc; }
+            if (starts_with(head, "AIFF", 8u)) {
+                detail = "FORM";
+                return AudioContainer::aiff;
+            }
+            if (starts_with(head, "AIFC", 8u)) {
+                detail = "FORM";
+                return AudioContainer::aifc;
+            }
         }
         if (starts_with(head, "ftyp", 4u)) {
             detail = "ftyp:" + fourcc(head.data() + 8u);
@@ -418,15 +478,30 @@ AudioContainer sniff(Reader& reader, std::string& detail) {
         detail = "W64";
         return AudioContainer::wav;
     }
-    if (starts_with(head, "fLaC")) { detail = "fLaC"; return AudioContainer::flac; }
-    if (starts_with(head, "OggS")) { detail = "OggS"; return AudioContainer::ogg; }
-    if (starts_with(head, "ID3")) { detail = "ID3"; return AudioContainer::mp3; }
-    if (starts_with(head, "TAG")) { detail = "ID3v1"; return AudioContainer::mp3; }
+    if (starts_with(head, "fLaC")) {
+        detail = "fLaC";
+        return AudioContainer::flac;
+    }
+    if (starts_with(head, "OggS")) {
+        detail = "OggS";
+        return AudioContainer::ogg;
+    }
+    if (starts_with(head, "ID3")) {
+        detail = "ID3";
+        return AudioContainer::mp3;
+    }
+    if (starts_with(head, "TAG")) {
+        detail = "ID3v1";
+        return AudioContainer::mp3;
+    }
     if (head.size() >= 4u && mp3_frame_header_valid(head.data())) {
         detail = "frame";
         return AudioContainer::mp3;
     }
-    if (starts_with(head, "APETAGEX")) { detail = "APE"; return AudioContainer::mp3; }
+    if (starts_with(head, "APETAGEX")) {
+        detail = "APE";
+        return AudioContainer::mp3;
+    }
     return AudioContainer::unknown;
 }
 
@@ -439,15 +514,23 @@ void inspect_raw(Builder& b, const RawPcmSpec& spec) {
     report.container = AudioContainer::raw;
     report.container_detail = raw_pcm_format_name(spec.format);
     report.facts_confidence = FactsConfidence::parsed;
-    if (spec.channels == 0u) { report.error = "raw PCM needs at least one channel"; return; }
-    if (spec.sample_rate == 0u) { report.error = "raw PCM needs a positive sample rate"; return; }
+    if (spec.channels == 0u) {
+        report.error = "raw PCM needs at least one channel";
+        return;
+    }
+    if (spec.sample_rate == 0u) {
+        report.error = "raw PCM needs a positive sample rate";
+        return;
+    }
     if (spec.offset > b.reader.size()) {
         report.error = "raw PCM offset " + std::to_string(spec.offset) +
-                       " is past the end of the file (" + std::to_string(b.reader.size()) + " bytes)";
+                       " is past the end of the file (" + std::to_string(b.reader.size()) +
+                       " bytes)";
         return;
     }
     const auto bytes_per_sample = raw_pcm_bytes_per_sample(spec.format);
-    const std::uint64_t bytes_per_frame = static_cast<std::uint64_t>(bytes_per_sample) * spec.channels;
+    const std::uint64_t bytes_per_frame =
+        static_cast<std::uint64_t>(bytes_per_sample) * spec.channels;
     const auto payload = b.reader.size() - spec.offset;
     const auto frames = payload / bytes_per_frame;
     const auto tail = payload % bytes_per_frame;
@@ -458,7 +541,8 @@ void inspect_raw(Builder& b, const RawPcmSpec& spec) {
     }
     auto& pcm = b.add_region(spec.offset, 0u, payload, "pcm", LayoutRegionKind::data);
     pcm.fields.push_back({"format", std::string(raw_pcm_format_name(spec.format))});
-    pcm.fields.push_back({"endian", std::string(spec.endian == RawPcmSpec::Endian::big ? "big" : "little")});
+    pcm.fields.push_back(
+        {"endian", std::string(spec.endian == RawPcmSpec::Endian::big ? "big" : "little")});
     pcm.fields.push_back({"channels", static_cast<std::uint64_t>(spec.channels)});
     pcm.fields.push_back({"sample_rate", static_cast<std::uint64_t>(spec.sample_rate)});
     pcm.fields.push_back({"bytes_per_frame", bytes_per_frame});
@@ -471,8 +555,9 @@ void inspect_raw(Builder& b, const RawPcmSpec& spec) {
     facts.valid_bits = facts.bits_per_sample;
     facts.frames = frames;
     facts.duration_seconds = static_cast<double>(frames) / spec.sample_rate;
-    facts.encoding = (spec.format == RawPcmSpec::Format::f32 || spec.format == RawPcmSpec::Format::f64)
-                         ? "float" : "pcm";
+    facts.encoding =
+        (spec.format == RawPcmSpec::Format::f32 || spec.format == RawPcmSpec::Format::f64) ? "float"
+                                                                                           : "pcm";
     facts.bytes_per_frame = static_cast<std::uint32_t>(bytes_per_frame);
     report.stream = facts;
     report.truncated_tail_bytes = tail;
@@ -495,19 +580,31 @@ AudioFileLayoutReport inspect_audio_file_layout(LayoutByteSource& source,
         b.report.container = container;
         b.report.container_detail = detail;
         switch (container) {
-            case AudioContainer::wav: layout_detail::inspect_wav_layout(b); break;
-            case AudioContainer::aiff:
-            case AudioContainer::aifc: layout_detail::inspect_aiff_layout(b); break;
-            case AudioContainer::flac: layout_detail::inspect_flac_layout(b); break;
-            case AudioContainer::ogg: layout_detail::inspect_ogg_layout(b); break;
-            case AudioContainer::mp3: layout_detail::inspect_mp3_layout(b); break;
-            case AudioContainer::mp4: layout_detail::inspect_mp4_layout(b); break;
-            case AudioContainer::raw:
-            case AudioContainer::unknown:
-                b.report.facts_confidence = FactsConfidence::container_only;
-                if (source.size() == 0u)
-                    b.report.error = "empty input";
-                break;
+        case AudioContainer::wav:
+            layout_detail::inspect_wav_layout(b);
+            break;
+        case AudioContainer::aiff:
+        case AudioContainer::aifc:
+            layout_detail::inspect_aiff_layout(b);
+            break;
+        case AudioContainer::flac:
+            layout_detail::inspect_flac_layout(b);
+            break;
+        case AudioContainer::ogg:
+            layout_detail::inspect_ogg_layout(b);
+            break;
+        case AudioContainer::mp3:
+            layout_detail::inspect_mp3_layout(b);
+            break;
+        case AudioContainer::mp4:
+            layout_detail::inspect_mp4_layout(b);
+            break;
+        case AudioContainer::raw:
+        case AudioContainer::unknown:
+            b.report.facts_confidence = FactsConfidence::container_only;
+            if (source.size() == 0u)
+                b.report.error = "empty input";
+            break;
         }
     }
     b.report.bytes_read = b.reader.bytes_read();

@@ -23,13 +23,14 @@ struct WavDecodeLimits {
 
 /// Stream facts the decoder derives from a `fmt ` payload and a data size.
 struct WavFormatFacts {
-    std::uint16_t format_tag = 0u;             ///< wFormatTag as written
-    std::uint16_t translated_format_tag = 0u;  ///< sub-format tag when wFormatTag is EXTENSIBLE
+    std::uint16_t format_tag = 0u;            ///< wFormatTag as written
+    std::uint16_t translated_format_tag = 0u; ///< sub-format tag when wFormatTag is EXTENSIBLE
     std::uint32_t channels = 0u;
     std::uint32_t sample_rate = 0u;
-    std::uint32_t bits_per_sample = 0u;        ///< container width (wBitsPerSample)
-    std::uint32_t bytes_per_frame = 0u;        ///< 0 for compressed formats
-    std::uint64_t total_frames = 0u;           ///< data_size / bytes_per_frame, or the fact count for compressed formats
+    std::uint32_t bits_per_sample = 0u; ///< container width (wBitsPerSample)
+    std::uint32_t bytes_per_frame = 0u; ///< 0 for compressed formats
+    std::uint64_t total_frames =
+        0u; ///< data_size / bytes_per_frame, or the fact count for compressed formats
 };
 
 /// Interpret a `fmt ` payload the way `inspect_wav` and `decode_wav` do,
@@ -41,9 +42,9 @@ struct WavFormatFacts {
 /// layout inspector that reads only the header window reaches the same
 /// facts as a decoder holding the whole file. Returns nullopt when the
 /// decoder would refuse the format.
-[[nodiscard]] std::optional<WavFormatFacts> interpret_wav_format(
-    std::span<const std::uint8_t> fmt_payload, std::uint64_t data_size,
-    std::optional<std::uint64_t> fact_sample_count = std::nullopt);
+[[nodiscard]] std::optional<WavFormatFacts>
+interpret_wav_format(std::span<const std::uint8_t> fmt_payload, std::uint64_t data_size,
+                     std::optional<std::uint64_t> fact_sample_count = std::nullopt);
 
 /// Decode a complete in-memory RIFF/WAVE file into deinterleaved float channels.
 ///

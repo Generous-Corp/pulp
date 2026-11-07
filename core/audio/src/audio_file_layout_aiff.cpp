@@ -58,7 +58,8 @@ class SourceStreambuf final : public std::streambuf {
 
   private:
     std::uint64_t current() const noexcept {
-        return gptr() != nullptr ? block_start_ + static_cast<std::uint64_t>(gptr() - eback()) : position_;
+        return gptr() != nullptr ? block_start_ + static_cast<std::uint64_t>(gptr() - eback())
+                                 : position_;
     }
 
     pos_type seek_to(std::uint64_t target) {
@@ -86,8 +87,8 @@ double extended_to_double(const std::uint8_t* p) noexcept {
 
 LayoutRegionKind classify(std::string_view id) {
     static constexpr std::array<std::string_view, 14> kMetadata{
-        "NAME", "AUTH", "(c) ", "ANNO", "COMT", "MARK", "INST", "MIDI",
-        "AESD", "APPL", "ID3 ", "CHAN", "basc", "trns"};
+        "NAME", "AUTH", "(c) ", "ANNO", "COMT", "MARK", "INST",
+        "MIDI", "AESD", "APPL", "ID3 ", "CHAN", "basc", "trns"};
     if (id == "COMM" || id == "FVER")
         return LayoutRegionKind::fmt;
     if (id == "SSND")
@@ -139,44 +140,56 @@ void inspect_aiff_layout(Builder& b) {
         const auto declared = static_cast<std::uint64_t>(read_u32be(raw.data() + 4u));
         const auto payload_offset = offset + 8u;
         const bool printable = printable_id(id);
-        auto& region = b.add_region(offset, 8u, declared, id, printable ? classify(id) : LayoutRegionKind::unknown);
+        auto& region = b.add_region(offset, 8u, declared, id,
+                                    printable ? classify(id) : LayoutRegionKind::unknown);
         if (!printable)
-            region.note = "chunk id is not printable ASCII; the walk may be out of step with the file";
+            region.note =
+                "chunk id is not printable ASCII; the walk may be out of step with the file";
 
         const bool past_eof = payload_offset > file_size || declared > file_size - payload_offset;
         const auto chunk_end = past_eof ? file_size : payload_offset + declared;
         if (past_eof) {
             const auto missing = payload_offset + declared - file_size;
-            b.warn(id == "SSND" ? LayoutWarningKind::truncated_data : LayoutWarningKind::chunk_past_eof,
-                   offset, id + " declares " + std::to_string(declared) + " bytes, " +
-                               std::to_string(missing) + " past end of file");
+            b.warn(id == "SSND" ? LayoutWarningKind::truncated_data
+                                : LayoutWarningKind::chunk_past_eof,
+                   offset,
+                   id + " declares " + std::to_string(declared) + " bytes, " +
+                       std::to_string(missing) + " past end of file");
         }
         std::uint64_t pad = declared & 1u;
         if (pad != 0u && !past_eof && chunk_end >= file_size) {
             b.warn(LayoutWarningKind::missing_pad_byte, offset,
-                   id + " has odd size " + std::to_string(declared) + " and ends the file without a pad byte");
+                   id + " has odd size " + std::to_string(declared) +
+                       " and ends the file without a pad byte");
             pad = 0u;
         }
 
         if (id == "COMM") {
             if (comm_seen)
-                b.warn(LayoutWarningKind::duplicate_fmt, offset, "second COMM chunk; the reader uses the first");
+                b.warn(LayoutWarningKind::duplicate_fmt, offset,
+                       "second COMM chunk; the reader uses the first");
             if (ssnd_seen && !comm_seen)
-                b.warn(LayoutWarningKind::fmt_after_data, offset, "COMM chunk follows the SSND chunk");
+                b.warn(LayoutWarningKind::fmt_after_data, offset,
+                       "COMM chunk follows the SSND chunk");
             comm_seen = true;
             auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, 256u));
             if (payload.size() >= 18u) {
-                region.fields.push_back({"channels", static_cast<std::uint64_t>(read_u16be(payload.data()))});
-                region.fields.push_back({"frames", static_cast<std::uint64_t>(read_u32be(payload.data() + 2u))});
-                region.fields.push_back({"bits_per_sample", static_cast<std::uint64_t>(read_u16be(payload.data() + 6u))});
+                region.fields.push_back(
+                    {"channels", static_cast<std::uint64_t>(read_u16be(payload.data()))});
+                region.fields.push_back(
+                    {"frames", static_cast<std::uint64_t>(read_u32be(payload.data() + 2u))});
+                region.fields.push_back({"bits_per_sample", static_cast<std::uint64_t>(
+                                                                read_u16be(payload.data() + 6u))});
                 region.fields.push_back({"sample_rate", extended_to_double(payload.data() + 8u)});
                 if (aifc && payload.size() >= 22u) {
                     if (compression_type.empty())
                         compression_type = fourcc(payload.data() + 18u);
                     region.fields.push_back({"compression_type", fourcc(payload.data() + 18u)});
                     if (payload.size() > 22u) {
-                        const auto name_length = std::min<std::size_t>(payload[22], payload.size() - 23u);
-                        region.fields.push_back({"compression_name", trimmed_text(payload.data() + 23u, name_length)});
+                        const auto name_length =
+                            std::min<std::size_t>(payload[22], payload.size() - 23u);
+                        region.fields.push_back(
+                            {"compression_name", trimmed_text(payload.data() + 23u, name_length)});
                     }
                 }
             } else {
@@ -190,24 +203,29 @@ void inspect_aiff_layout(Builder& b) {
             }
             auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, 8u));
             if (payload.size() == 8u) {
-                region.fields.push_back({"offset", static_cast<std::uint64_t>(read_u32be(payload.data()))});
-                region.fields.push_back({"block_size", static_cast<std::uint64_t>(read_u32be(payload.data() + 4u))});
+                region.fields.push_back(
+                    {"offset", static_cast<std::uint64_t>(read_u32be(payload.data()))});
+                region.fields.push_back(
+                    {"block_size", static_cast<std::uint64_t>(read_u32be(payload.data() + 4u))});
             }
         } else if (id == "FVER") {
             auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, 4u));
             if (payload.size() == 4u)
-                region.fields.push_back({"timestamp", static_cast<std::uint64_t>(read_u32be(payload.data()))});
+                region.fields.push_back(
+                    {"timestamp", static_cast<std::uint64_t>(read_u32be(payload.data()))});
         } else if (region.kind == LayoutRegionKind::metadata) {
             b.present(id, offset, declared);
             if (id == "NAME" || id == "AUTH" || id == "(c) " || id == "ANNO") {
                 if (b.options.include_metadata_text) {
-                    auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, kMaxPayloadRead));
+                    auto payload = b.reader.read(
+                        payload_offset, std::min<std::uint64_t>(declared, kMaxPayloadRead));
                     b.text(id, "text", trimmed_text(payload.data(), payload.size()));
                 }
             } else if (id == "MARK" || id == "COMT") {
                 auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, 2u));
                 if (payload.size() == 2u)
-                    region.fields.push_back({"count", static_cast<std::uint64_t>(read_u16be(payload.data()))});
+                    region.fields.push_back(
+                        {"count", static_cast<std::uint64_t>(read_u16be(payload.data()))});
             } else if (id == "ID3 ") {
                 region.note = "ID3v2 tag embedded in AIFF";
             }
@@ -218,7 +236,8 @@ void inspect_aiff_layout(Builder& b) {
         offset = chunk_end + pad;
     }
     if (declared_end > 12u && declared_end < file_size) {
-        auto& trailing = b.add_region(declared_end, 0u, file_size - declared_end, "", LayoutRegionKind::unknown);
+        auto& trailing =
+            b.add_region(declared_end, 0u, file_size - declared_end, "", LayoutRegionKind::unknown);
         trailing.note = "bytes after the declared envelope";
     }
 

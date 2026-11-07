@@ -62,7 +62,8 @@ Bytes two_frames_mono16() {
 }
 
 fs::path temp_file(const std::string& name) {
-    return fs::temp_directory_path() / ("pulp-audio-file-layout-" + std::to_string(::getpid()) + "-" + name);
+    return fs::temp_directory_path() /
+           ("pulp-audio-file-layout-" + std::to_string(::getpid()) + "-" + name);
 }
 
 std::uint64_t resident_bytes() {
@@ -81,7 +82,8 @@ std::uint64_t resident_bytes() {
 
 } // namespace
 
-TEST_CASE("layout report agrees with inspect_wav on every decoder fixture", "[audio][file-layout][parity]") {
+TEST_CASE("layout report agrees with inspect_wav on every decoder fixture",
+          "[audio][file-layout][parity]") {
     // The decoder is the ground truth for accept/reject and for the stream
     // facts; the report must never disagree, including on every truncated
     // prefix of a valid file.
@@ -120,7 +122,8 @@ TEST_CASE("layout report agrees with inspect_wav on every decoder fixture", "[au
     CHECK(rejected >= 50u);
 }
 
-TEST_CASE("interpret_wav_format reproduces the decoder's facts from a fmt payload", "[audio][file-layout]") {
+TEST_CASE("interpret_wav_format reproduces the decoder's facts from a fmt payload",
+          "[audio][file-layout]") {
     const auto facts = interpret_wav_format(make_extensible_pcm_format(2u, 44'100u, 32u, 24u), 16u);
     REQUIRE(facts);
     CHECK(facts->format_tag == 0xfffeu);
@@ -139,7 +142,8 @@ TEST_CASE("interpret_wav_format reproduces the decoder's facts from a fmt payloa
 
 TEST_CASE("standard headers classify standard with no warning", "[audio][file-layout][profile]") {
     SECTION("44-byte PCM") {
-        const auto report = inspect_audio_file_layout(make_wav(make_format(1u, 1u, 48'000u, 16u), two_frames_mono16()));
+        const auto report = inspect_audio_file_layout(
+            make_wav(make_format(1u, 1u, 48'000u, 16u), two_frames_mono16()));
         CHECK(report.container == AudioContainer::wav);
         REQUIRE(report.profile);
         CHECK(*report.profile == WavProfile::pcm44);
@@ -153,7 +157,7 @@ TEST_CASE("standard headers classify standard with no warning", "[audio][file-la
     }
     SECTION("BWF with bext before data") {
         Bytes bext(602u, 0u);
-        bext[346] = 2u;  // version 2 carries loudness fields
+        bext[346] = 2u; // version 2 carries loudness fields
         const auto report = inspect_audio_file_layout(make_wav_with_chunks(
             make_format(1u, 1u, 48'000u, 16u), two_frames_mono16(), {{"bext", bext}}));
         REQUIRE(report.profile);
@@ -172,7 +176,8 @@ TEST_CASE("standard headers classify standard with no warning", "[audio][file-la
     SECTION("float32 with an 18-byte fmt") {
         Bytes data;
         append_sample(data, 0.5f);
-        const auto report = inspect_audio_file_layout(make_wav(make_format_18(3u, 1u, 48'000u, 32u), data));
+        const auto report =
+            inspect_audio_file_layout(make_wav(make_format_18(3u, 1u, 48'000u, 32u), data));
         REQUIRE(report.profile);
         CHECK(*report.profile == WavProfile::floating);
         CHECK(report.is_standard());
@@ -201,7 +206,8 @@ TEST_CASE("standard headers classify standard with no warning", "[audio][file-la
         CHECK(report.stream->frames == 1u);
     }
     SECTION("RF64 with ds64") {
-        const auto report = inspect_audio_file_layout(make_rf64(make_format(1u, 1u, 48'000u, 16u), two_frames_mono16()));
+        const auto report = inspect_audio_file_layout(
+            make_rf64(make_format(1u, 1u, 48'000u, 16u), two_frames_mono16()));
         CHECK(report.container_detail == "RF64");
         REQUIRE(report.profile);
         CHECK(*report.profile == WavProfile::rf64);
@@ -213,10 +219,12 @@ TEST_CASE("standard headers classify standard with no warning", "[audio][file-la
         CHECK(ds64->kind == LayoutRegionKind::envelope);
         REQUIRE(report.decode);
         CHECK_FALSE(report.decode->decodable);
-        CHECK_THAT(report.decode->reason, Catch::Matchers::ContainsSubstring("RIFF envelopes only"));
+        CHECK_THAT(report.decode->reason,
+                   Catch::Matchers::ContainsSubstring("RIFF envelopes only"));
     }
     SECTION("Wave64") {
-        const auto report = inspect_audio_file_layout(make_w64(make_format(1u, 2u, 44'100u, 16u), Bytes(8u, 0u)));
+        const auto report =
+            inspect_audio_file_layout(make_w64(make_format(1u, 2u, 44'100u, 16u), Bytes(8u, 0u)));
         CHECK(report.container == AudioContainer::wav);
         CHECK(report.container_detail == "W64");
         REQUIRE(report.profile);
@@ -232,7 +240,8 @@ TEST_CASE("standard headers classify standard with no warning", "[audio][file-la
     }
 }
 
-TEST_CASE("specification violations each raise exactly their warning", "[audio][file-layout][warnings]") {
+TEST_CASE("specification violations each raise exactly their warning",
+          "[audio][file-layout][warnings]") {
     const auto format = make_format(1u, 1u, 48'000u, 16u);
     const auto data = two_frames_mono16();
 
@@ -250,7 +259,8 @@ TEST_CASE("specification violations each raise exactly their warning", "[audio][
         CHECK_FALSE(inspect_wav(bytes));
     }
     SECTION("duplicate fmt") {
-        const auto report = inspect_audio_file_layout(make_wav_with_chunks(format, data, {{"fmt ", format}}));
+        const auto report =
+            inspect_audio_file_layout(make_wav_with_chunks(format, data, {{"fmt ", format}}));
         CHECK(has_warning(report, LayoutWarningKind::duplicate_fmt));
         CHECK(report.warnings.size() == 1u);
         REQUIRE(report.decode);
@@ -294,8 +304,9 @@ TEST_CASE("specification violations each raise exactly their warning", "[audio][
         CHECK_FALSE(report.decode->decodable);
         CHECK_THAT(report.decode->reason, Catch::Matchers::ContainsSubstring("zero frames"));
         // The sample bytes that follow parse as chunks the file never declared.
-        CHECK(std::any_of(report.regions.begin(), report.regions.end(),
-                          [](const LayoutRegion& r) { return r.kind == LayoutRegionKind::unknown; }));
+        CHECK(std::any_of(report.regions.begin(), report.regions.end(), [](const LayoutRegion& r) {
+            return r.kind == LayoutRegionKind::unknown;
+        }));
     }
     SECTION("sentinel size without ds64") {
         auto bytes = make_wav(format, data);
@@ -307,8 +318,8 @@ TEST_CASE("specification violations each raise exactly their warning", "[audio][
         CHECK_FALSE(inspect_wav(bytes));
     }
     SECTION("RF64 ds64 data size overlapping the following chunk") {
-        const auto bytes = make_rf64(format, data, static_cast<std::uint32_t>(data.size()), data.size() + 8u,
-                                     {{"JUNK", Bytes{1u, 2u, 3u, 4u}}});
+        const auto bytes = make_rf64(format, data, static_cast<std::uint32_t>(data.size()),
+                                     data.size() + 8u, {{"JUNK", Bytes{1u, 2u, 3u, 4u}}});
         const auto report = inspect_audio_file_layout(bytes);
         CHECK(has_warning(report, LayoutWarningKind::chunk_overlap));
         REQUIRE(find_region(report, "JUNK"));
@@ -328,7 +339,8 @@ TEST_CASE("specification violations each raise exactly their warning", "[audio][
     SECTION("envelope size mismatch in both directions") {
         auto larger = make_wav(format, data);
         set_u32(larger, 4u, static_cast<std::uint32_t>(larger.size()));
-        CHECK(has_warning(inspect_audio_file_layout(larger), LayoutWarningKind::envelope_size_mismatch));
+        CHECK(has_warning(inspect_audio_file_layout(larger),
+                          LayoutWarningKind::envelope_size_mismatch));
         auto trailing = make_wav(format, data);
         append_chunk(trailing, "JUNK", Bytes{1u, 2u});
         const auto report = inspect_audio_file_layout(trailing);
@@ -339,14 +351,18 @@ TEST_CASE("specification violations each raise exactly their warning", "[audio][
         Bytes list{'I', 'N', 'F', 'O'};
         for (int i = 0; i < 20; ++i) {
             const std::string tag = "IN" + std::to_string(10 + i);
-            for (char c : tag) list.push_back(static_cast<std::uint8_t>(c));
+            for (char c : tag)
+                list.push_back(static_cast<std::uint8_t>(c));
             const std::string value = "value-" + std::to_string(i);
             append_u32(list, static_cast<std::uint32_t>(value.size() + 1u));
-            for (char c : value) list.push_back(static_cast<std::uint8_t>(c));
+            for (char c : value)
+                list.push_back(static_cast<std::uint8_t>(c));
             list.push_back(0u);
-            if ((list.size() & 1u) != 0u) list.push_back(0u);
+            if ((list.size() & 1u) != 0u)
+                list.push_back(0u);
         }
-        const auto report = inspect_audio_file_layout(make_wav_with_chunks(format, data, {{"LIST", list}}));
+        const auto report =
+            inspect_audio_file_layout(make_wav_with_chunks(format, data, {{"LIST", list}}));
         CHECK(report.is_standard());
         const auto* region = find_region(report, "LIST");
         REQUIRE(region);
@@ -358,7 +374,8 @@ TEST_CASE("specification violations each raise exactly their warning", "[audio][
     }
 }
 
-TEST_CASE("declared frames past the decode limit are a fact, not an error", "[audio][file-layout][limits]") {
+TEST_CASE("declared frames past the decode limit are a fact, not an error",
+          "[audio][file-layout][limits]") {
     // 100,000,001 mono 16-bit frames declared by the header of a file that
     // holds none of them. The limit fires on the declaration.
     auto bytes = make_wav(make_format(1u, 1u, 48'000u, 16u), Bytes{});
@@ -380,14 +397,16 @@ TEST_CASE("declared frames past the decode limit are a fact, not an error", "[au
 }
 
 TEST_CASE("sparse multi-gigabyte WAV costs only header reads", "[audio][file-layout][memory]") {
-    constexpr std::uint64_t kFileSize = 2'147'483'648ull + 44u;  // 2 GiB of samples behind a 44-byte header
+    constexpr std::uint64_t kFileSize =
+        2'147'483'648ull + 44u; // 2 GiB of samples behind a 44-byte header
     const auto path = temp_file("sparse.wav");
     {
         auto header = make_wav(make_format(1u, 2u, 48'000u, 16u), Bytes{});
         set_u32(header, 4u, static_cast<std::uint32_t>(kFileSize - 8u));
         set_u32(header, 40u, static_cast<std::uint32_t>(kFileSize - 44u));
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        out.write(reinterpret_cast<const char*>(header.data()), static_cast<std::streamsize>(header.size()));
+        out.write(reinterpret_cast<const char*>(header.data()),
+                  static_cast<std::streamsize>(header.size()));
         out.close();
         fs::resize_file(path, kFileSize);
     }
@@ -470,7 +489,8 @@ TEST_CASE("hostile headers are reported, never guessed around", "[audio][file-la
         CHECK(report.stream->frames == 2u);
     }
     SECTION("fmt shorter than 16 bytes") {
-        const auto report = inspect_audio_file_layout(make_wav(Bytes{1u, 0u, 1u, 0u, 0x80u, 0xbbu, 0u, 0u}, data));
+        const auto report =
+            inspect_audio_file_layout(make_wav(Bytes{1u, 0u, 1u, 0u, 0x80u, 0xbbu, 0u, 0u}, data));
         REQUIRE(report.decode);
         CHECK_FALSE(report.decode->decodable);
         CHECK_THAT(report.decode->reason, Catch::Matchers::ContainsSubstring("fmt"));
@@ -478,7 +498,7 @@ TEST_CASE("hostile headers are reported, never guessed around", "[audio][file-la
     }
     SECTION("odd data chunk at end of file") {
         auto bytes = make_wav(format, Bytes{0u, 0u, 0u});
-        bytes.pop_back();  // drop the pad byte make_wav added
+        bytes.pop_back(); // drop the pad byte make_wav added
         set_u32(bytes, 4u, static_cast<std::uint32_t>(bytes.size() - 8u));
         const auto report = inspect_audio_file_layout(bytes);
         CHECK(has_warning(report, LayoutWarningKind::missing_pad_byte));
@@ -514,7 +534,7 @@ TEST_CASE("raw PCM is described, never guessed", "[audio][file-layout][raw]") {
     spec.sample_rate = 44'100u;
     spec.offset = 4u;
     options.raw = spec;
-    const Bytes bytes(4u + 6u * 3u + 4u, 0u);  // header, three stereo frames, four stray bytes
+    const Bytes bytes(4u + 6u * 3u + 4u, 0u); // header, three stereo frames, four stray bytes
     const auto report = inspect_audio_file_layout(bytes, options);
     CHECK(report.container == AudioContainer::raw);
     REQUIRE(report.stream);
@@ -541,14 +561,16 @@ TEST_CASE("raw PCM is described, never guessed", "[audio][file-layout][raw]") {
     CHECK_FALSE(inspect_audio_file_layout(bytes, options).error.empty());
 }
 
-TEST_CASE("default output carries no metadata text and names no path", "[audio][file-layout][redaction]") {
+TEST_CASE("default output carries no metadata text and names no path",
+          "[audio][file-layout][redaction]") {
     Bytes bext(602u, 0u);
     const std::string speaker = "SPEAKER NAME 42";
     std::copy(speaker.begin(), speaker.end(), bext.begin());
     Bytes list{'I', 'N', 'F', 'O', 'I', 'N', 'A', 'M'};
     const std::string title = "Secret Title";
     append_u32(list, static_cast<std::uint32_t>(title.size()));
-    for (char c : title) list.push_back(static_cast<std::uint8_t>(c));
+    for (char c : title)
+        list.push_back(static_cast<std::uint8_t>(c));
     const auto bytes = make_wav_with_chunks(make_format(1u, 1u, 48'000u, 16u), two_frames_mono16(),
                                             {{"bext", bext}, {"LIST", list}});
 
@@ -574,18 +596,31 @@ TEST_CASE("default output carries no metadata text and names no path", "[audio][
     CHECK_THAT(full, Catch::Matchers::ContainsSubstring("\"text\""));
 }
 
-TEST_CASE("inspect JSON carries its schema id and a fixed key set", "[audio][file-layout][schema]") {
-    const auto report = inspect_audio_file_layout(make_wav(make_format(1u, 1u, 48'000u, 16u), two_frames_mono16()));
+TEST_CASE("inspect JSON carries its schema id and a fixed key set",
+          "[audio][file-layout][schema]") {
+    const auto report =
+        inspect_audio_file_layout(make_wav(make_format(1u, 1u, 48'000u, 16u), two_frames_mono16()));
     LayoutJsonOptions options;
     options.input_name = "a.wav";
     const auto json = audio_file_layout_to_json(report, options);
     const auto parsed = choc::json::parse(json);
     CHECK(parsed["schema"].getString() == "pulp.audio.file_inspect.v1");
     CHECK(parsed["schema"].getString() == kAudioFileInspectJsonSchema);
-    const std::set<std::string> expected{
-        "schema", "input", "container", "container_detail", "profile", "conformance", "facts_confidence",
-        "bytes_read", "stream", "decode", "exceeds_decode_limits", "regions", "regions_truncated",
-        "warnings", "metadata"};
+    const std::set<std::string> expected{"schema",
+                                         "input",
+                                         "container",
+                                         "container_detail",
+                                         "profile",
+                                         "conformance",
+                                         "facts_confidence",
+                                         "bytes_read",
+                                         "stream",
+                                         "decode",
+                                         "exceeds_decode_limits",
+                                         "regions",
+                                         "regions_truncated",
+                                         "warnings",
+                                         "metadata"};
     CHECK(top_level_keys(json) == expected);
     CHECK(parsed["input"]["name"].getString() == "a.wav");
     CHECK(parsed["metadata"].hasObjectMember("present"));
@@ -597,7 +632,8 @@ TEST_CASE("inspect JSON carries its schema id and a fixed key set", "[audio][fil
             keys.insert(std::string(region.getObjectMemberAt(i).name));
         return keys;
     }();
-    CHECK(region_keys == std::set<std::string>{"offset", "declared_size", "actual_size", "id", "kind", "fields"});
+    CHECK(region_keys ==
+          std::set<std::string>{"offset", "declared_size", "actual_size", "id", "kind", "fields"});
 }
 
 #ifdef PULP_SOURCE_DIR
@@ -659,8 +695,9 @@ TEST_CASE("checked-in container fixtures walk end to end", "[audio][file-layout]
         CHECK(report.facts_confidence == FactsConfidence::container_only);
         REQUIRE_FALSE(report.regions.empty());
         const auto& first = report.regions.front();
-        const auto streams = std::find_if(first.fields.begin(), first.fields.end(),
-                                          [](const LayoutField& f) { return f.name == "logical_streams"; });
+        const auto streams =
+            std::find_if(first.fields.begin(), first.fields.end(),
+                         [](const LayoutField& f) { return f.name == "logical_streams"; });
         REQUIRE(streams != first.fields.end());
         CHECK(std::get<std::uint64_t>(streams->value) == 2u);
         const auto chained = std::find_if(first.fields.begin(), first.fields.end(),
@@ -689,7 +726,8 @@ TEST_CASE("checked-in container fixtures walk end to end", "[audio][file-layout]
         CHECK(report.stream->frames > 0u);
         CHECK(report.metadata_text.empty());
         std::vector<std::string> present;
-        for (const auto& entry : report.metadata_present) present.push_back(entry.id);
+        for (const auto& entry : report.metadata_present)
+            present.push_back(entry.id);
         CHECK(std::find(present.begin(), present.end(), "ID3v2") != present.end());
         CHECK(std::find(present.begin(), present.end(), "APEv2") != present.end());
     }
@@ -705,8 +743,9 @@ TEST_CASE("checked-in container fixtures walk end to end", "[audio][file-layout]
                           [](const LayoutField& f) { return f.name == "largesize"; }));
         const auto* stbl = find_region(report, "stbl");
         REQUIRE(stbl);
-        const auto offsets = std::find_if(stbl->fields.begin(), stbl->fields.end(),
-                                          [](const LayoutField& f) { return f.name == "chunk_offsets"; });
+        const auto offsets =
+            std::find_if(stbl->fields.begin(), stbl->fields.end(),
+                         [](const LayoutField& f) { return f.name == "chunk_offsets"; });
         REQUIRE(offsets != stbl->fields.end());
         CHECK(std::get<std::string>(offsets->value) == "co64");
         REQUIRE(report.stream);

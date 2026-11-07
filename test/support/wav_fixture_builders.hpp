@@ -63,8 +63,8 @@ inline Bytes make_format(std::uint16_t encoding, std::uint16_t channels, std::ui
 }
 
 /// 18-byte fmt payload (cbSize = 0), the form float WAVs commonly carry.
-inline Bytes make_format_18(std::uint16_t encoding, std::uint16_t channels, std::uint32_t sample_rate,
-                            std::uint16_t bits) {
+inline Bytes make_format_18(std::uint16_t encoding, std::uint16_t channels,
+                            std::uint32_t sample_rate, std::uint16_t bits) {
     auto format = make_format(encoding, channels, sample_rate, bits);
     append_u16(format, 0u);
     return format;
@@ -144,8 +144,9 @@ inline Bytes make_wav_with_chunks(const Bytes& format, const Bytes& data,
 /// RF64 with a leading ds64. The data chunk's own size field is the sentinel
 /// unless `data_size32` overrides it; `ds64_data_size` overrides the ds64
 /// data size (defaults to the real payload size).
-inline Bytes make_rf64(const Bytes& format, const Bytes& data, std::uint32_t data_size32 = 0xffffffffu,
-                       std::uint64_t ds64_data_size = 0u, const std::vector<NamedChunk>& after_data = {}) {
+inline Bytes make_rf64(const Bytes& format, const Bytes& data,
+                       std::uint32_t data_size32 = 0xffffffffu, std::uint64_t ds64_data_size = 0u,
+                       const std::vector<NamedChunk>& after_data = {}) {
     Bytes bytes;
     append_id(bytes, "RF64");
     append_u32(bytes, 0xffffffffu);
@@ -178,7 +179,8 @@ inline Bytes make_rf64(const Bytes& format, const Bytes& data, std::uint32_t dat
 inline Bytes make_w64(const Bytes& format, const Bytes& data) {
     static const Bytes riff_guid{0x72, 0x69, 0x66, 0x66, 0x2E, 0x91, 0xCF, 0x11,
                                  0xA5, 0xD6, 0x28, 0xDB, 0x04, 0xC1, 0x00, 0x00};
-    static const Bytes suffix{0xF3, 0xAC, 0xD3, 0x11, 0x8C, 0xD1, 0x00, 0xC0, 0x4F, 0x8E, 0xDB, 0x8A};
+    static const Bytes suffix{0xF3, 0xAC, 0xD3, 0x11, 0x8C, 0xD1,
+                              0x00, 0xC0, 0x4F, 0x8E, 0xDB, 0x8A};
     auto guid = [&](const char (&id)[5]) {
         Bytes g;
         for (std::size_t i = 0; i < 4u; ++i)
@@ -239,7 +241,8 @@ inline std::vector<Fixture> decoder_fixtures() {
     append_sample(stereo16, std::int16_t{-16384});
     add("pcm16 stereo", make_wav(make_format(1u, 2u, 48'000u, 16u), stereo16));
     add("pcm8", make_wav(make_format(1u, 1u, 8'000u, 8u), Bytes{0x00u, 0x80u, 0xffu}));
-    add("pcm24", make_wav(make_format(1u, 1u, 44'100u, 24u), Bytes{0x00u, 0x00u, 0x80u, 0xffu, 0xffu, 0x7fu}));
+    add("pcm24", make_wav(make_format(1u, 1u, 44'100u, 24u),
+                          Bytes{0x00u, 0x00u, 0x80u, 0xffu, 0xffu, 0x7fu}));
     Bytes pcm32;
     append_sample(pcm32, std::int32_t{-2147483647 - 1});
     append_sample(pcm32, std::int32_t{1073741824});

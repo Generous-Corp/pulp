@@ -90,14 +90,17 @@ std::optional<DecodedAudio> decode(const std::string& path) {
         layout_options.decode_limits.max_output_bytes = registry_limits.max_output_bytes;
         const auto layout = pulp::audio::inspect_audio_file_layout(fs::path(path), layout_options);
         if (layout.decode_limits && layout.decode_limits->exceeds && layout.stream) {
-            std::cerr << "Error: audio file exceeds the in-memory decode limit: "
-                      << path << " declares " << layout.stream->frames << " frames x "
+            std::cerr << "Error: audio file exceeds the in-memory decode limit: " << path
+                      << " declares " << layout.stream->frames << " frames x "
                       << layout.stream->channels << " channels;";
             for (const auto& name : layout.decode_limits->exceeded) {
                 std::cerr << " " << name << "=";
-                if (name == "max_frames") std::cerr << layout.decode_limits->limits.max_frames;
-                else if (name == "max_channels") std::cerr << layout.decode_limits->limits.max_channels;
-                else std::cerr << layout.decode_limits->limits.max_output_bytes;
+                if (name == "max_frames")
+                    std::cerr << layout.decode_limits->limits.max_frames;
+                else if (name == "max_channels")
+                    std::cerr << layout.decode_limits->limits.max_channels;
+                else
+                    std::cerr << layout.decode_limits->limits.max_output_bytes;
             }
             std::cerr << ". `pulp audio inspect` reports the header without decoding.\n";
             return std::nullopt;
@@ -129,7 +132,8 @@ int run_summarize(const std::vector<std::string>& args) {
     bool absolute_paths = false;
     for (std::size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--json") json_output = true;
-        else if (args[i] == "--absolute-paths") absolute_paths = true;
+        else if (args[i] == "--absolute-paths")
+            absolute_paths = true;
         else if (file.empty() && !args[i].empty() && args[i][0] != '-')
             file = args[i];
         else {

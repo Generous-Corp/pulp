@@ -21,8 +21,8 @@ namespace {
 constexpr std::uint64_t kSyncSearchWindow = 64u * 1024u;
 
 struct FrameHeader {
-    std::uint32_t version_index = 0u;   // 0 = 2.5, 2 = 2, 3 = 1
-    std::uint32_t layer = 0u;           // 1, 2, 3
+    std::uint32_t version_index = 0u; // 0 = 2.5, 2 = 2, 3 = 1
+    std::uint32_t layer = 0u;         // 1, 2, 3
     std::uint32_t bitrate_kbps = 0u;
     std::uint32_t sample_rate = 0u;
     std::uint32_t channels = 0u;
@@ -72,35 +72,47 @@ std::optional<FrameHeader> parse_frame_header(const std::uint8_t* h) {
     f.sample_rate = kRates[f.version_index][rate_index];
     if (f.layer == 1u) {
         f.samples_per_frame = 384u;
-        f.frame_length = (12u * f.bitrate_kbps * 1000u / f.sample_rate + (f.padding ? 1u : 0u)) * 4u;
+        f.frame_length =
+            (12u * f.bitrate_kbps * 1000u / f.sample_rate + (f.padding ? 1u : 0u)) * 4u;
     } else {
         f.samples_per_frame = (f.layer == 3u && !mpeg1) ? 576u : 1152u;
-        f.frame_length = f.samples_per_frame / 8u * f.bitrate_kbps * 1000u / f.sample_rate + (f.padding ? 1u : 0u);
+        f.frame_length = f.samples_per_frame / 8u * f.bitrate_kbps * 1000u / f.sample_rate +
+                         (f.padding ? 1u : 0u);
     }
     return f;
 }
 
 const char* version_name(std::uint32_t index) {
     switch (index) {
-        case 0: return "2.5";
-        case 2: return "2";
-        case 3: return "1";
-        default: return "reserved";
+    case 0:
+        return "2.5";
+    case 2:
+        return "2";
+    case 3:
+        return "1";
+    default:
+        return "reserved";
     }
 }
 
 const char* channel_mode_name(std::uint32_t mode) {
     switch (mode) {
-        case 0: return "stereo";
-        case 1: return "joint_stereo";
-        case 2: return "dual_channel";
-        default: return "mono";
+    case 0:
+        return "stereo";
+    case 1:
+        return "joint_stereo";
+    case 2:
+        return "dual_channel";
+    default:
+        return "mono";
     }
 }
 
 std::uint32_t syncsafe(const std::uint8_t* p) noexcept {
-    return (static_cast<std::uint32_t>(p[0] & 0x7fu) << 21u) | (static_cast<std::uint32_t>(p[1] & 0x7fu) << 14u) |
-           (static_cast<std::uint32_t>(p[2] & 0x7fu) << 7u) | static_cast<std::uint32_t>(p[3] & 0x7fu);
+    return (static_cast<std::uint32_t>(p[0] & 0x7fu) << 21u) |
+           (static_cast<std::uint32_t>(p[1] & 0x7fu) << 14u) |
+           (static_cast<std::uint32_t>(p[2] & 0x7fu) << 7u) |
+           static_cast<std::uint32_t>(p[3] & 0x7fu);
 }
 
 std::string id3_text(const std::uint8_t* p, std::size_t size) {
@@ -110,9 +122,12 @@ std::string id3_text(const std::uint8_t* p, std::size_t size) {
     const auto* body = p + 1u;
     const auto body_size = size - 1u;
     switch (encoding) {
-        case 1: return utf16_to_utf8(body, body_size, false);
-        case 2: return utf16_to_utf8(body, body_size, true);
-        default: return trimmed_text(body, body_size);
+    case 1:
+        return utf16_to_utf8(body, body_size, false);
+    case 2:
+        return utf16_to_utf8(body, body_size, true);
+    default:
+        return trimmed_text(body, body_size);
     }
 }
 
@@ -161,7 +176,8 @@ void inspect_mp3_layout(Builder& b) {
         const bool footer = (flags & 0x10u) != 0u;
         const auto total = 10u + tag_size + (footer ? 10u : 0u);
         auto& region = b.add_region(0u, 0u, total, "ID3v2", LayoutRegionKind::metadata);
-        region.fields.push_back({"version", std::string("2.") + std::to_string(major) + "." + std::to_string(head[4])});
+        region.fields.push_back(
+            {"version", std::string("2.") + std::to_string(major) + "." + std::to_string(head[4])});
         region.fields.push_back({"flags", static_cast<std::uint64_t>(flags)});
         region.fields.push_back({"unsynchronisation", (flags & 0x80u) != 0u});
         region.fields.push_back({"extended_header", (flags & 0x40u) != 0u});
@@ -188,7 +204,8 @@ void inspect_mp3_layout(Builder& b) {
     if (file_size >= 128u) {
         auto tail = b.reader.read(file_size - 128u, 128u);
         if (tail.size() == 128u && std::memcmp(tail.data(), "TAG", 3u) == 0) {
-            auto& region = b.add_region(file_size - 128u, 0u, 128u, "ID3v1", LayoutRegionKind::metadata);
+            auto& region =
+                b.add_region(file_size - 128u, 0u, 128u, "ID3v1", LayoutRegionKind::metadata);
             region.fields.push_back({"has_track_number", tail[125] == 0u && tail[126] != 0u});
             b.present("ID3v1", file_size - 128u, 128u);
             b.text("ID3v1", "title", trimmed_text(tail.data() + 3u, 30u));
@@ -226,7 +243,10 @@ void inspect_mp3_layout(Builder& b) {
     std::optional<FrameHeader> first;
     std::uint64_t first_offset = audio_start;
     {
-        const auto window = b.reader.read(audio_start, std::min<std::uint64_t>(kSyncSearchWindow, audio_end > audio_start ? audio_end - audio_start : 0u));
+        const auto window = b.reader.read(
+            audio_start,
+            std::min<std::uint64_t>(kSyncSearchWindow,
+                                    audio_end > audio_start ? audio_end - audio_start : 0u));
         for (std::size_t i = 0u; i + 4u <= window.size(); ++i) {
             const auto candidate = parse_frame_header(window.data() + i);
             if (!candidate || candidate->frame_length == 0u)
@@ -235,7 +255,8 @@ void inspect_mp3_layout(Builder& b) {
             bool confirmed = next >= audio_end;
             if (!confirmed) {
                 std::array<std::uint8_t, 4> next_header{};
-                confirmed = b.reader.read_exact(next, next_header) && frame_header_valid(next_header.data());
+                confirmed = b.reader.read_exact(next, next_header) &&
+                            frame_header_valid(next_header.data());
             }
             if (confirmed) {
                 first = candidate;
@@ -246,26 +267,33 @@ void inspect_mp3_layout(Builder& b) {
     }
 
     if (first_offset > audio_start) {
-        auto& gap = b.add_region(audio_start, 0u, first_offset - audio_start, "", LayoutRegionKind::unknown);
+        auto& gap = b.add_region(audio_start, 0u, first_offset - audio_start, "",
+                                 LayoutRegionKind::unknown);
         gap.note = "bytes between the leading tag and the first frame sync";
     }
     if (!first) {
         if (audio_end > first_offset) {
-            auto& rest = b.add_region(first_offset, 0u, audio_end - first_offset, "", LayoutRegionKind::unknown);
-            rest.note = "no MPEG frame sync found in the first " + std::to_string(kSyncSearchWindow) + " bytes";
+            auto& rest = b.add_region(first_offset, 0u, audio_end - first_offset, "",
+                                      LayoutRegionKind::unknown);
+            rest.note = "no MPEG frame sync found in the first " +
+                        std::to_string(kSyncSearchWindow) + " bytes";
         }
         report.error = "no MPEG audio frame found";
         return;
     }
-    auto& frames = b.add_region(first_offset, 0u, audio_end > first_offset ? audio_end - first_offset : 0u,
-                                "frames", LayoutRegionKind::data);
+    auto& frames =
+        b.add_region(first_offset, 0u, audio_end > first_offset ? audio_end - first_offset : 0u,
+                     "frames", LayoutRegionKind::data);
     frames.fields.push_back({"mpeg_version", std::string(version_name(first->version_index))});
     frames.fields.push_back({"layer", static_cast<std::uint64_t>(first->layer)});
-    frames.fields.push_back({"first_frame_bitrate_kbps", static_cast<std::uint64_t>(first->bitrate_kbps)});
+    frames.fields.push_back(
+        {"first_frame_bitrate_kbps", static_cast<std::uint64_t>(first->bitrate_kbps)});
     frames.fields.push_back({"sample_rate", static_cast<std::uint64_t>(first->sample_rate)});
     frames.fields.push_back({"channel_mode", std::string(channel_mode_name(first->channel_mode))});
-    frames.fields.push_back({"first_frame_length", static_cast<std::uint64_t>(first->frame_length)});
-    frames.fields.push_back({"samples_per_frame", static_cast<std::uint64_t>(first->samples_per_frame)});
+    frames.fields.push_back(
+        {"first_frame_length", static_cast<std::uint64_t>(first->frame_length)});
+    frames.fields.push_back(
+        {"samples_per_frame", static_cast<std::uint64_t>(first->samples_per_frame)});
     frames.fields.push_back({"crc_protection", first->protection});
 
     // Xing/Info or VBRI header inside the first frame.
@@ -273,12 +301,14 @@ void inspect_mp3_layout(Builder& b) {
     std::uint64_t xing_bytes = 0u;
     {
         const bool mpeg1 = first->version_index == 3u;
-        const std::size_t side_info = mpeg1 ? (first->channels == 1u ? 17u : 32u)
-                                            : (first->channels == 1u ? 9u : 17u);
-        auto frame = b.reader.read(first_offset, std::min<std::uint64_t>(first->frame_length, 2048u));
+        const std::size_t side_info =
+            mpeg1 ? (first->channels == 1u ? 17u : 32u) : (first->channels == 1u ? 9u : 17u);
+        auto frame =
+            b.reader.read(first_offset, std::min<std::uint64_t>(first->frame_length, 2048u));
         const std::size_t xing_at = 4u + side_info;
         if (frame.size() >= xing_at + 8u &&
-            (std::memcmp(frame.data() + xing_at, "Xing", 4u) == 0 || std::memcmp(frame.data() + xing_at, "Info", 4u) == 0)) {
+            (std::memcmp(frame.data() + xing_at, "Xing", 4u) == 0 ||
+             std::memcmp(frame.data() + xing_at, "Info", 4u) == 0)) {
             const auto tag = fourcc(frame.data() + xing_at);
             const auto flags = read_u32be(frame.data() + xing_at + 4u);
             std::size_t at = xing_at + 8u;
@@ -296,11 +326,13 @@ void inspect_mp3_layout(Builder& b) {
             if ((flags & 0x4u) != 0u)
                 at += 100u;
             if ((flags & 0x8u) != 0u && at + 4u <= frame.size()) {
-                frames.fields.push_back({"vbr_quality", static_cast<std::uint64_t>(read_u32be(frame.data() + at))});
+                frames.fields.push_back(
+                    {"vbr_quality", static_cast<std::uint64_t>(read_u32be(frame.data() + at))});
                 at += 4u;
             }
             // LAME extension: encoder string then delay/padding packed in 3 bytes.
-            if (at + 24u <= frame.size() && printable_id(std::string(reinterpret_cast<const char*>(frame.data() + at), 4u))) {
+            if (at + 24u <= frame.size() &&
+                printable_id(std::string(reinterpret_cast<const char*>(frame.data() + at), 4u))) {
                 frames.fields.push_back({"encoder", trimmed_text(frame.data() + at, 9u)});
                 const auto* dp = frame.data() + at + 21u;
                 const auto delay = (static_cast<std::uint32_t>(dp[0]) << 4u) | (dp[1] >> 4u);
@@ -308,9 +340,11 @@ void inspect_mp3_layout(Builder& b) {
                 frames.fields.push_back({"encoder_delay", static_cast<std::uint64_t>(delay)});
                 frames.fields.push_back({"encoder_padding", static_cast<std::uint64_t>(padding)});
             }
-        } else if (frame.size() >= 4u + 32u + 26u && std::memcmp(frame.data() + 36u, "VBRI", 4u) == 0) {
+        } else if (frame.size() >= 4u + 32u + 26u &&
+                   std::memcmp(frame.data() + 36u, "VBRI", 4u) == 0) {
             frames.fields.push_back({"vbr_header", std::string("VBRI")});
-            frames.fields.push_back({"vbri_delay", static_cast<std::uint64_t>(read_u16be(frame.data() + 42u))});
+            frames.fields.push_back(
+                {"vbri_delay", static_cast<std::uint64_t>(read_u16be(frame.data() + 42u))});
             xing_bytes = read_u32be(frame.data() + 46u);
             xing_frames = read_u32be(frame.data() + 50u);
             frames.fields.push_back({"vbr_bytes", xing_bytes});
@@ -352,14 +386,17 @@ struct Mp4Facts {
 };
 
 LayoutRegionKind box_kind(std::string_view type) {
-    if (type == "ftyp") return LayoutRegionKind::envelope;
+    if (type == "ftyp")
+        return LayoutRegionKind::envelope;
     if (type == "moov" || type == "trak" || type == "mdia" || type == "minf" || type == "stbl" ||
         type == "mvhd" || type == "tkhd" || type == "mdhd" || type == "hdlr" || type == "stsd" ||
         type == "stts" || type == "stsz" || type == "stsc" || type == "stco" || type == "co64" ||
         type == "esds" || type == "elst" || type == "edts" || type == "smhd" || type == "dinf")
         return LayoutRegionKind::fmt;
-    if (type == "mdat") return LayoutRegionKind::data;
-    if (type == "free" || type == "skip" || type == "wide") return LayoutRegionKind::padding;
+    if (type == "mdat")
+        return LayoutRegionKind::data;
+    if (type == "free" || type == "skip" || type == "wide")
+        return LayoutRegionKind::padding;
     if (type == "udta" || type == "meta" || type == "ilst" || type == "chpl" || type == "uuid")
         return LayoutRegionKind::metadata;
     return LayoutRegionKind::unknown;
@@ -378,22 +415,26 @@ std::uint32_t descriptor_length(const std::uint8_t* p, std::size_t size, std::si
 }
 
 void parse_esds(LayoutRegion& region, Mp4Facts& facts, const std::uint8_t* p, std::size_t size) {
-    std::size_t at = 4u;  // version + flags
+    std::size_t at = 4u; // version + flags
     while (at < size) {
         const auto tag = p[at++];
         const auto length = descriptor_length(p, size, at);
         const auto end = std::min(size, at + length);
         if (tag == 0x03u) {
-            at += 3u;  // ES_ID + flags; assume no dependsOn/URL/OCR flags
+            at += 3u; // ES_ID + flags; assume no dependsOn/URL/OCR flags
             continue;
         }
         if (tag == 0x04u && at + 13u <= end) {
             const auto oti = p[at];
             region.fields.push_back({"object_type_indication", static_cast<std::uint64_t>(oti)});
-            region.fields.push_back({"max_bitrate", static_cast<std::uint64_t>(read_u32be(p + at + 5u))});
-            region.fields.push_back({"avg_bitrate", static_cast<std::uint64_t>(read_u32be(p + at + 9u))});
-            if (oti == 0x40u) facts.codec = "aac";
-            else if (oti == 0x6bu || oti == 0x69u) facts.codec = "mp3";
+            region.fields.push_back(
+                {"max_bitrate", static_cast<std::uint64_t>(read_u32be(p + at + 5u))});
+            region.fields.push_back(
+                {"avg_bitrate", static_cast<std::uint64_t>(read_u32be(p + at + 9u))});
+            if (oti == 0x40u)
+                facts.codec = "aac";
+            else if (oti == 0x6bu || oti == 0x69u)
+                facts.codec = "mp3";
             at += 13u;
             continue;
         }
@@ -402,24 +443,29 @@ void parse_esds(LayoutRegion& region, Mp4Facts& facts, const std::uint8_t* p, st
             const auto freq_index = ((p[at] & 0x7u) << 1u) | (p[at + 1u] >> 7u);
             const auto channel_config = (p[at + 1u] >> 3u) & 0xfu;
             region.fields.push_back({"audio_object_type", static_cast<std::uint64_t>(aot)});
-            region.fields.push_back({"sampling_frequency_index", static_cast<std::uint64_t>(freq_index)});
-            region.fields.push_back({"channel_configuration", static_cast<std::uint64_t>(channel_config)});
+            region.fields.push_back(
+                {"sampling_frequency_index", static_cast<std::uint64_t>(freq_index)});
+            region.fields.push_back(
+                {"channel_configuration", static_cast<std::uint64_t>(channel_config)});
             // The sample entry's channelcount is pinned to 2 by QuickTime-
             // style writers regardless of the stream; the AudioSpecificConfig
             // is the codec's own statement.
             if (channel_config >= 1u && channel_config <= 7u)
                 facts.channels = channel_config == 7u ? 8u : channel_config;
-            if (aot == 2u) facts.codec = "aac-lc";
-            else if (aot == 5u) facts.codec = "he-aac";
-            else if (aot == 29u) facts.codec = "he-aac-v2";
+            if (aot == 2u)
+                facts.codec = "aac-lc";
+            else if (aot == 5u)
+                facts.codec = "he-aac";
+            else if (aot == 29u)
+                facts.codec = "he-aac-v2";
             return;
         }
         at = end;
     }
 }
 
-void walk_boxes(Builder& b, Mp4Facts& facts, std::span<const std::uint8_t> bytes, std::uint64_t base,
-                std::size_t depth, const std::string& parent);
+void walk_boxes(Builder& b, Mp4Facts& facts, std::span<const std::uint8_t> bytes,
+                std::uint64_t base, std::size_t depth, const std::string& parent);
 
 void parse_leaf(Builder& b, Mp4Facts& facts, LayoutRegion& region, const std::string& type,
                 std::span<const std::uint8_t> body, std::uint64_t body_offset, std::size_t depth,
@@ -460,7 +506,7 @@ void parse_leaf(Builder& b, Mp4Facts& facts, LayoutRegion& region, const std::st
         const auto entry_type = fourcc(p + 12u);
         region.fields.push_back({"first_entry", entry_type});
         if (facts.handler == "soun" && !facts.audio_track_done && size >= 16u + 28u) {
-            const auto* e = p + 16u;  // after the entry's own size+type
+            const auto* e = p + 16u; // after the entry's own size+type
             const auto channels = read_u16be(e + 16u);
             const auto sample_size = read_u16be(e + 18u);
             const auto rate = read_u32be(e + 24u) >> 16u;
@@ -475,8 +521,10 @@ void parse_leaf(Builder& b, Mp4Facts& facts, LayoutRegion& region, const std::st
             // into the stsd body.
             constexpr std::size_t kEntryChildren = 8u + 36u;
             if (entry_size > 36u && kEntryChildren < size && depth + 1u < kMaxBoxDepth) {
-                const auto children = body.subspan(kEntryChildren, std::min<std::size_t>(entry_size - 36u, size - kEntryChildren));
-                walk_boxes(b, facts, children, body_offset + kEntryChildren, depth + 1u, entry_type);
+                const auto children = body.subspan(
+                    kEntryChildren, std::min<std::size_t>(entry_size - 36u, size - kEntryChildren));
+                walk_boxes(b, facts, children, body_offset + kEntryChildren, depth + 1u,
+                           entry_type);
             }
         }
     } else if (type == "esds") {
@@ -501,7 +549,10 @@ void parse_leaf(Builder& b, Mp4Facts& facts, LayoutRegion& region, const std::st
     } else if ((type == "stco" || type == "co64") && size >= 8u) {
         region.fields.push_back({"entry_count", static_cast<std::uint64_t>(read_u32be(p + 4u))});
         if (facts.handler == "soun" && !facts.audio_track_done) {
-            if (type == "co64") facts.co64 = true; else facts.stco = true;
+            if (type == "co64")
+                facts.co64 = true;
+            else
+                facts.stco = true;
         }
     } else if (type == "elst" && size >= 8u) {
         const auto version = p[0];
@@ -510,10 +561,14 @@ void parse_leaf(Builder& b, Mp4Facts& facts, LayoutRegion& region, const std::st
         if (entries >= 1u) {
             if (version == 1u && size >= 28u) {
                 region.fields.push_back({"first_segment_duration", read_u64be(p + 8u)});
-                region.fields.push_back({"first_media_time", static_cast<std::int64_t>(read_u64be(p + 16u))});
+                region.fields.push_back(
+                    {"first_media_time", static_cast<std::int64_t>(read_u64be(p + 16u))});
             } else if (size >= 20u) {
-                region.fields.push_back({"first_segment_duration", static_cast<std::uint64_t>(read_u32be(p + 8u))});
-                region.fields.push_back({"first_media_time", static_cast<std::int64_t>(static_cast<std::int32_t>(read_u32be(p + 12u)))});
+                region.fields.push_back(
+                    {"first_segment_duration", static_cast<std::uint64_t>(read_u32be(p + 8u))});
+                region.fields.push_back(
+                    {"first_media_time",
+                     static_cast<std::int64_t>(static_cast<std::int32_t>(read_u32be(p + 12u)))});
             }
         }
     } else if (type == "data" && parent.size() == 4u && size >= 8u) {
@@ -523,8 +578,8 @@ void parse_leaf(Builder& b, Mp4Facts& facts, LayoutRegion& region, const std::st
     }
 }
 
-void walk_boxes(Builder& b, Mp4Facts& facts, std::span<const std::uint8_t> bytes, std::uint64_t base,
-                std::size_t depth, const std::string& parent) {
+void walk_boxes(Builder& b, Mp4Facts& facts, std::span<const std::uint8_t> bytes,
+                std::uint64_t base, std::size_t depth, const std::string& parent) {
     std::size_t at = 0u;
     while (at + 8u <= bytes.size() && !b.report.regions_truncated) {
         std::uint64_t size = read_u32be(bytes.data() + at);
@@ -543,15 +598,17 @@ void walk_boxes(Builder& b, Mp4Facts& facts, std::span<const std::uint8_t> bytes
         const auto kind = printable_id(type) ? box_kind(type) : LayoutRegionKind::unknown;
         auto& region = b.add_region(base + at, header, size - header, type, kind);
         if (type == "meta" && parent != "ilst") {
-            header += 4u;  // full box: version + flags before children
+            header += 4u; // full box: version + flags before children
         }
         const auto body_end = std::min<std::uint64_t>(bytes.size(), at + size);
         if (at + header > body_end)
             break;
-        const auto body = bytes.subspan(at + header, static_cast<std::size_t>(body_end - at - header));
-        const bool container = type == "moov" || type == "trak" || type == "mdia" || type == "minf" ||
-                               type == "stbl" || type == "udta" || type == "meta" || type == "ilst" ||
-                               type == "edts" || type == "dinf" || (parent == "ilst");
+        const auto body =
+            bytes.subspan(at + header, static_cast<std::size_t>(body_end - at - header));
+        const bool container = type == "moov" || type == "trak" || type == "mdia" ||
+                               type == "minf" || type == "stbl" || type == "udta" ||
+                               type == "meta" || type == "ilst" || type == "edts" ||
+                               type == "dinf" || (parent == "ilst");
         if (type == "udta" || type == "meta" || type == "ilst")
             b.present(type, base + at, size);
         if (container && depth + 1u < kMaxBoxDepth) {
@@ -578,7 +635,8 @@ void inspect_mp4_layout(Builder& b) {
     while (offset < file_size && !report.regions_truncated) {
         std::array<std::uint8_t, 16> raw{};
         if (file_size - offset < 8u || !b.reader.read_exact(offset, std::span(raw.data(), 8u))) {
-            auto& stub = b.add_region(offset, 0u, file_size - offset, "", LayoutRegionKind::unknown);
+            auto& stub =
+                b.add_region(offset, 0u, file_size - offset, "", LayoutRegionKind::unknown);
             stub.note = "shorter than a box header";
             break;
         }
@@ -606,18 +664,23 @@ void inspect_mp4_layout(Builder& b) {
         }
         const bool past_eof = size > file_size - offset;
         if (past_eof) {
-            b.warn(type == "mdat" ? LayoutWarningKind::truncated_data : LayoutWarningKind::chunk_past_eof, offset,
+            b.warn(type == "mdat" ? LayoutWarningKind::truncated_data
+                                  : LayoutWarningKind::chunk_past_eof,
+                   offset,
                    type + " declares " + std::to_string(size) + " bytes, " +
                        std::to_string(offset + size - file_size) + " past end of file");
         }
         if (type == "ftyp") {
-            auto body = b.reader.read(offset + header, std::min<std::uint64_t>(size - header, 256u));
+            auto body =
+                b.reader.read(offset + header, std::min<std::uint64_t>(size - header, 256u));
             if (body.size() >= 8u) {
                 region.fields.push_back({"major_brand", fourcc(body.data())});
-                region.fields.push_back({"minor_version", static_cast<std::uint64_t>(read_u32be(body.data() + 4u))});
+                region.fields.push_back(
+                    {"minor_version", static_cast<std::uint64_t>(read_u32be(body.data() + 4u))});
                 std::string brands;
                 for (std::size_t at = 8u; at + 4u <= body.size(); at += 4u) {
-                    if (!brands.empty()) brands += ',';
+                    if (!brands.empty())
+                        brands += ',';
                     brands += fourcc(body.data() + at);
                 }
                 region.fields.push_back({"compatible_brands", brands});
@@ -625,9 +688,11 @@ void inspect_mp4_layout(Builder& b) {
             }
         } else if (type == "moov") {
             const auto body_size = size - header;
-            auto body = b.reader.read(offset + header, std::min<std::uint64_t>(body_size, kMaxMoovRead));
+            auto body =
+                b.reader.read(offset + header, std::min<std::uint64_t>(body_size, kMaxMoovRead));
             if (body_size > body.size())
-                region.note = "moov read capped at " + std::to_string(body.size()) + " bytes; boxes past the cap are not listed";
+                region.note = "moov read capped at " + std::to_string(body.size()) +
+                              " bytes; boxes past the cap are not listed";
             walk_boxes(b, facts, body, offset + header, 1u, "moov");
         } else if (type == "mdat") {
             region.note = largesize ? "sample data; 64-bit size" : "sample data";
@@ -639,23 +704,30 @@ void inspect_mp4_layout(Builder& b) {
 
     if (facts.handler == "soun" || facts.audio_track_done || facts.sample_rate != 0u) {
         LayoutStreamFacts stream;
-        stream.sample_rate = facts.sample_rate != 0u ? facts.sample_rate
-                                                     : static_cast<std::uint32_t>(facts.media_timescale);
+        stream.sample_rate = facts.sample_rate != 0u
+                                 ? facts.sample_rate
+                                 : static_cast<std::uint32_t>(facts.media_timescale);
         stream.channels = facts.channels;
         stream.encoding = facts.codec.empty() ? "unknown" : facts.codec;
         stream.frames = facts.stts_samples;
-        if (stream.frames == 0u && facts.media_timescale != 0u && facts.sample_rate == facts.media_timescale)
+        if (stream.frames == 0u && facts.media_timescale != 0u &&
+            facts.sample_rate == facts.media_timescale)
             stream.frames = facts.media_duration;
-        stream.duration_seconds = stream.sample_rate != 0u && stream.frames != 0u
-            ? static_cast<double>(stream.frames) / stream.sample_rate
-            : (facts.media_timescale != 0u ? static_cast<double>(facts.media_duration) / facts.media_timescale : 0.0);
+        stream.duration_seconds =
+            stream.sample_rate != 0u && stream.frames != 0u
+                ? static_cast<double>(stream.frames) / stream.sample_rate
+                : (facts.media_timescale != 0u
+                       ? static_cast<double>(facts.media_duration) / facts.media_timescale
+                       : 0.0);
         report.stream = stream;
     }
     // The chunk-offset table style matters for files past 4 GiB; name it on
     // the sample table that owns it.
     for (auto& region : report.regions) {
         if (region.id == "stbl") {
-            region.fields.push_back({"chunk_offsets", std::string(facts.co64 ? "co64" : (facts.stco ? "stco" : "none"))});
+            region.fields.push_back(
+                {"chunk_offsets",
+                 std::string(facts.co64 ? "co64" : (facts.stco ? "stco" : "none"))});
             break;
         }
     }

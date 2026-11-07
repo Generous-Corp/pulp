@@ -53,7 +53,9 @@ class SpanByteSource final : public LayoutByteSource {
   public:
     explicit SpanByteSource(std::span<const std::uint8_t> bytes) noexcept : bytes_(bytes) {}
 
-    [[nodiscard]] std::uint64_t size() const noexcept override { return bytes_.size(); }
+    [[nodiscard]] std::uint64_t size() const noexcept override {
+        return bytes_.size();
+    }
     [[nodiscard]] std::size_t read_at(std::uint64_t offset,
                                       std::span<std::uint8_t> out) noexcept override;
 
@@ -71,8 +73,12 @@ class FileByteSource final : public LayoutByteSource {
     FileByteSource(const FileByteSource&) = delete;
     FileByteSource& operator=(const FileByteSource&) = delete;
 
-    [[nodiscard]] bool is_open() const noexcept { return handle_ >= 0; }
-    [[nodiscard]] std::uint64_t size() const noexcept override { return size_; }
+    [[nodiscard]] bool is_open() const noexcept {
+        return handle_ >= 0;
+    }
+    [[nodiscard]] std::uint64_t size() const noexcept override {
+        return size_;
+    }
     [[nodiscard]] std::size_t read_at(std::uint64_t offset,
                                       std::span<std::uint8_t> out) noexcept override;
 
@@ -86,14 +92,22 @@ class CountingByteSource final : public LayoutByteSource {
   public:
     explicit CountingByteSource(LayoutByteSource& inner) noexcept : inner_(inner) {}
 
-    [[nodiscard]] std::uint64_t size() const noexcept override { return inner_.size(); }
+    [[nodiscard]] std::uint64_t size() const noexcept override {
+        return inner_.size();
+    }
     [[nodiscard]] std::size_t read_at(std::uint64_t offset,
                                       std::span<std::uint8_t> out) noexcept override;
 
-    [[nodiscard]] std::uint64_t bytes_read() const noexcept { return bytes_read_; }
-    [[nodiscard]] std::uint64_t read_calls() const noexcept { return read_calls_; }
+    [[nodiscard]] std::uint64_t bytes_read() const noexcept {
+        return bytes_read_;
+    }
+    [[nodiscard]] std::uint64_t read_calls() const noexcept {
+        return read_calls_;
+    }
     /// Highest file offset any read touched, exclusive.
-    [[nodiscard]] std::uint64_t high_water_offset() const noexcept { return high_water_; }
+    [[nodiscard]] std::uint64_t high_water_offset() const noexcept {
+        return high_water_;
+    }
 
   private:
     LayoutByteSource& inner_;
@@ -105,14 +119,14 @@ class CountingByteSource final : public LayoutByteSource {
 /// Container the inspector recognized from the leading bytes.
 enum class AudioContainer {
     unknown,
-    wav,   ///< RIFF, RF64/BW64, or Sony Wave64 envelope around WAVE data
-    aiff,  ///< FORM/AIFF
-    aifc,  ///< FORM/AIFC
-    flac,  ///< native FLAC stream
-    ogg,   ///< Ogg pages (Vorbis, Opus, FLAC-in-Ogg, Speex)
-    mp3,   ///< MPEG audio frames, optionally wrapped in ID3/APE tags
-    mp4,   ///< ISO base media file (MP4, M4A, 3GP, MOV)
-    raw,   ///< headerless PCM described by the caller
+    wav,  ///< RIFF, RF64/BW64, or Sony Wave64 envelope around WAVE data
+    aiff, ///< FORM/AIFF
+    aifc, ///< FORM/AIFC
+    flac, ///< native FLAC stream
+    ogg,  ///< Ogg pages (Vorbis, Opus, FLAC-in-Ogg, Speex)
+    mp3,  ///< MPEG audio frames, optionally wrapped in ID3/APE tags
+    mp4,  ///< ISO base media file (MP4, M4A, 3GP, MOV)
+    raw,  ///< headerless PCM described by the caller
 };
 
 /// What a region holds.
@@ -130,22 +144,22 @@ enum class FactsConfidence { parsed, container_only };
 /// Specification violations the walk can prove from bytes alone. Anything
 /// not on this list is a fact or a decoder refusal, never a warning.
 enum class LayoutWarningKind {
-    envelope_size_mismatch,          ///< declared envelope end differs from the file size
-    missing_pad_byte,                ///< odd-sized chunk ends the file without its pad byte
-    duplicate_fmt,                   ///< more than one `fmt ` chunk
-    fmt_after_data,                  ///< `fmt ` follows `data`
-    truncated_data,                  ///< `data` payload shorter than declared or not whole frames
-    sentinel_size_without_ds64,      ///< 0xFFFFFFFF size with no ds64 entry to resolve it
-    chunk_overlap,                   ///< two regions claim the same bytes
-    chunk_past_eof,                  ///< a non-data region extends past end of file
-    extensible_mask_channel_mismatch,///< channel mask population differs from the channel count
-    valid_bits_above_container,      ///< wValidBitsPerSample exceeds wBitsPerSample
+    envelope_size_mismatch,           ///< declared envelope end differs from the file size
+    missing_pad_byte,                 ///< odd-sized chunk ends the file without its pad byte
+    duplicate_fmt,                    ///< more than one `fmt ` chunk
+    fmt_after_data,                   ///< `fmt ` follows `data`
+    truncated_data,                   ///< `data` payload shorter than declared or not whole frames
+    sentinel_size_without_ds64,       ///< 0xFFFFFFFF size with no ds64 entry to resolve it
+    chunk_overlap,                    ///< two regions claim the same bytes
+    chunk_past_eof,                   ///< a non-data region extends past end of file
+    extensible_mask_channel_mismatch, ///< channel mask population differs from the channel count
+    valid_bits_above_container,       ///< wValidBitsPerSample exceeds wBitsPerSample
 };
 
 struct LayoutWarning {
     LayoutWarningKind kind;
-    std::uint64_t offset = 0u;   ///< region the warning is about
-    std::string detail;          ///< human-readable specifics with the numbers involved
+    std::uint64_t offset = 0u; ///< region the warning is about
+    std::string detail;        ///< human-readable specifics with the numbers involved
 };
 
 /// A parsed field value. Strings here are never free text from the file;
@@ -160,12 +174,12 @@ struct LayoutField {
 /// One contiguous region of the file.
 struct LayoutRegion {
     std::uint64_t offset = 0u;
-    std::uint64_t declared_size = 0u;  ///< size the header claims for the payload
-    std::uint64_t actual_size = 0u;    ///< payload bytes actually present in the file
-    std::string id;                    ///< chunk id, box type, block type, or page label
+    std::uint64_t declared_size = 0u; ///< size the header claims for the payload
+    std::uint64_t actual_size = 0u;   ///< payload bytes actually present in the file
+    std::string id;                   ///< chunk id, box type, block type, or page label
     LayoutRegionKind kind = LayoutRegionKind::unknown;
-    std::vector<LayoutField> fields;   ///< fields the specification defines for this region
-    std::string note;                  ///< one-line clarification when the id alone misleads
+    std::vector<LayoutField> fields; ///< fields the specification defines for this region
+    std::string note;                ///< one-line clarification when the id alone misleads
 };
 
 /// A metadata region named by id and location, without its contents.
@@ -186,27 +200,29 @@ struct LayoutMetadataText {
 struct LayoutStreamFacts {
     std::uint32_t sample_rate = 0u;
     std::uint32_t channels = 0u;
-    std::uint32_t bits_per_sample = 0u;   ///< container width
-    std::uint32_t valid_bits = 0u;        ///< significant bits when the container says so, else bits_per_sample
-    std::uint64_t frames = 0u;            ///< 0 when the container does not state a count
-    double duration_seconds = 0.0;        ///< 0 when frames or rate are unknown
-    std::string encoding;                 ///< "pcm", "float", "adpcm", "alaw", "mulaw", "flac", "vorbis", "opus", "mp3", "aac", ...
-    std::uint32_t bytes_per_frame = 0u;   ///< 0 for compressed streams
+    std::uint32_t bits_per_sample = 0u; ///< container width
+    std::uint32_t valid_bits =
+        0u; ///< significant bits when the container says so, else bits_per_sample
+    std::uint64_t frames = 0u;     ///< 0 when the container does not state a count
+    double duration_seconds = 0.0; ///< 0 when frames or rate are unknown
+    std::string
+        encoding; ///< "pcm", "float", "adpcm", "alaw", "mulaw", "flac", "vorbis", "opus", "mp3", "aac", ...
+    std::uint32_t bytes_per_frame = 0u; ///< 0 for compressed streams
 };
 
 /// Whether the in-memory decoder would accept the file as laid out, and the
 /// first reason it would not. This is the same decision `inspect_wav` makes.
 struct LayoutDecodeVerdict {
     bool decodable = false;
-    std::string reason;   ///< empty when decodable
+    std::string reason; ///< empty when decodable
 };
 
 /// `decode_wav`'s allocation ceilings applied to the declared stream.
 struct LayoutDecodeLimitsFact {
     bool exceeds = false;
-    std::vector<std::string> exceeded;   ///< names of the limits exceeded, in check order
+    std::vector<std::string> exceeded; ///< names of the limits exceeded, in check order
     WavDecodeLimits limits;
-    std::uint64_t output_bytes = 0u;     ///< frames x channels x sizeof(float), 0 on overflow
+    std::uint64_t output_bytes = 0u; ///< frames x channels x sizeof(float), 0 on overflow
 };
 
 /// Description of a headerless PCM payload. Every field is required; the
@@ -218,7 +234,7 @@ struct RawPcmSpec {
     Endian endian = Endian::little;
     std::uint32_t channels = 0u;
     std::uint32_t sample_rate = 0u;
-    std::uint64_t offset = 0u;   ///< byte offset where sample data begins
+    std::uint64_t offset = 0u; ///< byte offset where sample data begins
 };
 
 /// Options for a layout inspection.
@@ -235,9 +251,10 @@ struct LayoutInspectOptions {
 /// The layout report.
 struct AudioFileLayoutReport {
     AudioContainer container = AudioContainer::unknown;
-    std::string container_detail;   ///< envelope or brand: "RIFF", "RF64", "W64", "FORM", "fLaC", "OggS", "ftyp:M4A ", ...
+    std::string
+        container_detail; ///< envelope or brand: "RIFF", "RF64", "W64", "FORM", "fLaC", "OggS", "ftyp:M4A ", ...
     std::uint64_t file_size = 0u;
-    std::uint64_t bytes_read = 0u;  ///< bytes the inspector requested from the source
+    std::uint64_t bytes_read = 0u; ///< bytes the inspector requested from the source
     FactsConfidence facts_confidence = FactsConfidence::parsed;
     std::optional<WavProfile> profile;
     std::vector<LayoutRegion> regions;
@@ -254,22 +271,26 @@ struct AudioFileLayoutReport {
     std::string error;
 
     /// True when no warning was recorded.
-    [[nodiscard]] bool is_standard() const noexcept { return warnings.empty(); }
+    [[nodiscard]] bool is_standard() const noexcept {
+        return warnings.empty();
+    }
 };
 
 /// Inspect bytes through a source. Reads are bounded to headers and small
 /// payloads regardless of `source.size()`.
-[[nodiscard]] AudioFileLayoutReport inspect_audio_file_layout(
-    LayoutByteSource& source, const LayoutInspectOptions& options = {});
+[[nodiscard]] AudioFileLayoutReport
+inspect_audio_file_layout(LayoutByteSource& source, const LayoutInspectOptions& options = {});
 
 /// Inspect a complete in-memory file.
-[[nodiscard]] AudioFileLayoutReport inspect_audio_file_layout(
-    std::span<const std::uint8_t> bytes, const LayoutInspectOptions& options = {});
+[[nodiscard]] AudioFileLayoutReport
+inspect_audio_file_layout(std::span<const std::uint8_t> bytes,
+                          const LayoutInspectOptions& options = {});
 
 /// Inspect a file on disk with positional reads. A file that cannot be
 /// opened yields a report whose `error` names the failure.
-[[nodiscard]] AudioFileLayoutReport inspect_audio_file_layout(
-    const std::filesystem::path& path, const LayoutInspectOptions& options = {});
+[[nodiscard]] AudioFileLayoutReport
+inspect_audio_file_layout(const std::filesystem::path& path,
+                          const LayoutInspectOptions& options = {});
 
 /// Names for the enumerations, as they appear in JSON.
 [[nodiscard]] const char* audio_container_name(AudioContainer container) noexcept;
@@ -278,7 +299,8 @@ struct AudioFileLayoutReport {
 [[nodiscard]] const char* facts_confidence_name(FactsConfidence confidence) noexcept;
 [[nodiscard]] const char* layout_warning_kind_name(LayoutWarningKind kind) noexcept;
 [[nodiscard]] const char* raw_pcm_format_name(RawPcmSpec::Format format) noexcept;
-[[nodiscard]] std::optional<RawPcmSpec::Format> parse_raw_pcm_format(std::string_view name) noexcept;
+[[nodiscard]] std::optional<RawPcmSpec::Format>
+parse_raw_pcm_format(std::string_view name) noexcept;
 [[nodiscard]] std::uint32_t raw_pcm_bytes_per_sample(RawPcmSpec::Format format) noexcept;
 
 } // namespace pulp::audio

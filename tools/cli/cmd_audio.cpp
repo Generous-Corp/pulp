@@ -55,8 +55,9 @@ static void print_audio_usage() {
     std::cout
         << "  pulp audio plugin-inspect --plugin <bundle> [--format <fmt>] [--id <id>]  # JSON\n";
     std::cout << "  pulp audio sampler-mip build <source> [--levels <1|2>] [--json]\n";
-    std::cout << "  pulp audio inspect <file> [--json] [--include-metadata-text] [--absolute-paths] "
-                 "[--raw --format <fmt> --channels <n> --rate <hz> --endian <le|be> --offset <n>]\n";
+    std::cout
+        << "  pulp audio inspect <file> [--json] [--include-metadata-text] [--absolute-paths] "
+           "[--raw --format <fmt> --channels <n> --rate <hz> --endian <le|be> --offset <n>]\n";
     std::cout << "  pulp audio heritage <validate|canonicalize|inspect|render> ...\n";
 }
 

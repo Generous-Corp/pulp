@@ -261,8 +261,8 @@ std::string handle_audio_file_inspect(const std::string& params_json) {
 
     // The tool is a thin wrapper: every flag maps to the CLI verb so the JSON
     // an agent receives here is byte-for-byte the CLI's own report.
-    std::string cmd = shell_quote(source_build_cli_path(root).string()) +
-                      " audio inspect " + shell_quote(path) + " --json";
+    std::string cmd = shell_quote(source_build_cli_path(root).string()) + " audio inspect " +
+                      shell_quote(path) + " --json";
     if (extract_bool(params_json, "include_metadata_text", false))
         cmd += " --include-metadata-text";
     if (extract_bool(params_json, "absolute_paths", false))
@@ -288,7 +288,8 @@ std::string handle_audio_file_inspect(const std::string& params_json) {
             if (!has(key))
                 continue;
             const auto text = extract_raw(params_json, key);
-            if (text.empty() || !std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }))
+            if (text.empty() ||
+                !std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }))
                 return arg_error(std::string("Error: ") + key + " must be a non-negative integer");
             cmd += std::string(" --") + (key + 4) + " " + text;
         }

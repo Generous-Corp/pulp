@@ -29,8 +29,12 @@ class Reader {
   public:
     explicit Reader(LayoutByteSource& source) noexcept;
 
-    [[nodiscard]] std::uint64_t size() const noexcept { return size_; }
-    [[nodiscard]] std::uint64_t bytes_read() const noexcept { return bytes_read_; }
+    [[nodiscard]] std::uint64_t size() const noexcept {
+        return size_;
+    }
+    [[nodiscard]] std::uint64_t bytes_read() const noexcept {
+        return bytes_read_;
+    }
 
     /// Read up to `length` bytes at `offset`; shorter at end of input.
     [[nodiscard]] std::vector<std::uint8_t> read(std::uint64_t offset, std::uint64_t length);
@@ -57,8 +61,8 @@ struct Builder {
     /// bytes after `offset`; `actual_size` is the payload present in the
     /// file. Past the cap the report is marked truncated and a scratch
     /// region is returned so callers need no branch.
-    LayoutRegion& add_region(std::uint64_t offset, std::uint64_t header_size, std::uint64_t declared,
-                             std::string id, LayoutRegionKind kind);
+    LayoutRegion& add_region(std::uint64_t offset, std::uint64_t header_size,
+                             std::uint64_t declared, std::string id, LayoutRegionKind kind);
     void warn(LayoutWarningKind kind, std::uint64_t offset, std::string detail);
     void present(const std::string& id, std::uint64_t offset, std::uint64_t size);
     /// Record free text; a no-op unless the options ask for metadata text.

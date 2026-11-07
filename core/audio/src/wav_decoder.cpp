@@ -261,10 +261,10 @@ std::optional<WavFormatFacts> interpret_wav_format(std::span<const std::uint8_t>
     if (rf64) {
         put_id("ds64");
         put_u32(28u);
-        put_u64(0u);         // riff size, patched below
+        put_u64(0u); // riff size, patched below
         put_u64(data_size);
         put_u64(fact_sample_count.value_or(0u));
-        put_u32(0u);         // no table entries
+        put_u32(0u); // no table entries
     }
     put_id("fmt ");
     put_u32(static_cast<std::uint32_t>(format_copy));
@@ -275,7 +275,8 @@ std::optional<WavFormatFacts> interpret_wav_format(std::span<const std::uint8_t>
     if (fact_sample_count) {
         put_id("fact");
         put_u32(4u);
-        put_u32(static_cast<std::uint32_t>(std::min<std::uint64_t>(*fact_sample_count, 0xFFFFFFFFu)));
+        put_u32(
+            static_cast<std::uint32_t>(std::min<std::uint64_t>(*fact_sample_count, 0xFFFFFFFFu)));
     }
     put_id("data");
     put_u32(static_cast<std::uint32_t>(rf64 ? kRiffSizeSentinel : data_size));
