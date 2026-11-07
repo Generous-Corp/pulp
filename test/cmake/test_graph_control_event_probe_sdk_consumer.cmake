@@ -34,4 +34,20 @@ execute_process(COMMAND "${CMAKE_COMMAND}" --build "${_build}" RESULT_VARIABLE _
 if(NOT _build_result EQUAL 0)
     message(FATAL_ERROR "SDK consumer build failed")
 endif()
-step(consumer-tests "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}" --output-on-failure)
+set(_expected_tests
+    graph-control-event-probe-consumer
+    graph-control-event-probe-planted-negative
+    graph-control-event-probe-event-planted-negative)
+execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}" -N
+    RESULT_VARIABLE _list_result OUTPUT_VARIABLE _list_output ERROR_VARIABLE _list_error)
+if(NOT _list_result EQUAL 0)
+    message(FATAL_ERROR "SDK consumer test discovery failed: ${_list_error}")
+endif()
+foreach(_test IN LISTS _expected_tests)
+    string(FIND "${_list_output}" "${_test}" _test_offset)
+    if(_test_offset LESS 0)
+        message(FATAL_ERROR "SDK consumer did not register ${_test}:\n${_list_output}")
+    endif()
+    step("${_test}" "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}"
+         --output-on-failure -R "^${_test}$")
+endforeach()
