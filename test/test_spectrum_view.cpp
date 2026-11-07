@@ -74,10 +74,8 @@ TEST_CASE("SpectrumView analysis paints in every display type", "[view][spectrum
         CHECK(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
         if (style == SpectrumView::Style::bars)
             CHECK(canvas.count(DrawCommand::Type::fill_rect) >= 50);
-        else
-            CHECK(canvas.count(DrawCommand::Type::stroke_path) >= 1);
-        if (style == SpectrumView::Style::filled)
-            CHECK(canvas.count(DrawCommand::Type::fill_path) >= 1);
+        else // the polyline is one segment per pixel column (300 px wide)
+            CHECK(canvas.count(DrawCommand::Type::stroke_line) >= 290);
     }
 }
 
@@ -164,17 +162,24 @@ TEST_CASE("EqCurveView analyzer overlay maps bins through SpectrumBinMapping", "
             std::max(-90.0f, -3.0f - 6.0f * static_cast<float>((k - vertex) * (k - vertex)));
     eq.set_spectrum(bins.data(), bins.size());
 
-    RecordingCanvas canvas;
-    eq.paint(canvas);
-    CHECK(canvas.count(DrawCommand::Type::fill_path) >= 1);
+    RecordingCanvas with_overlay;
+    eq.paint(with_overlay);
     CHECK(eq.analyzer_animating());
+    eq.set_analyzer_enabled(false);
+    RecordingCanvas without_overlay;
+    eq.paint(without_overlay);
+    eq.set_analyzer_enabled(true);
+    // The overlay's top stroke is a polyline of many segments.
+    CHECK(with_overlay.count(DrawCommand::Type::stroke_line) >
+          without_overlay.count(DrawCommand::Type::stroke_line) + 100);
 
     // A bin count that changes between frames (FFT-size change) repaints cleanly.
     std::vector<float> bigger(4097, -60.0f);
     eq.set_spectrum(bigger.data(), bigger.size());
     RecordingCanvas again;
     eq.paint(again);
-    CHECK(again.count(DrawCommand::Type::fill_path) >= 1);
+    CHECK(again.count(DrawCommand::Type::stroke_line) >
+          without_overlay.count(DrawCommand::Type::stroke_line) + 100);
 
     // A degenerate one-bin spectrum draws a floor line, not garbage.
     float single = -20.0f;
