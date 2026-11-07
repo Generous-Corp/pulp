@@ -5,6 +5,7 @@
 #ifdef PULP_VST3_GUI
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -23,6 +24,43 @@
 namespace pulp::format::vst3 {
 
 using namespace Steinberg;
+
+#if defined(__linux__)
+// VST3 3.6.8's Linux contract gives the plug-in an IRunLoop through the host's
+// IPlugFrame. The timer callback is therefore host-owned and UI-thread bound;
+// it is the timestamp source for PluginViewHost::advance_frame(). A host that
+// does not expose IRunLoop remains static/input-driven, with no fallback worker
+// or fabricated 60 Hz clock.
+class PulpPlugView::LinuxFrameTimer final : public Linux::ITimerHandler {
+public:
+    explicit LinuxFrameTimer(PulpPlugView& owner) : owner_(&owner) {}
+
+    void PLUGIN_API onTimer() override {
+        if (owner_)
+            owner_->on_linux_frame_timer();
+    }
+
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
+        if (!obj) return kInvalidArgument;
+        *obj = nullptr;
+        if (FUnknownPrivate::iidEqual(iid, Linux::ITimerHandler::iid) ||
+            FUnknownPrivate::iidEqual(iid, FUnknown::iid)) {
+            *obj = static_cast<Linux::ITimerHandler*>(this);
+            addRef();
+            return kResultTrue;
+        }
+        return kNoInterface;
+    }
+
+    uint32 PLUGIN_API addRef() override { return 1; }
+    uint32 PLUGIN_API release() override { return 1; }
+
+    void clear_owner() { owner_ = nullptr; }
+
+private:
+    PulpPlugView* owner_ = nullptr;
+};
+#endif
 
 // Keeps the concrete editor type out of vst3_adapter.cpp, so the audio
 // adapter compiles without pulp/view on its include path. Declared in
@@ -45,6 +83,73 @@ PulpPlugView::PulpPlugView(Processor& processor, state::StateStore& store,
                static_cast<int32>(hints.preferred_height));
     setRect(r);
 }
+
+PulpPlugView::~PulpPlugView() {
+    unregister_linux_frame_timer();
+}
+
+tresult PLUGIN_API PulpPlugView::setFrame(IPlugFrame* frame) {
+#if defined(__linux__)
+    // Hosts commonly clear the frame before removed(). Unregister first so a
+    // queued IRunLoop callback cannot retain this view while its IPlugFrame
+    // is being released; a replacement frame starts a fresh registration.
+    if (linux_timer_registered_)
+        unregister_linux_frame_timer();
+#endif
+    const auto result = CPluginView::setFrame(frame);
+#if defined(__linux__)
+    if (result == kResultTrue && editor_host_ && isAttached())
+        register_linux_frame_timer();
+#endif
+    return result;
+}
+
+#if defined(__linux__)
+void PulpPlugView::register_linux_frame_timer() {
+    if (linux_timer_registered_ || !plugFrame)
+        return;
+
+    void* queried = nullptr;
+    if (plugFrame->queryInterface(Linux::IRunLoop::iid, &queried) != kResultTrue ||
+        queried == nullptr) {
+        runtime::log_warn("VST3 editor: host IRunLoop unavailable; "
+                          "continuous animation disabled");
+        return;
+    }
+    linux_run_loop_ = static_cast<Linux::IRunLoop*>(queried);
+    if (!linux_frame_timer_)
+        linux_frame_timer_ = std::make_unique<LinuxFrameTimer>(*this);
+    if (linux_run_loop_->registerTimer(linux_frame_timer_.get(), 16) != kResultTrue) {
+        runtime::log_warn("VST3 editor: host IRunLoop refused the 16 ms frame timer; "
+                          "continuous animation disabled");
+        linux_run_loop_->release();
+        linux_run_loop_ = nullptr;
+        return;
+    }
+    linux_timer_registered_ = true;
+}
+
+void PulpPlugView::unregister_linux_frame_timer() {
+    if (linux_frame_timer_)
+        linux_frame_timer_->clear_owner();
+    if (linux_run_loop_) {
+        if (linux_timer_registered_ && linux_frame_timer_)
+            linux_run_loop_->unregisterTimer(linux_frame_timer_.get());
+        linux_timer_registered_ = false;
+        linux_run_loop_->release();
+        linux_run_loop_ = nullptr;
+    }
+    linux_frame_timer_.reset();
+}
+
+void PulpPlugView::on_linux_frame_timer() {
+    if (!editor_host_ || !isAttached())
+        return;
+    const double now = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    editor_host_->advance_frame(now);
+}
+#endif
 
 tresult PLUGIN_API PulpPlugView::isPlatformTypeSupported(FIDString type) {
 #ifdef __APPLE__
@@ -99,6 +204,11 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
         bridge_.close();
         return result;
     }
+
+    // Linux hosts supply the UI scheduler through IPlugFrame::IRunLoop. The
+    // frame may be installed before or after attached(), so setFrame() also
+    // retries this registration when a late frame arrives.
+    register_linux_frame_timer();
 
     // Resize contract: the shared should_pin_design_viewport() predicate
     // (plugin_descriptor.hpp) — pin+lock unless the plugin opted into free
@@ -163,6 +273,8 @@ tresult PLUGIN_API PulpPlugView::removed() {
 
     // Drop the editor→host resize handler before the editor host it captures.
     processor_.set_editor_resize_handler(this, nullptr);
+
+    unregister_linux_frame_timer();
 
     // Unsubscribe FIRST: the observer writes into the scripted UI session that
     // bridge_.close() destroys, and the host publishes `unavailable` from both

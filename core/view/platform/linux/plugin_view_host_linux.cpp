@@ -24,6 +24,7 @@
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/plugin_frame_renderer.hpp>  // shared with the Windows host
 #include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
+#include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/drag_drop.hpp>
 
@@ -71,6 +72,9 @@ class X11PluginViewHost : public PluginViewHost {
 public:
     X11PluginViewHost(View& root, const Options& options)
         : root_(root), size_(options.size), options_(options) {
+        // The editor tree owns no clock of its own. The embedding adapter's
+        // UI-thread callback advances this host's clock below.
+        root_.set_frame_clock(&frame_clock_);
 #ifdef PULP_HAS_SKIA
         // This host builds its surface in the constructor (unlike Windows,
         // which must wait for reparenting), but the window between here and
@@ -131,6 +135,8 @@ public:
     }
 
     ~X11PluginViewHost() override {
+        frame_pump_.suspend();
+        root_.set_frame_clock(nullptr);
         root_.set_plugin_view_host(nullptr);
 #ifdef PULP_HAS_SKIA
         // Publish the teardown before the surfaces die, so a consumer holding
@@ -162,10 +168,13 @@ public:
         XMapWindow(display_, child_);
         XFlush(display_);
         attached_.store(true, std::memory_order_release);
+        frame_pump_.suspend();
+        continuous_frames_ = false;
+        needs_repaint_ = true;
         repaint();
     }
 
-    bool is_attached() const noexcept {
+    bool is_attached() const noexcept override {
         return attached_.load(std::memory_order_acquire);
     }
 
@@ -176,27 +185,78 @@ public:
         XReparentWindow(display_, child_, root_win, 0, 0);
         XFlush(display_);
         attached_.store(false, std::memory_order_release);
+        frame_pump_.suspend();
+        continuous_frames_ = false;
+        needs_repaint_ = true;
     }
 
     void repaint() override {
+        needs_repaint_ = true;
         // Service drag-and-drop on our own X connection. The standalone host
         // repaints ~each frame, so this is the steady-state XDND pump; a
         // DAW-embedded driver can also call pump_x_events() directly.
-        drain_x_events();
-        paint_now();
+        if (drain_x_events())
+            needs_repaint_ = true;
+        if (!in_frame_tick_)
+            paint_now();
+    }
+
+    void advance_frame(double timestamp_seconds) override {
+        // Timer callbacks can already be queued when a CLAP/VST3 editor is
+        // removed. Check attachment at dispatch time so no detached tree is
+        // walked or painted.
+        if (!attached_.load(std::memory_order_acquire)) {
+            frame_pump_.suspend();
+            continuous_frames_ = false;
+            return;
+        }
+
+        // Keep the X11 connection responsive on the same UI thread as the
+        // adapter callback. A skipped frame is recorded by HostFramePump so a
+        // later animation starts with one nominal frame rather than idle time.
+        in_frame_tick_ = true;
+        if (drain_x_events())
+            needs_repaint_ = true;
+        if (!should_dispatch_host_frame(frame_pump_, needs_repaint_,
+                                        continuous_frames_,
+                                        static_cast<bool>(idle_callback_))) {
+            in_frame_tick_ = false;
+            return;
+        }
+
+        // Scripted UI polling belongs to the adapter-owned callback cadence,
+        // not to a renderer worker. Run it once before sampling damage so a
+        // poll-triggered repaint is included in this tick.
+        if (idle_callback_)
+            idle_callback_();
+        const bool dirty = needs_repaint_;
+        needs_repaint_ = false;
+        const auto tick = begin_host_frame(&root_, frame_clock_, frame_pump_,
+                                           timestamp_seconds, dirty);
+        if (tick.should_render) {
+            advance_host_frame(&root_, frame_clock_, tick.dt);
+            in_frame_tick_ = false;
+            paint_now(/*run_idle_callback=*/false);
+        } else {
+            in_frame_tick_ = false;
+        }
+        // A subscriber/animation may have started or stopped during advance.
+        // Re-evaluate after the tick so the next callback is gated correctly.
+        continuous_frames_ = frame_clock_.has_active_subscribers() ||
+                             needs_continuous_frames(&root_);
     }
 
     // The paint half of repaint(), without the event pump, so the pump itself
     // can repaint after a host-driven resize.
-    void paint_now() {
+    void paint_now(bool run_idle_callback = true) {
 #ifdef PULP_HAS_SKIA
         if (gpu_surface_ && skia_surface_) {
-            render_frame_gpu(nullptr, nullptr, nullptr);
+            render_frame_gpu(nullptr, nullptr, nullptr, run_idle_callback);
             return;
         }
         // No GPU: present a raster frame into the live window if attached.
         if (display_ && child_ && attached_.load(std::memory_order_acquire)) {
-            present_raster();
+            present_raster(run_idle_callback);
         }
 #endif
     }
@@ -406,6 +466,11 @@ private:
     GC gc_ = nullptr;
     std::atomic<bool> attached_{false};
     std::function<void()> idle_callback_;
+    FrameClock frame_clock_;
+    HostFramePump frame_pump_;
+    bool needs_repaint_ = true;
+    bool continuous_frames_ = false;
+    bool in_frame_tick_ = false;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
     X11ResizeEcho resize_echo_;
     float design_viewport_w_ = 0.0f;
@@ -966,14 +1031,15 @@ private:
         paint_plugin_scene(canvas, root_, frame_geometry(), clip);
     }
 
-    bool render_frame_gpu(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h) {
+    bool render_frame_gpu(std::vector<uint8_t>* cap, uint32_t* cap_w,
+                          uint32_t* cap_h, bool run_idle_callback = true) {
         if (!gpu_surface_ || !skia_surface_) return false;
 
         PluginFrameRenderer::Request request;
         request.root = &root_;
         request.geometry = frame_geometry();
         request.partial_repaint = partial_repaint_enabled_;
-        request.idle = idle_callback_;
+        request.idle = run_idle_callback ? idle_callback_ : std::function<void()>{};
         request.capture = cap;
         request.capture_width = cap_w;
         request.capture_height = cap_h;
@@ -1009,20 +1075,21 @@ private:
     // units — the raster fallback / headless capture is crisp on HiDPI and
     // matches the GPU surface's pixel resolution. out_w/out_h get the pixel
     // dims. Empty on failure.
-    std::vector<uint8_t> raster_render(uint32_t* out_w, uint32_t* out_h) {
-        if (idle_callback_) idle_callback_();
+    std::vector<uint8_t> raster_render(uint32_t* out_w, uint32_t* out_h,
+                                       bool run_idle_callback = true) {
+        if (run_idle_callback && idle_callback_) idle_callback_();
         return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h);
     }
 
     // Live CPU present: raster the scene, convert RGBA -> the X visual's pixel
     // format (assume 32-bit BGRX TrueColor, the common case), and XPutImage.
-    void present_raster() {
+    void present_raster(bool run_idle_callback = true) {
         // Same contract as the GPU path: consume the damage for this frame and
         // put it back on any path that does not reach XPutImage, so a failed
         // raster frame does not silently retire a region nobody presented.
         const PendingDamage::Snapshot consumed = damage_.take();
         uint32_t w = 0, h = 0;
-        auto rgba = raster_render(&w, &h);
+        auto rgba = raster_render(&w, &h, run_idle_callback);
         if (rgba.empty()) {
             damage_.restore(consumed);
             return;

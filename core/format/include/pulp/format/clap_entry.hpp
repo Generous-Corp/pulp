@@ -37,6 +37,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdio>
+#include <chrono>
 #include <string>
 #include <string_view>
 
@@ -602,6 +603,58 @@ inline void install_editor_resize_handler(
         });
 }
 
+// Native embedded CLAP editors are driven by the host's timer-support
+// extension. The callback is delivered on the host UI thread; use that thread
+// as the scheduling boundary and pass a monotonic timestamp into the Linux
+// PluginViewHost's HostFramePump. Hosts that do not expose timer-support keep
+// the honest static/input-triggered behavior and emit an unavailable receipt.
+inline void stop_native_gui_timer(clap_adapter::PulpClapPlugin& plugin) {
+    if (plugin.editor_timer_id != CLAP_INVALID_ID && plugin.editor_host_timer &&
+        plugin.host && plugin.editor_host_timer->unregister_timer) {
+        plugin.editor_host_timer->unregister_timer(plugin.host,
+                                                    plugin.editor_timer_id);
+    }
+    plugin.editor_timer_id = CLAP_INVALID_ID;
+    plugin.editor_host_timer = nullptr;
+}
+
+inline bool start_native_gui_timer(clap_adapter::PulpClapPlugin& plugin) {
+    if (plugin.editor_timer_id != CLAP_INVALID_ID)
+        return true;
+    if (!plugin.host || !plugin.host->get_extension)
+        return false;
+    auto* timer = static_cast<const clap_host_timer_support_t*>(
+        plugin.host->get_extension(plugin.host, CLAP_EXT_TIMER_SUPPORT));
+    if (!timer || !timer->register_timer || !timer->unregister_timer) {
+        runtime::log_warn("CLAP editor: host timer-support unavailable; "
+                          "continuous animation disabled");
+        return false;
+    }
+    clap_id id = CLAP_INVALID_ID;
+    if (!timer->register_timer(plugin.host, 16, &id) || id == CLAP_INVALID_ID) {
+        runtime::log_warn("CLAP editor: host refused the 16 ms frame timer; "
+                          "continuous animation disabled");
+        return false;
+    }
+    plugin.editor_host_timer = timer;
+    plugin.editor_timer_id = id;
+    return true;
+}
+
+inline void native_gui_on_timer(const clap_plugin_t* plugin, clap_id timer_id) {
+    auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (!p || !p->editor_host || !p->editor_parent_attached || !p->editor_visible ||
+        p->editor_timer_id != timer_id)
+        return;
+    const double now = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    p->editor_host->advance_frame(now);
+}
+
+inline const clap_plugin_timer_support_t native_timer_ext = {
+    .on_timer = native_gui_on_timer,
+};
+
 inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     if (pulp::format::detail::editor_launch_blocked_by_environment()) {
@@ -673,6 +726,8 @@ inline void gui_destroy(const clap_plugin_t* plugin) {
     if (p->processor) p->processor->set_editor_resize_handler(p, nullptr);
     // Unsubscribe BEFORE the host publishes its teardown and before the bridge
     // that owns the scripted session goes away: no callback after teardown.
+    stop_native_gui_timer(*p);
+    p->editor_parent_attached = false;
     p->gpu_surface_binding.reset();
     p->editor_host.reset();
     if (p->bridge) {
@@ -836,6 +891,13 @@ inline bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* win
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     if (!p->editor_host) return false;
 
+    // A reparent is a lifecycle boundary. Stop any queued timer before
+    // attaching the new native parent; the callback checks attachment again,
+    // but unregistering here avoids keeping a hidden editor alive between
+    // parent transactions.
+    stop_native_gui_timer(*p);
+    p->editor_parent_attached = false;
+
     bool attached = false;
 #ifdef __APPLE__
     if (strcmp(window->api, CLAP_WINDOW_API_COCOA) == 0) {
@@ -851,10 +913,18 @@ inline bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* win
     }
 #endif
     if (attached && p->bridge) {
+        p->editor_parent_attached = true;
         p->bridge->notify_attached();
         // Content-first: the first frame the host composites is the mounted
         // document (ViewBridge::prepare_first_frame()).
         p->bridge->prepare_first_frame(*p->editor_host);
+#if defined(__linux__)
+        // CLAP normally calls show() after set_parent(), but tolerate hosts
+        // that make the calls in the opposite order without leaving a visible
+        // editor permanently unscheduled.
+        if (p->editor_visible)
+            start_native_gui_timer(*p);
+#endif
     }
     return attached;
 }
@@ -871,6 +941,9 @@ inline bool gui_show(const clap_plugin_t* plugin) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     if (p->editor_host) {
         p->editor_visible = true;
+#if defined(__linux__)
+        start_native_gui_timer(*p);
+#endif
         p->editor_host->repaint();
         return true;
     }
@@ -880,6 +953,9 @@ inline bool gui_show(const clap_plugin_t* plugin) {
 inline bool gui_hide(const clap_plugin_t* plugin) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     p->editor_visible = false;
+#if defined(__linux__)
+    stop_native_gui_timer(*p);
+#endif
     // A hidden editor keeps its host and surfaces for gui_show, but nothing it
     // is not drawing should keep holding GPU memory meanwhile.
     if (p->editor_host)
@@ -926,7 +1002,12 @@ inline const void* get_static_extension(const clap_plugin_t* plugin, const char*
     }
 #if defined(PULP_CLAP_CONTRACT_GUI)
     if (strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0)
-        return clap_adapter::contract_timer_extension(plugin);
+        if (const auto* contract = clap_adapter::contract_timer_extension(plugin))
+            return contract;
+#endif
+#if defined(PULP_CLAP_GUI) && PULP_CLAP_GUI && defined(__linux__)
+    if (strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0)
+        return &native_timer_ext;
 #endif
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &audio_ports_ext;
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG) == 0)
