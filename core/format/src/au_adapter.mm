@@ -21,6 +21,7 @@
 //  ├──────────────────────────────────────────┼───────────┼──────────────┼──────────────┤
 //  │ initWithComponentDescription:options:    │ self/nil  │ main (init)  │ YES (init)   │
 //  │ outputBusses / inputBusses               │ NSArray   │ main + audio │ NO (cached)  │
+//  │ shouldChangeToFormat:forBus:             │ BOOL      │ main         │ YES (probe)  │
 //  │ MIDIOutputNames                          │ NSArray   │ main         │ YES (build)  │
 //  │ latency                                  │ seconds   │ KVO/main     │ NO           │
 //  │ tailTime                                 │ seconds   │ KVO/main     │ NO           │
@@ -56,6 +57,7 @@
 //     last block's param-event queue (sample-offset, ramp duration, etc).
 
 #import <AVFoundation/AVFoundation.h>
+#import <AudioToolbox/AUAudioUnitImplementation.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <CoreAudioKit/CoreAudioKit.h>
 #include <array>
@@ -140,9 +142,59 @@ struct AUBridge {
     // Index of the sidechain bus in `inputBusses`. Bus arrays are built in
     // declaration order, so without a main input bus the sidechain sits at 0.
     NSInteger sidechain_bus_index = 1;
+
+    // Buses beyond the main input, the sidechain and the main output.
+    //
+    // Each direction exposes at most `kMaxBuses` audio buses; any declared
+    // beyond that are not exposed to the host. Entries are built once at init
+    // and never resized, so the render block reads them without locking.
+    static constexpr int kMaxBuses = 8;
+    struct ExtraBus {
+        std::string name;
+        int declared_index = 0; ///< index into PluginDescriptor::input_buses / output_buses
+        NSInteger au_bus = 0;   ///< index into inputBusses / outputBusses
+        int channels = 0;       ///< channels the bus carries once render resources exist
+    };
+    /// Declared input buses 2 and up that have channels (host-pulled).
+    std::array<ExtraBus, kMaxBuses> extra_inputs{};
+    int extra_input_count = 0;
+    /// Declared output buses 1 and up that have channels (host-rendered).
+    std::array<ExtraBus, kMaxBuses> aux_outputs{};
+    int aux_output_count = 0;
+    /// Number of ProcessBuffers entries per direction: one per declared bus, so
+    /// ProcessBusBufferInfo::index equals the descriptor index. Inputs always
+    /// carry at least the main and sidechain entries.
+    int input_entry_count = 2;
+    int output_entry_count = 1;
+    /// Declared bus index behind each host bus, indexed by host bus number.
+    /// Used to translate a host format change into a layout proposal.
+    std::array<int, kMaxBuses> input_au_declared{};
+    int input_au_count = 0;
+    std::array<int, kMaxBuses> output_au_declared{};
+    int output_au_count = 0;
     /// True when the descriptor declares MIDI output (hosts are told through
     /// `MIDIOutputNames`, and only then install `MIDIOutputEventBlock`).
     bool produces_midi = false;
+    // Backing storage for the extra input pulls and the aux output renders.
+    // Each bus owns a block of `kMaxChannels * max_frames` floats, sized in
+    // allocateRenderResources so the render block never allocates.
+    std::vector<float> extra_input_storage;
+    std::vector<float> aux_output_storage;
+    struct ExtraBufferStorage {
+        UInt32 mNumberBuffers;
+        AudioBuffer mBuffers[kMaxChannels];
+    };
+    std::array<ExtraBufferStorage, kMaxBuses> extra_input_abl{};
+    std::array<std::array<const float*, kMaxChannels>, kMaxBuses> extra_input_ptrs{};
+    std::array<std::array<float*, kMaxChannels>, kMaxBuses> aux_output_ptrs{};
+    // Multi-output rendering. A host asks for each output bus in a separate
+    // render call, but one Processor::process() call produces all of them. The
+    // first request for a time stamp renders every bus into this storage and
+    // the others are copied out of it.
+    ExtraBufferStorage multi_main_abl{};
+    bool multi_cache_valid = false;
+    Float64 multi_cache_sample_time = 0.0;
+    AUAudioFrameCount multi_cache_frames = 0;
     // Dual-tracked bypass.
     //   * `bypass_param_id != 0` means the plugin declared a "Bypass"
     //     parameter; the AUAudioUnit's `shouldBypassEffect` reads/writes
@@ -483,9 +535,32 @@ struct ScopedAuV3HostWriting {
     NSMutableArray *outBusses = [NSMutableArray new];
     NSMutableArray *inBusses = [NSMutableArray new];
 
+    namespace au_fmt = pulp::format::au;
+    const auto make_bus = [&](int channels, const std::string& name) -> AUAudioUnitBus* {
+        AVAudioFormat* busFormat = [[AVAudioFormat alloc]
+            initStandardFormatWithSampleRate:48000.0
+                                    channels:static_cast<AVAudioChannelCount>(channels)];
+        AUAudioUnitBus* bus = [[AUAudioUnitBus alloc] initWithFormat:busFormat error:outError];
+        if (bus && !name.empty())
+            bus.name = [NSString stringWithUTF8String:name.c_str()];
+#if !__has_feature(objc_arc)
+        [busFormat release]; // the bus holds its own reference
+#endif
+        return bus; // +1: the caller hands it to a bus array, then releases
+    };
+    const auto release_bus = [](AUAudioUnitBus* bus) {
+#if !__has_feature(objc_arc)
+        [bus release]; // the bus array holds its own reference
+#else
+        (void)bus;
+#endif
+    };
+
     _outputBus = [[AUAudioUnitBus alloc] initWithFormat:format error:outError];
     if (!_outputBus) return nil;
     [outBusses addObject:_outputBus];
+    _bridge.output_au_declared[0] = 0;
+    _bridge.output_au_count = 1;
 
     if (desc.default_input_channels() > 0) {
         AVAudioFormat *inFormat = [[AVAudioFormat alloc]
@@ -494,6 +569,7 @@ struct ScopedAuV3HostWriting {
         _inputBus = [[AUAudioUnitBus alloc] initWithFormat:inFormat error:outError];
         if (!_inputBus) return nil;
         [inBusses addObject:_inputBus];
+        _bridge.input_au_declared[static_cast<std::size_t>(_bridge.input_au_count++)] = 0;
     }
 
     // Sidechain input. When the descriptor declares a second input_bus, expose
@@ -508,6 +584,54 @@ struct ScopedAuV3HostWriting {
         if (!sidechainBus) return nil;
         _bridge.sidechain_bus_index = static_cast<NSInteger>([inBusses count]);
         [inBusses addObject:sidechainBus];
+        _bridge.input_au_declared[static_cast<std::size_t>(_bridge.input_au_count++)] = 1;
+    }
+
+    // Every further declared input bus is a host-connectable input, pulled each
+    // block and handed to the processor as an auxiliary bus. Entries follow
+    // the declaration order, so a bus's host number is its position among the
+    // buses that carry channels.
+    const int declared_inputs = static_cast<int>(
+        std::min<std::size_t>(desc.input_buses.size(), au_fmt::AUBridge::kMaxBuses));
+    _bridge.input_entry_count = std::max(2, declared_inputs);
+    for (int i = 2; i < declared_inputs; ++i) {
+        const auto& declared = desc.input_buses[static_cast<std::size_t>(i)];
+        if (declared.default_channels <= 0 || _bridge.input_au_count >= au_fmt::AUBridge::kMaxBuses)
+            continue;
+        AUAudioUnitBus* bus = make_bus(declared.default_channels, declared.name);
+        if (!bus)
+            return nil;
+        auto& extra = _bridge.extra_inputs[static_cast<std::size_t>(_bridge.extra_input_count++)];
+        extra.name = declared.name;
+        extra.declared_index = i;
+        extra.au_bus = static_cast<NSInteger>([inBusses count]);
+        extra.channels = declared.default_channels;
+        _bridge.input_au_declared[static_cast<std::size_t>(_bridge.input_au_count++)] = i;
+        [inBusses addObject:bus];
+        release_bus(bus);
+    }
+
+    // Every further declared output bus is rendered for the host as an
+    // auxiliary output.
+    const int declared_outputs = static_cast<int>(
+        std::min<std::size_t>(desc.output_buses.size(), au_fmt::AUBridge::kMaxBuses));
+    _bridge.output_entry_count = std::max(1, declared_outputs);
+    for (int i = 1; i < declared_outputs; ++i) {
+        const auto& declared = desc.output_buses[static_cast<std::size_t>(i)];
+        if (declared.default_channels <= 0 ||
+            _bridge.output_au_count >= au_fmt::AUBridge::kMaxBuses)
+            continue;
+        AUAudioUnitBus* bus = make_bus(declared.default_channels, declared.name);
+        if (!bus)
+            return nil;
+        auto& aux = _bridge.aux_outputs[static_cast<std::size_t>(_bridge.aux_output_count++)];
+        aux.name = declared.name;
+        aux.declared_index = i;
+        aux.au_bus = static_cast<NSInteger>([outBusses count]);
+        aux.channels = declared.default_channels;
+        _bridge.output_au_declared[static_cast<std::size_t>(_bridge.output_au_count++)] = i;
+        [outBusses addObject:bus];
+        release_bus(bus);
     }
 
     _outputBusArray = [[AUAudioUnitBusArray alloc]
@@ -531,10 +655,94 @@ struct ScopedAuV3HostWriting {
 // reports at least one output here, so a plug-in that produces MIDI but answers
 // with an empty list never has its output delivered. One output, matching the
 // single cable the render block writes to.
-- (NSArray<NSString *> *)MIDIOutputNames {
+- (NSArray<NSString*>*)MIDIOutputNames {
     if (_bridge.produces_midi)
         return @[ @"MIDI Out" ];
     return @[];
+}
+
+// Bus format negotiation. The render block reads float, non-interleaved
+// buffers, so anything else is refused. A channel count is accepted when the
+// processor supports some bus layout in which this bus carries that many
+// channels: its declared layout list when it has one, otherwise mono or stereo
+// on a bus declared mono or stereo, and the declared width for any other bus.
+// Testing "some layout" rather than "the layout with every other bus as it is
+// now" lets a processor that needs matching input and output widths move both
+// buses one after the other.
+- (BOOL)shouldChangeToFormat:(AVAudioFormat*)format forBus:(AUAudioUnitBus*)bus {
+    if (!_bridge.processor || format == nil || bus == nil)
+        return NO;
+    if (format.commonFormat != AVAudioPCMFormatFloat32 || format.interleaved)
+        return NO;
+    if (!(format.sampleRate > 0.0))
+        return NO;
+    const NSUInteger channels = format.channelCount;
+    if (channels < 1 || channels > static_cast<NSUInteger>(pulp::format::au::kMaxChannels))
+        return NO;
+
+    const auto desc = _bridge.processor->descriptor();
+    const bool is_input = bus.busType == AUAudioUnitBusTypeInput;
+    const NSUInteger host_index = bus.index;
+    const auto& au_declared = is_input ? _bridge.input_au_declared : _bridge.output_au_declared;
+    const int au_count = is_input ? _bridge.input_au_count : _bridge.output_au_count;
+    if (host_index >= static_cast<NSUInteger>(au_count))
+        return NO;
+    const int declared_index = au_declared[host_index];
+
+    // Channel counts as they stand now, one entry per declared bus. A declared
+    // bus the adapter does not expose (past the per-direction limit, or with no
+    // channels) keeps its declared width.
+    pulp::format::Processor::BusesLayout current;
+    for (const auto& declared : desc.input_buses)
+        current.inputs.push_back(declared.default_channels);
+    for (const auto& declared : desc.output_buses)
+        current.outputs.push_back(declared.default_channels);
+    const auto fill_current = [](std::vector<int>& counts, AUAudioUnitBusArray* array,
+                                 const std::array<int, pulp::format::au::AUBridge::kMaxBuses>& map,
+                                 int map_count) {
+        for (int k = 0; k < map_count; ++k) {
+            const auto declared = static_cast<std::size_t>(map[static_cast<std::size_t>(k)]);
+            if (declared < counts.size())
+                counts[declared] =
+                    static_cast<int>(array[static_cast<NSUInteger>(k)].format.channelCount);
+        }
+    };
+    fill_current(current.inputs, _inputBusArray, _bridge.input_au_declared, _bridge.input_au_count);
+    fill_current(current.outputs, _outputBusArray, _bridge.output_au_declared,
+                 _bridge.output_au_count);
+
+    auto& changed_side = is_input ? current.inputs : current.outputs;
+    const auto changed_index = static_cast<std::size_t>(declared_index);
+    if (changed_index >= changed_side.size())
+        return NO;
+
+    const int proposed = static_cast<int>(channels);
+    const auto supported = [&](pulp::format::Processor::BusesLayout layout) {
+        return _bridge.processor->is_bus_layout_supported(layout);
+    };
+
+    // The bus alone moves.
+    auto layout = current;
+    (is_input ? layout.inputs : layout.outputs)[changed_index] = proposed;
+    if (supported(layout))
+        return YES;
+
+    // The main input and main output move together.
+    if (declared_index == 0 && !layout.inputs.empty() && !layout.outputs.empty()) {
+        layout.inputs[0] = proposed;
+        layout.outputs[0] = proposed;
+        if (supported(layout))
+            return YES;
+    }
+
+    // One of the layouts the descriptor lists.
+    for (const auto& declared_layout : desc.supported_bus_layouts) {
+        const auto& side = is_input ? declared_layout.inputs : declared_layout.outputs;
+        if (changed_index < side.size() && side[changed_index] == proposed &&
+            supported({declared_layout.inputs, declared_layout.outputs}))
+            return YES;
+    }
+    return NO;
 }
 
 - (NSArray<NSNumber *> *)channelCapabilities {
@@ -939,12 +1147,41 @@ struct ScopedAuV3HostWriting {
 
     _bridge.sample_rate = _outputBus.format.sampleRate;
     _bridge.max_frames = self.maximumFramesToRender;
+
+    // Adopt the channel counts the host settled on. They equal the declared
+    // widths unless the host negotiated another layout through
+    // -shouldChangeToFormat:forBus:.
+    {
+        const auto clamp_channels = [](AUAudioUnitBus* bus) {
+            return std::min(static_cast<int>(bus.format.channelCount),
+                            pulp::format::au::kMaxChannels);
+        };
+        _bridge.output_channels = clamp_channels(_outputBus);
+        if (_inputBus)
+            _bridge.input_channels = clamp_channels(_inputBus);
+        if (_bridge.sidechain_channels > 0)
+            _bridge.sidechain_channels = clamp_channels(
+                _inputBusArray[static_cast<NSUInteger>(_bridge.sidechain_bus_index)]);
+        for (int i = 0; i < _bridge.extra_input_count; ++i) {
+            auto& extra = _bridge.extra_inputs[static_cast<std::size_t>(i)];
+            extra.channels = clamp_channels(_inputBusArray[static_cast<NSUInteger>(extra.au_bus)]);
+        }
+        for (int i = 0; i < _bridge.aux_output_count; ++i) {
+            auto& aux = _bridge.aux_outputs[static_cast<std::size_t>(i)];
+            aux.channels = clamp_channels(_outputBusArray[static_cast<NSUInteger>(aux.au_bus)]);
+        }
+    }
+    _bridge.multi_cache_valid = false;
     const auto storage_samples =
         static_cast<std::size_t>(pulp::format::au::kMaxChannels) *
         static_cast<std::size_t>(_bridge.max_frames);
     _bridge.output_storage.assign(storage_samples, 0.0f);
     _bridge.input_storage.assign(storage_samples, 0.0f);
     _bridge.sidechain_storage.assign(storage_samples, 0.0f);
+    _bridge.extra_input_storage.assign(
+        storage_samples * static_cast<std::size_t>(_bridge.extra_input_count), 0.0f);
+    _bridge.aux_output_storage.assign(
+        storage_samples * static_cast<std::size_t>(_bridge.aux_output_count), 0.0f);
 
     // Pre-size the per-block MIDI buffers + UMP reassembler so the render block
     // appends without heap allocation. Capacity-limited: add()/add_sysex_copy()
@@ -1005,6 +1242,7 @@ struct ScopedAuV3HostWriting {
     // noteId to a voice that no longer exists (mirrors VST3's setActive(false)).
     _bridge.mpe.reset();
     _bridge.ump_buffer.clear();
+    _bridge.multi_cache_valid = false;
     [super deallocateRenderResources];
 }
 
@@ -1277,6 +1515,52 @@ struct ScopedAuV3HostWriting {
             }
         } else {
             bridge->processor->set_sidechain(nullptr);
+        }
+
+        // Additional input buses: pulled like the sidechain, each into its own
+        // storage, and handed to the processor as auxiliary input buses. A
+        // bus the host leaves unconnected, or whose pull fails, reads as
+        // silence so a stateful processor still sees explicit zero input.
+        for (int e = 0; e < bridge->extra_input_count; ++e) {
+            auto& extra = bridge->extra_inputs[static_cast<std::size_t>(e)];
+            const UInt32 chans = std::min(static_cast<UInt32>(extra.channels),
+                                          static_cast<UInt32>(pulp::format::au::kMaxChannels));
+            const std::size_t base = static_cast<std::size_t>(e) *
+                                     static_cast<std::size_t>(pulp::format::au::kMaxChannels) *
+                                     bridge->max_frames;
+            PULP_DBG_ASSERT(bridge->extra_input_storage.size() >= base + chans * frameCount,
+                            "AU render: extra_input_storage undersized; allocateRenderResources "
+                            "must pre-size every extra input bus");
+            float* storage = bridge->extra_input_storage.data() + base;
+            std::fill_n(storage, static_cast<std::size_t>(chans) * frameCount, 0.0f);
+            auto& abl = bridge->extra_input_abl[static_cast<std::size_t>(e)];
+            abl.mNumberBuffers = chans;
+            for (UInt32 i = 0; i < chans; ++i) {
+                abl.mBuffers[i].mNumberChannels = 1;
+                abl.mBuffers[i].mDataByteSize = frameCount * sizeof(float);
+                abl.mBuffers[i].mData = storage + static_cast<std::size_t>(i) * frameCount;
+            }
+            bool pulled = false;
+            if (pullInputBlock) {
+                AudioUnitRenderActionFlags pullFlags = 0;
+                const auto status = pullInputBlock(&pullFlags, timestamp, frameCount, extra.au_bus,
+                                                   reinterpret_cast<AudioBufferList*>(&abl));
+                pulled = status == noErr;
+            }
+            auto* list = reinterpret_cast<AudioBufferList*>(&abl);
+            // A host may swap in its own buffers on a successful pull, or
+            // declare none to publish silence. Anything else must be complete.
+            const bool silent_pull = pulled && list->mNumberBuffers == 0;
+            const bool usable =
+                pulled && !silent_pull &&
+                pulp::format::detail::audio_buffer_list_shape_matches(list, chans) &&
+                pulp::format::detail::audio_buffer_list_has_storage(list, frameCount,
+                                                                    sizeof(float));
+            for (UInt32 i = 0; i < chans; ++i) {
+                bridge->extra_input_ptrs[static_cast<std::size_t>(e)][i] =
+                    usable ? static_cast<const float*>(list->mBuffers[i].mData)
+                           : storage + static_cast<std::size_t>(i) * frameCount;
+            }
         }
 
         // MIDI events. Short messages arrive as AURenderEventMIDI; sysex (and
@@ -1598,9 +1882,15 @@ struct ScopedAuV3HostWriting {
             ctx, bridge->playhead_prev,
             pulp::format::detail::TransportDiffMode::FieldValidity);
 
-        std::array<pulp::format::ProcessBusBufferView<const float>, 2> input_buses{{
-            {
-                .info = {
+        // One entry per declared bus, so ProcessBusBufferInfo::index equals the
+        // descriptor index. Entries for a bus without channels stay empty and
+        // inactive.
+        std::array<pulp::format::ProcessBusBufferView<const float>,
+                   pulp::format::au::AUBridge::kMaxBuses>
+            input_buses{};
+        input_buses[0] = {
+            .info =
+                {
                     .name = "Audio In",
                     .index = 0,
                     .direction = pulp::format::BusDirection::Input,
@@ -1609,10 +1899,11 @@ struct ScopedAuV3HostWriting {
                     .optional = bridge->input_channels == 0,
                     .active = input_view.num_channels() > 0,
                 },
-                .buffer = input_view,
-            },
-            {
-                .info = {
+            .buffer = input_view,
+        };
+        input_buses[1] = {
+            .info =
+                {
                     .name = "Sidechain",
                     .index = 1,
                     .direction = pulp::format::BusDirection::Input,
@@ -1621,12 +1912,49 @@ struct ScopedAuV3HostWriting {
                     .optional = true,
                     .active = sidechain_view.num_channels() > 0,
                 },
-                .buffer = sidechain_view,
-            },
-        }};
-        std::array<pulp::format::ProcessBusBufferView<float>, 1> output_buses{{
-            {
-                .info = {
+            .buffer = sidechain_view,
+        };
+        for (int i = 2; i < bridge->input_entry_count; ++i) {
+            input_buses[static_cast<std::size_t>(i)] = {
+                .info =
+                    {
+                        .name = "Aux In",
+                        .index = static_cast<std::size_t>(i),
+                        .direction = pulp::format::BusDirection::Input,
+                        .role = pulp::format::BusRole::Aux,
+                        .declared_channels = 0,
+                        .optional = true,
+                        .active = false,
+                    },
+                .buffer = pulp::audio::BufferView<const float>{},
+            };
+        }
+        for (int e = 0; e < bridge->extra_input_count; ++e) {
+            const auto& extra = bridge->extra_inputs[static_cast<std::size_t>(e)];
+            const auto chans =
+                static_cast<std::size_t>(std::min(extra.channels, pulp::format::au::kMaxChannels));
+            input_buses[static_cast<std::size_t>(extra.declared_index)] = {
+                .info =
+                    {
+                        .name = extra.name,
+                        .index = static_cast<std::size_t>(extra.declared_index),
+                        .direction = pulp::format::BusDirection::Input,
+                        .role = pulp::format::BusRole::Aux,
+                        .declared_channels = extra.channels,
+                        .optional = true,
+                        .active = chans > 0,
+                    },
+                .buffer = pulp::audio::BufferView<const float>(
+                    bridge->extra_input_ptrs[static_cast<std::size_t>(e)].data(), chans,
+                    frameCount),
+            };
+        }
+
+        std::array<pulp::format::ProcessBusBufferView<float>, pulp::format::au::AUBridge::kMaxBuses>
+            output_buses{};
+        output_buses[0] = {
+            .info =
+                {
                     .name = "Audio Out",
                     .index = 0,
                     .direction = pulp::format::BusDirection::Output,
@@ -1635,12 +1963,56 @@ struct ScopedAuV3HostWriting {
                     .optional = false,
                     .active = output_view.num_channels() > 0,
                 },
-                .buffer = output_view,
-            },
-        }};
+            .buffer = output_view,
+        };
+        for (int i = 1; i < bridge->output_entry_count; ++i) {
+            output_buses[static_cast<std::size_t>(i)] = {
+                .info =
+                    {
+                        .name = "Aux Out",
+                        .index = static_cast<std::size_t>(i),
+                        .direction = pulp::format::BusDirection::Output,
+                        .role = pulp::format::BusRole::Aux,
+                        .declared_channels = 0,
+                        .optional = true,
+                        .active = false,
+                    },
+                .buffer = pulp::audio::BufferView<float>{},
+            };
+        }
+        for (int a = 0; a < bridge->aux_output_count; ++a) {
+            const auto& aux = bridge->aux_outputs[static_cast<std::size_t>(a)];
+            const auto chans =
+                static_cast<std::size_t>(std::min(aux.channels, pulp::format::au::kMaxChannels));
+            // The multi-output wrapper below zeroed this storage before the
+            // block, so a bypassed or failed block leaves the bus silent.
+            float* storage = bridge->aux_output_storage.data() +
+                             static_cast<std::size_t>(a) *
+                                 static_cast<std::size_t>(pulp::format::au::kMaxChannels) *
+                                 bridge->max_frames;
+            for (std::size_t ch = 0; ch < chans; ++ch)
+                bridge->aux_output_ptrs[static_cast<std::size_t>(a)][ch] =
+                    storage + ch * frameCount;
+            output_buses[static_cast<std::size_t>(aux.declared_index)] = {
+                .info =
+                    {
+                        .name = aux.name,
+                        .index = static_cast<std::size_t>(aux.declared_index),
+                        .direction = pulp::format::BusDirection::Output,
+                        .role = pulp::format::BusRole::Aux,
+                        .declared_channels = aux.channels,
+                        .optional = true,
+                        .active = chans > 0,
+                    },
+                .buffer = pulp::audio::BufferView<float>(
+                    bridge->aux_output_ptrs[static_cast<std::size_t>(a)].data(), chans, frameCount),
+            };
+        }
         pulp::format::ProcessBuffers process_buffers{
-            pulp::format::ProcessBusBufferSet<const float>{std::span(input_buses)},
-            pulp::format::ProcessBusBufferSet<float>{std::span(output_buses)},
+            pulp::format::ProcessBusBufferSet<const float>{
+                std::span(input_buses.data(), static_cast<std::size_t>(bridge->input_entry_count))},
+            pulp::format::ProcessBusBufferSet<float>{std::span(
+                output_buses.data(), static_cast<std::size_t>(bridge->output_entry_count))},
         };
 
         // Prove no setFullState: restore is installing underneath this block.
@@ -1758,10 +2130,115 @@ struct ScopedAuV3HostWriting {
 
         return noErr;
     };
+
+    // One output bus: the block above is the whole render.
+    if (bridge->aux_output_count == 0) {
 #if __has_feature(objc_arc)
-    return [renderBlock copy];
+        return [renderBlock copy];
 #else
-    return [[renderBlock copy] autorelease];
+        return [[renderBlock copy] autorelease];
+#endif
+    }
+
+    // Several output buses. The host asks for each in a separate call, and one
+    // Processor::process() call produces them all, so the first request for a
+    // time stamp renders every bus into adapter storage and the later requests
+    // for that time stamp are copied out of it.
+#if __has_feature(objc_arc)
+    AUInternalRenderBlock singleBusBlock = [renderBlock copy];
+#else
+    AUInternalRenderBlock singleBusBlock = [[renderBlock copy] autorelease];
+#endif
+    AUInternalRenderBlock multiBusBlock = ^AUAudioUnitStatus(
+        AudioUnitRenderActionFlags* actionFlags, const AudioTimeStamp* timestamp,
+        AUAudioFrameCount frameCount, NSInteger outputBusNumber, AudioBufferList* outputData,
+        const AURenderEvent* realtimeEventListHead,
+        AURenderPullInputBlock __unsafe_unretained pullInputBlock) {
+      if (!outputData)
+          return noErr;
+      const auto silence = [&] {
+          pulp::format::detail::zero_audio_buffer_list(outputData);
+          if (actionFlags)
+              *actionFlags |= kAudioUnitRenderAction_OutputIsSilence;
+          return noErr;
+      };
+      if (outputBusNumber < 0 || outputBusNumber > bridge->aux_output_count)
+          return silence();
+
+      const bool timed = timestamp && (timestamp->mFlags & kAudioTimeStampSampleTimeValid) != 0;
+      const bool rendered = timed && bridge->multi_cache_valid &&
+                            bridge->multi_cache_sample_time == timestamp->mSampleTime &&
+                            bridge->multi_cache_frames == frameCount;
+
+      const UInt32 mainChans =
+          bridge->output_channels > 0 && bridge->output_channels <= pulp::format::au::kMaxChannels
+              ? static_cast<UInt32>(bridge->output_channels)
+              : 0;
+      if (!rendered) {
+          bridge->multi_cache_valid = false;
+          if (frameCount > bridge->max_frames)
+              return kAudioUnitErr_TooManyFramesToProcess;
+          if (mainChans == 0)
+              return silence();
+
+          // Aux buses start silent so a bypassed or failed block leaves them so.
+          std::fill(bridge->aux_output_storage.begin(), bridge->aux_output_storage.end(), 0.0f);
+
+          auto& mainAbl = bridge->multi_main_abl;
+          mainAbl.mNumberBuffers = mainChans;
+          for (UInt32 i = 0; i < mainChans; ++i) {
+              mainAbl.mBuffers[i].mNumberChannels = 1;
+              mainAbl.mBuffers[i].mDataByteSize = frameCount * sizeof(float);
+              mainAbl.mBuffers[i].mData =
+                  bridge->output_storage.data() + static_cast<std::size_t>(i) * frameCount;
+          }
+          const auto status = singleBusBlock(actionFlags, timestamp, frameCount, 0,
+                                             reinterpret_cast<AudioBufferList*>(&mainAbl),
+                                             realtimeEventListHead, pullInputBlock);
+          if (status != noErr)
+              return status;
+          bridge->multi_cache_valid = timed;
+          if (timed) {
+              bridge->multi_cache_sample_time = timestamp->mSampleTime;
+              bridge->multi_cache_frames = frameCount;
+          }
+      }
+
+      // Copy the requested bus to the host. A host that supplied no storage
+      // reads the adapter's buffer directly.
+      const float* source[pulp::format::au::kMaxChannels] = {};
+      UInt32 chans = 0;
+      if (outputBusNumber == 0) {
+          chans = mainChans;
+          for (UInt32 i = 0; i < chans; ++i)
+              source[i] = bridge->output_storage.data() + static_cast<std::size_t>(i) * frameCount;
+      } else {
+          const auto a = static_cast<std::size_t>(outputBusNumber - 1);
+          chans = static_cast<UInt32>(
+              std::min(bridge->aux_outputs[a].channels, pulp::format::au::kMaxChannels));
+          const float* base =
+              bridge->aux_output_storage.data() +
+              a * static_cast<std::size_t>(pulp::format::au::kMaxChannels) * bridge->max_frames;
+          for (UInt32 i = 0; i < chans; ++i)
+              source[i] = base + static_cast<std::size_t>(i) * frameCount;
+      }
+      if (chans == 0 || !pulp::format::detail::audio_buffer_list_shape_matches(outputData, chans))
+          return silence();
+      for (UInt32 i = 0; i < chans; ++i) {
+          auto& buffer = outputData->mBuffers[i];
+          if (!buffer.mData || buffer.mDataByteSize < frameCount * sizeof(float)) {
+              buffer.mDataByteSize = frameCount * sizeof(float);
+              buffer.mData = const_cast<float*>(source[i]);
+          } else if (buffer.mData != source[i]) {
+              std::memcpy(buffer.mData, source[i], frameCount * sizeof(float));
+          }
+      }
+      return noErr;
+    };
+#if __has_feature(objc_arc)
+    return [multiBusBlock copy];
+#else
+    return [[multiBusBlock copy] autorelease];
 #endif
 }
 

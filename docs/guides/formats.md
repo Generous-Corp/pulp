@@ -568,14 +568,34 @@ outputs, and a bypassed effect emits no MIDI.
 
 ### Multi-Bus / Sidechain
 
-AU v3 exposes descriptor input bus 0 as the main input and descriptor input bus
-1 as an optional sidechain `AUAudioUnitBus` when it has a positive channel
-count. The render block pulls input bus 1 separately, publishes it through
-`Processor::set_sidechain()`, and includes it as the sidechain bus in
-`ProcessBuffers`.
+AU v3 builds its input and output bus arrays from the descriptor's bus lists:
 
-Additional input buses and secondary output buses are not exposed through the
-AUv3 adapter surface yet; the adapter creates one main output bus.
+- **Inputs:** descriptor input bus 0 is the main input, bus 1 is the optional
+  sidechain, and every further input bus with a positive channel count is an
+  auxiliary input. The render block pulls each one by its host bus number. The
+  main input and sidechain still reach `Processor::set_sidechain()`, and every
+  bus appears in `ProcessBuffers` at its descriptor index.
+- **Outputs:** descriptor output bus 0 is the main output. Every further output
+  bus with a positive channel count is an auxiliary output the host can route
+  on its own. A host renders each output bus in a separate call; the adapter
+  runs `process()` once for the first call at a time stamp and copies the
+  other buses out of that one render. A processor that overrides
+  `process(ProcessBuffers&)` writes every output bus; one that only implements
+  the simple callback leaves the auxiliary outputs silent.
+- **Limit:** at most eight buses per direction are exposed. A bus with no
+  channels is not exposed, and a request for an output bus the processor does
+  not declare gets silence.
+
+**Format negotiation.** Hosts change a bus format through the bus object. The
+adapter accepts a float, non-interleaved format at a positive sample rate when
+the processor supports some bus layout in which that bus carries the proposed
+channel count. By default a bus accepts mono or stereo and the buses keep the
+declared bus counts. A descriptor with `supported_bus_layouts`, or a processor
+that overrides `is_bus_layout_supported()`, narrows or widens that. Anything
+else is refused, including interleaved, double-precision, and more than eight
+channels. When render resources are allocated the adapter adopts the channel
+counts the host settled on, so a processor sees `prepare()` and `process()` at
+the negotiated widths.
 
 ---
 

@@ -13,7 +13,7 @@ See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence 
 The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
 
 <!-- generated:start id=limitations -->
-### Known limitations (26 items across 18 capabilities)
+### Known limitations (25 items across 18 capabilities)
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
@@ -30,7 +30,6 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `formats.vst3` | Controller and per-note expression input is host-mediated: CC, pitch bend, and channel aftertouch arrive when the host honors IMidiMapping hidden parameters, and per-note tuning/pressure/timbre arrive for MPE-enabled plug-ins through INoteExpressionController. There is no separate raw poly-pressure event route. | `planning/production-readiness/01-format-adapters.md#1.2` |
 | `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | `planning/production-readiness/01-format-adapters.md#1.3` |
 | `formats.au_v2` | Outbound MIDI from AU v2 effects is not wired yet; HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host. | `planning/production-readiness/01-format-adapters.md#1.3` |
-| `formats.auv3` | Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet. | `planning/production-readiness/01-format-adapters.md#1.4` |
 | `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | `planning/production-readiness/01-format-adapters.md#1.4` |
 | `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | `planning/production-readiness/05-auv3-mobile.md` |
 | `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | `planning/production-readiness/01-format-adapters.md#1.5` |

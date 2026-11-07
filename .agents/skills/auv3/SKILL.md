@@ -1705,3 +1705,21 @@ processor and wraps `process()` with `service_panic()` before and
 `midi_out` claim (`docs/guides/midi-panic.md`). Keep both calls on any new
 process path (including f64) or `Processor::request_panic()` silently stops
 working there. Tests: test_au_plugin_state.mm (capabilities; the MIDI output block is host-installed, so the emitted MIDI is covered by the CLAP, VST3 and AU v2 tests).
+
+## Buses, format negotiation, and MIDI output
+
+The bus arrays are built from the descriptor: input 0 is the main input, input 1
+the sidechain, inputs 2 and up auxiliary inputs; output 0 is the main output and
+outputs 1 and up are auxiliary outputs (at most `AUBridge::kMaxBuses` per
+direction, a bus without channels is not exposed). `ProcessBuffers` carries one
+entry per declared bus at its descriptor index. A host asks for each output bus
+in its own render call, so with auxiliary outputs `internalRenderBlock` returns a
+wrapper that runs the real block once per time stamp into adapter storage and
+copies each requested bus out of it; a host that re-renders the same time stamp
+gets the cached result. `shouldChangeToFormat:forBus:` accepts a float,
+non-interleaved format when `Processor::is_bus_layout_supported()` accepts some
+layout with that width for the bus, and `allocateRenderResources` adopts the
+widths the host settled on. `MIDIOutputNames` reports "MIDI Out" only for a
+descriptor with `produces_midi`: a host installs `MIDIOutputEventBlock` only for
+a unit that reports an output. Tests: test_au_multibus.mm,
+test_au_midi_output.mm.

@@ -656,6 +656,29 @@ if(APPLE AND PULP_HAS_AUSDK)
     )
     catch_discover_tests(pulp-test-au-midi-output)
 
+    
+    # one host bus per declared bus, mono/stereo negotiation through the bus
+    # objects, and every output bus rendered from one process() call. Compiles
+    # au_adapter.mm, mirroring the targets above.
+    add_executable(pulp-test-au-multibus
+        test_au_multibus.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_adapter.mm
+    )
+    target_link_libraries(pulp-test-au-multibus PRIVATE
+        pulp::format
+        ausdk
+        Catch2::Catch2WithMain
+        "-framework AudioToolbox"
+        "-framework AVFoundation"
+        "-framework CoreAudioKit"
+        "-framework Foundation"
+    )
+    set_target_properties(pulp-test-au-multibus PROPERTIES
+        CXX_STANDARD 23
+        OBJCXX_STANDARD 23
+    )
+    catch_discover_tests(pulp-test-au-multibus)
+
     # AU v2 instrument (aumu) render-path RT-safety guard. Drives
     # PulpAUInstrument::Render for one steady-state block under
     # ScopedRtProcessProbe. Links the RT interposition trap TU and sets
