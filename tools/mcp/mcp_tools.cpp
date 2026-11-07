@@ -161,6 +161,11 @@ std::string handle_graph(const std::string& params_json) {
     if (op != "inspect" && op != "validate" && op != "explain" && op != "render" && op != "probe")
         return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: operation is not available "
                "through the read-only MCP surface\"}]}";
+    if (op != "probe" &&
+        (extract_bool(params_json, "plan", false) || extract_bool(params_json, "latency", false) ||
+         extract_bool(params_json, "node_loads", false)))
+        return "{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"Error: "
+               "plan, latency and node_loads are only valid for probe\"}]}";
     fs::path binary;
     if (op == "probe") {
         std::lock_guard lock(graph_executable_mutex);
@@ -189,6 +194,12 @@ std::string handle_graph(const std::string& params_json) {
                 arguments.emplace_back(flag);
                 arguments.push_back(value);
             }
+        }
+        for (const auto& [key, flag] : {std::pair{"plan", "--plan"},
+                                        {"latency", "--latency"},
+                                        {"node_loads", "--node-loads"}}) {
+            if (extract_bool(params_json, key, false))
+                arguments.emplace_back(flag);
         }
         const auto block = extract_raw(params_json, "block_frames");
         if (!block.empty()) {
