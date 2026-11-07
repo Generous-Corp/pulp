@@ -41,6 +41,7 @@
 #include <pulp_tooling/gpu_probe/probe_result.hpp>
 
 #include "support/fixture_root.hpp"
+#include "support/wav_fixture_builders.hpp"
 
 namespace {
 
@@ -1827,39 +1828,15 @@ TEST_CASE("MCP audio file inspect returns exactly the CLI's JSON document",
     const auto wav = project.path() / "fixture.wav";
     {
         // 44-byte PCM header plus two 16-bit frames and a bext chunk with text.
-        std::vector<std::uint8_t> bytes;
-        auto put_id = [&](const char* id) { bytes.insert(bytes.end(), id, id + 4); };
-        auto put_u16 = [&](std::uint16_t v) {
-            bytes.push_back(static_cast<std::uint8_t>(v));
-            bytes.push_back(static_cast<std::uint8_t>(v >> 8));
-        };
-        auto put_u32 = [&](std::uint32_t v) {
-            for (unsigned s = 0; s < 32; s += 8)
-                bytes.push_back(static_cast<std::uint8_t>(v >> s));
-        };
-        put_id("RIFF");
-        put_u32(0);
-        put_id("WAVE");
-        put_id("fmt ");
-        put_u32(16);
-        put_u16(1);
-        put_u16(1);
-        put_u32(48000);
-        put_u32(96000);
-        put_u16(2);
-        put_u16(16);
-        put_id("bext");
-        put_u32(602);
+        using namespace pulp_test::wav;
+        Bytes bext(602u, 0u);
         const std::string description = "MCP parity description";
-        bytes.insert(bytes.end(), description.begin(), description.end());
-        bytes.insert(bytes.end(), 602u - description.size(), 0u);
-        put_id("data");
-        put_u32(4);
-        put_u16(0);
-        put_u16(1000);
-        const auto riff = static_cast<std::uint32_t>(bytes.size() - 8);
-        for (unsigned s = 0; s < 32; s += 8)
-            bytes[4 + s / 8] = static_cast<std::uint8_t>(riff >> s);
+        std::copy(description.begin(), description.end(), bext.begin());
+        Bytes data;
+        append_sample(data, std::int16_t{0});
+        append_sample(data, std::int16_t{1000});
+        const auto bytes =
+            make_wav_with_chunks(make_format(1u, 1u, 48'000u, 16u), data, {{"bext", bext}});
         std::ofstream out(wav, std::ios::binary);
         out.write(reinterpret_cast<const char*>(bytes.data()),
                   static_cast<std::streamsize>(bytes.size()));

@@ -1370,7 +1370,9 @@ endif()
 # bounded reads, raw PCM, redaction, and the checked-in container fixtures.
 pulp_add_test_suite(pulp-test-audio-file-layout
     LIBRARIES pulp::audio)
-pulp_test_data(pulp-test-audio-file-layout PATHS test/fixtures/audio/inspect)
+pulp_add_test_suite(pulp-test-audio-file-layout-containers
+    LIBRARIES pulp::audio)
+pulp_test_data(pulp-test-audio-file-layout-containers PATHS test/fixtures/audio/inspect)
 
 # Phase-vocoder offline time-stretch / pitch-shift.
 pulp_add_test_suite(pulp-test-phase-vocoder GROUP pulp-test-group-core-signal
