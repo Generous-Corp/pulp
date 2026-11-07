@@ -5,18 +5,6 @@
 
 namespace pulp::runtime {
 
-// ─── CancellationToken ────────────────────────────────────────────────────
-
-CancellationToken::CancellationToken() : state_(std::make_shared<State>()) {}
-
-void CancellationToken::cancel() {
-    if (state_) state_->cancelled.store(true, std::memory_order_release);
-}
-
-bool CancellationToken::is_cancelled() const {
-    return state_ && state_->cancelled.load(std::memory_order_acquire);
-}
-
 // ─── AsyncStream ──────────────────────────────────────────────────────────
 
 AsyncStream::AsyncStream(std::unique_ptr<Stream> stream, Options options)
@@ -35,7 +23,8 @@ void AsyncStream::on_drain(AsyncCloseCallback cb) { on_drain_ = std::move(cb); }
 void AsyncStream::start() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (running_) return;
-    if (token_.is_cancelled()) token_ = CancellationToken();
+    if (source_.is_cancelled())
+        source_ = CancelSource();
     running_ = true;
     close_fired_ = false;
     writer_thread_ = std::thread([this] { write_loop(); });
@@ -50,7 +39,7 @@ void AsyncStream::stop() {
         if (!running_ && !writer_thread_.joinable() && !reader_thread_.joinable()) return;
         running_ = false;
     }
-    token_.cancel();
+    source_.cancel();
     cv_.notify_all();
     if (writer_thread_.joinable()) writer_thread_.join();
     if (reader_thread_.joinable()) reader_thread_.join();
@@ -59,7 +48,7 @@ void AsyncStream::stop() {
 }
 
 void AsyncStream::cancel() {
-    token_.cancel();
+    source_.cancel();
     {
         std::lock_guard<std::mutex> lock(mutex_);
         running_ = false;
@@ -89,7 +78,7 @@ bool AsyncStream::write_async(const std::uint8_t* data, std::size_t size,
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (token_.is_cancelled() || !stream_ || !stream_->is_open()) {
+        if (source_.is_cancelled() || !stream_ || !stream_->is_open()) {
             auto cb = std::move(pw.callback);
             if (cb) dispatch([cb = std::move(cb)] { cb(0, StreamError::Closed); });
             return true;
@@ -150,9 +139,10 @@ void AsyncStream::write_loop() {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             cv_.wait(lock, [this] {
-                return !running_ || token_.is_cancelled() || !write_queue_.empty();
+                return !running_ || source_.is_cancelled() || !write_queue_.empty();
             });
-            if (!running_ || token_.is_cancelled()) return;
+            if (!running_ || source_.is_cancelled())
+                return;
             if (!write_queue_.empty()) {
                 to_write = std::move(write_queue_.front());
                 write_queue_.erase(write_queue_.begin());
@@ -163,7 +153,10 @@ void AsyncStream::write_loop() {
 
         StreamError last_err = StreamError::Ok;
         while (to_write.written < to_write.data.size()) {
-            if (token_.is_cancelled()) { last_err = StreamError::Closed; break; }
+            if (source_.is_cancelled()) {
+                last_err = StreamError::Closed;
+                break;
+            }
             auto remaining = to_write.data.size() - to_write.written;
             auto result = stream_->write(
                 to_write.data.data() + to_write.written, remaining);
@@ -219,7 +212,8 @@ void AsyncStream::read_loop() {
     while (true) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (!running_ || token_.is_cancelled() || !stream_ || !stream_->is_open()) return;
+            if (!running_ || source_.is_cancelled() || !stream_ || !stream_->is_open())
+                return;
         }
 
         auto r = stream_->read(read_buf.data(), read_buf.size());

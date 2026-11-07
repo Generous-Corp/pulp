@@ -85,6 +85,15 @@ workers. A stream can therefore be cancelled, stopped, and started again for
 tests or reusable transports. Do not preserve a stale cancelled token across
 restart.
 
+`cancellation_token()` returns a `CancelToken` (`pulp/runtime/cancel.hpp`), an
+observer that cannot cancel. Poll `is_cancelled()` (lock-free, safe on the audio
+thread), block with `wait_for_cancellation(timeout)`, or run code on cancel with
+`register_callback(fn)`. Keep the returned `CancelRegistration` alive only as long
+as the callback's captures; destroying it waits out a callback running on another
+thread. To cancel your own work, own a `CancelSource` (it cancels when destroyed)
+and hand out its `token()`. `CancellationToken` remains as the old
+request-and-observe type and converts to `CancelToken`.
+
 ### 5. Null writes are invalid unless size is zero
 
 `write_async(nullptr, 0, cb)` is the normal zero-byte no-op and completes

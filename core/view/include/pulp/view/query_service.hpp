@@ -106,7 +106,7 @@ private:
         // once both complete. Returns true if the index was installed.
         bool put_unless_cancelled(const std::string& id,
                                   std::shared_ptr<const runtime::SearchIndex> index,
-                                  const runtime::CancellationToken& cancel);
+                                  const runtime::CancelToken& cancel);
         void erase(const std::string& id);
         std::size_t size() const;
     };

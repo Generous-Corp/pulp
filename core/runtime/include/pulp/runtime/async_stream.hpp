@@ -20,6 +20,7 @@
 // are already `Stream` subclasses and therefore automatically work with
 // `AsyncStream` without further adapter code.
 
+#include <pulp/runtime/cancel.hpp>
 #include <pulp/runtime/stream.hpp>
 
 #include <atomic>
@@ -39,28 +40,6 @@ namespace pulp::runtime {
 /// `[loop](auto fn) { loop->dispatch(std::move(fn)); }`. When null, the
 /// AsyncStream runs callbacks on its worker thread.
 using AsyncExecutor = std::function<void(std::function<void()>)>;
-
-/// Simple cancellation token, shared across async operations. Instances can
-/// be cheaply copied (they share state) and safely used from any thread.
-class CancellationToken {
-public:
-    CancellationToken();
-
-    /// Signal cancellation. Idempotent.
-    void cancel();
-
-    /// True once `cancel()` has been called.
-    bool is_cancelled() const;
-
-    /// True if this token is the same underlying state as `other`.
-    bool shares(const CancellationToken& other) const {
-        return state_.get() == other.state_.get();
-    }
-
-private:
-    struct State { std::atomic<bool> cancelled{false}; };
-    std::shared_ptr<State> state_;
-};
 
 /// Completion callback for `write_async`. Receives the number of bytes
 /// written and an error code; `error == Ok` means the full payload
@@ -144,7 +123,9 @@ public:
     /// Cancellation token shared with this stream's worker. Callers can
     /// pass this to user code that wants to observe cancellation alongside
     /// the stream lifetime.
-    CancellationToken cancellation_token() const { return token_; }
+    CancelToken cancellation_token() const {
+        return source_.token();
+    }
 
     /// Underlying Stream, for advanced callers. Not thread-safe with the
     /// worker; only touch from the worker thread or after `stop()`.
@@ -165,7 +146,7 @@ private:
 
     std::unique_ptr<Stream> stream_;
     Options options_;
-    CancellationToken token_;
+    CancelSource source_;
 
     AsyncDataCallback on_data_;
     AsyncErrorCallback on_error_;

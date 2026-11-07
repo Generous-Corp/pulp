@@ -240,6 +240,42 @@ Critical audio rendering should not be gated through this helper. Use it for
 noncritical graph previews, diagnostics, per-voice analysis, background refresh,
 and validation helpers where a degraded result is acceptable and visible.
 
+## Cancellation
+
+`CancelSource` owns a cancellation request and `CancelToken` observes it. Hand the
+token to the work being cancelled and keep the source with whoever may cancel it.
+
+```cpp
+#include <pulp/runtime/cancel.hpp>
+
+pulp::runtime::CancelSource source;
+auto token = source.token();                 // copyable observer
+
+worker = std::thread([token] {
+    while (!token.is_cancelled()) {          // lock-free; safe on the audio thread
+        do_a_slice_of_work();
+    }
+});
+
+auto registration = token.register_callback([] { wake_the_ui(); });
+bool stopped = token.wait_for_cancellation(std::chrono::seconds(5));
+
+source.cancel();                             // idempotent; also runs on destruction
+```
+
+- `CancelSource` is move-only and cancels when destroyed, so work never outlives
+  its owner without being told to stop.
+- A default-constructed `CancelToken` can never be cancelled, which makes
+  `const CancelToken& = {}` a safe "not cancellable" default parameter.
+- `is_cancelled()` is one acquire load. It never locks or allocates. Everything
+  else takes a mutex and stays off the audio thread.
+- `register_callback` returns a `CancelRegistration`. Callbacks run on the
+  cancelling thread, in registration order, or immediately if the token is
+  already cancelled. Destroying a registration waits for a callback that is
+  running on another thread, so captured state is safe to free afterwards.
+- `CancellationToken` is the former single type that both requested and observed
+  cancellation. It still works and converts to `CancelToken`.
+
 ## ScopeGuard
 
 RAII cleanup — runs a callable on scope exit.

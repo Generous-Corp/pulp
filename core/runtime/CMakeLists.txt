@@ -111,6 +111,7 @@ target_sources(pulp-runtime PRIVATE
     src/socket.cpp
     src/named_pipe.cpp
     src/stream.cpp
+    src/cancel.cpp
     src/async_stream.cpp
     src/background_job.cpp
     src/search_index.cpp
@@ -305,6 +306,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/assert.hpp
     include/pulp/runtime/async_stream.hpp
     include/pulp/runtime/background_job.hpp
+    include/pulp/runtime/cancel.hpp
     include/pulp/runtime/base64.hpp
     include/pulp/runtime/big_integer.hpp
     include/pulp/runtime/budget_policy.hpp

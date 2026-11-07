@@ -14,9 +14,9 @@ QueryService::Registry::get(const std::string& id) const {
     return it == indices.end() ? nullptr : it->second;
 }
 
-bool QueryService::Registry::put_unless_cancelled(
-    const std::string& id, std::shared_ptr<const runtime::SearchIndex> index,
-    const runtime::CancellationToken& cancel) {
+bool QueryService::Registry::put_unless_cancelled(const std::string& id,
+                                                  std::shared_ptr<const runtime::SearchIndex> index,
+                                                  const runtime::CancelToken& cancel) {
     std::lock_guard<std::mutex> lock(mutex);
     if (cancel.is_cancelled()) return false;
     indices[id] = std::move(index);

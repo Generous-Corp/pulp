@@ -97,7 +97,7 @@ ResolvedRedirect resolve_redirect(const std::string& cur_scheme_host_port,
 namespace pulp::runtime {
 
 DownloadResult download_file(const DownloadRequest& req, const DownloadProgressFn&,
-                             const CancellationToken*) {
+                             const CancelToken*) {
     DownloadResult r;
     r.path = req.dest;
     r.error = "model downloads are not supported on iOS";
@@ -108,7 +108,7 @@ DownloadResult download_file(const DownloadRequest& req, const DownloadProgressF
 
 #else
 
-#include <pulp/runtime/async_stream.hpp>
+#include <pulp/runtime/cancel.hpp>
 
 #include <mbedtls/sha256.h>
 
@@ -193,7 +193,7 @@ const char* system_ca_path() {
 } // namespace
 
 DownloadResult download_file(const DownloadRequest& req, const DownloadProgressFn& on_progress,
-                             const CancellationToken* cancel) {
+                             const CancelToken* cancel) {
     DownloadResult r;
     r.path = req.dest;
 

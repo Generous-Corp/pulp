@@ -17,7 +17,7 @@
 #include <pulp/runtime/model_registry.hpp>
 
 namespace pulp::runtime {
-class CancellationToken;  // async_stream.hpp
+class CancelToken; // cancel.hpp
 }
 
 namespace pulp::runtime {
@@ -101,7 +101,7 @@ struct InstallModelResult {
 InstallModelResult
 install_model(const ModelEntry& model, std::string_view subsystem,
               const std::function<bool(const struct DownloadProgress&)>& on_progress = {},
-              const CancellationToken* cancel = nullptr,
+              const CancelToken* cancel = nullptr,
               const std::vector<std::pair<std::string, std::string>>& headers = {},
               const std::filesystem::path& pulp_home_override = {}, bool allow_unverified = false);
 

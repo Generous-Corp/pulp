@@ -651,3 +651,7 @@ pulp_add_test_suite(pulp-test-state-restore-gate GROUP pulp-test-group-fmt-forma
 # fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
 pulp_test_spawns(pulp-test-au-v2-param-display NONE REASON "re-runs its own executable and nothing else the tree builds")
 pulp_test_spawns(pulp-test-group-fmt-ship NONE REASON "runs the system xar, pkgbuild and productbuild, nothing the tree builds")
+
+# CancelSource / CancelToken / CancelRegistration
+pulp_add_test_suite(pulp-test-cancel GROUP pulp-test-group-fmt-runtime
+    LIBRARIES pulp::runtime)
