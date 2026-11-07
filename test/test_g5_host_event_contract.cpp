@@ -274,8 +274,8 @@ TEST_CASE("G5 host projection preflights pending MPE release on an empty block",
     midi.reserve(1);
     midi.set_realtime_capacity_limit(true);
     mpe.set_realtime_capacity_limit(true);
-    REQUIRE(project_host_event_block(std::span<const HostEventRecord>{}, 0, 1, midi,
-                                     &tracker, &mpe) == HostEventResult::OutputCapacity);
+    REQUIRE(project_host_event_block(std::span<const HostEventRecord>{}, 0, 1, midi, &tracker,
+                                     &mpe) == HostEventResult::OutputCapacity);
     REQUIRE(midi.empty());
     REQUIRE(mpe.empty());
     REQUIRE(mpe.dropped_event_count() == 0);
@@ -324,8 +324,8 @@ TEST_CASE("G5 host projection flushes a pending MPE release at full capacity",
     midi.set_realtime_capacity_limit(true);
     mpe.reserve(1);
     mpe.set_realtime_capacity_limit(true);
-    REQUIRE(project_host_event_block(std::span<const HostEventRecord>{}, 0, 1, midi,
-                                     &tracker, &mpe) == HostEventResult::Accepted);
+    REQUIRE(project_host_event_block(std::span<const HostEventRecord>{}, 0, 1, midi, &tracker,
+                                     &mpe) == HostEventResult::Accepted);
     REQUIRE(tracker.pending_note_off_count() == 0);
     REQUIRE(mpe.size() == 1);
     REQUIRE(mpe[0].sample_offset == 0);

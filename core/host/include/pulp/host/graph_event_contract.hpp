@@ -307,8 +307,8 @@ inline HostEventResult project_host_event_block(std::span<const HostEventRecord>
                 : records.size() * kMpeRecordsPerSource;
         const auto pending_mpe = tracker->pending_note_off_count();
         const auto required_mpe = pending_mpe > std::numeric_limits<std::size_t>::max() - event_mpe
-            ? std::numeric_limits<std::size_t>::max()
-            : pending_mpe + event_mpe;
+                                      ? std::numeric_limits<std::size_t>::max()
+                                      : pending_mpe + event_mpe;
         if (required_mpe > mpe_out->capacity() - std::min(mpe_out->capacity(), mpe_out->size()))
             return HostEventResult::OutputCapacity;
     }
