@@ -28,10 +28,16 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 ## simd
 
-Portable block kernels for DSP: elementwise buffer arithmetic, reductions
-(`sum`, `dot`, `sum_squares`, `max_abs`, `maximum`, `minimum`), gain ramps
-(`ramp_mul`) and FIR correlation (`correlate`, `decimate2`), for `float` and
-`double`. `pulp::signal` links this module, so DSP headers can call it without
+Portable block kernels for DSP: elementwise buffer arithmetic (`add`, `sub`,
+`mul`, `div`, `negate`, `fma`, `scale`, `abs`, `clamp`), reductions (`sum`,
+`mean`, `rms`, `dot`, `sum_squares`, `max_abs`, `maximum`, `minimum`,
+`find_maximum` and `find_minimum` with the index), threshold replacement
+(`replace_below`, `replace_above`), gain ramps (`ramp_mul`), sample-format
+conversion (`from_int16`, `from_int32`, `to_int16`, `to_int32`, with a scale),
+stereo `interleave2` / `deinterleave2`, and FIR correlation (`correlate`,
+`decimate2`), for `float` and `double`. The conversions to integer round half to
+even, saturate, and turn NaN into 0 on every backend. A copy with gain is
+`scale`. `pulp::signal` links this module, so DSP headers can call it without
 acquiring `pulp::runtime`.
 
 **Link:** `pulp::simd` (also reached through `pulp::signal` and `pulp::runtime`) · **Include prefix:** `<pulp/simd/...>`

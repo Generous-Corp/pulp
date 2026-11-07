@@ -35,6 +35,7 @@
 // overlap is never supported.
 
 #include <cstddef>
+#include <cstdint>
 
 // Kernel signatures, declared once per backend below.
 //
@@ -54,6 +55,36 @@
 //   max_abs(x, n)              largest |x[i]|                  (0 when n == 0)
 //   ramp_mul(x, start, step, dst, n)
 //                              dst[i] = x[i] * (start + i * step) (dst == x ok)
+//   sub(a, b, dst, n)          dst[i] = a[i] - b[i]            (dst == a or b ok)
+//   div(a, b, dst, n)          dst[i] = a[i] / b[i]            (dst == a or b ok)
+//   negate(a, dst, n)          dst[i] = -a[i]                  (dst == a ok)
+//   mean(x, n)                 arithmetic mean of x[i]         (0 when n == 0)
+//   rms(x, n)                  sqrt(mean of x[i] * x[i])       (0 when n == 0)
+//   find_maximum(x, n, &i)     largest x[i]; *i is the lowest index holding it
+//   find_minimum(x, n, &i)     smallest x[i]; *i is the lowest index holding it
+//                              Both return 0 and set *i = 0 when n == 0.
+//   replace_below(a, threshold, value, dst, n)
+//                              dst[i] = a[i] < threshold ? value : a[i]   (dst == a ok)
+//   replace_above(a, threshold, value, dst, n)
+//                              dst[i] = a[i] > threshold ? value : a[i]   (dst == a ok)
+//                              A NaN input is never replaced.
+//   from_int16(src, s, dst, n) dst[i] = T(src[i]) * s     (fixed-point to float)
+//   from_int32(src, s, dst, n) dst[i] = T(src[i]) * s
+//   to_int16(src, s, dst, n)   dst[i] = int16(round_half_even(src[i] * s)),
+//                              saturated to [-32768, 32767]; NaN becomes 0.
+//   to_int32(src, s, dst, n)   same for int32. A float source saturates at
+//                              2147483520, the largest float below 2^31.
+//                              Use s = 32768 (int16) or 2147483648 (int32) to
+//                              convert full-scale float audio, and the
+//                              reciprocal for the way back.
+//   interleave2(l, r, dst, frames)
+//                              dst[2i] = l[i], dst[2i + 1] = r[i]
+//   deinterleave2(src, l, r, frames)
+//                              l[i] = src[2i], r[i] = src[2i + 1]
+//                              Interleave/deinterleave buffers must not overlap.
+//
+//   A copy with gain is scale(): dst[i] = a[i] * s.
+//
 //   correlate(x, h, y, n_out, taps)
 //                              y[i] = sum_{k < taps} x[i + k] * h[k]
 //                              x holds n_out + taps - 1 samples. A FIR filter
@@ -82,7 +113,22 @@
     T max_abs(const T* data, std::size_t count) noexcept;                                          \
     void ramp_mul(const T* x, T start, T step, T* dst, std::size_t count) noexcept;                \
     void correlate(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept;    \
-    void decimate2(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept;
+    void decimate2(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept;      \
+    void sub(const T* a, const T* b, T* dst, std::size_t count) noexcept;                          \
+    void div(const T* a, const T* b, T* dst, std::size_t count) noexcept;                          \
+    void negate(const T* a, T* dst, std::size_t count) noexcept;                                   \
+    T mean(const T* data, std::size_t count) noexcept;                                             \
+    T rms(const T* data, std::size_t count) noexcept;                                              \
+    T find_maximum(const T* data, std::size_t count, std::size_t* index) noexcept;                 \
+    T find_minimum(const T* data, std::size_t count, std::size_t* index) noexcept;                 \
+    void replace_below(const T* a, T threshold, T value, T* dst, std::size_t count) noexcept;      \
+    void replace_above(const T* a, T threshold, T value, T* dst, std::size_t count) noexcept;      \
+    void from_int16(const std::int16_t* src, T scale, T* dst, std::size_t count) noexcept;         \
+    void from_int32(const std::int32_t* src, T scale, T* dst, std::size_t count) noexcept;         \
+    void to_int16(const T* src, T scale, std::int16_t* dst, std::size_t count) noexcept;           \
+    void to_int32(const T* src, T scale, std::int32_t* dst, std::size_t count) noexcept;           \
+    void interleave2(const T* left, const T* right, T* dst, std::size_t frames) noexcept;          \
+    void deinterleave2(const T* src, T* left, T* right, std::size_t frames) noexcept;
 
 namespace pulp::simd {
 
@@ -147,17 +193,32 @@ using active_backend::add_scaled;
 using active_backend::clamp;
 using active_backend::correlate;
 using active_backend::decimate2;
+using active_backend::deinterleave2;
+using active_backend::div;
 using active_backend::dot;
+using active_backend::find_maximum;
+using active_backend::find_minimum;
 using active_backend::fma;
+using active_backend::from_int16;
+using active_backend::from_int32;
+using active_backend::interleave2;
 using active_backend::max_abs;
 using active_backend::maximum;
+using active_backend::mean;
 using active_backend::minimum;
 using active_backend::mul;
+using active_backend::negate;
 using active_backend::ramp_mul;
+using active_backend::replace_above;
+using active_backend::replace_below;
+using active_backend::rms;
 using active_backend::scale;
 using active_backend::set;
+using active_backend::sub;
 using active_backend::sum;
 using active_backend::sum_squares;
+using active_backend::to_int16;
+using active_backend::to_int32;
 
 #if defined(PULP_SIMD_HAS_HIGHWAY)
 /// Number of float lanes on the dispatched Highway target.

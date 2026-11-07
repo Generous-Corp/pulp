@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 
 namespace pulp::simd::detail {
 
@@ -127,6 +129,125 @@ inline void decimate2_impl(const T* x, const T* h, T* y, std::size_t n_out,
         y[i] = dot_impl(x + 2 * i, h, taps);
 }
 
+template <typename T> inline void sub_impl(const T* a, const T* b, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = a[i] - b[i];
+}
+
+template <typename T> inline void div_impl(const T* a, const T* b, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = a[i] / b[i];
+}
+
+template <typename T> inline void negate_impl(const T* a, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = -a[i];
+}
+
+template <typename T> inline T mean_impl(const T* x, std::size_t n) noexcept {
+    return n == 0 ? T(0) : sum_impl(x, n) / T(n);
+}
+
+template <typename T> inline T rms_impl(const T* x, std::size_t n) noexcept {
+    return n == 0 ? T(0) : std::sqrt(sum_squares_impl(x, n) / T(n));
+}
+
+/// Lowest index whose element equals `value`; 0 when none does (only possible
+/// with NaN input, where the extremum is unspecified).
+template <typename T>
+inline std::size_t first_index_of(const T* x, std::size_t n, T value) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        if (x[i] == value)
+            return i;
+    return 0;
+}
+
+template <typename T>
+inline T find_maximum_impl(const T* x, std::size_t n, std::size_t* index) noexcept {
+    T best = n == 0 ? T(0) : x[0];
+    std::size_t at = 0;
+    for (std::size_t i = 1; i < n; ++i) {
+        if (x[i] > best) {
+            best = x[i];
+            at = i;
+        }
+    }
+    *index = at;
+    return best;
+}
+
+template <typename T>
+inline T find_minimum_impl(const T* x, std::size_t n, std::size_t* index) noexcept {
+    T best = n == 0 ? T(0) : x[0];
+    std::size_t at = 0;
+    for (std::size_t i = 1; i < n; ++i) {
+        if (x[i] < best) {
+            best = x[i];
+            at = i;
+        }
+    }
+    *index = at;
+    return best;
+}
+
+template <typename T>
+inline void replace_below_impl(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = a[i] < threshold ? value : a[i];
+}
+
+template <typename T>
+inline void replace_above_impl(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = a[i] > threshold ? value : a[i];
+}
+
+template <typename T, typename I>
+inline void from_int_impl(const I* src, T scale, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = static_cast<T>(src[i]) * scale;
+}
+
+/// Largest value of T that converts to I without overflow: the float just
+/// below 2^31 for float -> int32, the integer limit otherwise.
+template <typename T, typename I> inline constexpr T int_upper_bound() noexcept {
+    if constexpr (sizeof(I) == 4 && sizeof(T) == 4)
+        return T(2147483520.0);
+    else
+        return static_cast<T>(std::numeric_limits<I>::max());
+}
+
+template <typename T, typename I>
+inline void to_int_impl(const T* src, T scale, I* dst, std::size_t n) noexcept {
+    constexpr T lo = static_cast<T>(std::numeric_limits<I>::min());
+    constexpr T hi = int_upper_bound<T, I>();
+    for (std::size_t i = 0; i < n; ++i) {
+        T v = src[i] * scale;
+        if (v != v) {
+            dst[i] = 0;
+            continue;
+        }
+        v = v < lo ? lo : (v > hi ? hi : v);
+        dst[i] = static_cast<I>(std::nearbyint(v));
+    }
+}
+
+template <typename T>
+inline void interleave2_impl(const T* l, const T* r, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        dst[2 * i] = l[i];
+        dst[2 * i + 1] = r[i];
+    }
+}
+
+template <typename T>
+inline void deinterleave2_impl(const T* src, T* l, T* r, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        l[i] = src[2 * i];
+        r[i] = src[2 * i + 1];
+    }
+}
+
 } // namespace pulp::simd::detail
 
 // Defines every kernel overload for element type T in the current namespace.
@@ -180,6 +301,51 @@ inline void decimate2_impl(const T* x, const T* h, T* y, std::size_t n_out,
     SPEC void correlate(const T* x, const T* h, T* y, std::size_t n_out,                           \
                         std::size_t taps) noexcept {                                               \
         ::pulp::simd::detail::correlate_impl(x, h, y, n_out, taps);                                \
+    }                                                                                              \
+    SPEC void sub(const T* a, const T* b, T* dst, std::size_t n) noexcept {                        \
+        ::pulp::simd::detail::sub_impl(a, b, dst, n);                                              \
+    }                                                                                              \
+    SPEC void div(const T* a, const T* b, T* dst, std::size_t n) noexcept {                        \
+        ::pulp::simd::detail::div_impl(a, b, dst, n);                                              \
+    }                                                                                              \
+    SPEC void negate(const T* a, T* dst, std::size_t n) noexcept {                                 \
+        ::pulp::simd::detail::negate_impl(a, dst, n);                                              \
+    }                                                                                              \
+    SPEC T mean(const T* x, std::size_t n) noexcept {                                              \
+        return ::pulp::simd::detail::mean_impl(x, n);                                              \
+    }                                                                                              \
+    SPEC T rms(const T* x, std::size_t n) noexcept {                                               \
+        return ::pulp::simd::detail::rms_impl(x, n);                                               \
+    }                                                                                              \
+    SPEC T find_maximum(const T* x, std::size_t n, std::size_t* index) noexcept {                  \
+        return ::pulp::simd::detail::find_maximum_impl(x, n, index);                               \
+    }                                                                                              \
+    SPEC T find_minimum(const T* x, std::size_t n, std::size_t* index) noexcept {                  \
+        return ::pulp::simd::detail::find_minimum_impl(x, n, index);                               \
+    }                                                                                              \
+    SPEC void replace_below(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {    \
+        ::pulp::simd::detail::replace_below_impl(a, threshold, value, dst, n);                     \
+    }                                                                                              \
+    SPEC void replace_above(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {    \
+        ::pulp::simd::detail::replace_above_impl(a, threshold, value, dst, n);                     \
+    }                                                                                              \
+    SPEC void from_int16(const std::int16_t* src, T scale, T* dst, std::size_t n) noexcept {       \
+        ::pulp::simd::detail::from_int_impl(src, scale, dst, n);                                   \
+    }                                                                                              \
+    SPEC void from_int32(const std::int32_t* src, T scale, T* dst, std::size_t n) noexcept {       \
+        ::pulp::simd::detail::from_int_impl(src, scale, dst, n);                                   \
+    }                                                                                              \
+    SPEC void to_int16(const T* src, T scale, std::int16_t* dst, std::size_t n) noexcept {         \
+        ::pulp::simd::detail::to_int_impl(src, scale, dst, n);                                     \
+    }                                                                                              \
+    SPEC void to_int32(const T* src, T scale, std::int32_t* dst, std::size_t n) noexcept {         \
+        ::pulp::simd::detail::to_int_impl(src, scale, dst, n);                                     \
+    }                                                                                              \
+    SPEC void interleave2(const T* l, const T* r, T* dst, std::size_t n) noexcept {                \
+        ::pulp::simd::detail::interleave2_impl(l, r, dst, n);                                      \
+    }                                                                                              \
+    SPEC void deinterleave2(const T* src, T* l, T* r, std::size_t n) noexcept {                    \
+        ::pulp::simd::detail::deinterleave2_impl(src, l, r, n);                                    \
     }                                                                                              \
     SPEC void decimate2(const T* x, const T* h, T* y, std::size_t n_out,                           \
                         std::size_t taps) noexcept {                                               \

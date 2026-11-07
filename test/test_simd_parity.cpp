@@ -15,6 +15,11 @@
 //     backend-specific order. Any order's error is bounded by
 //     n * eps * sum|terms| (standard forward bound for recursive summation),
 //     so two orders differ by at most 2 * n * eps * sum|terms|.
+//   - sub, div, negate, replace_below/above, int <-> float conversion and
+//     interleave/deinterleave: one rounding or a pure data move, bit for bit.
+//     Conversions to integers round half to even, saturate and send NaN to 0.
+//   - mean and rms: reduction bound divided by n (mean); relative n * eps
+//     (rms, a sum of non-negative terms followed by one square root).
 //   - ramp_mul: the gain start + i * step is formed in the backend's own way
 //     (Accelerate advances it by repeated addition), bounded by
 //     (i + 2) * eps * (|start| + i * |step|) * |x|.
@@ -35,6 +40,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <random>
@@ -64,13 +70,31 @@ template <typename T> struct Kernels {
     void (*ramp_mul)(const T*, T, T, T*, std::size_t) noexcept;
     void (*correlate)(const T*, const T*, T*, std::size_t, std::size_t) noexcept;
     void (*decimate2)(const T*, const T*, T*, std::size_t, std::size_t) noexcept;
+    void (*sub)(const T*, const T*, T*, std::size_t) noexcept;
+    void (*div)(const T*, const T*, T*, std::size_t) noexcept;
+    void (*negate)(const T*, T*, std::size_t) noexcept;
+    T (*mean)(const T*, std::size_t) noexcept;
+    T (*rms)(const T*, std::size_t) noexcept;
+    T (*find_maximum)(const T*, std::size_t, std::size_t*) noexcept;
+    T (*find_minimum)(const T*, std::size_t, std::size_t*) noexcept;
+    void (*replace_below)(const T*, T, T, T*, std::size_t) noexcept;
+    void (*replace_above)(const T*, T, T, T*, std::size_t) noexcept;
+    void (*from_int16)(const std::int16_t*, T, T*, std::size_t) noexcept;
+    void (*from_int32)(const std::int32_t*, T, T*, std::size_t) noexcept;
+    void (*to_int16)(const T*, T, std::int16_t*, std::size_t) noexcept;
+    void (*to_int32)(const T*, T, std::int32_t*, std::size_t) noexcept;
+    void (*interleave2)(const T*, const T*, T*, std::size_t) noexcept;
+    void (*deinterleave2)(const T*, T*, T*, std::size_t) noexcept;
 };
 
 #define PULP_TEST_KERNELS(NAME, NS)                                                                \
     Kernels<T> {                                                                                   \
         NAME, &NS::add, &NS::mul, &NS::fma, &NS::set, &NS::scale, &NS::add_scaled, &NS::sum,       \
             &NS::maximum, &NS::minimum, &NS::abs, &NS::clamp, &NS::dot, &NS::sum_squares,          \
-            &NS::max_abs, &NS::ramp_mul, &NS::correlate, &NS::decimate2                            \
+            &NS::max_abs, &NS::ramp_mul, &NS::correlate, &NS::decimate2, &NS::sub, &NS::div,       \
+            &NS::negate, &NS::mean, &NS::rms, &NS::find_maximum, &NS::find_minimum,                \
+            &NS::replace_below, &NS::replace_above, &NS::from_int16, &NS::from_int32,              \
+            &NS::to_int16, &NS::to_int32, &NS::interleave2, &NS::deinterleave2                     \
     }
 
 template <typename T> Kernels<T> reference_kernels() {
@@ -274,6 +298,204 @@ void check_fir(const Kernels<T>& ref, const Kernels<T>& k, std::size_t n_out, st
               reduction_bound(taps, sum_abs_products(x.data() + 2 * i, h.data(), taps)));
 }
 
+/// Samples that exercise the edges of the conversion and replace kernels.
+template <typename T> std::vector<T> edge_values() {
+    const T inf = std::numeric_limits<T>::infinity();
+    return {T(0),      T(-0.0), T(0.5),     T(1.5),   T(2.5),    T(-0.5),    T(-1.5),
+            T(-2.5),   T(0.999969482421875), T(1),    T(-1),     T(1.00001), T(-1.00001),
+            T(1e30),   T(-1e30), inf,       -inf,     std::numeric_limits<T>::quiet_NaN(),
+            T(32767.5), T(-32768.5), T(65536), T(-65536)};
+}
+
+/// Same bits, except that any NaN matches any NaN (0 / 0 and a NaN input do
+/// not pin the sign or payload).
+template <typename T> void check_same_values(const std::vector<T>& want, const std::vector<T>& got) {
+    REQUIRE(want.size() == got.size());
+    for (std::size_t i = 0; i < want.size(); ++i) {
+        if (std::isnan(want[i]))
+            CHECK(std::isnan(got[i]));
+        else
+            CHECK(std::memcmp(&want[i], &got[i], sizeof(T)) == 0);
+    }
+}
+
+template <typename T>
+void check_new_elementwise(const Kernels<T>& ref, const Kernels<T>& k, std::size_t n,
+                           unsigned seed, bool subnormals) {
+    auto a = noise<T>(n, seed + 100), b = noise<T>(n, seed + 101);
+    if (subnormals)
+        sprinkle_subnormals(a);
+    for (std::size_t i = 0; i < n; i += 7)
+        b[i] = (i & 1) ? T(0) : T(-0.0); // exercise division by (signed) zero
+    std::vector<T> want(n), got(n);
+
+    ref.sub(a.data(), b.data(), want.data(), n);
+    k.sub(a.data(), b.data(), got.data(), n);
+    CHECK(same_bits(want, got));
+
+    ref.div(a.data(), b.data(), want.data(), n);
+    k.div(a.data(), b.data(), got.data(), n);
+    check_same_values(want, got);
+
+    ref.negate(a.data(), want.data(), n);
+    k.negate(a.data(), got.data(), n);
+    CHECK(same_bits(want, got));
+
+    // In-place aliasing.
+    want = a;
+    got = a;
+    ref.sub(want.data(), b.data(), want.data(), n);
+    k.sub(got.data(), b.data(), got.data(), n);
+    CHECK(same_bits(want, got));
+    want = a;
+    got = a;
+    ref.negate(want.data(), want.data(), n);
+    k.negate(got.data(), got.data(), n);
+    CHECK(same_bits(want, got));
+
+    // Replace: the threshold value itself and NaN are never replaced.
+    auto r = noise<T>(n, seed + 102);
+    if (subnormals)
+        sprinkle_subnormals(r);
+    for (std::size_t i = 3; i < n; i += 9)
+        r[i] = T(0.125);
+    for (std::size_t i = 4; i < n; i += 13)
+        r[i] = std::numeric_limits<T>::quiet_NaN();
+    ref.replace_below(r.data(), T(0.125), T(-7), want.data(), n);
+    k.replace_below(r.data(), T(0.125), T(-7), got.data(), n);
+    check_same_values(want, got);
+    ref.replace_above(r.data(), T(0.125), T(9), want.data(), n);
+    k.replace_above(r.data(), T(0.125), T(9), got.data(), n);
+    check_same_values(want, got);
+    got = r;
+    k.replace_below(got.data(), T(0.125), T(-7), got.data(), n);
+    ref.replace_below(r.data(), T(0.125), T(-7), want.data(), n);
+    check_same_values(want, got);
+}
+
+template <typename T>
+void check_new_reductions(const Kernels<T>& ref, const Kernels<T>& k, std::size_t n, unsigned seed,
+                          bool subnormals) {
+    auto a = noise<T>(n, seed + 110);
+    if (subnormals)
+        sprinkle_subnormals(a);
+    std::vector<T> ones(n, T(1));
+
+    const T mean_bound =
+        reduction_bound(n, sum_abs_products(a.data(), ones.data(), n)) / T(std::max<std::size_t>(n, 1)) +
+        subnormal_slack<T>();
+    CHECK(std::fabs(ref.mean(a.data(), n) - k.mean(a.data(), n)) <= mean_bound);
+    const T r = ref.rms(a.data(), n), g = k.rms(a.data(), n);
+    CHECK(std::fabs(r - g) <= T(4) * T(n + 2) * eps<T>() * std::max(r, g) + subnormal_slack<T>());
+
+    // Extremum value and the lowest index holding it, with ties.
+    if (n > 3) {
+        a[n - 1] = T(5);
+        a[n / 2] = T(5);
+        a[n - 2] = T(-5);
+        a[1] = T(-5);
+    }
+    std::size_t ri = 77, ki = 88;
+    const T rmax = ref.find_maximum(a.data(), n, &ri);
+    const T kmax = k.find_maximum(a.data(), n, &ki);
+    CHECK(rmax == kmax);
+    CHECK(ri == ki);
+    if (n > 0)
+        CHECK(a[ki] == kmax);
+    const T rmin = ref.find_minimum(a.data(), n, &ri);
+    const T kmin = k.find_minimum(a.data(), n, &ki);
+    CHECK(rmin == kmin);
+    CHECK(ri == ki);
+    if (n > 0)
+        CHECK(a[ki] == kmin);
+    if (n > 3) {
+        CHECK(kmax == T(5));
+        CHECK(kmin == T(-5));
+    }
+}
+
+template <typename T>
+void check_conversions(const Kernels<T>& ref, const Kernels<T>& k, std::size_t n, unsigned seed,
+                       bool subnormals) {
+    (void)subnormals;
+    std::mt19937 rng(seed + 120);
+    std::vector<std::int16_t> i16(n);
+    std::vector<std::int32_t> i32(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        i16[i] = static_cast<std::int16_t>(rng());
+        i32[i] = static_cast<std::int32_t>(rng());
+    }
+    if (n > 3) {
+        i16[0] = INT16_MIN;
+        i16[1] = INT16_MAX;
+        i32[0] = INT32_MIN;
+        i32[1] = INT32_MAX;
+    }
+    std::vector<T> want(n), got(n);
+    for (T scale : {T(1), T(1.0 / 32768.0), T(1.0 / 2147483648.0)}) {
+        ref.from_int16(i16.data(), scale, want.data(), n);
+        k.from_int16(i16.data(), scale, got.data(), n);
+        CHECK(same_bits(want, got));
+        ref.from_int32(i32.data(), scale, want.data(), n);
+        k.from_int32(i32.data(), scale, got.data(), n);
+        CHECK(same_bits(want, got));
+    }
+
+    // To integer: out-of-range, tie, infinity and NaN inputs mixed with noise.
+    auto x = noise<T>(n, seed + 121, T(1.6));
+    const auto edges = edge_values<T>();
+    for (std::size_t i = 0; i < n && i < edges.size(); ++i)
+        x[n - 1 - i] = edges[i];
+    std::vector<std::int16_t> w16(n), g16(n);
+    std::vector<std::int32_t> w32(n), g32(n);
+    for (T scale : {T(1), T(32768), T(2147483648.0)}) {
+        ref.to_int16(x.data(), scale, w16.data(), n);
+        k.to_int16(x.data(), scale, g16.data(), n);
+        CHECK(w16 == g16);
+        ref.to_int32(x.data(), scale, w32.data(), n);
+        k.to_int32(x.data(), scale, g32.data(), n);
+        CHECK(w32 == g32);
+    }
+    // Ties round to even; saturation and NaN are pinned by value, not only
+    // by agreement with the reference.
+    if (n >= 8) {
+        const T tie[8] = {T(0.5), T(1.5), T(2.5), T(-0.5), T(-1.5), T(-2.5),
+                          std::numeric_limits<T>::quiet_NaN(), T(1e30)};
+        std::int16_t out[8];
+        k.to_int16(tie, T(1), out, 8);
+        const std::int16_t expect[8] = {0, 2, 2, 0, -2, -2, 0, 32767};
+        for (int i = 0; i < 8; ++i)
+            CHECK(out[i] == expect[i]);
+        std::int32_t out32[8];
+        k.to_int32(tie, T(1), out32, 8);
+        const std::int32_t expect32[8] = {0, 2, 2, 0, -2, -2, 0,
+                                          std::is_same_v<T, float> ? 2147483520
+                                                                    : INT32_MAX};
+        for (int i = 0; i < 8; ++i)
+            CHECK(out32[i] == expect32[i]);
+    }
+    // Round trip: 16-bit audio survives float and back exactly.
+    k.from_int16(i16.data(), T(1.0 / 32768.0), got.data(), n);
+    k.to_int16(got.data(), T(32768), g16.data(), n);
+    CHECK(g16 == i16);
+}
+
+template <typename T>
+void check_interleave(const Kernels<T>& ref, const Kernels<T>& k, std::size_t n, unsigned seed) {
+    const auto l = noise<T>(n, seed + 130), r = noise<T>(n, seed + 131);
+    std::vector<T> want(2 * n), got(2 * n);
+    ref.interleave2(l.data(), r.data(), want.data(), n);
+    k.interleave2(l.data(), r.data(), got.data(), n);
+    CHECK(same_bits(want, got));
+    std::vector<T> wl(n), wr(n), gl(n), gr(n);
+    ref.deinterleave2(want.data(), wl.data(), wr.data(), n);
+    k.deinterleave2(want.data(), gl.data(), gr.data(), n);
+    CHECK(same_bits(wl, gl));
+    CHECK(same_bits(wr, gr));
+    CHECK(same_bits(gl, l));
+    CHECK(same_bits(gr, r));
+}
+
 template <typename T> void run_parity(bool subnormals) {
     const auto ref = reference_kernels<T>();
     for (const auto& k : candidate_kernels<T>()) {
@@ -284,6 +506,10 @@ template <typename T> void run_parity(bool subnormals) {
             check_elementwise(ref, k, n, seed, subnormals);
             check_reductions(ref, k, n, seed, subnormals);
             check_ramp(ref, k, n, seed);
+            check_new_elementwise(ref, k, n, seed, subnormals);
+            check_new_reductions(ref, k, n, seed, subnormals);
+            check_conversions(ref, k, n, seed, subnormals);
+            check_interleave(ref, k, n, seed);
             seed += 11;
         }
         for (std::size_t taps : kTaps) {
@@ -330,6 +556,31 @@ TEMPLATE_TEST_CASE("pulp::simd empty ranges and zero-tap filters", "[simd][parit
         k.correlate(x, x, y, 0, 3);
         k.decimate2(x, x, y, 0, 3);
         k.ramp_mul(x, T(1), T(1), y, 0);
+        k.sub(x, x, y, 0);
+        k.div(x, x, y, 0);
+        k.negate(x, y, 0);
+        k.replace_below(x, T(0), T(1), y, 0);
+        k.replace_above(x, T(0), T(1), y, 0);
+        k.interleave2(x, x, y, 0);
+        k.deinterleave2(x, y, y, 0);
+        std::int16_t s16[4] = {7, 7, 7, 7};
+        std::int32_t s32[4] = {7, 7, 7, 7};
+        k.to_int16(x, T(1), s16, 0);
+        k.to_int32(x, T(1), s32, 0);
+        k.from_int16(s16, T(1), y, 0);
+        k.from_int32(s32, T(1), y, 0);
+        for (int i = 0; i < 4; ++i) {
+            CHECK(s16[i] == 7);
+            CHECK(s32[i] == 7);
+        }
+        CHECK(k.mean(x, 0) == T(0));
+        CHECK(k.rms(x, 0) == T(0));
+        std::size_t at = 99;
+        CHECK(k.find_maximum(x, 0, &at) == T(0));
+        CHECK(at == 0);
+        at = 99;
+        CHECK(k.find_minimum(x, 0, &at) == T(0));
+        CHECK(at == 0);
         for (T v : y)
             CHECK(v == canary);
         k.correlate(x, x, y, 4, 0);
@@ -466,7 +717,9 @@ TEMPLATE_TEST_CASE("pulp::simd kernels do not allocate", "[simd][rt-safety]", fl
     all.push_back(reference_kernels<T>());
     const std::size_t n = 1024;
     auto a = noise<T>(n + 256, 5), b = noise<T>(n + 256, 6);
-    std::vector<T> dst(n);
+    std::vector<T> dst(n), dst2(n), pair(2 * n);
+    std::vector<std::int16_t> ints16(n);
+    std::vector<std::int32_t> ints32(n);
     for (const auto& k : all) {
         INFO("backend " << k.name);
         pulp::test::RtAllocationProbe probe;
@@ -484,6 +737,20 @@ TEMPLATE_TEST_CASE("pulp::simd kernels do not allocate", "[simd][rt-safety]", fl
         k.ramp_mul(a.data(), T(0), T(0.001), dst.data(), n);
         k.correlate(a.data(), b.data(), dst.data(), n, 256);
         k.decimate2(a.data(), b.data(), dst.data(), n / 2, 255);
+        k.sub(a.data(), b.data(), dst.data(), n);
+        k.div(a.data(), b.data(), dst.data(), n);
+        k.negate(a.data(), dst.data(), n);
+        sink += k.mean(a.data(), n) + k.rms(a.data(), n);
+        std::size_t at = 0;
+        sink += k.find_maximum(a.data(), n, &at) + k.find_minimum(a.data(), n, &at);
+        k.replace_below(a.data(), T(0), T(1), dst.data(), n);
+        k.replace_above(a.data(), T(0), T(1), dst.data(), n);
+        k.to_int16(a.data(), T(32768), ints16.data(), n);
+        k.to_int32(a.data(), T(2147483648.0), ints32.data(), n);
+        k.from_int16(ints16.data(), T(1), dst.data(), n);
+        k.from_int32(ints32.data(), T(1), dst.data(), n);
+        k.interleave2(a.data(), b.data(), pair.data(), n);
+        k.deinterleave2(pair.data(), dst.data(), dst2.data(), n);
         CHECK(probe.allocation_count() == 0);
         CHECK(std::isfinite(sink));
     }

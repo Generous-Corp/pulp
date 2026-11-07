@@ -5,11 +5,14 @@
 // picks the best one the running CPU supports, so the kernels are not limited
 // by the baseline ISA the rest of the build targets.
 
+#include <pulp/simd/scalar_kernels.hpp>
 #include <pulp/simd/simd.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 
 #undef HWY_TARGET_INCLUDE
 #define HWY_TARGET_INCLUDE "src/highway.cpp"
@@ -277,6 +280,184 @@ void Decimate2T(const T* HWY_RESTRICT x, const T* HWY_RESTRICT h, T* HWY_RESTRIC
         y[i] = DotT(x + 2 * i, h, taps);
 }
 
+template <typename T> void SubT(const T* a, const T* b, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N)
+        hn::StoreU(hn::Sub(hn::LoadU(d, a + i), hn::LoadU(d, b + i)), d, dst + i);
+    for (; i < count; ++i)
+        dst[i] = a[i] - b[i];
+}
+
+template <typename T> void DivT(const T* a, const T* b, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N)
+        hn::StoreU(hn::Div(hn::LoadU(d, a + i), hn::LoadU(d, b + i)), d, dst + i);
+    for (; i < count; ++i)
+        dst[i] = a[i] / b[i];
+}
+
+template <typename T> void NegateT(const T* a, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N)
+        hn::StoreU(hn::Neg(hn::LoadU(d, a + i)), d, dst + i);
+    for (; i < count; ++i)
+        dst[i] = -a[i];
+}
+
+// The extremum is found with vector Max/Min; the index is then the first
+// element equal to it, so ties resolve to the lowest index like the scalar
+// reference.
+template <typename T> T FindMaximumT(const T* HWY_RESTRICT x, size_t count, size_t* index) {
+    const T m = MaximumT(x, count);
+    size_t at = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (x[i] == m) {
+            at = i;
+            break;
+        }
+    }
+    *index = at;
+    return m;
+}
+
+template <typename T> T FindMinimumT(const T* HWY_RESTRICT x, size_t count, size_t* index) {
+    const T m = MinimumT(x, count);
+    size_t at = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (x[i] == m) {
+            at = i;
+            break;
+        }
+    }
+    *index = at;
+    return m;
+}
+
+template <typename T> void ReplaceBelowT(const T* a, T threshold, T value, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    const auto vt = hn::Set(d, threshold);
+    const auto vv = hn::Set(d, value);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        const auto x = hn::LoadU(d, a + i);
+        hn::StoreU(hn::IfThenElse(hn::Lt(x, vt), vv, x), d, dst + i);
+    }
+    for (; i < count; ++i)
+        dst[i] = a[i] < threshold ? value : a[i];
+}
+
+template <typename T> void ReplaceAboveT(const T* a, T threshold, T value, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    const auto vt = hn::Set(d, threshold);
+    const auto vv = hn::Set(d, value);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        const auto x = hn::LoadU(d, a + i);
+        hn::StoreU(hn::IfThenElse(hn::Gt(x, vt), vv, x), d, dst + i);
+    }
+    for (; i < count; ++i)
+        dst[i] = a[i] > threshold ? value : a[i];
+}
+
+template <typename T, typename I>
+void FromIntT(const I* src, T scale, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const hn::Rebind<int32_t, decltype(d)> di32;
+    const hn::Rebind<I, decltype(d)> dsrc;
+    const size_t N = hn::Lanes(d);
+    const auto s = hn::Set(d, scale);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(di32)> wide;
+        if constexpr (sizeof(I) == 4)
+            wide = hn::LoadU(di32, src + i);
+        else
+            wide = hn::PromoteTo(di32, hn::LoadU(dsrc, src + i));
+        hn::Vec<decltype(d)> f;
+        if constexpr (sizeof(T) == 8)
+            f = hn::PromoteTo(d, wide);
+        else
+            f = hn::ConvertTo(d, wide);
+        hn::StoreU(hn::Mul(f, s), d, dst + i);
+    }
+    for (; i < count; ++i)
+        dst[i] = static_cast<T>(src[i]) * scale;
+}
+
+// float -> integer: scale, send NaN to 0, clamp to the representable range,
+// round half to even, then narrow. The scalar tail is the same sequence.
+template <typename T, typename I> void ToIntT(const T* src, T scale, I* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const hn::Rebind<int32_t, decltype(d)> di32;
+    const hn::Rebind<I, decltype(d)> ddst;
+    const size_t N = hn::Lanes(d);
+    constexpr T lo = static_cast<T>(std::numeric_limits<I>::min());
+    constexpr T hi = ::pulp::simd::detail::int_upper_bound<T, I>();
+    const auto s = hn::Set(d, scale);
+    const auto vlo = hn::Set(d, lo);
+    const auto vhi = hn::Set(d, hi);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        auto v = hn::Mul(hn::LoadU(d, src + i), s);
+        v = hn::IfThenElseZero(hn::Eq(v, v), v);
+        v = hn::Min(hn::Max(v, vlo), vhi);
+        hn::Vec<decltype(di32)> r;
+        if constexpr (sizeof(T) == 4)
+            r = hn::NearestInt(v);
+        else
+            r = hn::DemoteToNearestInt(di32, v);
+        if constexpr (sizeof(I) == 4)
+            hn::StoreU(r, di32, dst + i);
+        else
+            hn::StoreU(hn::DemoteTo(ddst, r), ddst, dst + i);
+    }
+    for (; i < count; ++i) {
+        T v = src[i] * scale;
+        if (v != v) {
+            dst[i] = 0;
+            continue;
+        }
+        v = v < lo ? lo : (v > hi ? hi : v);
+        dst[i] = static_cast<I>(std::nearbyint(v));
+    }
+}
+
+template <typename T> void Interleave2T(const T* l, const T* r, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N)
+        hn::StoreInterleaved2(hn::LoadU(d, l + i), hn::LoadU(d, r + i), d, dst + 2 * i);
+    for (; i < count; ++i) {
+        dst[2 * i] = l[i];
+        dst[2 * i + 1] = r[i];
+    }
+}
+
+template <typename T> void Deinterleave2T(const T* src, T* l, T* r, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> va, vb;
+        hn::LoadInterleaved2(d, src + 2 * i, va, vb);
+        hn::StoreU(va, d, l + i);
+        hn::StoreU(vb, d, r + i);
+    }
+    for (; i < count; ++i) {
+        l[i] = src[2 * i];
+        r[i] = src[2 * i + 1];
+    }
+}
+
 #define PULP_SIMD_HWY_INSTANTIATE(SUFFIX, T)                                                       \
     void Add##SUFFIX(const T* a, const T* b, T* dst, size_t n) {                                   \
         AddT(a, b, dst, n);                                                                        \
@@ -325,6 +506,45 @@ void Decimate2T(const T* HWY_RESTRICT x, const T* HWY_RESTRICT h, T* HWY_RESTRIC
     }                                                                                              \
     void Correlate##SUFFIX(const T* x, const T* h, T* y, size_t n_out, size_t taps) {              \
         CorrelateT(x, h, y, n_out, taps);                                                          \
+    }                                                                                              \
+    void Sub##SUFFIX(const T* a, const T* b, T* dst, size_t n) {                                   \
+        SubT(a, b, dst, n);                                                                        \
+    }                                                                                              \
+    void Div##SUFFIX(const T* a, const T* b, T* dst, size_t n) {                                   \
+        DivT(a, b, dst, n);                                                                        \
+    }                                                                                              \
+    void Negate##SUFFIX(const T* a, T* dst, size_t n) {                                            \
+        NegateT(a, dst, n);                                                                        \
+    }                                                                                              \
+    T FindMaximum##SUFFIX(const T* x, size_t n, size_t* index) {                                   \
+        return FindMaximumT(x, n, index);                                                          \
+    }                                                                                              \
+    T FindMinimum##SUFFIX(const T* x, size_t n, size_t* index) {                                   \
+        return FindMinimumT(x, n, index);                                                          \
+    }                                                                                              \
+    void ReplaceBelow##SUFFIX(const T* a, T threshold, T value, T* dst, size_t n) {                \
+        ReplaceBelowT(a, threshold, value, dst, n);                                                \
+    }                                                                                              \
+    void ReplaceAbove##SUFFIX(const T* a, T threshold, T value, T* dst, size_t n) {                \
+        ReplaceAboveT(a, threshold, value, dst, n);                                                \
+    }                                                                                              \
+    void FromInt16##SUFFIX(const int16_t* src, T scale, T* dst, size_t n) {                        \
+        FromIntT(src, scale, dst, n);                                                              \
+    }                                                                                              \
+    void FromInt32##SUFFIX(const int32_t* src, T scale, T* dst, size_t n) {                        \
+        FromIntT(src, scale, dst, n);                                                              \
+    }                                                                                              \
+    void ToInt16##SUFFIX(const T* src, T scale, int16_t* dst, size_t n) {                          \
+        ToIntT(src, scale, dst, n);                                                                \
+    }                                                                                              \
+    void ToInt32##SUFFIX(const T* src, T scale, int32_t* dst, size_t n) {                          \
+        ToIntT(src, scale, dst, n);                                                                \
+    }                                                                                              \
+    void Interleave2##SUFFIX(const T* l, const T* r, T* dst, size_t n) {                           \
+        Interleave2T(l, r, dst, n);                                                                \
+    }                                                                                              \
+    void Deinterleave2##SUFFIX(const T* src, T* l, T* r, size_t n) {                               \
+        Deinterleave2T(src, l, r, n);                                                              \
     }                                                                                              \
     void Decimate2##SUFFIX(const T* x, const T* h, T* y, size_t n_out, size_t taps) {              \
         Decimate2T(x, h, y, n_out, taps);                                                          \
@@ -377,6 +597,19 @@ HWY_EXPORT(DoubleLanes);
     HWY_EXPORT(MaxAbs##SUFFIX);                                                                    \
     HWY_EXPORT(RampMul##SUFFIX);                                                                   \
     HWY_EXPORT(Correlate##SUFFIX);                                                                 \
+    HWY_EXPORT(Sub##SUFFIX);                                                            \
+    HWY_EXPORT(Div##SUFFIX);                                                            \
+    HWY_EXPORT(Negate##SUFFIX);                                                         \
+    HWY_EXPORT(FindMaximum##SUFFIX);                                                    \
+    HWY_EXPORT(FindMinimum##SUFFIX);                                                    \
+    HWY_EXPORT(ReplaceBelow##SUFFIX);                                                   \
+    HWY_EXPORT(ReplaceAbove##SUFFIX);                                                   \
+    HWY_EXPORT(FromInt16##SUFFIX);                                                      \
+    HWY_EXPORT(FromInt32##SUFFIX);                                                      \
+    HWY_EXPORT(ToInt16##SUFFIX);                                                        \
+    HWY_EXPORT(ToInt32##SUFFIX);                                                        \
+    HWY_EXPORT(Interleave2##SUFFIX);                                                    \
+    HWY_EXPORT(Deinterleave2##SUFFIX);                                                  \
     HWY_EXPORT(Decimate2##SUFFIX);
 
 PULP_SIMD_HWY_EXPORT(F32)
@@ -432,6 +665,51 @@ PULP_SIMD_HWY_EXPORT(F64)
     }                                                                                              \
     void correlate(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept {   \
         HWY_DYNAMIC_DISPATCH(Correlate##SUFFIX)(x, h, y, n_out, taps);                             \
+    }                                                                                              \
+    void sub(const T* a, const T* b, T* dst, std::size_t n) noexcept {                             \
+        HWY_DYNAMIC_DISPATCH(Sub##SUFFIX)(a, b, dst, n);                                           \
+    }                                                                                              \
+    void div(const T* a, const T* b, T* dst, std::size_t n) noexcept {                             \
+        HWY_DYNAMIC_DISPATCH(Div##SUFFIX)(a, b, dst, n);                                           \
+    }                                                                                              \
+    void negate(const T* a, T* dst, std::size_t n) noexcept {                                      \
+        HWY_DYNAMIC_DISPATCH(Negate##SUFFIX)(a, dst, n);                                           \
+    }                                                                                              \
+    T mean(const T* x, std::size_t n) noexcept {                                                   \
+        return n == 0 ? T(0) : sum(x, n) / T(n);                                                   \
+    }                                                                                              \
+    T rms(const T* x, std::size_t n) noexcept {                                                    \
+        return n == 0 ? T(0) : std::sqrt(sum_squares(x, n) / T(n));                                \
+    }                                                                                              \
+    T find_maximum(const T* x, std::size_t n, std::size_t* index) noexcept {                       \
+        return HWY_DYNAMIC_DISPATCH(FindMaximum##SUFFIX)(x, n, index);                             \
+    }                                                                                              \
+    T find_minimum(const T* x, std::size_t n, std::size_t* index) noexcept {                       \
+        return HWY_DYNAMIC_DISPATCH(FindMinimum##SUFFIX)(x, n, index);                             \
+    }                                                                                              \
+    void replace_below(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {         \
+        HWY_DYNAMIC_DISPATCH(ReplaceBelow##SUFFIX)(a, threshold, value, dst, n);                   \
+    }                                                                                              \
+    void replace_above(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {         \
+        HWY_DYNAMIC_DISPATCH(ReplaceAbove##SUFFIX)(a, threshold, value, dst, n);                   \
+    }                                                                                              \
+    void from_int16(const std::int16_t* src, T scale, T* dst, std::size_t n) noexcept {            \
+        HWY_DYNAMIC_DISPATCH(FromInt16##SUFFIX)(src, scale, dst, n);                               \
+    }                                                                                              \
+    void from_int32(const std::int32_t* src, T scale, T* dst, std::size_t n) noexcept {            \
+        HWY_DYNAMIC_DISPATCH(FromInt32##SUFFIX)(src, scale, dst, n);                               \
+    }                                                                                              \
+    void to_int16(const T* src, T scale, std::int16_t* dst, std::size_t n) noexcept {              \
+        HWY_DYNAMIC_DISPATCH(ToInt16##SUFFIX)(src, scale, dst, n);                                 \
+    }                                                                                              \
+    void to_int32(const T* src, T scale, std::int32_t* dst, std::size_t n) noexcept {              \
+        HWY_DYNAMIC_DISPATCH(ToInt32##SUFFIX)(src, scale, dst, n);                                 \
+    }                                                                                              \
+    void interleave2(const T* l, const T* r, T* dst, std::size_t n) noexcept {                     \
+        HWY_DYNAMIC_DISPATCH(Interleave2##SUFFIX)(l, r, dst, n);                                   \
+    }                                                                                              \
+    void deinterleave2(const T* src, T* l, T* r, std::size_t n) noexcept {                         \
+        HWY_DYNAMIC_DISPATCH(Deinterleave2##SUFFIX)(src, l, r, n);                                 \
     }                                                                                              \
     void decimate2(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept {   \
         HWY_DYNAMIC_DISPATCH(Decimate2##SUFFIX)(x, h, y, n_out, taps);                             \
