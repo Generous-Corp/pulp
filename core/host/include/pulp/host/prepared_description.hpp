@@ -107,6 +107,11 @@ struct PreparedDescriptionData {
     std::vector<std::string> schedule;
     std::uint64_t snapshot_id = 0;
     std::uint64_t pool_snapshot_id = 0;
+    // Process-local identity of the exact serial pool object that produced the
+    // capture. This is provenance only and is deliberately excluded from
+    // canonical portable bytes; export compares it with the live compiled
+    // snapshot's pool address to reject same-size/wrong-pool substitution.
+    std::uintptr_t pool_binding_identity = 0;
     // The adopted compiled generation is process-local provenance.  It is
     // deliberately excluded from canonical portable bytes; export validates
     // it against the exact live snapshot before returning a detached copy.

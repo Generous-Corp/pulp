@@ -2065,6 +2065,8 @@ PreparedDescriptionResult SignalGraph::ExecutionSnapshot::export_prepared_descri
     if (snapshot_->prepared_description->execution_generation != snapshot_->execution_generation)
         return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
     const auto selection_generation = owner_->execution_selection_generation_.load(std::memory_order_relaxed);
+    if (selection_generation == std::numeric_limits<std::uint64_t>::max())
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::GenerationExhausted);
     if (snapshot_->prepared_description->execution_selection_generation != selection_generation)
         return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
     const auto& record = *snapshot_->prepared_description;
@@ -2073,6 +2075,7 @@ PreparedDescriptionResult SignalGraph::ExecutionSnapshot::export_prepared_descri
         !serial.pool.bound_to(serial.snapshot) || record.snapshot_id != serial.snapshot.id() ||
         record.pool_snapshot_id != serial.pool.bound_snapshot_id() ||
         record.pool_snapshot_id != record.snapshot_id ||
+        record.pool_binding_identity != reinterpret_cast<std::uintptr_t>(&serial.pool) ||
         record.buffer_slot_count != serial.snapshot.buffer_slot_count() ||
         record.pool_slot_count != serial.pool.slot_count() ||
         record.pool_max_frames != serial.pool.max_frames() ||
@@ -2148,6 +2151,12 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
     GraphMutationLock owner_lock(*owner_);
     if (!base_is_current_locked_() || owner_->in_swap_edit_) {
         return last_result_ = Result::StaleBase;
+    }
+    if (owner_->execution_selection_generation_.load(std::memory_order_relaxed) ==
+            std::numeric_limits<std::uint64_t>::max() ||
+        candidate_->execution_selection_generation_.load(std::memory_order_relaxed) ==
+            std::numeric_limits<std::uint64_t>::max()) {
+        return last_result_ = Result::PreflightFailed;
     }
 
     if (owner_->spectral_mode_.load(std::memory_order_acquire)) {
@@ -2399,6 +2408,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         // snapshot identity so an export cannot silently bless an unbound or
         // mismatched pool that merely has matching capacities.
         capture->pool_snapshot_id = next->routed.serial.pool.bound_snapshot_id();
+        capture->pool_binding_identity =
+            reinterpret_cast<std::uintptr_t>(&next->routed.serial.pool);
         capture->execution_generation = next->execution_generation;
         capture->owner_generation = base_authoring_generation_;
         const auto& plan = next->routed.serial.snapshot.plan();
@@ -2425,6 +2436,7 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         capture->connection_delay_samples = assignment.connection_delay_samples;
         capture->reads_in_place = assignment.reads_in_place;
         if (!capture->serial_pool_bound || capture->pool_snapshot_id != capture->snapshot_id ||
+            capture->pool_binding_identity == 0 ||
             capture->pool_slot_count != capture->buffer_slot_count ||
             capture->pool_max_frames < capture->max_block_frames)
             return last_result_ = Result::PreflightFailed;

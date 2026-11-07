@@ -165,6 +165,7 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     REQUIRE(exported.value->pool_slot_count == exported.value->buffer_slot_count);
     REQUIRE(exported.value->snapshot_id != 0);
     REQUIRE(exported.value->pool_snapshot_id == exported.value->snapshot_id);
+    REQUIRE(exported.value->pool_binding_identity != 0);
     REQUIRE(exported.value->executor_contract == "pulp.graph.canonical-executor.f32.v1");
     REQUIRE(exported.value->execution_mode == "serial");
     REQUIRE(exported.value->tie_break_contract == "ready-node-id-ascending.v1");
