@@ -68,6 +68,12 @@ TEST_CASE("G4 voice template persistence restores atomically and supports edit u
     REQUIRE(receipt.valid);
     CHECK(receipt.encoding.front() == 0x01);
     CHECK(receipt.sha256.size() == 64);
+    VoiceBankState decoded;
+    REQUIRE(decode_voice_bank_state(receipt.encoding, decoded));
+    CHECK(decoded.manifest_sha256 == before.manifest_sha256);
+    REQUIRE(decoded.parameters.size() == 1);
+    CHECK(decoded.parameters.front().path == before.parameters.front().path);
+    CHECK(decoded.parameters.front().target == before.parameters.front().target);
 
     VoiceBankState live = state_for(prepared.manifest, 0.5f);
     REQUIRE(restore_voice_bank_state(prepared.manifest, before, live));
@@ -85,6 +91,11 @@ TEST_CASE(
     auto rejected = prepare_voice_bank(duplicate);
     CHECK_FALSE(rejected.valid);
 
+    auto ordinal_duplicate = schema();
+    ordinal_duplicate.bindings.front().ordinal = 9;
+    ordinal_duplicate.bindings.push_back(ordinal_duplicate.bindings.front());
+    CHECK_FALSE(prepare_voice_bank(ordinal_duplicate).valid);
+
     auto alias = schema();
     alias.bindings[0].path[0] = "filte\xCC\x81r";
     alias.bindings.push_back(alias.bindings[0]);
@@ -99,9 +110,17 @@ TEST_CASE(
     mismatch.bindings[1].type = VoiceBindingType::Event;
     mismatch.bindings[1].rate = VoiceBindingRate::Sample;
     CHECK_FALSE(prepare_voice_bank(mismatch).valid);
+    mismatch = schema();
+    mismatch.bindings[1].shape = VoiceBindingShape::Scalar;
+    CHECK_FALSE(prepare_voice_bank(mismatch).valid);
 
     const auto prepared = prepare_voice_bank(schema());
     REQUIRE(prepared.valid);
+    auto forged_manifest = prepared.manifest;
+    forged_manifest.bindings.front().identity.sha256[0] =
+        forged_manifest.bindings.front().identity.sha256[0] == '0' ? '1' : '0';
+    auto forged_state = state_for(forged_manifest, 0.5f);
+    CHECK_FALSE(encode_voice_bank_state(forged_manifest, forged_state).valid);
     auto live = state_for(prepared.manifest, 0.5f);
     const auto unchanged = live;
     auto failed = state_for(prepared.manifest, 0.8f);
@@ -110,6 +129,12 @@ TEST_CASE(
     CHECK(live.parameters.front().value == unchanged.parameters.front().value);
     failed = state_for(prepared.manifest, 0.8f);
     failed.parameters.front().value = std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(restore_voice_bank_state(prepared.manifest, failed, live));
+    CHECK(live.parameters.front().value == unchanged.parameters.front().value);
+    failed = state_for(prepared.manifest, 0.8f);
+    failed.parameters.front().path[0] = "filte\xCC\x81r";
+    failed.parameters.push_back(failed.parameters.front());
+    failed.parameters.back().path[0] = "filtér";
     CHECK_FALSE(restore_voice_bank_state(prepared.manifest, failed, live));
     CHECK(live.parameters.front().value == unchanged.parameters.front().value);
 }

@@ -9,6 +9,7 @@
 #include <limits>
 #include <set>
 #include <string_view>
+#include <tuple>
 #include <utility>
 
 namespace pulp::host {
@@ -114,6 +115,14 @@ bool normalize_binding(const VoiceBindingSpec& input, NormalizedBinding& output,
             return false;
         }
     } else {
+        if (input.type == VoiceBindingType::Audio && input.shape == VoiceBindingShape::Scalar) {
+            error = "audio port binding must declare mono or stereo shape";
+            return false;
+        }
+        if (input.type == VoiceBindingType::Event && input.shape != VoiceBindingShape::Scalar) {
+            error = "event port binding must declare scalar shape";
+            return false;
+        }
         if (input.type == VoiceBindingType::Event && input.rate != VoiceBindingRate::Event) {
             error = "event port binding must use event rate";
             return false;
@@ -149,6 +158,7 @@ VoiceIdentityResult make_identity(const VoiceTemplateSchema& schema, std::uint32
                 : (binding.spec.type == VoiceBindingType::Event ? VoicePortKind::Event
                                                                 : VoicePortKind::Control);
         key.port.ordinal = binding.spec.ordinal;
+        key.port_target = binding.target;
     } else {
         key.has_parameter = true;
         key.parameter = binding.target;
@@ -215,21 +225,58 @@ std::string manifest_digest(const VoiceBankManifest& manifest) {
 }
 
 bool manifest_matches(const VoiceBankManifest& manifest) {
-    return manifest.bindings.size() == kSlots * manifest.schema.bindings.size() &&
-           !manifest.sha256.empty() && manifest.sha256 == manifest_digest(manifest);
+    if (manifest.bindings.size() != kSlots * manifest.schema.bindings.size() ||
+        manifest.sha256.empty() || manifest.sha256 != manifest_digest(manifest))
+        return false;
+    const auto expected = prepare_voice_bank(manifest.schema);
+    if (!expected.valid || expected.manifest.sha256 != manifest.sha256 ||
+        expected.manifest.bindings.size() != manifest.bindings.size())
+        return false;
+    for (std::size_t i = 0; i < manifest.bindings.size(); ++i) {
+        const auto& actual = manifest.bindings[i];
+        const auto& wanted = expected.manifest.bindings[i];
+        if (actual.slot_ordinal != wanted.slot_ordinal || actual.spec.path != wanted.spec.path ||
+            actual.spec.target != wanted.spec.target ||
+            actual.spec.target_kind != wanted.spec.target_kind ||
+            actual.spec.type != wanted.spec.type ||
+            actual.spec.direction != wanted.spec.direction ||
+            actual.spec.shape != wanted.spec.shape || actual.spec.rate != wanted.spec.rate ||
+            actual.spec.ordinal != wanted.spec.ordinal ||
+            actual.identity.sha256 != wanted.identity.sha256 ||
+            actual.identity.encoding != wanted.identity.encoding)
+            return false;
+    }
+    return true;
 }
 
-bool valid_parameter(const VoiceBankManifest& manifest, const VoiceParameterValue& value) {
+bool normalize_parameter(const VoiceParameterValue& value, VoiceParameterValue& normalized) {
     if (value.slot_ordinal >= kSlots || !std::isfinite(value.value))
         return false;
     std::vector<std::string> path;
     if (!normalize_path(value.path, path))
         return false;
+    std::string target;
+    if (!normalize_name(value.target, target))
+        return false;
+    normalized = value;
+    normalized.path = std::move(path);
+    normalized.target = std::move(target);
+    return true;
+}
+
+bool valid_parameter(const VoiceBankManifest& manifest, const VoiceParameterValue& value,
+                     VoiceParameterValue* normalized = nullptr) {
+    VoiceParameterValue canonical;
+    if (!normalize_parameter(value, canonical))
+        return false;
     for (const auto& binding : manifest.bindings) {
-        if (binding.slot_ordinal == value.slot_ordinal &&
+        if (binding.slot_ordinal == canonical.slot_ordinal &&
             binding.spec.target_kind == VoiceBindingTarget::Parameter &&
-            binding.spec.path == path && binding.spec.target == value.target)
+            binding.spec.path == canonical.path && binding.spec.target == canonical.target) {
+            if (normalized)
+                *normalized = std::move(canonical);
             return true;
+        }
     }
     return false;
 }
@@ -262,8 +309,9 @@ VoiceBankPrepareResult prepare_voice_bank(const VoiceTemplateSchema& schema) {
         if (!normalize_binding(raw, binding, result.error))
             return result;
         std::string key = path_key(binding.path) + "\x1f" + binding.target + "\x1f" +
-                          std::to_string(static_cast<unsigned>(binding.spec.target_kind)) + "\x1f" +
-                          std::to_string(binding.spec.ordinal);
+                          std::to_string(static_cast<unsigned>(binding.spec.target_kind));
+        if (binding.spec.target_kind == VoiceBindingTarget::Port)
+            key += "\x1f" + std::to_string(binding.spec.ordinal);
         if (!declaration_keys.insert(std::move(key)).second) {
             result.error = "duplicate or aliased binding declaration";
             return result;
@@ -311,12 +359,15 @@ VoiceBankPersistenceResult encode_voice_bank_state(const VoiceBankManifest& mani
         result.error = "state schema or manifest identity does not match";
         return result;
     }
-    std::vector<VoiceParameterValue> values = state.parameters;
-    for (const auto& value : values) {
-        if (!valid_parameter(manifest, value)) {
+    std::vector<VoiceParameterValue> values;
+    values.reserve(state.parameters.size());
+    for (const auto& value : state.parameters) {
+        VoiceParameterValue canonical;
+        if (!valid_parameter(manifest, value, &canonical)) {
             result.error = "state contains an undeclared, duplicate, or non-finite parameter";
             return result;
         }
+        values.push_back(std::move(canonical));
     }
     std::sort(values.begin(), values.end(),
               [](const VoiceParameterValue& a, const VoiceParameterValue& b) {
@@ -352,6 +403,85 @@ VoiceBankPersistenceResult encode_voice_bank_state(const VoiceBankManifest& mani
     return result;
 }
 
+bool decode_voice_bank_state(std::span<const std::uint8_t> encoding, VoiceBankState& destination,
+                             std::string* error) {
+    auto fail = [&](const char* message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    std::size_t at = 0;
+    auto byte = [&](std::uint8_t& value) {
+        if (at >= encoding.size())
+            return false;
+        value = encoding[at++];
+        return true;
+    };
+    auto read_u32 = [&](std::uint32_t& value) {
+        if (encoding.size() - at < 4)
+            return false;
+        value = (static_cast<std::uint32_t>(encoding[at]) << 24) |
+                (static_cast<std::uint32_t>(encoding[at + 1]) << 16) |
+                (static_cast<std::uint32_t>(encoding[at + 2]) << 8) |
+                static_cast<std::uint32_t>(encoding[at + 3]);
+        at += 4;
+        return true;
+    };
+    auto read_string = [&](std::string& value) {
+        std::uint32_t size = 0;
+        if (!read_u32(size) || size > encoding.size() - at)
+            return false;
+        value.assign(reinterpret_cast<const char*>(encoding.data() + at), size);
+        at += size;
+        return true;
+    };
+    auto read_path = [&](std::vector<std::string>& path) {
+        std::uint32_t count = 0;
+        if (!read_u32(count) || count > 1024)
+            return false;
+        path.clear();
+        path.reserve(count);
+        for (std::uint32_t i = 0; i < count; ++i) {
+            std::string segment;
+            if (!read_string(segment))
+                return false;
+            path.push_back(std::move(segment));
+        }
+        return true;
+    };
+    std::uint8_t tag = 0;
+    if (!byte(tag) || tag != 0x01)
+        return fail("unsupported voice-bank state tag");
+    std::string schema;
+    if (!read_string(schema) || schema != kWireSchema)
+        return fail("unsupported voice-bank state schema");
+    std::uint32_t version = 0;
+    if (!read_u32(version) || version != kSchemaVersion)
+        return fail("unsupported voice-bank state version");
+    VoiceBankState parsed;
+    parsed.schema_version = version;
+    if (!read_string(parsed.manifest_sha256) || parsed.manifest_sha256.size() != 64)
+        return fail("invalid voice-bank manifest digest");
+    std::uint32_t count = 0;
+    if (!read_u32(count) || count > 4096)
+        return fail("voice-bank state parameter count is out of bounds");
+    parsed.parameters.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+        VoiceParameterValue value;
+        if (!read_u32(value.slot_ordinal) || !read_path(value.path) || !read_string(value.target))
+            return fail("truncated voice-bank parameter");
+        std::uint32_t bits = 0;
+        if (!read_u32(bits))
+            return fail("truncated voice-bank parameter value");
+        std::memcpy(&value.value, &bits, sizeof(bits));
+        parsed.parameters.push_back(std::move(value));
+    }
+    if (at != encoding.size())
+        return fail("trailing voice-bank state bytes");
+    destination = std::move(parsed);
+    return true;
+}
+
 bool restore_voice_bank_state(const VoiceBankManifest& manifest, const VoiceBankState& candidate,
                               VoiceBankState& destination, std::string* error) {
     auto fail = [&](const char* message) {
@@ -364,15 +494,20 @@ bool restore_voice_bank_state(const VoiceBankManifest& manifest, const VoiceBank
     if (candidate.schema_version != kSchemaVersion || candidate.manifest_sha256 != manifest.sha256)
         return fail("state schema or manifest identity does not match");
     std::set<std::string> seen;
+    VoiceBankState canonical = candidate;
+    canonical.parameters.clear();
+    canonical.parameters.reserve(candidate.parameters.size());
     for (const auto& value : candidate.parameters) {
-        if (!valid_parameter(manifest, value))
+        VoiceParameterValue normalized;
+        if (!valid_parameter(manifest, value, &normalized))
             return fail("state contains an undeclared or non-finite parameter");
-        const auto key = std::to_string(value.slot_ordinal) + "\x1f" + path_key(value.path) +
-                         "\x1f" + value.target;
+        const auto key = std::to_string(normalized.slot_ordinal) + "\x1f" +
+                         path_key(normalized.path) + "\x1f" + normalized.target;
         if (!seen.insert(key).second)
             return fail("state contains a duplicate parameter");
+        canonical.parameters.push_back(std::move(normalized));
     }
-    destination = candidate;
+    destination = std::move(canonical);
     return true;
 }
 

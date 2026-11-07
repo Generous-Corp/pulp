@@ -7,6 +7,7 @@
 #include <pulp/host/voice_identity.hpp>
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -94,6 +95,11 @@ struct VoiceBankPersistenceResult {
 /// manifest is checked first; malformed or stale state produces no bytes.
 VoiceBankPersistenceResult encode_voice_bank_state(const VoiceBankManifest& manifest,
                                                    const VoiceBankState& state);
+
+/// Decode the tagged persistence payload without publishing it. Manifest
+/// binding validation is completed by restore_voice_bank_state.
+bool decode_voice_bank_state(std::span<const std::uint8_t> encoding, VoiceBankState& destination,
+                             std::string* error = nullptr);
 
 /// Transactionally validate and restore state.  `destination` is untouched on
 /// any failure, including a mismatched manifest, unsupported migration, alias,
