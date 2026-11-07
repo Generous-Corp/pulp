@@ -43,6 +43,81 @@ class JsonDuplicateScanner {
     }
 
   private:
+    static bool append_code_point(std::string& output, std::uint32_t code_point) {
+        if (code_point <= 0x7fu) {
+            output.push_back(static_cast<char>(code_point));
+        } else if (code_point <= 0x7ffu) {
+            output.push_back(static_cast<char>(0xc0u | (code_point >> 6)));
+            output.push_back(static_cast<char>(0x80u | (code_point & 0x3fu)));
+        } else if (code_point <= 0xffffu) {
+            output.push_back(static_cast<char>(0xe0u | (code_point >> 12)));
+            output.push_back(static_cast<char>(0x80u | ((code_point >> 6) & 0x3fu)));
+            output.push_back(static_cast<char>(0x80u | (code_point & 0x3fu)));
+        } else if (code_point <= 0x10ffffu) {
+            output.push_back(static_cast<char>(0xf0u | (code_point >> 18)));
+            output.push_back(static_cast<char>(0x80u | ((code_point >> 12) & 0x3fu)));
+            output.push_back(static_cast<char>(0x80u | ((code_point >> 6) & 0x3fu)));
+            output.push_back(static_cast<char>(0x80u | (code_point & 0x3fu)));
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    bool escaped_code_unit(std::uint16_t& value) {
+        if (position_ + 4 > text_.size())
+            return false;
+        value = 0;
+        for (int i = 0; i < 4; ++i) {
+            const auto c = static_cast<unsigned char>(text_[position_++]);
+            if (!std::isxdigit(c))
+                return false;
+            value = static_cast<std::uint16_t>(value << 4);
+            if (c >= '0' && c <= '9')
+                value = static_cast<std::uint16_t>(value + c - '0');
+            else if (c >= 'a' && c <= 'f')
+                value = static_cast<std::uint16_t>(value + c - 'a' + 10);
+            else
+                value = static_cast<std::uint16_t>(value + c - 'A' + 10);
+        }
+        return true;
+    }
+
+    bool raw_utf8(std::string& output, unsigned char first) {
+        std::uint32_t code_point = 0;
+        std::size_t continuation_count = 0;
+        if (first <= 0x7fu) {
+            output.push_back(static_cast<char>(first));
+            return true;
+        }
+        if (first >= 0xc2u && first <= 0xdfu) {
+            code_point = first & 0x1fu;
+            continuation_count = 1;
+        } else if (first >= 0xe0u && first <= 0xefu) {
+            code_point = first & 0x0fu;
+            continuation_count = 2;
+        } else if (first >= 0xf0u && first <= 0xf4u) {
+            code_point = first & 0x07u;
+            continuation_count = 3;
+        } else {
+            return false;
+        }
+        if (position_ + continuation_count > text_.size())
+            return false;
+        for (std::size_t i = 0; i < continuation_count; ++i) {
+            const auto c = static_cast<unsigned char>(text_[position_++]);
+            if ((c & 0xc0u) != 0x80u)
+                return false;
+            code_point = (code_point << 6) | (c & 0x3fu);
+        }
+        if ((continuation_count == 1 && code_point < 0x80u) ||
+            (continuation_count == 2 && code_point < 0x800u) ||
+            (continuation_count == 3 && code_point < 0x10000u) ||
+            (code_point >= 0xd800u && code_point <= 0xdfffu) || code_point > 0x10ffffu)
+            return false;
+        return append_code_point(output, code_point);
+    }
+
     void skip_space() {
         while (position_ < text_.size() &&
                (text_[position_] == ' ' || text_[position_] == '\n' || text_[position_] == '\r' ||
@@ -50,31 +125,76 @@ class JsonDuplicateScanner {
             ++position_;
     }
 
-    bool string_token() {
+    bool string_token(std::string* decoded = nullptr) {
         if (position_ >= text_.size() || text_[position_++] != '"')
             return false;
+        std::string value;
         while (position_ < text_.size()) {
             const auto c = static_cast<unsigned char>(text_[position_++]);
-            if (c == '"')
+            if (c == '"') {
+                if (decoded)
+                    *decoded = std::move(value);
                 return true;
+            }
             if (c < 0x20)
                 return false;
             if (c == '\\') {
                 if (position_ >= text_.size())
                     return false;
                 const auto escaped = text_[position_++];
-                if (escaped == 'u') {
-                    if (position_ + 4 > text_.size())
+                switch (escaped) {
+                case '"':
+                    value.push_back('"');
+                    break;
+                case '\\':
+                    value.push_back('\\');
+                    break;
+                case '/':
+                    value.push_back('/');
+                    break;
+                case 'b':
+                    value.push_back('\b');
+                    break;
+                case 'f':
+                    value.push_back('\f');
+                    break;
+                case 'n':
+                    value.push_back('\n');
+                    break;
+                case 'r':
+                    value.push_back('\r');
+                    break;
+                case 't':
+                    value.push_back('\t');
+                    break;
+                case 'u': {
+                    std::uint16_t high = 0;
+                    if (!escaped_code_unit(high))
                         return false;
-                    for (int i = 0; i < 4; ++i) {
-                        const auto h = static_cast<unsigned char>(text_[position_++]);
-                        if (!std::isxdigit(h))
+                    std::uint32_t code_point = high;
+                    if (high >= 0xd800u && high <= 0xdbffu) {
+                        if (position_ + 6 > text_.size() || text_[position_] != '\\' ||
+                            text_[position_ + 1] != 'u')
                             return false;
+                        position_ += 2;
+                        std::uint16_t low = 0;
+                        if (!escaped_code_unit(low) || low < 0xdc00u || low > 0xdfffu)
+                            return false;
+                        code_point =
+                            0x10000u + ((static_cast<std::uint32_t>(high) - 0xd800u) << 10) +
+                            (static_cast<std::uint32_t>(low) - 0xdc00u);
+                    } else if (high >= 0xdc00u && high <= 0xdfffu) {
+                        return false;
                     }
-                } else if (escaped != '"' && escaped != '\\' && escaped != '/' && escaped != 'b' &&
-                           escaped != 'f' && escaped != 'n' && escaped != 'r' && escaped != 't') {
+                    if (!append_code_point(value, code_point))
+                        return false;
+                    break;
+                }
+                default:
                     return false;
                 }
+            } else if (!raw_utf8(value, c)) {
+                return false;
             }
         }
         return false;
@@ -89,10 +209,10 @@ class JsonDuplicateScanner {
             return true;
         }
         while (position_ < text_.size()) {
-            const auto start = position_;
-            if (!string_token())
+            std::string decoded_key;
+            if (!string_token(&decoded_key))
                 return false;
-            if (!keys.emplace(std::string(text_.substr(start, position_ - start))).second)
+            if (!keys.emplace(std::move(decoded_key)).second)
                 return false;
             skip_space();
             if (position_ >= text_.size() || text_[position_++] != ':')
@@ -149,7 +269,7 @@ class JsonDuplicateScanner {
             // A comma or closing delimiter cannot stand in for a JSON value.
             // Without this guard the token loop below consumes zero bytes,
             // which accidentally accepts trailing commas and missing object
-            // values before the real parser sees the payload.
+            // values before the real parser sees them.
             if (text_[position_] == ',' || text_[position_] == ']' ||
                 text_[position_] == '}')
                 return false;

@@ -76,6 +76,16 @@ TEST_CASE("D4 export rejects a retired owner generation") {
     REQUIRE(first->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
     auto retired = first->committed_execution_snapshot();
 
+    auto failed = graph.begin_prepared_topology_edit();
+    REQUIRE(failed);
+    REQUIRE(failed->prepare(48000.0, 128) ==
+            SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE_FALSE(failed->disconnect(0, 0, 0, 0));
+    REQUIRE(failed->commit() == SignalGraph::PreparedTopologyEdit::Result::InvalidMutation);
+    const auto preserved = retired.export_prepared_description();
+    REQUIRE(preserved);
+    REQUIRE(preserved.value->owner_generation == graph.authoring_receipt().generation);
+
     auto second = graph.begin_prepared_topology_edit();
     REQUIRE(second);
     REQUIRE(second->prepare(48000.0, 128) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
@@ -341,18 +351,32 @@ TEST_CASE("D4 rejects a swapped authored channel") {
     SignalGraph graph;
     auto edit = graph.begin_prepared_topology_edit();
     REQUIRE(edit);
-    const auto input = edit->add_input_node(2);
-    const auto output = edit->add_output_node(2);
-    REQUIRE(edit->connect(input, 0, output, 0));
-    REQUIRE(edit->connect(input, 1, output, 1));
+    const auto input = edit->add_input_node(2, "Input");
+    const auto gain_a = edit->add_gain_node("Gain A");
+    const auto gain_b = edit->add_gain_node("Gain B");
+    const auto output = edit->add_output_node(2, "Output");
+    REQUIRE(input != 0);
+    REQUIRE(gain_a != 0);
+    REQUIRE(gain_b != 0);
+    REQUIRE(output != 0);
+    for (std::uint32_t channel = 0; channel < 2; ++channel) {
+        REQUIRE(edit->connect(input, channel, gain_a, channel));
+        REQUIRE(edit->connect(gain_a, channel, gain_b, channel));
+        REQUIRE(edit->connect(gain_b, channel, output, channel));
+    }
     AuthoredRuntimeBinding binding;
-    binding.nodes = {{input, "input"}, {output, "output"}};
-    binding.channels = {
-        {input, "audio", true, "L", 0, 0},
-        {input, "audio", true, "R", 1, 1},
-        {output, "audio", false, "L", 0, 0},
-        {output, "audio", false, "R", 1, 1},
+    binding.nodes = {{input, "input"}, {gain_a, "gain_a"}, {gain_b, "gain_b"},
+                     {output, "output"}};
+    const auto add_channels = [&](std::uint64_t node, bool output_direction) {
+        binding.channels.push_back({node, "audio", output_direction, "L", 0, 0});
+        binding.channels.push_back({node, "audio", output_direction, "R", 1, 1});
     };
+    add_channels(input, true);
+    add_channels(gain_a, false);
+    add_channels(gain_a, true);
+    add_channels(gain_b, false);
+    add_channels(gain_b, true);
+    add_channels(output, false);
     binding.interfaces = {
         {"main-in", false, input, "audio", "L", 0, 0, 0},
         {"main-in", false, input, "audio", "R", 1, 0, 1},
@@ -360,16 +384,8 @@ TEST_CASE("D4 rejects a swapped authored channel") {
         {"main-out", true, output, "audio", "R", 1, 0, 1},
     };
     std::swap(binding.channels[0].authored_channel, binding.channels[1].authored_channel);
-    REQUIRE(
-        edit->bind_authored_identity(
-                "{\"assets\":{},\"edges\":{},\"interfaces\":[{\"channels\":[\"L\",\"R\"],\"kind\":"
-                "\"audio\",\"role\":\"input\"},{\"channels\":[\"L\",\"R\"],\"kind\":\"audio\","
-                "\"role\":\"output\"}],\"nodes\":{\"input\":{\"kind\":\"audio_input\"},\"gain_a\":{"
-                "\"kind\":\"gain\"},\"gain_b\":{\"config\":{\"gain\":\"f32:3f800000\"},\"kind\":"
-                "\"gain\"},\"output\":{\"kind\":\"audio_"
-                "output\"}},\"policies\":{},\"profile\":\"pulp.graph.identity.v1\"}",
-                binding)
-            .refusal == PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    REQUIRE(edit->bind_authored_identity(stereo_payload(), binding).refusal ==
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
 }
 
 TEST_CASE("D4 rejects an event lane in the closed audio profile") {
@@ -422,6 +438,26 @@ TEST_CASE("D4 rejects unknown and duplicate semantic fields") {
         "{\"assets\":{},\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
         "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}";
     REQUIRE(edit->bind_authored_identity(duplicate, {}).refusal ==
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    const std::string escaped_duplicate =
+        "{\"assets\":{},\"asset\\u0073\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\","
+        "\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},"
+        "\"profile\":\"pulp.graph.identity.v1\"}";
+    REQUIRE(edit->bind_authored_identity(escaped_duplicate, {}).refusal ==
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    std::string malformed_utf8 =
+        "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},\"policies\":{},"
+        "\"profile\":\"pulp.graph.identity.v1\",\"x\":\"";
+    malformed_utf8.push_back(static_cast<char>(0xc0));
+    malformed_utf8.push_back(static_cast<char>(0x80));
+    malformed_utf8 += "\"}";
+    REQUIRE(edit->bind_authored_identity(malformed_utf8, {}).refusal ==
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    const std::string unpaired_surrogate =
+        "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},\"policies\":{},"
+        "\"profile\":\"pulp.graph.identity.v1\",\"x\":\"\\uD800\"}";
+    REQUIRE(edit->bind_authored_identity(unpaired_surrogate, {}).refusal ==
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
     const std::string trailing_comma =
         "{\"assets\":{},\"edges\":{},\"interfaces\":[,],\"nodes\":{},"
