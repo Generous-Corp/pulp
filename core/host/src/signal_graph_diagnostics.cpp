@@ -120,8 +120,9 @@ SignalGraph::EdgeProbeIdentity SignalGraph::audio_edge_probe_identity() const {
     return cg && cg->audio_edge_probe ? cg->audio_edge_probe_identity : EdgeProbeIdentity{};
 }
 
-SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(
-    const PortHandle& source, NodeId destination, std::uint32_t parameter_id) {
+SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(const PortHandle& source,
+                                                                    NodeId destination,
+                                                                    std::uint32_t parameter_id) {
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return EdgeProbeStatus::UnsupportedExecution;
@@ -213,7 +214,7 @@ SignalGraph::EdgeProbeIdentity SignalGraph::control_edge_probe_identity() const 
 }
 
 SignalGraph::EdgeProbeStatus SignalGraph::attach_event_edge_probe(const PortHandle& source,
-                                                                   const PortHandle& destination) {
+                                                                  const PortHandle& destination) {
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return EdgeProbeStatus::UnsupportedExecution;
@@ -238,8 +239,7 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_event_edge_probe(const PortHand
             continue;
         for (std::uint32_t j = 0; j < plan.connections.size(); ++j) {
             const auto& resolved = plan.connections[j];
-            if (!graph::is_event(resolved) ||
-                plan.nodes[resolved.source_index].id != source.node ||
+            if (!graph::is_event(resolved) || plan.nodes[resolved.source_index].id != source.node ||
                 plan.nodes[resolved.dest_index].id != destination.node)
                 continue;
             auto probe = std::make_unique<format::GraphRuntimeEventEdgeProbe>();

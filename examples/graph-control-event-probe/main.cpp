@@ -3,20 +3,20 @@
 
 #include <array>
 #include <iostream>
-#include <stdexcept>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 
 using namespace pulp;
 
 namespace {
 void require(bool value, const char* rule) {
-    if (!value) throw std::runtime_error(rule);
+    if (!value)
+        throw std::runtime_error(rule);
 }
 
 bool process_node(format::ProcessBlock& block,
-                  const format::GraphRuntimeNodeProcessContext& context,
-                  void*) noexcept {
+                  const format::GraphRuntimeNodeProcessContext& context, void*) noexcept {
     if (context.node_param_events == nullptr || context.node_param_events->size() != 2)
         return false;
     (void)context.node_inputs;
@@ -56,7 +56,8 @@ void control_probe(bool planted) {
     GraphRuntimeBufferPool pool;
     require(pool.reset(snapshot.buffer_slot_count(), 8), "control-pool");
     GraphRuntimeAutomationScratch automation_scratch;
-    require(automation_scratch.reset(snapshot.plan(), snapshot.bindings(), 8), "control-automation");
+    require(automation_scratch.reset(snapshot.plan(), snapshot.bindings(), 8),
+            "control-automation");
     std::array<float, 8> input{};
     input.fill(0.75f);
     const std::array<const float*, 1> in_channels{input.data()};
@@ -80,7 +81,10 @@ void control_probe(bool planted) {
     probes.control = &control;
     GraphRuntimeExecutor executor;
     if (!planted)
-        require(executor.process_routed(block, snapshot, pool, nullptr, &automation_scratch, {}, {}, {}, {}, {}, nullptr, &probes).ok(),
+        require(executor
+                    .process_routed(block, snapshot, pool, nullptr, &automation_scratch, {}, {}, {},
+                                    {}, {}, nullptr, &probes)
+                    .ok(),
                 "control-process");
     GraphRuntimeProbeSample sample;
     require(control.samples.try_pop(sample), "control-publication");
@@ -121,13 +125,16 @@ void event_probe() {
     block.sample_rate = 48000.0;
     block.frame_count = 8;
     GraphRuntimeExecutor executor;
-    require(executor.process_routed(block, snapshot, pool, &midi, nullptr, {}, {}, {}, {}, {}, nullptr, &probes).ok(),
+    require(executor
+                .process_routed(block, snapshot, pool, &midi, nullptr, {}, {}, {}, {}, {}, nullptr,
+                                &probes)
+                .ok(),
             "event-process");
     GraphRuntimeProbeSample sample;
     require(event.samples.try_pop(sample), "event-publication");
     require(sample.kind == GraphRuntimeProbeKind::Event && sample.payload_count == 1 &&
-                sample.payload_dropped == 1 &&
-                sample.payload_status != 0 && sample.payload_offset == 0,
+                sample.payload_dropped == 1 && sample.payload_status != 0 &&
+                sample.payload_offset == 0,
             "event-oracle");
 }
 } // namespace
