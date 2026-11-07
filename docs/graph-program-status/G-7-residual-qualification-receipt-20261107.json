@@ -1,0 +1,48 @@
+{
+  "schema": "pulp.graph.g7.residual_qualification.v1",
+  "state": "PARTIAL",
+  "source_head": "a5ebbeca6139db88265ea93997d70927d3f60aa4",
+  "origin_main_head": "a5ebbeca6139db88265ea93997d70927d3f60aa4",
+  "source_dirty": false,
+  "build": {
+    "configuration": "Release",
+    "wrapper": "tools/ci/governed-build.sh cmake --build build --target pulp-cpp pulp-mcp",
+    "parallelism": 1,
+    "targets": ["pulp-cpp", "pulp-mcp"],
+    "cli_sha256": "e924722fd305677a260f381d28d363527e45b0252d79d1f0b130c9b8f5e0e7f2",
+    "mcp_sha256": "c59a255b8ba74cf013acd83a2bdf1991bfafb856dcdc087276aa8bd3392f6c86"
+  },
+  "external_consumer": {
+    "source": "examples/graph-edge-probe",
+    "sdk_source_head": "8ecb5db3c9c0323ed065d7b9055e217ba715b292",
+    "sdk_provenance_sha256": "4335a1fb583b56590a34253bcbe6564189942b9f59ef27cbc46429f43012cb4f",
+    "consumer_sha256": "0eb7750c389b7ef153c10edfc995a465acc823def2f2eb62043e26f76f1f8f16",
+    "ctest": "1/1 PASS",
+    "direct_checks": 567
+  },
+  "current_main_cli_mcp_parity": {
+    "command": "python3 test/graph_edge_probe_sdk.py --consumer <external-consumer> --cli <current-main-pulp-cpp> --mcp <current-main-pulp-mcp>",
+    "result": "graph-edge-probe installed CLI/MCP parity PASS",
+    "controls": [
+      "audio edge positive publication",
+      "plan and latency introspection",
+      "node loads",
+      "CLI/MCP mirrored output",
+      "unknown option",
+      "invalid graph shape",
+      "unsupported node",
+      "ambiguous node",
+      "malformed graph",
+      "graph limit",
+      "non-finite input",
+      "non-finite sample"
+    ]
+  },
+  "exact_head_sdk": {
+    "status": "UNAVAILABLE",
+    "install_attempt": "cmake --install build --prefix build/g7-prefix --config Release",
+    "blocker": "generated install graph stopped because build/tools/audio/pulp-au-instrument-probe was missing",
+    "promotion_rule": "Do not infer exact-head installed-SDK parity from this cross-head receipt"
+  },
+  "qualification_boundary": "No control/event edge probe, realtime, cross-platform, or full G-7 completion claim."
+}
