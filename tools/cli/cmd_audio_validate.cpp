@@ -3,6 +3,7 @@
 // the existing `pulp audio` verbs are untouched.
 
 #include "cmd_audio_validate.hpp"
+#include "cli_fs_util.hpp"
 
 #include <pulp/audio/analysis/audio_artifacts.hpp>
 #include <pulp/audio/analysis/audio_assertions.hpp>
@@ -84,25 +85,15 @@ std::optional<DecodedAudio> decode(const std::string& path) {
         // the fact is evaluated against those ceilings, not the smaller
         // in-memory WavDecodeLimits that `pulp audio inspect` reports.
         pulp::audio::LayoutInspectOptions layout_options;
-        const pulp::audio::DecodeLimits registry_limits;
-        layout_options.decode_limits.max_frames = registry_limits.max_frames;
-        layout_options.decode_limits.max_channels = registry_limits.max_channels;
-        layout_options.decode_limits.max_output_bytes = registry_limits.max_output_bytes;
+        layout_options.decode_limits =
+            pulp::audio::as_wav_decode_limits(pulp::audio::DecodeLimits{});
         const auto layout = pulp::audio::inspect_audio_file_layout(fs::path(path), layout_options);
-        if (layout.decode_limits && layout.decode_limits->exceeds && layout.stream) {
+        if (layout.decode_limits && layout.decode_limits->exceeds() && layout.stream) {
             std::cerr << "Error: audio file exceeds the in-memory decode limit: " << path
                       << " declares " << layout.stream->frames << " frames x "
-                      << layout.stream->channels << " channels;";
-            for (const auto& name : layout.decode_limits->exceeded) {
-                std::cerr << " " << name << "=";
-                if (name == "max_frames")
-                    std::cerr << layout.decode_limits->limits.max_frames;
-                else if (name == "max_channels")
-                    std::cerr << layout.decode_limits->limits.max_channels;
-                else
-                    std::cerr << layout.decode_limits->limits.max_output_bytes;
-            }
-            std::cerr << ". `pulp audio inspect` reports the header without decoding.\n";
+                      << layout.stream->channels << " channels; "
+                      << layout.decode_limits->describe()
+                      << ". `pulp audio inspect` reports the header without decoding.\n";
             return std::nullopt;
         }
         std::cerr << "Error: could not decode audio file (unsupported format "
@@ -158,7 +149,7 @@ int run_summarize(const std::vector<std::string>& args) {
     if (json_output) {
         // The document names its input by basename unless asked otherwise, so
         // a report attached to a shared artifact does not carry a local path.
-        const auto name = absolute_paths ? file : fs::path(file).filename().string();
+        const auto name = pulp::cli::fsutil::display_input_name(file, absolute_paths);
         std::cout << audio::metrics_to_json(metrics, name) << "\n";
         return 0;
     }

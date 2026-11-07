@@ -1,6 +1,7 @@
 // approach after SimZhou/vscode-audiolens c5c5a24; re-authored
 
 #include "cmd_audio_inspect.hpp"
+#include "cli_fs_util.hpp"
 
 #include <pulp/audio/audio_file_layout.hpp>
 #include <pulp/audio/audio_file_layout_json.hpp>
@@ -119,14 +120,8 @@ void print_table(const pulp::audio::AudioFileLayoutReport& report, const std::st
             std::cout << " (" << report.decode->reason << ")";
         std::cout << "\n";
     }
-    if (report.decode_limits && report.decode_limits->exceeds) {
-        std::cout << "exceeds decode limits:";
-        for (const auto& name_ : report.decode_limits->exceeded)
-            std::cout << " " << name_;
-        std::cout << " (max_frames " << report.decode_limits->limits.max_frames << ", max_channels "
-                  << report.decode_limits->limits.max_channels << ", max_output_bytes "
-                  << report.decode_limits->limits.max_output_bytes << ")\n";
-    }
+    if (report.decode_limits && report.decode_limits->exceeds())
+        std::cout << "exceeds decode limits: " << report.decode_limits->describe() << "\n";
     if (report.truncated_tail_bytes)
         std::cout << "truncated tail bytes: " << *report.truncated_tail_bytes << "\n";
 
@@ -158,10 +153,12 @@ void print_table(const pulp::audio::AudioFileLayoutReport& report, const std::st
             std::cout << "  - " << layout_warning_kind_name(warning.kind) << " @" << warning.offset
                       << ": " << warning.detail << "\n";
     }
-    if (!report.metadata_present.empty()) {
+    const auto metadata = report.metadata_regions();
+    if (!metadata.empty()) {
         std::cout << "metadata present:";
-        for (const auto& entry : report.metadata_present)
-            std::cout << " " << entry.id << "(" << entry.offset << "," << entry.size << ")";
+        for (const auto* region : metadata)
+            std::cout << " " << region->id << "(" << region->offset << "," << region->declared_size
+                      << ")";
         std::cout << "\n";
     }
     for (const auto& text : report.metadata_text)
@@ -287,7 +284,7 @@ int cmd_audio_inspect(const std::vector<std::string>& args) {
             "--format, --channels, --rate, --endian and --offset apply only with --raw");
     }
 
-    const std::string name = absolute_paths ? file : fs::path(file).filename().string();
+    const std::string name = pulp::cli::fsutil::display_input_name(file, absolute_paths);
     std::error_code ec;
     if (!fs::is_regular_file(file, ec)) {
         std::cerr << "Error: not a readable file: " << name << "\n";
@@ -310,17 +307,13 @@ int cmd_audio_inspect(const std::vector<std::string>& args) {
     } else {
         print_table(report, name);
     }
-    if (!report.error.empty() && report.container == pulp::audio::AudioContainer::unknown) {
+    if (!report.error.empty()) {
         std::cerr << "Error: " << report.error << "\n";
         return 1;
     }
     if (report.container == pulp::audio::AudioContainer::unknown) {
         std::cerr << "pulp audio inspect: leading bytes match no known audio container\n";
         return kExitUnrecognized;
-    }
-    if (!report.error.empty()) {
-        std::cerr << "Error: " << report.error << "\n";
-        return 1;
     }
     return 0;
 }

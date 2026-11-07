@@ -15,6 +15,7 @@
 #include <cmath>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 namespace fs = std::filesystem;
@@ -282,7 +283,7 @@ std::string handle_audio_file_inspect(const std::string& params_json) {
             const auto value = extract_string(params_json, key);
             if (value.empty() || value.front() == '-')
                 return arg_error(std::string("Error: ") + key + " must be a name, not an option");
-            cmd += std::string(" --") + (key + 4) + " " + shell_quote(value);
+            cmd += " --" + std::string(std::string_view(key).substr(4)) + " " + shell_quote(value);
         }
         for (const char* key : {"raw_channels", "raw_rate", "raw_offset"}) {
             if (!has(key))
@@ -291,7 +292,7 @@ std::string handle_audio_file_inspect(const std::string& params_json) {
             if (text.empty() ||
                 !std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }))
                 return arg_error(std::string("Error: ") + key + " must be a non-negative integer");
-            cmd += std::string(" --") + (key + 4) + " " + text;
+            cmd += " --" + std::string(std::string_view(key).substr(4)) + " " + text;
         }
     }
 
