@@ -362,7 +362,7 @@ for (const auto& caps : FormatRegistry::instance().writer_capabilities()) {
 
 `pulp audio formats` prints the same table for the current build, and
 `pulp audio formats --json` emits it as JSON with `readers` and `writers`
-arrays.
+arrays; the CLI reference lists every field.
 
 For an already-resident RIFF/WAVE byte span, `inspect_wav()` and `decode_wav()`
 in `wav_decoder.hpp` provide a no-file-I/O, no-exceptions path with caller-set
@@ -436,7 +436,7 @@ therefore counts it twice.
 
 | Format | Read | Write | Backend |
 |--------|:----:|:-----:|---------|
-| AAC | macOS | ✓* | Read through ExtAudioFile on macOS; optional FDK AAC adds writing (`pulp add fdk-aac --accept-license FDK-AAC`) |
+| AAC | macOS | ✓* | Read through ExtAudioFile on macOS; optional FDK AAC adds writing (`pulp add fdk-aac --accept-license FDK-AAC`). It writes an ADTS stream for both `.aac` and `.m4a`, so a `.m4a` it writes is not an MPEG-4 file and some players refuse it |
 | AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian) |
 | ALAC | macOS | ✓* | Read through ExtAudioFile on macOS; optional Apple ALAC adds writing (`pulp add alac`) |
 | CAF | macOS | — | Read through ExtAudioFile on macOS |

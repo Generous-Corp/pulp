@@ -86,6 +86,25 @@ class NameOnlyReader : public FormatReader {
 
 } // namespace
 
+// A report with no extensions is a handler without a capabilities()
+// override, which reports only its name by contract; there is nothing else to
+// check. Every other report must agree with its handler.
+static void require_listed_extensions_resolve(const std::vector<FormatCapabilities>& list,
+                                              bool readers) {
+    auto& registry = FormatRegistry::instance();
+    for (const auto& caps : list) {
+        INFO(caps.format_name);
+        REQUIRE_FALSE(caps.format_name.empty());
+        for (const auto& ext : caps.extensions) {
+            INFO(ext);
+            if (readers)
+                REQUIRE(registry.find_reader(ext) != nullptr);
+            else
+                REQUIRE(registry.find_writer(ext) != nullptr);
+        }
+    }
+}
+
 TEST_CASE("Every registered reader and writer reports consistent capabilities",
           "[audio][format-capabilities]") {
     auto& registry = FormatRegistry::instance();
@@ -93,32 +112,44 @@ TEST_CASE("Every registered reader and writer reports consistent capabilities",
     const auto writers = registry.writer_capabilities();
     REQUIRE_FALSE(readers.empty());
     REQUIRE_FALSE(writers.empty());
+    require_listed_extensions_resolve(readers, true);
+    require_listed_extensions_resolve(writers, false);
 
-    for (const auto& caps : readers) {
-        INFO(caps.format_name);
-        for (const auto& ext : caps.extensions) {
-            auto* reader = registry.find_reader(ext);
-            REQUIRE(reader != nullptr);
-        }
-    }
-    for (const auto& caps : writers) {
-        INFO(caps.format_name);
-        auto* writer = registry.find_writer(caps.extensions.front());
-        REQUIRE(writer != nullptr);
-    }
-
-    // Each handler's report agrees with its own predicates.
+    // The handler that wins each extension agrees with its own predicates,
+    // unless it reports its name only.
     for (const auto& ext : registry.supported_read_extensions()) {
         auto* reader = registry.find_reader(ext);
         REQUIRE(reader != nullptr);
         INFO(ext);
-        require_consistent(*reader, reader->capabilities());
+        const auto caps = reader->capabilities();
+        if (!caps.extensions.empty())
+            require_consistent(*reader, caps);
     }
     for (const auto& ext : registry.supported_write_extensions()) {
         auto* writer = registry.find_writer(ext);
         REQUIRE(writer != nullptr);
         INFO(ext);
-        require_consistent(*writer, writer->capabilities());
+        const auto caps = writer->capabilities();
+        if (!caps.extensions.empty())
+            require_consistent(*writer, caps);
+    }
+
+    // The built-in handlers always report in full.
+    std::vector<std::string> full_readers = {"WAV", "FLAC", "MP3", "OGG Vorbis", "AIFF"};
+#ifdef __APPLE__
+    full_readers.push_back("CoreAudio");
+#endif
+    for (const auto& name : full_readers) {
+        INFO(name);
+        const auto caps = find_caps(readers, name);
+        REQUIRE(caps);
+        REQUIRE_FALSE(caps->extensions.empty());
+    }
+    for (const auto& name : {std::string("WAV"), std::string("AIFF")}) {
+        INFO(name);
+        const auto caps = find_caps(writers, name);
+        REQUIRE(caps);
+        REQUIRE_FALSE(caps->extensions.empty());
     }
 }
 
@@ -137,7 +168,10 @@ TEST_CASE("Built-in readers report their codec limits", "[audio][format-capabili
     REQUIRE(flac->compressed);
     REQUIRE(flac->lossless);
     REQUIRE(flac->max_channels == 8);
-    REQUIRE(contains(flac->bit_depths, 24));
+    // FLAC allows every depth from 4 to 32 bits, and dr_flac decodes them all.
+    REQUIRE(flac->bit_depths.size() == 29);
+    REQUIRE(flac->bit_depths.front() == 4);
+    REQUIRE(flac->bit_depths.back() == 32);
 
     const auto mp3 = find_caps(readers, "MP3");
     REQUIRE(mp3);

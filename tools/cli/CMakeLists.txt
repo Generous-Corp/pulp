@@ -665,7 +665,7 @@ if(PULP_BUILD_TESTS)
     add_test(NAME cli-audio-formats-json
         COMMAND pulp-cli audio formats --json)
     set_tests_properties(cli-audio-formats-json PROPERTIES
-        PASS_REGULAR_EXPRESSION "\"writers\"")
+        PASS_REGULAR_EXPRESSION "\"name\": \"AIFF\"")
 
     add_test(NAME cli-audio-sampler-mip-help
         COMMAND pulp-cli audio sampler-mip --help)

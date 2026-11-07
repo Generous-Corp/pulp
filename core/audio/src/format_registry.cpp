@@ -129,6 +129,14 @@ public:
 
 // ── FLAC Reader (via dr_flac) ───────────────────────────────────────────
 
+// FLAC allows every integer depth from 4 to 32 bits; dr_flac decodes them all.
+static std::vector<std::uint32_t> flac_bit_depths() {
+    std::vector<std::uint32_t> depths;
+    for (std::uint32_t bits = 4; bits <= 32; ++bits)
+        depths.push_back(bits);
+    return depths;
+}
+
 class FlacReader : public FormatReader {
 public:
     std::optional<AudioFileInfo> read_info(const std::string& path) override {
@@ -200,7 +208,7 @@ public:
     FormatCapabilities capabilities() const override {
         return {.format_name = "FLAC",
                 .extensions = {".flac"},
-                .bit_depths = {8, 12, 16, 20, 24, 32},
+                .bit_depths = flac_bit_depths(),
                 .max_channels = 8,
                 .compressed = true};
     }

@@ -48,14 +48,17 @@ struct FormatQualityOption {
 /// What a reader accepts or a writer produces, for choosing a format before
 /// reading or writing. Empty lists mean "not restricted by this format", not
 /// "unknown"; a custom reader or writer that does not override capabilities()
-/// reports only its name.
+/// reports only its name, with no extensions. A platform reader that decodes
+/// several codecs (CoreAudio on Apple) reports one entry covering them all,
+/// stated at the weakest case.
 struct FormatCapabilities {
     std::string format_name;
     /// Lower-case extensions with the leading dot, e.g. ".flac".
     std::vector<std::string> extensions;
     /// Integer PCM bit depths. Empty for lossy formats, which store no depth.
     std::vector<std::uint32_t> bit_depths;
-    /// True when 32-bit float samples are read or written.
+    /// True when float samples are read or written: 32-bit, and for the WAV
+    /// reader 64-bit as well.
     bool float_samples = false;
     /// Sample rates the format allows. Empty means any positive rate.
     std::vector<std::uint32_t> sample_rates;

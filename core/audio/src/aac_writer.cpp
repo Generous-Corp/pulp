@@ -114,7 +114,10 @@ public:
                 .lossless = false,
                 .quality_options = {{"profile", "AAC object type", "AAC-LC"},
                                     {"bitrate", "Target bitrate in bits per second", "128000"},
-                                    {"container", "Stream framing", "ADTS"}}};
+                                    {"container",
+                                     "Stream framing; ADTS for both extensions, so a .m4a file is "
+                                     "an ADTS stream rather than MPEG-4",
+                                     "ADTS"}}};
     }
 };
 
