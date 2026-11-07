@@ -243,7 +243,10 @@ that read bytes a host, a downloaded pack or a dropped file hands the SDK:
 - **Deterministic replay** (ctest label `fuzz`, plain Catch2, every platform):
   `pulp-test-timeline-document-fuzz` and `pulp-test-control-protocol-fuzz`
   replay a seeded mutation corpus through oracles shared with the libFuzzer
-  targets. Runs on every PR that touches its parse surface and on the nightly.
+  targets, and `pulp-test-audio-decoder-corpus` replays the committed
+  audio-decoder seeds (CoreAudio extensions included on Apple) through the
+  oracle `pulp-fuzz-audio-decoder` shares. Runs on every PR that touches its
+  parse surface and on the nightly.
 - **Coverage-guided** (libFuzzer + ASan, `PULP_ENABLE_FUZZING=ON`, Linux,
   nightly and `workflow_dispatch` only): one target per parser, each with a
   seed corpus and a bounded `<target>-smoke` ctest (labels `fuzz;libfuzzer`)
@@ -258,11 +261,15 @@ that read bytes a host, a downloaded pack or a dropped file hands the SDK:
 | `pulp-fuzz-svg` | `VectorScene::from_svg_string` (nanosvg plus scene lowering) | `test/fixtures/fuzz/svg/` | `core_runtime_canvas_signal_tests.cmake` |
 | `pulp-fuzz-smf` | Standard MIDI File import, strict and lenient policies | `test/fixtures/fuzz/smf/` | `timeline_tests.cmake` |
 | `pulp-fuzz-content-manifest` | Content-pack manifest via the install preview, sample-bank manifest, plugin capability manifest | `test/fixtures/fuzz/content-manifest/` | `content_workflow_tests.cmake` |
-| `pulp-fuzz-format-registry` | Every registered audio container reader under `DecodeLimits` | none (the input is the file) | `core_audio_platform_format_tests.cmake` |
+| `pulp-fuzz-audio-decoder` | WAV, AIFF, FLAC, MP3 and Ogg Vorbis readers under `DecodeLimits`; CoreAudio covered by the deterministic replay | `test/fixtures/fuzz/audio-decoder/` | `core_audio_platform_format_tests.cmake` |
 
-None of the coverage-guided targets runs on the required `macos` gate: Apple's
-clang ships no libFuzzer runtime, so the gate never configures with
-`PULP_ENABLE_FUZZING`, and the libfuzzer job skips `pull_request`.
+None of the coverage-guided targets runs on the required `macos` gate: the
+gate never configures with `PULP_ENABLE_FUZZING`, and the libfuzzer job skips
+`pull_request`. A macOS host can still build and run the lane by pointing
+`-DPULP_FUZZ_RUNTIME_ARCHIVE` at Homebrew LLVM's `libclang_rt.fuzzer_osx.a`
+(see `docs/guides/build.md`). Under `PULP_ENABLE_FUZZING` the whole tree is
+instrumented, not only the entry file, which is what lets a target's coverage
+and ASan reach the parser behind it.
 `PULP_FUZZ_SANITIZERS` (default `fuzzer,address`) is the `-fsanitize` list the
 targets build with; a host whose ASan runtime cannot start sets it to `fuzzer`. The ctest
 smokes exist so a fuzzing build has a cheap, named proof that every target

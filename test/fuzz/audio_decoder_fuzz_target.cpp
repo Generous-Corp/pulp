@@ -1,19 +1,30 @@
-// libFuzzer entry point over every reader the FormatRegistry registers.
+// libFuzzer entry point over the audio container readers that ship their own
+// decoder: WAV (CHOC), AIFF (in-house), FLAC (dr_flac), MP3 (dr_mp3) and Ogg
+// Vorbis (stb_vorbis). Each input reaches exactly one reader.
+// approach after SimZhou/vscode-audiolens c5c5a24; re-authored
 //
-// The input is written to a scratch file once per supported extension and
-// handed to the registry, so one corpus exercises FLAC, MP3, OGG, AIFF, WAV and
-// whatever platform readers are present. Output ceilings are kept small: the
-// property under test is "no crash, no runaway allocation", and a legitimate
-// multi-gigabyte decode would only trip the sanitizer's own allocation limit.
+// Routing: the container magic is sniffed first, so a plain seed file (and
+// every mutation that keeps its header) goes to the reader that owns it.
+// When no magic matches, the first byte selects a format and the rest is the
+// payload, which lets the fuzzer reach a reader with a header it invented.
+// The platform CoreAudio reader is deliberately never selected: it is system
+// code, and the deterministic Catch2 corpus replay covers it on Apple.
+//
+// Readers take paths, so the input is written to one scratch file per call.
+// The oracle shared with the Catch2 lane decides what a finding is; here a
+// finding traps so libFuzzer records the input.
 
-#include <pulp/audio/format_registry.hpp>
+#include "audio_decoder_fuzz_oracle.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <vector>
+#include <string_view>
 
 #ifdef _WIN32
 #include <process.h>
@@ -34,7 +45,7 @@ struct ScratchDir {
 #else
         const auto pid = static_cast<long long>(getpid());
 #endif
-        path = fs::temp_directory_path() / ("pulp-format-registry-fuzz-" + std::to_string(pid));
+        path = fs::temp_directory_path() / ("pulp-audio-decoder-fuzz-" + std::to_string(pid));
         std::error_code ec;
         fs::create_directories(path, ec);
     }
@@ -50,10 +61,35 @@ const ScratchDir& scratch_dir() {
     return dir;
 }
 
-const std::vector<std::string>& read_extensions() {
-    static const std::vector<std::string> extensions =
-        pulp::audio::FormatRegistry::instance().supported_read_extensions();
-    return extensions;
+// The fuzzable set, indexed by the selector byte modulo its size.
+constexpr std::array<std::string_view, 5> kExtensions = {".wav", ".aiff", ".flac", ".mp3",
+                                                         ".ogg"};
+
+bool starts_with(const uint8_t* data, size_t size, std::string_view magic, size_t offset = 0) {
+    return size >= offset + magic.size() &&
+           std::memcmp(data + offset, magic.data(), magic.size()) == 0;
+}
+
+// Container magic, checked in an order where no two prefixes overlap.
+std::string_view sniff_extension(const uint8_t* data, size_t size) {
+    if (starts_with(data, size, "RIFF") && starts_with(data, size, "WAVE", 8))
+        return ".wav";
+    if (starts_with(data, size, "RF64") && starts_with(data, size, "WAVE", 8))
+        return ".wav";
+    if (starts_with(data, size, "FORM") && starts_with(data, size, "AIFF", 8))
+        return ".aiff";
+    if (starts_with(data, size, "FORM") && starts_with(data, size, "AIFC", 8))
+        return ".aifc";
+    if (starts_with(data, size, "fLaC"))
+        return ".flac";
+    if (starts_with(data, size, "OggS"))
+        return ".ogg";
+    if (starts_with(data, size, "ID3"))
+        return ".mp3";
+    // MPEG audio frame sync: eleven set bits.
+    if (size >= 2 && data[0] == 0xFFu && (data[1] & 0xE0u) == 0xE0u)
+        return ".mp3";
+    return {};
 }
 
 bool write_input(const fs::path& path, const uint8_t* data, size_t size) {
@@ -65,21 +101,34 @@ bool write_input(const fs::path& path, const uint8_t* data, size_t size) {
     return output.good();
 }
 
+void trap_on_failure(const pulp_fuzz::audio_decoder::OracleFailure& failure) {
+    std::fprintf(stderr, "audio decoder oracle: %s: %s: %s\n", failure.path.c_str(),
+                 failure.field.c_str(), failure.detail.c_str());
+    std::fflush(stderr);
+    __builtin_trap();
+}
+
 } // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    pulp::audio::DecodeLimits limits;
-    limits.max_frames = 1u << 22;
-    limits.max_channels = 16u;
-    limits.max_output_bytes = 64u * 1024u * 1024u;
+    if (size == 0)
+        return 0;
 
-    auto& registry = pulp::audio::FormatRegistry::instance();
-    for (const auto& extension : read_extensions()) {
-        const auto path = scratch_dir().path / ("input" + extension);
-        if (!write_input(path, data, size))
-            continue;
-        (void)registry.read_info(path.string());
-        (void)registry.read(path.string(), limits);
+    std::string_view extension = sniff_extension(data, size);
+    const uint8_t* payload = data;
+    size_t payload_size = size;
+    if (extension.empty()) {
+        extension = kExtensions[data[0] % kExtensions.size()];
+        payload = data + 1;
+        payload_size = size - 1;
     }
+
+    const auto path = scratch_dir().path / ("input" + std::string(extension));
+    if (!write_input(path, payload, payload_size))
+        return 0;
+
+    (void)pulp_fuzz::audio_decoder::check_registry(path.string(),
+                                                   pulp_fuzz::audio_decoder::fuzz_limits(),
+                                                   trap_on_failure);
     return 0;
 }

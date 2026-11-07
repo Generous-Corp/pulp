@@ -56,16 +56,31 @@ pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
 pulp_add_test_suite(pulp-test-format-registry-limits GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
-# Coverage-guided lane over every registered reader. Off by default; the
-# timeline manifest, included earlier, proves the libFuzzer runtime exists
-# before this block is reached.
+# Deterministic replay of the audio decoder seed corpus through the oracle the
+# libFuzzer target shares (test/fuzz/audio_decoder_fuzz_oracle.hpp). Runs on
+# the required gate; it is the one lane that reaches the platform CoreAudio
+# reader, which the fuzzer excludes, and it holds the CHOC-vs-dr_wav WAV
+# differential.
+pulp_add_test_suite(pulp-test-audio-decoder-corpus LIBRARIES pulp::audio
+    LABELS fuzz audio)
+pulp_test_data(pulp-test-audio-decoder-corpus PATHS test/fixtures/fuzz/audio-decoder)
+
+# Developer-lane dump for the quality lab's libsndfile differential
+# (tools/audio/quality-lab/tests/test_decoder_differential.py): one file in,
+# a JSON header plus raw float32 interleaved samples out. Built with the tests,
+# never a ctest of its own.
+add_executable(pulp-audio-decode-dump fuzz/audio_decode_dump_main.cpp)
+target_link_libraries(pulp-audio-decode-dump PRIVATE pulp::audio)
+
+# Coverage-guided lane over the WAV, AIFF, FLAC, MP3 and Ogg Vorbis readers,
+# one reader per input. Off by default; the timeline manifest, included
+# earlier, proves the libFuzzer runtime exists before this block is reached.
 if(PULP_ENABLE_FUZZING)
-    add_executable(pulp-fuzz-format-registry
-        fuzz/format_registry_fuzz_target.cpp)
-    target_link_libraries(pulp-fuzz-format-registry PRIVATE pulp::audio)
-    target_compile_options(pulp-fuzz-format-registry PRIVATE
-        -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
-    target_link_options(pulp-fuzz-format-registry PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS})
+    pulp_add_libfuzzer_target(pulp-fuzz-audio-decoder
+        SOURCES fuzz/audio_decoder_fuzz_target.cpp
+        LIBRARIES pulp::audio
+        CORPUS "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fuzz/audio-decoder"
+        MAX_LEN 262144)
 endif()
 
 # Impulse-response loading. The PCM entry point is fed by UNTRUSTED, already-
