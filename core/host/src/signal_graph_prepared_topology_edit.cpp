@@ -2735,6 +2735,7 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
     // private candidate. The owner's authoring graph and live publication remain
     // unchanged unless the candidate succeeds and commit() is called.
     GraphMutationLock owner_lock(*owner_);
+    try {
     if (owner_->refuse_spectral_mutation_())
         return last_result_ = Result::PreflightFailed;
     if (!base_is_current_locked_() || owner_->in_swap_edit_)
@@ -2851,6 +2852,15 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
     }
 
     return last_result_ = Result::Prepared;
+    } catch (const std::bad_alloc&) {
+        if (!rollback_quiesced_lifecycles_locked_())
+            return last_result_ = Result::QuiescedRollbackFailed;
+        return last_result_ = Result::PreflightFailed;
+    } catch (...) {
+        if (!rollback_quiesced_lifecycles_locked_())
+            return last_result_ = Result::QuiescedRollbackFailed;
+        return last_result_ = Result::PreflightFailed;
+    }
 }
 
 SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::commit() {
