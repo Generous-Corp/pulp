@@ -41,6 +41,41 @@ struct GraphRuntimeAudioEdgeProbe {
     std::uint64_t timestamp_samples = 0;
 };
 
+// One source audio -> destination parameter observation. The source buffer is
+// sampled at the same control-rate mapping used by the automation gather, so
+// the report is the value delivered to the destination parameter, not a
+// second approximation made by the diagnostic surface.
+struct GraphRuntimeControlEdgeProbe {
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
+                  std::atomic<bool>::is_always_lock_free);
+    graph::GraphRuntimeProbe<> samples;
+    std::uint32_t source_index = 0;
+    std::uint32_t source_port = 0;
+    std::uint32_t destination_index = 0;
+    std::uint32_t parameter_id = 0;
+    std::uint32_t edge_index = 0;
+    std::uint64_t timestamp_samples = 0;
+};
+
+// One MIDI/event edge observation. The bounded sample carries the event count
+// and the first event's status/offset; event payloads remain in the graph's
+// existing bounded MIDI buffers and are never copied into the probe ring.
+struct GraphRuntimeEventEdgeProbe {
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
+                  std::atomic<bool>::is_always_lock_free);
+    graph::GraphRuntimeProbe<> samples;
+    std::uint32_t source_index = 0;
+    std::uint32_t destination_index = 0;
+    std::uint32_t edge_index = 0;
+    std::uint64_t timestamp_samples = 0;
+};
+
+struct GraphRuntimeEdgeProbeSet {
+    GraphRuntimeAudioEdgeProbe* audio = nullptr;
+    GraphRuntimeControlEdgeProbe* control = nullptr;
+    GraphRuntimeEventEdgeProbe* event = nullptr;
+};
+
 enum class AudioRateModulationDelivery : std::uint8_t {
     LegacyParameterEvents = 0,
     DenseViews = 1,
@@ -817,7 +852,8 @@ public:
                    GraphRuntimeCommandHandler command_handler = {},
                    GraphRuntimeEventSink event_sink = {},
                    std::span<const std::uint8_t> skip_mask = {},
-                   GraphRuntimeAudioEdgeProbe* audio_probe = nullptr) noexcept;
+                   GraphRuntimeAudioEdgeProbe* audio_probe = nullptr,
+                   GraphRuntimeEdgeProbeSet* edge_probes = nullptr) noexcept;
 
     // `skip_mask` (optional, indexed by dense node index; empty = run everything):
     // a non-zero entry means "do not run this node — its output slots are already

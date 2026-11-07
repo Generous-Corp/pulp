@@ -564,6 +564,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
         NodeId destination = 0;
         PortIndex source_port = 0;
         PortIndex destination_port = 0;
+        std::uint32_t parameter_id = 0;
     };
     // One ordinary audio edge, observed at its source before PDC/mixing. Attach
     // and detach are control-thread lifecycle operations: stop process() and
@@ -580,6 +581,27 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::uint64_t audio_edge_probe_dropped() const;
     EdgeProbeStatus audio_edge_probe_status() const;
     EdgeProbeIdentity audio_edge_probe_identity() const;
+    // Control probes observe one prepared automation edge after source mapping
+    // and slew, before the destination consumes the parameter events. The
+    // destination is identified by NodeId + public parameter id because
+    // automation edges do not have a destination audio port.
+    EdgeProbeStatus attach_control_edge_probe(const PortHandle& source, NodeId destination,
+                                              std::uint32_t parameter_id);
+    void detach_control_edge_probe();
+    bool read_control_edge_probe(graph::GraphRuntimeProbeSample& sample);
+    std::uint64_t control_edge_probe_dropped() const;
+    EdgeProbeStatus control_edge_probe_status() const;
+    EdgeProbeIdentity control_edge_probe_identity() const;
+    // Event probes observe one bounded MIDI edge after source publication and
+    // before destination consumption. Only the count and first event metadata
+    // are copied into the fixed-size probe record.
+    EdgeProbeStatus attach_event_edge_probe(const PortHandle& source,
+                                            const PortHandle& destination);
+    void detach_event_edge_probe();
+    bool read_event_edge_probe(graph::GraphRuntimeProbeSample& sample);
+    std::uint64_t event_edge_probe_dropped() const;
+    EdgeProbeStatus event_edge_probe_status() const;
+    EdgeProbeIdentity event_edge_probe_identity() const;
     std::vector<NodeLoadReport> node_loads() const;
     // true times nodes before any read; false stops until the next node_loads().
     void set_node_load_monitoring(bool enabled) noexcept;
@@ -1345,6 +1367,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
         RoutedPaths routed;
         std::unique_ptr<format::GraphRuntimeAudioEdgeProbe> audio_edge_probe;
         EdgeProbeIdentity audio_edge_probe_identity;
+        std::unique_ptr<format::GraphRuntimeControlEdgeProbe> control_edge_probe;
+        EdgeProbeIdentity control_edge_probe_identity;
+        std::unique_ptr<format::GraphRuntimeEventEdgeProbe> event_edge_probe;
+        EdgeProbeIdentity event_edge_probe_identity;
 
         // Anticipative rendering for this snapshot (built only when anticipation is
         // enabled at compile time AND the routed plan has an eligible latent
