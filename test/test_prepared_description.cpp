@@ -80,7 +80,8 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
         "{\"assets\":{},\"edges\":{},\"interfaces\":[{\"channels\":[\"L\",\"R\"],\"kind\":"
         "\"audio\",\"role\":\"input\"},{\"channels\":[\"L\",\"R\"],\"kind\":\"audio\",\"role\":"
         "\"output\"}],\"nodes\":{\"input\":{\"kind\":\"audio_input\"},\"gain_a\":{\"kind\":"
-        "\"gain\"},\"gain_b\":{\"kind\":\"gain\"},\"output\":{\"kind\":\"audio_output\"}},"
+        "\"gain\"},\"gain_b\":{\"config\":{\"gain\":\"f32:3f800000\"},\"kind\":\"gain\"},"
+        "\"output\":{\"kind\":\"audio_output\"}},"
         "\"policies\":{},\"profile\":\"pulp.graph.identity.v1\"}",
         binding);
     INFO(prepared_description_refusal_name(bound.refusal));
@@ -123,7 +124,8 @@ TEST_CASE("D4 rejects a swapped authored channel") {
                 "{\"assets\":{},\"edges\":{},\"interfaces\":[{\"channels\":[\"L\",\"R\"],\"kind\":"
                 "\"audio\",\"role\":\"input\"},{\"channels\":[\"L\",\"R\"],\"kind\":\"audio\","
                 "\"role\":\"output\"}],\"nodes\":{\"input\":{\"kind\":\"audio_input\"},\"gain_a\":{"
-                "\"kind\":\"gain\"},\"gain_b\":{\"kind\":\"gain\"},\"output\":{\"kind\":\"audio_"
+                "\"kind\":\"gain\"},\"gain_b\":{\"config\":{\"gain\":\"f32:3f800000\"},\"kind\":"
+                "\"gain\"},\"output\":{\"kind\":\"audio_"
                 "output\"}},\"policies\":{},\"profile\":\"pulp.graph.identity.v1\"}",
                 binding)
             .refusal == PreparedDescriptionRefusal::AuthoredBindingMismatch);

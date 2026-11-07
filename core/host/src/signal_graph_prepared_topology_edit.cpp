@@ -16,6 +16,7 @@
 #include <pulp/host/detail/prepared_lifecycle_ownership.hpp>
 #include <pulp/host/sample_region_plan.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <choc/text/choc_JSON.h>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -49,6 +50,15 @@ bool valid_authored_payload(std::string_view payload, bool empty) {
                payload.find("\"interfaces\":[]") != std::string_view::npos;
     return payload.find("\"nodes\":{}") == std::string_view::npos &&
            payload.find("\"interfaces\":[") != std::string_view::npos;
+}
+
+bool canonical_payload_object(std::string_view payload, choc::value::Value& root) {
+    try {
+        root = choc::json::parse(std::string(payload));
+        return root.isObject();
+    } catch (...) {
+        return false;
+    }
 }
 
 std::vector<std::string> authored_channels(std::string_view payload) {
@@ -249,12 +259,18 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
     if (!valid_authored_payload(canonical_semantic_payload, nodes.empty()))
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    choc::value::Value authored_root;
+    if (!canonical_payload_object(canonical_semantic_payload, authored_root) ||
+        !authored_root["nodes"].isObject() || !authored_root["interfaces"].isArray())
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
     const auto channel_names = authored_channels(canonical_semantic_payload);
     if (!nodes.empty() && channel_names.size() != 2)
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::UnsupportedPreparedProfile);
-    const std::string digest_preimage =
-        "pulp.graph.semantic.v1\0" + std::string(canonical_semantic_payload);
+    std::string digest_preimage{"pulp.graph.semantic.v1", 20};
+    digest_preimage.push_back('\0');
+    digest_preimage.append(canonical_semantic_payload.data(), canonical_semantic_payload.size());
     result->semantic_digest = runtime::sha256_hex(digest_preimage);
     if (nodes.empty()) {
         if (!bindings.nodes.empty() || !bindings.channels.empty() || !bindings.interfaces.empty())
@@ -309,8 +325,10 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
         if (keys.find(node.id) == keys.end())
             return PreparedDescriptionResult::refused(
                 PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    const auto authored_nodes = authored_root["nodes"];
     for (const auto& [id, key] : keys) {
-        if (canonical_semantic_payload.find("\"" + key + "\"") == std::string_view::npos)
+        const auto authored_node = authored_nodes[key];
+        if (!authored_node.isObject() || !authored_node.hasObjectMember("kind"))
             return PreparedDescriptionResult::refused(
                 PreparedDescriptionRefusal::AuthoredBindingMismatch);
         const auto node = std::find_if(nodes.begin(), nodes.end(),
@@ -329,9 +347,15 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
         default:
             break;
         }
-        if (canonical_semantic_payload.find("\"kind\":\"" + kind + "\"") == std::string_view::npos)
+        if (!authored_node["kind"].isString() || authored_node["kind"].getString() != kind)
             return PreparedDescriptionResult::refused(
                 PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        if (node->type == NodeType::Gain) {
+            const auto config = authored_node["config"];
+            if (!config.isObject() || !config["gain"].isString())
+                return PreparedDescriptionResult::refused(
+                    PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        }
     }
 
     std::unordered_set<std::string> channel_keys;
