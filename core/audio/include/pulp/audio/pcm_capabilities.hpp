@@ -2,11 +2,10 @@
 
 /// @file pcm_capabilities.hpp
 /// Turns what a PCM driver reports (rate range, channel range, period range)
-/// into the lists a `DeviceInfo` carries. The conversion is plain arithmetic
+/// into the lists a `DeviceInfo` carries. Deliberately free of the device header
+/// so it adds nothing to that header's include fan-out. The conversion is plain arithmetic
 /// on numbers, so it lives apart from any platform audio API and can be tested
 /// on every host.
-
-#include <pulp/audio/device.hpp>
 
 #include <algorithm>
 #include <array>
@@ -111,42 +110,50 @@ std::vector<T> intersect_sorted(const std::vector<T>& a, const std::vector<T>& b
 }
 } // namespace detail
 
-/// Fill the capability fields of `info` from the probed directions. A device
-/// opened for both directions must run one rate and one buffer size on both,
-/// so the lists are the intersection of the directions that probed. Channel
-/// counts are per direction. When neither direction could be probed (device
-/// busy, or no audio hardware) a conservative default list is reported so
-/// callers never see an empty one.
-inline void fill_device_info_from_capabilities(DeviceInfo& info,
-                                               const std::optional<PcmCapabilities>& playback,
-                                               const std::optional<PcmCapabilities>& capture) {
+/// The lists and channel counts a `DeviceInfo` carries for one device.
+struct PcmDeviceSummary {
+    std::vector<double> sample_rates;
+    std::vector<int> buffer_sizes;
+    int max_input_channels = 0;
+    int max_output_channels = 0;
+};
+
+/// Summarise the probed directions. A device opened for both directions must
+/// run one rate and one buffer size on both, so the lists are the intersection
+/// of the directions that probed. Channel counts are per direction. When
+/// neither direction could be probed (device busy, or no audio hardware) a
+/// conservative default list is reported so callers never see an empty one.
+inline PcmDeviceSummary summarize_pcm_capabilities(const std::optional<PcmCapabilities>& playback,
+                                                   const std::optional<PcmCapabilities>& capture) {
     auto usable = [](const std::optional<PcmCapabilities>& c) {
         return c && c->channels_max > 0 && c->channels_min <= c->channels_max;
     };
     const bool has_play = usable(playback);
     const bool has_cap = usable(capture);
 
+    PcmDeviceSummary out;
     if (!has_play && !has_cap) {
-        info.max_output_channels = 2;
-        info.max_input_channels = 2;
-        info.sample_rates = {44100, 48000, 88200, 96000};
-        info.buffer_sizes = {64, 128, 256, 512, 1024, 2048, 4096};
-        return;
+        out.max_output_channels = 2;
+        out.max_input_channels = 2;
+        out.sample_rates = {44100, 48000, 88200, 96000};
+        out.buffer_sizes = {64, 128, 256, 512, 1024, 2048, 4096};
+        return out;
     }
 
-    info.max_output_channels = has_play ? static_cast<int>(playback->channels_max) : 0;
-    info.max_input_channels = has_cap ? static_cast<int>(capture->channels_max) : 0;
+    out.max_output_channels = has_play ? static_cast<int>(playback->channels_max) : 0;
+    out.max_input_channels = has_cap ? static_cast<int>(capture->channels_max) : 0;
 
     if (has_play && has_cap) {
-        info.sample_rates =
+        out.sample_rates =
             detail::intersect_sorted(sample_rates_from(*playback), sample_rates_from(*capture));
-        info.buffer_sizes =
+        out.buffer_sizes =
             detail::intersect_sorted(buffer_sizes_from(*playback), buffer_sizes_from(*capture));
     } else {
         const auto& only = has_play ? *playback : *capture;
-        info.sample_rates = sample_rates_from(only);
-        info.buffer_sizes = buffer_sizes_from(only);
+        out.sample_rates = sample_rates_from(only);
+        out.buffer_sizes = buffer_sizes_from(only);
     }
+    return out;
 }
 
 } // namespace pulp::audio

@@ -102,22 +102,19 @@ TEST_CASE("buffer_sizes_from reports a fixed period even if not a power of two",
 }
 
 TEST_CASE("DeviceInfo takes channel counts per direction", "[audio][pcm]") {
-    DeviceInfo info;
     auto play = usb_interface();
     play.channels_max = 8;
     auto cap = usb_interface();
     cap.channels_max = 2;
-    fill_device_info_from_capabilities(info, play, cap);
+    const auto info = summarize_pcm_capabilities(play, cap);
     REQUIRE(info.max_output_channels == 8);
     REQUIRE(info.max_input_channels == 2);
 
-    DeviceInfo out_only;
-    fill_device_info_from_capabilities(out_only, play, std::nullopt);
+    const auto out_only = summarize_pcm_capabilities(play, std::nullopt);
     REQUIRE(out_only.max_output_channels == 8);
     REQUIRE(out_only.max_input_channels == 0);
 
-    DeviceInfo in_only;
-    fill_device_info_from_capabilities(in_only, std::nullopt, cap);
+    const auto in_only = summarize_pcm_capabilities(std::nullopt, cap);
     REQUIRE(in_only.max_output_channels == 0);
     REQUIRE(in_only.max_input_channels == 2);
 }
@@ -127,8 +124,7 @@ TEST_CASE("DeviceInfo lists for a duplex device are what both directions support
     auto cap = usb_interface();
     cap.accepted_rates = {44100, 48000};
     cap.period_max = 1024;
-    DeviceInfo info;
-    fill_device_info_from_capabilities(info, play, cap);
+    const auto info = summarize_pcm_capabilities(play, cap);
     REQUIRE(info.sample_rates == std::vector<double>{44100, 48000});
     REQUIRE(info.buffer_sizes.back() == 1024);
     REQUIRE(info.buffer_sizes.front() == 32);
@@ -136,22 +132,19 @@ TEST_CASE("DeviceInfo lists for a duplex device are what both directions support
 
 TEST_CASE("DeviceInfo uses a conservative default only when nothing could be probed",
           "[audio][pcm]") {
-    DeviceInfo info;
-    fill_device_info_from_capabilities(info, std::nullopt, std::nullopt);
+    const auto info = summarize_pcm_capabilities(std::nullopt, std::nullopt);
     REQUIRE_FALSE(info.sample_rates.empty());
     REQUIRE_FALSE(info.buffer_sizes.empty());
     REQUIRE(info.max_output_channels == 2);
 
     // A probe that found zero channels counts as not probed.
     PcmCapabilities none;
-    DeviceInfo zero;
-    fill_device_info_from_capabilities(zero, none, none);
+    const auto zero = summarize_pcm_capabilities(none, none);
     REQUIRE(zero.max_output_channels == 2);
 
     // A real device is not given the default list.
-    DeviceInfo real;
     auto only_48 = usb_interface();
     only_48.accepted_rates = {48000};
-    fill_device_info_from_capabilities(real, only_48, std::nullopt);
+    const auto real = summarize_pcm_capabilities(only_48, std::nullopt);
     REQUIRE(real.sample_rates == std::vector<double>{48000});
 }

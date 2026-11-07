@@ -124,9 +124,13 @@ std::optional<PcmCapabilities> probe_pcm_capabilities(const std::string& id,
 
 // Fill rates, buffer sizes and channel counts for a device id from the driver.
 void fill_probed_capabilities(DeviceInfo& info) {
-    fill_device_info_from_capabilities(info,
-                                       probe_pcm_capabilities(info.id, SND_PCM_STREAM_PLAYBACK),
-                                       probe_pcm_capabilities(info.id, SND_PCM_STREAM_CAPTURE));
+    const auto summary =
+        summarize_pcm_capabilities(probe_pcm_capabilities(info.id, SND_PCM_STREAM_PLAYBACK),
+                                   probe_pcm_capabilities(info.id, SND_PCM_STREAM_CAPTURE));
+    info.sample_rates = summary.sample_rates;
+    info.buffer_sizes = summary.buffer_sizes;
+    info.max_input_channels = summary.max_input_channels;
+    info.max_output_channels = summary.max_output_channels;
 }
 
 } // namespace
@@ -385,8 +389,7 @@ DeviceInfo AlsaDevice::info() const {
         info.buffer_sizes = buffer_sizes_from(*caps);
     }
     if (info.sample_rates.empty() || info.buffer_sizes.empty()) {
-        DeviceInfo fallback;
-        fill_device_info_from_capabilities(fallback, std::nullopt, std::nullopt);
+        const auto fallback = summarize_pcm_capabilities(std::nullopt, std::nullopt);
         if (info.sample_rates.empty())
             info.sample_rates = fallback.sample_rates;
         if (info.buffer_sizes.empty())
