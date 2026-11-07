@@ -30,7 +30,9 @@ struct LearnResult {
 
 namespace detail {
 
-constexpr bool in_range(uint8_t v, uint8_t lo, uint8_t hi) { return v >= lo && v <= hi; }
+constexpr bool in_range(uint8_t v, uint8_t lo, uint8_t hi) {
+    return v >= lo && v <= hi;
+}
 
 /// Relative-encoder detection for one 7-bit CC's values. Relative encoders
 /// send small tick counts, so their values cluster at the edges of a
@@ -40,7 +42,8 @@ inline LearnResult classify_cc7_values(std::span<const uint8_t> v, LearnResult b
     constexpr std::size_t kMinEvents = 3;
     base.mode = RelativeMode::absolute;
     base.confidence = v.size() >= 2 ? 0.6f : 0.5f;
-    if (v.size() < kMinEvents) return base;
+    if (v.size() < kMinEvents)
+        return base;
 
     bool twos = true, signed_bit = true, offset = true;
     bool low = false, high = false, up65 = false, down48 = false;
@@ -59,16 +62,30 @@ inline LearnResult classify_cc7_values(std::span<const uint8_t> v, LearnResult b
     }
 
     // Both directions seen under one convention: strong evidence.
-    if (twos && low && high) { base.mode = RelativeMode::twos_complement; base.confidence = 0.95f; return base; }
-    if (signed_bit && low && up65) { base.mode = RelativeMode::signed_bit; base.confidence = 0.95f; return base; }
-    if (offset && down48 && up65) { base.mode = RelativeMode::binary_offset; base.confidence = 0.95f; return base; }
+    if (twos && low && high) {
+        base.mode = RelativeMode::twos_complement;
+        base.confidence = 0.95f;
+        return base;
+    }
+    if (signed_bit && low && up65) {
+        base.mode = RelativeMode::signed_bit;
+        base.confidence = 0.95f;
+        return base;
+    }
+    if (offset && down48 && up65) {
+        base.mode = RelativeMode::binary_offset;
+        base.confidence = 0.95f;
+        return base;
+    }
 
     // One direction only: an absolute pot sweeping slowly through the same
     // values would look identical, but it ramps through distinct values while
     // an encoder repeats the same tick. Require mostly-repeated values.
     std::size_t repeats = 0;
-    for (std::size_t i = 1; i < v.size(); ++i) repeats += (v[i] == v[i - 1]);
-    if (repeats * 2 < v.size() - 1) return base;
+    for (std::size_t i = 1; i < v.size(); ++i)
+        repeats += (v[i] == v[i - 1]);
+    if (repeats * 2 < v.size() - 1)
+        return base;
 
     if (twos && (low != high)) {
         base.mode = RelativeMode::twos_complement;
@@ -119,7 +136,8 @@ inline LearnResult classify_learn_sequence(std::span<const RawMidi> burst) {
     bool have_primary = false;
     for (const auto& m : burst) {
         DecodedMidi s;
-        if (!decode_simple(m, s, /*include_data_entry_ccs=*/false)) continue;
+        if (!decode_simple(m, s, /*include_data_entry_ccs=*/false))
+            continue;
         if (!have_primary) {
             have_primary = true;
             out.valid = true;
@@ -128,7 +146,8 @@ inline LearnResult classify_learn_sequence(std::span<const RawMidi> burst) {
             break;
         }
     }
-    if (!have_primary) return out;
+    if (!have_primary)
+        return out;
 
     if (out.source.kind == MidiSourceKind::cc7) {
         uint8_t values[64];
@@ -160,7 +179,9 @@ struct TakeoverState {
     float last_input = 0.0f;
 };
 
-inline void takeover_reset(TakeoverState& s) { s = {}; }
+inline void takeover_reset(TakeoverState& s) {
+    s = {};
+}
 
 struct TakeoverResult {
     bool apply = false;
@@ -169,8 +190,8 @@ struct TakeoverResult {
 
 /// One controller move: `input` and `current` are normalized [0, 1].
 /// `epsilon` is the distance regarded as "reached".
-inline TakeoverResult takeover_step(TakeoverMode mode, TakeoverState& s, float input,
-                                    float current, float epsilon = 0.02f) {
+inline TakeoverResult takeover_step(TakeoverMode mode, TakeoverState& s, float input, float current,
+                                    float epsilon = 0.02f) {
     input = std::clamp(input, 0.0f, 1.0f);
     current = std::clamp(current, 0.0f, 1.0f);
     if (mode == TakeoverMode::jump) {
@@ -185,12 +206,14 @@ inline TakeoverResult takeover_step(TakeoverMode mode, TakeoverState& s, float i
     s.has_last = true;
     s.last_input = input;
 
-    if (s.engaged) return {true, input};
+    if (s.engaged)
+        return {true, input};
     if (std::fabs(input - current) <= epsilon) {
         s.engaged = true;
         return {true, input};
     }
-    if (!had_last) return {false, 0.0f};
+    if (!had_last)
+        return {false, 0.0f};
 
     if (mode == TakeoverMode::pickup) {
         // Crossed the parameter between the last and this position.
@@ -208,12 +231,15 @@ inline TakeoverResult takeover_step(TakeoverMode mode, TakeoverState& s, float i
     float ratio = 1.0f;
     if (delta > 0.0f) {
         const float room_in = 1.0f - last;
-        if (room_in > 1e-6f) ratio = (1.0f - current) / room_in;
+        if (room_in > 1e-6f)
+            ratio = (1.0f - current) / room_in;
     } else if (delta < 0.0f) {
-        if (last > 1e-6f) ratio = current / last;
+        if (last > 1e-6f)
+            ratio = current / last;
     }
     const float out = std::clamp(current + delta * ratio, 0.0f, 1.0f);
-    if (std::fabs(input - out) <= epsilon) s.engaged = true;
+    if (std::fabs(input - out) <= epsilon)
+        s.engaged = true;
     return {true, out};
 }
 

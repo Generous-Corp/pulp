@@ -62,16 +62,30 @@ struct MidiSourceHash {
 inline std::string label(const MidiSource& s) {
     std::string out;
     switch (s.kind) {
-    case MidiSourceKind::cc7: out = "CC " + std::to_string(s.number); break;
+    case MidiSourceKind::cc7:
+        out = "CC " + std::to_string(s.number);
+        break;
     case MidiSourceKind::cc14:
         out = "CC " + std::to_string(s.number) + "/" + std::to_string(s.number + 32) + " (14-bit)";
         break;
-    case MidiSourceKind::nrpn: out = "NRPN " + std::to_string(s.number); break;
-    case MidiSourceKind::rpn: out = "RPN " + std::to_string(s.number); break;
-    case MidiSourceKind::pitch_bend: out = "Pitch Bend"; break;
-    case MidiSourceKind::channel_pressure: out = "Pressure"; break;
-    case MidiSourceKind::poly_pressure: out = "Poly Pressure note " + std::to_string(s.number); break;
-    case MidiSourceKind::program_change: out = "Program " + std::to_string(s.number); break;
+    case MidiSourceKind::nrpn:
+        out = "NRPN " + std::to_string(s.number);
+        break;
+    case MidiSourceKind::rpn:
+        out = "RPN " + std::to_string(s.number);
+        break;
+    case MidiSourceKind::pitch_bend:
+        out = "Pitch Bend";
+        break;
+    case MidiSourceKind::channel_pressure:
+        out = "Pressure";
+        break;
+    case MidiSourceKind::poly_pressure:
+        out = "Poly Pressure note " + std::to_string(s.number);
+        break;
+    case MidiSourceKind::program_change:
+        out = "Program " + std::to_string(s.number);
+        break;
     }
     out += s.channel == MidiSource::kOmni ? " (any ch)" : " ch " + std::to_string(s.channel + 1);
     return out;

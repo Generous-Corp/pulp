@@ -17,11 +17,14 @@ using Catch::Matchers::WithinAbs;
 
 namespace {
 
-RawMidi cc(uint8_t ch, uint8_t n, uint8_t v) { return {static_cast<uint8_t>(0xB0 | ch), n, v}; }
+RawMidi cc(uint8_t ch, uint8_t n, uint8_t v) {
+    return {static_cast<uint8_t>(0xB0 | ch), n, v};
+}
 
 std::vector<RawMidi> ccs(uint8_t ch, uint8_t n, std::initializer_list<int> values) {
     std::vector<RawMidi> out;
-    for (int v : values) out.push_back(cc(ch, n, static_cast<uint8_t>(v)));
+    for (int v : values)
+        out.push_back(cc(ch, n, static_cast<uint8_t>(v)));
     return out;
 }
 
@@ -58,7 +61,8 @@ TEST_CASE("decode_simple covers the stateless message kinds", "[state][midi-lear
     CHECK_FALSE(decode_simple(RawMidi{0xF8, 0, 0}, d));    // clock
 }
 
-TEST_CASE("decode_simple can leave data-entry CCs to the NRPN decoder", "[state][midi-learn][decode]") {
+TEST_CASE("decode_simple can leave data-entry CCs to the NRPN decoder",
+          "[state][midi-learn][decode]") {
     DecodedMidi d;
     for (uint8_t n : {6, 38, 96, 97, 98, 99, 100, 101}) {
         CHECK(decode_simple(cc(0, n, 1), d, true));
@@ -88,7 +92,8 @@ TEST_CASE("Cc14Decoder combines MSB and LSB", "[state][midi-learn][decode][cc14]
     CHECK_FALSE(dec.feed(cc(0, 64, 10), d)); // sustain, outside 0..63
 }
 
-TEST_CASE("Cc14Decoder tolerates LSB-first and keeps channels apart", "[state][midi-learn][decode][cc14]") {
+TEST_CASE("Cc14Decoder tolerates LSB-first and keeps channels apart",
+          "[state][midi-learn][decode][cc14]") {
     Cc14Decoder dec;
     DecodedMidi d;
 
@@ -129,7 +134,8 @@ TEST_CASE("NrpnDecoder reassembles selection and data entry", "[state][midi-lear
     CHECK(d.source.number == 1155);
 }
 
-TEST_CASE("NrpnDecoder forgets the data LSB when the selection changes", "[state][midi-learn][decode][nrpn]") {
+TEST_CASE("NrpnDecoder forgets the data LSB when the selection changes",
+          "[state][midi-learn][decode][nrpn]") {
     NrpnDecoder dec;
     DecodedMidi d;
     dec.feed(cc(1, 99, 0), d);
@@ -144,7 +150,8 @@ TEST_CASE("NrpnDecoder forgets the data LSB when the selection changes", "[state
     CHECK(d.max_raw == 127);
 }
 
-TEST_CASE("NrpnDecoder: RPN, null RPN, increment and decrement, per channel", "[state][midi-learn][decode][nrpn]") {
+TEST_CASE("NrpnDecoder: RPN, null RPN, increment and decrement, per channel",
+          "[state][midi-learn][decode][nrpn]") {
     NrpnDecoder dec;
     DecodedMidi d;
 
@@ -282,9 +289,10 @@ TEST_CASE("learn: relative encoders are detected per convention", "[state][midi-
     CHECK(r.mode == RelativeMode::absolute);
 }
 
-TEST_CASE("learn: only the first controller in the burst is considered", "[state][midi-learn][classify]") {
-    std::vector<RawMidi> burst{cc(0, 21, 1), cc(0, 21, 1), cc(0, 99, 5), cc(0, 21, 127),
-                               cc(0, 22, 64), cc(0, 21, 1)};
+TEST_CASE("learn: only the first controller in the burst is considered",
+          "[state][midi-learn][classify]") {
+    std::vector<RawMidi> burst{cc(0, 21, 1),   cc(0, 21, 1),  cc(0, 99, 5),
+                               cc(0, 21, 127), cc(0, 22, 64), cc(0, 21, 1)};
     // The 99 (NRPN select) alone completes nothing; notes and clock are skipped.
     burst.insert(burst.begin(), {RawMidi{0x90, 60, 100}, RawMidi{0xF8, 0, 0}});
     auto r = classify_learn_sequence(burst);
@@ -294,7 +302,8 @@ TEST_CASE("learn: only the first controller in the burst is considered", "[state
 }
 
 TEST_CASE("learn: 14-bit pairs, NRPN, RPN and the other kinds", "[state][midi-learn][classify]") {
-    auto r = classify_learn_sequence(std::vector<RawMidi>{cc(0, 1, 30), cc(0, 33, 12), cc(0, 1, 31)});
+    auto r =
+        classify_learn_sequence(std::vector<RawMidi>{cc(0, 1, 30), cc(0, 33, 12), cc(0, 1, 31)});
     REQUIRE(r.valid);
     CHECK(r.source == MidiSource{MidiSourceKind::cc14, 0, 1});
 
@@ -306,7 +315,8 @@ TEST_CASE("learn: 14-bit pairs, NRPN, RPN and the other kinds", "[state][midi-le
     r = classify_learn_sequence(std::vector<RawMidi>{cc(0, 1, 30), cc(0, 1, 31), cc(0, 1, 90)});
     CHECK(r.source == MidiSource{MidiSourceKind::cc7, 0, 1});
 
-    r = classify_learn_sequence(std::vector<RawMidi>{cc(1, 99, 1), cc(1, 98, 2), cc(1, 6, 50), cc(1, 38, 3)});
+    r = classify_learn_sequence(
+        std::vector<RawMidi>{cc(1, 99, 1), cc(1, 98, 2), cc(1, 6, 50), cc(1, 38, 3)});
     REQUIRE(r.valid);
     CHECK(r.source == MidiSource{MidiSourceKind::nrpn, 1, (1 << 7) | 2});
 
@@ -335,7 +345,8 @@ TEST_CASE("takeover jump applies immediately", "[state][midi-learn][takeover]") 
     CHECK_THAT(r.value, WithinAbs(0.9f, 1e-6f));
 }
 
-TEST_CASE("takeover pickup waits for the controller to reach the parameter", "[state][midi-learn][takeover]") {
+TEST_CASE("takeover pickup waits for the controller to reach the parameter",
+          "[state][midi-learn][takeover]") {
     TakeoverState s;
     // Parameter at 0.5, controller starts far below and sweeps up.
     CHECK_FALSE(takeover_step(TakeoverMode::pickup, s, 0.1f, 0.5f).apply); // first sight
@@ -388,7 +399,8 @@ TEST_CASE("takeover scale converges at the end of travel", "[state][midi-learn][
     CHECK_THAT(r.value, WithinAbs(0.4f, 1e-6f));
 }
 
-TEST_CASE("takeover scale handles downward travel and a parameter at the end stop", "[state][midi-learn][takeover]") {
+TEST_CASE("takeover scale handles downward travel and a parameter at the end stop",
+          "[state][midi-learn][takeover]") {
     TakeoverState s;
     float param = 0.2f;
     takeover_step(TakeoverMode::scale, s, 0.9f, param);

@@ -27,8 +27,12 @@ struct RawMidi {
     uint8_t data1 = 0;
     uint8_t data2 = 0;
 
-    constexpr uint8_t type() const { return status & 0xF0; }
-    constexpr uint8_t channel() const { return status & 0x0F; }
+    constexpr uint8_t type() const {
+        return status & 0xF0;
+    }
+    constexpr uint8_t channel() const {
+        return status & 0x0F;
+    }
 };
 
 /// A decoded controller value. `kind == step` carries a signed increment
@@ -38,13 +42,14 @@ struct DecodedMidi {
 
     Kind kind = Kind::absolute;
     MidiSource source{};
-    uint16_t raw = 0;      ///< Absolute raw value, 0..max_raw.
+    uint16_t raw = 0;       ///< Absolute raw value, 0..max_raw.
     uint16_t max_raw = 127; ///< 127 for 7-bit, 16383 for 14-bit.
-    int16_t step = 0;      ///< Signed increment when kind == step.
+    int16_t step = 0;       ///< Signed increment when kind == step.
 
     /// Position in [0, 1]. Zero for a step event.
     constexpr float normalized() const {
-        if (kind == Kind::step || max_raw == 0) return 0.0f;
+        if (kind == Kind::step || max_raw == 0)
+            return 0.0f;
         return static_cast<float>(raw) / static_cast<float>(max_raw);
     }
 };
@@ -77,7 +82,8 @@ constexpr bool decode_simple(const RawMidi& m, DecodedMidi& out,
     out.source.channel = m.channel();
     switch (m.type()) {
     case 0xB0:
-        if (!include_data_entry_ccs && is_data_entry_cc(m.data1)) return false;
+        if (!include_data_entry_ccs && is_data_entry_cc(m.data1))
+            return false;
         out.source.kind = MidiSourceKind::cc7;
         out.source.number = m.data1 & 0x7F;
         out.raw = m.data2 & 0x7F;
@@ -118,16 +124,19 @@ class Cc14Decoder {
     /// Feed one message. Returns true and fills `out` when it completed or
     /// updated a pair (the source is `cc14` with `number` = MSB controller).
     bool feed(const RawMidi& m, DecodedMidi& out) {
-        if (m.type() != 0xB0) return false;
+        if (m.type() != 0xB0)
+            return false;
         const uint8_t cc = m.data1 & 0x7F;
-        if (cc >= 64) return false;
+        if (cc >= 64)
+            return false;
         const bool is_lsb = cc >= 32;
         const uint8_t msb_cc = is_lsb ? static_cast<uint8_t>(cc - 32) : cc;
         Slot& s = slots_[m.channel()][msb_cc];
         if (is_lsb) {
             s.lsb = m.data2 & 0x7F;
             s.has_lsb = true;
-            if (!s.has_msb) return false;
+            if (!s.has_msb)
+                return false;
         } else {
             s.msb = m.data2 & 0x7F;
             s.has_msb = true;
@@ -144,7 +153,9 @@ class Cc14Decoder {
         return true;
     }
 
-    void reset() { slots_ = {}; }
+    void reset() {
+        slots_ = {};
+    }
 
   private:
     struct Slot {
@@ -168,32 +179,49 @@ class NrpnDecoder {
     /// increment/decrement completed against a selected parameter. Selection
     /// messages and data entry with nothing selected return false.
     bool feed(const RawMidi& m, DecodedMidi& out) {
-        if (m.type() != 0xB0) return false;
+        if (m.type() != 0xB0)
+            return false;
         Chan& c = chans_[m.channel()];
         const uint8_t v = m.data2 & 0x7F;
         switch (m.data1 & 0x7F) {
-        case kCcNrpnMsb: select(c, true, true, v); return false;
-        case kCcNrpnLsb: select(c, true, false, v); return false;
-        case kCcRpnMsb: select(c, false, true, v); return false;
-        case kCcRpnLsb: select(c, false, false, v); return false;
+        case kCcNrpnMsb:
+            select(c, true, true, v);
+            return false;
+        case kCcNrpnLsb:
+            select(c, true, false, v);
+            return false;
+        case kCcRpnMsb:
+            select(c, false, true, v);
+            return false;
+        case kCcRpnLsb:
+            select(c, false, false, v);
+            return false;
         case kCcDataEntryMsb:
-            if (!c.ready()) return false;
+            if (!c.ready())
+                return false;
             c.data_msb = v;
             c.has_msb = true;
             return emit_absolute(m.channel(), c, out);
         case kCcDataEntryLsb:
-            if (!c.ready()) return false;
+            if (!c.ready())
+                return false;
             c.data_lsb = v;
             c.has_lsb = true;
-            if (!c.has_msb) return false;
+            if (!c.has_msb)
+                return false;
             return emit_absolute(m.channel(), c, out);
-        case kCcDataIncrement: return emit_step(m.channel(), c, +1, v, out);
-        case kCcDataDecrement: return emit_step(m.channel(), c, -1, v, out);
-        default: return false;
+        case kCcDataIncrement:
+            return emit_step(m.channel(), c, +1, v, out);
+        case kCcDataDecrement:
+            return emit_step(m.channel(), c, -1, v, out);
+        default:
+            return false;
         }
     }
 
-    void reset() { chans_ = {}; }
+    void reset() {
+        chans_ = {};
+    }
 
   private:
     struct Chan {
@@ -207,8 +235,12 @@ class NrpnDecoder {
         bool has_msb = false;
         bool has_lsb = false;
 
-        bool ready() const { return has_sel_msb && has_sel_lsb; }
-        uint16_t number() const { return static_cast<uint16_t>((sel_msb << 7) | sel_lsb); }
+        bool ready() const {
+            return has_sel_msb && has_sel_lsb;
+        }
+        uint16_t number() const {
+            return static_cast<uint16_t>((sel_msb << 7) | sel_lsb);
+        }
     };
 
     static void select(Chan& c, bool nrpn, bool msb_half, uint8_t v) {
@@ -216,8 +248,13 @@ class NrpnDecoder {
             c.is_nrpn = nrpn;
             c.has_sel_msb = c.has_sel_lsb = false;
         }
-        if (msb_half) { c.sel_msb = v; c.has_sel_msb = true; }
-        else { c.sel_lsb = v; c.has_sel_lsb = true; }
+        if (msb_half) {
+            c.sel_msb = v;
+            c.has_sel_msb = true;
+        } else {
+            c.sel_lsb = v;
+            c.has_sel_lsb = true;
+        }
         c.has_msb = c.has_lsb = false;
         if (!nrpn && c.has_sel_msb && c.has_sel_lsb && c.sel_msb == 127 && c.sel_lsb == 127)
             c.has_sel_msb = c.has_sel_lsb = false; // null RPN deselects
@@ -237,7 +274,8 @@ class NrpnDecoder {
     }
 
     static bool emit_step(uint8_t ch, const Chan& c, int sign, uint8_t amount, DecodedMidi& out) {
-        if (!c.ready()) return false;
+        if (!c.ready())
+            return false;
         out = {};
         out.kind = DecodedMidi::Kind::step;
         out.source = {c.is_nrpn ? MidiSourceKind::nrpn : MidiSourceKind::rpn, ch, c.number()};
@@ -261,13 +299,16 @@ enum class RelativeMode : uint8_t {
 constexpr int decode_relative(RelativeMode mode, uint8_t raw) {
     raw &= 0x7F;
     switch (mode) {
-    case RelativeMode::twos_complement: return raw < 64 ? raw : static_cast<int>(raw) - 128;
+    case RelativeMode::twos_complement:
+        return raw < 64 ? raw : static_cast<int>(raw) - 128;
     case RelativeMode::signed_bit: {
         const int mag = raw & 0x3F;
         return (raw & 0x40) ? -mag : mag;
     }
-    case RelativeMode::binary_offset: return static_cast<int>(raw) - 64;
-    case RelativeMode::absolute: return 0;
+    case RelativeMode::binary_offset:
+        return static_cast<int>(raw) - 64;
+    case RelativeMode::absolute:
+        return 0;
     }
     return 0;
 }
@@ -281,7 +322,8 @@ struct RelativeConfig {
 /// Move `current` (normalized) by `ticks`, clamped to [0, 1]. Acceleration
 /// scales a burst of n ticks by `1 + acceleration * (n - 1)`.
 inline float apply_relative(float current, int ticks, const RelativeConfig& cfg = {}) {
-    if (ticks == 0) return std::clamp(current, 0.0f, 1.0f);
+    if (ticks == 0)
+        return std::clamp(current, 0.0f, 1.0f);
     const float n = static_cast<float>(std::abs(ticks));
     const float gain = 1.0f + std::max(0.0f, cfg.acceleration) * (n - 1.0f);
     const float delta = static_cast<float>(ticks) * cfg.step * gain;
