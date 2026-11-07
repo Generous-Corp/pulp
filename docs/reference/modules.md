@@ -22,6 +22,7 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 | Native handles | `native_handle.hpp` | Typed OS window/device handles for adapters |
 | Clipboard | `clipboard.hpp` | Cross-platform text clipboard access where implemented |
 | File dialogs | `file_dialog.hpp` | Native open/save panels where implemented |
+| Outbound file drag | `file_drag.hpp` | `begin_file_drag` drags existing files out of any native view (macOS: an NSDraggingSession) from inside a pointer-down or drag handler, offering copy and/or move with an optional drag image, and reports the destination's operation once on the main thread. `set_file_drag_recorder` records the request instead, so automation and tests can start a drag without a pointer event |
 | Popup menus | `popup_menu.hpp` | Native menu affordances for UI surfaces |
 | Main-thread work | `main_thread.hpp` | `MainThreadScope` posts work to the main thread from any thread, and `MainThreadTimer` gives one-shot or repeating millisecond timers. Both run in the common run-loop modes, so they keep running during menu tracking, live resize and modal panels, and nothing runs after the scope is destroyed. macOS and iOS; other platforms report `main_thread_supported() == false` |
 | Unique Objective-C classes | `objc_unique_class.hpp` | Registers Objective-C classes at run time under `<base>_<image token>`, so two Pulp binaries in one host process never share a class name and run each other's code. It adds methods from C functions and gives each instance a context slot. Apple platforms |

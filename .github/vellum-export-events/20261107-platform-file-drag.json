@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-platform-file-drag",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-08T01:00:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/platform/include/pulp/platform/file_drag.hpp",
+    "core/platform/platform/mac/file_drag_mac.mm",
+    "core/platform/src/file_drag.cpp",
+    "core/platform/src/file_drag_stub.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Adds begin_file_drag to the generic platform layer: an outbound drag of existing files from any NSView, offering copy and/or move, with an optional drag image and a once-only report of the destination's operation through a MainThreadScope, plus a recorder seam so automation and tests can start and observe a drag without a pointer event. Additive and free of view or render dependencies (the view layer's own drag is unchanged), so the next Vellum re-export of core/platform should carry it."
+}
