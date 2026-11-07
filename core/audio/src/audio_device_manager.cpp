@@ -102,6 +102,31 @@ AudioDeviceManager::~AudioDeviceManager() {
     // dispatches are no-ops, and `in_flight_` is guaranteed zero.
     latch_close();
 
+    // Stop MIDI input before anything the callbacks reach is torn down.
+    // Dispatches already no-op after the latch; closing waits for any
+    // callback still running inside a device.
+    {
+        pulp::midi::MidiSystem* system = nullptr;
+        bool installed = false;
+        {
+            std::lock_guard<std::mutex> lk(input_mu_);
+            system = midi_system_;
+            installed = midi_port_callback_installed_;
+            midi_system_ = nullptr;
+            midi_port_callback_installed_ = false;
+            settings_ = nullptr;
+        }
+        if (system && installed) system->set_port_change_callback(nullptr);
+        std::vector<EnabledInput> inputs;
+        {
+            std::lock_guard<std::mutex> lk(input_mu_);
+            inputs.swap(enabled_inputs_);
+        }
+        for (auto& in : inputs) {
+            if (in.device) in.device->close();
+        }
+    }
+
     // Detach from any bound AudioSystem so its callback can no longer
     // reach us. Equivalent to attach_audio_system(nullptr) without
     // the dispatch indirection.
@@ -537,34 +562,45 @@ void AudioDeviceManager::set_midi_endpoints(std::vector<MidiEndpoint> endpoints)
     {
         std::lock_guard<std::mutex> lk(midi_ep_mu_);
 
+        // Identity is direction plus id: an input and an output may share
+        // an id (WinMM numbers each list from zero).
+        auto key = [](const MidiEndpoint& ep) {
+            return std::string(ep.is_input ? "i:" : "o:") + ep.id;
+        };
         std::unordered_set<std::string> old_ids;
         old_ids.reserve(midi_endpoints_.size());
-        for (const auto& ep : midi_endpoints_) old_ids.insert(ep.id);
+        for (const auto& ep : midi_endpoints_) old_ids.insert(key(ep));
 
         std::unordered_set<std::string> new_ids;
         new_ids.reserve(endpoints.size());
-        for (const auto& ep : endpoints) new_ids.insert(ep.id);
+        for (const auto& ep : endpoints) new_ids.insert(key(ep));
 
         // Removals: in old, not in new.
         for (const auto& ep : midi_endpoints_) {
-            if (new_ids.find(ep.id) == new_ids.end()) {
+            if (new_ids.find(key(ep)) == new_ids.end()) {
                 changes.push_back({MidiEndpointChangeKind::Removed, ep});
             }
         }
         // Additions: in new, not in old.
         for (const auto& ep : endpoints) {
-            if (old_ids.find(ep.id) == old_ids.end()) {
+            if (old_ids.find(key(ep)) == old_ids.end()) {
                 changes.push_back({MidiEndpointChangeKind::Added, ep});
             }
         }
 
         midi_endpoints_ = std::move(endpoints);
+        endpoints_known_ = true;
     }
-
-    if (changes.empty()) return;
 
     DispatchGuard guard(this);
     if (!guard.entered()) return;
+
+    if (changes.empty()) {
+        // No delta, but an enabled input whose last open attempt failed
+        // (device busy) gets another try on every refresh.
+        reconcile_midi_inputs();
+        return;
+    }
 
     std::vector<MidiEndpointChangeHandler> handlers;
     {
@@ -576,12 +612,205 @@ void AudioDeviceManager::set_midi_endpoints(std::vector<MidiEndpoint> endpoints)
         if (!fn) continue;
         for (const auto& change : changes) fn(change);
     }
+    reconcile_midi_inputs();
 }
 
 std::vector<AudioDeviceManager::MidiEndpoint>
 AudioDeviceManager::midi_endpoints() const {
     std::lock_guard<std::mutex> lk(midi_ep_mu_);
     return midi_endpoints_;
+}
+
+// ── Enabled MIDI inputs and reconnection ────────────────────────────
+
+void AudioDeviceManager::attach_midi_system(pulp::midi::MidiSystem* system,
+                                            bool install_port_change_callback) {
+    pulp::midi::MidiSystem* previous = nullptr;
+    bool previous_installed = false;
+    {
+        std::lock_guard<std::mutex> lk(input_mu_);
+        previous = midi_system_;
+        previous_installed = midi_port_callback_installed_;
+        midi_system_ = system;
+        midi_port_callback_installed_ = system && install_port_change_callback;
+    }
+    if (previous && previous_installed && previous != system) {
+        previous->set_port_change_callback(nullptr);
+    }
+    if (!system) return;
+    if (install_port_change_callback) {
+        system->set_port_change_callback([this] { refresh_midi_endpoints(); });
+    }
+    refresh_midi_endpoints();
+}
+
+void AudioDeviceManager::refresh_midi_endpoints() {
+    DispatchGuard guard(this);
+    if (!guard.entered()) return;
+
+    pulp::midi::MidiSystem* system = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(input_mu_);
+        system = midi_system_;
+    }
+    if (!system) return;
+
+    std::vector<MidiEndpoint> endpoints;
+    for (auto& p : system->enumerate_inputs()) {
+        endpoints.push_back({std::move(p.id), std::move(p.name), true});
+    }
+    for (auto& p : system->enumerate_outputs()) {
+        endpoints.push_back({std::move(p.id), std::move(p.name), false});
+    }
+    set_midi_endpoints(std::move(endpoints));
+}
+
+void AudioDeviceManager::reconcile_midi_inputs() {
+    // Presence comes from the endpoint snapshot; copy it before taking
+    // input_mu_ so the two mutexes are never nested.
+    std::unordered_set<std::string> present_inputs;
+    bool known = false;
+    {
+        std::lock_guard<std::mutex> lk(midi_ep_mu_);
+        known = endpoints_known_;
+        for (const auto& ep : midi_endpoints_) {
+            if (ep.is_input) present_inputs.insert(ep.id);
+        }
+    }
+
+    std::lock_guard<std::mutex> lk(input_mu_);
+    if (!midi_system_ || closed_.load(std::memory_order_acquire)) return;
+    for (auto& in : enabled_inputs_) {
+        // Before the first snapshot nothing is known, so try to open and let
+        // the backend decide.
+        const bool present = !known || present_inputs.count(in.id) != 0;
+        if (!present) {
+            // Release the stale handle: the OS has already dropped the
+            // connection, and a reopen needs a fresh one.
+            if (in.device) {
+                in.device->close();
+                in.device.reset();
+            }
+            continue;
+        }
+        if (in.device && in.device->is_open()) continue;
+
+        auto device = midi_system_->create_input();
+        if (!device) continue;
+        const bool opened = device->open(in.id, [this](const pulp::midi::MidiEvent& e) {
+            dispatch_midi_event(e);
+        });
+        if (opened) in.device = std::move(device);
+        else in.device.reset();
+    }
+}
+
+bool AudioDeviceManager::set_midi_input_enabled(const std::string& id, bool enabled) {
+    if (id.empty() || is_closed()) return false;
+
+    std::unique_ptr<pulp::midi::MidiInput> to_close;
+    std::vector<std::string> snapshot;
+    pulp::state::ApplicationProperties* settings = nullptr;
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lk(input_mu_);
+        auto it = std::find_if(enabled_inputs_.begin(), enabled_inputs_.end(),
+                               [&](const EnabledInput& e) { return e.id == id; });
+        if (enabled && it == enabled_inputs_.end()) {
+            enabled_inputs_.push_back({id, nullptr});
+            changed = true;
+        } else if (!enabled && it != enabled_inputs_.end()) {
+            to_close = std::move(it->device);
+            enabled_inputs_.erase(it);
+            changed = true;
+        }
+        for (const auto& e : enabled_inputs_) snapshot.push_back(e.id);
+        settings = settings_;
+    }
+    if (to_close) to_close->close();
+    if (changed && settings) save_enabled_midi_inputs(*settings, snapshot);
+
+    if (!enabled) return false;
+    DispatchGuard guard(this);
+    if (guard.entered()) reconcile_midi_inputs();
+    return is_midi_input_open(id);
+}
+
+bool AudioDeviceManager::is_midi_input_enabled(const std::string& id) const {
+    std::lock_guard<std::mutex> lk(input_mu_);
+    return std::any_of(enabled_inputs_.begin(), enabled_inputs_.end(),
+                       [&](const EnabledInput& e) { return e.id == id; });
+}
+
+bool AudioDeviceManager::is_midi_input_open(const std::string& id) const {
+    std::lock_guard<std::mutex> lk(input_mu_);
+    for (const auto& e : enabled_inputs_) {
+        if (e.id == id) return e.device && e.device->is_open();
+    }
+    return false;
+}
+
+std::vector<std::string> AudioDeviceManager::enabled_midi_inputs() const {
+    std::lock_guard<std::mutex> lk(input_mu_);
+    std::vector<std::string> ids;
+    ids.reserve(enabled_inputs_.size());
+    for (const auto& e : enabled_inputs_) ids.push_back(e.id);
+    return ids;
+}
+
+void AudioDeviceManager::bind_settings(pulp::state::ApplicationProperties* props) {
+    std::vector<std::string> saved;
+    if (props) saved = load_enabled_midi_inputs(*props);
+    {
+        std::lock_guard<std::mutex> lk(input_mu_);
+        settings_ = props;
+        for (const auto& id : saved) {
+            const bool known = std::any_of(enabled_inputs_.begin(), enabled_inputs_.end(),
+                                           [&](const EnabledInput& e) { return e.id == id; });
+            if (!known) enabled_inputs_.push_back({id, nullptr});
+        }
+    }
+    DispatchGuard guard(this);
+    if (guard.entered()) reconcile_midi_inputs();
+}
+
+std::vector<std::string> AudioDeviceManager::load_enabled_midi_inputs(
+    const pulp::state::ApplicationProperties& props) {
+    std::vector<std::string> ids;
+    const auto value = props.user_settings().get_string(adm_keys::kEnabledMidiInputs);
+    if (!value) return ids;
+    std::size_t start = 0;
+    while (start <= value->size()) {
+        const auto end = value->find('\n', start);
+        const auto len = (end == std::string::npos ? value->size() : end) - start;
+        if (len > 0) {
+            auto id = value->substr(start, len);
+            if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(std::move(id));
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return ids;
+}
+
+bool AudioDeviceManager::save_enabled_midi_inputs(pulp::state::ApplicationProperties& props,
+                                                  const std::vector<std::string>& ids) {
+    auto& user = props.user_settings();
+    if (ids.empty()) {
+        user.remove(adm_keys::kEnabledMidiInputs);
+    } else {
+        std::string joined;
+        for (const auto& id : ids) {
+            if (!joined.empty()) joined += '\n';
+            joined += id;
+        }
+        user.set_string(adm_keys::kEnabledMidiInputs, joined);
+    }
+    if (user.path().empty()) {
+        const std::string dir = pulp::state::ApplicationProperties::user_settings_dir(props.app_name());
+        return user.save(dir + "/settings.json");
+    }
+    return user.save();
 }
 
 // ── Concurrent-callback shutdown ────────────────────────────────────

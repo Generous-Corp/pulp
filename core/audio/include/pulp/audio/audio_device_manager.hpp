@@ -21,6 +21,10 @@
 ///     default-device changes, sample-rate changes, and xruns.
 ///   - Tracks MIDI endpoint snapshots with `set_midi_endpoints()` and
 ///     dispatches `MidiEndpointChange` events on add/remove.
+///   - Keeps the user's enabled MIDI inputs open across disconnection:
+///     an enabled input that disappears is closed, and reopened by itself
+///     when an input with the same identifier returns. The enabled set is
+///     saved to the settings file; disabling an input removes it there.
 ///   - Makes shutdown explicit: `latch_close()` waits for in-flight
 ///     dispatches to return and turns later dispatch attempts into
 ///     no-ops.
@@ -73,6 +77,9 @@ constexpr const char* kSampleRate         = "audio_device_manager.sample_rate";
 constexpr const char* kBufferSize         = "audio_device_manager.buffer_size";
 constexpr const char* kOutputChannelMask  = "audio_device_manager.output_channel_mask";
 constexpr const char* kInputChannelMask   = "audio_device_manager.input_channel_mask";
+/// Newline-separated identifiers of the MIDI inputs the user enabled.
+/// Absent when none are enabled.
+constexpr const char* kEnabledMidiInputs  = "audio_device_manager.enabled_midi_inputs";
 }  // namespace adm_keys
 
 class AudioDeviceManager;
@@ -383,6 +390,59 @@ public:
     /// Current MIDI endpoint snapshot.
     std::vector<MidiEndpoint> midi_endpoints() const;
 
+    // ── Enabled MIDI inputs and reconnection ───────────────────────
+
+    /// Bind the MIDI system the manager enumerates and opens inputs on. The
+    /// manager snapshots the port list immediately and, when
+    /// `install_port_change_callback` is true, registers itself with
+    /// `MidiSystem::set_port_change_callback` so every plug or unplug
+    /// refreshes the snapshot. A system has one port-change slot: pass
+    /// false and call `refresh_midi_endpoints()` from your own callback when
+    /// something else owns it. The system must outlive the manager or be
+    /// detached with `attach_midi_system(nullptr)` first.
+    void attach_midi_system(pulp::midi::MidiSystem* system,
+                            bool install_port_change_callback = true);
+
+    /// Re-enumerate the attached system, publish the result through
+    /// `set_midi_endpoints()` and apply the reopen policy. Safe from any
+    /// thread, including a MIDI system's notification thread.
+    void refresh_midi_endpoints();
+
+    /// Enable or disable a MIDI input by identifier. Enabling records the
+    /// choice (and saves it when settings are bound), then opens the input if
+    /// it is present. Returns true when the input is open afterwards. An
+    /// enabled input that is not currently present stays enabled and opens as
+    /// soon as it appears. Disabling closes the input and removes it from the
+    /// saved settings. Incoming events from enabled inputs reach
+    /// `subscribe_midi()` subscribers, which must not call back into the
+    /// enable/disable API from the delivering thread (closing an input waits
+    /// for its callback to return).
+    bool set_midi_input_enabled(const std::string& id, bool enabled);
+
+    /// True when the user has enabled `id`, whether or not it is connected.
+    bool is_midi_input_enabled(const std::string& id) const;
+
+    /// True when `id` is enabled and currently open.
+    bool is_midi_input_open(const std::string& id) const;
+
+    /// Identifiers of every enabled input, in the order they were enabled.
+    std::vector<std::string> enabled_midi_inputs() const;
+
+    /// Load the saved enabled set from `props` and write every later change
+    /// to it. Inputs loaded here open as soon as they are present. Pass
+    /// nullptr to stop persisting. `props` must outlive the manager or be
+    /// unbound first, and is only touched from the thread that calls
+    /// `set_midi_input_enabled()` or `bind_settings()`.
+    void bind_settings(pulp::state::ApplicationProperties* props);
+
+    /// Read the saved enabled-input identifiers.
+    static std::vector<std::string> load_enabled_midi_inputs(
+        const pulp::state::ApplicationProperties& props);
+
+    /// Write the enabled-input identifiers; an empty list removes the key.
+    static bool save_enabled_midi_inputs(pulp::state::ApplicationProperties& props,
+                                         const std::vector<std::string>& ids);
+
     // ── Concurrent-callback shutdown ───────────────────────────────
 
     /// Latch the manager so subsequent dispatches are no-ops. Blocks
@@ -405,6 +465,7 @@ private:
     void unsubscribe_midi(uint64_t id) noexcept;
     void unsubscribe_device_change(uint64_t id) noexcept;
     void unsubscribe_midi_endpoint(uint64_t id) noexcept;
+    void reconcile_midi_inputs();
 
     // RAII guard used by every dispatcher; blocks latch_close() until
     // all in-flight dispatches return.
@@ -443,8 +504,23 @@ private:
     mutable std::mutex                                                midi_ep_mu_;
     std::unordered_map<uint64_t, MidiEndpointChangeHandler>           midi_ep_subs_;
     std::vector<MidiEndpoint>                                         midi_endpoints_;
+    bool                                                              endpoints_known_ = false;  ///< Guarded by midi_ep_mu_.
 
     AudioSystem*                                    attached_system_ = nullptr;
+
+    /// Enabled MIDI inputs. `input_mu_` serialises every open/close so a
+    /// plug event on a system thread cannot interleave with the user's
+    /// enable/disable on the UI thread. It is never held while subscriber
+    /// callbacks run, and device callbacks only take `midi_mu_`.
+    struct EnabledInput {
+        std::string                          id;
+        std::unique_ptr<pulp::midi::MidiInput> device;  ///< Null while disconnected.
+    };
+    mutable std::mutex                              input_mu_;
+    std::vector<EnabledInput>                       enabled_inputs_;
+    pulp::midi::MidiSystem*                         midi_system_ = nullptr;
+    bool                                            midi_port_callback_installed_ = false;
+    pulp::state::ApplicationProperties*             settings_ = nullptr;
 
     AudioProcessLoadMeasurer                     load_;
 

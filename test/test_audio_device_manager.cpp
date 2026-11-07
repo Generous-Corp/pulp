@@ -16,6 +16,7 @@
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/audio/audio_device_manager.hpp>
+#include <pulp/midi/mock_midi_system.hpp>
 #include <pulp/state/properties_file.hpp>
 #include <pulp/runtime/temporary_file.hpp>
 
@@ -846,4 +847,192 @@ TEST_CASE("AudioDeviceManager attach_audio_system bridges to device changes",
     mgr.attach_audio_system(nullptr);
     sys.simulate_device_list_change();
     REQUIRE(calls.load() == 2);
+}
+
+// ── Enabled MIDI inputs: disconnect, reconnect, persistence ─────────────
+
+namespace {
+
+struct InputHarness {
+    pulp::midi::MockMidiSystem system;
+    AudioDeviceManager mgr;
+    std::atomic<int> received{0};
+    MidiSubscriptionToken tok;
+
+    InputHarness() {
+        tok = mgr.subscribe_midi([this](const pulp::midi::MidiEvent&) { ++received; });
+    }
+    ~InputHarness() { mgr.attach_midi_system(nullptr); }
+};
+
+}  // namespace
+
+TEST_CASE("AudioDeviceManager reopens an enabled MIDI input after it reappears",
+          "[audio][audio-device-manager][midi-reconnect]") {
+    InputHarness h;
+    h.system.add_port("usb-1", "Pad");
+    h.mgr.attach_midi_system(&h.system);
+
+    REQUIRE(h.mgr.set_midi_input_enabled("usb-1", true));
+    REQUIRE(h.system.open_input_count("usb-1") == 1);
+    REQUIRE(h.system.inject("usb-1", pulp::midi::MidiEvent::note_on(0, 60, 100)) == 1);
+    REQUIRE(h.received == 1);
+
+    // Unplug: the stale handle is released but the input stays enabled.
+    h.system.remove_port("usb-1");
+    REQUIRE(h.system.open_input_count("usb-1") == 0);
+    REQUIRE(h.mgr.is_midi_input_enabled("usb-1"));
+    REQUIRE_FALSE(h.mgr.is_midi_input_open("usb-1"));
+
+    // Replug with the same identifier: reopened with no user action.
+    h.system.add_port("usb-1", "Pad");
+    REQUIRE(h.system.open_input_count("usb-1") == 1);
+    REQUIRE(h.mgr.is_midi_input_open("usb-1"));
+    REQUIRE(h.system.total_opens() == 2);
+    REQUIRE(h.system.inject("usb-1", pulp::midi::MidiEvent::note_on(0, 62, 100)) == 1);
+    REQUIRE(h.received == 2);
+}
+
+TEST_CASE("AudioDeviceManager opens an input enabled before it was connected",
+          "[audio][audio-device-manager][midi-reconnect]") {
+    InputHarness h;
+    h.mgr.attach_midi_system(&h.system);
+
+    REQUIRE_FALSE(h.mgr.set_midi_input_enabled("late", true));
+    REQUIRE(h.mgr.is_midi_input_enabled("late"));
+    REQUIRE(h.system.total_opens() == 0);
+
+    h.system.add_port("late", "Late Pad");
+    REQUIRE(h.mgr.is_midi_input_open("late"));
+}
+
+TEST_CASE("AudioDeviceManager does not open a disabled input that reappears",
+          "[audio][audio-device-manager][midi-reconnect]") {
+    InputHarness h;
+    h.system.add_port("a", "A");
+    h.system.add_port("b", "B");
+    h.mgr.attach_midi_system(&h.system);
+
+    REQUIRE(h.mgr.set_midi_input_enabled("a", true));
+    h.mgr.set_midi_input_enabled("a", false);
+    REQUIRE(h.system.open_input_count("a") == 0);
+    REQUIRE_FALSE(h.mgr.is_midi_input_enabled("a"));
+
+    h.system.remove_port("a");
+    h.system.add_port("a", "A");
+    REQUIRE(h.system.open_input_count("a") == 0);
+    REQUIRE(h.system.open_input_count("b") == 0);
+}
+
+TEST_CASE("AudioDeviceManager saves enabled inputs and drops them when disabled",
+          "[audio][audio-device-manager][midi-reconnect]") {
+    PropsSandbox box("PulpADMMidiEnabled");
+    {
+        InputHarness h;
+        h.system.add_port("a", "A");
+        h.system.add_port("b", "B");
+        h.mgr.bind_settings(box.props.get());
+        h.mgr.attach_midi_system(&h.system);
+        h.mgr.set_midi_input_enabled("a", true);
+        h.mgr.set_midi_input_enabled("b", true);
+    }
+    {
+        pulp::state::ApplicationProperties reread("PulpADMMidiEnabled");
+        reread.load();
+        REQUIRE(AudioDeviceManager::load_enabled_midi_inputs(reread)
+                == std::vector<std::string>{"a", "b"});
+    }
+
+    // A new session restores the enabled state; "a" is not connected yet.
+    InputHarness h2;
+    h2.system.add_port("b", "B");
+    h2.mgr.attach_midi_system(&h2.system);
+    h2.mgr.bind_settings(box.props.get());
+    REQUIRE(h2.mgr.enabled_midi_inputs() == std::vector<std::string>{"a", "b"});
+    REQUIRE(h2.mgr.is_midi_input_open("b"));
+    REQUIRE_FALSE(h2.mgr.is_midi_input_open("a"));
+    h2.system.add_port("a", "A");
+    REQUIRE(h2.mgr.is_midi_input_open("a"));
+
+    // Disabling removes it from the saved settings, and then the key itself
+    // once nothing is enabled.
+    h2.mgr.set_midi_input_enabled("a", false);
+    {
+        pulp::state::ApplicationProperties reread("PulpADMMidiEnabled");
+        reread.load();
+        REQUIRE(AudioDeviceManager::load_enabled_midi_inputs(reread)
+                == std::vector<std::string>{"b"});
+    }
+    h2.mgr.set_midi_input_enabled("b", false);
+    {
+        pulp::state::ApplicationProperties reread("PulpADMMidiEnabled");
+        reread.load();
+        REQUIRE_FALSE(reread.user_settings().contains(adm_keys::kEnabledMidiInputs));
+    }
+}
+
+TEST_CASE("AudioDeviceManager retries an input whose open failed",
+          "[audio][audio-device-manager][midi-reconnect]") {
+    InputHarness h;
+    h.system.add_port("busy", "Busy");
+    h.mgr.attach_midi_system(&h.system);
+
+    h.system.fail_next_opens(1);
+    REQUIRE_FALSE(h.mgr.set_midi_input_enabled("busy", true));
+    REQUIRE(h.mgr.is_midi_input_enabled("busy"));
+
+    // Any later refresh, even with an unchanged port list, retries.
+    h.mgr.refresh_midi_endpoints();
+    REQUIRE(h.mgr.is_midi_input_open("busy"));
+}
+
+TEST_CASE("AudioDeviceManager recovers when the unplug notification was missed",
+          "[audio][audio-device-manager][midi-reconnect]") {
+    InputHarness h;
+    h.system.add_port("usb", "Pad");
+    h.mgr.attach_midi_system(&h.system);
+    REQUIRE(h.mgr.set_midi_input_enabled("usb", true));
+
+    // The device vanishes and returns without a port-change callback in
+    // between; the next refresh sees the final list and must leave exactly one
+    // live handle.
+    h.system.set_ports_silently({});
+    h.mgr.refresh_midi_endpoints();
+    REQUIRE(h.system.open_input_count("usb") == 0);
+    h.system.set_ports_silently({{"usb", "Pad", true, false}});
+    h.mgr.refresh_midi_endpoints();
+    REQUIRE(h.system.open_input_count("usb") == 1);
+}
+
+TEST_CASE("AudioDeviceManager endpoint identity includes direction",
+          "[audio][audio-device-manager][midi-reconnect]") {
+    AudioDeviceManager mgr;
+    std::vector<AudioDeviceManager::MidiEndpointChange> changes;
+    auto tok = mgr.subscribe_midi_endpoints(
+        [&](const AudioDeviceManager::MidiEndpointChange& c) { changes.push_back(c); });
+
+    mgr.set_midi_endpoints({{"0", "In", true}, {"0", "Out", false}});
+    REQUIRE(changes.size() == 2);
+
+    // Dropping only the output must not look like the input vanished.
+    changes.clear();
+    mgr.set_midi_endpoints({{"0", "In", true}});
+    REQUIRE(changes.size() == 1);
+    REQUIRE(changes[0].kind == AudioDeviceManager::MidiEndpointChangeKind::Removed);
+    REQUIRE_FALSE(changes[0].endpoint.is_input);
+}
+
+TEST_CASE("AudioDeviceManager closes its inputs on destruction",
+          "[audio][audio-device-manager][midi-reconnect]") {
+    pulp::midi::MockMidiSystem system;
+    system.add_port("usb", "Pad");
+    {
+        AudioDeviceManager mgr;
+        mgr.attach_midi_system(&system);
+        REQUIRE(mgr.set_midi_input_enabled("usb", true));
+        REQUIRE(system.open_input_count("usb") == 1);
+    }
+    REQUIRE(system.open_input_count("usb") == 0);
+    // The system's callback slot was released, so a later change is harmless.
+    system.add_port("other", "Other");
 }
