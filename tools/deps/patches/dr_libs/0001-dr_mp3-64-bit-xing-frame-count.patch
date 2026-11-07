@@ -1,0 +1,11 @@
+--- a/external/dr_libs/dr_mp3.h
++++ b/external/dr_libs/dr_mp3.h
+@@ -3285,7 +3285,7 @@
+     }
+ 
+     if (detectedMP3FrameCount != 0xFFFFFFFF) {
+-        pMP3->totalPCMFrameCount = detectedMP3FrameCount * firstFramePCMFrameCount;
++        pMP3->totalPCMFrameCount = (drmp3_uint64)detectedMP3FrameCount * firstFramePCMFrameCount;
+     }
+ 
+     pMP3->channels   = pMP3->mp3FrameChannels;

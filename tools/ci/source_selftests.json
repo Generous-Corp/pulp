@@ -237,10 +237,38 @@
       ]
     },
     {
+      "name": "dead-test-guard",
+      "argv": [
+        "{repo}/tools/scripts/dead_test_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "dead-test-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_dead_test_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "decisions-contract-selftest",
       "argv": [
         "{repo}/tools/scripts/test_decisions_contract.py"
       ]
+    },
+    {
+      "name": "deps-patches-selftest",
+      "argv": [
+        "{repo}/tools/deps/test_check_patches.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "deps-patches-verify",
+      "argv": [
+        "{repo}/tools/deps/check_patches.py"
+      ],
+      "timeout": 120.0
     },
     {
       "name": "diff-cover-targets-selftest",
@@ -288,6 +316,20 @@
         "{repo}/tools/ci/test_evidence_archive.py"
       ],
       "timeout": 60.0
+    },
+    {
+      "name": "examples-index-guard",
+      "argv": [
+        "{repo}/tools/scripts/examples_index_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "examples-index-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_examples_index_guard.py"
+      ],
+      "timeout": 120.0
     },
     {
       "name": "fleet-remote-probe-selftest",
