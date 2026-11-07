@@ -1804,3 +1804,12 @@ The `CustomNodeEventBlock::triggers` field also touches sequencer-owned exposure
 maintain the pending bounded-trigger-runtime row with installed SDK evidence
 and explicit product-control gaps. Neither that pointer nor the header ledger
 admits arbitrary Custom trigger producers or claims complete G-5 support.
+
+## Status-matrix truth edits are not capability surface
+
+Correcting `docs/status/support-matrix.yaml` and `docs/reference/capabilities.md`
+to match code that already exists (dropping a stale limitation, adding a row for
+an existing renderer or example, changing a widget label) adds no public header
+and changes no installed capability key. Run
+`python3 tools/docs_generate.py generate` so the generated limitations block
+follows the matrix, and do not touch the capability manifest for it.
