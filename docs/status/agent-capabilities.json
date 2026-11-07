@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 91,
+  "manifest_revision": 92,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -16078,6 +16078,50 @@
               "width()",
               "height()",
               "frames_written()"
+            ],
+            "enums": []
+          }
+        ],
+        "spectrum_analyzer.hpp": [
+          {
+            "class": "SpectrumAnalyzer",
+            "qualified_name": "pulp::signal::SpectrumAnalyzer",
+            "template": null,
+            "methods": [
+              "push_samples(const float* samples, std::size_t count)",
+              "configure(SpectrumAnalyzerConfig config)",
+              "update(double dt_seconds)",
+              "bins_db()",
+              "bin_count()",
+              "config()",
+              "hop_size()",
+              "aggregation()",
+              "overflow_count()",
+              "skipped_frame_count()",
+              "frame_count()",
+              "clear()",
+              "clamp_fft_size(int requested)"
+            ],
+            "enums": []
+          }
+        ],
+        "spectrum_bin_mapping.hpp": [
+          {
+            "class": "SpectrumBinMapping",
+            "qualified_name": "pulp::signal::SpectrumBinMapping",
+            "template": null,
+            "methods": [
+              "configure(const SpectrumBinMappingConfig& config)",
+              "valid()",
+              "columns()",
+              "bin_count()",
+              "config()",
+              "column_frequency(std::size_t i)",
+              "column_bin_position(std::size_t i)",
+              "column_width_bins(std::size_t i)",
+              "frequency_to_column(double hz)",
+              "map(std::span<const float> bins_db, std::span<float> out, SpectrumAggregation aggregation)",
+              "interpolate(std::span<const float> bins_db, double pos)"
             ],
             "enums": []
           }

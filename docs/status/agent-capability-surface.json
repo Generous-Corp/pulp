@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 526,
-    "reviewed_headers": 281,
+    "public_headers": 528,
+    "reviewed_headers": 283,
     "legacy_unreviewed_headers": 245,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 112,
+      "infrastructure": 114,
       "legacy_unreviewed": 245,
       "unsupported_capability": 2
     },
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 281,
-        "reviewed_headers": 158,
+        "public_headers": 283,
+        "reviewed_headers": 160,
         "legacy_unreviewed_headers": 123,
         "unsupported_headers": 2
       },
@@ -4606,6 +4606,24 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectrum_analyzer.hpp",
+      "fingerprint": "sha256:89df9785e6b461680d5cb9f04636c5e89d483a4ca34fbada608ac659823be32f",
+      "include": "pulp/signal/spectrum_analyzer.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Display-side spectrum analysis behind SpectrumView: a lock-free sample tap for the audio thread plus UI-thread windowed FFT, level modes and time-based release; analysis for drawing, not a generator capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectrum_bin_mapping.hpp",
+      "fingerprint": "sha256:deeea13fe6702cba6804abde84ecf47d53b556a1ac0e51a3600e880c86e86884",
+      "include": "pulp/signal/spectrum_bin_mapping.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Maps FFT magnitude bins onto the columns of a log-frequency display (parabolic interpolation, fractional-edge aggregation); shared by SpectrumView and EqCurveView, with no generator capability claim."
     },
     {
       "domain": "signal",

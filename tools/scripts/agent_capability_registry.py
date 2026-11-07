@@ -181,6 +181,28 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/signal/spectrum_analyzer.hpp",
+        "fingerprint": "sha256:89df9785e6b461680d5cb9f04636c5e89d483a4ca34fbada608ac659823be32f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Display-side spectrum analysis behind SpectrumView: a lock-free sample "
+            "tap for the audio thread plus UI-thread windowed FFT, level modes and "
+            "time-based release; analysis for drawing, not a generator capability."
+        ),
+    },
+    {
+        "include": "pulp/signal/spectrum_bin_mapping.hpp",
+        "fingerprint": "sha256:deeea13fe6702cba6804abde84ecf47d53b556a1ac0e51a3600e880c86e86884",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Maps FFT magnitude bins onto the columns of a log-frequency display "
+            "(parabolic interpolation, fractional-edge aggregation); shared by "
+            "SpectrumView and EqCurveView, with no generator capability claim."
+        ),
+    },
+    {
         'include': 'pulp/host/plugin_identity.hpp',
         'fingerprint': 'sha256:f5d1fe9c5e8038b5cbb564170a8cb23fe7abb79b0c6009f5f6ec8b0d8b578060',
         'disposition': 'infrastructure',
