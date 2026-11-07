@@ -26,6 +26,12 @@ struct PresetInfo {
     std::vector<std::string> tags;     ///< Optional category tags
 };
 
+/// One parameter value read from a preset file.
+struct ParamSetting {
+    ParamID id = 0;
+    float value = 0.0f;
+};
+
 /// Lists installed content-pack presets for a plugin's content manifest.
 /// `data_root` is the explicit content data root, or empty for the platform
 /// default.
@@ -73,6 +79,13 @@ public:
 
     /// Load a preset by file path.
     bool load(const std::filesystem::path& path);
+
+    /// Read the parameter values a preset file holds without applying them.
+    /// Only parameters the store defines and the file names are returned, in
+    /// store order. Returns nullopt when the file cannot be read or has no
+    /// parameters section. Lets a caller cache a preset once and apply it later
+    /// from a thread that must not touch the file system.
+    std::optional<std::vector<ParamSetting>> read_values(const std::filesystem::path& path) const;
 
     /// Delete a user preset file. Factory presets cannot be deleted.
     bool delete_preset(const PresetInfo& preset);
