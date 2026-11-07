@@ -37,7 +37,7 @@ constexpr std::uint64_t kChunkFrames = 4096u;
 // ── Byte sources ────────────────────────────────────────────────────────
 
 class MemoryByteSource final : public AudioByteSource {
-public:
+  public:
     explicit MemoryByteSource(std::span<const std::uint8_t> bytes) : bytes_(bytes) {}
 
     std::size_t read(void* destination, std::size_t bytes) override {
@@ -54,16 +54,20 @@ public:
         position_ = position;
         return true;
     }
-    std::uint64_t position() const override { return position_; }
-    std::uint64_t size() const override { return bytes_.size(); }
+    std::uint64_t position() const override {
+        return position_;
+    }
+    std::uint64_t size() const override {
+        return bytes_.size();
+    }
 
-private:
+  private:
     std::span<const std::uint8_t> bytes_;
     std::uint64_t position_ = 0;
 };
 
 class FileByteSource final : public AudioByteSource {
-public:
+  public:
     bool open(const std::string& path) {
         if (!file_.open(std::filesystem::path(path), std::ios::in | std::ios::binary))
             return false;
@@ -77,12 +81,12 @@ public:
     std::size_t read(void* destination, std::size_t bytes) override {
         // Take the minimum in 64 bits so a 32-bit size_t never truncates the
         // remaining length of a large file.
-        const auto wanted = static_cast<std::size_t>(
-            std::min<std::uint64_t>(bytes, size_ - position_));
+        const auto wanted =
+            static_cast<std::size_t>(std::min<std::uint64_t>(bytes, size_ - position_));
         if (wanted == 0)
             return 0;
-        const auto got = file_.sgetn(static_cast<char*>(destination),
-                                     static_cast<std::streamsize>(wanted));
+        const auto got =
+            file_.sgetn(static_cast<char*>(destination), static_cast<std::streamsize>(wanted));
         if (got <= 0)
             return 0;
         position_ += static_cast<std::uint64_t>(got);
@@ -97,10 +101,14 @@ public:
         position_ = position;
         return true;
     }
-    std::uint64_t position() const override { return position_; }
-    std::uint64_t size() const override { return size_; }
+    std::uint64_t position() const override {
+        return position_;
+    }
+    std::uint64_t size() const override {
+        return size_;
+    }
 
-private:
+  private:
     std::filebuf file_;
     std::uint64_t size_ = 0;
     std::uint64_t position_ = 0;
@@ -109,12 +117,12 @@ private:
 // Buffered, seekable std::streambuf over an AudioByteSource, for the WAV and
 // AIFF parsers, which read through std::istream.
 class SourceStreamBuf final : public std::streambuf {
-public:
+  public:
     explicit SourceStreamBuf(AudioByteSource& source) : source_(source) {
         setg(buffer_.data(), buffer_.data(), buffer_.data());
     }
 
-protected:
+  protected:
     int_type underflow() override {
         if (gptr() < egptr())
             return traits_type::to_int_type(*gptr());
@@ -151,7 +159,7 @@ protected:
         return seekoff(off_type(position), std::ios_base::beg, which);
     }
 
-private:
+  private:
     AudioByteSource& source_;
     std::array<char, 65536> buffer_{};
 };
@@ -260,10 +268,14 @@ struct AudioReader::Decoder {
     virtual std::uint64_t decode(std::uint64_t frame_offset, float* const* out,
                                  std::uint64_t frames) = 0;
 
-    virtual bool ranged() const { return true; }
+    virtual bool ranged() const {
+        return true;
+    }
 
     // Non-null for codecs that decode forward from a seek position.
-    virtual StreamingDecoder* as_streaming() { return nullptr; }
+    virtual StreamingDecoder* as_streaming() {
+        return nullptr;
+    }
 
     AudioFileInfo info;
     // Planar scratch for reads that ask for fewer channels than the file has.
@@ -277,16 +289,17 @@ using Decoder = AudioReader::Decoder;
 
 void finish_info(AudioFileInfo& info, std::string format) {
     info.format = std::move(format);
-    info.duration_seconds = info.sample_rate > 0
-                                ? static_cast<double>(info.num_frames) / info.sample_rate
-                                : 0.0;
+    info.duration_seconds =
+        info.sample_rate > 0 ? static_cast<double>(info.num_frames) / info.sample_rate : 0.0;
 }
 
 // A codec that decodes forward from a seekable position. Sequential reads
 // continue from the cursor without seeking, which keeps streaming playback
 // from paying a seek per block.
 struct StreamingDecoder : Decoder {
-    StreamingDecoder* as_streaming() override { return this; }
+    StreamingDecoder* as_streaming() override {
+        return this;
+    }
 
     virtual bool seek_to(std::uint64_t frame) = 0;
     // Decodes at most kChunkFrames frames forward; zero at end of stream.
@@ -345,7 +358,7 @@ struct StreamingDecoder : Decoder {
         return data;
     }
 
-private:
+  private:
     std::vector<float*> shifted_;
     std::uint64_t cursor_ = 0;
     bool cursor_valid_ = true;
@@ -371,7 +384,9 @@ struct DecodedDecoder final : Decoder {
         return frames;
     }
 
-    bool ranged() const override { return false; }
+    bool ranged() const override {
+        return false;
+    }
 
     AudioFileData data;
 };
@@ -401,8 +416,8 @@ struct FlacDecoder final : StreamingDecoder {
     }
 
     std::uint64_t decode_next(float* const* out, std::uint64_t frames) override {
-        const auto got = drflac_read_pcm_frames_f32(flac, std::min(frames, kChunkFrames),
-                                                    interleaved.data());
+        const auto got =
+            drflac_read_pcm_frames_f32(flac, std::min(frames, kChunkFrames), interleaved.data());
         deinterleave(interleaved.data(), out, got, info.num_channels);
         return got;
     }
@@ -465,8 +480,8 @@ struct VorbisDecoder final : StreamingDecoder {
         if (bytes.size() > static_cast<std::size_t>(INT_MAX))
             return false;
         int error = 0;
-        vorbis = stb_vorbis_open_memory(bytes.data(), static_cast<int>(bytes.size()), &error,
-                                        nullptr);
+        vorbis =
+            stb_vorbis_open_memory(bytes.data(), static_cast<int>(bytes.size()), &error, nullptr);
         return finish_open();
     }
 
@@ -493,7 +508,7 @@ struct VorbisDecoder final : StreamingDecoder {
     std::vector<std::uint8_t> owned_bytes;
     stb_vorbis* vorbis = nullptr;
 
-private:
+  private:
     bool finish_open() {
         if (vorbis == nullptr)
             return false;
@@ -539,8 +554,7 @@ struct WavDecoder final : Decoder {
             for (std::uint32_t ch = 0; ch < info.num_channels; ++ch)
                 pointers[ch] = out[ch] + produced;
             auto view = choc::buffer::createChannelArrayView<float>(
-                pointers.data(), info.num_channels,
-                static_cast<choc::buffer::FrameCount>(count));
+                pointers.data(), info.num_channels, static_cast<choc::buffer::FrameCount>(count));
             if (!reader->readFrames(frame_offset + produced, view))
                 break;
             produced += count;
@@ -623,8 +637,8 @@ std::optional<std::vector<std::uint8_t>> read_all_bytes(AudioByteSource& source,
     return bytes;
 }
 
-std::unique_ptr<Decoder> open_seekable(std::unique_ptr<AudioByteSource> source,
-                                       Container container, const DecodeLimits& limits,
+std::unique_ptr<Decoder> open_seekable(std::unique_ptr<AudioByteSource> source, Container container,
+                                       const DecodeLimits& limits,
                                        std::span<const std::uint8_t> memory) {
     switch (container) {
     case Container::Wav:

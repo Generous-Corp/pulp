@@ -44,8 +44,8 @@ constexpr std::uint64_t kFrames = 5513;
 // The fixture signal, before 16-bit quantization.
 float expected_sample(std::uint64_t frame, std::uint32_t channel) {
     const double hz = channel == 0 ? 440.0 : 660.0;
-    return static_cast<float>(0.5 * std::sin(2.0 * std::numbers::pi * hz *
-                                             static_cast<double>(frame) / kRate));
+    return static_cast<float>(
+        0.5 * std::sin(2.0 * std::numbers::pi * hz * static_cast<double>(frame) / kRate));
 }
 
 struct TempDir {
@@ -95,7 +95,7 @@ AudioFileData make_signal() {
 // A byte source that serves a vector through the abstract interface only, so
 // the reader cannot take a memory fast path.
 class VectorSource final : public AudioByteSource {
-public:
+  public:
     explicit VectorSource(std::vector<std::uint8_t> bytes) : bytes_(std::move(bytes)) {}
     std::size_t read(void* destination, std::size_t bytes) override {
         const auto count = std::min<std::size_t>(bytes, bytes_.size() - position_);
@@ -109,10 +109,14 @@ public:
         position_ = static_cast<std::size_t>(position);
         return true;
     }
-    std::uint64_t position() const override { return position_; }
-    std::uint64_t size() const override { return bytes_.size(); }
+    std::uint64_t position() const override {
+        return position_;
+    }
+    std::uint64_t size() const override {
+        return bytes_.size();
+    }
 
-private:
+  private:
     std::vector<std::uint8_t> bytes_;
     std::size_t position_ = 0;
 };
@@ -173,7 +177,7 @@ void check_ranges(AudioReader& reader, const AudioFileData& reference) {
     const auto total = reference.num_frames();
     // Offsets straddle FLAC block (1024) and MP3 frame (576) boundaries; the
     // order goes backwards and forwards so every read seeks.
-    const std::uint64_t offsets[] = {3000, 0,    1023, 1024, 575, 576, 2047,
+    const std::uint64_t offsets[] = {3000, 0,    1023, 1024, 575,       576,        2047,
                                      1,    4097, 1152, 2304, total - 1, total - 300};
     for (const auto offset : offsets)
         check_range(reader, reference, offset, 700, 1e-6f);
@@ -222,8 +226,7 @@ TEST_CASE("AudioReader ranged reads equal the full decode for every seekable for
     }
 }
 
-TEST_CASE("AudioReader decodes the known signal from each format",
-          "[audio][audio-reader]") {
+TEST_CASE("AudioReader decodes the known signal from each format", "[audio][audio-reader]") {
     TempDir dir;
     for (auto& format : make_formats(dir)) {
         SECTION(std::string(format.name)) {
@@ -330,8 +333,7 @@ TEST_CASE("AudioReader enforces decode limits on open and on allocating reads",
     CHECK(AudioReader::open_source(std::make_unique<VectorSource>(ogg), ".ogg", tiny));
 }
 
-TEST_CASE("AudioReader refuses unknown, empty and truncated input",
-          "[audio][audio-reader]") {
+TEST_CASE("AudioReader refuses unknown, empty and truncated input", "[audio][audio-reader]") {
     const std::vector<std::uint8_t> garbage(512, 0x42);
     CHECK_FALSE(AudioReader::open_memory(garbage));
     CHECK_FALSE(AudioReader::open_memory({}));
@@ -373,8 +375,8 @@ TEST_CASE("Memory-mapped readers range-read compressed files without a whole-fil
             CHECK(mapped.info().num_frames == total);
             std::vector<std::vector<float>> out(2, std::vector<float>(900));
             float* pointers[2] = {out[0].data(), out[1].data()};
-            for (const std::uint64_t offset : {std::uint64_t{2500}, std::uint64_t{17},
-                                               total - 900}) {
+            for (const std::uint64_t offset :
+                 {std::uint64_t{2500}, std::uint64_t{17}, total - 900}) {
                 REQUIRE(mapped.read_frames_ranged_only(pointers, 2, offset, 900));
                 for (std::uint32_t ch = 0; ch < 2; ++ch)
                     for (std::uint64_t i = 0; i < 900; ++i)

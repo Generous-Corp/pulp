@@ -76,8 +76,7 @@ TEST_CASE("PulpSampler streams continuously across the preload boundary", "[samp
     }
 }
 
-TEST_CASE("PulpSampler streams a FLAC through the ranged decoder",
-          "[sampler][stream][codec]") {
+TEST_CASE("PulpSampler streams a FLAC through the ranged decoder", "[sampler][stream][codec]") {
     TempSamplerFlac flac("codec_ranged_flac");
     SamplerFixture fixture;
     const auto loaded = fixture.proc->load_sample_file_result(flac.path);

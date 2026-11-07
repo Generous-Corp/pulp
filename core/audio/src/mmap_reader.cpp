@@ -176,9 +176,9 @@ bool MemoryMappedAudioReader::open(std::string_view path, std::size_t maximum_ma
                    extension == ".oga") {
             // The snapshot path was chosen by the user or host; the caller owns
             // the bound.
-            ranged_->codec = AudioReader::open_memory(
-                {backing_->snapshot.data(), backing_->snapshot.size()}, extension,
-                DecodeLimits::unbounded());
+            ranged_->codec =
+                AudioReader::open_memory({backing_->snapshot.data(), backing_->snapshot.size()},
+                                         extension, DecodeLimits::unbounded());
         }
     }
     if (ranged_ && ranged_->reader) {
@@ -298,7 +298,8 @@ bool MemoryMappedAudioReader::read_frames_impl(float** dest_channels, uint32_t n
                 rs.subset_scratch.assign(fch * static_cast<std::size_t>(count), 0.0f);
                 rs.subset_ptrs.resize(fch);
                 for (std::size_t c = 0; c < fch; ++c)
-                    rs.subset_ptrs[c] = rs.subset_scratch.data() + c * static_cast<std::size_t>(count);
+                    rs.subset_ptrs[c] =
+                        rs.subset_scratch.data() + c * static_cast<std::size_t>(count);
                 auto view = choc::buffer::createChannelArrayView<float>(rs.subset_ptrs.data(),
                                                                         info_.num_channels, fcount);
                 if (rs.reader->readFrames(start, view)) {

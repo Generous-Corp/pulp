@@ -33,7 +33,7 @@ namespace pulp::audio {
 /// Random-access source of encoded bytes. Implement this to decode from an
 /// archive member, a network cache or anything else that can seek.
 class AudioByteSource {
-public:
+  public:
     virtual ~AudioByteSource() = default;
 
     /// Copies up to `bytes` bytes at the current position into `destination`
@@ -64,7 +64,7 @@ std::unique_ptr<AudioByteSource> make_file_byte_source(const std::string& path);
 /// whole stream, `max_output_bytes` bounds each allocating read() instead of
 /// the file's length; a stream decoded once on open is held to every ceiling.
 class AudioReader {
-public:
+  public:
     /// Opens `path`. The format comes from the extension, then from the first
     /// bytes when the extension is unknown. Any format the registry reads is
     /// accepted; formats without a seekable decoder are decoded once here.
@@ -114,7 +114,7 @@ public:
 
     struct Decoder;
 
-private:
+  private:
     AudioReader(std::unique_ptr<Decoder> decoder, const DecodeLimits& limits);
 
     std::unique_ptr<Decoder> decoder_;
