@@ -6,6 +6,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <vector>
 
 #define DRWAV_API [[maybe_unused]] static
 #define DRWAV_PRIVATE static
@@ -222,6 +223,89 @@ std::optional<AudioFileInfo> inspect_wav(std::span<const std::uint8_t> bytes) {
     info.duration_seconds =
         static_cast<double>(wav.totalPCMFrameCount) / static_cast<double>(wav.sampleRate);
     return info;
+}
+
+std::optional<WavFormatFacts> interpret_wav_format(std::span<const std::uint8_t> fmt_payload,
+                                                   std::uint64_t data_size,
+                                                   std::optional<std::uint64_t> fact_sample_count) {
+    // dr_wav needs only the first 40 bytes of a fmt payload; a larger one is
+    // copied up to this cap and declared at the copied length so the
+    // synthetic file stays self-consistent.
+    constexpr std::size_t kMaxFormatCopy = 1024u;
+    constexpr std::uint64_t kRiffSizeSentinel = 0xFFFFFFFFu;
+    const auto format_copy = std::min(fmt_payload.size(), kMaxFormatCopy);
+    const bool rf64 = data_size >= kRiffSizeSentinel;
+
+    // Build the smallest file dr_wav accepts for these headers: envelope,
+    // ds64 when the data size needs 64 bits, fmt, optional fact, and the data
+    // chunk header. dr_wav stops at the data header, so no payload is needed.
+    std::vector<std::uint8_t> synthetic;
+    synthetic.reserve(96u + format_copy);
+    auto put_id = [&](const char (&id)[5]) {
+        for (std::size_t i = 0; i < 4u; ++i)
+            synthetic.push_back(static_cast<std::uint8_t>(id[i]));
+    };
+    auto put_u32 = [&](std::uint32_t value) {
+        for (unsigned shift = 0; shift < 32u; shift += 8u)
+            synthetic.push_back(static_cast<std::uint8_t>(value >> shift));
+    };
+    auto put_u64 = [&](std::uint64_t value) {
+        for (unsigned shift = 0; shift < 64u; shift += 8u)
+            synthetic.push_back(static_cast<std::uint8_t>(value >> shift));
+    };
+
+    put_id(rf64 ? "RF64" : "RIFF");
+    const auto riff_size_slot = synthetic.size();
+    put_u32(0u);
+    put_id("WAVE");
+    if (rf64) {
+        put_id("ds64");
+        put_u32(28u);
+        put_u64(0u);         // riff size, patched below
+        put_u64(data_size);
+        put_u64(fact_sample_count.value_or(0u));
+        put_u32(0u);         // no table entries
+    }
+    put_id("fmt ");
+    put_u32(static_cast<std::uint32_t>(format_copy));
+    synthetic.insert(synthetic.end(), fmt_payload.begin(),
+                     fmt_payload.begin() + static_cast<std::ptrdiff_t>(format_copy));
+    if ((format_copy & 1u) != 0u)
+        synthetic.push_back(0u);
+    if (fact_sample_count) {
+        put_id("fact");
+        put_u32(4u);
+        put_u32(static_cast<std::uint32_t>(std::min<std::uint64_t>(*fact_sample_count, 0xFFFFFFFFu)));
+    }
+    put_id("data");
+    put_u32(static_cast<std::uint32_t>(rf64 ? kRiffSizeSentinel : data_size));
+
+    const auto header_bytes = static_cast<std::uint64_t>(synthetic.size()) - 8u;
+    const auto riff_size = header_bytes + data_size;
+    const auto riff_size32 =
+        static_cast<std::uint32_t>(std::min<std::uint64_t>(riff_size, kRiffSizeSentinel));
+    for (unsigned shift = 0; shift < 32u; shift += 8u)
+        synthetic[riff_size_slot + shift / 8u] = static_cast<std::uint8_t>(riff_size32 >> shift);
+    if (rf64) {
+        const auto ds64_riff_slot = 20u;
+        for (unsigned shift = 0; shift < 64u; shift += 8u)
+            synthetic[ds64_riff_slot + shift / 8u] = static_cast<std::uint8_t>(riff_size >> shift);
+    }
+
+    RiffLayout layout;
+    WavSession session(synthetic, layout);
+    if (!session)
+        return std::nullopt;
+    auto& wav = session.wav();
+    WavFormatFacts facts;
+    facts.format_tag = wav.fmt.formatTag;
+    facts.translated_format_tag = wav.translatedFormatTag;
+    facts.channels = wav.channels;
+    facts.sample_rate = wav.sampleRate;
+    facts.bits_per_sample = wav.bitsPerSample;
+    facts.bytes_per_frame = drwav_get_bytes_per_pcm_frame(&wav);
+    facts.total_frames = wav.totalPCMFrameCount;
+    return facts;
 }
 
 std::optional<AudioFileData> decode_wav(std::span<const std::uint8_t> bytes,

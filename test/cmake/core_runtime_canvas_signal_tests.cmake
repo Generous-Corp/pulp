@@ -1366,6 +1366,12 @@ if(CMAKE_NM)
         COMMENT "Checking pulp-audio does not export private dr_wav symbols")
 endif()
 
+# Byte-level audio file layout report: decoder parity, profiles, warnings,
+# bounded reads, raw PCM, redaction, and the checked-in container fixtures.
+pulp_add_test_suite(pulp-test-audio-file-layout
+    LIBRARIES pulp::audio)
+pulp_test_data(pulp-test-audio-file-layout PATHS test/fixtures/audio/inspect)
+
 # Phase-vocoder offline time-stretch / pitch-shift.
 pulp_add_test_suite(pulp-test-phase-vocoder GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)

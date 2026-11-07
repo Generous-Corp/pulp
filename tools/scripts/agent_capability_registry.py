@@ -242,6 +242,9 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     {'include': 'pulp/midi/sysex_chunk_assembler.hpp', 'fingerprint': 'sha256:01c367d4c8c832ec83ca837901b08da9b4a8195a3caa8d06cc37f03113bc6c08', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Joins driver receive buffers of one long SysEx message for the Windows multimedia backend; not a generator-facing capability.'},
 
     {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
+    {'include': 'pulp/audio/wav_decoder.hpp', 'fingerprint': 'sha256:3eba2447c95d96e693aa13dc4e4d96192c75bb26faf61ed2e69ea43729a44f8e', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Byte-span RIFF/WAVE inspector and decoder for import surfaces; reviewed when interpret_wav_format exposed the fmt interpretation for the layout report. Not a generator-facing capability.'},
+    {'include': 'pulp/audio/audio_file_layout.hpp', 'fingerprint': 'sha256:25ad9111143d686c7473070b7e932dc9307db15d8d483676d37e35d32475bdc7', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Developer-tool byte layout report over audio containers (regions, warnings, decoder verdict) behind `pulp audio inspect`; reads headers only. Not a generator-facing capability.'},
+    {'include': 'pulp/audio/audio_file_layout_json.hpp', 'fingerprint': 'sha256:5406b77755fa086d8f79cf651dfac7f5e38f690fb99a06ec78d05cf1e00ca994', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Versioned JSON serializer for the layout report (pulp.audio.file_inspect.v1), a CLI/MCP developer surface. Not a generator-facing capability.'},
 
     {
         "include": "pulp/signal/spectral_frame_codec.hpp",
