@@ -429,7 +429,8 @@ public:
     bool on_modifier_keys(std::uint16_t modifiers) {
         const bool delivered =
             pulp::view::deliver_modifier_keys_changed(host_.input_root(), modifiers);
-        if (delivered) host_.input_request_repaint();
+        if (delivered)
+            host_.input_request_repaint();
         return delivered;
     }
 

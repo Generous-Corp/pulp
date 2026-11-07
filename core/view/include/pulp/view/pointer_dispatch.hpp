@@ -233,8 +233,12 @@ struct HoverDamage {
     bool has_bounds = false;
     Rect bounds{};
 
-    static HoverDamage everything() { return {}; }
-    static HoverDamage region(Rect r) { return {false, true, r}; }
+    static HoverDamage everything() {
+        return {};
+    }
+    static HoverDamage region(Rect r) {
+        return {false, true, r};
+    }
 };
 
 /// Bring hover state back in line with what is on screen after a frame in
@@ -255,8 +259,7 @@ struct HoverDamage {
 /// It does nothing while a pointer button is held, when no hover pass has run
 /// yet, and after the pointer has left the surface. Returns true when anything
 /// was delivered.
-bool reevaluate_stationary_hover(View& root,
-                                 const HoverDamage& damage = HoverDamage{});
+bool reevaluate_stationary_hover(View& root, const HoverDamage& damage = HoverDamage{});
 
 /// Host hooks the portable wheel router calls back into. Kept as a struct so
 /// a new hook can be threaded in without re-touching every call site.

@@ -401,8 +401,8 @@ public:
         // A bare modifier key going down or up changes the held-modifier set;
         // auto-repeat does not. Report the change before ordinary key routing.
         if (!event.is_repeat &&
-            (event.key == "Shift" || event.key == "Control" ||
-             event.key == "Alt" || event.key == "Meta") &&
+            (event.key == "Shift" || event.key == "Control" || event.key == "Alt" ||
+             event.key == "Meta") &&
             deliver_modifier_keys_changed(root_, ke.modifiers))
             mark_dirty();
         // Escape runs the shared dismissal policy before focused-view

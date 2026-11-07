@@ -46,7 +46,7 @@ PluginKeyDisposition route_plugin_key(View& root, const PluginKeyOffer& offer) {
             // focus is offered the key by the seam afterwards (it needs the
             // seam's own per-press de-duplication, so it is not policy).
             return pulp::view::deliver_key_event(*fv, ke) ? PluginKeyDisposition::consumed
-                                        : PluginKeyDisposition::forward_to_host;
+                                                          : PluginKeyDisposition::forward_to_host;
         } else if (takes_text) {
             // A text field sees every key, because any printable character is
             // its content. Command handling (arrows, ⌘Z, ⌘A, Backspace) runs

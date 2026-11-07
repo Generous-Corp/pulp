@@ -51,9 +51,9 @@ enum class RuntimeViewKind : std::uint8_t {
 /// `keyboard` and `programmatic`; a pointer press that focuses a control does
 /// not show its focus ring.
 enum class FocusCause : std::uint8_t {
-    pointer,       ///< A mouse, touch or pen press focused the view.
-    keyboard,      ///< Tab, Shift+Tab or another key moved focus.
-    programmatic,  ///< Code moved focus (focus(), setFocus, autofocus).
+    pointer,      ///< A mouse, touch or pen press focused the view.
+    keyboard,     ///< Tab, Shift+Tab or another key moved focus.
+    programmatic, ///< Code moved focus (focus(), setFocus, autofocus).
 };
 
 /// Identity-safe reference to a View captured across native event boundaries.
@@ -489,7 +489,9 @@ public:
     /// adjustment when Shift goes down after the drag began. Disabled views are
     /// skipped. Hosts report changes through `deliver_modifier_keys_changed`
     /// in pointer_dispatch.hpp.
-    virtual void on_modifier_keys_changed(Modifiers modifiers) { (void)modifiers; }
+    virtual void on_modifier_keys_changed(Modifiers modifiers) {
+        (void)modifiers;
+    }
     /// Text input from keyboard/IME (separate from key events).
     virtual void on_text_input(const TextInputEvent& event) { (void)event; }
     /// Called when this view gains or loses focus.
@@ -509,16 +511,21 @@ public:
     /// Called on every ancestor of a view whose focus changed, nearest first,
     /// after that view's own `on_focus_changed`. `child` is the view that
     /// gained or lost focus, not the ancestor's direct child.
-    virtual void on_descendant_focus_changed(View& child, bool gained,
-                                             FocusCause cause) {
-        (void)child; (void)gained; (void)cause;
+    virtual void on_descendant_focus_changed(View& child, bool gained, FocusCause cause) {
+        (void)child;
+        (void)gained;
+        (void)cause;
     }
 
     /// Cause of the most recent focus change delivered to this view.
-    FocusCause focus_cause() const { return focus_cause_; }
+    FocusCause focus_cause() const {
+        return focus_cause_;
+    }
     /// CSS `:focus-visible`: this view has focus and got it from the keyboard
     /// or from code, so a focus ring should show.
-    bool focus_visible() const { return has_focus_ && focus_visible_; }
+    bool focus_visible() const {
+        return has_focus_ && focus_visible_;
+    }
     /// CSS `:focus-within`: this view or any descendant holds input focus.
     bool focus_within() const;
 
@@ -526,8 +533,7 @@ public:
     /// fires for this view's own gain or loss, `on_descendant_focus_event` for
     /// a descendant's.
     std::function<void(bool gained, FocusCause cause)> on_focus_event;
-    std::function<void(View& child, bool gained, FocusCause cause)>
-        on_descendant_focus_event;
+    std::function<void(View& child, bool gained, FocusCause cause)> on_descendant_focus_event;
 
     /// Gesture event (pinch/rotate from multi-touch or trackpad).
     virtual void on_gesture_event(const GestureEvent& event) {
@@ -785,7 +791,8 @@ public:
     /// ancestor disables its whole subtree.
     bool effectively_enabled() const {
         for (const View* v = this; v != nullptr; v = v->parent_)
-            if (!v->enabled_) return false;
+            if (!v->enabled_)
+                return false;
         return true;
     }
 
@@ -794,14 +801,20 @@ public:
     /// point. Used to ask "is the pointer over something disabled" (cursor
     /// resolution) without duplicating the hit-test geometry.
     class DisabledHitTestScope {
-    public:
-        DisabledHitTestScope() { ++depth(); }
-        ~DisabledHitTestScope() { --depth(); }
+      public:
+        DisabledHitTestScope() {
+            ++depth();
+        }
+        ~DisabledHitTestScope() {
+            --depth();
+        }
         DisabledHitTestScope(const DisabledHitTestScope&) = delete;
         DisabledHitTestScope& operator=(const DisabledHitTestScope&) = delete;
-        static bool active() { return depth() > 0; }
+        static bool active() {
+            return depth() > 0;
+        }
 
-    private:
+      private:
         static int& depth() {
             static thread_local int d = 0;
             return d;

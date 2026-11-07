@@ -316,7 +316,8 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
                                    ? _dragTargetCapture.live_in(*root)
                                    : nullptr;
                 if (!root || !target ||
-                    !pulp::view::transfer_input_focus(*root, target, pulp::view::FocusCause::pointer)) {
+                    !pulp::view::transfer_input_focus(*root, target,
+                                                      pulp::view::FocusCause::pointer)) {
                     _dragTargetCapture.reset();
                     _focusedView = root
                                        ? pulp::view::focused_input_under_root(*root)
@@ -895,11 +896,10 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
                 // the new one gains, and each side's ancestors are told, with
                 // the cause recorded as keyboard.
                 if (auto* liveRoot = self.rootView)
-                    pulp::view::transfer_input_focus(
-                        *liveRoot, next, pulp::view::FocusCause::keyboard);
-                _focusedView = self.rootView
-                                   ? pulp::view::focused_input_under_root(*self.rootView)
-                                   : nullptr;
+                    pulp::view::transfer_input_focus(*liveRoot, next,
+                                                     pulp::view::FocusCause::keyboard);
+                _focusedView =
+                    self.rootView ? pulp::view::focused_input_under_root(*self.rootView) : nullptr;
             }
             [self setNeedsDisplay:YES];
             return;
@@ -995,8 +995,8 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
 // effect without the pointer moving.
 - (void)flagsChanged:(NSEvent*)event {
     if (self.rootView) {
-        if (pulp::view::deliver_modifier_keys_changed(
-                *self.rootView, modifiers_from_ns_flags(event.modifierFlags)))
+        if (pulp::view::deliver_modifier_keys_changed(*self.rootView,
+                                                      modifiers_from_ns_flags(event.modifierFlags)))
             [self setNeedsDisplay:YES];
     }
     [super flagsChanged:event];
@@ -1014,7 +1014,8 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
             ke.is_down = false;
             if (self.rootView && self.rootView->on_global_key)
                 self.rootView->on_global_key(ke);
-            if (auto* fv = [self liveFocusedView]) pulp::view::deliver_key_event(*fv, ke);
+            if (auto* fv = [self liveFocusedView])
+                pulp::view::deliver_key_event(*fv, ke);
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {
             std::cerr << "MacWindowHost keyUp error: " << e.what() << "\n";

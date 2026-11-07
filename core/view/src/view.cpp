@@ -440,11 +440,11 @@ void apply_pointer(MouseEvent& e, const View::SimulatedPointer& p) {
 }  // namespace
 
 bool View::focus_within() const {
-    const RootInteractionState* state =
-        const_cast<View*>(this)->existing_interaction();
+    const RootInteractionState* state = const_cast<View*>(this)->existing_interaction();
     const View* focused = state ? state->focused_input : nullptr;
     for (const View* v = focused; v != nullptr; v = v->parent_)
-        if (v == this) return true;
+        if (v == this)
+            return true;
     return false;
 }
 
@@ -669,7 +669,8 @@ void View::simulate_drag(Point start, Point end, int steps,
 
 static void collect_focusable(View& root, std::vector<View*>& out) {
     // A disabled view and its subtree are not in the tab order.
-    if (!root.enabled()) return;
+    if (!root.enabled())
+        return;
     if (root.focusable()) out.push_back(&root);
     for (size_t i = 0; i < root.child_count(); ++i)
         collect_focusable(*root.child_at(i), out);
@@ -1407,7 +1408,8 @@ std::vector<View*> View::sorted_children_by_z_index() const {
 }
 
 View* View::hit_test(Point local_point) {
-    if (!visible_ || hit_test_blocked_by_disabled() || !hit_testable_) return nullptr;
+    if (!visible_ || hit_test_blocked_by_disabled() || !hit_testable_)
+        return nullptr;
     if (!parent_ && !inverse_scale_transform(local_point)) return nullptr;
 
     // React Native pointerEvents:
@@ -2267,7 +2269,8 @@ void View::set_hovered(bool h) {
     if (hovered_ == h) return;
     // A disabled view never gains hover. Losing it is always allowed, so a
     // view disabled while hovered still receives its pointer-exit.
-    if (h && !effectively_enabled()) return;
+    if (h && !effectively_enabled())
+        return;
     hovered_ = h;
     if (h) {
         on_mouse_enter();
@@ -2673,7 +2676,8 @@ void View::simulate_hover(Point root_pos) {
         state.hover_pointer = root_pos;
         state.hover_pointer_valid = local_bounds().contains(root_pos);
         state.hover_target.set(target);
-        if (!target) state.hover_target.reset();
+        if (!target)
+            state.hover_target.reset();
     }
 
     if (pulp::view::motion::input_recording_enabled()) {

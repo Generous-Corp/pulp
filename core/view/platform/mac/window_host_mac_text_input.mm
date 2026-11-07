@@ -32,7 +32,8 @@ extern "C" void pulp_mac_text_input_client_category_anchor() {}
     auto* fv = pulp::view::View::focused_input_;
     auto* te = dynamic_cast<pulp::view::TextEditor*>(fv);
     // A disabled field takes no composition either.
-    if (te && !te->effectively_enabled()) return nullptr;
+    if (te && !te->effectively_enabled())
+        return nullptr;
     return te;
 }
 

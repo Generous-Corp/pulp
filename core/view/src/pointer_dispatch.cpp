@@ -147,37 +147,42 @@ void clear_pressed_target(View& root, int pointer_id) {
 // Deliver one focus change to the view behind `capture`, then tell every
 // ancestor. Each hop re-resolves its view because the hooks are user code and
 // may unmount the tree.
-void deliver_focus_change(View& root, const ViewCapture& capture, bool gained,
-                          FocusCause cause) {
+void deliver_focus_change(View& root, const ViewCapture& capture, bool gained, FocusCause cause) {
     View* view = capture.live_in(root);
-    if (!view) return;
+    if (!view)
+        return;
     const auto ancestors = capture_path_to_root(view->parent());
     {
         DispatchLease lease(*view);
         view->on_focus_changed(gained, cause);
         if (capture.live_in(root)) {
             auto hook = view->on_focus_event;
-            if (hook) hook(gained, cause);
+            if (hook)
+                hook(gained, cause);
         }
     }
     view = capture.live_in(root);
-    if (!view) return;
+    if (!view)
+        return;
     for (const auto& ancestor_capture : ancestors) {
         View* ancestor = ancestor_capture.live_in(root);
-        if (!ancestor) continue;
+        if (!ancestor)
+            continue;
         View* child = capture.live_in(root);
-        if (!child) return;
+        if (!child)
+            return;
         DispatchLease lease(*ancestor);
         ancestor->on_descendant_focus_changed(*child, gained, cause);
         if (ancestor_capture.live_in(root)) {
             auto hook = ancestor->on_descendant_focus_event;
-            if (hook) hook(*child, gained, cause);
+            if (hook)
+                hook(*child, gained, cause);
         }
     }
 }
 
-bool drain_root_focus(View& root, const ViewCapture& protected_target,
-                      bool keep_protected_target, FocusCause cause) {
+bool drain_root_focus(View& root, const ViewCapture& protected_target, bool keep_protected_target,
+                      FocusCause cause) {
     constexpr size_t kMaxReentrantFocusHops = 64;
     for (size_t hop = 0; hop < kMaxReentrantFocusHops; ++hop) {
         View* live_target = protected_target.has_value()
@@ -271,8 +276,7 @@ bool transfer_input_focus(View& root, View* target, FocusCause cause) {
     if (target && !still_in_tree(target, &root)) return false;
     ViewCapture target_capture;
     target_capture.set(target);
-    const bool target_focusable =
-        target && target->focusable() && target->effectively_enabled();
+    const bool target_focusable = target && target->focusable() && target->effectively_enabled();
     if (!drain_root_focus(root, target_capture, target_focusable, cause))
         return false;
     if (!target) return false;
@@ -288,7 +292,8 @@ bool transfer_input_focus(View& root, View* target, FocusCause cause) {
     if (!target) return false;
     // A gain callback may also claim a replacement. The explicit clicked
     // target still wins; blur that replacement before publishing the target.
-    if (!drain_root_focus(root, target_capture, true, cause)) return false;
+    if (!drain_root_focus(root, target_capture, true, cause))
+        return false;
     target = target_capture.live_in(root);
     if (!target) return false;
     target->claim_input_focus();
@@ -305,7 +310,8 @@ bool deliver_modifier_keys_changed(View& root, Modifiers modifiers) {
     {
         ViewCapture focused;
         focused.set(focused_input_under_root(root));
-        if (focused.has_value()) receivers.push_back(focused);
+        if (focused.has_value())
+            receivers.push_back(focused);
     }
     for (const auto& entry : root.interaction().pressed_targets)
         receivers.push_back(entry.second);
@@ -318,7 +324,8 @@ bool deliver_modifier_keys_changed(View& root, Modifiers modifiers) {
         if (!view || std::find(seen.begin(), seen.end(), view) != seen.end())
             continue;
         seen.push_back(view);
-        if (!view->effectively_enabled()) continue;
+        if (!view->effectively_enabled())
+            continue;
         view->on_modifier_keys_changed(modifiers);
         delivered = true;
     }
@@ -326,12 +333,14 @@ bool deliver_modifier_keys_changed(View& root, Modifiers modifiers) {
 }
 
 bool deliver_key_event(View& target, const KeyEvent& event) {
-    if (!target.effectively_enabled()) return false;
+    if (!target.effectively_enabled())
+        return false;
     return target.on_key_event(event);
 }
 
 bool deliver_text_input(View& target, const TextInputEvent& event) {
-    if (!target.effectively_enabled()) return false;
+    if (!target.effectively_enabled())
+        return false;
     target.on_text_input(event);
     return true;
 }
@@ -383,11 +392,12 @@ void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers,
 
 bool reevaluate_stationary_hover(View& root, const HoverDamage& damage) {
     auto& state = root.interaction();
-    if (!state.hover_pointer_valid) return false;
+    if (!state.hover_pointer_valid)
+        return false;
     // A held button owns the pointer; hover waits for the release.
-    if (!state.pressed_targets.empty()) return false;
-    if (!damage.full &&
-        !(damage.has_bounds && damage.bounds.contains(state.hover_pointer)))
+    if (!state.pressed_targets.empty())
+        return false;
+    if (!damage.full && !(damage.has_bounds && damage.bounds.contains(state.hover_pointer)))
         return false;
 
     const Point pointer = state.hover_pointer;
@@ -399,7 +409,8 @@ bool reevaluate_stationary_hover(View& root, const HoverDamage& damage) {
         deliver_hover_move(root, pointer, state.hover_modifiers);
         return true;
     }
-    if (!target) return false;
+    if (!target)
+        return false;
 
     // Same view, but it may have moved under the pointer (a scrolled list row
     // slides past a still pointer), so the pointer's position inside it moved.
@@ -432,7 +443,8 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
     if (!still_in_tree(target, &root)) return;
     // A drag in flight on a view that has since been disabled gets no further
     // moves; the release that ends the drag is still delivered.
-    if (!target->effectively_enabled()) return;
+    if (!target->effectively_enabled())
+        return;
 
     ViewCapture target_capture;
     target_capture.set(target);
@@ -513,7 +525,8 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
                         const PointerAttributes& pointer) {
     if (!still_in_tree(target, &root)) return false;
     // A disabled view takes no press and no double-click.
-    if (!target->effectively_enabled()) return false;
+    if (!target->effectively_enabled())
+        return false;
     const auto should_continue = [&] {
         return !host.should_continue || host.should_continue();
     };

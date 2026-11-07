@@ -448,10 +448,9 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
     }
 
     static bool is_modifier_virtual_key(WPARAM vk) {
-        return vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT ||
-               vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL ||
-               vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU ||
-               vk == VK_LWIN || vk == VK_RWIN;
+        return vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_CONTROL ||
+               vk == VK_LCONTROL || vk == VK_RCONTROL || vk == VK_MENU || vk == VK_LMENU ||
+               vk == VK_RMENU || vk == VK_LWIN || vk == VK_RWIN;
     }
 
     bool handle_key(WPARAM wp, LPARAM lp, bool is_down) {

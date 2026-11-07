@@ -345,7 +345,8 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
         auto alive = callback_alive_;
         auto* eng = &engine_;
         auto notify = [alive, eng](View& view, bool gained, FocusCause cause) {
-            if (view.id().empty()) return;
+            if (view.id().empty())
+                return;
             BridgeCallbackScope scope(alive);
             const bool visible = gained && cause != FocusCause::pointer;
             const char* cause_name = cause == FocusCause::pointer    ? "pointer"

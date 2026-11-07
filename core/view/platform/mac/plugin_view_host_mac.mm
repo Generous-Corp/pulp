@@ -286,7 +286,8 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
                 drag_target->set(refreshed.target);
             }
             auto* target = drag_target->live_in(*root);
-            if (!target || !pulp::view::transfer_input_focus(*root, target, pulp::view::FocusCause::pointer)) {
+            if (!target ||
+                !pulp::view::transfer_input_focus(*root, target, pulp::view::FocusCause::pointer)) {
                 drag_target->reset();
                 return;
             }
@@ -334,7 +335,8 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
             if (!drag_target->live_in(*root)) return;
         }
         auto* target = drag_target->live_in(*root);
-        if (!target || !pulp::view::transfer_input_focus(*root, target, pulp::view::FocusCause::pointer)) {
+        if (!target ||
+            !pulp::view::transfer_input_focus(*root, target, pulp::view::FocusCause::pointer)) {
             drag_target->reset();
             return;
         }
@@ -1130,8 +1132,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 - (void)flagsChanged:(NSEvent*)event {
     if (self.rootView &&
         pulp::view::deliver_modifier_keys_changed(
-            *self.rootView,
-            pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags)))
+            *self.rootView, pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags)))
         [self setNeedsDisplay:YES];
     [super flagsChanged:event];
 }
@@ -2113,8 +2114,7 @@ private:
 - (void)flagsChanged:(NSEvent*)event {
     if (self.rootView &&
         pulp::view::deliver_modifier_keys_changed(
-            *self.rootView,
-            pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags)))
+            *self.rootView, pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags)))
         [self setNeedsDisplay:YES];
     [super flagsChanged:event];
 }
