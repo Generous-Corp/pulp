@@ -10,10 +10,11 @@
   ],
   "rationale": "Adds the display-only pulp audio spectrogram and pulp audio waveform verbs and their pulp.audio.image.v1 sidecar to cli-commands.yaml; no design-output or packaging behavior changes, the family is touched only because the CLI manifest is a watched surface.",
   "tests": [
-    "ctest --test-dir build -R pulp-test-audio-image-raster",
-    "ctest --test-dir build -R pulp-test-cli-audio-image",
-    "ctest --test-dir build -R pulp-test-mcp-server",
-    "python3 tools/audio/quality-lab/tests/test_artifacts.py",
+    "./build/test/pulp-test-audio-image-raster",
+    "./build/test/pulp-test-cli-audio-image",
+    "ctest --test-dir build -R \"audio image verbs|audio spectrogram writes|audio waveform reports\"",
+    "ctest --test-dir build -R \"MCP audio image tools\"",
+    "cd tools/audio/quality-lab && python -m pytest tests/test_artifacts.py -q",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
   ],
