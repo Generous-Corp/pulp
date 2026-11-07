@@ -309,7 +309,9 @@ TEST_CASE("teardown hooks run once when the scope is destroyed",
     {
         MainThreadScope scope;
         MainThreadScope::Handle handle = scope.handle();
-        REQUIRE(scope.add_teardown([&] {
+        // The hook runs from the scope's destructor, after `handle` (declared
+        // later) is gone, so it holds its own copy.
+        REQUIRE(scope.add_teardown([&ran, &posts_stopped_first, handle] {
             ++ran;
             posts_stopped_first = !handle.post([] {});
         }) != 0);

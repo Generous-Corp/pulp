@@ -3236,6 +3236,7 @@
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
+  "pulp-test-platform-async-dialogs",
   "pulp-test-platform-main-thread",
   "pulp-test-playback-audio-renderer",
   "pulp-test-playback-automation-cursor",
