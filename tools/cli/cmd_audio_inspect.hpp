@@ -1,5 +1,7 @@
 #pragma once
 
+// approach after SimZhou/vscode-audiolens c5c5a24; re-authored
+
 #include <string>
 #include <vector>
 

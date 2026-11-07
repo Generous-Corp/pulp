@@ -2,9 +2,6 @@
 
 #include <pulp/audio/audio_file_layout.hpp>
 
-#include <pulp/audio/wav_metadata.hpp>
-
-#include "aiff_parser.hpp"
 #include "audio_file_layout_detail.hpp"
 
 #include <algorithm>
@@ -12,9 +9,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
-#include <istream>
 #include <limits>
-#include <streambuf>
 #include <string_view>
 
 #if defined(_WIN32)
@@ -301,7 +296,45 @@ std::uint64_t read_u64be(const std::uint8_t* p) noexcept {
 }
 
 std::string fourcc(const std::uint8_t* p) {
-    return std::string(reinterpret_cast<const char*>(p), 4u);
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(4u);
+    for (std::size_t i = 0; i < 4u; ++i) {
+        if (p[i] >= 0x20u && p[i] < 0x7fu) {
+            out.push_back(static_cast<char>(p[i]));
+            continue;
+        }
+        out += "\\x";
+        out.push_back(kHex[p[i] >> 4u]);
+        out.push_back(kHex[p[i] & 0xfu]);
+    }
+    return out;
+}
+
+bool raw_id_printable(const std::uint8_t* p, std::size_t count) noexcept {
+    for (std::size_t i = 0; i < count; ++i) {
+        if (p[i] < 0x20u || p[i] >= 0x7fu)
+            return false;
+    }
+    return true;
+}
+
+std::string escape_control(std::string text) {
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+        const auto u = static_cast<unsigned char>(c);
+        const bool control = (u < 0x20u && c != '\t' && c != '\n' && c != '\r') || u == 0x7fu;
+        if (!control) {
+            out.push_back(c);
+            continue;
+        }
+        out += "\\x";
+        out.push_back(kHex[u >> 4u]);
+        out.push_back(kHex[u & 0xfu]);
+    }
+    return out;
 }
 
 bool printable_id(std::string_view id) noexcept {
@@ -326,7 +359,7 @@ std::string trimmed_text(const std::uint8_t* p, std::size_t count) {
     std::string out(reinterpret_cast<const char*>(p), count);
     while (!out.empty() && (out.back() == '\0' || out.back() == ' '))
         out.pop_back();
-    return out;
+    return escape_control(std::move(out));
 }
 
 std::string utf16_to_utf8(const std::uint8_t* p, std::size_t count, bool big_endian) {
@@ -405,7 +438,10 @@ void Builder::present(const std::string& id, std::uint64_t offset, std::uint64_t
 void Builder::text(const std::string& region_id, std::string key, std::string value) {
     if (!options.include_metadata_text || value.empty())
         return;
-    report.metadata_text.push_back(LayoutMetadataText{region_id, std::move(key), std::move(value)});
+    // Text from a file may hold anything; the report holds only what a JSON
+    // string can, so control bytes are escaped here, once, for every caller.
+    report.metadata_text.push_back(LayoutMetadataText{region_id, escape_control(std::move(key)),
+                                                      escape_control(std::move(value))});
 }
 
 void Builder::set_decode_limits(std::uint64_t frames, std::uint32_t channels) {

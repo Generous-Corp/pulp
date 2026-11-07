@@ -1,5 +1,7 @@
 #pragma once
 
+// approach after SimZhou/vscode-audiolens c5c5a24; re-authored
+
 /// @file audio_file_layout_json.hpp
 /// Versioned JSON serialization of an AudioFileLayoutReport.
 

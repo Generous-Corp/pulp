@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -286,19 +287,26 @@ int cmd_audio_inspect(const std::vector<std::string>& args) {
             "--format, --channels, --rate, --endian and --offset apply only with --raw");
     }
 
+    const std::string name = absolute_paths ? file : fs::path(file).filename().string();
     std::error_code ec;
     if (!fs::is_regular_file(file, ec)) {
-        std::cerr << "Error: not a readable file: " << file << "\n";
+        std::cerr << "Error: not a readable file: " << name << "\n";
         return 1;
     }
     const auto report = pulp::audio::inspect_audio_file_layout(fs::path(file), options);
-    const std::string name = absolute_paths ? file : fs::path(file).filename().string();
 
     if (json) {
         pulp::audio::LayoutJsonOptions json_options;
         json_options.input_name = name;
         json_options.include_metadata_text = include_text;
-        std::cout << pulp::audio::audio_file_layout_to_json(report, json_options) << "\n";
+        try {
+            std::cout << pulp::audio::audio_file_layout_to_json(report, json_options) << "\n";
+        } catch (const std::exception& error) {
+            // The report sanitises file text, so this is a defect, not an
+            // input problem; say so instead of aborting with no output.
+            std::cerr << "Error: report could not be serialized: " << error.what() << "\n";
+            return 1;
+        }
     } else {
         print_table(report, name);
     }

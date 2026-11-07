@@ -1,14 +1,21 @@
+// approach after SimZhou/vscode-audiolens c5c5a24; re-authored
+
 #include <pulp/audio/audio_file_layout_json.hpp>
 
 #include <choc/text/choc_JSON.h>
 
 #include <cstdint>
+#include <limits>
 
 namespace pulp::audio {
 namespace {
 
-std::int64_t as_i64(std::uint64_t value) {
-    return static_cast<std::int64_t>(value);
+// JSON numbers here are int64; a size past 2^63 (only a hostile header can
+// declare one) is emitted as a double rather than wrapping negative.
+choc::value::Value as_i64(std::uint64_t value) {
+    if (value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+        return choc::value::Value(static_cast<double>(value));
+    return choc::value::Value(static_cast<std::int64_t>(value));
 }
 
 void set_field(choc::value::Value& object, const LayoutField& field) {

@@ -262,7 +262,15 @@ TEST_CASE("audio inspect exits 2 on an unrecognized container and still reports"
     const auto missing =
         run_pulp({"audio", "inspect", (path.parent_path() / "does-not-exist.wav").string()});
     CHECK(missing.exit_code == 1);
-    CHECK_THAT(missing.stderr_output, Catch::Matchers::ContainsSubstring("not a readable file"));
+    CHECK_THAT(missing.stderr_output,
+               Catch::Matchers::ContainsSubstring("not a readable file: does-not-exist.wav"));
+    CHECK_THAT(missing.stderr_output,
+               !Catch::Matchers::ContainsSubstring(path.parent_path().string()));
+    const auto missing_abs =
+        run_pulp({"audio", "inspect", (path.parent_path() / "does-not-exist.wav").string(),
+                  "--absolute-paths"});
+    CHECK_THAT(missing_abs.stderr_output,
+               Catch::Matchers::ContainsSubstring(path.parent_path().string()));
 
     const auto none = run_pulp({"audio", "inspect"});
     CHECK(none.exit_code == 1);

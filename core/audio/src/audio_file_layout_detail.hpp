@@ -83,10 +83,20 @@ std::uint32_t read_u24be(const std::uint8_t* p) noexcept;
 std::uint32_t read_u32be(const std::uint8_t* p) noexcept;
 std::uint64_t read_u64be(const std::uint8_t* p) noexcept;
 
+/// Four bytes as text. Bytes outside printable ASCII are written as `\xNN`
+/// escapes so an id can never carry a NUL or a control byte into the report.
 std::string fourcc(const std::uint8_t* p);
+/// True when every byte of `id` is printable ASCII (after escaping, every
+/// fourcc() result passes; use raw_id_printable on the bytes themselves).
 bool printable_id(std::string_view id) noexcept;
+/// True when the raw bytes of an id are all printable ASCII.
+bool raw_id_printable(const std::uint8_t* p, std::size_t count) noexcept;
+/// Replace control bytes (other than tab, newline, return) with `\xNN`
+/// escapes. Bytes above 0x7f pass through so UTF-8 text survives.
+std::string escape_control(std::string text);
 std::string hex_bytes(const std::uint8_t* p, std::size_t count);
-/// Bytes as text with trailing NULs and spaces removed.
+/// Bytes as text with trailing NULs and spaces removed and interior control
+/// bytes escaped.
 std::string trimmed_text(const std::uint8_t* p, std::size_t count);
 /// UTF-16 (with or without BOM) to UTF-8, stopping at the first NUL unit.
 std::string utf16_to_utf8(const std::uint8_t* p, std::size_t count, bool big_endian);
