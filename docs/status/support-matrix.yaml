@@ -1097,6 +1097,7 @@ subsystems:
   render: experimental
   view: usable
   osc: experimental
+  host: usable
 
 # ── Known limitations ────────────────────────────────────────────────────────
 #
@@ -1111,6 +1112,9 @@ subsystems:
 # Consistency rule enforced by check-docs-consistency.py (warn-mode):
 # every key under limitations: must resolve to a real entry in the matrix.
 limitations:
+  subsystems.host:
+    - text: "The LV2 slot hosts instruments and effects through lilv (MIDI in and out, time:Position, patch parameters, worker, state, options, latency) but shows no plugin UI, feeds CV inputs silence, drops SysEx, and offers no state:mapPath or state:makePath, so state that refers to files does not restore."
+      tracked_in: "../guides/hosting.md#lv2-plugins"
   timeline_engine.cli_mcp:
     - text: "The headless render path emits arrangement audio only; it does not instantiate hosted devices or MIDI instruments, and unknown plugin-delay compensation remains null rather than being invented."
       tracked_in: "../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp"

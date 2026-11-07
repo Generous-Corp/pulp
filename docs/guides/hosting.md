@@ -12,9 +12,9 @@ Current scope: CLAP, VST3, AU, and LV2 have real `PluginSlot` loaders
 when the matching SDK or platform support is compiled in. Each loader can
 open a bundle, prepare it, and process audio through the common host
 interface. Feature depth still varies by format: parameter, MIDI, state,
-editor, and extension support are not identical across loaders. In
-particular, **instruments are hostable through AU, VST3, and CLAP but not
-LV2** — see [Limits](#limits).
+editor, and extension support are not identical across loaders. Instruments
+are hostable through every format; see [LV2 plugins](#lv2-plugins) for what
+the LV2 loader provides and [Limits](#limits) for what no loader does yet.
 `SignalGraph` topology, block processing, automation routing, and delay
 compensation are implemented over the same `PluginSlot` interface.
 The VST3 and AU loaders are not stubs: both instantiate and process third-party
@@ -297,6 +297,73 @@ with `ParamCursor` or subblock helpers. Dense
 `connect_audio_rate_modulation()` is the PDC-aligned path for parameters that
 must track a delayed audio branch sample by sample.
 
+## LV2 plugins
+
+The LV2 loader reads a bundle the way every LV2 host does, through lilv: it
+starts at `manifest.ttl`, follows `rdfs:seeAlso`, and loads the module the
+plugin's `lv2:binary` names. A bundle without a manifest describes no plugin and
+does not load. lilv and its dependencies are vendored under `external/lilv` and
+compiled into `pulp::host`, so hosting LV2 needs nothing installed on the
+system.
+
+```cpp
+pulp::host::PluginInfo info;
+info.format = pulp::host::PluginFormat::LV2;
+info.path = "/usr/lib/lv2/MySynth.lv2";        // the bundle directory
+info.unique_id = "http://example.com/my-synth"; // the plugin URI; empty picks the first
+auto synth = pulp::host::PluginSlot::load(info);
+```
+
+What the slot gives the plugin:
+
+- **Every port connected.** Audio, control, CV, and atom ports are connected
+  before the first `run()`, so instruments and event-driven plugins run with
+  defined behavior. CV inputs receive silence. A required port of any other
+  kind makes `load()` fail and names the port in the log.
+- **MIDI in and out.** Host MIDI reaches each atom input that supports
+  `midi:MidiEvent`, at its sample offset. MIDI the plugin writes to an atom
+  output comes back in `midi_out` at the frame it was written. Messages longer
+  than three bytes (SysEx) are not delivered.
+- **Transport.** A plugin with an atom input that supports `time:Position`
+  reports `wants_transport()`, and `SignalGraph` then hands the slot the host
+  transport. The graph does this on its routed executor, so enable it with
+  `set_canonical_executor_routing_enabled(true)` and pass an input buffer
+  whose length matches the block (a block that fails validation runs the
+  reference walk, which carries no transport). The slot sends a `time:Position` object (frame, speed, bar, bar
+  beat, beat unit, beats per bar, tempo) on the first block, whenever the play
+  state, tempo, or meter changes, and whenever the position jumps.
+- **Parameters.** Control input ports are parameters, identified by port
+  index. Properties the plugin declares `patch:writable` (or `patch:readable`)
+  with a numeric `rdfs:range` are parameters too, with ids from `0x40000000`
+  in property-URI order. Setting one sends `patch:Set` at the start of the
+  next block; automating one sends it at the event's frame. A `patch:Set` the
+  plugin emits updates the value `get_parameter()` returns, and the slot sends
+  `patch:Get` after a prepare or a state restore so the host's values start in
+  agreement with the plugin's. Output control ports are readable through
+  `get_parameter(port index)` but are not listed as parameters.
+- **Host features.** `urid:map`, `urid:unmap`, `options:options` (buf-size
+  min, max, and nominal block length, sequence size, and `param:sampleRate`),
+  `buf-size:boundedBlockLength`, `log:log`, `worker:schedule`, and
+  `state:loadDefaultState`. A plugin that requires any other feature is
+  refused at `load()`, as LV2 requires.
+- **Worker.** A plugin's scheduled work runs on a worker thread and its
+  responses reach `work_response()` after a later `run()`. In an offline block
+  (`ProcessContext::process_mode` is `Offline`) work runs inside the block and
+  answers after the same `run()`, so an offline render does not depend on
+  thread timing. An `lv2:freeWheeling` input is set to 1 for offline blocks.
+- **State.** `save_state()` returns the plugin's LV2 state and its control
+  input values as Turtle text; `restore_state()` applies it to the running
+  instance, or holds it until `prepare()` when there is no instance yet. A
+  re-prepare builds a new instance (LV2 fixes the sample rate at
+  instantiation) and carries the state across. A plugin's default state from
+  its bundle is applied when it is first instantiated.
+- **Latency.** An `lv2:reportsLatency` output port is read back by
+  `latency_samples()`. `prepare()` runs one silent block so the value is valid
+  when `SignalGraph` reads it for delay compensation.
+
+Restores and re-prepares lock out the audio thread with a try-lock: a block that
+arrives during one passes its input through instead of waiting.
+
 ## CLI
 
 Two commands surface hosting in the CLI:
@@ -311,15 +378,12 @@ These exist to smoke-test the loaders outside a full DAW context.
 ## Limits
 
 - Feature coverage is format-specific. CLAP, VST3, and AU route parameter
-  automation through their native event paths; LV2 routes host parameter
-  events through block-rate control ports, so the last event in a block wins.
-- **LV2 cannot host instruments.** The LV2 loader discovers only
-  `lv2:AudioPort` and `lv2:ControlPort`, so atom, event, and CV ports are
-  never `connect_port`'d — and LV2 requires *every* port be connected before
-  `run()`. Every LV2 instrument has an atom MIDI input port, so running one
-  is undefined behavior rather than a clean failure. No MIDI reaches an LV2
-  plugin at all: `process()` accepts the host's `MidiBuffer` and discards it.
-  Host instruments through **AU, VST3, or CLAP**, which do route MIDI.
+  automation through their native event paths. LV2 control ports are read at
+  block start, so the last event in a block wins; LV2 patch parameters are
+  sample-accurate.
+- The LV2 loader shows no plugin UI (`lv2:ui`), feeds CV inputs silence, does
+  not deliver SysEx, and gives plugins no `state:mapPath` or `state:makePath`,
+  so a plugin that saves files in its state cannot be restored from them.
 - Only one factory descriptor per `.clap` is selected (first one, or one
   matching `info.unique_id`).
 - Hosted editor embedding is wired for CLAP, VST3, and AU v2 on macOS. LV2
