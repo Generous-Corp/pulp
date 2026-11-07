@@ -203,8 +203,11 @@ class SignalGraph::PreparedTopologyEdit {
         const NodeId id = fn();
         if (id == 0)
             mutation_failed_ = true;
-        else
+        else {
+            if (prepared_description_)
+                authored_binding_stale_ = true;
             prepared_description_.reset();
+        }
         return id;
     }
     template <typename Fn> bool mutate_(Fn&& fn) {
@@ -215,8 +218,11 @@ class SignalGraph::PreparedTopologyEdit {
         const bool ok = fn();
         if (!ok)
             mutation_failed_ = true;
-        else
+        else {
+            if (prepared_description_)
+                authored_binding_stale_ = true;
             prepared_description_.reset();
+        }
         return ok;
     }
 
@@ -237,9 +243,11 @@ class SignalGraph::PreparedTopologyEdit {
     bool base_canonical_routing_ = false;
     bool base_parallel_routing_ = false;
     bool base_anticipation_ = false;
+    std::uint64_t base_execution_selection_generation_ = 0;
     bool mutation_failed_ = false;
     bool prepare_attempted_ = false;
     bool quiesced_lifecycles_dirty_ = false;
+    bool authored_binding_stale_ = false;
     bool committed_ = false;
     const SampleRegionParameterBinding* sample_region_parameter_binding_ = nullptr;
     Result last_result_ = Result::NotPrepared;

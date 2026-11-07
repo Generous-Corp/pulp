@@ -10,10 +10,13 @@
 
 #include <algorithm>
 #include <bit>
+#include <charconv>
 #include <cctype>
 #include <cmath>
 #include <limits>
 #include <pulp/host/detail/prepared_lifecycle_ownership.hpp>
+#include <pulp/host/graph_identity.hpp>
+#include <pulp/host/identity_text.hpp>
 #include <pulp/host/sample_region_plan.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <choc/text/choc_JSON.h>
@@ -21,69 +24,524 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <set>
 
 namespace pulp::host {
 namespace {
 
-bool valid_authored_payload(std::string_view payload, bool empty) {
-    if (payload.empty() || payload.front() != '{' || payload.back() != '}')
+class JsonDuplicateScanner {
+  public:
+    explicit JsonDuplicateScanner(std::string_view text) : text_(text) {}
+
+    bool valid() {
+        skip_space();
+        if (!value())
+            return false;
+        skip_space();
+        return position_ == text_.size();
+    }
+
+  private:
+    void skip_space() {
+        while (position_ < text_.size() &&
+               (text_[position_] == ' ' || text_[position_] == '\n' || text_[position_] == '\r' ||
+                text_[position_] == '\t'))
+            ++position_;
+    }
+
+    bool string_token() {
+        if (position_ >= text_.size() || text_[position_++] != '"')
+            return false;
+        while (position_ < text_.size()) {
+            const auto c = static_cast<unsigned char>(text_[position_++]);
+            if (c == '"')
+                return true;
+            if (c < 0x20)
+                return false;
+            if (c == '\\') {
+                if (position_ >= text_.size())
+                    return false;
+                const auto escaped = text_[position_++];
+                if (escaped == 'u') {
+                    if (position_ + 4 > text_.size())
+                        return false;
+                    for (int i = 0; i < 4; ++i) {
+                        const auto h = static_cast<unsigned char>(text_[position_++]);
+                        if (!std::isxdigit(h))
+                            return false;
+                    }
+                } else if (escaped != '"' && escaped != '\\' && escaped != '/' && escaped != 'b' &&
+                           escaped != 'f' && escaped != 'n' && escaped != 'r' && escaped != 't') {
+                    return false;
+                }
+            }
+        }
         return false;
-    constexpr std::string_view profile = "\"profile\":\"pulp.graph.identity.v1\"";
-    constexpr std::string_view policies = "\"policies\":";
-    constexpr std::string_view assets = "\"assets\":";
-    constexpr std::string_view nodes = "\"nodes\":";
-    constexpr std::string_view edges = "\"edges\":";
-    constexpr std::string_view interfaces = "\"interfaces\":";
-    if (payload.find(profile) == std::string_view::npos ||
-        payload.find(policies) == std::string_view::npos ||
-        payload.find(assets) == std::string_view::npos ||
-        payload.find(nodes) == std::string_view::npos ||
-        payload.find(edges) == std::string_view::npos ||
-        payload.find(interfaces) == std::string_view::npos)
+    }
+
+    bool object() {
+        ++position_; // '{'
+        skip_space();
+        std::set<std::string> keys;
+        if (position_ < text_.size() && text_[position_] == '}') {
+            ++position_;
+            return true;
+        }
+        while (position_ < text_.size()) {
+            const auto start = position_;
+            if (!string_token())
+                return false;
+            if (!keys.emplace(std::string(text_.substr(start, position_ - start))).second)
+                return false;
+            skip_space();
+            if (position_ >= text_.size() || text_[position_++] != ':')
+                return false;
+            skip_space();
+            if (!value())
+                return false;
+            skip_space();
+            if (position_ < text_.size() && text_[position_] == '}') {
+                ++position_;
+                return true;
+            }
+            if (position_ >= text_.size() || text_[position_++] != ',')
+                return false;
+            skip_space();
+        }
         return false;
-    if (payload.find("\"document_schema\"") != std::string_view::npos ||
-        payload.find("\"format_version\"") != std::string_view::npos)
+    }
+
+    bool array() {
+        ++position_; // '['
+        skip_space();
+        if (position_ < text_.size() && text_[position_] == ']') {
+            ++position_;
+            return true;
+        }
+        while (position_ < text_.size()) {
+            if (!value())
+                return false;
+            skip_space();
+            if (position_ < text_.size() && text_[position_] == ']') {
+                ++position_;
+                return true;
+            }
+            if (position_ >= text_.size() || text_[position_++] != ',')
+                return false;
+            skip_space();
+        }
         return false;
-    if (empty)
-        return payload.find("\"nodes\":{}") != std::string_view::npos &&
-               payload.find("\"edges\":{}") != std::string_view::npos &&
-               payload.find("\"interfaces\":[]") != std::string_view::npos;
-    return payload.find("\"nodes\":{}") == std::string_view::npos &&
-           payload.find("\"interfaces\":[") != std::string_view::npos;
+    }
+
+    bool value() {
+        skip_space();
+        if (position_ >= text_.size())
+            return false;
+        switch (text_[position_]) {
+        case '{':
+            return object();
+        case '[':
+            return array();
+        case '"':
+            return string_token();
+        default:
+            while (position_ < text_.size() && text_[position_] != ',' && text_[position_] != ']' &&
+                   text_[position_] != '}' && !std::isspace(static_cast<unsigned char>(text_[position_])))
+                ++position_;
+            return true;
+        }
+    }
+
+    std::string_view text_;
+    std::size_t position_ = 0;
+};
+
+void append_canonical_json_string(std::string& out, std::string_view value) {
+    out.push_back('"');
+    constexpr char hex[] = "0123456789abcdef";
+    for (const auto c : value) {
+        const auto byte = static_cast<unsigned char>(c);
+        switch (byte) {
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\b':
+            out += "\\b";
+            break;
+        case '\f':
+            out += "\\f";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            if (byte < 0x20) {
+                out += "\\u00";
+                out.push_back(hex[byte >> 4]);
+                out.push_back(hex[byte & 0xf]);
+            } else {
+                out.push_back(static_cast<char>(byte));
+            }
+        }
+    }
+    out.push_back('"');
 }
 
-bool canonical_payload_object(std::string_view payload, choc::value::Value& root) {
+void append_canonical_json(const choc::value::ValueView& value, std::string& out) {
+    if (value.isVoid()) {
+        out += "null";
+    } else if (value.isString()) {
+        append_canonical_json_string(out, value.getString());
+    } else if (value.isBool()) {
+        out += value.getBool() ? "true" : "false";
+    } else if (value.isInt()) {
+        out += std::to_string(value.get<int64_t>());
+    } else if (value.isFloat()) {
+        out += choc::json::doubleToString(value.get<double>());
+    } else if (value.isArray() || value.isVector()) {
+        out.push_back('[');
+        for (std::uint32_t i = 0; i < value.size(); ++i) {
+            if (i)
+                out.push_back(',');
+            append_canonical_json(value[i], out);
+        }
+        out.push_back(']');
+    } else if (value.isObject()) {
+        std::vector<std::pair<std::string, std::uint32_t>> members;
+        members.reserve(value.size());
+        for (std::uint32_t i = 0; i < value.size(); ++i) {
+            const auto member = value.getObjectMemberAt(i);
+            members.emplace_back(std::string(member.name), i);
+        }
+        std::sort(members.begin(), members.end(),
+                  [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+        out.push_back('{');
+        for (std::size_t i = 0; i < members.size(); ++i) {
+            if (i)
+                out.push_back(',');
+            append_canonical_json_string(out, members[i].first);
+            out.push_back(':');
+            append_canonical_json(value[members[i].first], out);
+        }
+        out.push_back('}');
+    }
+}
+
+bool canonical_member_shape(const choc::value::ValueView& value,
+                            std::initializer_list<std::string_view> allowed,
+                            std::initializer_list<std::string_view> required) {
+    if (!value.isObject())
+        return false;
+    const auto has = [&](std::string_view key) { return value.hasObjectMember(key); };
+    for (std::uint32_t i = 0; i < value.size(); ++i) {
+        const auto member = value.getObjectMemberAt(i);
+        if (std::find(allowed.begin(), allowed.end(), member.name) == allowed.end())
+            return false;
+    }
+    return std::all_of(required.begin(), required.end(), has);
+}
+
+bool canonical_key(const choc::value::ValueView& value) {
+    if (!value.isString())
+        return false;
+    std::string normalized;
+    return normalize_authored_identity_text(value.getString(), normalized) &&
+           normalized == value.getString();
+}
+
+bool canonical_key_text(std::string_view value) {
+    std::string normalized;
+    return normalize_authored_identity_text(value, normalized) && normalized == value;
+}
+
+bool canonical_gain(std::string_view value) {
+    if (value.size() != 12 || value.substr(0, 4) != "f32:")
+        return false;
+    for (const auto c : value.substr(4))
+        if (!(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f'))
+            return false;
+    const auto bits = static_cast<std::uint32_t>(std::stoul(std::string(value.substr(4)), nullptr, 16));
+    return (bits & 0x7f800000u) != 0x7f800000u;
+}
+
+bool canonical_channels(const choc::value::ValueView& value, std::vector<std::string>& output) {
+    if (!value.isArray() || value.size() == 0)
+        return false;
+    output.clear();
+    std::unordered_set<std::string> seen;
+    for (std::uint32_t i = 0; i < value.size(); ++i) {
+        if (!canonical_key(value[i]))
+            return false;
+        const std::string channel(value[i].getString());
+        if (!seen.insert(channel).second)
+            return false;
+        output.push_back(channel);
+    }
+    return true;
+}
+
+bool canonical_endpoint(const choc::value::ValueView& value, std::string& node,
+                        std::string& direction, std::string& port) {
+    if (!canonical_member_shape(value, {"node", "direction", "kind", "port"},
+                                {"node", "direction", "kind", "port"}) ||
+        !canonical_key(value["node"]) || !canonical_key(value["port"])
+        || !value["direction"].isString() || !value["kind"].isString() ||
+        (value["direction"].getString() != "in" && value["direction"].getString() != "out") ||
+        value["kind"].getString() != "audio")
+        return false;
+    node = value["node"].getString();
+    direction = value["direction"].getString();
+    port = value["port"].getString();
+    return true;
+}
+
+std::string canonical_edge_key(std::string_view source_node, std::string_view source_direction,
+                               std::string_view source_port, std::string_view dest_node,
+                               std::string_view dest_direction, std::string_view dest_port) {
+    std::string result{"[\"audio\",{\"direction\":"};
+    append_canonical_json_string(result, source_direction);
+    result += ",\"kind\":\"audio\",\"node\":";
+    append_canonical_json_string(result, source_node);
+    result += ",\"port\":";
+    append_canonical_json_string(result, source_port);
+    result += "},{\"direction\":";
+    append_canonical_json_string(result, dest_direction);
+    result += ",\"kind\":\"audio\",\"node\":";
+    append_canonical_json_string(result, dest_node);
+    result += ",\"port\":";
+    append_canonical_json_string(result, dest_port);
+    result += "},null]";
+    return result;
+}
+
+bool strict_semantic_payload(std::string_view payload, choc::value::Value& root,
+                             std::vector<std::string>& channel_names) {
+    if (payload.find('\0') != std::string_view::npos || !JsonDuplicateScanner(payload).valid()) {
+        return false;
+    }
     try {
         root = choc::json::parse(std::string(payload));
-        return root.isObject();
     } catch (...) {
         return false;
     }
-}
-
-std::vector<std::string> authored_channels(std::string_view payload) {
-    std::vector<std::string> result;
-    const auto start = payload.find("\"interfaces\":[");
-    if (start == std::string_view::npos)
-        return result;
-    const auto end = payload.find("],\"kind\":", start);
-    const auto limit = end == std::string_view::npos ? payload.size() : end;
-    auto pos = payload.find("\"channels\":[", start);
-    if (pos == std::string_view::npos || pos >= limit)
-        return result;
-    pos += std::string_view("\"channels\":[").size();
-    while (pos < limit && payload[pos] != ']') {
-        if (payload[pos] != '\"')
-            return {};
-        const auto close = payload.find('\"', pos + 1);
-        if (close == std::string_view::npos || close >= limit)
-            return {};
-        result.emplace_back(payload.substr(pos + 1, close - pos - 1));
-        pos = close + 1;
-        if (pos < limit && payload[pos] == ',')
-            ++pos;
+    std::string canonical;
+    append_canonical_json(root, canonical);
+    if (canonical != payload ||
+        !canonical_member_shape(root, {"assets", "edges", "interfaces", "nodes", "policies", "profile"},
+                                {"assets", "edges", "interfaces", "nodes", "policies", "profile"}) ||
+        !root["profile"].isString() || root["profile"].getString() != "pulp.graph.identity.v1" ||
+        !root["assets"].isObject() || root["assets"].size() != 0) {
+        return false;
     }
-    return result;
+    const auto policies = root["policies"];
+    if (!canonical_member_shape(policies,
+                                {"event_order", "fault", "feedback", "rate_conversion", "seed",
+                                 "state_retention"},
+                                {"event_order", "fault", "feedback", "rate_conversion", "seed",
+                                 "state_retention"}) ||
+        policies["event_order"].getString() != "none" || policies["fault"].getString() != "fail" ||
+        policies["feedback"].getString() != "forbid" ||
+        policies["rate_conversion"].getString() != "none" || !policies["seed"].isVoid() ||
+        policies["state_retention"].getString() != "none") {
+        return false;
+    }
+    const auto nodes = root["nodes"];
+    const auto edges = root["edges"];
+    const auto interfaces = root["interfaces"];
+    if (!nodes.isObject() || !edges.isObject() || !interfaces.isArray()) {
+        return false;
+    }
+    if (nodes.size() == 0)
+        return edges.size() == 0 && interfaces.size() == 0;
+    if (interfaces.size() != 2) {
+        return false;
+    }
+
+    std::unordered_map<std::string, std::string> kinds;
+    std::unordered_map<std::string, std::vector<std::string>> port_channels;
+    std::vector<std::string> graph_channels;
+    for (std::uint32_t i = 0; i < nodes.size(); ++i) {
+        const auto member = nodes.getObjectMemberAt(i);
+        if (!canonical_key_text(member.name) ||
+            !canonical_member_shape(member.value,
+                                    {"kind", "kind_contract", "implementation", "config", "initial_state",
+                                     "ports", "parameter_bindings", "policies"},
+                                    {"kind", "kind_contract", "implementation", "config", "initial_state",
+                                     "ports", "parameter_bindings", "policies"}))
+        {
+            return false;
+        }
+        const auto node = member.value;
+        if (!node["kind"].isString())
+        {
+            return false;
+        }
+        const std::string kind(node["kind"].getString());
+        if (kind != "audio_input" && kind != "audio_output" && kind != "gain")
+        {
+            return false;
+        }
+        const std::string revision = kind == "gain" ? "gain.v1" : "io.v1";
+        const std::string implementation =
+            kind == "audio_input" ? "pulp.builtin.audio-input.v1"
+                                   : (kind == "audio_output" ? "pulp.builtin.audio-output.v1"
+                                                               : "pulp.builtin.gain.v1");
+        if (!node["kind_contract"].isString() || node["kind_contract"].getString() != revision ||
+            !node["implementation"].isString() || node["implementation"].getString() != implementation ||
+            !node["parameter_bindings"].isObject() || node["parameter_bindings"].size() != 0 ||
+            !node["policies"].isObject() || node["policies"].size() != 0 ||
+            !canonical_member_shape(node["initial_state"], {"mode", "revision"}, {"mode", "revision"}) ||
+            node["initial_state"]["mode"].getString() != "default" ||
+            node["initial_state"]["revision"].getString() != revision)
+            return false;
+        if (kind == "gain") {
+            if (!canonical_member_shape(node["config"], {"gain"}, {"gain"}) ||
+                !node["config"]["gain"].isString() || !canonical_gain(node["config"]["gain"].getString()))
+                {
+                return false;
+                }
+        } else if (!node["config"].isObject() || node["config"].size() != 0) {
+            return false;
+        }
+        if (!canonical_member_shape(node["ports"], {"in", "out"}, {"in", "out"}))
+        {
+            return false;
+        }
+        std::vector<std::string> active_channels;
+        for (const auto direction : {std::string_view{"in"}, std::string_view{"out"}}) {
+            const bool active = kind == "gain" || (kind == "audio_input" && direction == "out") ||
+                                (kind == "audio_output" && direction == "in");
+            const auto lookup = direction == "in" ? node["ports"]["in"] : node["ports"]["out"];
+            const auto ports = lookup;
+            const bool valid_ports = ports.isObject() &&
+                                     (active ? (ports.size() == 1 &&
+                                                std::string(ports.getObjectMemberAt(0).name) == "audio")
+                                             : ports.size() == 0);
+            if (!valid_ports) {
+                return false;
+            }
+            if (active) {
+                const auto port = ports["audio"];
+                if (!canonical_member_shape(port, {"kind", "channels", "contract"},
+                                            {"kind", "channels", "contract"}) ||
+                    port["kind"].getString() != "audio" || port["contract"].getString() != "audio-port.v1" ||
+                    !canonical_channels(port["channels"], active_channels))
+                {
+                    return false;
+                }
+                if (port_channels.contains(member.name) && port_channels[member.name] != active_channels)
+                {
+                    return false;
+                }
+                port_channels[std::string(member.name)] = active_channels;
+                if (graph_channels.empty())
+                    graph_channels = active_channels;
+                else if (graph_channels != active_channels) {
+                    return false;
+                }
+            }
+        }
+        if (kind == "gain" && node["ports"]["in"]["audio"]["channels"] !=
+                                   node["ports"]["out"]["audio"]["channels"]) {
+            return false;
+        }
+        kinds.emplace(std::string(member.name), kind);
+    }
+    channel_names = std::move(graph_channels);
+    if (channel_names.size() != 2)
+        return false;
+    std::unordered_set<std::string> interface_keys;
+    std::size_t input_interfaces = 0, output_interfaces = 0;
+    for (std::uint32_t i = 0; i < interfaces.size(); ++i) {
+        const auto item = interfaces[i];
+        if (!canonical_member_shape(item, {"key", "role", "kind", "endpoint", "channels"},
+                                    {"key", "role", "kind", "endpoint", "channels"}) ||
+            !canonical_key(item["key"]) ||
+            !interface_keys.insert(std::string(item["key"].getString())).second ||
+            !item["role"].isString() || (item["role"].getString() != "input" && item["role"].getString() != "output") ||
+            !item["kind"].isString() || item["kind"].getString() != "audio")
+            return false;
+        std::string node, direction, port;
+        if (!canonical_endpoint(item["endpoint"], node, direction, port) || !kinds.contains(node) ||
+            port != "audio" || direction != (item["role"].getString() == "input" ? "out" : "in") ||
+            kinds[node] != (item["role"].getString() == "input" ? "audio_input" : "audio_output"))
+            return false;
+        std::vector<std::string> names;
+        if (!canonical_channels(item["channels"], names) || names != channel_names)
+            return false;
+        if (item["role"].getString() == "input")
+            ++input_interfaces;
+        else
+            ++output_interfaces;
+    }
+    if (input_interfaces != 1 || output_interfaces != 1)
+        return false;
+    std::unordered_map<std::string, std::size_t> indegree, outdegree;
+    std::unordered_map<std::string, std::vector<std::string>> adjacency;
+    for (const auto& [name, _] : kinds)
+        indegree[name] = outdegree[name] = 0;
+    for (std::uint32_t i = 0; i < edges.size(); ++i) {
+        const auto member = edges.getObjectMemberAt(i);
+        const auto edge = member.value;
+        if (!canonical_member_shape(edge, {"lane", "source", "destination", "semantic_order", "feedback", "channel_map"},
+                                    {"lane", "source", "destination", "semantic_order", "feedback", "channel_map"}) ||
+            !edge["lane"].isString() || edge["lane"].getString() != "audio" || !edge["feedback"].isBool() ||
+            edge["feedback"].getBool() || !edge["semantic_order"].isVoid())
+            return false;
+        std::string source_node, source_direction, source_port, destination_node, destination_direction,
+            destination_port;
+        if (!canonical_endpoint(edge["source"], source_node, source_direction, source_port) ||
+            !canonical_endpoint(edge["destination"], destination_node, destination_direction, destination_port) ||
+            source_direction != "out" || destination_direction != "in" || !kinds.contains(source_node) ||
+            !kinds.contains(destination_node) || source_port != "audio" || destination_port != "audio" ||
+            member.name != canonical_edge_key(source_node, source_direction, source_port, destination_node,
+                                              destination_direction, destination_port))
+            return false;
+        const auto map = edge["channel_map"];
+        if (!map.isArray() || map.size() != channel_names.size())
+            return false;
+        for (std::uint32_t c = 0; c < map.size(); ++c) {
+            if (!map[c].isArray() || map[c].size() != 2 || !map[c][0].isString() || !map[c][1].isString() ||
+                map[c][0].getString() != channel_names[c] || map[c][1].getString() != channel_names[c])
+                return false;
+        }
+        ++outdegree[source_node];
+        ++indegree[destination_node];
+        adjacency[source_node].push_back(destination_node);
+    }
+    for (const auto& [name, kind] : kinds) {
+        const auto expected_in = kind == "audio_input" ? 0u : 1u;
+        const auto expected_out = kind == "audio_output" ? 0u : 1u;
+        if (indegree[name] != expected_in || outdegree[name] != expected_out)
+            return false;
+    }
+    std::unordered_map<std::string, std::uint8_t> marks;
+    const auto visit = [&](const auto& self, const std::string& name) -> bool {
+        auto& mark = marks[name];
+        if (mark == 1)
+            return false;
+        if (mark == 2)
+            return true;
+        mark = 1;
+        for (const auto& next : adjacency[name])
+            if (!self(self, next))
+                return false;
+        mark = 2;
+        return true;
+    };
+    for (const auto& [name, _] : kinds)
+        if (!visit(visit, name))
+            return false;
+    return true;
 }
 
 const char* prepared_kind(NodeType type) noexcept {
@@ -221,6 +679,9 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
         owner.parallel_routing_enabled_.load(std::memory_order_relaxed), std::memory_order_relaxed);
     candidate_->anticipation_enabled_.store(
         owner.anticipation_enabled_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    candidate_->execution_selection_generation_.store(
+        owner.execution_selection_generation_.load(std::memory_order_relaxed),
+        std::memory_order_relaxed);
     candidate_->desired_live_dsp_telemetry_enabled_.store(
         owner.desired_live_dsp_telemetry_enabled_.load(std::memory_order_relaxed),
         std::memory_order_relaxed);
@@ -241,6 +702,8 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
         owner.canonical_executor_routing_enabled_.load(std::memory_order_relaxed);
     base_parallel_routing_ = owner.parallel_routing_enabled_.load(std::memory_order_relaxed);
     base_anticipation_ = owner.anticipation_enabled_.load(std::memory_order_relaxed);
+    base_execution_selection_generation_ =
+        owner.execution_selection_generation_.load(std::memory_order_relaxed);
 }
 
 PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_identity(
@@ -255,29 +718,32 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
     result->semantic_profile = "pulp.graph.authored-io-gain.v1";
     result->semantic_payload.assign(canonical_semantic_payload);
 
-    const auto& nodes = candidate_->nodes_;
-    if (!valid_authored_payload(canonical_semantic_payload, nodes.empty()))
-        return PreparedDescriptionResult::refused(
-            PreparedDescriptionRefusal::AuthoredBindingMismatch);
     choc::value::Value authored_root;
-    if (!canonical_payload_object(canonical_semantic_payload, authored_root) ||
-        !authored_root["nodes"].isObject() || !authored_root["interfaces"].isArray())
+    std::vector<std::string> channel_names;
+    try {
+        if (!strict_semantic_payload(canonical_semantic_payload, authored_root, channel_names)) {
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        }
+    } catch (const std::exception& e) {
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    }
+    const auto& nodes = candidate_->nodes_;
     const auto authored_interfaces = authored_root["interfaces"];
-    const auto channel_names = authored_channels(canonical_semantic_payload);
     if (!nodes.empty() && channel_names.size() != 2)
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::UnsupportedPreparedProfile);
     std::string digest_preimage{"pulp.graph.semantic.v1", 22};
     digest_preimage.push_back('\0');
     digest_preimage.append(canonical_semantic_payload.data(), canonical_semantic_payload.size());
-    result->semantic_digest = runtime::sha256_hex(digest_preimage);
+    result->semantic_digest = "sha256:" + runtime::sha256_hex(digest_preimage);
     if (nodes.empty()) {
         if (!bindings.nodes.empty() || !bindings.channels.empty() || !bindings.interfaces.empty())
             return PreparedDescriptionResult::refused(
                 PreparedDescriptionRefusal::AuthoredBindingMismatch);
         prepared_description_ = result;
+        authored_binding_stale_ = false;
         return {PreparedDescriptionRefusal::None, result};
     }
 
@@ -305,17 +771,14 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
     if (inputs != 1 || outputs != 1)
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::UnsupportedPreparedProfile);
-    const std::string swapped_map = "[[\"" + channel_names[1] + "\",\"" + channel_names[0] +
-                                    "\"],[\"" + channel_names[0] + "\",\"" + channel_names[1] +
-                                    "\"]]";
-    if (canonical_semantic_payload.find(swapped_map) != std::string_view::npos)
-        return PreparedDescriptionResult::refused(
-            PreparedDescriptionRefusal::AuthoredBindingMismatch);
-
     std::unordered_map<NodeId, std::string> keys;
+    std::unordered_set<std::string> authored_keys;
     for (const auto& binding : bindings.nodes) {
+        std::string normalized_binding_key;
         if (binding.node_id == 0 || binding.authored_key.empty() ||
-            !keys.emplace(binding.node_id, binding.authored_key).second)
+            !normalize_authored_identity_text(binding.authored_key, normalized_binding_key) ||
+            normalized_binding_key != binding.authored_key || !keys.emplace(binding.node_id, binding.authored_key).second ||
+            !authored_keys.insert(binding.authored_key).second)
             return PreparedDescriptionResult::refused(
                 PreparedDescriptionRefusal::AuthoredBindingMismatch);
     }
@@ -327,6 +790,9 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
             return PreparedDescriptionResult::refused(
                 PreparedDescriptionRefusal::AuthoredBindingMismatch);
     const auto authored_nodes = authored_root["nodes"];
+    if (!authored_nodes.isObject() || authored_nodes.size() != nodes.size())
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
     for (const auto& [id, key] : keys) {
         const auto authored_node = authored_nodes[key];
         if (!authored_node.isObject() || !authored_node.hasObjectMember("kind"))
@@ -373,6 +839,8 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
 
     const auto authored_edges = authored_root["edges"];
     std::unordered_set<std::string> expected_edge_pairs;
+    std::unordered_map<std::string, std::uint8_t> runtime_edge_masks;
+    std::unordered_set<std::string> runtime_edge_keys;
     for (const auto& connection : candidate_->connections_)
         expected_edge_pairs.insert(std::to_string(connection.source_node) + ":" +
                                    std::to_string(connection.dest_node));
@@ -404,6 +872,16 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
                 PreparedDescriptionRefusal::UnsupportedPreparedProfile);
         const auto source_key = keys.at(source->id);
         const auto destination_key = keys.at(destination->id);
+        if (connection.source_port != connection.dest_port ||
+            !runtime_edge_keys
+                 .insert(source_key + ":" + destination_key + ":" +
+                         std::to_string(connection.source_port))
+                 .second)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        const auto pair_key = source_key + ":" + destination_key;
+        runtime_edge_masks[pair_key] = static_cast<std::uint8_t>(
+            runtime_edge_masks[pair_key] | (1u << connection.source_port));
         const std::string edge_key = "[\"audio\",{\"direction\":\"out\",\"kind\":\"" +
                                      std::string(kind_for(source->type)) + "\",\"node\":\"" +
                                      source_key +
@@ -423,6 +901,10 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
                     PreparedDescriptionRefusal::AuthoredBindingMismatch);
         }
     }
+    for (const auto& [_, mask] : runtime_edge_masks)
+        if (mask != 0x3u)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
 
     std::unordered_set<std::string> channel_keys;
     for (const auto& binding : bindings.channels) {
@@ -482,7 +964,10 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
     for (const auto& binding : bindings.interfaces) {
-        if (binding.interface_key.empty() || binding.authored_port != "audio" ||
+        std::string normalized_interface_key;
+        if (binding.interface_key.empty() ||
+            !normalize_authored_identity_text(binding.interface_key, normalized_interface_key) ||
+            normalized_interface_key != binding.interface_key || binding.authored_port != "audio" ||
             binding.authored_ordinal > 1 || binding.authored_channel.empty() ||
             binding.authored_channel != channel_names[binding.authored_ordinal] ||
             binding.runtime_bus_index != 0 || binding.runtime_channel_index > 1 ||
@@ -499,18 +984,63 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
                                                    : node->type != NodeType::AudioInput))
             return PreparedDescriptionResult::refused(
                 PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        const auto semantic_entry = [&]() -> choc::value::ValueView {
+            for (std::uint32_t i = 0; i < authored_interfaces.size(); ++i) {
+                const auto candidate = authored_interfaces[i];
+                if (candidate.isObject() && candidate["key"].isString() &&
+                    candidate["key"].getString() == binding.interface_key)
+                    return candidate;
+            }
+            return {};
+        }();
+        if (semantic_entry.isVoid() ||
+            semantic_entry["role"].getString() != (binding.output ? "output" : "input") ||
+            !semantic_entry["endpoint"].isObject() ||
+            semantic_entry["endpoint"]["node"].getString() != keys.at(binding.node_id) ||
+            semantic_entry["endpoint"]["port"].getString() != binding.authored_port ||
+            semantic_entry["endpoint"]["direction"].getString() !=
+                (binding.output ? "in" : "out"))
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
     }
     if (bindings.interfaces.size() != 4)
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
 
     result->channels = channel_names;
+    for (const auto& interface : bindings.interfaces) {
+        const auto node = std::find_if(nodes.begin(), nodes.end(), [&](const GraphNode& n) {
+            return n.id == interface.node_id;
+        });
+        if (node == nodes.end())
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        auto existing = std::find_if(result->interfaces.begin(), result->interfaces.end(),
+                                      [&](const PreparedDescriptionInterface& value) {
+                                          return value.key == interface.interface_key &&
+                                                 value.output == interface.output;
+                                      });
+        if (existing == result->interfaces.end())
+            result->interfaces.push_back({interface.interface_key,
+                                          keys.at(interface.node_id),
+                                          interface.authored_port,
+                                          interface.output,
+                                          channel_names});
+    }
     result->nodes.reserve(nodes.size());
     for (const auto& node : nodes) {
-        result->nodes.push_back({keys.at(node.id), prepared_kind(node.type),
-                                 static_cast<std::uint32_t>(node.num_input_ports),
-                                 static_cast<std::uint32_t>(node.num_output_ports),
-                                 std::bit_cast<std::uint32_t>(node.gain)});
+        PreparedDescriptionNode description{keys.at(node.id),
+                                            prepared_kind(node.type),
+                                            node.type == NodeType::Gain ? "gain.v1" : "io.v1",
+                                            node.type == NodeType::AudioInput
+                                                ? "pulp.builtin.audio-input.v1"
+                                                : (node.type == NodeType::AudioOutput
+                                                       ? "pulp.builtin.audio-output.v1"
+                                                       : "pulp.builtin.gain.v1"),
+                                            static_cast<std::uint32_t>(node.num_input_ports),
+                                            static_cast<std::uint32_t>(node.num_output_ports),
+                                            std::bit_cast<std::uint32_t>(node.gain)};
+        result->nodes.push_back(std::move(description));
         result->schedule.push_back(keys.at(node.id));
     }
     for (const auto& connection : candidate_->connections_) {
@@ -527,9 +1057,11 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
         result->edges.push_back(
             {keys.at(source->id) + ":" + std::to_string(connection.source_port),
              keys.at(destination->id) + ":" + std::to_string(connection.dest_port),
-             connection.source_port, connection.dest_port, "copy"});
+             connection.source_port, connection.dest_port, "copy", 0, 0, connection.feedback,
+             true, "copy"});
     }
     prepared_description_ = result;
+    authored_binding_stale_ = false;
     return {PreparedDescriptionRefusal::None, result};
 }
 
@@ -567,7 +1099,9 @@ bool SignalGraph::PreparedTopologyEdit::base_is_current_locked_() const {
                base_canonical_routing_ &&
            owner_->parallel_routing_enabled_.load(std::memory_order_relaxed) ==
                base_parallel_routing_ &&
-           owner_->anticipation_enabled_.load(std::memory_order_relaxed) == base_anticipation_;
+           owner_->anticipation_enabled_.load(std::memory_order_relaxed) == base_anticipation_ &&
+           owner_->execution_selection_generation_.load(std::memory_order_relaxed) ==
+               base_execution_selection_generation_;
 }
 
 bool SignalGraph::PreparedTopologyEdit::is_new_node_(NodeId id) const {
@@ -1251,6 +1785,8 @@ void SignalGraph::PreparedTopologyEdit::set_canonical_executor_routing_enabled(
         return;
     }
     candidate_->set_canonical_executor_routing_enabled(enabled);
+    if (prepared_description_)
+        authored_binding_stale_ = true;
     prepared_description_.reset();
 }
 
@@ -1260,6 +1796,8 @@ void SignalGraph::PreparedTopologyEdit::set_parallel_routing_enabled(bool enable
         return;
     }
     candidate_->set_parallel_routing_enabled(enabled);
+    if (prepared_description_)
+        authored_binding_stale_ = true;
     prepared_description_.reset();
 }
 
@@ -1269,6 +1807,8 @@ void SignalGraph::PreparedTopologyEdit::set_anticipation_enabled(bool enabled) n
         return;
     }
     candidate_->set_anticipation_enabled(enabled);
+    if (prepared_description_)
+        authored_binding_stale_ = true;
     prepared_description_.reset();
 }
 
@@ -1324,15 +1864,23 @@ const std::vector<Connection>& SignalGraph::PreparedTopologyEdit::connections() 
 PreparedDescriptionResult SignalGraph::ExecutionSnapshot::export_prepared_description() const {
     if (!owner_ || !snapshot_)
         return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::Unprepared);
+    GraphMutationLock owner_lock(*owner_);
     const auto current = owner_->live_slot_.live();
     if (!current || current.get() != snapshot_.get())
         return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
     if (!snapshot_->prepared_description)
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::LogicalIdentityMissing);
+    if (snapshot_->prepared_description->owner_graph_identity != owner_->diagnostic_graph_identity_)
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
     if (snapshot_->prepared_description->owner_generation != owner_->authoring_generation_)
         return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
+    const auto selection_generation = owner_->execution_selection_generation_.load(std::memory_order_relaxed);
+    if (snapshot_->prepared_description->execution_selection_generation != selection_generation)
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
     auto copy = std::make_shared<PreparedDescriptionData>(*snapshot_->prepared_description);
+    if (owner_->execution_selection_generation_.load(std::memory_order_relaxed) != selection_generation)
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
     return {PreparedDescriptionRefusal::None, std::move(copy)};
 }
 
@@ -1372,6 +1920,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         return last_result_ = Result::AlreadyCommitted;
     if (mutation_failed_)
         return last_result_ = Result::InvalidMutation;
+    if (authored_binding_stale_)
+        return last_result_ = Result::PreflightFailed;
     if (prepared_snapshot_)
         return last_result_ = Result::Prepared;
     if (prepare_attempted_)
@@ -1570,50 +2120,101 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed);
         capture->anticipation_enabled =
             candidate_->anticipation_enabled_.load(std::memory_order_relaxed);
+        capture->execution_selection_generation =
+            candidate_->execution_selection_generation_.load(std::memory_order_relaxed);
         capture->pdc_execution_domain = "dynamic";
+        capture->executor_contract = "pulp.graph.canonical-executor.f32.v1";
+        capture->execution_mode = "serial";
+        capture->tie_break_contract = "ready-node-id-ascending.v1";
+        capture->execution_fallback_policy = "internal_copy";
         const auto& limits = candidate_->limits_;
-        capture->host_max_nodes = limits.max_nodes;
-        capture->host_max_connections = limits.max_connections;
-        capture->host_max_ports = limits.max_ports;
-        capture->host_max_block_frames = static_cast<std::uint64_t>(limits.max_block_size);
-        capture->host_max_estimated_work_units = limits.max_estimated_work_units;
-        capture->runtime_max_nodes = capture->host_max_nodes;
-        capture->runtime_max_connections = capture->host_max_connections;
-        capture->runtime_max_ports = capture->host_max_ports;
-        capture->runtime_max_block_frames = capture->host_max_block_frames;
-        capture->effective_max_nodes = std::min(
-            {capture->profile_max_nodes, capture->host_max_nodes, capture->runtime_max_nodes});
-        capture->effective_max_connections =
-            std::min({capture->profile_max_connections, capture->host_max_connections,
-                      capture->runtime_max_connections});
-        capture->effective_max_ports = std::min(
-            {capture->profile_max_ports, capture->host_max_ports, capture->runtime_max_ports});
-        capture->effective_max_block_frames =
-            std::min({capture->profile_max_block_frames, capture->host_max_block_frames,
-                      capture->runtime_max_block_frames});
+        capture->host_max_nodes = static_cast<std::uint64_t>(limits.max_nodes);
+        capture->host_max_connections = static_cast<std::uint64_t>(limits.max_connections);
+        capture->host_max_ports = static_cast<std::uint64_t>(limits.max_ports);
+        capture->host_max_block_frames = limits.max_block_size > 0
+                                            ? static_cast<std::uint64_t>(limits.max_block_size)
+                                            : 0;
+        capture->host_max_estimated_work_units =
+            static_cast<std::uint64_t>(limits.max_estimated_work_units);
+        // The routed planner is compiled with this closed, explicit limit set.
+        // Capture those actual limits instead of copying GraphLimits, whose
+        // defaults are intentionally broader than the executor contract.
+        const graph::GraphRuntimeLimits runtime_limits{};
+        capture->runtime_max_nodes = runtime_limits.max_nodes;
+        capture->runtime_max_connections = runtime_limits.max_connections;
+        capture->runtime_max_ports_per_node = runtime_limits.max_ports_per_node;
+        capture->runtime_max_ports = runtime_limits.max_total_ports;
+        // The routed pool is the runtime's actual frame capacity for this
+        // prepared serial path. It is value-owned here rather than inferred
+        // from the host request or a default limit struct.
+        capture->runtime_max_block_frames = next->routed.serial.pool.max_frames();
+        const auto effective_bound = [](std::uint64_t profile, std::uint64_t host,
+                                        std::uint64_t runtime) {
+            std::uint64_t result = profile;
+            if (host != 0)
+                result = std::min(result, host);
+            if (runtime != 0)
+                result = std::min(result, runtime);
+            return result;
+        };
+        capture->effective_max_nodes = effective_bound(
+            capture->profile_max_nodes, capture->host_max_nodes, capture->runtime_max_nodes);
+        capture->effective_max_connections = effective_bound(
+            capture->profile_max_connections, capture->host_max_connections,
+            capture->runtime_max_connections);
+        capture->effective_max_ports_per_node = effective_bound(
+            capture->profile_max_ports_per_node, 0, capture->runtime_max_ports_per_node);
+        capture->effective_max_ports = effective_bound(
+            capture->profile_max_ports, capture->host_max_ports, capture->runtime_max_ports);
+        capture->effective_max_block_frames = effective_bound(
+            capture->profile_max_block_frames, capture->host_max_block_frames,
+            capture->runtime_max_block_frames);
         if (capture->nodes.size() > capture->effective_max_nodes ||
-            capture->edges.size() > capture->effective_max_connections) {
+            capture->edges.size() > capture->effective_max_connections ||
+            std::any_of(capture->nodes.begin(), capture->nodes.end(), [&](const auto& node) {
+                return std::max(node.input_ports, node.output_ports) >
+                       capture->effective_max_ports_per_node;
+            }) ||
+            static_cast<std::uint64_t>(max_block_size) > capture->effective_max_block_frames)
             return last_result_ = Result::PreflightFailed;
-        }
         capture->snapshot_id = next->routed.serial.snapshot.id();
         // bound_to() compares the pool's private binding identity to this
         // snapshot. The public pool intentionally does not expose that token;
         // retain the paired snapshot identity as the detached provenance.
         capture->pool_snapshot_id = capture->snapshot_id;
         capture->owner_generation = base_authoring_generation_;
-        capture->schedule.clear();
         const auto& plan = next->routed.serial.snapshot.plan();
+        if (!next->routed.serial.snapshot.valid() || plan.nodes.size() != capture->nodes.size() ||
+            plan.connections.size() != capture->edges.size() ||
+            plan.nodes.size() > capture->effective_max_nodes ||
+            plan.connections.size() > capture->effective_max_connections ||
+            plan.nodes.size() > std::numeric_limits<std::uint32_t>::max() ||
+            plan.connections.size() > std::numeric_limits<std::uint32_t>::max())
+            return last_result_ = Result::PreflightFailed;
         capture->prepared_plan_node_count = plan.nodes.size();
         capture->prepared_plan_connection_count = plan.connections.size();
         capture->serial_pool_bound =
             next->routed.serial.pool.bound_to(next->routed.serial.snapshot);
         const auto& assignment = next->routed.serial.snapshot.buffer_assignment();
+        if (assignment.nodes.size() != plan.nodes.size() ||
+            assignment.connection_delay_samples.size() != plan.connections.size() ||
+            assignment.reads_in_place.size() != plan.connections.size())
+            return last_result_ = Result::PreflightFailed;
         capture->buffer_slot_count = assignment.slot_count;
         capture->pool_slot_count = next->routed.serial.pool.slot_count();
         capture->pool_max_frames = next->routed.serial.pool.max_frames();
         capture->total_latency_samples = assignment.total_latency_samples;
         capture->connection_delay_samples = assignment.connection_delay_samples;
         capture->reads_in_place = assignment.reads_in_place;
+        if (!capture->serial_pool_bound || capture->pool_slot_count != capture->buffer_slot_count ||
+            capture->pool_max_frames < capture->max_block_frames)
+            return last_result_ = Result::PreflightFailed;
+        capture->host_input_alias_eligible = false;
+        capture->host_input_alias_mode = "conditional_direct_host_input";
+        capture->host_input_alias_fallback = "internal_copy";
+        capture->host_input_alias_requires_full_width = true;
+        capture->host_input_alias_requires_disjoint = true;
+        capture->host_input_alias_mappings.clear();
         const auto mode_name = [](format::GraphRuntimeSnapshot::InputPortSource::Mode mode) {
             switch (mode) {
             case format::GraphRuntimeSnapshot::InputPortSource::Mode::Zero:
@@ -1627,7 +2228,22 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             }
             return "unknown";
         };
-        capture->input_modes.clear();
+        const auto bindings = next->routed.serial.snapshot.bindings();
+        if (bindings.size() != plan.nodes.size())
+            return last_result_ = Result::PreflightFailed;
+        std::vector<std::size_t> authored_positions(plan.nodes.size());
+        std::vector<std::size_t> processing_positions(plan.nodes.size(),
+                                                       std::numeric_limits<std::size_t>::max());
+        for (std::size_t position = 0; position < plan.processing_order_indices.size(); ++position) {
+            const auto dense = plan.processing_order_indices[position];
+            if (dense >= plan.nodes.size() ||
+                processing_positions[dense] != std::numeric_limits<std::size_t>::max())
+                return last_result_ = Result::PreflightFailed;
+            processing_positions[dense] = position;
+        }
+        if (plan.processing_order_indices.size() != plan.nodes.size())
+            return last_result_ = Result::PreflightFailed;
+        capture->nodes.resize(plan.nodes.size());
         for (std::uint32_t dense = 0; dense < plan.nodes.size(); ++dense) {
             const auto authored = std::find_if(
                 candidate_->nodes_.begin(), candidate_->nodes_.end(),
@@ -1637,28 +2253,235 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             const auto position = static_cast<std::size_t>(authored - candidate_->nodes_.begin());
             if (position >= capture->nodes.size())
                 return last_result_ = Result::PreflightFailed;
-            const auto& key = capture->nodes[position].authored_key;
+            authored_positions[dense] = position;
+            auto& node = capture->nodes[position];
+            node.input_ports = plan.nodes[dense].input_ports;
+            node.output_ports = plan.nodes[dense].output_ports;
+            node.latency_samples = plan.nodes[dense].latency_samples;
+            node.persistent_output = plan.nodes[dense].persistent_output;
+            node.reads_inputs_only = bindings[dense].reads_inputs_only;
+            node.transport_sensitive = authored->transport_sensitive;
+            node.tail_samples = 0;
+            if (node.input_ports > runtime_limits.max_ports_per_node ||
+                node.output_ports > runtime_limits.max_ports_per_node)
+                return last_result_ = Result::PreflightFailed;
+        }
+        std::uint64_t total_ports = 0;
+        for (const auto& node : plan.nodes) {
+            if (node.input_ports > std::numeric_limits<std::uint64_t>::max() - total_ports)
+                return last_result_ = Result::PreflightFailed;
+            total_ports += node.input_ports;
+            if (node.output_ports > std::numeric_limits<std::uint64_t>::max() - total_ports)
+                return last_result_ = Result::PreflightFailed;
+            total_ports += node.output_ports;
+        }
+        if (total_ports > capture->effective_max_ports)
+            return last_result_ = Result::PreflightFailed;
+
+        capture->input_modes.clear();
+        capture->schedule.clear();
+        for (std::uint32_t dense = 0; dense < plan.nodes.size(); ++dense) {
+            const auto& key = capture->nodes[authored_positions[dense]].authored_key;
             const auto sources = next->routed.serial.snapshot.input_port_sources(dense);
+            if (sources.size() != plan.nodes[dense].input_ports)
+                return last_result_ = Result::PreflightFailed;
             for (std::uint32_t port = 0; port < sources.size(); ++port) {
-                capture->input_modes.push_back(key + ":" + std::to_string(port) + ":" +
-                                               mode_name(sources[port].mode) + ":" +
-                                               std::to_string(sources[port].slot));
+                if (sources[port].mode == format::GraphRuntimeSnapshot::InputPortSource::Mode::Sum)
+                    return last_result_ = Result::PreflightFailed;
+                capture->input_modes.push_back(key + ":port=audio:channel=" +
+                                               std::to_string(port) + ",mode=" +
+                                               mode_name(sources[port].mode));
             }
         }
-        for (const auto dense_index : plan.processing_order_indices) {
-            if (dense_index >= plan.nodes.size())
-                return last_result_ = Result::PreflightFailed;
-            const auto id = plan.nodes[dense_index].id;
-            const auto authored =
-                std::find_if(candidate_->nodes_.begin(), candidate_->nodes_.end(),
-                             [&](const GraphNode& node) { return node.id == id; });
-            if (authored == candidate_->nodes_.end())
-                return last_result_ = Result::PreflightFailed;
-            const auto position = static_cast<std::size_t>(authored - candidate_->nodes_.begin());
-            if (position >= capture->nodes.size())
-                return last_result_ = Result::PreflightFailed;
-            capture->schedule.push_back(capture->nodes[position].authored_key);
+        for (const auto dense_index : plan.processing_order_indices)
+            capture->schedule.push_back(capture->nodes[authored_positions[dense_index]].authored_key);
+
+        // Copy the actual node binding and edge lowering facts. The initial
+        // authored record is deliberately not trusted as a plan substitute.
+        for (std::uint32_t dense = 0; dense < plan.nodes.size(); ++dense) {
+            const auto& pnode = plan.nodes[dense];
+            auto& node = capture->nodes[authored_positions[dense]];
+            node.input_ports = pnode.input_ports;
+            node.output_ports = pnode.output_ports;
+            node.latency_samples = pnode.latency_samples;
+            node.persistent_output = pnode.persistent_output;
+            node.reads_inputs_only = bindings[dense].reads_inputs_only;
         }
+        const auto final_mode = [&](std::uint32_t dense, std::uint32_t port) {
+            const auto sources = next->routed.serial.snapshot.input_port_sources(dense);
+            return sources.size() > port ? mode_name(sources[port].mode) : "unknown";
+        };
+        std::vector<PreparedDescriptionEdge> actual_edges;
+        actual_edges.reserve(plan.connections.size());
+        for (std::uint32_t index = 0; index < plan.connections.size(); ++index) {
+            const auto& connection = plan.connections[index];
+            if (connection.source_index >= plan.nodes.size() || connection.dest_index >= plan.nodes.size() ||
+                index >= assignment.connection_delay_samples.size() ||
+                index >= assignment.reads_in_place.size())
+                return last_result_ = Result::PreflightFailed;
+            const auto& source_key = capture->nodes[authored_positions[connection.source_index]].authored_key;
+            const auto& destination_key =
+                capture->nodes[authored_positions[connection.dest_index]].authored_key;
+            std::size_t gather = 0;
+            const auto& destination = plan.nodes[connection.dest_index];
+            bool found = false;
+            for (std::uint32_t offset = 0; offset < destination.inbound_connection_count; ++offset) {
+                const auto at = destination.first_inbound_connection + offset;
+                if (at < plan.inbound_connection_indices.size() &&
+                    plan.inbound_connection_indices[at] == index) {
+                    gather = offset;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                return last_result_ = Result::PreflightFailed;
+            const std::string_view mode = final_mode(connection.dest_index, connection.dest_port);
+            if (mode == "sum" || mode == "unknown" || connection.feedback ||
+                assignment.connection_delay_samples[index] != 0)
+                return last_result_ = Result::PreflightFailed;
+            actual_edges.push_back({source_key + ":" + std::to_string(connection.source_port),
+                                    destination_key + ":" + std::to_string(connection.dest_port),
+                                    connection.source_port, connection.dest_port, std::string(mode),
+                                    static_cast<std::uint32_t>(gather),
+                                    assignment.connection_delay_samples[index], connection.feedback,
+                                    assignment.reads_in_place[index] != 0, std::string(mode)});
+        }
+        capture->edges = std::move(actual_edges);
+
+        // Recompute the host-input policy using the same facts consumed by
+        // GraphRuntimeBufferPool::bind(), including read-only bindings and
+        // resolved in-place input modes. The policy is conditional; it never
+        // exports a callback-time pointer.
+        std::uint32_t input_dense = 0;
+        std::size_t input_count = 0;
+        for (std::uint32_t dense = 0; dense < plan.nodes.size(); ++dense) {
+            if (plan.nodes[dense].kind == graph::GraphRuntimeNodeKind::AudioInput) {
+                input_dense = dense;
+                ++input_count;
+            }
+        }
+        bool aliasable = input_count == 1;
+        for (const auto& connection : plan.connections) {
+            if (!aliasable || connection.source_index != input_dense)
+                continue;
+            const auto ports = next->routed.serial.snapshot.input_port_sources(connection.dest_index);
+            const auto& destination = plan.nodes[connection.dest_index];
+            const bool read_only = destination.kind == graph::GraphRuntimeNodeKind::AudioOutput ||
+                                   bindings[connection.dest_index].reads_inputs_only;
+            if (!graph::carries_audio(connection) || connection.feedback || !read_only ||
+                connection.dest_port >= ports.size() ||
+                ports[connection.dest_port].mode !=
+                    format::GraphRuntimeSnapshot::InputPortSource::Mode::InPlace)
+                aliasable = false;
+        }
+        capture->host_input_alias_eligible = aliasable && input_count == 1;
+        if (capture->host_input_alias_eligible &&
+            plan.nodes[input_dense].output_ports != capture->channels.size())
+            capture->host_input_alias_eligible = false;
+        if (capture->host_input_alias_eligible) {
+            capture->host_input_alias_source = capture->nodes[authored_positions[input_dense]].authored_key +
+                                               ":audio:out";
+            capture->host_input_alias_view = capture->nodes[authored_positions[input_dense]].authored_key +
+                                             ":audio:out";
+            for (const auto& channel : capture->channels)
+                capture->host_input_alias_mappings.push_back(
+                    capture->host_input_alias_source + ":channel=" + channel +
+                    "->" + capture->host_input_alias_view + ":channel=" + channel);
+        }
+
+        // Normalize the actual slot classes and per-value processing lifetimes.
+        capture->buffer_classes.clear();
+        capture->buffer_values.clear();
+        std::vector<bool> used_slots(assignment.slot_count, false);
+        bool invalid_slot = false;
+        const auto add_class = [&](std::uint32_t slot) {
+            if (slot < used_slots.size())
+                used_slots[slot] = true;
+            else
+                invalid_slot = true;
+        };
+        const auto add_value = [&](std::string value) { capture->buffer_values.push_back(std::move(value)); };
+        for (std::uint32_t dense = 0; dense < plan.nodes.size(); ++dense) {
+            const auto& pnode = plan.nodes[dense];
+            const auto& slots = assignment.nodes[dense];
+            const auto& key = capture->nodes[authored_positions[dense]].authored_key;
+            const auto position = processing_positions[dense];
+            const auto sources = next->routed.serial.snapshot.input_port_sources(dense);
+            for (std::uint32_t port = 0; port < pnode.input_ports; ++port) {
+                const auto mode = sources[port].mode;
+                const auto slot = mode == format::GraphRuntimeSnapshot::InputPortSource::Mode::InPlace
+                                      ? sources[port].slot
+                                      : slots.input_base + port;
+                add_class(slot);
+                add_value(key + ":port=audio:" + (mode == format::GraphRuntimeSnapshot::InputPortSource::Mode::InPlace
+                                                         ? "direction=in,role=input_view"
+                                                         : "direction=in,role=input_scratch") +
+                          ",channel=" + std::to_string(port) + ",phase=gather,ordinal=" +
+                          std::to_string(port) + ",mode=" + mode_name(mode) + ",class=" +
+                          std::to_string(slot) + ",lifetime=[" + std::to_string(position) + "," +
+                          std::to_string(position + 1) + ")");
+            }
+            for (std::uint32_t port = 0; port < pnode.output_ports; ++port) {
+                const auto slot = slots.output_base + port;
+                add_class(slot);
+                std::size_t last_reader = position;
+                for (const auto& connection : plan.connections)
+                    if (connection.source_index == dense && connection.source_port == port)
+                        last_reader = std::max(last_reader, processing_positions[connection.dest_index]);
+                add_value(key + ":port=audio:direction=out,role=node_output,channel=" +
+                          std::to_string(port) + ",phase=execute,ordinal=" + std::to_string(port) +
+                          ",mode=write,class=" + std::to_string(slot) + ",lifetime=[" +
+                          std::to_string(position) + "," + std::to_string(last_reader + 1) + ")");
+            }
+        }
+        for (std::uint32_t slot = 0; slot < used_slots.size(); ++slot)
+            if (used_slots[slot])
+                capture->buffer_classes.push_back("storage_kind=scratch,capacity_frames=" +
+                                                  std::to_string(capture->max_block_frames) +
+                                                  ",sample_format=f32,initialization=zero,class=" +
+                                                  std::to_string(slot));
+        std::sort(capture->buffer_values.begin(), capture->buffer_values.end());
+        if (invalid_slot)
+            return last_result_ = Result::PreflightFailed;
+
+        // Slot numbers are executor-local and may change after a harmless
+        // allocator renumbering. Assign portable class ordinals in the
+        // canonical access order, then rewrite both the class records and
+        // every value record to that normalized ordinal.
+        std::unordered_map<std::uint32_t, std::uint32_t> normalized_classes;
+        const auto normalize_class = [&](std::string& record) {
+            const auto marker = record.find("class=");
+            if (marker == std::string::npos)
+                return false;
+            const auto begin = marker + 6;
+            const auto end = record.find(',', begin);
+            const auto token = record.substr(begin, end == std::string::npos ? std::string::npos
+                                                                            : end - begin);
+            std::uint32_t raw = 0;
+            const auto parsed = std::from_chars(token.data(), token.data() + token.size(), raw);
+            if (parsed.ec != std::errc{} || parsed.ptr != token.data() + token.size())
+                return false;
+            const auto [it, inserted] = normalized_classes.emplace(
+                raw, static_cast<std::uint32_t>(normalized_classes.size()));
+            const auto replacement = "class=" + std::to_string(it->second);
+            record.replace(marker, (end == std::string::npos ? record.size() : end) - marker,
+                           replacement);
+            return true;
+        };
+        for (auto& value : capture->buffer_values)
+            if (!normalize_class(value))
+                return last_result_ = Result::PreflightFailed;
+        for (auto& value : capture->buffer_classes)
+            if (!normalize_class(value))
+                return last_result_ = Result::PreflightFailed;
+        std::sort(capture->buffer_values.begin(), capture->buffer_values.end());
+        std::sort(capture->buffer_classes.begin(), capture->buffer_classes.end(),
+                  [](const std::string& lhs, const std::string& rhs) {
+                      const auto l = lhs.find("class=");
+                      const auto r = rhs.find("class=");
+                      return lhs.substr(l + 6) < rhs.substr(r + 6);
+                  });
         next->prepared_description = std::move(capture);
     }
 
@@ -1948,7 +2771,10 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
         try {
             auto value = std::make_shared<PreparedDescriptionData>(
                 *prepared_snapshot_->prepared_description);
+            value->owner_graph_identity = owner_->diagnostic_graph_identity_;
             value->owner_generation = owner_->authoring_generation_ + 1;
+            value->execution_selection_generation =
+                owner_->execution_selection_generation_.load(std::memory_order_relaxed);
             reminted_description = std::move(value);
         } catch (...) {
             return fail_before_commit(Result::RuntimeAdoptionFailed);
@@ -2077,6 +2903,9 @@ void SignalGraph::adopt_candidate_authoring_locked_(SignalGraph& candidate) {
         std::memory_order_relaxed);
     this->anticipation_enabled_.store(
         candidate.anticipation_enabled_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    this->execution_selection_generation_.store(
+        candidate.execution_selection_generation_.load(std::memory_order_relaxed),
+        std::memory_order_relaxed);
     this->transport_suppressed_for_anticipation_.store(
         candidate.transport_suppressed_for_anticipation_.load(std::memory_order_relaxed),
         std::memory_order_relaxed);

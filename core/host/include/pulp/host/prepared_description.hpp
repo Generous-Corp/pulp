@@ -56,9 +56,24 @@ struct AuthoredRuntimeBinding {
 struct PreparedDescriptionNode {
     std::string authored_key;
     std::string kind;
+    std::string kind_contract;
+    std::string implementation;
     std::uint32_t input_ports = 0;
     std::uint32_t output_ports = 0;
     std::uint32_t gain_bits = 0;
+    std::uint64_t latency_samples = 0;
+    std::uint64_t tail_samples = 0;
+    bool transport_sensitive = false;
+    bool persistent_output = false;
+    bool reads_inputs_only = false;
+};
+
+struct PreparedDescriptionInterface {
+    std::string key;
+    std::string node;
+    std::string port;
+    bool output = false;
+    std::vector<std::string> channels;
 };
 
 struct PreparedDescriptionEdge {
@@ -67,6 +82,11 @@ struct PreparedDescriptionEdge {
     std::uint32_t source_port = 0;
     std::uint32_t destination_port = 0;
     std::string input_mode;
+    std::uint32_t gather_ordinal = 0;
+    std::uint32_t pdc_delay_samples = 0;
+    bool feedback = false;
+    bool assignment_allowed = false;
+    std::string final_input_mode;
 };
 
 // Detached, value-owned capture of one admitted prepared serial path. No
@@ -79,12 +99,17 @@ struct PreparedDescriptionData {
     std::string semantic_digest;
     double sample_rate = 0.0;
     std::uint64_t max_block_frames = 0;
+    std::string sample_precision = "f32";
     std::vector<std::string> channels;
+    std::vector<PreparedDescriptionInterface> interfaces;
     std::vector<PreparedDescriptionNode> nodes;
     std::vector<PreparedDescriptionEdge> edges;
     std::vector<std::string> schedule;
     std::uint64_t snapshot_id = 0;
     std::uint64_t pool_snapshot_id = 0;
+    // Process-local owner provenance. Deliberately excluded from canonical
+    // portable content; reminted only when a candidate is adopted.
+    std::uint64_t owner_graph_identity = 0;
     std::uint64_t owner_generation = 0;
     std::string execution_backend = "pulp.graph.canonical-executor.f32.v1";
     std::string pdc_execution_domain = "dynamic";
@@ -98,11 +123,29 @@ struct PreparedDescriptionData {
     std::uint64_t pool_slot_count = 0;
     std::uint64_t pool_max_frames = 0;
     std::uint64_t total_latency_samples = 0;
+    std::string executor_contract = "pulp.graph.canonical-executor.f32.v1";
+    std::string execution_mode = "serial";
+    std::string tie_break_contract = "ready-node-id-ascending.v1";
+    std::string execution_fallback_policy = "internal_copy";
     std::vector<std::string> input_modes;
     std::vector<std::uint32_t> connection_delay_samples;
     std::vector<std::uint8_t> reads_in_place;
+    // Normalized value-owned storage/lifetime records. Each entry is a stable
+    // textual record so the detached receipt never retains executor pointers.
+    std::vector<std::string> buffer_classes;
+    std::vector<std::string> buffer_values;
+    bool host_input_alias_eligible = false;
+    std::string host_input_alias_mode = "internal_copy";
+    std::string host_input_alias_fallback = "internal_copy";
+    std::string host_input_alias_source;
+    std::string host_input_alias_view;
+    std::vector<std::string> host_input_alias_mappings;
+    bool host_input_alias_requires_full_width = true;
+    bool host_input_alias_requires_disjoint = true;
+    std::uint64_t execution_selection_generation = 0;
     std::uint64_t profile_max_nodes = 512;
     std::uint64_t profile_max_connections = 2048;
+    std::uint64_t profile_max_ports_per_node = 64;
     std::uint64_t profile_max_ports = 4096;
     std::uint64_t profile_max_block_frames = 4096;
     std::uint64_t host_max_nodes = 0;
@@ -112,10 +155,12 @@ struct PreparedDescriptionData {
     std::uint64_t host_max_estimated_work_units = 0;
     std::uint64_t runtime_max_nodes = 0;
     std::uint64_t runtime_max_connections = 0;
+    std::uint64_t runtime_max_ports_per_node = 0;
     std::uint64_t runtime_max_ports = 0;
     std::uint64_t runtime_max_block_frames = 0;
     std::uint64_t effective_max_nodes = 0;
     std::uint64_t effective_max_connections = 0;
+    std::uint64_t effective_max_ports_per_node = 0;
     std::uint64_t effective_max_ports = 0;
     std::uint64_t effective_max_block_frames = 0;
 

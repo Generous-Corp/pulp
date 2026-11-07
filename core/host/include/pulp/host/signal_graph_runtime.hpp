@@ -715,6 +715,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Pick a path before starting a feedback graph and keep it for the stream.
     void set_canonical_executor_routing_enabled(bool enabled) noexcept {
         canonical_executor_routing_enabled_.store(enabled, std::memory_order_relaxed);
+        execution_selection_generation_.fetch_add(1, std::memory_order_relaxed);
     }
     // Returns the requested opt-in flag, not a promise that the current block
     // is taking the executor path. Actual dispatch also requires an eligible
@@ -734,6 +735,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // bit-identical across all three paths.
     void set_parallel_routing_enabled(bool enabled) noexcept {
         parallel_routing_enabled_.store(enabled, std::memory_order_relaxed);
+        execution_selection_generation_.fetch_add(1, std::memory_order_relaxed);
     }
     bool parallel_routing_enabled() const noexcept {
         return parallel_routing_enabled_.load(std::memory_order_relaxed);
@@ -824,6 +826,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // transport-sensitive nodes that anticipation forced exterior.
     void set_anticipation_enabled(bool enabled) noexcept {
         anticipation_enabled_.store(enabled, std::memory_order_relaxed);
+        execution_selection_generation_.fetch_add(1, std::memory_order_relaxed);
     }
     bool anticipation_enabled() const noexcept {
         return anticipation_enabled_.load(std::memory_order_relaxed);
@@ -1407,6 +1410,11 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Invalidates an outstanding PreparedTopologyEdit when any direct authoring
     // or lifecycle operation touches this graph. Guarded by graph_mutation_mutex_.
     std::uint64_t authoring_generation_{0};
+    // Monotonic control-side generation for execution-policy selection. Unlike
+    // the three policy bits, this does not return to its prior value when a
+    // caller toggles a setting away and back (ABA), so detached prepared
+    // receipts cannot be reused after a policy mutation.
+    std::atomic<std::uint64_t> execution_selection_generation_{0};
     NodeId next_id_ = 1;
     NodeId last_prepare_custom_failure_node_ = 0;
     GraphLimits limits_;

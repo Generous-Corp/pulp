@@ -80,10 +80,20 @@ std::string PreparedDescriptionData::canonical_bytes() const {
     out.push_back('"');
     out += ",\"max_block_frames\":";
     number(out, max_block_frames);
+    out += ",\"sample_precision\":";
+    quote(out, sample_precision);
     out += ",\"execution\":{\"backend\":";
     quote(out, execution_backend);
     out += ",\"pdc_domain\":";
     quote(out, pdc_execution_domain);
+    out += ",\"executor_contract\":";
+    quote(out, executor_contract);
+    out += ",\"execution_mode\":";
+    quote(out, execution_mode);
+    out += ",\"tie_break_contract\":";
+    quote(out, tie_break_contract);
+    out += ",\"fallback_policy\":";
+    quote(out, execution_fallback_policy);
     out += ",\"canonical_executor_routing_enabled\":";
     out += canonical_executor_routing_enabled ? "true" : "false";
     out += ",\"parallel_routing_enabled\":";
@@ -123,11 +133,36 @@ std::string PreparedDescriptionData::canonical_bytes() const {
         number(out, reads_in_place[i]);
     }
     out += "]";
+    out += ",\"host_input_alias_policy\":{\"eligible\":";
+    out += host_input_alias_eligible ? "true" : "false";
+    out += ",\"mode\":";
+    quote(out, host_input_alias_mode);
+    out += ",\"fallback\":";
+    quote(out, host_input_alias_fallback);
+    out += ",\"source\":";
+    quote(out, host_input_alias_source);
+    out += ",\"view\":";
+    quote(out, host_input_alias_view);
+    out += ",\"mappings\":[";
+    for (std::size_t i = 0; i < host_input_alias_mappings.size(); ++i) {
+        if (i)
+            out.push_back(',');
+        quote(out, host_input_alias_mappings[i]);
+    }
+    out += "]";
+    out += ",\"requires_full_width\":";
+    out += host_input_alias_requires_full_width ? "true" : "false";
+    out += ",\"requires_disjoint\":";
+    out += host_input_alias_requires_disjoint ? "true" : "false";
+    out += "},\"execution_selection_generation\":";
+    number(out, execution_selection_generation);
     out += "}";
     out += ",\"limits\":{\"profile\":{\"nodes\":";
     number(out, profile_max_nodes);
     out += ",\"connections\":";
     number(out, profile_max_connections);
+    out += ",\"ports_per_node\":";
+    number(out, profile_max_ports_per_node);
     out += ",\"ports\":";
     number(out, profile_max_ports);
     out += ",\"block_frames\":";
@@ -146,6 +181,8 @@ std::string PreparedDescriptionData::canonical_bytes() const {
     number(out, runtime_max_nodes);
     out += ",\"connections\":";
     number(out, runtime_max_connections);
+    out += ",\"ports_per_node\":";
+    number(out, runtime_max_ports_per_node);
     out += ",\"ports\":";
     number(out, runtime_max_ports);
     out += ",\"block_frames\":";
@@ -154,6 +191,8 @@ std::string PreparedDescriptionData::canonical_bytes() const {
     number(out, effective_max_nodes);
     out += ",\"connections\":";
     number(out, effective_max_connections);
+    out += ",\"ports_per_node\":";
+    number(out, effective_max_ports_per_node);
     out += ",\"ports\":";
     number(out, effective_max_ports);
     out += ",\"block_frames\":";
@@ -164,6 +203,29 @@ std::string PreparedDescriptionData::canonical_bytes() const {
             out.push_back(',');
         quote(out, channels[i]);
     }
+    out += "],\"interfaces\":[";
+    for (std::size_t i = 0; i < interfaces.size(); ++i) {
+        if (i)
+            out.push_back(',');
+        const auto& iface = interfaces[i];
+        out += "{\"key\":";
+        quote(out, iface.key);
+        out += ",\"role\":";
+        quote(out, iface.output ? "output" : "input");
+        out += ",\"kind\":\"audio\",\"endpoint\":{\"node\":";
+        quote(out, iface.node);
+        out += ",\"direction\":";
+        quote(out, iface.output ? "in" : "out");
+        out += ",\"kind\":\"audio\",\"port\":";
+        quote(out, iface.port);
+        out += "},\"channels\":[";
+        for (std::size_t c = 0; c < iface.channels.size(); ++c) {
+            if (c)
+                out.push_back(',');
+            quote(out, iface.channels[c]);
+        }
+        out += "]}";
+    }
     out += "],\"nodes\":[";
     for (std::size_t i = 0; i < nodes.size(); ++i) {
         if (i)
@@ -173,12 +235,26 @@ std::string PreparedDescriptionData::canonical_bytes() const {
         quote(out, node.authored_key);
         out += ",\"kind\":";
         quote(out, node.kind);
+        out += ",\"kind_contract\":";
+        quote(out, node.kind_contract);
+        out += ",\"implementation\":";
+        quote(out, node.implementation);
         out += ",\"input_ports\":";
         number(out, node.input_ports);
         out += ",\"output_ports\":";
         number(out, node.output_ports);
         out += ",\"gain\":";
         float_bits(out, std::bit_cast<float>(node.gain_bits));
+        out += ",\"latency_samples\":";
+        number(out, node.latency_samples);
+        out += ",\"tail_samples\":";
+        number(out, node.tail_samples);
+        out += ",\"transport_sensitive\":";
+        out += node.transport_sensitive ? "true" : "false";
+        out += ",\"persistent_output\":";
+        out += node.persistent_output ? "true" : "false";
+        out += ",\"reads_inputs_only\":";
+        out += node.reads_inputs_only ? "true" : "false";
         out.push_back('}');
     }
     out += "],\"edges\":[";
@@ -196,6 +272,16 @@ std::string PreparedDescriptionData::canonical_bytes() const {
         number(out, edge.destination_port);
         out += ",\"input_mode\":";
         quote(out, edge.input_mode);
+        out += ",\"gather_ordinal\":";
+        number(out, edge.gather_ordinal);
+        out += ",\"pdc_delay_samples\":";
+        number(out, edge.pdc_delay_samples);
+        out += ",\"feedback\":";
+        out += edge.feedback ? "true" : "false";
+        out += ",\"assignment_allowed\":";
+        out += edge.assignment_allowed ? "true" : "false";
+        out += ",\"final_input_mode\":";
+        quote(out, edge.final_input_mode);
         out.push_back('}');
     }
     out += "],\"schedule\":[";
@@ -204,7 +290,19 @@ std::string PreparedDescriptionData::canonical_bytes() const {
             out.push_back(',');
         quote(out, schedule[i]);
     }
-    out += "]}";
+    out += "],\"buffers\":{\"classes\":[";
+    for (std::size_t i = 0; i < buffer_classes.size(); ++i) {
+        if (i)
+            out.push_back(',');
+        quote(out, buffer_classes[i]);
+    }
+    out += "],\"values\":[";
+    for (std::size_t i = 0; i < buffer_values.size(); ++i) {
+        if (i)
+            out.push_back(',');
+        quote(out, buffer_values[i]);
+    }
+    out += "]}}";
     return out;
 }
 
