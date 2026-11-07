@@ -164,14 +164,37 @@ function(_pulp_control_vendor_operations_member output target control_caps)
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): CONTROL_VENDOR_OPERATIONS must not contain '$<'")
     endif()
+    # Tiers and descriptions are read as JSON, so text inside a description
+    # can never satisfy or defeat the tier check. The broker re-validates the
+    # whole declaration; these checks only make mistakes fail at configure.
+    string(JSON _count ERROR_VARIABLE _json_error LENGTH "${_document}" operations)
+    if(_json_error OR NOT _count GREATER 0)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTROL_VENDOR_OPERATIONS must be a JSON object with a non-empty 'operations' array")
+    endif()
+    set(_used_tiers "")
+    math(EXPR _last "${_count} - 1")
+    foreach(_index RANGE ${_last})
+        string(JSON _tier ERROR_VARIABLE _tier_error GET "${_document}" operations ${_index} tier)
+        string(JSON _description ERROR_VARIABLE _description_error
+            GET "${_document}" operations ${_index} description)
+        string(LENGTH "${_description}" _description_length)
+        if(_description_error OR _description_length GREATER 512 OR
+           NOT _description MATCHES "^[ -~]+$")
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): vendor operation ${_index} needs a description of one line of 1 to 512 printable ASCII characters")
+        endif()
+        if(NOT _tier_error)
+            list(APPEND _used_tiers "${_tier}")
+        endif()
+    endforeach()
     foreach(_tier read gesture render destructive)
-        string(REGEX MATCH "\"tier\"[ \t\r\n]*:[ \t\r\n]*\"${_tier}\"" _uses "${_document}")
         set(_cap "dev.pulp.vendor/${_tier}@1")
-        if(_uses AND NOT _cap IN_LIST control_caps)
+        if(_tier IN_LIST _used_tiers AND NOT _cap IN_LIST control_caps)
             message(FATAL_ERROR
                 "pulp_add_plugin(${target}): a '${_tier}' vendor operation requires '${_cap}' in CONTROL_CAPABILITIES")
         endif()
-        if(NOT _uses AND _cap IN_LIST control_caps)
+        if(NOT _tier IN_LIST _used_tiers AND _cap IN_LIST control_caps)
             message(FATAL_ERROR
                 "pulp_add_plugin(${target}): '${_cap}' is declared without a '${_tier}' vendor operation")
         endif()

@@ -197,7 +197,11 @@ class ControlBroker {
     ControlResolvedOperation resolve_operation_locked(std::string_view manifest_digest,
                                                       std::string_view operation_id,
                                                       std::uint32_t operation_version) const;
-    ControlIdentityStatus retain_vendor_operations_locked(const ControlManifest& manifest);
+    /// Validates a declaration and makes room for it without retaining it, so
+    /// a registration that is then refused never occupies a table slot.
+    ControlIdentityStatus
+    prepare_vendor_operations_locked(const ControlManifest& manifest, std::string& digest,
+                                     std::shared_ptr<const ControlVendorOperationTable>& table);
     void request_active_cancellation(const ControlClientId& client_id,
                                      const ControlRegistrationId& registration_id,
                                      const ControlGrantId& grant_id, std::string_view reason);

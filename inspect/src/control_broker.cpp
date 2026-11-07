@@ -216,21 +216,30 @@ ControlRegistrationResult
 ControlBroker::register_instance(const VerifiedControlPeerIdentity& host_peer,
                                  ControlRegistrationRequest request, bool publish) {
     std::lock_guard coordination_lock(coordination_mutex_);
+    std::string vendor_digest;
+    std::shared_ptr<const ControlVendorOperationTable> vendor_table;
     if (!request.manifest.vendor_operations.empty()) {
-        const auto retained = retain_vendor_operations_locked(request.manifest);
-        if (retained != ControlIdentityStatus::Accepted) {
+        const auto prepared =
+            prepare_vendor_operations_locked(request.manifest, vendor_digest, vendor_table);
+        if (prepared != ControlIdentityStatus::Accepted) {
             audit_denial("registration.register", host_peer,
-                         retained == ControlIdentityStatus::InvalidRequest
+                         prepared == ControlIdentityStatus::InvalidRequest
                              ? "invalid-vendor-operations"
                              : "vendor-operations-capacity");
-            return {.status = retained};
+            return {.status = prepared};
         }
     }
-    return identities_.register_instance(host_peer, std::move(request), publish);
+    auto result = identities_.register_instance(host_peer, std::move(request), publish);
+    // Retained only once the registration exists; the coordination lock keeps
+    // any admission from seeing the registration without its table.
+    if (result.registration && vendor_table)
+        vendor_tables_.emplace(std::move(vendor_digest), std::move(vendor_table));
+    return result;
 }
 
-ControlIdentityStatus
-ControlBroker::retain_vendor_operations_locked(const ControlManifest& manifest) {
+ControlIdentityStatus ControlBroker::prepare_vendor_operations_locked(
+    const ControlManifest& manifest, std::string& digest,
+    std::shared_ptr<const ControlVendorOperationTable>& table) {
     // Bounded independently of live registrations: an entry outlives its
     // registration so receipts can still be completed and replayed, and is
     // reclaimed only once nothing live or in flight names its digest.
@@ -239,12 +248,12 @@ ControlBroker::retain_vendor_operations_locked(const ControlManifest& manifest) 
     // occupies a table slot.
     if (!validate_control_manifest_detailed(manifest).valid)
         return ControlIdentityStatus::InvalidRequest;
-    const auto digest = control_manifest_digest(manifest);
+    digest = control_manifest_digest(manifest);
     if (digest.empty())
         return ControlIdentityStatus::InvalidRequest;
     if (vendor_tables_.contains(digest))
         return ControlIdentityStatus::Accepted;
-    auto table = parse_control_vendor_operations(manifest.vendor_operations, manifest.bundle_id);
+    table = parse_control_vendor_operations(manifest.vendor_operations, manifest.bundle_id);
     if (!table)
         return ControlIdentityStatus::InvalidRequest;
     if (vendor_tables_.size() >= kMaximumVendorTables) {
@@ -260,7 +269,6 @@ ControlBroker::retain_vendor_operations_locked(const ControlManifest& manifest) 
         if (vendor_tables_.size() >= kMaximumVendorTables)
             return ControlIdentityStatus::ResourceExhausted;
     }
-    vendor_tables_.emplace(digest, std::move(table));
     return ControlIdentityStatus::Accepted;
 }
 
@@ -795,6 +803,8 @@ ControlBroker::finish_operation(const VerifiedControlPeerIdentity& client_peer,
             };
         }
     }
+    // resolved_result owns any vendor table, so the descriptor pointer below
+    // stays valid for the rest of this call.
     const auto resolved_result = success_like
                                      ? resolve_operation_locked(current->binding.manifest_digest,
                                                                 current->binding.operation_id,

@@ -11,7 +11,7 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
         pulp::inspect-standalone-runtime pulp::standalone pulp::format)
     target_link_options(${_fixture} PRIVATE LINKER:-dead_strip_dylibs)
     _pulp_cache_control_declarations(${_fixture} developer-local
-        "dev.pulp.instance/read@1;dev.pulp.session/control@1;dev.pulp.vendor/read@1;dev.pulp.vendor/gesture@1;dev.pulp.vendor/render@1"
+        "dev.pulp.instance/read@1;dev.pulp.session/control@1;dev.pulp.vendor/read@1;dev.pulp.vendor/gesture@1;dev.pulp.vendor/render@1;dev.pulp.vendor/destructive@1"
         FALSE)
     _pulp_cache_control_vendor_operations(${_fixture}
         "${CMAKE_SOURCE_DIR}/test/fixtures/control_vendor_product_operations.json")
