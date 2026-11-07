@@ -9,14 +9,85 @@
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <algorithm>
+#include <bit>
+#include <cctype>
+#include <cmath>
 #include <limits>
 #include <pulp/host/detail/prepared_lifecycle_ownership.hpp>
 #include <pulp/host/sample_region_plan.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace pulp::host {
 namespace {
+
+bool valid_authored_payload(std::string_view payload, bool empty) {
+    if (payload.empty() || payload.front() != '{' || payload.back() != '}')
+        return false;
+    constexpr std::string_view profile = "\"profile\":\"pulp.graph.identity.v1\"";
+    constexpr std::string_view policies = "\"policies\":";
+    constexpr std::string_view assets = "\"assets\":";
+    constexpr std::string_view nodes = "\"nodes\":";
+    constexpr std::string_view edges = "\"edges\":";
+    constexpr std::string_view interfaces = "\"interfaces\":";
+    if (payload.find(profile) == std::string_view::npos ||
+        payload.find(policies) == std::string_view::npos ||
+        payload.find(assets) == std::string_view::npos ||
+        payload.find(nodes) == std::string_view::npos ||
+        payload.find(edges) == std::string_view::npos ||
+        payload.find(interfaces) == std::string_view::npos)
+        return false;
+    if (payload.find("\"document_schema\"") != std::string_view::npos ||
+        payload.find("\"format_version\"") != std::string_view::npos)
+        return false;
+    if (empty)
+        return payload.find("\"nodes\":{}") != std::string_view::npos &&
+               payload.find("\"edges\":{}") != std::string_view::npos &&
+               payload.find("\"interfaces\":[]") != std::string_view::npos;
+    return payload.find("\"nodes\":{}") == std::string_view::npos &&
+           payload.find("\"interfaces\":[") != std::string_view::npos;
+}
+
+std::vector<std::string> authored_channels(std::string_view payload) {
+    std::vector<std::string> result;
+    const auto start = payload.find("\"interfaces\":[");
+    if (start == std::string_view::npos)
+        return result;
+    const auto end = payload.find("],\"kind\":", start);
+    const auto limit = end == std::string_view::npos ? payload.size() : end;
+    auto pos = payload.find("\"channels\":[", start);
+    if (pos == std::string_view::npos || pos >= limit)
+        return result;
+    pos += std::string_view("\"channels\":[").size();
+    while (pos < limit && payload[pos] != ']') {
+        if (payload[pos] != '\"')
+            return {};
+        const auto close = payload.find('\"', pos + 1);
+        if (close == std::string_view::npos || close >= limit)
+            return {};
+        result.emplace_back(payload.substr(pos + 1, close - pos - 1));
+        pos = close + 1;
+        if (pos < limit && payload[pos] == ',')
+            ++pos;
+    }
+    return result;
+}
+
+const char* prepared_kind(NodeType type) noexcept {
+    switch (type) {
+    case NodeType::AudioInput:
+        return "AudioInput";
+    case NodeType::AudioOutput:
+        return "AudioOutput";
+    case NodeType::Gain:
+        return "Gain";
+    default:
+        return nullptr;
+    }
+}
 
 std::string prepared_custom_key(std::string_view type_id, int version) {
     std::string key(type_id);
@@ -160,6 +231,200 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
         owner.canonical_executor_routing_enabled_.load(std::memory_order_relaxed);
     base_parallel_routing_ = owner.parallel_routing_enabled_.load(std::memory_order_relaxed);
     base_anticipation_ = owner.anticipation_enabled_.load(std::memory_order_relaxed);
+}
+
+PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_identity(
+    std::string_view canonical_semantic_payload, const AuthoredRuntimeBinding& bindings) {
+    if (prepare_attempted_ || committed_ || mutation_failed_)
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::AuthoredBindingStale);
+    if (canonical_semantic_payload.empty())
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::LogicalIdentityMissing);
+
+    const auto result = std::make_shared<PreparedDescriptionData>();
+    result->semantic_profile = "pulp.graph.authored-io-gain.v1";
+    result->semantic_payload.assign(canonical_semantic_payload);
+
+    const auto& nodes = candidate_->nodes_;
+    if (!valid_authored_payload(canonical_semantic_payload, nodes.empty()))
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    const auto channel_names = authored_channels(canonical_semantic_payload);
+    if (!nodes.empty() && channel_names.size() != 2)
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+    const std::string digest_preimage =
+        "pulp.graph.semantic.v1\0" + std::string(canonical_semantic_payload);
+    result->semantic_digest = runtime::sha256_hex(digest_preimage);
+    if (nodes.empty()) {
+        if (!bindings.nodes.empty() || !bindings.channels.empty() || !bindings.interfaces.empty())
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        prepared_description_ = result;
+        return {PreparedDescriptionRefusal::None, result};
+    }
+
+    std::size_t inputs = 0, outputs = 0;
+    for (const auto& node : nodes) {
+        if (!prepared_kind(node.type) ||
+            ((node.type == NodeType::AudioInput || node.type == NodeType::AudioOutput ||
+              node.type == NodeType::Gain) &&
+             (node.num_input_ports > 2 || node.num_output_ports > 2)))
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+        if (node.type == NodeType::AudioInput)
+            ++inputs;
+        if (node.type == NodeType::AudioOutput)
+            ++outputs;
+        if ((node.type == NodeType::AudioInput &&
+             (node.num_input_ports != 0 || node.num_output_ports != 2)) ||
+            (node.type == NodeType::AudioOutput &&
+             (node.num_input_ports != 2 || node.num_output_ports != 0)) ||
+            (node.type == NodeType::Gain &&
+             (node.num_input_ports != 2 || node.num_output_ports != 2)))
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+    }
+    if (inputs != 1 || outputs != 1)
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+    const std::string swapped_map = "[[\"" + channel_names[1] + "\",\"" + channel_names[0] +
+                                    "\"],[\"" + channel_names[0] + "\",\"" + channel_names[1] +
+                                    "\"]]";
+    if (canonical_semantic_payload.find(swapped_map) != std::string_view::npos)
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+
+    std::unordered_map<NodeId, std::string> keys;
+    for (const auto& binding : bindings.nodes) {
+        if (binding.node_id == 0 || binding.authored_key.empty() ||
+            !keys.emplace(binding.node_id, binding.authored_key).second)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    }
+    if (keys.size() != nodes.size())
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    for (const auto& node : nodes)
+        if (keys.find(node.id) == keys.end())
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    for (const auto& [id, key] : keys) {
+        if (canonical_semantic_payload.find("\"" + key + "\"") == std::string_view::npos)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        const auto node = std::find_if(nodes.begin(), nodes.end(),
+                                       [&](const GraphNode& n) { return n.id == id; });
+        std::string kind;
+        switch (node->type) {
+        case NodeType::AudioInput:
+            kind = "audio_input";
+            break;
+        case NodeType::AudioOutput:
+            kind = "audio_output";
+            break;
+        case NodeType::Gain:
+            kind = "gain";
+            break;
+        default:
+            break;
+        }
+        if (canonical_semantic_payload.find("\"kind\":\"" + kind + "\"") == std::string_view::npos)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    }
+
+    std::unordered_set<std::string> channel_keys;
+    for (const auto& binding : bindings.channels) {
+        if (binding.authored_port != "audio" || binding.authored_channel.empty() ||
+            binding.authored_ordinal > 1 ||
+            binding.authored_channel != channel_names[binding.authored_ordinal] ||
+            binding.runtime_port_index != binding.authored_ordinal ||
+            !channel_keys
+                 .insert(std::to_string(binding.node_id) + ":" + (binding.output ? "out:" : "in:") +
+                         binding.authored_channel)
+                 .second)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        const auto node = std::find_if(nodes.begin(), nodes.end(),
+                                       [&](const GraphNode& n) { return n.id == binding.node_id; });
+        if (node == nodes.end() || binding.authored_ordinal >= 2 ||
+            (binding.output ? node->num_output_ports : node->num_input_ports) != 2)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    }
+    std::size_t required_channels = 0;
+    for (const auto& node : nodes)
+        required_channels += static_cast<std::size_t>(node.num_input_ports + node.num_output_ports);
+    if (bindings.channels.size() != required_channels)
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+
+    std::unordered_set<std::string> interfaces;
+    for (const auto& binding : bindings.interfaces) {
+        if (binding.interface_key.empty() || binding.authored_port != "audio" ||
+            binding.authored_ordinal > 1 || binding.authored_channel.empty() ||
+            binding.authored_channel != channel_names[binding.authored_ordinal] ||
+            binding.runtime_bus_index != 0 || binding.runtime_channel_index > 1 ||
+            binding.authored_ordinal != binding.runtime_channel_index ||
+            !interfaces
+                 .insert(binding.interface_key + ":" + (binding.output ? "out:" : "in:") +
+                         std::to_string(binding.authored_ordinal))
+                 .second)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        const auto node = std::find_if(nodes.begin(), nodes.end(),
+                                       [&](const GraphNode& n) { return n.id == binding.node_id; });
+        if (node == nodes.end() || (binding.output ? node->type != NodeType::AudioOutput
+                                                   : node->type != NodeType::AudioInput))
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    }
+    if (bindings.interfaces.size() != 4)
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+
+    result->channels = channel_names;
+    result->nodes.reserve(nodes.size());
+    for (const auto& node : nodes) {
+        result->nodes.push_back({keys.at(node.id), prepared_kind(node.type),
+                                 static_cast<std::uint32_t>(node.num_input_ports),
+                                 static_cast<std::uint32_t>(node.num_output_ports),
+                                 std::bit_cast<std::uint32_t>(node.gain)});
+        result->schedule.push_back(keys.at(node.id));
+    }
+    for (const auto& connection : candidate_->connections_) {
+        const auto source = std::find_if(nodes.begin(), nodes.end(), [&](const GraphNode& n) {
+            return n.id == connection.source_node;
+        });
+        const auto destination = std::find_if(nodes.begin(), nodes.end(), [&](const GraphNode& n) {
+            return n.id == connection.dest_node;
+        });
+        if (source == nodes.end() || destination == nodes.end() || connection.feedback ||
+            connection.source_port > 1 || connection.dest_port > 1)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+        result->edges.push_back(
+            {keys.at(source->id) + ":" + std::to_string(connection.source_port),
+             keys.at(destination->id) + ":" + std::to_string(connection.dest_port),
+             connection.source_port, connection.dest_port, "copy"});
+    }
+    prepared_description_ = result;
+    return {PreparedDescriptionRefusal::None, result};
+}
+
+PreparedDescriptionResult
+SignalGraph::PreparedTopologyEdit::build_prepared_description_(double sample_rate,
+                                                               int max_block_size) const {
+    if (!prepared_description_ || !std::isfinite(sample_rate) || sample_rate <= 0.0 ||
+        max_block_size < 1 || max_block_size > 4096)
+        return PreparedDescriptionResult::refused(
+            prepared_description_ ? PreparedDescriptionRefusal::UnsupportedPreparedProfile
+                                  : PreparedDescriptionRefusal::LogicalIdentityMissing);
+    auto copy = std::make_shared<PreparedDescriptionData>(*prepared_description_);
+    copy->sample_rate = sample_rate;
+    copy->max_block_frames = static_cast<std::uint64_t>(max_block_size);
+    return {PreparedDescriptionRefusal::None, std::move(copy)};
 }
 
 SignalGraph::PreparedTopologyEdit::~PreparedTopologyEdit() {
@@ -866,6 +1131,7 @@ void SignalGraph::PreparedTopologyEdit::set_canonical_executor_routing_enabled(
         return;
     }
     candidate_->set_canonical_executor_routing_enabled(enabled);
+    prepared_description_.reset();
 }
 
 void SignalGraph::PreparedTopologyEdit::set_parallel_routing_enabled(bool enabled) noexcept {
@@ -874,6 +1140,7 @@ void SignalGraph::PreparedTopologyEdit::set_parallel_routing_enabled(bool enable
         return;
     }
     candidate_->set_parallel_routing_enabled(enabled);
+    prepared_description_.reset();
 }
 
 void SignalGraph::PreparedTopologyEdit::set_anticipation_enabled(bool enabled) noexcept {
@@ -882,6 +1149,7 @@ void SignalGraph::PreparedTopologyEdit::set_anticipation_enabled(bool enabled) n
         return;
     }
     candidate_->set_anticipation_enabled(enabled);
+    prepared_description_.reset();
 }
 
 bool SignalGraph::PreparedTopologyEdit::set_exact_parameter_event_nodes(
@@ -931,6 +1199,21 @@ const std::vector<GraphNode>& SignalGraph::PreparedTopologyEdit::nodes() const {
 const std::vector<Connection>& SignalGraph::PreparedTopologyEdit::connections() const {
     static const std::vector<Connection> empty;
     return candidate_ ? candidate_->connections_ : empty;
+}
+
+PreparedDescriptionResult SignalGraph::ExecutionSnapshot::export_prepared_description() const {
+    if (!owner_ || !snapshot_)
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::Unprepared);
+    const auto current = owner_->live_slot_.live();
+    if (!current || current.get() != snapshot_.get())
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
+    if (!snapshot_->prepared_description)
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::LogicalIdentityMissing);
+    if (snapshot_->prepared_description->owner_generation != owner_->authoring_generation_)
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
+    auto copy = std::make_shared<PreparedDescriptionData>(*snapshot_->prepared_description);
+    return {PreparedDescriptionRefusal::None, std::move(copy)};
 }
 
 bool SignalGraph::PreparedTopologyEdit::routed_execution_ready(int block_size) const noexcept {
@@ -1146,6 +1429,62 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
     if (!next) {
         owner_->spectral_error_.store(candidate_->spectral_error(), std::memory_order_relaxed);
         return last_result_ = Result::CompileFailed;
+    }
+
+    if (prepared_description_) {
+        if (!candidate_->canonical_executor_routing_enabled_.load(std::memory_order_relaxed) ||
+            candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed) ||
+            candidate_->anticipation_enabled_.load(std::memory_order_relaxed) ||
+            next->pdc_execution_domain != PdcExecutionDomain::Dynamic ||
+            !next->routed.serial.valid ||
+            !next->routed.serial.pool.bound_to(next->routed.serial.snapshot) ||
+            max_block_size < 1 || max_block_size > 4096) {
+            return last_result_ = Result::PreflightFailed;
+        }
+        auto capture = std::make_shared<PreparedDescriptionData>(*prepared_description_);
+        capture->sample_rate = sample_rate;
+        capture->max_block_frames = static_cast<std::uint64_t>(max_block_size);
+        const auto& limits = candidate_->limits_;
+        capture->host_max_nodes = limits.max_nodes;
+        capture->host_max_connections = limits.max_connections;
+        capture->host_max_ports = limits.max_ports;
+        capture->host_max_block_frames = static_cast<std::uint64_t>(limits.max_block_size);
+        capture->host_max_estimated_work_units = limits.max_estimated_work_units;
+        capture->effective_max_nodes =
+            std::min<std::uint64_t>(capture->profile_max_nodes, capture->host_max_nodes);
+        capture->effective_max_connections = std::min<std::uint64_t>(
+            capture->profile_max_connections, capture->host_max_connections);
+        capture->effective_max_ports =
+            std::min<std::uint64_t>(capture->profile_max_ports, capture->host_max_ports);
+        capture->effective_max_block_frames = std::min<std::uint64_t>(
+            capture->profile_max_block_frames, capture->host_max_block_frames);
+        if (capture->nodes.size() > capture->effective_max_nodes ||
+            capture->edges.size() > capture->effective_max_connections) {
+            return last_result_ = Result::PreflightFailed;
+        }
+        capture->snapshot_id = next->routed.serial.snapshot.id();
+        // bound_to() compares the pool's private binding identity to this
+        // snapshot. The public pool intentionally does not expose that token;
+        // retain the paired snapshot identity as the detached provenance.
+        capture->pool_snapshot_id = capture->snapshot_id;
+        capture->owner_generation = base_authoring_generation_;
+        capture->schedule.clear();
+        const auto& plan = next->routed.serial.snapshot.plan();
+        for (const auto dense_index : plan.processing_order_indices) {
+            if (dense_index >= plan.nodes.size())
+                return last_result_ = Result::PreflightFailed;
+            const auto id = plan.nodes[dense_index].id;
+            const auto authored =
+                std::find_if(candidate_->nodes_.begin(), candidate_->nodes_.end(),
+                             [&](const GraphNode& node) { return node.id == id; });
+            if (authored == candidate_->nodes_.end())
+                return last_result_ = Result::PreflightFailed;
+            const auto position = static_cast<std::size_t>(authored - candidate_->nodes_.begin());
+            if (position >= capture->nodes.size())
+                return last_result_ = Result::PreflightFailed;
+            capture->schedule.push_back(capture->nodes[position].authored_key);
+        }
+        next->prepared_description = std::move(capture);
     }
 
     if (old != nullptr) {
@@ -1427,6 +1766,20 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
         return fail_before_commit(Result::StaleBase);
     }
 
+    std::shared_ptr<const PreparedDescriptionData> reminted_description;
+    if (prepared_snapshot_->prepared_description) {
+        if (owner_->authoring_generation_ == std::numeric_limits<std::uint64_t>::max())
+            return fail_before_commit(Result::RuntimeAdoptionFailed);
+        try {
+            auto value = std::make_shared<PreparedDescriptionData>(
+                *prepared_snapshot_->prepared_description);
+            value->owner_generation = owner_->authoring_generation_ + 1;
+            reminted_description = std::move(value);
+        } catch (...) {
+            return fail_before_commit(Result::RuntimeAdoptionFailed);
+        }
+    }
+
     // Everything above the irreversible authoring move is an exception
     // boundary. Reserve both generic publication retirement and destination
     // load-map buckets now. After this point publication is noexcept and load
@@ -1482,6 +1835,8 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     // captured when the candidate was created.
     prepared_snapshot_->live_dsp_telemetry.set_enabled(
         owner_->desired_live_dsp_telemetry_enabled_.load(std::memory_order_relaxed));
+    if (reminted_description)
+        prepared_snapshot_->prepared_description = std::move(reminted_description);
     owner_->live_slot_.publish_prepared(prepared_snapshot_);
     owner_->total_latency_samples_.store(prepared_snapshot_->total_latency_samples,
                                          std::memory_order_relaxed);

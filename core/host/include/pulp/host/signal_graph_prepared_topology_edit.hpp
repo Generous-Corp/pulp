@@ -2,6 +2,7 @@
 
 #include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/host/signal_graph_execution_snapshot.hpp>
+#include <pulp/host/prepared_description.hpp>
 
 #include <optional>
 
@@ -157,6 +158,11 @@ class SignalGraph::PreparedTopologyEdit {
     /// Requires process, MIDI injection, and anticipation to be stopped.
     Result prepare_quiesced(double sample_rate, int max_block_size);
     Result commit();
+    /// Bind the canonical D1/D2 semantic payload to this edit's explicit
+    /// authored node/channel/interface identities. Binding is control-thread
+    /// only and must precede prepare().
+    PreparedDescriptionResult bind_authored_identity(std::string_view canonical_semantic_payload,
+                                                     const AuthoredRuntimeBinding& bindings);
     ExecutionSnapshot committed_execution_snapshot() const noexcept {
         if (owner_->spectral_mode_.load(std::memory_order_acquire)) {
             owner_->spectral_error_.store(SpectralError::SpectralPinnedExecutionUnsupported,
@@ -186,6 +192,8 @@ class SignalGraph::PreparedTopologyEdit {
     SampleRegionResult reject_sample_region_(SampleRegionId id, SampleRegionRefusalReason reason,
                                              std::string message, NodeId node = 0);
     std::optional<Result> sample_region_preparation_result_(double sample_rate, int max_block_size);
+    PreparedDescriptionResult build_prepared_description_(double sample_rate,
+                                                          int max_block_size) const;
 
     template <typename Fn> NodeId add_node_(Fn&& fn) {
         if (mutation_failed_ || committed_ || prepare_attempted_) {
@@ -195,6 +203,8 @@ class SignalGraph::PreparedTopologyEdit {
         const NodeId id = fn();
         if (id == 0)
             mutation_failed_ = true;
+        else
+            prepared_description_.reset();
         return id;
     }
     template <typename Fn> bool mutate_(Fn&& fn) {
@@ -205,6 +215,8 @@ class SignalGraph::PreparedTopologyEdit {
         const bool ok = fn();
         if (!ok)
             mutation_failed_ = true;
+        else
+            prepared_description_.reset();
         return ok;
     }
 
@@ -212,6 +224,7 @@ class SignalGraph::PreparedTopologyEdit {
     std::unique_ptr<SignalGraph> candidate_;
     std::shared_ptr<SignalGraph::CompiledGraph> prepared_snapshot_;
     std::shared_ptr<SignalGraph::CompiledGraph> committed_snapshot_;
+    std::shared_ptr<const PreparedDescriptionData> prepared_description_;
     std::unordered_set<NodeId> baseline_node_ids_;
     std::unordered_set<std::string> baseline_registry_keys_;
     std::unordered_set<std::string> replaced_registry_keys_;

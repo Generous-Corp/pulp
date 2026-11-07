@@ -30,6 +30,7 @@
 #include <pulp/host/signal_graph_connection.hpp>
 #include <pulp/host/signal_graph_execution_status.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
+#include <pulp/host/prepared_description.hpp>
 #include <pulp/host/signal_graph_node.hpp>
 #include <pulp/host/trigger_graph.hpp>
 #include <pulp/host/spectral_graph.hpp>
@@ -1167,10 +1168,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
 
         std::shared_ptr<SpectralRuntimeBank> spectral;
         std::uint64_t execution_generation = 0;
+        std::shared_ptr<const PreparedDescriptionData> prepared_description;
         std::shared_ptr<int> legacy_processing_lifetime;
-        // Private executable topology. For ordinary graphs this is a copy of
-        // nodes_; region-bearing graphs replace each admitted region with one
-        // synthetic Custom anchor while leaving public authoring state intact.
+        // Private executable topology; region-bearing graphs use synthetic anchors.
         std::vector<GraphNode> executable_nodes;
         std::vector<NodeId> order;
         std::vector<Connection> connections;
