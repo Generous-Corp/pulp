@@ -3250,6 +3250,8 @@
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
+  "pulp-test-platform-file-drag",
+  "pulp-test-platform-main-thread",
   "pulp-test-platform-objc-unique-class",
   "pulp-test-playback-audio-renderer",
   "pulp-test-playback-automation-cursor",
