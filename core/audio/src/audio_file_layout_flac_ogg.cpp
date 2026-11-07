@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 
 namespace pulp::audio::layout_detail {
@@ -159,7 +160,7 @@ void inspect_flac_layout(Builder& b) {
         } else if (type == 2u) {
             auto p = b.reader.read(payload_offset, std::min<std::uint64_t>(length, 4u));
             if (p.size() == 4u)
-                region.fields.push_back({"application_id", printable_id(fourcc(p.data()))
+                region.fields.push_back({"application_id", raw_id_printable(p.data(), 4u)
                                                                ? fourcc(p.data())
                                                                : hex_bytes(p.data(), 4u)});
             b.present(id, offset, length);
@@ -171,9 +172,11 @@ void inspect_flac_layout(Builder& b) {
                 const auto mime_length = read_u32be(p.data() + 4u);
                 std::size_t at = 8u;
                 if (mime_length <= p.size() - at) {
+                    // The MIME string is file text; it travels only on request.
                     region.fields.push_back(
-                        {"mime_type",
-                         std::string(reinterpret_cast<const char*>(p.data() + at), mime_length)});
+                        {"mime_length", static_cast<std::uint64_t>(mime_length)});
+                    b.text(id, "mime_type",
+                           std::string(reinterpret_cast<const char*>(p.data() + at), mime_length));
                     at += mime_length;
                     if (at + 4u <= p.size()) {
                         const auto desc_length = read_u32be(p.data() + at);
@@ -416,7 +419,9 @@ void inspect_ogg_layout(Builder& b) {
                 skip = 7u;
             else if (stream->codec == "opus" && body.size() >= 8u)
                 skip = 8u;
-            if (skip != 0u || stream->codec == "flac")
+            else if (stream->codec == "flac" && body.size() >= 4u)
+                skip = 4u; // FLAC-in-Ogg wraps the comment in a metadata block header
+            if (skip != 0u)
                 parse_vorbis_comments(b, region, "OggS", body.data() + skip, body.size() - skip);
         } else {
             if (stream->data_region == SIZE_MAX) {
@@ -434,7 +439,8 @@ void inspect_ogg_layout(Builder& b) {
                 region.actual_size = std::min(region.declared_size, file_size - region.offset);
             }
         }
-        stream->last_granule = page.granule;
+        if (page.granule != std::numeric_limits<std::uint64_t>::max())
+            stream->last_granule = page.granule;
         stream->eos = stream->eos || eos;
         if (past_eof)
             break;
@@ -463,7 +469,10 @@ void inspect_ogg_layout(Builder& b) {
     facts.sample_rate = first.sample_rate;
     facts.channels = first.channels;
     facts.encoding = first.codec;
-    if (walk_complete && first.eos && streams.size() == 1u) {
+    // A granule position of -1 means "no packet finishes on this page"; it
+    // is not a length.
+    constexpr std::uint64_t kNoGranule = std::numeric_limits<std::uint64_t>::max();
+    if (walk_complete && first.eos && streams.size() == 1u && first.last_granule != kNoGranule) {
         facts.frames = first.codec == "opus" && first.last_granule >= first.pre_skip
                            ? first.last_granule - first.pre_skip
                            : first.last_granule;

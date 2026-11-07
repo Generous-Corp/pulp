@@ -19,8 +19,10 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if !defined(_WIN32)
@@ -675,6 +677,12 @@ TEST_CASE("checked-in container fixtures walk end to end", "[audio][file-layout]
         CHECK_FALSE(report.decode->decodable);
         CHECK_THAT(report.decode->reason, Catch::Matchers::ContainsSubstring("twos"));
         CHECK(report.is_standard());
+        CHECK(report.stream->encoding == "pcm");
+        CHECK(report.metadata_text.empty());
+        LayoutJsonOptions json_options;
+        json_options.input_name = "tone.aifc";
+        CHECK_THAT(audio_file_layout_to_json(report, json_options),
+                   !Catch::Matchers::ContainsSubstring("Linear PCM"));
     }
     SECTION("FLAC with SEEKTABLE") {
         const auto report = inspect("tone.flac");
@@ -755,3 +763,485 @@ TEST_CASE("checked-in container fixtures walk end to end", "[audio][file-layout]
     }
 }
 #endif
+
+namespace {
+
+// Big-endian helpers for the hand-built MP4, FLAC and ID3 fixtures below.
+void put_be16(Bytes& b, std::uint16_t v) {
+    b.push_back(static_cast<std::uint8_t>(v >> 8u));
+    b.push_back(static_cast<std::uint8_t>(v));
+}
+void put_be32(Bytes& b, std::uint32_t v) {
+    for (int shift = 24; shift >= 0; shift -= 8)
+        b.push_back(static_cast<std::uint8_t>(v >> shift));
+}
+void put_be64(Bytes& b, std::uint64_t v) {
+    for (int shift = 56; shift >= 0; shift -= 8)
+        b.push_back(static_cast<std::uint8_t>(v >> shift));
+}
+void put_text(Bytes& b, std::string_view text) {
+    for (char c : text)
+        b.push_back(static_cast<std::uint8_t>(c));
+}
+Bytes box(std::string_view type, const Bytes& body) {
+    Bytes b;
+    put_be32(b, static_cast<std::uint32_t>(8u + body.size()));
+    put_text(b, type);
+    b.insert(b.end(), body.begin(), body.end());
+    return b;
+}
+// IFF chunk (AIFF): id first, then a big-endian payload size, then the pad.
+Bytes iff_chunk(std::string_view id, const Bytes& body) {
+    Bytes b;
+    put_text(b, id);
+    put_be32(b, static_cast<std::uint32_t>(body.size()));
+    b.insert(b.end(), body.begin(), body.end());
+    if ((body.size() & 1u) != 0u)
+        b.push_back(0u);
+    return b;
+}
+Bytes cat(std::initializer_list<Bytes> parts) {
+    Bytes out;
+    for (const auto& part : parts)
+        out.insert(out.end(), part.begin(), part.end());
+    return out;
+}
+
+// One Ogg page: header type flags, granule, serial, sequence, a single
+// segment table entry per 255 bytes of body. The CRC is left zero; the walk
+// does not check it.
+Bytes ogg_page(std::uint8_t header_type, std::uint64_t granule, std::uint32_t serial,
+               std::uint32_t sequence, const Bytes& body) {
+    Bytes b;
+    put_text(b, "OggS");
+    b.push_back(0u);
+    b.push_back(header_type);
+    append_u64(b, granule);
+    append_u32(b, serial);
+    append_u32(b, sequence);
+    append_u32(b, 0u);
+    std::vector<std::uint8_t> lacing;
+    std::size_t remaining = body.size();
+    while (remaining >= 255u) {
+        lacing.push_back(255u);
+        remaining -= 255u;
+    }
+    lacing.push_back(static_cast<std::uint8_t>(remaining));
+    b.push_back(static_cast<std::uint8_t>(lacing.size()));
+    b.insert(b.end(), lacing.begin(), lacing.end());
+    b.insert(b.end(), body.begin(), body.end());
+    return b;
+}
+
+Bytes vorbis_comment_body(std::string_view vendor,
+                          std::initializer_list<std::string_view> entries) {
+    Bytes b;
+    append_u32(b, static_cast<std::uint32_t>(vendor.size()));
+    put_text(b, vendor);
+    append_u32(b, static_cast<std::uint32_t>(entries.size()));
+    for (auto entry : entries) {
+        append_u32(b, static_cast<std::uint32_t>(entry.size()));
+        put_text(b, entry);
+    }
+    return b;
+}
+
+std::string to_json(const AudioFileLayoutReport& report, bool include_text = false) {
+    LayoutJsonOptions options;
+    options.input_name = "x";
+    options.include_metadata_text = include_text;
+    return audio_file_layout_to_json(report, options);
+}
+
+} // namespace
+
+TEST_CASE("file bytes that are not JSON text are escaped, never fatal",
+          "[audio][file-layout][hostile][json]") {
+    const auto format = make_format(1u, 1u, 48'000u, 16u);
+    const auto data = two_frames_mono16();
+    SECTION("NUL inside a chunk id") {
+        auto bytes = make_wav_with_chunks(format, data, {{"JUNK", Bytes{1u, 2u}}});
+        bytes[36] = 'A';
+        bytes[37] = 'B';
+        bytes[38] = 0u;
+        bytes[39] = 'C';
+        const auto report = inspect_audio_file_layout(bytes);
+        const auto it = std::find_if(report.regions.begin(), report.regions.end(),
+                                     [](const LayoutRegion& r) { return r.offset == 36u; });
+        REQUIRE(it != report.regions.end());
+        CHECK(it->id == "AB\\x00C");
+        CHECK(it->kind == LayoutRegionKind::unknown);
+        const auto json = to_json(report);
+        const auto parsed = choc::json::parse(json);
+        CHECK(parsed["regions"][2]["id"].getString() == "AB\\x00C");
+    }
+    SECTION("NUL and control bytes inside metadata text") {
+        Bytes bext(602u, 0u);
+        const std::string description = std::string("line\0one\x01two", 13);
+        std::copy(description.begin(), description.end(), bext.begin());
+        LayoutInspectOptions options;
+        options.include_metadata_text = true;
+        const auto report = inspect_audio_file_layout(
+            make_wav_with_chunks(format, data, {{"bext", bext}}), options);
+        REQUIRE_FALSE(report.metadata_text.empty());
+        CHECK(report.metadata_text[0].text == "line\\x00one\\x01two");
+        const auto parsed = choc::json::parse(to_json(report, true));
+        CHECK(parsed["metadata"]["text"][0]["text"].getString() == "line\\x00one\\x01two");
+    }
+    SECTION("NUL inside an MP4 brand and a handler type") {
+        Bytes ftyp;
+        put_text(ftyp, "M4");
+        ftyp.push_back(0u);
+        ftyp.push_back('A');
+        put_be32(ftyp, 0u);
+        put_text(ftyp, "isom");
+        Bytes hdlr(8u, 0u);
+        put_text(hdlr, "so");
+        hdlr.push_back(0u);
+        hdlr.push_back('n');
+        hdlr.resize(hdlr.size() + 13u, 0u);
+        const auto bytes =
+            cat({box("ftyp", ftyp), box("moov", box("trak", box("mdia", box("hdlr", hdlr))))});
+        const auto report = inspect_audio_file_layout(bytes);
+        CHECK(report.container == AudioContainer::mp4);
+        CHECK(report.container_detail == "ftyp:M4\\x00A");
+        const auto parsed = choc::json::parse(to_json(report));
+        CHECK(parsed["container_detail"].getString() == "ftyp:M4\\x00A");
+    }
+    SECTION("NUL inside an AIFF chunk id and an AIFF-C compression name") {
+        Bytes comm;
+        put_be16(comm, 1u);
+        put_be32(comm, 2u);
+        put_be16(comm, 16u);
+        comm.insert(comm.end(), {0x40u, 0x0eu, 0xacu, 0x44u, 0u, 0u, 0u, 0u, 0u, 0u});
+        put_text(comm, "NONE");
+        comm.push_back(5u);
+        put_text(comm, "na");
+        comm.push_back(0u);
+        put_text(comm, "me");
+        comm.push_back(0u); // pad byte of the pstring
+        Bytes body;
+        put_text(body, "AIFC");
+        body = cat(
+            {body, iff_chunk("FVER", Bytes{0xa2u, 0x80u, 0x51u, 0x40u}), iff_chunk("COMM", comm)});
+        Bytes odd;
+        put_text(odd, "NA");
+        odd.push_back(0u);
+        put_text(odd, "E");
+        put_be32(odd, 2u);
+        odd.push_back('x');
+        odd.push_back('y');
+        body.insert(body.end(), odd.begin(), odd.end());
+        Bytes form;
+        put_text(form, "FORM");
+        put_be32(form, static_cast<std::uint32_t>(body.size()));
+        form.insert(form.end(), body.begin(), body.end());
+        LayoutInspectOptions options;
+        options.include_metadata_text = true;
+        const auto report = inspect_audio_file_layout(form, options);
+        CHECK(report.container == AudioContainer::aifc);
+        CHECK(std::any_of(report.regions.begin(), report.regions.end(),
+                          [](const LayoutRegion& r) { return r.id == "NA\\x00E"; }));
+        const auto name =
+            std::find_if(report.metadata_text.begin(), report.metadata_text.end(),
+                         [](const LayoutMetadataText& t) { return t.key == "compression_name"; });
+        REQUIRE(name != report.metadata_text.end());
+        CHECK(name->text == "na\\x00me");
+        CHECK_NOTHROW(choc::json::parse(to_json(report, true)));
+        // Without the flag the pstring is not in the report at all.
+        const auto quiet = inspect_audio_file_layout(form);
+        CHECK(quiet.metadata_text.empty());
+        CHECK_THAT(to_json(quiet), !Catch::Matchers::ContainsSubstring("compression_name"));
+        CHECK_THAT(to_json(quiet), !Catch::Matchers::ContainsSubstring("na\\x00me"));
+    }
+}
+
+TEST_CASE("a short fact chunk before data stops the decoder, and the report says so",
+          "[audio][file-layout][parity]") {
+    const auto format = make_format(1u, 1u, 48'000u, 16u);
+    const auto data = two_frames_mono16();
+    for (std::size_t fact_size = 0u; fact_size <= 5u; ++fact_size) {
+        INFO("fact size " << fact_size);
+        const auto bytes = make_wav_with_chunks(format, data, {{"fact", Bytes(fact_size, 0u)}});
+        const auto report = inspect_audio_file_layout(bytes);
+        REQUIRE(report.decode);
+        const bool decoder_accepts = inspect_wav(bytes).has_value();
+        CHECK(report.decode->decodable == decoder_accepts);
+        // dr_wav reads four bytes from any fact chunk: sizes 0, 1 and 2 leave
+        // it off the next header, 3 lands back on it through the pad byte.
+        CHECK(decoder_accepts == (fact_size >= 3u));
+        if (!decoder_accepts)
+            CHECK_THAT(report.decode->reason,
+                       Catch::Matchers::ContainsSubstring("fact chunk shorter than 4 bytes"));
+    }
+    // After data the decoder never reads the fact chunk, so its size is moot.
+    const auto after = make_wav_with_chunks(format, data, {}, {{"fact", Bytes(2u, 0u)}});
+    REQUIRE(inspect_audio_file_layout(after).decode);
+    CHECK(inspect_audio_file_layout(after).decode->decodable == inspect_wav(after).has_value());
+    CHECK(inspect_wav(after));
+}
+
+TEST_CASE("file text in fields stays out of the default report",
+          "[audio][file-layout][redaction]") {
+    SECTION("FLAC PICTURE mime type") {
+        Bytes picture;
+        put_be32(picture, 3u);
+        const std::string mime = "image/png";
+        put_be32(picture, static_cast<std::uint32_t>(mime.size()));
+        put_text(picture, mime);
+        put_be32(picture, 0u);
+        put_be32(picture, 16u);
+        put_be32(picture, 16u);
+        put_be32(picture, 24u);
+        put_be32(picture, 0u);
+        put_be32(picture, 0u);
+        Bytes flac{'f', 'L', 'a', 'C', 0u, 0u, 0u, 34u};
+        flac.resize(8u + 34u, 0u);
+        flac[8] = 0x10u;
+        flac[10] = 0x10u;
+        const std::uint64_t packed =
+            (static_cast<std::uint64_t>(48000u) << 44u) | (15ull << 36u) | 800u;
+        for (unsigned i = 0; i < 8u; ++i)
+            flac[18u + i] = static_cast<std::uint8_t>(packed >> (56u - 8u * i));
+        flac.push_back(0x86u);
+        flac.push_back(0u);
+        flac.push_back(0u);
+        flac.push_back(static_cast<std::uint8_t>(picture.size()));
+        flac.insert(flac.end(), picture.begin(), picture.end());
+        const auto quiet = inspect_audio_file_layout(flac);
+        CHECK_THAT(to_json(quiet), !Catch::Matchers::ContainsSubstring(mime));
+        const auto* region = find_region(quiet, "PICTURE");
+        REQUIRE(region);
+        CHECK(std::any_of(region->fields.begin(), region->fields.end(),
+                          [](const LayoutField& f) { return f.name == "mime_length"; }));
+        LayoutInspectOptions options;
+        options.include_metadata_text = true;
+        const auto lifted = inspect_audio_file_layout(flac, options);
+        CHECK_THAT(to_json(lifted, true), Catch::Matchers::ContainsSubstring(mime));
+    }
+}
+
+TEST_CASE("Ogg facts: a -1 granule is unknown and FLAC-in-Ogg comments are read",
+          "[audio][file-layout][ogg]") {
+    SECTION("Opus stream ending on a page with no finished packet") {
+        Bytes head;
+        put_text(head, "OpusHead");
+        head.push_back(1u);
+        head.push_back(2u);
+        append_u16(head, 312u);
+        append_u32(head, 48000u);
+        append_u16(head, 0u);
+        head.push_back(0u);
+        Bytes tags;
+        put_text(tags, "OpusTags");
+        tags = cat({tags, vorbis_comment_body("test", {"TITLE=t"})});
+        const auto bytes = cat({ogg_page(0x02u, 0u, 7u, 0u, head), ogg_page(0u, 0u, 7u, 1u, tags),
+                                ogg_page(0x04u, 0xffffffffffffffffull, 7u, 2u, Bytes(10u, 0u))});
+        const auto report = inspect_audio_file_layout(bytes);
+        REQUIRE(report.stream);
+        CHECK(report.stream->encoding == "opus");
+        CHECK(report.stream->channels == 2u);
+        CHECK(report.stream->frames == 0u);
+        CHECK(report.stream->duration_seconds == 0.0);
+        const auto parsed = choc::json::parse(to_json(report));
+        CHECK(parsed["stream"]["frames"].getInt64() == 0);
+    }
+    SECTION("FLAC-in-Ogg comment header behind its block header") {
+        Bytes ident{0x7fu};
+        put_text(ident, "FLAC");
+        ident.push_back(1u);
+        ident.push_back(0u);
+        put_be16(ident, 1u);
+        put_text(ident, "fLaC");
+        ident.insert(ident.end(), {0x80u, 0u, 0u, 34u});
+        const auto info_start = ident.size();
+        ident.resize(info_start + 34u, 0u);
+        const std::uint64_t packed =
+            (static_cast<std::uint64_t>(44100u) << 44u) | (15ull << 36u) | 100u;
+        for (unsigned i = 0; i < 8u; ++i)
+            ident[info_start + 10u + i] = static_cast<std::uint8_t>(packed >> (56u - 8u * i));
+        const auto comment_body = vorbis_comment_body("ref", {"ARTIST=a", "TITLE=b"});
+        Bytes comment{0x84u, 0u, 0u, static_cast<std::uint8_t>(comment_body.size())};
+        comment.insert(comment.end(), comment_body.begin(), comment_body.end());
+        const auto bytes =
+            cat({ogg_page(0x02u, 0u, 9u, 0u, ident), ogg_page(0u, 0u, 9u, 1u, comment),
+                 ogg_page(0x04u, 100u, 9u, 2u, Bytes(8u, 0u))});
+        LayoutInspectOptions options;
+        options.include_metadata_text = true;
+        const auto report = inspect_audio_file_layout(bytes, options);
+        REQUIRE(report.stream);
+        CHECK(report.stream->encoding == "flac");
+        CHECK(report.stream->sample_rate == 44100u);
+        CHECK(report.stream->frames == 100u);
+        REQUIRE(report.regions.size() >= 2u);
+        const auto& comment_region = report.regions[1];
+        const auto count =
+            std::find_if(comment_region.fields.begin(), comment_region.fields.end(),
+                         [](const LayoutField& f) { return f.name == "comment_count"; });
+        REQUIRE(count != comment_region.fields.end());
+        CHECK(std::get<std::uint64_t>(count->value) == 2u);
+        CHECK(std::any_of(
+            report.metadata_text.begin(), report.metadata_text.end(),
+            [](const LayoutMetadataText& t) { return t.key == "ARTIST" && t.text == "a"; }));
+    }
+}
+
+TEST_CASE("MP4 facts come from the media timescale and children stay inside their parent",
+          "[audio][file-layout][mp4]") {
+    Bytes ftyp;
+    put_text(ftyp, "M4A ");
+    put_be32(ftyp, 0u);
+    put_text(ftyp, "isom");
+    Bytes mdhd(12u, 0u);
+    put_be32(mdhd, 1000u); // timescale
+    put_be32(mdhd, 2000u); // duration: 2.000 s
+    put_be32(mdhd, 0u);
+    Bytes hdlr(8u, 0u);
+    put_text(hdlr, "soun");
+    hdlr.resize(hdlr.size() + 13u, 0u);
+    Bytes entry;
+    put_be32(entry, 36u);
+    put_text(entry, "mp4a");
+    entry.resize(entry.size() + 16u, 0u);
+    put_be16(entry, 1u);  // channels
+    put_be16(entry, 16u); // sample size
+    put_be32(entry, 0u);
+    put_be32(entry, 8000u << 16u);
+    Bytes stsd(4u, 0u);
+    put_be32(stsd, 1u);
+    stsd.insert(stsd.end(), entry.begin(), entry.end());
+    Bytes stts(4u, 0u);
+    put_be32(stts, 1u);
+    put_be32(stts, 10u);
+    put_be32(stts, 200u); // 10 x 200 = 2000 media units
+    auto stts_box = box("stts", stts);
+    SECTION("duration from mdhd, frames only when the timescale is the sample rate") {
+        const auto bytes =
+            cat({box("ftyp", ftyp),
+                 box("moov",
+                     box("trak", box("mdia", cat({box("mdhd", mdhd), box("hdlr", hdlr),
+                                                  box("minf", box("stbl", cat({box("stsd", stsd),
+                                                                               stts_box})))}))))});
+        const auto report = inspect_audio_file_layout(bytes);
+        REQUIRE(report.stream);
+        CHECK(report.stream->sample_rate == 8000u);
+        CHECK(report.stream->frames == 0u);
+        CHECK(report.stream->duration_seconds == 2.0);
+        CHECK(report.is_standard());
+    }
+    SECTION("a child box that overruns its parent is clamped and reported") {
+        // Claim 400 bytes for stts inside a stbl that holds far fewer.
+        auto oversized = stts_box;
+        oversized[0] = 0u;
+        oversized[1] = 0u;
+        oversized[2] = 0x01u;
+        oversized[3] = 0x90u;
+        const auto bytes =
+            cat({box("ftyp", ftyp),
+                 box("moov",
+                     box("trak", box("mdia", cat({box("mdhd", mdhd), box("hdlr", hdlr),
+                                                  box("minf", box("stbl", cat({box("stsd", stsd),
+                                                                               oversized})))}))))});
+        const auto report = inspect_audio_file_layout(bytes);
+        CHECK(has_warning(report, LayoutWarningKind::chunk_past_eof));
+        const auto* region = find_region(report, "stts");
+        REQUIRE(region);
+        CHECK(region->declared_size == 392u);
+        CHECK(region->actual_size == stts.size());
+        const auto parsed = choc::json::parse(to_json(report));
+        CHECK(parsed["warnings"].size() == 1u);
+    }
+}
+
+TEST_CASE("ID3v2 unsynchronisation is undone before frames are read", "[audio][file-layout][mp3]") {
+    // A TIT2 frame whose text holds 0xFF bytes; under unsynchronisation each
+    // is followed by an inserted 0x00 that the reader must remove.
+    const std::string title = "A\xff"
+                              "B";
+    Bytes frame;
+    put_text(frame, "TIT2");
+    put_be32(frame, static_cast<std::uint32_t>(1u + title.size()));
+    put_be16(frame, 0u);
+    frame.push_back(0u); // ISO-8859-1
+    put_text(frame, title);
+    Bytes unsynced;
+    for (const auto byte : frame) {
+        unsynced.push_back(byte);
+        if (byte == 0xffu)
+            unsynced.push_back(0u);
+    }
+    Bytes tag;
+    put_text(tag, "ID3");
+    tag.push_back(3u);
+    tag.push_back(0u);
+    tag.push_back(0x80u);
+    const auto size = static_cast<std::uint32_t>(unsynced.size());
+    tag.push_back(static_cast<std::uint8_t>((size >> 21u) & 0x7fu));
+    tag.push_back(static_cast<std::uint8_t>((size >> 14u) & 0x7fu));
+    tag.push_back(static_cast<std::uint8_t>((size >> 7u) & 0x7fu));
+    tag.push_back(static_cast<std::uint8_t>(size & 0x7fu));
+    tag.insert(tag.end(), unsynced.begin(), unsynced.end());
+    // One valid MPEG-1 layer III frame header so the stream is recognised.
+    tag.insert(tag.end(), {0xffu, 0xfbu, 0x90u, 0xc0u});
+    tag.resize(tag.size() + 413u, 0u);
+    LayoutInspectOptions options;
+    options.include_metadata_text = true;
+    const auto report = inspect_audio_file_layout(tag, options);
+    CHECK(report.container == AudioContainer::mp3);
+    const auto* id3 = find_region(report, "ID3v2");
+    REQUIRE(id3);
+    const auto frames = std::find_if(id3->fields.begin(), id3->fields.end(),
+                                     [](const LayoutField& f) { return f.name == "frames"; });
+    REQUIRE(frames != id3->fields.end());
+    CHECK(std::get<std::uint64_t>(frames->value) == 1u);
+    const auto text = std::find_if(report.metadata_text.begin(), report.metadata_text.end(),
+                                   [](const LayoutMetadataText& t) { return t.key == "TIT2"; });
+    REQUIRE(text != report.metadata_text.end());
+    CHECK(text->text == title);
+}
+
+TEST_CASE("sizes past 2^63 serialize as numbers, not negatives", "[audio][file-layout][json]") {
+    AudioFileLayoutReport report;
+    report.container = AudioContainer::wav;
+    LayoutRegion region;
+    region.offset = 0u;
+    region.declared_size = (1ull << 63u) + 5u;
+    region.id = "data";
+    region.kind = LayoutRegionKind::data;
+    region.fields.push_back({"huge", std::uint64_t{0xffffffffffffffffull}});
+    report.regions.push_back(region);
+    const auto parsed = choc::json::parse(to_json(report));
+    CHECK(parsed["regions"][0]["declared_size"].get<double>() > 9.2e18);
+    CHECK(parsed["regions"][0]["fields"]["huge"].get<double>() > 1.8e19);
+    LayoutRegion small;
+    small.declared_size = 44u;
+    AudioFileLayoutReport plain;
+    plain.regions.push_back(small);
+    CHECK(choc::json::parse(to_json(plain))["regions"][0]["declared_size"].getInt64() == 44);
+}
+
+TEST_CASE("an AIFF COMM rate that is not finite is noted, not emitted",
+          "[audio][file-layout][aiff]") {
+    Bytes comm;
+    put_be16(comm, 1u);
+    put_be32(comm, 2u);
+    put_be16(comm, 16u);
+    comm.insert(comm.end(),
+                {0x7fu, 0xffu, 0x80u, 0u, 0u, 0u, 0u, 0u, 0u, 0u}); // exponent all ones: infinity
+    Bytes body;
+    put_text(body, "AIFF");
+    body = cat({body, iff_chunk("COMM", comm), iff_chunk("SSND", Bytes(12u, 0u))});
+    Bytes form;
+    put_text(form, "FORM");
+    put_be32(form, static_cast<std::uint32_t>(body.size()));
+    form.insert(form.end(), body.begin(), body.end());
+    const auto report = inspect_audio_file_layout(form);
+    const auto* region = find_region(report, "COMM");
+    REQUIRE(region);
+    CHECK(std::none_of(region->fields.begin(), region->fields.end(),
+                       [](const LayoutField& f) { return f.name == "sample_rate"; }));
+    CHECK_THAT(region->note, Catch::Matchers::ContainsSubstring("not a finite number"));
+    REQUIRE(report.decode);
+    CHECK_FALSE(report.decode->decodable);
+    CHECK_NOTHROW(choc::json::parse(to_json(report)));
+}

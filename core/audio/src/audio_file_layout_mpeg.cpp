@@ -189,10 +189,27 @@ void inspect_mp3_layout(Builder& b) {
                        std::to_string(total - file_size) + " past end of file");
         } else {
             auto body = b.reader.read(10u, std::min<std::uint64_t>(tag_size, kMaxPayloadRead));
+            // Unsynchronisation inserts a 0x00 after every 0xFF; undo it
+            // before the frame walk reads sizes.
+            if ((flags & 0x80u) != 0u && major <= 3u) {
+                std::vector<std::uint8_t> plain;
+                plain.reserve(body.size());
+                for (std::size_t i = 0; i < body.size(); ++i) {
+                    plain.push_back(body[i]);
+                    if (body[i] == 0xffu && i + 1u < body.size() && body[i + 1u] == 0u)
+                        ++i;
+                }
+                body.swap(plain);
+            }
             std::size_t skip = 0u;
-            if ((flags & 0x40u) != 0u && body.size() >= 4u)
+            // v2.2's 0x40 flag means compression, which this walk does not
+            // undo; the extended header exists from v2.3 on.
+            const bool compressed_v22 = major == 2u && (flags & 0x40u) != 0u;
+            if (major >= 3u && (flags & 0x40u) != 0u && body.size() >= 4u)
                 skip = major == 4u ? syncsafe(body.data()) : read_u32be(body.data()) + 4u;
-            if (skip < body.size())
+            if (compressed_v22)
+                region.note = "ID3v2.2 compressed tag; frames not walked";
+            else if (skip < body.size())
                 parse_id3v2_frames(b, region, body.data() + skip, body.size() - skip, major);
         }
         audio_start = std::min<std::uint64_t>(total, file_size);
@@ -331,9 +348,9 @@ void inspect_mp3_layout(Builder& b) {
                 at += 4u;
             }
             // LAME extension: encoder string then delay/padding packed in 3 bytes.
-            if (at + 24u <= frame.size() &&
-                printable_id(std::string(reinterpret_cast<const char*>(frame.data() + at), 4u))) {
-                frames.fields.push_back({"encoder", trimmed_text(frame.data() + at, 9u)});
+            if (at + 24u <= frame.size() && raw_id_printable(frame.data() + at, 4u)) {
+                // The encoder string is file text; it travels only on request.
+                b.text("frames", "encoder", trimmed_text(frame.data() + at, 9u));
                 const auto* dp = frame.data() + at + 21u;
                 const auto delay = (static_cast<std::uint32_t>(dp[0]) << 4u) | (dp[1] >> 4u);
                 const auto padding = (static_cast<std::uint32_t>(dp[1] & 0xfu) << 8u) | dp[2];
@@ -595,8 +612,18 @@ void walk_boxes(Builder& b, Mp4Facts& facts, std::span<const std::uint8_t> bytes
         }
         if (size < header)
             break;
-        const auto kind = printable_id(type) ? box_kind(type) : LayoutRegionKind::unknown;
+        const auto kind = raw_id_printable(bytes.data() + at + 4u, 4u) ? box_kind(type)
+                                                                       : LayoutRegionKind::unknown;
         auto& region = b.add_region(base + at, header, size - header, type, kind);
+        if (at + size > bytes.size()) {
+            // A child that runs past its parent is clamped to the parent's
+            // end, and the report says so rather than inventing a size.
+            region.actual_size = bytes.size() - at >= header ? bytes.size() - at - header : 0u;
+            b.warn(LayoutWarningKind::chunk_past_eof, base + at,
+                   type + " declares " + std::to_string(size) + " bytes, " +
+                       std::to_string(at + size - bytes.size()) + " past the end of its parent " +
+                       parent);
+        }
         if (type == "meta" && parent != "ilst") {
             header += 4u; // full box: version + flags before children
         }
@@ -653,7 +680,7 @@ void inspect_mp4_layout(Builder& b) {
         } else if (size == 0u) {
             size = file_size - offset;
         }
-        const bool printable = printable_id(type);
+        const bool printable = raw_id_printable(raw.data() + 4u, 4u);
         auto& region = b.add_region(offset, header, size >= header ? size - header : 0u, type,
                                     printable ? box_kind(type) : LayoutRegionKind::unknown);
         if (largesize)
@@ -709,16 +736,16 @@ void inspect_mp4_layout(Builder& b) {
                                  : static_cast<std::uint32_t>(facts.media_timescale);
         stream.channels = facts.channels;
         stream.encoding = facts.codec.empty() ? "unknown" : facts.codec;
-        stream.frames = facts.stts_samples;
-        if (stream.frames == 0u && facts.media_timescale != 0u &&
-            facts.sample_rate == facts.media_timescale)
-            stream.frames = facts.media_duration;
-        stream.duration_seconds =
-            stream.sample_rate != 0u && stream.frames != 0u
-                ? static_cast<double>(stream.frames) / stream.sample_rate
-                : (facts.media_timescale != 0u
-                       ? static_cast<double>(facts.media_duration) / facts.media_timescale
-                       : 0.0);
+        // stts deltas are in the media timescale, which is the sample rate
+        // only when the muxer chose it so; frames are stated only then, and
+        // the duration always comes from the timescale.
+        const auto media_units =
+            facts.stts_samples != 0u ? facts.stts_samples : facts.media_duration;
+        if (facts.media_timescale != 0u && facts.media_timescale == stream.sample_rate)
+            stream.frames = media_units;
+        stream.duration_seconds = facts.media_timescale != 0u
+                                      ? static_cast<double>(media_units) / facts.media_timescale
+                                      : 0.0;
         report.stream = stream;
     }
     // The chunk-offset table style matters for files past 4 GiB; name it on

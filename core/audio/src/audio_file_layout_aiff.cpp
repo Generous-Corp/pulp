@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <istream>
@@ -85,6 +86,27 @@ double extended_to_double(const std::uint8_t* p) noexcept {
     return (p[0] & 0x80u) != 0u ? -value : value;
 }
 
+// Encoding vocabulary for an AIFF-C compression type. 'twos' and 'sowt' are
+// plain PCM in either byte order; the in-memory reader still admits only NONE.
+std::string aifc_encoding(const std::string& compression_type) {
+    if (compression_type.empty() || compression_type == "NONE" || compression_type == "twos" ||
+        compression_type == "sowt" || compression_type == "in24" || compression_type == "in32")
+        return "pcm";
+    if (compression_type == "fl32" || compression_type == "fl64" || compression_type == "FL32" ||
+        compression_type == "FL64")
+        return "float";
+    if (compression_type == "ulaw" || compression_type == "ULAW")
+        return "mulaw";
+    if (compression_type == "alaw" || compression_type == "ALAW")
+        return "alaw";
+    std::string lowered = compression_type;
+    for (auto& c : lowered)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    while (!lowered.empty() && lowered.back() == ' ')
+        lowered.pop_back();
+    return lowered;
+}
+
 LayoutRegionKind classify(std::string_view id) {
     static constexpr std::array<std::string_view, 14> kMetadata{
         "NAME", "AUTH", "(c) ", "ANNO", "COMT", "MARK", "INST",
@@ -137,9 +159,9 @@ void inspect_aiff_layout(Builder& b) {
         if (!b.reader.read_exact(offset, raw))
             break;
         const auto id = fourcc(raw.data());
+        const bool printable = raw_id_printable(raw.data(), 4u);
         const auto declared = static_cast<std::uint64_t>(read_u32be(raw.data() + 4u));
         const auto payload_offset = offset + 8u;
-        const bool printable = printable_id(id);
         auto& region = b.add_region(offset, 8u, declared, id,
                                     printable ? classify(id) : LayoutRegionKind::unknown);
         if (!printable)
@@ -180,7 +202,11 @@ void inspect_aiff_layout(Builder& b) {
                     {"frames", static_cast<std::uint64_t>(read_u32be(payload.data() + 2u))});
                 region.fields.push_back({"bits_per_sample", static_cast<std::uint64_t>(
                                                                 read_u16be(payload.data() + 6u))});
-                region.fields.push_back({"sample_rate", extended_to_double(payload.data() + 8u)});
+                const double rate = extended_to_double(payload.data() + 8u);
+                if (std::isfinite(rate))
+                    region.fields.push_back({"sample_rate", rate});
+                else
+                    region.note = "COMM sample rate is not a finite number";
                 if (aifc && payload.size() >= 22u) {
                     if (compression_type.empty())
                         compression_type = fourcc(payload.data() + 18u);
@@ -188,8 +214,9 @@ void inspect_aiff_layout(Builder& b) {
                     if (payload.size() > 22u) {
                         const auto name_length =
                             std::min<std::size_t>(payload[22], payload.size() - 23u);
-                        region.fields.push_back(
-                            {"compression_name", trimmed_text(payload.data() + 23u, name_length)});
+                        // The pstring is free text from the file, not a spec'd token.
+                        b.text("COMM", "compression_name",
+                               trimmed_text(payload.data() + 23u, name_length));
                     }
                 }
             } else {
@@ -255,7 +282,7 @@ void inspect_aiff_layout(Builder& b) {
         stream_facts.valid_bits = layout->info.bits_per_sample;
         stream_facts.frames = layout->info.num_frames;
         stream_facts.duration_seconds = layout->info.duration_seconds;
-        stream_facts.encoding = pcm ? "pcm" : (aifc ? "compressed" : "pcm");
+        stream_facts.encoding = aifc_encoding(compression_type);
         stream_facts.bytes_per_frame = pcm ? pcm->bytes_per_frame : 0u;
         report.stream = stream_facts;
         b.set_decode_limits(layout->info.num_frames, layout->info.num_channels);
