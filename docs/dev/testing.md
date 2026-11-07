@@ -112,6 +112,15 @@ Common fixes:
 `sanitizers.yml` runs ASan + UBSan on `pull_request` and blocks on any
 report. Runners: Linux + macOS.
 
+### Known ASan exception: loading several CLAP plugins
+
+Every CLAP plugin exports the same C symbol, `clap_entry`, by ABI. A host test
+that loads more than one plugin binary built from the same source (for example
+`pulp-test-clap-identity`) makes ASan report an `odr-violation` on that global.
+A `no_sanitize` attribute does not affect this check. Such a test sets
+`ASAN_OPTIONS=detect_odr_violation=0` through its CTest `ENVIRONMENT` property,
+as `test/cmake/view_host_tests.cmake` does. Do not turn the check off globally.
+
 ## ThreadSanitizer
 
 ### Run locally
