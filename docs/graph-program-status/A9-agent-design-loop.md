@@ -1,6 +1,26 @@
 # A9 — agent design loop
 
-Status: **PARTIAL — bounded installed-SDK consumer implemented**
+Status: **PARTIAL — bounded installed-SDK consumer and fail-closed action-plan harness implemented**
+
+## Action-plan harness (2026-11-06, source `2f3d36dae75c3dca283c58e47f7731356f088e0d`)
+
+The existing consumer now reads the checked-in
+[`fixtures/action-plan.json`](../../examples/graph-agent-loop/fixtures/action-plan.json),
+which pins a deterministic offline action model, tool version, and this exact
+source SHA. It refuses URLs, `network_policy: allow`,
+`plugin_policy: allow-ambient`, missing required steps, and missing planted
+mutation declarations before graph work begins. Its JSONL action log records a
+plan digest, ordered action results, explicit network/ambient-plugin denials,
+and a topology-only semantic fingerprint. A gain edit must change samples
+without changing that fingerprint; saved-input replay must restore the original
+samples and fingerprint.
+
+The standalone CTest suite adds three independent planted-negative plans:
+network opt-in, ambient plugin opt-in, and missing action schema. They are
+expected to fail closed (`WILL_FAIL`) while the restored positive plan passes.
+This is evidence for the local action-plan boundary only. It does not prove
+model execution, CLI/MCP parity, arbitrary plugin hosting, network sandboxing
+outside the consumer, realtime behavior, A10 routing, or flagship completion.
 
 This slice closes one executable, public-API path for catalog discovery,
 notation, validation, offline render, edge probe/compare, one bounded edit, and
