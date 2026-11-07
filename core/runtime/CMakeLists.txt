@@ -320,6 +320,7 @@ set(PULP_RUNTIME_UNIT_HEADERS
     include/pulp/runtime/expression.hpp
     include/pulp/runtime/external_input.hpp
     include/pulp/runtime/file_search_path.hpp
+    include/pulp/runtime/fixed_function.hpp
     include/pulp/runtime/high_resolution_timer.hpp
     include/pulp/runtime/http.hpp
     include/pulp/runtime/i18n.hpp

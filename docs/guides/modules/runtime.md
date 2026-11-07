@@ -16,6 +16,7 @@ The runtime module provides lock-free primitives, logging, assertions, and scope
 | Ordered event stream | `SpscQueue<T>` | MIDI events, UI commands |
 | Occurrence-only feedback | `ActivityChannel<N>` | MIDI pad flashes, clip lights |
 | Wake a sleeping worker | `WakeSignal` | Audio thread hands a block to a render or disk thread |
+| Callable handed to a realtime or worker lane | `FixedFunction<Sig, N>` | Task handlers that must not allocate |
 | Budgeted optional work | `evaluate_runtime_budget()` | Background analysis, voice/cache refresh, validation helpers |
 
 **Never use on the audio thread**: `std::mutex`, `std::condition_variable`, heap allocation, I/O.
@@ -275,6 +276,35 @@ source.cancel();                             // idempotent; also runs on destruc
   running on another thread, so captured state is safe to free afterwards.
 - `CancellationToken` is the former single type that both requested and observed
   cancellation. It still works and converts to `CancelToken`.
+
+## FixedFunction
+
+`std::function` can allocate when constructed or copied and needs a copyable target,
+so it does not belong on a realtime path. `FixedFunction<Signature, Capacity>` is a
+move-only callable wrapper with inline storage.
+
+```cpp
+#include <pulp/runtime/fixed_function.hpp>
+
+pulp::runtime::FixedFunction<void(int), 32> apply =
+    [gain = &gain_](int db) { gain->store(db, std::memory_order_relaxed); };
+apply(-6);
+```
+
+- Constructing, moving, calling and destroying never allocate, lock or throw.
+- A target that is too large, over-aligned or not nothrow-move-constructible is a
+  `static_assert` failure at the construction site, never a silent heap fallback.
+  Capture pointers or indices instead of objects, or raise `Capacity`. The default
+  capacity is 32 bytes.
+- Targets may be move-only (a lambda owning a `unique_ptr`). Destroying the wrapper
+  runs the target's destructor on the destroying thread, so capture trivially
+  destructible state for objects that die on the audio thread.
+- Calling an empty `FixedFunction` is undefined behaviour; test it with
+  `explicit operator bool` when it can be empty.
+- `FixedFunction::fits<F>` reports at compile time whether `F` can be stored.
+- `format::BackgroundTaskLane`, the bounded audio-to-worker command lane, stores its
+  handler in one: `lane.start([this](const Task& t) { handle(t); })`. The older
+  function-pointer-plus-context overload still works.
 
 ## Special directories
 

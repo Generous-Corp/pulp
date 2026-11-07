@@ -1256,6 +1256,12 @@ pulp_add_test_suite(pulp-test-permissions GROUP pulp-test-group-core-platform
 pulp_add_test_suite(pulp-test-environment GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)
 
+# FixedFunction and the allocation-free BackgroundTaskLane handler. The probe
+# replaces global operator new, so this stays its own executable.
+pulp_add_test_suite(pulp-test-fixed-function
+    SOURCES test_fixed_function.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::runtime pulp::format)
+
 # Special directory resolution (pure per-OS layouts plus the host)
 pulp_add_test_suite(pulp-test-special-dir GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)

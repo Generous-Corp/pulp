@@ -39,6 +39,7 @@
 #include <pulp/runtime/background_job.hpp>
 #include <pulp/runtime/cancel.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/fixed_function.hpp>
 #include <pulp/runtime/log_sink.hpp>
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/runtime/scope_guard.hpp>
