@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-view-input-contracts-unfrozen-paths",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T16:37:56Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/view/include/pulp/view/input_events.hpp",
+    "core/view/include/pulp/view/pointer_dispatch.hpp",
+    "core/view/src/gesture.cpp",
+    "core/view/src/pointer_dispatch.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "The four paths the owner unfroze now carry the disabled-view input contract, modifier-key change delivery, focus-cause delivery and stationary-pointer hover re-evaluation. The additions are source-compatible and depend on no Pulp-only code, so the next re-export should carry them."
+}
