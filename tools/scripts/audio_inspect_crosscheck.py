@@ -38,7 +38,7 @@ def find_pulp(explicit):
 
 
 def pulp_facts(pulp, path):
-    run = subprocess.run([pulp, "audio", "inspect", str(path), "--json"], capture_output=True, text=True)
+    run = subprocess.run([pulp, "audio", "inspect", str(path), "--json"], capture_output=True, text=True, encoding="utf-8")
     if run.returncode not in (0, 2) or not run.stdout.strip():
         return None, f"pulp exit {run.returncode}: {run.stderr.strip()}"
     doc = json.loads(run.stdout)
@@ -58,7 +58,7 @@ def ffprobe_facts(ffprobe, path):
     if not ffprobe:
         return None, "ffprobe not found"
     run = subprocess.run([ffprobe, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", str(path)],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, encoding="utf-8")
     if run.returncode != 0:
         return None, f"ffprobe refused: {run.stderr.strip()}"
     doc = json.loads(run.stdout or "{}")
