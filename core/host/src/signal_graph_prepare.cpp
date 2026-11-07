@@ -2,6 +2,7 @@
 // This translation unit owns candidate construction and publication preparation;
 // the public SignalGraph API and the legacy reference walk remain unchanged.
 #include "signal_graph_internal.hpp"
+#include "signal_graph_port_equaliser.hpp"
 #include "spectral_graph_internal.hpp"
 #include <algorithm>
 #include <array>
@@ -255,6 +256,20 @@ void SignalGraph::compute_latencies_for_(
         if (it == cg.runtime.end())
             continue;
         cg.total_latency_samples = std::max(cg.total_latency_samples, it->second.input_latency);
+    }
+    // The host sees one latency for the whole graph. Every audio output is
+    // therefore aligned to that total: an output fed only by lower-latency
+    // paths receives the difference as delay on its inbound connections, so
+    // all host output channels leave the graph together. A graph with one
+    // output (or equal-latency outputs) gains no delay from this.
+    for (auto& [id, shape] : cg.shapes) {
+        if (shape.type != NodeType::AudioOutput)
+            continue;
+        auto it = cg.runtime.find(id);
+        if (it == cg.runtime.end())
+            continue;
+        it->second.input_latency = cg.total_latency_samples;
+        it->second.output_latency = cg.total_latency_samples;
     }
 
     cg.connection_delays.assign(cg.connections.size(), ConnectionDelay{});
@@ -708,8 +723,9 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 // Evaluated once here, off the audio thread, at the graph's own
                 // rate, and clamped into the declared range — the value is not
                 // knowable at registration, so this is where it gets checked.
-                if ((cg->custom_processors.contains(n.id) ||
-                     cg->custom_event_processors.contains(n.id)) &&
+                const bool has_live_callback = cg->custom_processors.contains(n.id) ||
+                                               cg->custom_event_processors.contains(n.id);
+                if (has_live_callback &&
                     (type->latency_samples_for_block || type->latency_samples)) {
                     const int latency =
                         type->latency_samples_for_block
@@ -717,6 +733,26 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                             : type->latency_samples(sample_rate);
                     cg->custom_latency_samples[n.id] =
                         std::clamp(latency, 0, CustomNodeType::kMaxLatencySamples);
+                }
+                // Intentional delay is reported, never compensated: it does not
+                // touch custom_latency_samples, so neither PDC pass sees it.
+                if (has_live_callback && type->intentional_delay_samples) {
+                    cg->custom_intentional_delay_samples[n.id] =
+                        std::clamp(type->intentional_delay_samples(sample_rate), 0,
+                                   CustomNodeType::kMaxLatencySamples);
+                }
+                // Per-port artifact latency: the node reports the maximum, and
+                // the binding equalises the other ports up to it.
+                if (has_live_callback && type->output_port_latency_samples) {
+                    std::vector<int> ports(static_cast<std::size_t>(n.num_output_ports), 0);
+                    for (int port = 0; port < n.num_output_ports; ++port)
+                        ports[static_cast<std::size_t>(port)] =
+                            std::clamp(type->output_port_latency_samples(sample_rate, port), 0,
+                                       CustomNodeType::kMaxLatencySamples);
+                    const int node_latency =
+                        ports.empty() ? 0 : *std::max_element(ports.begin(), ports.end());
+                    cg->custom_latency_samples[n.id] = node_latency;
+                    cg->custom_output_port_latency_samples[n.id] = std::move(ports);
                 }
                 // Bake-layer param injection: if the type declared baked_params
                 // and a param-aware process, bind a closure that captures the
@@ -754,6 +790,60 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                     cg->custom_transport_processors[n.id] = type->process_transport;
                     n.transport_sensitive = true;
                 }
+                // Equalise per-port artifact latency inside the binding, after
+                // every live callback variant has been resolved. One equaliser
+                // serves all variants (only one runs per block). A live snapshot
+                // whose equaliser declares the same port latencies hands its
+                // state over, so a gap-free swap keeps the delayed history.
+                if (const auto ports = cg->custom_output_port_latency_samples.find(n.id);
+                    ports != cg->custom_output_port_latency_samples.end()) {
+                    std::shared_ptr<detail::OutputPortLatencyEqualiser> equaliser;
+                    if (const auto live = live_slot_.live()) {
+                        if (const auto old = live->custom_output_port_equalisers.find(n.id);
+                            old != live->custom_output_port_equalisers.end() && old->second &&
+                            old->second->port_latencies() == ports->second)
+                            equaliser = old->second;
+                    }
+                    if (!equaliser) {
+                        auto fresh = std::make_shared<detail::OutputPortLatencyEqualiser>();
+                        if (fresh->prepare(ports->second))
+                            equaliser = std::move(fresh);
+                    }
+                    if (equaliser) {
+                        cg->custom_output_port_equalisers[n.id] = equaliser;
+                        if (auto it = cg->custom_processors.find(n.id);
+                            it != cg->custom_processors.end()) {
+                            it->second = [equaliser, fn = std::move(it->second)](
+                                             audio::BufferView<float>& out,
+                                             const audio::BufferView<const float>& in,
+                                             int num_samples) {
+                                fn(out, in, num_samples);
+                                equaliser->process(out, num_samples);
+                            };
+                        }
+                        if (auto it = cg->custom_event_processors.find(n.id);
+                            it != cg->custom_event_processors.end()) {
+                            it->second = [equaliser, fn = std::move(it->second)](
+                                             audio::BufferView<float>& out,
+                                             const audio::BufferView<const float>& in,
+                                             int num_samples, const CustomNodeEventBlock& events) {
+                                fn(out, in, num_samples, events);
+                                equaliser->process(out, num_samples);
+                            };
+                        }
+                        if (auto it = cg->custom_transport_processors.find(n.id);
+                            it != cg->custom_transport_processors.end()) {
+                            it->second = [equaliser, fn = std::move(it->second)](
+                                             audio::BufferView<float>& out,
+                                             const audio::BufferView<const float>& in,
+                                             int num_samples,
+                                             const format::ProcessContext& transport) {
+                                fn(out, in, num_samples, transport);
+                                equaliser->process(out, num_samples);
+                            };
+                        }
+                    }
+                }
             }
         }
         if (const auto region = region_by_anchor.find(n.id); region != region_by_anchor.end()) {
@@ -762,6 +852,9 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 [prepared](audio::BufferView<float>& out, const audio::BufferView<const float>& in,
                            int frames) noexcept { prepared->process(out, in, frames); };
             cg->custom_latency_samples[n.id] = 0;
+            cg->custom_intentional_delay_samples.erase(n.id);
+            cg->custom_output_port_latency_samples.erase(n.id);
+            cg->custom_output_port_equalisers.erase(n.id);
             // A region anchor's processor IS the prepared region, which has no
             // event plane and no transport plane. Drop both bindings its
             // registered type may have resolved above, so the region cannot be

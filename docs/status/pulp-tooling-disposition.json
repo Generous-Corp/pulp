@@ -2035,6 +2035,22 @@
           {
             "name": "--block-frames",
             "kind": "option"
+          },
+          {
+            "name": "--sample-rate",
+            "kind": "option"
+          },
+          {
+            "name": "--max-block-size",
+            "kind": "option"
+          },
+          {
+            "name": "--block-size",
+            "kind": "option"
+          },
+          {
+            "name": "--measure-blocks",
+            "kind": "option"
           }
         ],
         "subcommands": []

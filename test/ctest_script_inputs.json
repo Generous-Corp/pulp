@@ -3036,6 +3036,7 @@
   "pulp-test-graph-executor-routing",
   "pulp-test-graph-identity",
   "pulp-test-graph-plugin-resolution",
+  "pulp-test-graph-rt-report",
   "pulp-test-graph-runtime-worker-pool",
   "pulp-test-graphic-eq",
   "pulp-test-group-app-audio",
