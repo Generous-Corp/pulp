@@ -795,6 +795,58 @@ function(pulp_add_test_suite NAME)
     _pulp_test_data_register_suite(${NAME} ${_target} ${P_SOURCES})
 endfunction()
 
+# Proves, once per configure, that the toolchain can produce a libFuzzer
+# binary the way this build asks for one, so a missing runtime fails at
+# configure time with a named cause rather than at link time with a
+# missing-library error. Two shapes: the compiler ships the driver
+# (-fsanitize=fuzzer links), or PULP_FUZZ_RUNTIME_ARCHIVE names a driver
+# archive and the compiler only has to accept -fsanitize=fuzzer-no-link.
+function(pulp_check_libfuzzer_toolchain)
+    if(NOT PULP_ENABLE_FUZZING OR DEFINED PULP_HAVE_LIBFUZZER)
+        return()
+    endif()
+    include(CheckCXXSourceCompiles)
+    set(_entry "extern \"C\" int LLVMFuzzerTestOneInput(const unsigned char*, unsigned long) { return 0; }")
+    if(PULP_FUZZ_RUNTIME_ARCHIVE)
+        if(NOT EXISTS "${PULP_FUZZ_RUNTIME_ARCHIVE}")
+            message(FATAL_ERROR
+                "PULP_FUZZ_RUNTIME_ARCHIVE does not exist: ${PULP_FUZZ_RUNTIME_ARCHIVE}")
+        endif()
+        set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer-no-link")
+        set(CMAKE_REQUIRED_LIBRARIES "${PULP_FUZZ_RUNTIME_ARCHIVE}")
+        check_cxx_source_compiles("${_entry}" PULP_HAVE_LIBFUZZER)
+        unset(CMAKE_REQUIRED_LIBRARIES)
+        set(_hint "the compiler rejected -fsanitize=fuzzer-no-link or could not link ${PULP_FUZZ_RUNTIME_ARCHIVE}")
+    else()
+        set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer")
+        check_cxx_source_compiles("${_entry}" PULP_HAVE_LIBFUZZER)
+        set(_hint "Apple's clang omits libclang_rt.fuzzer; use an LLVM that ships it, or point PULP_FUZZ_RUNTIME_ARCHIVE at one (Homebrew llvm@<N>/lib/clang/<N>/lib/darwin/libclang_rt.fuzzer_osx.a)")
+    endif()
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(NOT PULP_HAVE_LIBFUZZER)
+        message(FATAL_ERROR
+            "PULP_ENABLE_FUZZING=ON but this toolchain cannot build a libFuzzer binary: ${_hint}.")
+    endif()
+endfunction()
+
+# Gives one executable the libFuzzer driver. The tree is already compiled
+# with the library-side list (coverage counters and the sanitizer, no driver);
+# the target is where the driver's main enters: from the compiler through
+# -fsanitize=fuzzer, or from PULP_FUZZ_RUNTIME_ARCHIVE when the compiler
+# ships none, in which case the target keeps the library-side flags so the
+# driver is not requested twice.
+function(pulp_fuzz_instrument_target NAME)
+    pulp_check_libfuzzer_toolchain()
+    if(PULP_FUZZ_RUNTIME_ARCHIVE)
+        list(JOIN PULP_FUZZ_LIBRARY_SANITIZERS "," _target_sanitizers)
+        target_link_libraries(${NAME} PRIVATE "${PULP_FUZZ_RUNTIME_ARCHIVE}")
+    else()
+        set(_target_sanitizers "${PULP_FUZZ_SANITIZERS}")
+    endif()
+    target_compile_options(${NAME} PRIVATE -fsanitize=${_target_sanitizers} -fno-omit-frame-pointer)
+    target_link_options(${NAME} PRIVATE -fsanitize=${_target_sanitizers})
+endfunction()
+
 # A libFuzzer target plus its bounded ctest smoke. Only meaningful under
 # PULP_ENABLE_FUZZING (the caller guards the call); the smoke runs the target
 # over its seed corpus for a fixed number of iterations so the required lane of
@@ -826,8 +878,7 @@ function(pulp_add_libfuzzer_target NAME)
     target_include_directories(${NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz ${P_INCLUDE_DIRECTORIES})
     target_link_libraries(${NAME} PRIVATE ${P_LIBRARIES})
-    target_compile_options(${NAME} PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
-    target_link_options(${NAME} PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS})
+    pulp_fuzz_instrument_target(${NAME})
     # libFuzzer writes every new interesting input into the first corpus
     # directory it is given, so the smoke gets a scratch directory first and
     # the seeds second; a checked-in seed corpus is never grown by a test run.
