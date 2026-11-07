@@ -1470,6 +1470,28 @@ rate change.
   `ProcessBlock::validate()`, the block silently falls back to the walk, and
   only `routed_walk_fallbacks()` shows it. `test/test_lv2_host_slot.cpp`
   asserts that counter stays zero.
+- **LV2 sequence overflow hides behind a 24-byte rhythm.** Every event the
+  slot forges is a multiple of 24 bytes, so a 16384-byte port (16368 after the
+  header) fills exactly and even unchecked forging stops cleanly. The torn
+  event (timestamp and header written, body not) only shows at the default
+  8192 bytes, which leave 16. `append_event()` checks the room before writing
+  and rolls back offset, sequence size, and frame stack; the fixture's
+  `malformed_events` port is what catches a regression, since a torn body
+  reads as zeros and counts as nothing.
+- **patch:Set carries the range's atom type.** Plugins compare
+  `value->type` with their URID and ignore anything else, so forge Int, Long,
+  Bool, Double, or Float from `Lv2PatchParameter::range`. The fixture accepts
+  only the declared type; keep it strict, or the test cannot fail.
+- **An LV2 save shares the lock with run().** `state_mutex_` is a
+  `shared_mutex`: run() try-locks it shared, save takes it shared plus
+  `save_mutex_`, and prepare, release, and restore take it exclusive. A save
+  reads control inputs from `control_shadow_`, never from the ports.
+- **`lilv_plugin_verify()` gates load.** It refuses parse errors, no ports,
+  and no `doap:name` (which LV2 requires), so hand-written test bundles need
+  a `doap:name`.
+- **An allocation-probe control must not be elidable.** Clang removes an
+  unused `std::vector`, so a "does the probe see an allocation" control that
+  builds one proves nothing; call `::operator new` directly.
 - **The LV2 fixture is a real bundle.** `test/fixtures/lv2_host_instrument`
   builds an instrument module plus `manifest.ttl`/`plugin.ttl` and reports
   what it observed (time:Position fields, options, worker answers, patch

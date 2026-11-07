@@ -7,17 +7,30 @@
 //   - MIDI from the host reaches atom:Sequence inputs that support
 //     midi:MidiEvent, and MIDI the plugin emits comes back as host MIDI;
 //   - the host transport reaches ports that support time:Position, as a
-//     time:Position object whenever it starts, changes, or jumps;
+//     time:Position object whenever it starts, changes, or jumps, carrying only
+//     the fields the host supplied;
 //   - control input ports, and properties the plugin declares patch:writable,
-//     are host parameters; patch properties travel as patch:Set messages, and a
-//     patch:Set the plugin emits updates the host's value;
+//     are host parameters; patch properties travel as patch:Set messages
+//     carrying the atom type of the property's rdfs:range, and a patch:Set the
+//     plugin emits updates the host's value. lv2:sampleRate port ranges are
+//     scaled by the prepared rate;
+//   - a sequence never holds a partial event: an event that does not fit is
+//     dropped whole;
 //   - the plugin gets urid:map/unmap, options:options with the buf-size bounds
 //     and sample rate, buf-size:boundedBlockLength, log:log, and
 //     worker:schedule with a worker thread (synchronous when rendering offline);
 //   - state is the plugin's LV2 state plus its control-port values, serialized
-//     by lilv as Turtle, and it survives a re-prepare;
+//     by lilv as Turtle, and it survives a re-prepare. A save runs alongside
+//     the audio thread, as LV2 allows; only a restore or re-prepare makes a
+//     block pass its input through;
 //   - lv2:reportsLatency is read back, and an lv2:freeWheeling port follows the
-//     offline process mode.
+//     offline process mode. prepare() runs one silent block to read the
+//     latency, so anything the plugin emits in its very first run() is not
+//     delivered;
+//   - log:log trace messages, the only kind allowed from run(), are dropped
+//     without formatting; other messages go to the Pulp log;
+//   - after a bypass the plugin gets All Notes Off on every channel, because
+//     it never saw the note-offs the host sent meanwhile.
 //
 // Not covered: LV2 UIs (has_editor() is false), CV signals (CV ports are
 // connected to silence), and required ports of unknown kinds (the plugin is
@@ -61,6 +74,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -199,6 +213,7 @@ struct Lv2Bundle {
             r.stepped =
                 has(LV2_CORE__toggled) || has(LV2_CORE__integer) || has(LV2_CORE__enumeration);
             r.hidden = has(LV2_PORT_PROPS__notOnGUI);
+            r.sample_rate_relative = has(LV2_CORE__sampleRate);
             LilvNodes* designations =
                 lilv_port_get_value(plugin, port, n.get(LV2_CORE__designation));
             auto designated = [&](const char* uri) {
@@ -262,6 +277,12 @@ struct Lv2Bundle {
                 p.uri = uri;
                 p.writable = writable;
                 p.stepped = integral;
+                using Range = detail::Lv2PatchParameter::Range;
+                p.range = range_uri == LV2_ATOM__Int      ? Range::Int
+                          : range_uri == LV2_ATOM__Long   ? Range::Long
+                          : range_uri == LV2_ATOM__Bool   ? Range::Bool
+                          : range_uri == LV2_ATOM__Double ? Range::Double
+                                                          : Range::Float;
                 if (LilvNode* label = lilv_world_get(world, prop, n.get(kRdfsLabel), nullptr)) {
                     p.label = lilv_node_as_string(label);
                     lilv_node_free(label);
@@ -380,7 +401,17 @@ class UridMap {
     LV2_URID_Unmap unmap_{};
 };
 
-int log_vprintf(LV2_Log_Handle, LV2_URID, const char* fmt, va_list args) {
+/// log:log handle: the trace URID, the one message type a plugin may log from
+/// run(). Those are dropped unformatted, so the audio thread never formats or
+/// allocates; every other type is logged.
+struct LogContext {
+    LV2_URID trace = 0;
+};
+
+int log_vprintf(LV2_Log_Handle handle, LV2_URID type, const char* fmt, va_list args) {
+    const auto* context = static_cast<const LogContext*>(handle);
+    if (context && type == context->trace)
+        return 0;
     char buf[512];
     const int n = std::vsnprintf(buf, sizeof(buf), fmt, args);
     runtime::log_info("LV2 plugin: {}", std::string_view(buf));
@@ -415,9 +446,10 @@ bool feature_supported(const char* uri) {
 struct UridSet {
     LV2_URID atom_sequence, atom_chunk, atom_float, atom_double, atom_int, atom_long, atom_bool,
         atom_object, atom_blank, atom_urid, midi_event, time_position, time_frame, time_speed,
-        time_bar, time_bar_beat, time_beat_unit, time_beats_per_bar, time_beats_per_minute,
-        patch_set, patch_get, patch_property, patch_value, buf_min, buf_max, buf_nominal,
-        buf_sequence_size, param_sample_rate;
+        time_bar, time_bar_beat, time_beat, time_beat_unit, time_beats_per_bar,
+        time_beats_per_minute, time_frames_per_second, log_trace, patch_set, patch_get,
+        patch_property, patch_value, buf_min, buf_max, buf_nominal, buf_sequence_size,
+        param_sample_rate;
 
     void init(UridMap& m) {
         atom_sequence = m.map(LV2_ATOM__Sequence);
@@ -436,6 +468,9 @@ struct UridSet {
         time_speed = m.map(LV2_TIME__speed);
         time_bar = m.map(LV2_TIME__bar);
         time_bar_beat = m.map(LV2_TIME__barBeat);
+        time_beat = m.map(LV2_TIME__beat);
+        time_frames_per_second = m.map(LV2_TIME__framesPerSecond);
+        log_trace = m.map(LV2_LOG__Trace);
         time_beat_unit = m.map(LV2_TIME__beatUnit);
         time_beats_per_bar = m.map(LV2_TIME__beatsPerBar);
         time_beats_per_minute = m.map(LV2_TIME__beatsPerMinute);
@@ -501,10 +536,18 @@ class Lv2Slot final : public PluginSlot {
         for (const auto& p : patch_params_)
             patch_property_urids_.push_back(urid_map_.map(p.uri.c_str()));
 
+        for (int channel = 0; channel < 16; ++channel) {
+            auto& off = all_notes_off_[static_cast<std::size_t>(channel)];
+            off.message =
+                choc::midi::ShortMessage(static_cast<std::uint8_t>(0xB0 | channel), 123, 0);
+            off.sample_offset = 0;
+        }
         control_values_.assign(ports_.size(), 0.0f);
         for (const auto& r : ports_) {
             if (r.is_atom && r.is_input && r.supports_time)
                 wants_transport_ = true;
+            if (r.reports_latency)
+                has_latency_port_ = true;
             if (!r.is_control)
                 continue;
             control_values_[static_cast<std::size_t>(r.index)] = r.default_value;
@@ -570,7 +613,7 @@ class Lv2Slot final : public PluginSlot {
     bool prepare(double sample_rate, int max_block_size) override {
         if (!is_loaded() || max_block_size <= 0)
             return false;
-        std::lock_guard<std::mutex> state_lock(state_mutex_);
+        std::unique_lock<std::shared_mutex> state_lock(state_mutex_);
         release_locked();
         // The sample rate is fixed at instantiation, so a re-prepare builds a
         // new instance. Carry the old instance's state across so a re-prepare
@@ -585,6 +628,8 @@ class Lv2Slot final : public PluginSlot {
 
         sample_rate_ = sample_rate;
         max_block_size_ = max_block_size;
+        apply_sample_rate_ranges();
+        pull_host_controls();
         build_features();
         instance_ = lilv_plugin_instantiate(bundle_->plugin, sample_rate, features_.data());
         if (!instance_) {
@@ -616,7 +661,7 @@ class Lv2Slot final : public PluginSlot {
     }
 
     void release() override {
-        std::lock_guard<std::mutex> state_lock(state_mutex_);
+        std::unique_lock<std::shared_mutex> state_lock(state_mutex_);
         release_locked();
     }
 
@@ -685,10 +730,11 @@ class Lv2Slot final : public PluginSlot {
     }
 
     std::vector<std::uint8_t> save_state() const override {
-        std::lock_guard<std::mutex> state_lock(state_mutex_);
+        // LV2 lets save() run alongside run(), so a save shares the lock with
+        // the audio thread and never costs a block; saves queue on their own.
+        std::shared_lock<std::shared_mutex> state_lock(state_mutex_);
+        std::lock_guard<std::mutex> save_lock(save_mutex_);
         auto* self = const_cast<Lv2Slot*>(this);
-        if (instance_)
-            self->pull_host_controls();
         const std::string text = instance_ ? self->save_state_string_locked() : pending_restore_;
         return {text.begin(), text.end()};
     }
@@ -697,7 +743,7 @@ class Lv2Slot final : public PluginSlot {
         if (data.empty())
             return false;
         std::string text(data.begin(), data.end());
-        std::lock_guard<std::mutex> state_lock(state_mutex_);
+        std::unique_lock<std::shared_mutex> state_lock(state_mutex_);
         if (instance_) {
             if (!restore_state_string_locked(text))
                 return false;
@@ -739,8 +785,11 @@ class Lv2Slot final : public PluginSlot {
             std::memory_order_relaxed);
         return v > 0.0f ? static_cast<int>(std::lround(v)) : 0;
     }
+    // Before prepare() a plugin with a latency port has not run, so there is
+    // no report to give yet.
     LatencyQuery latency_query() const override {
-        return LatencyQuery::Available;
+        return has_latency_port_ && !instance_ ? LatencyQuery::Unsupported
+                                               : LatencyQuery::Available;
     }
     int tail_samples() const override {
         return 0;
@@ -789,7 +838,8 @@ class Lv2Slot final : public PluginSlot {
         option(urids_.param_sample_rate, sizeof(float), urids_.atom_float, &sample_rate_float_);
         options_.push_back(LV2_Options_Option{LV2_OPTIONS_INSTANCE, 0, 0, 0, 0, nullptr});
 
-        log_.handle = this;
+        log_context_.trace = urids_.log_trace;
+        log_.handle = &log_context_;
         log_.printf = &log_printf;
         log_.vprintf = &log_vprintf;
 
@@ -866,9 +916,21 @@ class Lv2Slot final : public PluginSlot {
         lilv_state_restore(state, instance_, &Lv2Slot::set_port_value_trampoline, this, 0,
                            state_features_.data());
         lilv_state_free(state);
+        // The default state carries each port's lv2:default, which for an
+        // lv2:sampleRate port is a fraction of the rate.
+        const auto rate = static_cast<float>(sample_rate_);
+        for (const auto& r : ports_) {
+            const auto i = static_cast<std::size_t>(r.index);
+            if (r.sample_rate_relative && r.is_control && r.is_input &&
+                control_values_[i] == r.default_value)
+                control_values_[i] = r.default_value * rate;
+        }
     }
 
     std::string save_state_string_locked() {
+        save_controls_.resize(ports_.size());
+        for (std::size_t i = 0; i < ports_.size(); ++i)
+            save_controls_[i] = control_shadow_[i].load(std::memory_order_relaxed);
         LilvState* state = lilv_state_new_from_instance(
             bundle_->plugin, instance_, urid_map_.map_feature(), nullptr, nullptr, nullptr, nullptr,
             &Lv2Slot::get_port_value_trampoline, this, LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE,
@@ -907,7 +969,7 @@ class Lv2Slot final : public PluginSlot {
             if (r.is_control && r.is_input && !r.free_wheeling && r.symbol == symbol) {
                 *size = sizeof(float);
                 *type = self->urids_.atom_float;
-                return &self->control_values_[i];
+                return &self->save_controls_[i];
             }
         }
         *size = 0;
@@ -940,6 +1002,29 @@ class Lv2Slot final : public PluginSlot {
                 return;
             }
         }
+    }
+
+    /// lv2:sampleRate ports declare their range as fractions of the sample
+    /// rate; the plugin reads absolute values. The host's range follows the
+    /// prepared rate, and an untouched default becomes absolute once.
+    void apply_sample_rate_ranges() {
+        const auto rate = static_cast<float>(sample_rate_);
+        for (const auto& r : ports_) {
+            if (!r.sample_rate_relative || !r.is_control || !r.is_input || r.free_wheeling)
+                continue;
+            const auto i = static_cast<std::size_t>(r.index);
+            for (auto& h : params_) {
+                if (h.id != static_cast<std::uint32_t>(r.index))
+                    continue;
+                h.min_value = r.min_value * rate;
+                h.max_value = r.max_value * rate;
+                h.default_value = r.default_value * rate;
+            }
+            if (!sample_rate_ranges_applied_ &&
+                control_shadow_[i].load(std::memory_order_relaxed) == r.default_value)
+                control_shadow_[i].store(r.default_value * rate, std::memory_order_relaxed);
+        }
+        sample_rate_ranges_applied_ = true;
     }
 
     // ── Control values ──────────────────────────────────────────────────
@@ -1000,7 +1085,7 @@ class Lv2Slot final : public PluginSlot {
         worker_.deliver_responses();
         for (std::size_t i = 0; i < ports_.size(); ++i)
             if (ports_[i].is_atom && !ports_[i].is_input)
-                read_output_sequence(i, nullptr);
+                read_output_sequence(i, nullptr, max_block_size_);
     }
 
     void reset_atom_port(std::size_t i) {
@@ -1025,14 +1110,21 @@ class Lv2Slot final : public PluginSlot {
                    const midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
                    const ParameterEventQueue& param_events, int num_samples,
                    const format::ProcessContext* transport) {
-        std::unique_lock<std::mutex> state_lock(state_mutex_, std::try_to_lock);
+        std::shared_lock<std::shared_mutex> state_lock(state_mutex_, std::try_to_lock);
         // A restore or re-prepare holds the lock; this block passes the input
         // through rather than wait on the audio thread.
         if (!state_lock.owns_lock() || !instance_ || !active_ || num_samples <= 0 ||
-            num_samples > max_block_size_ || bypassed_.load(std::memory_order_relaxed)) {
+            num_samples > max_block_size_) {
             copy_or_zero(output, input, num_samples);
             return;
         }
+        if (bypassed_.load(std::memory_order_relaxed)) {
+            copy_or_zero(output, input, num_samples);
+            was_bypassed_ = true;
+            return;
+        }
+        const bool all_notes_off = was_bypassed_;
+        was_bypassed_ = false;
         const auto n = static_cast<std::size_t>(num_samples);
         const bool offline = transport && transport->is_offline();
         worker_.set_synchronous(offline);
@@ -1064,7 +1156,7 @@ class Lv2Slot final : public PluginSlot {
             ++channel;
         }
 
-        collect_events(midi_in, param_events, num_samples);
+        collect_events(midi_in, param_events, num_samples, all_notes_off);
         for (std::size_t i = 0; i < ports_.size(); ++i) {
             if (!ports_[i].is_atom)
                 continue;
@@ -1082,7 +1174,7 @@ class Lv2Slot final : public PluginSlot {
 
         for (std::size_t i = 0; i < ports_.size(); ++i)
             if (ports_[i].is_atom && !ports_[i].is_input)
-                read_output_sequence(i, &midi_out);
+                read_output_sequence(i, &midi_out, num_samples);
 
         channel = 0;
         for (std::size_t i = 0; i < ports_.size(); ++i) {
@@ -1099,19 +1191,26 @@ class Lv2Slot final : public PluginSlot {
 
     /// This block's MIDI, host patch edits, and patch-parameter automation,
     /// ordered by frame as an LV2 sequence must be. Insertion sort into
-    /// reserved storage: stable, and never allocates.
+    /// reserved storage: stable and allocation-free, and linear for the
+    /// already-ordered MIDI a host sends; only out-of-order events cost more.
     void collect_events(const midi::MidiBuffer& midi_in, const ParameterEventQueue& param_events,
-                        int num_samples) {
+                        int num_samples, bool all_notes_off) {
         pending_events_.clear();
         auto add = [&](PendingAtomEvent e) {
-            if (pending_events_.size() >= kMaxPendingEvents)
+            if (pending_events_.size() >= kMaxPendingEvents) {
+                dropped_events_.fetch_add(1, std::memory_order_relaxed);
                 return;
+            }
             e.frame = std::clamp<std::int32_t>(e.frame, 0, num_samples - 1);
             pending_events_.push_back(e);
             for (std::size_t k = pending_events_.size() - 1;
                  k > 0 && pending_events_[k - 1].frame > pending_events_[k].frame; --k)
                 std::swap(pending_events_[k - 1], pending_events_[k]);
         };
+        // After a bypass the plugin missed every note-off the host sent.
+        if (all_notes_off)
+            for (const auto& off : all_notes_off_)
+                add({0, &off, 0, 0.0f});
         PatchEdit edit;
         while (host_patch_edits_.try_pop(edit))
             add({0, nullptr, edit.ordinal, edit.value});
@@ -1128,6 +1227,71 @@ class Lv2Slot final : public PluginSlot {
             add({event.sample_offset, &event, 0, 0.0f});
     }
 
+    // Bytes one event takes in a sequence, padding included. Every event is
+    // checked against the room left before anything is written, so a full
+    // sequence drops whole events and never holds a partial one.
+    static constexpr std::uint32_t kEventHeaderBytes = sizeof(LV2_Atom_Event);
+    static constexpr std::uint32_t kKeyBytes = sizeof(LV2_Atom_Property_Body) - sizeof(LV2_Atom);
+    static constexpr std::uint32_t kScalarBytes = sizeof(LV2_Atom) + 8; // Any body up to 8 bytes.
+    static constexpr std::uint32_t kObjectHeaderBytes = sizeof(LV2_Atom_Object);
+    static constexpr std::uint32_t kPatchSetBytes =
+        kEventHeaderBytes - sizeof(LV2_Atom) + kObjectHeaderBytes + 2 * (kKeyBytes + kScalarBytes);
+    static constexpr std::uint32_t kPatchGetBytes =
+        kEventHeaderBytes - sizeof(LV2_Atom) + kObjectHeaderBytes;
+    static constexpr std::uint32_t kTimePositionKeys = 9;
+    static constexpr std::uint32_t kTimePositionBytes =
+        kEventHeaderBytes - sizeof(LV2_Atom) + kObjectHeaderBytes +
+        kTimePositionKeys * (kKeyBytes + kScalarBytes);
+
+    static std::uint32_t room(const LV2_Atom_Forge& forge) noexcept {
+        return forge.offset < forge.size ? forge.size - forge.offset : 0;
+    }
+
+    /// Runs `write` (which returns false when any forge call failed) only when
+    /// `bytes` fit, and undoes whatever it wrote if it still failed: the
+    /// sequence's size, the forge position, and its frame stack.
+    template <typename Write>
+    bool append_event(LV2_Atom_Forge& forge, LV2_Atom* sequence, std::uint32_t bytes,
+                      Write&& write) noexcept {
+        if (room(forge) < bytes) {
+            dropped_events_.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        const std::uint32_t offset = forge.offset;
+        const std::uint32_t size = sequence->size;
+        LV2_Atom_Forge_Frame* stack = forge.stack;
+        if (write())
+            return true;
+        forge.offset = offset;
+        sequence->size = size;
+        forge.stack = stack;
+        dropped_events_.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    /// Forges a patch property's value as the atom type its rdfs:range names,
+    /// clamped to its declared bounds.
+    bool forge_patch_value(LV2_Atom_Forge& forge, std::uint32_t ordinal, float value) noexcept {
+        const auto& p = patch_params_[ordinal];
+        const float lo = std::min(p.min_value, p.max_value);
+        const float hi = std::max(p.min_value, p.max_value);
+        const float v = std::clamp(value, lo, hi);
+        using Range = detail::Lv2PatchParameter::Range;
+        switch (p.range) {
+        case Range::Int:
+            return lv2_atom_forge_int(&forge, static_cast<std::int32_t>(std::lround(v))) != 0;
+        case Range::Long:
+            return lv2_atom_forge_long(&forge, static_cast<std::int64_t>(std::llround(v))) != 0;
+        case Range::Bool:
+            return lv2_atom_forge_bool(&forge, v >= 0.5f) != 0;
+        case Range::Double:
+            return lv2_atom_forge_double(&forge, static_cast<double>(v)) != 0;
+        case Range::Float:
+            break;
+        }
+        return lv2_atom_forge_float(&forge, v) != 0;
+    }
+
     void forge_input_sequence(std::size_t port, const format::ProcessContext* transport) {
         const auto& r = ports_[port];
         const bool patch_here = static_cast<int>(port) == patch_port_;
@@ -1141,40 +1305,51 @@ class Lv2Slot final : public PluginSlot {
         LV2_Atom_Forge& forge = forge_;
         lv2_atom_forge_set_buffer(&forge, buffer, capacity);
         LV2_Atom_Forge_Frame seq_frame;
-        lv2_atom_forge_sequence_head(&forge, &seq_frame, 0);
+        if (!lv2_atom_forge_sequence_head(&forge, &seq_frame, 0))
+            return;
+        auto* sequence = reinterpret_cast<LV2_Atom*>(buffer);
 
         if (send_time)
-            forge_time_position(forge, *transport);
+            append_event(forge, sequence, kTimePositionBytes,
+                         [&] { return forge_time_position(forge, *transport); });
         if (patch_here && !sent_initial_patch_get_) {
             // Ask the plugin to report every patch property, so the host's
             // values match the plugin's from the first block.
-            LV2_Atom_Forge_Frame obj;
-            lv2_atom_forge_frame_time(&forge, 0);
-            lv2_atom_forge_object(&forge, &obj, 0, urids_.patch_get);
-            lv2_atom_forge_pop(&forge, &obj);
+            append_event(forge, sequence, kPatchGetBytes, [&] {
+                LV2_Atom_Forge_Frame obj;
+                if (!lv2_atom_forge_frame_time(&forge, 0) ||
+                    !lv2_atom_forge_object(&forge, &obj, 0, urids_.patch_get))
+                    return false;
+                lv2_atom_forge_pop(&forge, &obj);
+                return true;
+            });
         }
         for (const auto& e : pending_events_) {
             if (e.midi) {
                 if (!r.supports_midi)
                     continue;
-                const auto len = e.midi->message.length();
+                const auto len = static_cast<std::uint32_t>(e.midi->message.length());
                 const auto* bytes = e.midi->message.data();
                 if (len < 1 || len > 3 || (bytes[0] & 0x80) == 0)
                     continue;
-                if (!lv2_atom_forge_frame_time(&forge, e.frame) ||
-                    !lv2_atom_forge_atom(&forge, len, urids_.midi_event) ||
-                    !lv2_atom_forge_write(&forge, bytes, len))
-                    break; // Sequence full: later events in this block are dropped.
+                append_event(forge, sequence, kEventHeaderBytes + lv2_atom_pad_size(len), [&] {
+                    return lv2_atom_forge_frame_time(&forge, e.frame) &&
+                           lv2_atom_forge_atom(&forge, len, urids_.midi_event) &&
+                           lv2_atom_forge_write(&forge, bytes, len);
+                });
             } else if (patch_here) {
-                LV2_Atom_Forge_Frame obj;
-                if (!lv2_atom_forge_frame_time(&forge, e.frame))
-                    break;
-                lv2_atom_forge_object(&forge, &obj, 0, urids_.patch_set);
-                lv2_atom_forge_key(&forge, urids_.patch_property);
-                lv2_atom_forge_urid(&forge, patch_property_urids_[e.ordinal]);
-                lv2_atom_forge_key(&forge, urids_.patch_value);
-                lv2_atom_forge_float(&forge, e.value);
-                lv2_atom_forge_pop(&forge, &obj);
+                append_event(forge, sequence, kPatchSetBytes, [&] {
+                    LV2_Atom_Forge_Frame obj;
+                    if (!lv2_atom_forge_frame_time(&forge, e.frame) ||
+                        !lv2_atom_forge_object(&forge, &obj, 0, urids_.patch_set) ||
+                        !lv2_atom_forge_key(&forge, urids_.patch_property) ||
+                        !lv2_atom_forge_urid(&forge, patch_property_urids_[e.ordinal]) ||
+                        !lv2_atom_forge_key(&forge, urids_.patch_value) ||
+                        !forge_patch_value(forge, e.ordinal, e.value))
+                        return false;
+                    lv2_atom_forge_pop(&forge, &obj);
+                    return true;
+                });
             }
         }
         lv2_atom_forge_pop(&forge, &seq_frame);
@@ -1202,42 +1377,85 @@ class Lv2Slot final : public PluginSlot {
         expected_frame_ = t.position_samples + (t.is_playing ? num_samples : 0);
     }
 
-    void forge_time_position(LV2_Atom_Forge& forge, const format::ProcessContext& t) {
-        const int num = std::max(1, t.time_sig_numerator);
-        const int den = std::max(1, t.time_sig_denominator);
+    /// One time:Position object carrying the fields the host supplied. A
+    /// context with an empty validity mask predates the mask, so its core
+    /// fields count as supplied. Every time:Position property is optional, so
+    /// a field the host did not give is left out rather than invented.
+    bool forge_time_position(LV2_Atom_Forge& forge, const format::ProcessContext& t) {
+        using F = format::TransportField;
+        const bool legacy = t.transport_validity.empty();
+        auto has = [&](F f) { return legacy || t.has_transport(f); };
+        const bool meter = has(F::TimeSignature);
+        const int num = meter ? std::max(1, t.time_sig_numerator) : 4;
+        const int den = meter ? std::max(1, t.time_sig_denominator) : 4;
         // position_beats counts quarter notes; LV2 counts beats of the meter's
         // beat unit, so a 6/8 bar holds six eighth-note beats.
         const double unit_beats = t.position_beats * static_cast<double>(den) / 4.0;
         const double bar = std::floor(unit_beats / num);
         const double bar_beat = unit_beats - bar * num;
         LV2_Atom_Forge_Frame obj;
-        lv2_atom_forge_frame_time(&forge, 0);
-        lv2_atom_forge_object(&forge, &obj, 0, urids_.time_position);
-        lv2_atom_forge_key(&forge, urids_.time_frame);
-        lv2_atom_forge_long(&forge, t.position_samples);
-        lv2_atom_forge_key(&forge, urids_.time_speed);
-        lv2_atom_forge_float(&forge, t.is_playing ? 1.0f : 0.0f);
-        lv2_atom_forge_key(&forge, urids_.time_bar);
-        lv2_atom_forge_long(&forge, static_cast<std::int64_t>(bar));
-        lv2_atom_forge_key(&forge, urids_.time_bar_beat);
-        lv2_atom_forge_float(&forge, static_cast<float>(bar_beat));
-        lv2_atom_forge_key(&forge, urids_.time_beat_unit);
-        lv2_atom_forge_int(&forge, den);
-        lv2_atom_forge_key(&forge, urids_.time_beats_per_bar);
-        lv2_atom_forge_float(&forge, static_cast<float>(num));
-        lv2_atom_forge_key(&forge, urids_.time_beats_per_minute);
-        lv2_atom_forge_float(&forge, static_cast<float>(t.tempo_bpm));
+        if (!lv2_atom_forge_frame_time(&forge, 0) ||
+            !lv2_atom_forge_object(&forge, &obj, 0, urids_.time_position))
+            return false;
+        bool ok = true;
+        auto key = [&](LV2_URID k) { ok = ok && lv2_atom_forge_key(&forge, k) != 0; };
+        if (has(F::SamplePosition)) {
+            key(urids_.time_frame);
+            ok = ok && lv2_atom_forge_long(&forge, t.position_samples);
+        }
+        key(urids_.time_frames_per_second);
+        ok = ok && lv2_atom_forge_float(&forge, sample_rate_float_);
+        if (has(F::Playing)) {
+            key(urids_.time_speed);
+            ok = ok && lv2_atom_forge_float(&forge, t.is_playing ? 1.0f : 0.0f);
+        }
+        if (has(F::BeatPosition)) {
+            key(urids_.time_beat);
+            ok = ok && lv2_atom_forge_double(&forge, unit_beats);
+            if (meter) {
+                key(urids_.time_bar);
+                ok = ok && lv2_atom_forge_long(&forge, static_cast<std::int64_t>(bar));
+                key(urids_.time_bar_beat);
+                ok = ok && lv2_atom_forge_float(&forge, static_cast<float>(bar_beat));
+            }
+        }
+        if (meter) {
+            key(urids_.time_beat_unit);
+            ok = ok && lv2_atom_forge_int(&forge, den);
+            key(urids_.time_beats_per_bar);
+            ok = ok && lv2_atom_forge_float(&forge, static_cast<float>(num));
+        }
+        if (has(F::Tempo)) {
+            key(urids_.time_beats_per_minute);
+            ok = ok && lv2_atom_forge_float(&forge, static_cast<float>(t.tempo_bpm));
+        }
+        if (!ok)
+            return false;
         lv2_atom_forge_pop(&forge, &obj);
+        return true;
     }
 
-    void read_output_sequence(std::size_t port, midi::MidiBuffer* midi_out) {
-        const auto* seq = reinterpret_cast<const LV2_Atom_Sequence*>(atom_buffers_[port].data());
+    /// Reads a plugin's output sequence. Nothing the plugin wrote is trusted:
+    /// the sequence and every event in it must lie inside the buffer, and
+    /// event times are clamped to the block.
+    void read_output_sequence(std::size_t port, midi::MidiBuffer* midi_out, int num_samples) {
+        const auto* base = reinterpret_cast<const std::uint8_t*>(atom_buffers_[port].data());
+        const auto* seq = reinterpret_cast<const LV2_Atom_Sequence*>(base);
         const auto capacity = atom_buffers_[port].size() * sizeof(std::uint64_t);
         // A plugin that wrote nothing leaves the Chunk header; one that wrote
         // a bad size must not walk the host off the buffer.
-        if (seq->atom.type != urids_.atom_sequence || seq->atom.size + sizeof(LV2_Atom) > capacity)
+        if (seq->atom.type != urids_.atom_sequence ||
+            static_cast<std::size_t>(seq->atom.size) + sizeof(LV2_Atom) > capacity)
             return;
+        const auto* end = base + sizeof(LV2_Atom) + seq->atom.size;
+        const std::int32_t last_frame = std::max(0, num_samples - 1);
         LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
+            const auto* body = reinterpret_cast<const std::uint8_t*>(&ev->body);
+            if (body + sizeof(LV2_Atom) > end ||
+                body + sizeof(LV2_Atom) + static_cast<std::size_t>(ev->body.size) > end)
+                break;
+            const auto frame =
+                static_cast<std::int32_t>(std::clamp<std::int64_t>(ev->time.frames, 0, last_frame));
             if (ev->body.type == urids_.midi_event) {
                 if (!midi_out || ev->body.size < 1 || ev->body.size > 3)
                     continue;
@@ -1246,9 +1464,11 @@ class Lv2Slot final : public PluginSlot {
                 midi::MidiEvent out;
                 out.message = choc::midi::ShortMessage(bytes[0], ev->body.size > 1 ? bytes[1] : 0,
                                                        ev->body.size > 2 ? bytes[2] : 0);
-                out.sample_offset = static_cast<std::int32_t>(ev->time.frames);
+                out.sample_offset = frame;
                 midi_out->add(out);
             } else if (ev->body.type == urids_.atom_object || ev->body.type == urids_.atom_blank) {
+                if (ev->body.size < sizeof(LV2_Atom_Object_Body))
+                    continue;
                 const auto* obj = reinterpret_cast<const LV2_Atom_Object*>(&ev->body);
                 if (obj->body.otype != urids_.patch_set)
                     continue;
@@ -1283,6 +1503,7 @@ class Lv2Slot final : public PluginSlot {
     UridSet urids_{};
     detail::Lv2Worker worker_;
     LV2_Log_Log log_{};
+    LogContext log_context_{};
     std::vector<LV2_Options_Option> options_;
     std::int32_t min_block_ = 1;
     std::int32_t max_block_ = 0;
@@ -1293,9 +1514,19 @@ class Lv2Slot final : public PluginSlot {
     std::vector<const LV2_Feature*> state_features_;
 
     LilvInstance* instance_ = nullptr;
-    // Held by every call that touches the instance off the audio thread
-    // (prepare, release, state); the audio thread only try_locks it.
-    mutable std::mutex state_mutex_;
+    // Held exclusively by every call that must not overlap run() (prepare,
+    // release, restore), and shared by run() (a try-lock) and save().
+    mutable std::shared_mutex state_mutex_;
+    // Serializes saves, which share state_mutex_ with each other.
+    mutable std::mutex save_mutex_;
+    // Control input values a save records, copied from control_shadow_ so a
+    // save never reads the ports the audio thread is writing.
+    std::vector<float> save_controls_;
+    std::array<midi::MidiEvent, 16> all_notes_off_{};
+    std::atomic<std::uint64_t> dropped_events_{0};
+    bool was_bypassed_ = false;
+    bool has_latency_port_ = false;
+    bool sample_rate_ranges_applied_ = false;
     std::string pending_restore_;
 
     // Port storage, indexed by port index. Control values are what the plugin
@@ -1358,6 +1589,12 @@ std::unique_ptr<PluginSlot> load_lv2_plugin(const PluginInfo& info) {
     if (!bundle->open(info.path, info.unique_id)) {
         runtime::log_error("LV2 load: bundle '{}' describes no plugin '{}'", info.path,
                            info.unique_id);
+        return nullptr;
+    }
+    // A description lilv cannot verify (a broken or missing plugin.ttl, ports
+    // without an index or symbol) would leave ports unconnected at run().
+    if (!lilv_plugin_verify(bundle->plugin)) {
+        runtime::log_error("LV2 load: '{}' has an incomplete or invalid description", info.path);
         return nullptr;
     }
     const std::string bin = bundle->binary_path();

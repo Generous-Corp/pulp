@@ -777,11 +777,15 @@ if(PULP_HAS_LV2)
             LIBRARY_OUTPUT_DIRECTORY "${_pulp_lv2_slot_probe_bundle}")
 
         file(MAKE_DIRECTORY "${_pulp_lv2_slot_probe_bundle}")
+        # LV2 requires a plugin to have a doap:name; the slot refuses one
+        # without it, as it refuses any description lilv cannot verify.
         string(CONCAT _pulp_lv2_slot_probe_ttl [=[
+@prefix doap: <http://usefulinc.com/ns/doap#> .
 @prefix lv2: <http://lv2plug.in/ns/lv2core#> .
 
 <http://example.com/pulp/lv2-slot-probe>
     a lv2:Plugin ;
+    doap:name "Pulp LV2 Slot Probe" ;
     lv2:binary <lv2-slot-probe]=]
     "${CMAKE_SHARED_MODULE_SUFFIX}"
     [=[> ;
@@ -869,7 +873,8 @@ if(PULP_HAS_LV2)
             "${_pulp_lv2_host_instrument_bundle}/plugin.ttl" COPYONLY)
         unset(LV2_BINARY)
 
-        add_executable(pulp-test-lv2-host-slot test_lv2_host_slot.cpp)
+        add_executable(pulp-test-lv2-host-slot test_lv2_host_slot.cpp
+            harness/rt_allocation_probe.cpp)
         target_include_directories(pulp-test-lv2-host-slot PRIVATE
             ${CMAKE_SOURCE_DIR}/core/host/src
             ${CMAKE_SOURCE_DIR}/test)

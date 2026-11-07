@@ -194,10 +194,13 @@ class Lv2Worker {
             return LV2_WORKER_ERR_UNKNOWN;
         if (synchronous_ && in_flight_.load(std::memory_order_acquire) == 0)
             return iface_->work(handle_, &Lv2Worker::respond_trampoline, this, size, data);
-        if (!requests_.write(data, size))
+        // Counted before it is published, so the worker thread can never finish
+        // a request the count does not include yet.
+        in_flight_.fetch_add(1, std::memory_order_acq_rel);
+        if (!requests_.write(data, size)) {
+            in_flight_.fetch_sub(1, std::memory_order_acq_rel);
             return LV2_WORKER_ERR_NO_SPACE;
-        // Release: the worker thread that sees the count also sees the request.
-        in_flight_.fetch_add(1, std::memory_order_release);
+        }
         wake_.release();
         return LV2_WORKER_SUCCESS;
     }
@@ -209,9 +212,10 @@ class Lv2Worker {
             if (!running_.load(std::memory_order_acquire))
                 return;
             std::uint32_t size = 0;
-            while (requests_.read(scratch, size)) {
+            // stop() discards what is still queued, so stop between requests.
+            while (running_.load(std::memory_order_acquire) && requests_.read(scratch, size)) {
                 iface_->work(handle_, &Lv2Worker::respond_trampoline, this, size, scratch.data());
-                in_flight_.fetch_sub(1, std::memory_order_release);
+                in_flight_.fetch_sub(1, std::memory_order_acq_rel);
             }
         }
     }

@@ -302,7 +302,8 @@ must track a delayed audio branch sample by sample.
 The LV2 loader reads a bundle the way every LV2 host does, through lilv: it
 starts at `manifest.ttl`, follows `rdfs:seeAlso`, and loads the module the
 plugin's `lv2:binary` names. A bundle without a manifest describes no plugin and
-does not load. lilv and its dependencies are vendored under `external/lilv` and
+does not load, and neither does a plugin whose description lilv cannot verify:
+a file that fails to parse, no ports, or no `doap:name`, which LV2 requires. lilv and its dependencies are vendored under `external/lilv` and
 compiled into `pulp::host`, so hosting LV2 needs nothing installed on the
 system.
 
@@ -329,18 +330,30 @@ What the slot gives the plugin:
   transport. The graph does this on its routed executor, so enable it with
   `set_canonical_executor_routing_enabled(true)` and pass an input buffer
   whose length matches the block (a block that fails validation runs the
-  reference walk, which carries no transport). The slot sends a `time:Position` object (frame, speed, bar, bar
-  beat, beat unit, beats per bar, tempo) on the first block, whenever the play
-  state, tempo, or meter changes, and whenever the position jumps.
+  reference walk, which carries no transport). The slot sends a
+  `time:Position` object on the first block, whenever the play state, tempo,
+  or meter changes, and whenever the position jumps. It carries frame, frames
+  per second, speed, beat (`time:beat`, in beats of the meter's beat unit),
+  bar, bar beat, beat unit, beats per bar, and tempo, but only the ones the
+  host supplied: when `ProcessContext::transport_validity` is set, a field it
+  does not mark is left out rather than sent as a default.
 - **Parameters.** Control input ports are parameters, identified by port
   index. Properties the plugin declares `patch:writable` (or `patch:readable`)
   with a numeric `rdfs:range` are parameters too, with ids from `0x40000000`
   in property-URI order. Setting one sends `patch:Set` at the start of the
-  next block; automating one sends it at the event's frame. A `patch:Set` the
+  next block; automating one sends it at the event's frame. The value is
+  clamped to the declared bounds and sent as the atom type of the property's
+  `rdfs:range` (`atom:Int`, `atom:Long`, `atom:Bool`, `atom:Double`, or
+  `atom:Float`), since plugins ignore a value of another type. A `patch:Set` the
   plugin emits updates the value `get_parameter()` returns, and the slot sends
   `patch:Get` after a prepare or a state restore so the host's values start in
   agreement with the plugin's. Output control ports are readable through
-  `get_parameter(port index)` but are not listed as parameters.
+  `get_parameter(port index)` but are not listed as parameters. A control
+  port marked `lv2:sampleRate` declares its range as fractions of the sample
+  rate; the slot scales it by the prepared rate.
+- **Event buffers.** Each atom input holds the larger of 8192 bytes and the
+  port's `rsz:minimumSize`. An event that does not fit is dropped whole, so a
+  plugin never sees a partial one.
 - **Host features.** `urid:map`, `urid:unmap`, `options:options` (buf-size
   min, max, and nominal block length, sequence size, and `param:sampleRate`),
   `buf-size:boundedBlockLength`, `log:log`, `worker:schedule`, and
@@ -351,8 +364,11 @@ What the slot gives the plugin:
   (`ProcessContext::process_mode` is `Offline`) work runs inside the block and
   answers after the same `run()`, so an offline render does not depend on
   thread timing. An `lv2:freeWheeling` input is set to 1 for offline blocks.
+  When the request queue is full, `schedule_work()` returns
+  `LV2_WORKER_ERR_NO_SPACE` and the plugin can try again later.
 - **State.** `save_state()` returns the plugin's LV2 state and its control
-  input values as Turtle text; `restore_state()` applies it to the running
+  input values as Turtle text. It runs alongside the audio thread, as LV2
+  allows, so saving never interrupts playback. `restore_state()` applies it to the running
   instance, or holds it until `prepare()` when there is no instance yet. A
   re-prepare builds a new instance (LV2 fixes the sample rate at
   instantiation) and carries the state across. A plugin's default state from
@@ -362,7 +378,18 @@ What the slot gives the plugin:
   when `SignalGraph` reads it for delay compensation.
 
 Restores and re-prepares lock out the audio thread with a try-lock: a block that
-arrives during one passes its input through instead of waiting.
+arrives during one passes its input through instead of waiting. A bypassed
+plugin misses the note-offs sent meanwhile, so it gets All Notes Off on every
+channel when the bypass ends. A plugin's `log:log` trace messages, the only
+kind it may log from `run()`, are dropped; other messages go to the Pulp log.
+
+Audio inputs map to the host's main input in port order, and outputs to the
+main output; `lv2:portGroup` (a sidechain group, for example) is not modelled
+as a separate bus.
+
+The LV2 host tests run the fixture bundle on macOS and Linux. On Windows the
+loader and the vendored libraries are compiled, but no test hosts an LV2
+plugin there.
 
 ## CLI
 

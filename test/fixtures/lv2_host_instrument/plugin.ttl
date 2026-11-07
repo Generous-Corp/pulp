@@ -1,6 +1,7 @@
 @prefix atom:  <http://lv2plug.in/ns/ext/atom#> .
 @prefix bufsz: <http://lv2plug.in/ns/ext/buf-size#> .
 @prefix doap:  <http://usefulinc.com/ns/doap#> .
+@prefix log:   <http://lv2plug.in/ns/ext/log#> .
 @prefix lv2:   <http://lv2plug.in/ns/lv2core#> .
 @prefix midi:  <http://lv2plug.in/ns/ext/midi#> .
 @prefix opts:  <http://lv2plug.in/ns/ext/options#> .
@@ -20,14 +21,48 @@
     lv2:minimum 0.0 ;
     lv2:maximum 20.0 .
 
+<http://example.com/pulp/lv2-host-instrument#count>
+    a lv2:Parameter ;
+    rdfs:label "Count" ;
+    rdfs:range atom:Int ;
+    lv2:default 3 ;
+    lv2:minimum 0 ;
+    lv2:maximum 100 .
+
+<http://example.com/pulp/lv2-host-instrument#big>
+    a lv2:Parameter ;
+    rdfs:label "Big" ;
+    rdfs:range atom:Long ;
+    lv2:default 10 ;
+    lv2:minimum 0 ;
+    lv2:maximum 1000000 .
+
+<http://example.com/pulp/lv2-host-instrument#flag>
+    a lv2:Parameter ;
+    rdfs:label "Flag" ;
+    rdfs:range atom:Bool ;
+    lv2:default false .
+
+<http://example.com/pulp/lv2-host-instrument#fine>
+    a lv2:Parameter ;
+    rdfs:label "Fine" ;
+    rdfs:range atom:Double ;
+    lv2:default 0.5 ;
+    lv2:minimum 0.0 ;
+    lv2:maximum 1.0 .
+
 <http://example.com/pulp/lv2-host-instrument>
     a lv2:Plugin , lv2:InstrumentPlugin ;
     doap:name "Pulp LV2 Host Instrument" ;
     lv2:requiredFeature urid:map , opts:options , work:schedule ;
-    lv2:optionalFeature bufsz:boundedBlockLength ;
+    lv2:optionalFeature bufsz:boundedBlockLength , log:log ;
     opts:supportedOption bufsz:maxBlockLength ;
     lv2:extensionData work:interface , state:interface ;
-    patch:writable <http://example.com/pulp/lv2-host-instrument#amount> ;
+    patch:writable <http://example.com/pulp/lv2-host-instrument#amount> ,
+        <http://example.com/pulp/lv2-host-instrument#count> ,
+        <http://example.com/pulp/lv2-host-instrument#big> ,
+        <http://example.com/pulp/lv2-host-instrument#flag> ,
+        <http://example.com/pulp/lv2-host-instrument#fine> ;
     lv2:port [
         a lv2:OutputPort , lv2:AudioPort ;
         lv2:index 0 ; lv2:symbol "out_l" ; lv2:name "Out L"
@@ -102,4 +137,36 @@
     ] , [
         a lv2:OutputPort , lv2:ControlPort ;
         lv2:index 20 ; lv2:symbol "time_messages" ; lv2:name "Time Messages"
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 21 ; lv2:symbol "seen_beat" ; lv2:name "Seen Beat"
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 22 ; lv2:symbol "seen_fps" ; lv2:name "Seen Frames Per Second"
+    ] , [
+        a lv2:InputPort , lv2:ControlPort ;
+        lv2:index 23 ; lv2:symbol "cutoff" ; lv2:name "Cutoff" ;
+        lv2:portProperty lv2:sampleRate ;
+        lv2:default 0.25 ; lv2:minimum 0.0 ; lv2:maximum 0.5
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 24 ; lv2:symbol "seen_cutoff" ; lv2:name "Seen Cutoff"
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 25 ; lv2:symbol "seen_count" ; lv2:name "Seen Count"
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 26 ; lv2:symbol "seen_big" ; lv2:name "Seen Big"
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 27 ; lv2:symbol "seen_flag" ; lv2:name "Seen Flag"
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 28 ; lv2:symbol "seen_fine" ; lv2:name "Seen Fine"
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 29 ; lv2:symbol "worker_refusals" ; lv2:name "Worker Refusals"
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 30 ; lv2:symbol "malformed_events" ; lv2:name "Malformed Events"
     ] .

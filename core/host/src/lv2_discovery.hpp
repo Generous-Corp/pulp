@@ -31,6 +31,8 @@ struct Lv2PortRole {
     bool hidden = false;          ///< lv2:notOnGUI.
     bool reports_latency = false; ///< Output control port carrying the plugin's latency.
     bool free_wheeling = false;   ///< Input designated lv2:freeWheeling (offline render).
+    /// lv2:sampleRate: min, max, and default are fractions of the sample rate.
+    bool sample_rate_relative = false;
     // Atom-port properties.
     bool supports_midi = false;      ///< atom:supports midi:MidiEvent.
     bool supports_time = false;      ///< atom:supports time:Position.
@@ -43,6 +45,10 @@ struct Lv2PortRole {
 /// host may set it) or patch:readable (the plugin only reports it). Values
 /// travel as patch:Set messages on an atom port, not through a control port.
 struct Lv2PatchParameter {
+    /// The property's rdfs:range, which is the atom type its patch:Set value
+    /// must carry.
+    enum class Range { Float, Double, Int, Long, Bool };
+
     std::string uri;
     std::string label;
     bool writable = false;
@@ -50,6 +56,7 @@ struct Lv2PatchParameter {
     float max_value = 1.0f;
     float default_value = 0.0f;
     bool stepped = false; ///< rdfs:range atom:Int, atom:Long, or atom:Bool.
+    Range range = Range::Float;
 };
 
 /// Ports of the plugin `plugin_uri` (the bundle's first plugin when empty), in

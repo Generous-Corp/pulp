@@ -1035,6 +1035,12 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/ci/test_dependency_pins.py")
     set_tests_properties(dependency-pins-selftest PROPERTIES TIMEOUT 60)
 
+    # external/lilv is the unmodified upstream release: tree digests against
+    # external/lilv/vendored.json, and the checker's own failure cases.
+    add_test(NAME vendored-lilv-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/deps/test_verify_vendored_lilv.py")
+    set_tests_properties(vendored-lilv-selftest PROPERTIES TIMEOUT 60)
+
     # The selection over a key manifest: would-skip set, seeded sample, and
     # the tests and build targets left to run, as canonical bytes.
     add_test(NAME executable-selection-selftest COMMAND ${Python3_EXECUTABLE}
