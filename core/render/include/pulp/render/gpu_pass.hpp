@@ -619,9 +619,9 @@ class GpuFrame {
 ///   * no unsubmitted `GpuFrame` writes it (checked): submit first, so the
 ///     queue runs the pass before Graphite samples the result.
 ///
-/// The texture's contents are treated as premultiplied alpha. The draw holds
-/// a reference to the texture until Graphite releases the wrapped image, so
-/// the caller may drop its own handle after this returns.
+/// The texture's contents are treated as premultiplied alpha. Graphite's
+/// wrapped image retains the Dawn texture until it is done with it, so the
+/// caller may drop its own handle after this returns.
 GpuStatus draw_gpu_texture(canvas::Canvas& canvas, const GpuTexture& texture, float x, float y,
                            float w, float h);
 

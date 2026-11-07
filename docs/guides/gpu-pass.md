@@ -164,9 +164,9 @@ void GlowView::paint(pulp::canvas::Canvas& canvas) {
   to their own work).
 - **One pass at a time.** End a pass before opening the next; a second open
   pass makes `submit()` fail and nothing from that frame is submitted.
-- **Texture lifetime.** `draw_gpu_texture()` holds a reference to the texture
-  until Skia releases the image, so dropping your handle right after the call
-  is safe.
+- **Texture lifetime.** The image Skia wraps around the texture retains the
+  Dawn texture until Skia is done with it, so dropping your handle right after
+  `draw_gpu_texture()` is safe.
 - **Surface lifetime.** Release the `GpuDevice` and every object made from it
   before the `GpuSurface` is destroyed. Rebuild them when the host recreates
   the surface.

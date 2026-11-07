@@ -1634,12 +1634,11 @@ GpuStatus draw_gpu_texture(canvas::Canvas& canvas, const GpuTexture& texture, fl
     if (skia == nullptr)
         return Err(make_error(GpuError::Kind::unavailable,
                               "the canvas is not a GPU canvas; draw a fallback instead"));
-    // The wrapped image keeps the texture state (and through it the Dawn
-    // texture) alive until Graphite releases it.
-    std::shared_ptr<const void> keep_alive = state;
+    // Graphite's wrapped SkImage retains the WGPUTexture and releases it when
+    // it is done (DawnGraphiteTypes.h, BackendTextures::MakeDawn), so the
+    // caller may drop its handle once this returns.
     if (!skia->draw_native_dawn_texture(&state->texture, state->desc.width, state->desc.height,
-                                        std::string(gpu_format_name(format)), x, y, w, h,
-                                        std::move(keep_alive)))
+                                        std::string(gpu_format_name(format)), x, y, w, h))
         return Err(make_error(GpuError::Kind::validation,
                               "the canvas could not wrap the texture (no active GPU frame?)"));
     return {};

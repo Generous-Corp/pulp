@@ -433,8 +433,8 @@ TEST_CASE("A pass result composites through the Skia canvas", "[render][gpu][gpu
     REQUIRE(canvas != nullptr);
     canvas->set_fill_color(pulp::canvas::Color::rgba8(0, 0, 255, 255));
     canvas->fill_rect(0, 0, kW, kH);
-    // Draw through a temporary handle: the canvas keeps the texture alive
-    // until Graphite is done with it.
+    // Drop the only handle before the frame ends: Graphite's wrapped image
+    // retains the Dawn texture until it is done with it.
     auto drawn = draw_gpu_texture(*canvas, target->color(), 0, 0, kW / 2.0f, kH);
     *target = GpuTarget{};
     skia->end_frame();

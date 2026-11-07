@@ -960,19 +960,20 @@ bool SkiaCanvas::save_layer_with_sksl_post_effect(
     return true;
 }
 
-bool SkiaCanvas::draw_native_dawn_texture(void* texture_handle, uint32_t width, uint32_t height,
-                                          const std::string& format, float x, float y, float w,
-                                          float h, std::shared_ptr<const void> keep_alive) {
+bool SkiaCanvas::draw_native_dawn_texture(void* texture_handle,
+                                          uint32_t width,
+                                          uint32_t height,
+                                          const std::string& format,
+                                          float x,
+                                          float y,
+                                          float w,
+                                          float h) {
 #if !PULP_CANVAS_GRAPHITE
     // Ganesh-only build (Emscripten / WebGL2): there is no Dawn texture to
     // wrap and no Graphite recorder to wrap it with. Report the draw as
     // unhandled so the widget paint path takes its non-GPU branch.
     (void)texture_handle; (void)width; (void)height; (void)format;
-    (void)x;
-    (void)y;
-    (void)w;
-    (void)h;
-    (void)keep_alive;
+    (void)x; (void)y; (void)w; (void)h;
     return false;
 #else
     // WebGPU canvas widgets provide a `wgpu::Texture*` that must be wrapped
@@ -993,21 +994,15 @@ bool SkiaCanvas::draw_native_dawn_texture(void* texture_handle, uint32_t width, 
         return false;
     }
 
-    // Graphite calls the release proc exactly once, when it no longer needs
-    // the texture (including when wrapping fails), which drops the caller's
-    // keep-alive reference.
-    SkImages::TextureReleaseProc release_proc = nullptr;
-    void* release_context = nullptr;
-    if (keep_alive) {
-        release_context = new std::shared_ptr<const void>(std::move(keep_alive));
-        release_proc = [](void* context) {
-            delete static_cast<std::shared_ptr<const void>*>(context);
-        };
-    }
-    auto image = SkImages::WrapTexture(
-        recorder_, backend_tex, sk_color_type_from_webgpu_format(format), kPremul_SkAlphaType,
-        sk_color_space_from_webgpu_format(format), skgpu::Origin::kTopLeft, release_proc,
-        release_context, "Pulp native GPU canvas");
+    auto image = SkImages::WrapTexture(recorder_,
+                                       backend_tex,
+                                       sk_color_type_from_webgpu_format(format),
+                                       kPremul_SkAlphaType,
+                                       sk_color_space_from_webgpu_format(format),
+                                       skgpu::Origin::kTopLeft,
+                                       nullptr,
+                                       nullptr,
+                                       "Pulp native GPU canvas");
     if (!image) {
         return false;
     }
