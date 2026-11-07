@@ -510,7 +510,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/pcm_capabilities.hpp",
-      "fingerprint": "sha256:2848713850d4de71e443c387a4b159eb9ffed58aa07f6c7dfe66b65596f6db65",
+      "fingerprint": "sha256:d52260fa3447b8c4b48ca1a52e2113cf9c6a3b37b73f2ec0e7ebd43da78d6ed3",
       "include": "pulp/audio/pcm_capabilities.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
