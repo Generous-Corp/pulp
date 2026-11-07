@@ -240,6 +240,86 @@ inline HostEventResult derive_mpe(std::span<const HostEventRecord> events,
     return dropped ? HostEventResult::Overflow : HostEventResult::Accepted;
 }
 
+/// Project an already-sorted absolute host-event block into the fixed MIDI,
+/// UMP, and optional MPE sidecars consumed by SignalGraph's existing ingress
+/// mailbox. The caller owns and prepares the destination buffers before the
+/// realtime boundary. Every record is checked before any destination is
+/// mutated, so an out-of-window record or insufficient sidecar capacity leaves
+/// all three destinations unchanged.
+///
+/// This is deliberately an adapter, not a scheduler: `block_start` and
+/// `frames` define the one block being delivered, and records outside that
+/// window are refused rather than retimed. The resulting buffers can be
+/// passed directly to `SignalGraph::inject_midi(node, midi, mpe)`; that API
+/// preserves the same payload on both the routed and legacy execution paths.
+inline HostEventResult project_host_event_block(
+    std::span<const HostEventRecord> records, std::uint64_t block_start,
+    std::size_t frames, midi::MidiBuffer& midi_out,
+    midi::MpeVoiceTracker* tracker = nullptr,
+    midi::MpeBuffer* mpe_out = nullptr) noexcept {
+    if (frames == 0 || frames > 4096 ||
+        block_start > std::numeric_limits<std::uint64_t>::max() - frames)
+        return HostEventResult::OutOfRange;
+    if ((tracker == nullptr) != (mpe_out == nullptr))
+        return HostEventResult::Unbound;
+
+    std::size_t midi_count = 0;
+    std::size_t ump_count = 0;
+    for (const auto& record : records) {
+        if (record.absolute_sample < 0)
+            return HostEventResult::OutOfRange;
+        const auto absolute = static_cast<std::uint64_t>(record.absolute_sample);
+        if (absolute < block_start || absolute >= block_start + frames ||
+            absolute - block_start >
+                static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()))
+            return HostEventResult::Late;
+        ++midi_count;
+        if (record.has_ump)
+            ++ump_count;
+    }
+    if (midi_out.realtime_capacity_limited() &&
+        midi_count > midi_out.event_capacity() -
+                          std::min(midi_out.event_capacity(), midi_out.size()))
+        return HostEventResult::OutputCapacity;
+    auto* ump = midi_out.ump();
+    if (ump_count != 0 && ump == nullptr)
+        return HostEventResult::OutputCapacity;
+    if (ump != nullptr && ump->realtime_capacity_limited() &&
+        ump_count > ump->capacity() - std::min(ump->capacity(), ump->size()))
+        return HostEventResult::OutputCapacity;
+    if (mpe_out != nullptr) {
+        // A retrigger can retire one voice and publish its replacement in the
+        // same callback, so reserve a conservative two sidecar records per
+        // source event before mutating any destination.
+        const auto required_mpe = records.size() >
+                                           std::numeric_limits<std::size_t>::max() / 2
+                                       ? std::numeric_limits<std::size_t>::max()
+                                       : records.size() * 2;
+        if (required_mpe >
+            mpe_out->capacity() - std::min(mpe_out->capacity(), mpe_out->size()))
+            return HostEventResult::OutputCapacity;
+    }
+
+    for (const auto& record : records) {
+        auto event = record.midi;
+        event.sample_offset = static_cast<std::int32_t>(
+            static_cast<std::uint64_t>(record.absolute_sample) - block_start);
+        if (!midi_out.add(event))
+            return HostEventResult::OutputCapacity;
+        if (record.has_ump && !ump->add(record.ump, event.sample_offset))
+            return HostEventResult::OutputCapacity;
+    }
+    midi_out.sort();
+    if (ump != nullptr)
+        ump->sort();
+    if (tracker != nullptr && mpe_out != nullptr) {
+        const auto result = derive_mpe(records, block_start, *tracker, *mpe_out);
+        if (result != HostEventResult::Accepted)
+            return result;
+    }
+    return HostEventResult::Accepted;
+}
+
 enum class GraphEventResult : std::uint8_t {
     Accepted,
     StaleEpoch,

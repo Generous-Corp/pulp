@@ -13,6 +13,7 @@ using pulp::host::GraphEventResult;
 using pulp::host::HostEventIngress;
 using pulp::host::HostEventRecord;
 using pulp::host::HostEventResult;
+using pulp::host::project_host_event_block;
 
 namespace pulp::host::detail {
 struct GraphEventLaneTestAccess {
@@ -183,6 +184,63 @@ TEST_CASE("G5 MPE sidecar preserves projected sample offsets", "[host][graph][g5
     REQUIRE(sidecar[0].kind == pulp::midi::MpeExpressionEvent::Kind::NoteOn);
     REQUIRE(sidecar[1].sample_offset == 5);
     REQUIRE(sidecar[1].kind == pulp::midi::MpeExpressionEvent::Kind::PitchBend);
+}
+
+TEST_CASE("G5 host projection preserves absolute offsets and sidecars",
+          "[host][graph][g5][events][mpe][ump]") {
+    std::array<HostEventRecord, 3> records{};
+    records[0] = midi_event(1, 43, 1, 3,
+                             pulp::midi::MidiEvent::note_on(1, 60, 100));
+    records[1] = midi_event(1, 45, 2, 3,
+                             pulp::midi::MidiEvent::pitch_bend(1, 10'000));
+    records[2] = midi_event(1, 46, 3, 3,
+                             pulp::midi::MidiEvent::cc(1, 74, 90));
+    records[2].has_ump = true;
+    records[2].ump.word_count = 2;
+    records[2].ump.words[0] = 0x4010'3C00u;
+    records[2].ump.words[1] = 0xFFFF'0000u;
+
+    pulp::midi::MidiBuffer midi;
+    pulp::midi::UmpBuffer ump;
+    pulp::midi::MpeBuffer mpe;
+    midi.reserve(4);
+    midi.set_realtime_capacity_limit(true);
+    ump.reserve(4);
+    ump.set_realtime_capacity_limit(true);
+    midi.attach_ump(&ump);
+    mpe.reserve(8);
+    mpe.set_realtime_capacity_limit(true);
+    pulp::midi::MpeVoiceTracker tracker;
+
+    REQUIRE(project_host_event_block(records, 40, 8, midi, &tracker, &mpe) ==
+            HostEventResult::Accepted);
+    REQUIRE(midi.size() == 3);
+    REQUIRE(midi[0].sample_offset == 3);
+    REQUIRE(midi[1].sample_offset == 5);
+    REQUIRE(midi[2].sample_offset == 6);
+    REQUIRE(ump.size() == 1);
+    REQUIRE(ump[0].sample_offset == 6);
+    REQUIRE(mpe.size() == 2);
+    REQUIRE(mpe[0].sample_offset == 3);
+    REQUIRE(mpe[1].sample_offset == 5);
+}
+
+TEST_CASE("G5 host projection refuses retiming and preserves destinations",
+          "[host][graph][g5][events][negative-control]") {
+    std::array<HostEventRecord, 1> late{
+        midi_event(1, 39, 1, 3, pulp::midi::MidiEvent::note_on(1, 60, 100))};
+    pulp::midi::MidiBuffer midi;
+    midi.reserve(1);
+    midi.set_realtime_capacity_limit(true);
+    REQUIRE(project_host_event_block(late, 40, 8, midi) == HostEventResult::Late);
+    REQUIRE(midi.empty());
+
+    std::array<HostEventRecord, 1> accepted{
+        midi_event(1, 40, 1, 3, pulp::midi::MidiEvent::note_on(1, 60, 100))};
+    REQUIRE(midi.add(pulp::midi::MidiEvent::note_off(1, 60)));
+    REQUIRE(project_host_event_block(accepted, 40, 8, midi) ==
+            HostEventResult::OutputCapacity);
+    REQUIRE(midi.size() == 1);
 }
 
 TEST_CASE("G5 graph-authored event lane is partition invariant", "[host][graph][g5][events]") {
