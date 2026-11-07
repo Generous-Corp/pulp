@@ -186,6 +186,16 @@ pulp_add_test_suite(pulp-test-i18n GROUP pulp-test-group-core-runtime
 pulp_add_test_suite(pulp-test-state-tree GROUP pulp-test-group-core-state
     LIBRARIES pulp::state pulp::runtime)
 
+# StateTree transactions, undo recording, moves and checked edits
+pulp_add_test_suite(pulp-test-state-tree-transaction GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+pulp_add_test_suite(pulp-test-state-tree-undo GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+pulp_add_test_suite(pulp-test-state-tree-move GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+pulp_add_test_suite(pulp-test-state-tree-validated GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
+
 # GUI component tests (table, toolbar, concertina, buttons, lasso)
 pulp_add_test_suite(pulp-test-gui-components GROUP pulp-test-group-core-view
     LIBRARIES pulp::view)
@@ -1269,6 +1279,16 @@ pulp_add_test_suite(pulp-test-permissions GROUP pulp-test-group-core-platform
 
 # Environment API tests
 pulp_add_test_suite(pulp-test-environment GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
+
+# FixedFunction and the allocation-free BackgroundTaskLane handler. The probe
+# replaces global operator new, so this stays its own executable.
+pulp_add_test_suite(pulp-test-fixed-function
+    SOURCES test_fixed_function.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::runtime pulp::format)
+
+# Special directory resolution (pure per-OS layouts plus the host)
+pulp_add_test_suite(pulp-test-special-dir GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)
 
 # Runtime tests

@@ -1012,6 +1012,26 @@ Files that predated the check are in `tools/scripts/unregistered_tests_baseline.
 which only shrinks: registering or deleting one fails the check until its row is
 removed. Register a new test file in the same PR that adds it.
 
+### A C++ test source no CMake file names, and an edit under `external/` no patch explains
+
+`tools/scripts/dead_test_guard.py` is the C++ counterpart: it fails when a `.cpp`
+under `test/` (or `core/<module>/test(s)/`) is named by no CMake file, so a test
+that was never added to a target cannot sit in the tree looking like coverage.
+It reads CMake text, not the configured graph, so a source registered through a
+`foreach` that computes the file name is listed with a reason in
+`tools/scripts/dead_test_guard.json`; a stale entry fails too. When it flags a
+file, register it (`pulp_add_test_suite(pulp-test-<name>` derives
+`test_<name>.cpp`) or delete it and say why in the commit.
+
+`tools/deps/check_patches.py` reads `tools/deps/patches.json`, copies the touched
+vendored files to scratch, reverse-applies the patch series last to first, and
+requires the result to match the recorded upstream hash. A local fix to a file
+under `external/` therefore needs a patch under `tools/deps/patches/<name>/` and a
+manifest entry in the same change. `--verify-upstream` re-downloads each file at
+its upstream commit to prove the recorded hash. `tools/scripts/examples_index_guard.py`
+keeps `examples/README.md` listing every `examples/` directory once. All three run
+in `gates.sh` and in the source-selftest suites.
+
 ### An X11 case that skips on the Linux leg did not run
 
 The Linux build job has no display, so an X11 test that opens one with

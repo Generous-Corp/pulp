@@ -2971,6 +2971,7 @@
   "pulp-test-fft-backend-accuracy-builtin",
   "pulp-test-fft-backend-accuracy-mufft",
   "pulp-test-fir-filter",
+  "pulp-test-fixed-function",
   "pulp-test-fixture-runner-cli",
   "pulp-test-foreign-framework-coexistence",
   "pulp-test-forge-analog-vcf-catalog",
@@ -5017,6 +5018,22 @@
    ],
    "kind": "python"
   },
+  "dead-test-guard": {
+   "entry": "tools/scripts/dead_test_guard.py",
+   "inputs": [
+    "tools/scripts/dead_test_guard.py"
+   ],
+   "kind": "python"
+  },
+  "dead-test-guard-selftest": {
+   "entry": "tools/scripts/test_dead_test_guard.py",
+   "inputs": [
+    "test/CMakeLists.txt",
+    "tools/scripts/dead_test_guard.py",
+    "tools/scripts/test_dead_test_guard.py"
+   ],
+   "kind": "python"
+  },
   "decisions-contract-selftest": {
    "entry": "tools/scripts/test_decisions_contract.py",
    "inputs": [
@@ -5087,6 +5104,22 @@
     "tools/ci/tart-provision.sh",
     "tools/deps/audit.py",
     "tools/packages/test-stubs"
+   ],
+   "kind": "python"
+  },
+  "deps-patches-selftest": {
+   "entry": "tools/deps/test_check_patches.py",
+   "inputs": [
+    "tools/deps/check_patches.py",
+    "tools/deps/patches.json",
+    "tools/deps/test_check_patches.py"
+   ],
+   "kind": "python"
+  },
+  "deps-patches-verify": {
+   "entry": "tools/deps/check_patches.py",
+   "inputs": [
+    "tools/deps/check_patches.py"
    ],
    "kind": "python"
   },
@@ -5332,6 +5365,21 @@
     "tools/scripts/example_validation_paths.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/test_example_validation_paths.py"
+   ],
+   "kind": "python"
+  },
+  "examples-index-guard": {
+   "entry": "tools/scripts/examples_index_guard.py",
+   "inputs": [
+    "tools/scripts/examples_index_guard.py"
+   ],
+   "kind": "python"
+  },
+  "examples-index-guard-selftest": {
+   "entry": "tools/scripts/test_examples_index_guard.py",
+   "inputs": [
+    "tools/scripts/examples_index_guard.py",
+    "tools/scripts/test_examples_index_guard.py"
    ],
    "kind": "python"
   },

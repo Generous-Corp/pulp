@@ -136,7 +136,7 @@ io.start();
 
 ### Cancellation
 
-Every `AsyncStream` owns a `CancellationToken`. Calling `cancel()` — or destroying the stream — sets the token, drains pending writes with `StreamError::Closed`, exits the worker, and fires `on_close` exactly once. The token can be shared out via `cancellation_token()` so user-level work (retries, coalescing writes) observes cancellation at the same moment the worker does.
+Every `AsyncStream` owns a `CancelSource`. Calling `cancel()` — or destroying the stream — cancels it, drains pending writes with `StreamError::Closed`, exits the worker, and fires `on_close` exactly once. The observer `CancelToken` can be shared out via `cancellation_token()` so user-level work (retries, coalescing writes) observes cancellation at the same moment the worker does.
 
 ### Executor routing
 
