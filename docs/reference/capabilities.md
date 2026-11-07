@@ -13,7 +13,7 @@ See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence 
 The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
 
 <!-- generated:start id=limitations -->
-### Known limitations (24 items across 19 capabilities)
+### Known limitations (23 items across 18 capabilities)
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
@@ -32,12 +32,11 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | — |
 | `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | — |
 | `audio_io.wasapi` | Full-duplex render/capture is not exposed as one synchronized WASAPI device: a WasapiDevice wraps either one render endpoint or one capture endpoint, so callers that need synchronized input/output must open and synchronize two devices. | — |
-| `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | — |
 | `audio_io.jack` | Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending. | — |
 | `audio_file_codecs.extaudiofile` | Through FormatRegistry, .m4a and .aac use the codec's default AAC bitrate and .alac writes 16-bit ALAC; other settings need write_system_audio_file(). Multichannel AAC beyond stereo has no channel-layout control, and no metadata is written. | — |
 | `audio_file_codecs.media_foundation` | Writes AAC in M4A only, mono or stereo at 44.1 or 48 kHz, at one of four bitrates (96, 128, 160 or 192 kbps); no ALAC, CAF or AIFF writing. Only the Windows CI build leg compiles it, and the round-trip test has not yet run on a Windows host. | — |
 | `midi_io.coremidi` | MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback. | — |
-| `midi_io.win32_midi` | Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport and no hotplug; SysEx input is routed via MIM_LONGDATA. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK. | — |
+| `midi_io.win32_midi` | Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport. Port changes are detected by polling once a second rather than by an operating-system notification, so a plug or unplug is reported up to a second late. SysEx input is routed via MIM_LONGDATA and long messages are joined across receive buffers. This path is compile-checked in CI and has not been exercised against Windows MIDI hardware. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK. | — |
 | `midi_io.alsa_midi` | Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually. | — |
 | `platform_maturity.accessibility.windows` | Direct UIA client and screen-reader regression tests remain pending; provider tree, WM_GETOBJECT, and value/focus/name event helpers are implemented in source. | — |
 | `platform_maturity.accessibility.linux` | Real AT-SPI registry/Orca signal receipt remains pending; per-widget Accessible/Component/Value objects and event-hook marshalling are loopback-tested on the session bus. | — |

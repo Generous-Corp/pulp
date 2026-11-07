@@ -208,10 +208,17 @@ bool apply_replacement_metadata(int descriptor, const ReplacementMetadata& metad
     struct stat temporary_status{};
     if (::fstat(descriptor, &temporary_status) != 0)
         return false;
+#if !defined(__wasi__)
     if ((temporary_status.st_uid != metadata.status.st_uid ||
          temporary_status.st_gid != metadata.status.st_gid) &&
         ::fchown(descriptor, metadata.status.st_uid, metadata.status.st_gid) != 0)
         return false;
+#else
+    // WASI does not expose file ownership or fchown. The temporary file is
+    // created in the same virtual filesystem, so preserve the mode bits below
+    // and leave ownership at the runtime's default.
+    (void)temporary_status;
+#endif
     if (::fchmod(descriptor, metadata.status.st_mode & static_cast<mode_t>(07777)) != 0)
         return false;
 #if defined(__APPLE__)

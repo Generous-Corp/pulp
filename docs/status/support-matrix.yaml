@@ -282,8 +282,9 @@ audio_io:
     notes: >-
       Output and input capture both work; an AlsaDevice is one direction, so
       duplex means opening one input and one output device and routing between
-      them. Real device-metadata enumeration remains pending: the sample-rate
-      list is hardcoded.
+      them. Sample rates, channel counts and buffer sizes are read from the
+      driver; a device that cannot be opened for probing reports a
+      conservative default list.
   jack:
     status: experimental
     platform: linux
@@ -1162,8 +1163,6 @@ limitations:
     - text: "Full-duplex render/capture is not exposed as one synchronized WASAPI device: a WasapiDevice wraps either one render endpoint or one capture endpoint, so callers that need synchronized input/output must open and synchronize two devices."
     # Hotplug: IMMNotificationClient device-change callbacks are wired;
     # no stale stub limitation remains.
-  audio_io.alsa:
-    - text: "Hardcoded sample-rate list; no real enumeration."
   audio_io.jack:
     - text: "Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending."
   audio_file_codecs.extaudiofile:
@@ -1173,7 +1172,7 @@ limitations:
   midi_io.coremidi:
     - text: "MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback."
   midi_io.win32_midi:
-    - text: "Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport and no hotplug; SysEx input is routed via MIM_LONGDATA. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK."
+    - text: "Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport. Port changes are detected by polling once a second rather than by an operating-system notification, so a plug or unplug is reported up to a second late. SysEx input is routed via MIM_LONGDATA and long messages are joined across receive buffers. This path is compile-checked in CI and has not been exercised against Windows MIDI hardware. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK."
   midi_io.alsa_midi:
     - text: "Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually."
   platform_maturity.accessibility.windows:
