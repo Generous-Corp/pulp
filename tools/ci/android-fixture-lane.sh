@@ -9,6 +9,9 @@ fi
 fixture_runner=$1
 playback_runner=$2
 corpus_dir=$3
+# shellcheck source=tools/ci/android-fixture-marker.sh
+source "$(dirname "${BASH_SOURCE[0]}")/android-fixture-marker.sh"
+
 remote_root=/data/local/tmp/pulp-android-fixtures
 
 for path in "$fixture_runner" "$playback_runner" "$corpus_dir/corpus.index"; do
@@ -35,7 +38,7 @@ run_remote() {
     status=$(printf '%s\n' "$output" | sed -n "s/^${marker}\([0-9][0-9]*\)\r\{0,1\}$/\1/p" | tail -1)
     [[ -n "$status" ]] || { echo "missing remote exit marker for $binary" >&2; return 1; }
     [[ "$status" == 0 ]] || { echo "$binary returned $status" >&2; return "$status"; }
-    printf '%s\n' "$output" | grep -Fq "$required_marker" || {
+    output_has_marker "$output" "$required_marker" || {
         echo "$binary omitted pass marker: $required_marker" >&2
         return 1
     }
