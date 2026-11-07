@@ -406,6 +406,11 @@ pulp_add_test_suite(pulp-test-analysis-frontends
 pulp_add_test_suite(pulp-test-modulation-language
     SOURCES test_modulation_language.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+# Sustain point, release and legato retrigger of the breakpoint envelope, and
+# their interaction with loops.
+pulp_add_test_suite(pulp-test-signal-breakpoint-sustain
+    SOURCES test_signal_breakpoint_sustain.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-units GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-events GROUP pulp-test-group-core-signal
@@ -439,6 +444,17 @@ pulp_add_test_suite(pulp-test-routing-primitives
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
 pulp_add_test_suite(pulp-test-signal-filters GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+# Every response of the multi-output state-variable filter against the analytic
+# prototype.
+pulp_add_test_suite(pulp-test-signal-svf-outputs GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+# Korg35-style two-pole filter with a saturating feedback path.
+pulp_add_test_suite(pulp-test-signal-korg35-filter GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+# Four-stage diode-coupled ladder lowpass, including agreement with the
+# transistor ladder at low resonance.
+pulp_add_test_suite(pulp-test-signal-diode-ladder-filter GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 # TptFilter and the lockstep voice banks (LadderBank, SvfBank), split from
 # the signal filter tests above.

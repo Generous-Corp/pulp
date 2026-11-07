@@ -18,6 +18,36 @@ enum class OnsetDetectionMethod : std::uint8_t {
     EnergyFlux,
     SpectralFlux,
     HighFrequencyContent,
+    /// Log-magnitude spectral flux on a logarithmic filterbank, comparing each
+    /// frame with a frequency-max-filtered earlier frame so that vibrato,
+    /// which moves partials sideways by a band or so, is not counted as new
+    /// energy. Böck and Widmer, "Maximum Filter Vibrato Suppression for Onset
+    /// Detection", DAFx 2013.
+    SuperFlux,
+};
+
+/// Settings of the SuperFlux novelty function (OnsetDetectionMethod::SuperFlux).
+/// The defaults follow the published configuration: 24 bands per octave from
+/// 27.5 Hz to 16 kHz, a maximum filter three bands wide, and a lag chosen from
+/// the window and hop.
+struct SuperFluxConfig {
+    /// Filterbank bands per octave, 1 to 48. Bands narrower than one FFT bin
+    /// are merged, so low frequencies use fewer than this.
+    double bands_per_octave = 24.0;
+    double min_hz = 27.5;
+    double max_hz = 16000.0;
+    /// `lambda` in `log(lambda * |X| + 1)`, with `|X|` calibrated so a full-scale
+    /// sine at a bin centre reads 1. Larger values compress quiet detail less
+    /// aggressively; the published value 1 applies to a differently scaled
+    /// spectrogram.
+    double compression = 1000.0;
+    /// Width of the maximum filter across bands (odd, 1 to 15). 1 disables it.
+    std::uint32_t max_filter_width = 3;
+    /// Frames between the compared spectra, 1 to 8. 0 derives it from the
+    /// window and hop: the earlier frame is the first whose Hann window has
+    /// moved past the point where it reaches half its peak, which is a quarter
+    /// of the window (rounded, at least 1).
+    std::uint32_t lag_frames = 0;
 };
 
 /// Pure novelty transitions shared by fixed-capacity streaming analysis and
@@ -294,6 +324,144 @@ inline int pitch_class_for_frequency(double frequency_hz) noexcept {
     return pitch_class;
 }
 
+/// SuperFlux novelty (Böck and Widmer, DAFx 2013): the magnitude spectrum is
+/// reduced to a logarithmic filterbank of triangular bands, compressed with
+/// `log(lambda * x + 1)`, and each frame is compared with the frame `lag`
+/// earlier after that earlier frame is max-filtered across bands. The novelty
+/// is the sum of the positive differences. Because the reference is the local
+/// maximum, a partial that has merely drifted to a neighbouring band (vibrato)
+/// is not counted as an increase, while a genuine onset, which raises energy
+/// in many bands at once, is.
+///
+/// Fixed capacity: at most kMaxBands bands and kMaxLag stored frames.
+template <typename SampleType, std::size_t MaxFftSize> class SuperFluxNoveltyT {
+  public:
+    static constexpr std::size_t kMaxBands = 256;
+    static constexpr std::size_t kMaxLag = 8;
+
+    [[nodiscard]] bool prepare(const StreamingAnalysisConfig& config,
+                               const SuperFluxConfig& params) noexcept {
+        if (!(params.bands_per_octave >= 1.0 && params.bands_per_octave <= 48.0) ||
+            !std::isfinite(params.min_hz) || !std::isfinite(params.max_hz) ||
+            !(params.min_hz > 0.0) || !(params.max_hz > params.min_hz) ||
+            !(params.compression > 0.0) || !std::isfinite(params.compression) ||
+            params.max_filter_width == 0 || params.max_filter_width > 15 ||
+            params.max_filter_width % 2u == 0 || params.lag_frames > kMaxLag ||
+            config.fft_size > MaxFftSize || config.fft_size < 8)
+            return false;
+
+        const double fft = static_cast<double>(config.fft_size);
+        const double nyquist_bin = fft / 2.0;
+        const double high_hz = std::min(params.max_hz, 0.5 * config.sample_rate);
+        // Centre frequencies 440 * 2^(i / bands_per_octave), snapped to FFT bins;
+        // bands that land on a bin already used are dropped.
+        const int first = static_cast<int>(
+            std::ceil(params.bands_per_octave * std::log2(params.min_hz / 440.0) - 1e-9));
+        count_ = 0;
+        for (int i = first; count_ < kMaxBands; ++i) {
+            const double hz = 440.0 * std::exp2(static_cast<double>(i) / params.bands_per_octave);
+            if (hz > high_hz)
+                break;
+            const double bin = std::round(hz * fft / config.sample_rate);
+            if (bin < 1.0)
+                continue;
+            if (bin > nyquist_bin - 1.0)
+                break;
+            const auto b = static_cast<std::uint32_t>(bin);
+            if (count_ == 0 || b > center_[count_ - 1])
+                center_[count_++] = b;
+        }
+        if (count_ < 2)
+            return false;
+        for (std::size_t i = 0; i < count_; ++i) {
+            left_[i] = i == 0 ? center_[0] - 1u : center_[i - 1];
+            right_[i] = i + 1 == count_
+                            ? std::min(center_[i] + 1u, static_cast<std::uint32_t>(nyquist_bin))
+                            : center_[i + 1];
+        }
+
+        double window_sum = 0.0;
+        for (std::size_t i = 0; i < config.fft_size; ++i)
+            window_sum += 0.5 - 0.5 * std::cos(6.28318530717958647692 * static_cast<double>(i) /
+                                               static_cast<double>(config.fft_size - 1u));
+        amplitude_scale_ = 2.0 / window_sum;
+        compression_ = params.compression;
+        half_width_ = params.max_filter_width / 2u;
+        if (params.lag_frames != 0) {
+            lag_ = params.lag_frames;
+        } else {
+            const double derived = std::round(0.25 * fft / static_cast<double>(config.hop_size));
+            lag_ = static_cast<std::size_t>(std::clamp(derived, 1.0, static_cast<double>(kMaxLag)));
+        }
+        reset();
+        return true;
+    }
+
+    void reset() noexcept {
+        stored_ = 0;
+        head_ = 0;
+    }
+
+    [[nodiscard]] std::size_t band_count() const noexcept {
+        return count_;
+    }
+    [[nodiscard]] std::size_t lag_frames() const noexcept {
+        return lag_;
+    }
+
+    /// Consumes the half spectrum (bins 0 .. fft_size / 2) of one frame and
+    /// returns its novelty: 0 until `lag` earlier frames exist, NaN if the
+    /// spectrum is not finite.
+    [[nodiscard]] double process(const std::complex<SampleType>* spectrum) noexcept {
+        auto& current = history_[head_];
+        for (std::size_t i = 0; i < count_; ++i) {
+            double weighted = 0.0;
+            double weights = 0.0;
+            const auto l = left_[i], c = center_[i], r = right_[i];
+            for (std::uint32_t b = l + 1u; b < r; ++b) {
+                const double w = b <= c ? static_cast<double>(b - l) / static_cast<double>(c - l)
+                                        : static_cast<double>(r - b) / static_cast<double>(r - c);
+                weighted += w * static_cast<double>(std::abs(spectrum[b]));
+                weights += w;
+            }
+            const double magnitude = amplitude_scale_ * weighted / weights;
+            if (!std::isfinite(magnitude))
+                return std::numeric_limits<double>::quiet_NaN();
+            current[i] = std::log1p(compression_ * magnitude);
+        }
+
+        double novelty = 0.0;
+        if (stored_ >= lag_) {
+            const auto& reference = history_[(head_ + kMaxLag - lag_) % kMaxLag];
+            for (std::size_t i = 0; i < count_; ++i) {
+                const std::size_t lo = i >= half_width_ ? i - half_width_ : 0;
+                const std::size_t hi = std::min(count_ - 1, i + half_width_);
+                double reference_max = reference[lo];
+                for (std::size_t j = lo + 1; j <= hi; ++j)
+                    reference_max = std::max(reference_max, reference[j]);
+                novelty += std::max(0.0, current[i] - reference_max);
+            }
+        }
+        head_ = (head_ + 1) % kMaxLag;
+        if (stored_ < kMaxLag)
+            ++stored_;
+        return novelty;
+    }
+
+  private:
+    std::array<std::array<double, kMaxBands>, kMaxLag> history_{};
+    std::array<std::uint32_t, kMaxBands> left_{};
+    std::array<std::uint32_t, kMaxBands> center_{};
+    std::array<std::uint32_t, kMaxBands> right_{};
+    std::size_t count_ = 0;
+    std::size_t lag_ = 1;
+    std::size_t half_width_ = 1;
+    std::size_t stored_ = 0;
+    std::size_t head_ = 0;
+    double amplitude_scale_ = 1.0;
+    double compression_ = 1000.0;
+};
+
 } // namespace detail
 
 /// One complete chroma analysis window. `magnitude` preserves the raw peak-bin
@@ -460,13 +628,23 @@ class OnsetNoveltyFrontEndT {
   public:
     using Frame = OnsetNoveltyFrameT<SampleType>;
 
-    [[nodiscard]] bool prepare(const StreamingAnalysisConfig& config, OnsetDetectionMethod method) {
+    /// `superflux` is read only for OnsetDetectionMethod::SuperFlux, which also
+    /// switches the analysis window from rectangular to Hann.
+    [[nodiscard]] bool prepare(const StreamingAnalysisConfig& config, OnsetDetectionMethod method,
+                               const SuperFluxConfig& superflux = {}) {
         if (method != OnsetDetectionMethod::EnergyFlux &&
             method != OnsetDetectionMethod::SpectralFlux &&
-            method != OnsetDetectionMethod::HighFrequencyContent)
+            method != OnsetDetectionMethod::HighFrequencyContent &&
+            method != OnsetDetectionMethod::SuperFlux)
             return false;
         const auto require_fft = method != OnsetDetectionMethod::EnergyFlux;
-        if (!window_.prepare(config, detail::AnalysisWindow::rectangular, require_fft))
+        const auto window = method == OnsetDetectionMethod::SuperFlux
+                                ? detail::AnalysisWindow::symmetric_hann
+                                : detail::AnalysisWindow::rectangular;
+        if (!window_.prepare(config, window, require_fft))
+            return false;
+        if (method == OnsetDetectionMethod::SuperFlux &&
+            !superflux_.prepare(window_.config(), superflux))
             return false;
         method_ = method;
         previous_magnitudes_.fill(0.0);
@@ -479,6 +657,7 @@ class OnsetNoveltyFrontEndT {
 
     void reset() noexcept {
         window_.reset();
+        superflux_.reset();
         previous_magnitudes_.fill(0.0);
         previous_energy_ = 0.0;
         have_previous_ = false;
@@ -535,6 +714,7 @@ class OnsetNoveltyFrontEndT {
   private:
     void clear_history_after_fault() noexcept {
         window_.clear_history_after_fault();
+        superflux_.reset();
         previous_magnitudes_.fill(0.0);
         previous_energy_ = 0.0;
         have_previous_ = false;
@@ -556,6 +736,10 @@ class OnsetNoveltyFrontEndT {
             if (have_previous_)
                 novelty = onset_energy_flux(previous_energy_, energy);
             previous_energy_ = energy;
+        } else if (method_ == OnsetDetectionMethod::SuperFlux) {
+            if (!window_.render_spectrum())
+                return false;
+            novelty = superflux_.process(window_.spectrum().data());
         } else {
             if (!window_.render_spectrum())
                 return false;
@@ -589,6 +773,7 @@ class OnsetNoveltyFrontEndT {
     }
 
     detail::StreamingAnalysisWindowT<SampleType, MaxFftSize, MaxChannels> window_{};
+    detail::SuperFluxNoveltyT<SampleType, MaxFftSize> superflux_{};
     std::array<double, MaxFftSize / 2u + 1u> previous_magnitudes_{};
     double previous_energy_ = 0.0;
     Frame current_{};

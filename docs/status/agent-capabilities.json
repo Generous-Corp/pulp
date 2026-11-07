@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 91,
+  "manifest_revision": 92,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -8941,6 +8941,19 @@
             "enums": []
           },
           {
+            "class": "SuperFluxNoveltyT",
+            "qualified_name": "pulp::signal::detail::SuperFluxNoveltyT",
+            "template": "typename SampleType, std::size_t MaxFftSize",
+            "methods": [
+              "prepare(const StreamingAnalysisConfig& config, const SuperFluxConfig& params)",
+              "reset()",
+              "process(const std::complex<SampleType>* spectrum)",
+              "band_count()",
+              "lag_frames()"
+            ],
+            "enums": []
+          },
+          {
             "class": "ChromaFrontEndT",
             "qualified_name": "pulp::signal::ChromaFrontEndT",
             "template": "typename SampleType = float, std::size_t MaxFftSize = 4096, std::size_t MaxChannels = 8",
@@ -8960,12 +8973,64 @@
             "qualified_name": "pulp::signal::OnsetNoveltyFrontEndT",
             "template": "typename SampleType = float, std::size_t MaxFftSize = 4096, std::size_t MaxChannels = 8",
             "methods": [
-              "prepare(const StreamingAnalysisConfig& config, OnsetDetectionMethod method)",
+              "prepare(const StreamingAnalysisConfig& config, OnsetDetectionMethod method, const SuperFluxConfig& superflux = {})",
               "reset()",
               "process(const SampleType* const* channels, std::size_t channel_count, std::size_t frames, Sink&& sink)",
               "current()",
               "readiness_latency_samples()",
               "retained_fft_bytes()"
+            ],
+            "enums": []
+          }
+        ],
+        "antiderivative_iir.hpp": [
+          {
+            "class": "TanhNonlinearity",
+            "qualified_name": "pulp::signal::TanhNonlinearity",
+            "template": null,
+            "methods": [
+              "length_scale()",
+              "breakpoints(double, double, double*)"
+            ],
+            "enums": []
+          },
+          {
+            "class": "HardClipNonlinearity",
+            "qualified_name": "pulp::signal::HardClipNonlinearity",
+            "template": null,
+            "methods": [
+              "length_scale()",
+              "breakpoints(double lo, double hi, double* out)"
+            ],
+            "enums": []
+          },
+          {
+            "class": "AntiderivativeIirKernel",
+            "qualified_name": "pulp::signal::AntiderivativeIirKernel",
+            "template": null,
+            "methods": [
+              "butterworth(int order, double cutoff_ratio)",
+              "add_real(double pole, double residue)",
+              "add_pair(std::complex<double> pole, std::complex<double> residue)",
+              "size()",
+              "section(std::size_t i)",
+              "magnitude(double cycles_per_sample)",
+              "group_delay_samples()",
+              "steady_state(std::size_t i, double c)"
+            ],
+            "enums": []
+          },
+          {
+            "class": "AntiderivativeIir",
+            "qualified_name": "pulp::signal::AntiderivativeIir",
+            "template": null,
+            "methods": [
+              "reset()",
+              "process(const Nonlinearity& f, double x)",
+              "set_kernel(const AntiderivativeIirKernel& kernel)",
+              "kernel()",
+              "reseed(double x, double fx)",
+              "previous_input()"
             ],
             "enums": []
           }
@@ -9222,12 +9287,19 @@
               "reset()",
               "process(std::span<SampleType> output)",
               "configure(std::span<const Point> points)",
+              "set_sustain_point(std::size_t index)",
+              "clear_sustain_point()",
               "set_loop(std::size_t first_point, std::size_t last_point, std::uint32_t repeat_count)",
               "clear_loop()",
               "trigger()",
+              "trigger_legato()",
+              "release()",
               "next()",
               "current()",
               "active()",
+              "holding()",
+              "gate()",
+              "sustain_point()",
               "point_count()",
               "current_segment()",
               "segment_position_samples()",
@@ -10362,6 +10434,27 @@
               "static_curve_feedback_db(double input_db)",
               "worst_case_gain()",
               "process_block(SampleType* io, int n)"
+            ],
+            "enums": []
+          }
+        ],
+        "diode_ladder_filter.hpp": [
+          {
+            "class": "DiodeLadderFilterT",
+            "qualified_name": "pulp::signal::DiodeLadderFilterT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process(SampleType x)",
+              "process(SampleType* buffer, int num_samples)",
+              "reset()",
+              "set_sample_rate(SampleType sr)",
+              "set_frequency(SampleType hz)",
+              "set_resonance(SampleType r)",
+              "set_drive(SampleType d)",
+              "set_bass_compensation(SampleType amount)",
+              "configure(SampleType sample_rate, SampleType frequency, SampleType resonance, SampleType drive = SampleType{1})",
+              "feedback()",
+              "solve_loop(SampleType d, SampleType ck, SampleType drive)"
             ],
             "enums": []
           }
@@ -13045,6 +13138,37 @@
             "enums": []
           }
         ],
+        "korg35_filter.hpp": [
+          {
+            "class": "Korg35FilterT",
+            "qualified_name": "pulp::signal::Korg35FilterT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process(SampleType x)",
+              "process(SampleType* buffer, int num_samples)",
+              "reset()",
+              "set_mode(Mode mode)",
+              "set_sample_rate(SampleType sr)",
+              "set_frequency(SampleType hz)",
+              "set_resonance(SampleType r)",
+              "set_drive(SampleType d)",
+              "configure(Mode mode, SampleType sample_rate, SampleType frequency, SampleType resonance, SampleType drive = SampleType{1})",
+              "mode()",
+              "feedback()",
+              "prototype_magnitude(Mode mode, double k, double omega)",
+              "solve_loop(SampleType c, SampleType a, SampleType drive)"
+            ],
+            "enums": [
+              [
+                "Mode",
+                [
+                  "lowpass",
+                  "highpass"
+                ]
+              ]
+            ]
+          }
+        ],
         "ladder_bank.hpp": [
           {
             "class": "LadderBankT",
@@ -15407,6 +15531,8 @@
               "set_pre_boost_db(double db)",
               "set_alias_policy(AliasPolicy policy)",
               "alias_policy()",
+              "set_adaa_iir_kernel(const AntiderivativeIirKernel& kernel)",
+              "adaa_iir_kernel()",
               "set_mix(double wet01)",
               "set_output_trim_db(double db)",
               "latency_samples()",
@@ -15430,10 +15556,21 @@
                   "adaa",
                   "oversample_2x",
                   "off",
-                  "adaa2"
+                  "adaa2",
+                  "adaa_iir"
                 ]
               ]
             ]
+          },
+          {
+            "class": "ShaperCurve",
+            "qualified_name": "pulp::signal::ShaperCurve",
+            "template": null,
+            "methods": [
+              "length_scale()",
+              "breakpoints(double lo, double hi, double* out)"
+            ],
+            "enums": []
           }
         ],
         "scale_quantizer.hpp": [
@@ -16268,8 +16405,11 @@
               "set_frequency(SampleType hz)",
               "set_resonance(SampleType q)",
               "set_mode(Mode m)",
+              "set_shelf_gain(SampleType linear_gain)",
+              "set_shelf_gain_db(SampleType db)",
               "configure(Mode mode, SampleType sample_rate, SampleType frequency, SampleType resonance)",
-              "design(SampleType sample_rate, SampleType frequency, SampleType resonance)"
+              "design(SampleType sample_rate, SampleType frequency, SampleType resonance)",
+              "process_all(SampleType input)"
             ],
             "enums": [
               [
@@ -16278,7 +16418,11 @@
                   "lowpass",
                   "highpass",
                   "bandpass",
-                  "notch"
+                  "notch",
+                  "unity_bandpass",
+                  "allpass",
+                  "peak",
+                  "band_shelf"
                 ]
               ]
             ]
