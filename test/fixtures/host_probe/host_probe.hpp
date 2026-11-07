@@ -9,9 +9,13 @@
 // written to a read-only parameter, which is the channel every format already
 // carries back to the host.
 //
-// It also acts on command: setting the Command parameter to 1 makes the
-// plug-in change its own Gain parameter (a plug-in-originated edit), and 2
-// makes it report a new latency through Processor::flag_latency_changed().
+// It also acts on command. Command 1 makes the plug-in change its own Gain
+// from process() (a value the format reports as processor output). Command 2
+// reports a new latency through Processor::flag_latency_changed(). Command 3
+// makes the next prepare() perform an editor-style gesture on Gain
+// (begin_gesture, set_value, end_gesture on the main thread), which a VST3
+// plug-in reports through IComponentHandler and a CLAP plug-in as gesture and
+// value events.
 // It writes a constant to its aux output so a host can see that bus is live.
 
 #include <pulp/format/processor.hpp>
@@ -39,8 +43,16 @@ class HostProbe final : public format::Processor {
     static constexpr state::ParamID kMaxBlock = 27;
     static constexpr state::ParamID kBeats = 28;
     static constexpr state::ParamID kTimeSigNumerator = 29;
+    static constexpr state::ParamID kRecording = 30;
+    static constexpr state::ParamID kLooping = 31;
+    static constexpr state::ParamID kValidityBits = 32;
+    static constexpr state::ParamID kActiveInputBuses = 33;
+    static constexpr state::ParamID kActiveOutputBuses = 34;
+    static constexpr state::ParamID kSidechainChannels = 35;
+    static constexpr state::ParamID kNoteOns = 36;
 
     static constexpr float kEditedGainDb = -6.0f;
+    static constexpr float kGestureGainDb = -12.0f;
     static constexpr int kInitialLatency = 32;
     static constexpr int kChangedLatency = 256;
     static constexpr float kAuxLevel = 0.5f;
@@ -61,7 +73,7 @@ class HostProbe final : public format::Processor {
     void define_parameters(state::StateStore& store) override {
         store.add_parameter(
             {.id = kGain, .name = "Gain", .unit = "dB", .range = {-60.0f, 12.0f, 0.0f}});
-        store.add_parameter({.id = kCommand, .name = "Command", .range = {0.0f, 2.0f, 0.0f, 1.0f}});
+        store.add_parameter({.id = kCommand, .name = "Command", .range = {0.0f, 3.0f, 0.0f, 1.0f}});
         auto observed = [&](state::ParamID id, const char* name, float max) {
             state::ParamInfo info{.id = id, .name = name, .range = {0.0f, max, 0.0f}};
             info.read_only = true;
@@ -78,6 +90,13 @@ class HostProbe final : public format::Processor {
         observed(kMaxBlock, "Seen Max Block", 65536.0f);
         observed(kBeats, "Seen Beats", 100000.0f);
         observed(kTimeSigNumerator, "Seen Time Signature", 32.0f);
+        observed(kRecording, "Seen Recording", 1.0f);
+        observed(kLooping, "Seen Looping", 1.0f);
+        observed(kValidityBits, "Seen Transport Validity", 4095.0f);
+        observed(kActiveInputBuses, "Seen Input Buses", 16.0f);
+        observed(kActiveOutputBuses, "Seen Output Buses", 16.0f);
+        observed(kSidechainChannels, "Seen Sidechain Channels", 16.0f);
+        observed(kNoteOns, "Seen Note-ons", 1000.0f);
     }
 
     // Recorded here and published from process(): formats report a plug-in's
@@ -85,6 +104,13 @@ class HostProbe final : public format::Processor {
     void prepare(const format::PrepareContext& context) override {
         prepared_rate_ = static_cast<float>(context.sample_rate);
         prepared_block_ = static_cast<float>(context.max_buffer_size);
+        // prepare() runs on the main thread in every format, which is where a
+        // gesture is legal: the edit an editor would make when a user drags.
+        if ((int)std::lround(state().get_value(kCommand)) == 3) {
+            state().begin_gesture(kGain);
+            state().set_value(kGain, kGestureGainDb);
+            state().end_gesture(kGain);
+        }
     }
 
     int latency_samples() const override {
@@ -112,6 +138,10 @@ class HostProbe final : public format::Processor {
                     peak = std::max(peak, std::abs(side->channel_ptr(c)[i]));
         }
         state().set_value(kSidechainPeak, std::min(peak, 1.0f));
+        const auto* side = audio.sidechain_input();
+        state().set_value(kSidechainChannels, side ? (float)side->num_channels() : 0.0f);
+        state().set_value(kActiveInputBuses, (float)audio.inputs.active_count());
+        state().set_value(kActiveOutputBuses, (float)audio.outputs.active_count());
         if (auto* aux = audio.outputs.find(format::BusRole::Aux); aux && aux->active()) {
             for (std::size_t c = 0; c < aux->buffer.num_channels(); ++c)
                 std::fill_n(aux->buffer.channel_ptr(c), aux->buffer.num_samples(), kAuxLevel);
@@ -133,6 +163,15 @@ class HostProbe final : public format::Processor {
         if (context.has_transport(F::TimeSignature))
             state().set_value(kTimeSigNumerator, (float)context.time_sig_numerator);
         state().set_value(kOffline, context.is_offline() ? 1.0f : 0.0f);
+        if (context.has_transport(F::Recording))
+            state().set_value(kRecording, context.is_recording ? 1.0f : 0.0f);
+        if (context.has_transport(F::Looping))
+            state().set_value(kLooping, context.is_looping ? 1.0f : 0.0f);
+        float bits = 0.0f;
+        for (int f = 0; f < (int)F::Count; ++f)
+            if (context.has_transport((F)f))
+                bits += (float)(1 << f);
+        state().set_value(kValidityBits, bits);
 
         for (const auto& event : midi_in) {
             const auto* d = event.message.data();
@@ -140,10 +179,13 @@ class HostProbe final : public format::Processor {
                 continue;
             if ((d[0] & 0xF0) == 0xB0 && d[1] == 7)
                 state().set_value(kLastCc7, (float)d[2]);
+            if ((d[0] & 0xF0) == 0x90 && d[2] > 0)
+                ++note_ons_;
             if ((d[0] & 0xF0) == 0xE0)
                 state().set_value(kPitchBend, (float)(d[1] | (d[2] << 7)));
         }
 
+        state().set_value(kNoteOns, (float)note_ons_);
         const int command = (int)std::lround(state().get_value(kCommand));
         if (command == handled_command_)
             return;
@@ -157,6 +199,7 @@ class HostProbe final : public format::Processor {
     }
 
     std::atomic<int> latency_{kInitialLatency};
+    int note_ons_ = 0;
     float prepared_rate_ = 0.0f;
     float prepared_block_ = 0.0f;
     int handled_command_ = 0;

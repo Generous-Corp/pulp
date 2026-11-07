@@ -112,7 +112,12 @@ fmt::ProcessContext transport() {
     ctx.position_samples = 146250;
     ctx.time_sig_numerator = 3;
     ctx.time_sig_denominator = 4;
-    for (auto f : {F::Playing, F::Tempo, F::BeatPosition, F::SamplePosition, F::TimeSignature})
+    ctx.is_recording = true;
+    ctx.is_looping = true;
+    ctx.loop_start_beats = 4.0;
+    ctx.loop_end_beats = 12.0;
+    for (auto f : {F::Playing, F::Recording, F::Looping, F::Tempo, F::BeatPosition,
+                   F::SamplePosition, F::TimeSignature, F::LoopRange})
         ctx.transport_validity.set(f);
     return ctx;
 }
@@ -147,7 +152,7 @@ TEST_CASE("Host probe bundles are built for every hosted format", "[host][probe]
     CHECK_FALSE(targets().empty());
 }
 
-TEST_CASE("Host probe sees the prepared sample rate, block size, and host transport",
+TEST_CASE("Host probe sees the prepared sample rate and block size and the host transport",
           "[host][probe][transport]") {
     for (const auto& target : targets()) {
         INFO(target.label);
@@ -162,7 +167,17 @@ TEST_CASE("Host probe sees the prepared sample rate, block size, and host transp
         CHECK(near(slot->get_parameter(Probe::kPlaying), 1.0f));
         CHECK(near(slot->get_parameter(Probe::kBeats), 6.5f));
         CHECK(near(slot->get_parameter(Probe::kTimeSigNumerator), 3.0f));
+        CHECK(near(slot->get_parameter(Probe::kRecording), 1.0f));
+        CHECK(near(slot->get_parameter(Probe::kLooping), 1.0f));
         CHECK(near(slot->get_parameter(Probe::kOffline), 0.0f));
+        // The plug-in's own adapter marks these fields as supplied.
+        const auto bits = (unsigned)std::lround(slot->get_parameter(Probe::kValidityBits));
+        using F = fmt::TransportField;
+        for (auto f :
+             {F::Playing, F::Recording, F::Looping, F::Tempo, F::BeatPosition, F::TimeSignature}) {
+            INFO("transport field " << (int)f << " bits " << bits);
+            CHECK((bits & (1u << (unsigned)f)) != 0);
+        }
     }
 }
 
@@ -193,6 +208,9 @@ TEST_CASE("Host probe reads the host sidechain and fills the host aux output",
         b.run(*slot, transport());
         b.run(*slot, transport());
         CHECK(near(slot->get_parameter(Probe::kSidechainPeak), 0.25f));
+        CHECK(near(slot->get_parameter(Probe::kActiveInputBuses), 2.0f));
+        CHECK(near(slot->get_parameter(Probe::kActiveOutputBuses), 2.0f));
+        CHECK(near(slot->get_parameter(Probe::kSidechainChannels), 2.0f));
         CHECK(b.store[6][0] == Probe::kAuxLevel);
         CHECK(b.store[7][kFrames - 1] == Probe::kAuxLevel);
     }
@@ -212,10 +230,14 @@ TEST_CASE("Host probe receives a mapped controller and pitch bend", "[host][prob
         bend.sample_offset = 8;
         bend.message = choc::midi::ShortMessage(0xE0, 0x00, 0x60); // 0x3000
         b.midi_in.add(bend);
+        auto note = pulp::midi::MidiEvent::note_on(0, 60, 100);
+        note.sample_offset = 12;
+        b.midi_in.add(note);
         b.run(*slot, transport());
         b.run(*slot, transport());
         CHECK(near(slot->get_parameter(Probe::kLastCc7), 99.0f, 0.6f));
         CHECK(near(slot->get_parameter(Probe::kPitchBend), 12288.0f, 2.0f));
+        CHECK(near(slot->get_parameter(Probe::kNoteOns), 1.0f));
     }
 }
 
@@ -241,6 +263,46 @@ TEST_CASE("Host probe's own parameter edit reaches the host", "[host][probe][par
         }
         CHECK(saw_gain);
         CHECK(near(slot->get_parameter(Probe::kGain), Probe::kEditedGainDb, 0.05f));
+    }
+}
+
+TEST_CASE("Host probe editor gesture reaches the host as begin value end",
+          "[host][probe][params]") {
+    for (const auto& target : targets()) {
+        INFO(target.label);
+        auto slot = load(target);
+        REQUIRE(slot->prepare(48000.0, kFrames));
+        Block b;
+        b.run(*slot, transport());
+        std::array<PluginParameterEdit, 256> edits{};
+        slot->drain_parameter_edits(edits); // discard the first block's reports
+
+        // Command 3: the next prepare() performs a gesture on Gain on the main
+        // thread, the way an editor drag would.
+        slot->set_parameter(Probe::kCommand, 3.0f);
+        b.run(*slot, transport());
+        REQUIRE(slot->prepare(48000.0, kFrames));
+        b.run(*slot, transport());
+        b.run(*slot, transport());
+
+        int begin_at = -1, value_at = -1, end_at = -1;
+        const auto n = slot->drain_parameter_edits(edits);
+        for (std::size_t i = 0; i < n; ++i) {
+            if (edits[i].id != Probe::kGain)
+                continue;
+            using K = PluginParameterEdit::Kind;
+            if (edits[i].kind == K::begin_gesture && begin_at < 0)
+                begin_at = (int)i;
+            if (edits[i].kind == K::value && value_at < 0 &&
+                near(edits[i].plain_value, Probe::kGestureGainDb, 0.05f))
+                value_at = (int)i;
+            if (edits[i].kind == K::end_gesture)
+                end_at = (int)i;
+        }
+        CHECK(begin_at >= 0);
+        CHECK(value_at > begin_at);
+        CHECK(end_at > value_at);
+        CHECK(near(slot->get_parameter(Probe::kGain), Probe::kGestureGainDb, 0.05f));
     }
 }
 
