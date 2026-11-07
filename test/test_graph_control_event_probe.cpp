@@ -25,14 +25,20 @@ class ProbeSlot final : public pulp::host::PluginSlot {
         info_.num_outputs = 1;
     }
 
-    const pulp::host::PluginInfo& info() const override { return info_; }
-    bool is_loaded() const override { return true; }
-    bool prepare(double, int) override { return true; }
+    const pulp::host::PluginInfo& info() const override {
+        return info_;
+    }
+    bool is_loaded() const override {
+        return true;
+    }
+    bool prepare(double, int) override {
+        return true;
+    }
     void release() override {}
     void process(pulp::audio::BufferView<float>& output,
-                 const pulp::audio::BufferView<const float>&,
-                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const pulp::host::ParameterEventQueue&, int frames) override {
+                 const pulp::audio::BufferView<const float>&, const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::host::ParameterEventQueue&,
+                 int frames) override {
         for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
             std::fill_n(output.channel_ptr(channel), frames, 0.0f);
     }
@@ -47,17 +53,33 @@ class ProbeSlot final : public pulp::host::PluginSlot {
         parameter.rate = rate_;
         return {parameter};
     }
-    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    float get_parameter(std::uint32_t) const override {
+        return 0.0f;
+    }
     void set_parameter(std::uint32_t, float) override {}
     void set_bypass(bool) override {}
-    bool is_bypassed() const override { return false; }
-    std::vector<std::uint8_t> save_state() const override { return {}; }
-    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
-    bool has_editor() const override { return false; }
-    void* create_editor_view() override { return nullptr; }
+    bool is_bypassed() const override {
+        return false;
+    }
+    std::vector<std::uint8_t> save_state() const override {
+        return {};
+    }
+    bool restore_state(const std::vector<std::uint8_t>&) override {
+        return true;
+    }
+    bool has_editor() const override {
+        return false;
+    }
+    void* create_editor_view() override {
+        return nullptr;
+    }
     void destroy_editor_view() override {}
-    int latency_samples() const override { return 0; }
-    int tail_samples() const override { return 0; }
+    int latency_samples() const override {
+        return 0;
+    }
+    int tail_samples() const override {
+        return 0;
+    }
 
   private:
     pulp::host::PluginInfo info_;
@@ -81,8 +103,12 @@ struct AudioGraph {
         graph.set_canonical_executor_routing_enabled(true);
     }
 
-    pulp::host::PortHandle source_port() const { return graph.node(input)->out("audio"); }
-    pulp::host::PortHandle destination_port() const { return graph.node(plugin)->in("audio"); }
+    pulp::host::PortHandle source_port() const {
+        return graph.node(input)->out("audio");
+    }
+    pulp::host::PortHandle destination_port() const {
+        return graph.node(plugin)->in("audio");
+    }
 };
 
 void process_audio(pulp::host::SignalGraph& graph, bool reset = false) {
@@ -108,23 +134,27 @@ TEST_CASE("G7 control probes cover lifecycle refusals, dense rejection, and rese
           "[host][graph][g7][probe]") {
     AudioGraph unprepared(pulp::host::ParamRate::ControlRate);
     const auto source = unprepared.source_port();
-    REQUIRE(unprepared.graph.attach_control_edge_probe(source, unprepared.plugin, ProbeSlot::kParam) ==
-            pulp::host::SignalGraph::EdgeProbeStatus::Unprepared);
+    REQUIRE(
+        unprepared.graph.attach_control_edge_probe(source, unprepared.plugin, ProbeSlot::kParam) ==
+        pulp::host::SignalGraph::EdgeProbeStatus::Unprepared);
 
     REQUIRE(unprepared.graph.prepare(48000.0, 8));
-    const auto invalid_source = pulp::host::PortHandle{
-        unprepared.input, 99, true, "missing", pulp::host::PortKind::Audio};
+    const auto invalid_source =
+        pulp::host::PortHandle{unprepared.input, 99, true, "missing", pulp::host::PortKind::Audio};
     REQUIRE(unprepared.graph.attach_control_edge_probe(invalid_source, unprepared.plugin,
                                                        ProbeSlot::kParam) ==
             pulp::host::SignalGraph::EdgeProbeStatus::UnknownPort);
-    REQUIRE(unprepared.graph.attach_control_edge_probe(source, unprepared.plugin, ProbeSlot::kParam + 1) ==
+    REQUIRE(unprepared.graph.attach_control_edge_probe(source, unprepared.plugin,
+                                                       ProbeSlot::kParam + 1) ==
             pulp::host::SignalGraph::EdgeProbeStatus::MissingEdge);
     auto wrong_kind = source;
     wrong_kind.kind = pulp::host::PortKind::Midi;
-    REQUIRE(unprepared.graph.attach_control_edge_probe(wrong_kind, unprepared.plugin, ProbeSlot::kParam) ==
+    REQUIRE(unprepared.graph.attach_control_edge_probe(wrong_kind, unprepared.plugin,
+                                                       ProbeSlot::kParam) ==
             pulp::host::SignalGraph::EdgeProbeStatus::UnsupportedKind);
-    REQUIRE(unprepared.graph.attach_control_edge_probe(source, unprepared.plugin, ProbeSlot::kParam) ==
-            pulp::host::SignalGraph::EdgeProbeStatus::Attached);
+    REQUIRE(
+        unprepared.graph.attach_control_edge_probe(source, unprepared.plugin, ProbeSlot::kParam) ==
+        pulp::host::SignalGraph::EdgeProbeStatus::Attached);
     const auto identity = unprepared.graph.control_edge_probe_identity();
     REQUIRE(identity.authoring.valid());
     REQUIRE(identity.connection != 0);
@@ -140,17 +170,19 @@ TEST_CASE("G7 control probes cover lifecycle refusals, dense rejection, and rese
     REQUIRE(unprepared.graph.control_edge_probe_status() ==
             pulp::host::SignalGraph::EdgeProbeStatus::Detached);
     REQUIRE_FALSE(unprepared.graph.read_control_edge_probe(sample));
-    REQUIRE(unprepared.graph.attach_control_edge_probe(source, unprepared.plugin, ProbeSlot::kParam) ==
-            pulp::host::SignalGraph::EdgeProbeStatus::Attached);
+    REQUIRE(
+        unprepared.graph.attach_control_edge_probe(source, unprepared.plugin, ProbeSlot::kParam) ==
+        pulp::host::SignalGraph::EdgeProbeStatus::Attached);
     process_audio(unprepared.graph);
     REQUIRE(unprepared.graph.read_control_edge_probe(sample));
     REQUIRE(sample.timestamp_samples == 0);
 
     AudioGraph dense(pulp::host::ParamRate::AudioRate);
-    REQUIRE(dense.graph.connect_audio_rate_modulation(dense.input, 0, dense.plugin, ProbeSlot::kParam,
-                                                      0.0f, 1.0f));
+    REQUIRE(dense.graph.connect_audio_rate_modulation(dense.input, 0, dense.plugin,
+                                                      ProbeSlot::kParam, 0.0f, 1.0f));
     REQUIRE(dense.graph.prepare(48000.0, 8));
-    REQUIRE(dense.graph.attach_control_edge_probe(dense.source_port(), dense.plugin, ProbeSlot::kParam) ==
+    REQUIRE(dense.graph.attach_control_edge_probe(dense.source_port(), dense.plugin,
+                                                  ProbeSlot::kParam) ==
             pulp::host::SignalGraph::EdgeProbeStatus::UnsupportedExecution);
 }
 

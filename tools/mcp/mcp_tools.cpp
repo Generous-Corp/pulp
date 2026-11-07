@@ -196,7 +196,7 @@ std::string handle_graph(const std::string& params_json) {
             // instead of treating it as a missing string and dropping the
             // control-edge selector before invoking the sibling CLI.
             const auto value = key == "destination_param" ? extract_raw(params_json, key)
-                                                           : extract_string(params_json, key);
+                                                          : extract_string(params_json, key);
             if (!value.empty() && value != "null") {
                 arguments.emplace_back(flag);
                 arguments.push_back(value);
