@@ -45,7 +45,9 @@ pulp::view::View* pulp_plugin_focus_under_root(pulp::view::View* root) {
 }
 
 pulp::view::TextEditor* pulp_plugin_focused_text_editor(pulp::view::View* root) {
-    return dynamic_cast<pulp::view::TextEditor*>(pulp_plugin_focus_under_root(root));
+    auto* te = dynamic_cast<pulp::view::TextEditor*>(pulp_plugin_focus_under_root(root));
+    // A disabled field takes no composition either.
+    return (te && !te->effectively_enabled()) ? nullptr : te;
 }
 
 bool pulp_plugin_apply_replacement_range(pulp::view::TextEditor* te,

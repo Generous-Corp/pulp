@@ -137,3 +137,21 @@ TEST_CASE("each touch pointer keeps its own captured view",
     CHECK(f.knob->seen.size() == 1);
     CHECK(f.bystander->seen.size() == 2);
 }
+
+TEST_CASE("a buttonless move ends a press whose release was lost",
+          "[view][input][modifiers]") {
+    Fixture f;
+    REQUIRE(deliver_mouse_down(f.root, f.knob, {30, 30}, 0));
+    deliver_hover_move(f.root, {300, 150});  // button is plainly up
+    CHECK_FALSE(f.root.simulate_modifier_keys(kModShift));
+    CHECK(f.knob->seen.empty());
+}
+
+TEST_CASE("a press whose target left the tree is still released",
+          "[view][input][modifiers]") {
+    Fixture f;
+    REQUIRE(deliver_mouse_down(f.root, f.knob, {30, 30}, 0));
+    auto removed = f.root.remove_child(f.knob);
+    deliver_mouse_up(f.root, removed.get(), {30, 30}, 0, 1, MouseUpHost{});
+    CHECK_FALSE(f.root.simulate_modifier_keys(kModShift));
+}

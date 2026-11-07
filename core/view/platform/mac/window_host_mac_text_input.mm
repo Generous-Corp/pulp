@@ -31,6 +31,8 @@ extern "C" void pulp_mac_text_input_client_category_anchor() {}
     // hasMarkedTextWithCompletionHandler:] on the next keypress.
     auto* fv = pulp::view::View::focused_input_;
     auto* te = dynamic_cast<pulp::view::TextEditor*>(fv);
+    // A disabled field takes no composition either.
+    if (te && !te->effectively_enabled()) return nullptr;
     return te;
 }
 

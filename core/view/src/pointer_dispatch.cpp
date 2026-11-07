@@ -345,6 +345,9 @@ void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers,
     // 1. Hover STATE first, so a handler reading `is_hovered()` during the
     //    dispatch below sees the state this same move established.
     root.interaction().hover_modifiers = modifiers;
+    // A buttonless move means this pointer's button is up. Dropping its press
+    // record here heals a host that lost the release.
+    clear_pressed_target(root, pointer.pointer_id);
     root.simulate_hover(root_pt);
 
     // 2. Hit-test AFTER the state pass: an `on_hover_move` handler is allowed
@@ -595,10 +598,11 @@ void deliver_pointer_terminal(View& root, View* target, Point root_pt,
                               const MouseUpHost& host, MouseButton button,
                               const PointerAttributes& pointer,
                               PointerTerminalKind kind) {
+    // The press is over whether or not the target is still around to be told.
+    clear_pressed_target(root, pointer.pointer_id);
     if (!still_in_tree(target, &root)) return;
 
     const bool cancelled = kind == PointerTerminalKind::cancel;
-    clear_pressed_target(root, pointer.pointer_id);
 
     ViewCapture target_capture;
     target_capture.set(target);
