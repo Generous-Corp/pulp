@@ -547,6 +547,13 @@
       "timeout": 300.0
     },
     {
+      "name": "embed-wgsl-selftest",
+      "argv": [
+        "{repo}/tools/cmake/scripts/test_embed_wgsl.py"
+      ],
+      "timeout": 60.0
+    },
+    {
       "name": "icu-data-subset-selftest",
       "argv": [
         "{repo}/tools/cmake/scripts/test_icu_data_subset.py"

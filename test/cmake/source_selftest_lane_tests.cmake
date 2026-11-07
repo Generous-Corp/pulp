@@ -89,6 +89,11 @@ add_test(NAME icu-data-subset-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/cmake/scripts/test_icu_data_subset.py")
 set_tests_properties(icu-data-subset-selftest PROPERTIES TIMEOUT 60)
+# pulp_add_wgsl_shaders' header generator.
+add_test(NAME embed-wgsl-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/cmake/scripts/test_embed_wgsl.py")
+set_tests_properties(embed-wgsl-selftest PROPERTIES TIMEOUT 60)
 add_test(NAME plugin-footprint-check-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_plugin_footprint_check.py")
