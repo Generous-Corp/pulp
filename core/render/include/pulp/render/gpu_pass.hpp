@@ -49,8 +49,8 @@
 ///     lost state and fails with `GpuError::Kind::device_lost`. Recreate
 ///     the `GpuDevice` from the new surface after the host rebuilds it.
 
-#include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/gpu_capabilities.hpp>
+#include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/wgsl_diagnostics.hpp>
 #include <pulp/runtime/result.hpp>
 
