@@ -49,6 +49,7 @@ class TriggerContext final {
     TriggerContext(const TriggerContext&) = delete;
     TriggerContext& operator=(const TriggerContext&) = delete;
     TriggerEmitResult emit(TriggerPayload payload) noexcept;
+    TriggerEmitResult emit_at_sample(std::int64_t absolute_sample, TriggerPayload payload) noexcept;
     std::span<const TriggerRecord> received() const noexcept;
 
   private:

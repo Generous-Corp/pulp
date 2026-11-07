@@ -1491,6 +1491,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
                              std::uint8_t phase, bool saturate);
     TriggerEmitResult trigger_test_emit_(std::int64_t target, std::uint64_t epoch,
                                          std::uint8_t port);
+    TriggerEmitResult trigger_test_schedule_(std::int64_t target, std::uint64_t epoch);
     bool trigger_test_budget_(std::size_t total);
     void trigger_test_gate_(bool held);
     NodeId add_trigger_audio_(TriggerAudioConfig config);
