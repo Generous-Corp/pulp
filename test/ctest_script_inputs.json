@@ -3180,6 +3180,7 @@
   "pulp-test-lv2-rt",
   "pulp-test-mac-hover-cursor-live",
   "pulp-test-mac-platform-harness",
+  "pulp-test-main-thread-timer-nested-modes",
   "pulp-test-matrix",
   "pulp-test-matrix-compressor",
   "pulp-test-matrix-drums",
