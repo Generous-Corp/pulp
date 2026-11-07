@@ -39,7 +39,10 @@ public:
     /// Called when a note turns off.
     std::function<void(uint8_t channel, uint8_t note)> on_note_off;
 
-    /// Process a MIDI event. Only note on/off are tracked.
+    /// Process a MIDI event. Note on/off are tracked, and the channel mode
+    /// messages All Sound Off (CC 120) and All Notes Off (CC 123) release every
+    /// held note on their channel, firing `on_note_off` for each, so a panic
+    /// from a controller cannot leave keys stuck on in a display.
     void process(const MidiEvent& event) {
         auto msg = event.message;
 
@@ -61,6 +64,9 @@ public:
             uint8_t note = msg.getNoteNumber();
             set_key(ch, note, 0);
             if (on_note_off) on_note_off(ch, note);
+        } else if (msg.isController()) {
+            const uint8_t cc = msg.getControllerNumber();
+            if (cc == 120 || cc == 123) all_notes_off(msg.getChannel0to15());
         }
     }
 

@@ -1004,6 +1004,26 @@ TEST_CASE("AudioDeviceManager recovers when the unplug notification was missed",
     REQUIRE(h.system.open_input_count("usb") == 1);
 }
 
+TEST_CASE("AudioDeviceManager reopens an input whose connection died behind a listed port",
+          "[audio][audio-device-manager][midi-reconnect]") {
+    // Host sleep: the OS replaces the endpoint, the port list looks the same
+    // before and after, and only the old handle knows it is dead.
+    InputHarness h;
+    h.system.add_port("usb", "Pad");
+    h.mgr.attach_midi_system(&h.system);
+    REQUIRE(h.mgr.set_midi_input_enabled("usb", true));
+    REQUIRE(h.system.total_opens() == 1);
+
+    h.system.drop_connections("usb");
+    REQUIRE_FALSE(h.mgr.is_midi_input_open("usb"));
+
+    h.mgr.refresh_midi_endpoints();  // e.g. the system-wake notification
+    REQUIRE(h.mgr.is_midi_input_open("usb"));
+    REQUIRE(h.system.total_opens() == 2);
+    REQUIRE(h.system.inject("usb", pulp::midi::MidiEvent::note_on(0, 60, 100)) == 1);
+    REQUIRE(h.received == 1);
+}
+
 TEST_CASE("AudioDeviceManager endpoint identity includes direction",
           "[audio][audio-device-manager][midi-reconnect]") {
     AudioDeviceManager mgr;

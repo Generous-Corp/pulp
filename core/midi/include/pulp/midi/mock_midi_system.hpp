@@ -73,6 +73,19 @@ public:
         return delivered;
     }
 
+    /// Sever the connection of every open input on `id` while the port stays
+    /// listed, as when an OS replaces an endpoint behind a still-present name
+    /// (a device that vanished and returned across a sleep). The inputs then
+    /// report `is_open() == false`.
+    void drop_connections(const std::string& id) {
+        std::lock_guard<std::mutex> lk(mu_);
+        for (auto& s : inputs_) {
+            if (s->port_id == id) s->open = false;
+        }
+        inputs_.erase(std::remove_if(inputs_.begin(), inputs_.end(),
+            [](const std::shared_ptr<InputState>& s) { return !s->open; }), inputs_.end());
+    }
+
     /// Number of currently open inputs on `id`.
     int open_input_count(const std::string& id) const {
         std::lock_guard<std::mutex> lk(mu_);

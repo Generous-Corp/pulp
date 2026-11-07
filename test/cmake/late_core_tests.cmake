@@ -41,6 +41,10 @@ pulp_add_test_suite(pulp-test-audio-route-catalog
     LIBRARIES pulp::host)
 
 # MIDI 1.0 backend audit
+# Conformance audit: BLE-MIDI timestamp wrap, system common vs running status in
+# both byte-stream parsers, CC 120/123 on the keyboard-state tracker.
+pulp_add_test_suite(pulp-test-midi-conformance-audit GROUP pulp-test-group-late-midi
+    LIBRARIES pulp::midi)
 pulp_add_test_suite(pulp-test-midi1-backend-audit GROUP pulp-test-group-late-midi
     LIBRARIES pulp::midi)
 

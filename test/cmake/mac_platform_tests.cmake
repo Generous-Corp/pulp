@@ -125,6 +125,20 @@ if(APPLE AND NOT PULP_IOS)
         "-framework CoreMIDI"
     )
     catch_discover_tests(pulp-test-coremidi-shared-client)
+
+    # A port connected to an endpoint that was replaced (host sleep, unplug)
+    # must report closed so its owner reopens it. In-process virtual endpoints
+    # against the real framework; skips where no MIDI server is reachable.
+    add_executable(pulp-test-coremidi-reconnect
+        test_coremidi_reconnect.cpp
+    )
+    target_link_libraries(pulp-test-coremidi-reconnect PRIVATE
+        pulp::midi
+        Catch2::Catch2WithMain
+        "-framework CoreMIDI"
+        "-framework CoreFoundation"
+    )
+    catch_discover_tests(pulp-test-coremidi-reconnect)
 endif()
 if(APPLE AND NOT PULP_IOS)
     # AppKit re-asks which cursor to show when the pointer MOVES and never

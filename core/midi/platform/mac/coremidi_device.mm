@@ -6,6 +6,13 @@
 #include <CoreMIDI/CoreMIDI.h>
 #include <TargetConditionals.h>
 #include <mach/mach_time.h>
+#if TARGET_OS_OSX
+#import <AppKit/AppKit.h>
+#endif
+#include <dispatch/dispatch.h>
+
+#include <memory>
+#include <mutex>
 
 #include "coremidi_shared_client.h"
 
@@ -33,6 +40,21 @@ double host_ticks_to_seconds(MIDITimeStamp ticks) {
                                static_cast<long double>(timebase.numer) /
                                static_cast<long double>(timebase.denom) /
                                1.0e9L);
+}
+
+// True while `endpoint` is still the live object registered under
+// `unique_id`. A device that is unplugged, or that disappears across a system
+// sleep, takes its endpoint object with it; when it comes back it is a new
+// object under the same unique id. A port connected to the old object receives
+// nothing, but nothing tells the port so. Comparing the registered object with
+// the one we connected to detects exactly that.
+bool endpoint_is_current(MIDIEndpointRef endpoint, SInt32 unique_id) {
+    if (endpoint == 0) return false;
+    if (unique_id == 0) return true;  // No id to verify against.
+    MIDIObjectRef found = 0;
+    MIDIObjectType type = kMIDIObjectType_Other;
+    const OSStatus status = MIDIObjectFindByUniqueID(unique_id, &found, &type);
+    return status == noErr && found == endpoint;
 }
 
 }  // namespace
@@ -150,8 +172,10 @@ public:
         ItemCount source_count = MIDIGetNumberOfSources();
         if (port_id.empty() || port_id == "0") {
             if (source_count > 0) {
-                status = MIDIPortConnectSource(port_, MIDIGetSource(0), nullptr);
+                MIDIEndpointRef first = MIDIGetSource(0);
+                status = MIDIPortConnectSource(port_, first, nullptr);
                 is_open_ = (status == noErr);
+                if (is_open_) remember_source(first);
             }
             if (!is_open_) close();
             return is_open_;
@@ -174,6 +198,7 @@ public:
                 status = MIDIPortConnectSource(port_, src, nullptr);
                 if (status == noErr) {
                     is_open_ = true;
+                    remember_source(src);
                     return true;
                 }
             }
@@ -190,17 +215,33 @@ public:
         // Drop any in-progress sysex so a reopened port starts fresh
         // and never emits a stale partial payload.
         sysex_reassembler_.reset();
+        source_ = 0;
+        source_unique_id_ = 0;
         is_open_ = false;
     }
 
-    bool is_open() const override { return is_open_; }
+    // Open means the port exists AND the endpoint it was connected to is
+    // still the one registered under that id. After a sleep or unplug the
+    // answer turns false, which tells an owner that reopens on `!is_open()`
+    // (AudioDeviceManager) to connect again.
+    bool is_open() const override {
+        return is_open_ && endpoint_is_current(source_, source_unique_id_);
+    }
 
     void set_sysex_callback(MidiSysexCallback cb) override {
         sysex_callback_ = std::move(cb);
     }
 
 private:
+    void remember_source(MIDIEndpointRef source) {
+        source_ = source;
+        source_unique_id_ = 0;
+        MIDIObjectGetIntegerProperty(source, kMIDIPropertyUniqueID, &source_unique_id_);
+    }
+
     MIDIPortRef port_ = 0;
+    MIDIEndpointRef source_ = 0;
+    SInt32 source_unique_id_ = 0;
     MidiInputCallback callback_;
     MidiSysexCallback sysex_callback_;
     // SysEx7 (UMP type 0x03) reassembly state — shared implementation
@@ -250,7 +291,12 @@ public:
         }
 
         is_open_ = (dest_ != 0);
-        if (!is_open_) close();
+        if (is_open_) {
+            dest_unique_id_ = 0;
+            MIDIObjectGetIntegerProperty(dest_, kMIDIPropertyUniqueID, &dest_unique_id_);
+        } else {
+            close();
+        }
         return is_open_;
     }
 
@@ -258,13 +304,18 @@ public:
         // The client is shared process-wide and outlives this port.
         if (port_) { MIDIPortDispose(port_); port_ = 0; }
         dest_ = 0;
+        dest_unique_id_ = 0;
         is_open_ = false;
     }
 
-    bool is_open() const override { return is_open_; }
+    // See CoreMidiInput::is_open(): a destination replaced across a sleep or
+    // unplug is no longer the object this port was opened on.
+    bool is_open() const override {
+        return is_open_ && endpoint_is_current(dest_, dest_unique_id_);
+    }
 
     void send(const MidiEvent& event) override {
-        if (!is_open_ || !dest_) return;
+        if (!is_open_ || !dest_ || !endpoint_is_current(dest_, dest_unique_id_)) return;
 
         // Build a MIDI 1.0 UMP word
         const auto* d = event.data();
@@ -283,14 +334,17 @@ public:
 private:
     MIDIPortRef port_ = 0;
     MIDIEndpointRef dest_ = 0;
+    SInt32 dest_unique_id_ = 0;
     bool is_open_ = false;
 };
 
 class CoreMidiSystem : public MidiSystem {
 public:
-    CoreMidiSystem() = default;
+    CoreMidiSystem() : notify_(std::make_shared<NotifyState>()) {}
 
     ~CoreMidiSystem() override {
+        notify_->set({});
+        remove_wake_observer();
         if (system_client_) {
             MIDIClientDispose(system_client_);
             system_client_ = 0;
@@ -298,18 +352,25 @@ public:
     }
 
     void set_port_change_callback(PortChangeCallback cb) override {
-        port_change_cb_ = std::move(cb);
+        const bool have_callback = static_cast<bool>(cb);
+        notify_->set(std::move(cb));
 
-        // Create a persistent client with notification callback for hotplug
-        if (port_change_cb_ && !system_client_) {
+        if (!have_callback) {
+            remove_wake_observer();
+            return;
+        }
+
+        // Create a persistent client with notification callback for hotplug.
+        // The block holds the shared notify state, not `this`, so a late
+        // notification after destruction finds an empty callback.
+        if (!system_client_) {
+            auto notify = notify_;
             OSStatus status = MIDIClientCreateWithBlock(
                 CFSTR("PulpMIDISystem"),
                 &system_client_,
                 ^(const MIDINotification* notification) {
                     if (notification->messageID == kMIDIMsgSetupChanged) {
-                        if (this->port_change_cb_) {
-                            this->port_change_cb_();
-                        }
+                        notify->fire();
                     }
                 });
             if (status != noErr) {
@@ -317,6 +378,7 @@ public:
                                   static_cast<int>(status));
             }
         }
+        install_wake_observer();
     }
 
     std::vector<MidiPortInfo> enumerate_inputs() override {
@@ -378,8 +440,63 @@ public:
     }
 
 private:
+    // Callback slot shared with the blocks the OS holds, so they never
+    // dereference a destroyed system.
+    struct NotifyState {
+        void set(PortChangeCallback cb) {
+            std::lock_guard<std::mutex> lk(mu);
+            callback = std::move(cb);
+        }
+        void fire() {
+            PortChangeCallback current;
+            {
+                std::lock_guard<std::mutex> lk(mu);
+                current = callback;
+            }
+            if (current) current();
+        }
+        std::mutex mu;
+        PortChangeCallback callback;
+    };
+
+    // After the host wakes from sleep, endpoints that vanished during sleep
+    // return as new objects. CoreMIDI posts a setup change for that, but a
+    // connection can also be lost without one, so wake itself reports a port
+    // change: once straight away, and once more after the devices have had
+    // time to re-enumerate. Consumers that reopen on a changed port list then
+    // reconnect without any user action.
+    void install_wake_observer() {
+#if TARGET_OS_OSX
+        if (wake_observer_) return;
+        auto notify = notify_;
+        id token = [[[NSWorkspace sharedWorkspace] notificationCenter]
+            addObserverForName:NSWorkspaceDidWakeNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification*) {
+                        notify->fire();
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+                                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                                           notify->fire();
+                                       });
+                    }];
+        wake_observer_ = token ? CFRetain((__bridge CFTypeRef)token) : nullptr;
+#endif
+    }
+
+    void remove_wake_observer() {
+#if TARGET_OS_OSX
+        if (!wake_observer_) return;
+        [[[NSWorkspace sharedWorkspace] notificationCenter]
+            removeObserver:(__bridge id)wake_observer_];
+        CFRelease(wake_observer_);
+        wake_observer_ = nullptr;
+#endif
+    }
+
     MIDIClientRef system_client_ = 0;
-    PortChangeCallback port_change_cb_;
+    std::shared_ptr<NotifyState> notify_;
+    CFTypeRef wake_observer_ = nullptr;
 };
 
 } // namespace pulp::midi::mac
