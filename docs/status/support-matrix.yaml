@@ -671,6 +671,29 @@ platform_maturity:
   tab_focus:
     status: usable
     notes: Tab/Shift+Tab cycles focus through focusable views. Wraps at ends.
+      Disabled views and their subtrees are skipped.
+  disabled_input_contract:
+    status: usable
+    notes: A disabled view, or one inside a disabled ancestor, receives no key,
+      text, gesture, hover-enter, press, move, drag or double-click, but still gets
+      the release and pointer-exit that finish an interaction in progress. The
+      cursor over it is the default. Enforced by the delivery functions in
+      pointer_dispatch.hpp; tested by test_disabled_input_contract.cpp.
+  modifier_key_changes:
+    status: partial
+    notes: View::on_modifier_keys_changed reaches the focused view and any view a
+      pointer press is captured by. Reported by the macOS standalone and plug-in
+      hosts (flagsChanged), the Windows plug-in host (modifier virtual keys) and
+      the browser host (keydown/keyup of Shift, Control, Alt, Meta). The Linux and
+      Android hosts have no keyboard path yet, so they do not report it. Tested
+      by test_modifier_keys_changed.cpp.
+  focus_cause:
+    status: usable
+    notes: Focus changes carry a FocusCause (pointer, keyboard, programmatic).
+      :focus-visible is true only for keyboard and programmatic focus, and
+      :focus-within follows on_descendant_focus_changed, delivered to every
+      ancestor. Script elements receive focus, blur, focusin and focusout from
+      native focus changes. Tested by test_focus_cause.cpp.
   accessibility:
     macos:
       status: usable

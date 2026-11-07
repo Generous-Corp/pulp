@@ -316,7 +316,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
                                    ? _dragTargetCapture.live_in(*root)
                                    : nullptr;
                 if (!root || !target ||
-                    !pulp::view::transfer_input_focus(*root, target)) {
+                    !pulp::view::transfer_input_focus(*root, target, pulp::view::FocusCause::pointer)) {
                     _dragTargetCapture.reset();
                     _focusedView = root
                                        ? pulp::view::focused_input_under_root(*root)
@@ -891,32 +891,15 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
             else
                 next = pulp::view::View::focus_next(*self.rootView, old);
             if (next && next != old) {
-                pulp::view::ViewCapture next_capture;
-                next_capture.set(next);
-                if (old) {
-                    old->release_input_focus();
-                    old->on_focus_changed(false);
-                }
-                auto* liveRoot = self.rootView;
-                if (!liveRoot) {
-                    _focusedView = nullptr;
-                    [self setNeedsDisplay:YES];
-                    return;
-                }
-                next = next_capture.live_in(*liveRoot);
-                if (!next) {
-                    _focusedView = nullptr;
-                    [self setNeedsDisplay:YES];
-                    return;
-                }
-                _focusedView = next;
-                _focusedView->on_focus_changed(true);
-                liveRoot = self.rootView;
-                _focusedView = liveRoot
-                                   ? next_capture.live_in(*liveRoot)
+                // The same transfer a click uses: the previous holder blurs,
+                // the new one gains, and each side's ancestors are told, with
+                // the cause recorded as keyboard.
+                if (auto* liveRoot = self.rootView)
+                    pulp::view::transfer_input_focus(
+                        *liveRoot, next, pulp::view::FocusCause::keyboard);
+                _focusedView = self.rootView
+                                   ? pulp::view::focused_input_under_root(*self.rootView)
                                    : nullptr;
-                if (_focusedView)
-                    _focusedView->claim_input_focus();
             }
             [self setNeedsDisplay:YES];
             return;

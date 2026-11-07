@@ -474,17 +474,10 @@ private:
         if (on_dirty_) on_dirty_();
     }
 
-    void set_focus(View* target) {
+    void set_focus(View* target, FocusCause cause = FocusCause::pointer) {
         if (focus_target_ == target) return;
-        if (focus_target_) {
-            focus_target_->on_focus_changed(false);
-            focus_target_->release_input_focus();
-        }
-        focus_target_ = target;
-        if (focus_target_) {
-            focus_target_->on_focus_changed(true);
-            focus_target_->claim_input_focus();
-        }
+        transfer_input_focus(root_, target, cause);
+        focus_target_ = focused_input_under_root(root_);
     }
 
     bool pointer_down(const MouseEvent& me, int raw_pointer_id) {

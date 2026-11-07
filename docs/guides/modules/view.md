@@ -187,6 +187,25 @@ from `flagsChanged:`, the Windows plug-in host from the modifier virtual keys,
 and the browser host from `keydown` and `keyup` of Shift, Control, Alt and
 Meta. In tests, call `root.simulate_modifier_keys(kModShift)`.
 
+### Focus cause and focus-within
+
+Every focus change carries a `FocusCause`: `pointer` (a press focused the
+view), `keyboard` (Tab or another key moved focus) or `programmatic` (code moved
+it). Override `on_focus_changed(bool gained, FocusCause cause)` to read it; the
+one-argument `on_focus_changed(bool)` still works and is what the two-argument
+version calls by default. `View::focus_visible()` is true only for keyboard and
+programmatic focus, so a click does not draw a focus ring.
+
+`on_descendant_focus_changed(View& child, bool gained, FocusCause cause)` is
+called on every ancestor of the view whose focus changed, nearest first, after
+that view's own callback. `View::focus_within()` answers whether a view or any
+descendant holds focus. Use `transfer_input_focus(root, view, cause)` from
+`pointer_dispatch.hpp` to move focus with a cause.
+
+In a scripted UI, native focus changes become `focus`, `blur`, `focusin` and
+`focusout` events, keep `document.activeElement` current, and drive the CSS
+`:focus`, `:focus-visible` and `:focus-within` selectors.
+
 ## Accessibility
 
 Every widget has an access role, label, and value for screen readers:

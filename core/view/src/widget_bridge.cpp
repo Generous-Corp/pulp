@@ -336,6 +336,30 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // most as long as the bridge.
     repaint_callback_ = [&root] { root.request_repaint(); };
     register_api();
+    // Report every focus change under this root to script. The root hears about
+    // each descendant's change, so one pair of hooks covers the whole tree and
+    // no per-widget registration is needed. The script side turns the event
+    // into focus / blur / focusin / focusout and updates activeElement,
+    // :focus-within and :focus-visible.
+    {
+        auto alive = callback_alive_;
+        auto* eng = &engine_;
+        auto notify = [alive, eng](View& view, bool gained, FocusCause cause) {
+            if (view.id().empty()) return;
+            BridgeCallbackScope scope(alive);
+            const bool visible = gained && cause != FocusCause::pointer;
+            const char* cause_name = cause == FocusCause::pointer    ? "pointer"
+                                     : cause == FocusCause::keyboard ? "keyboard"
+                                                                     : "programmatic";
+            dispatch_event(alive, eng, view.id(), gained ? "focus" : "blur",
+                           std::string("{cause:'") + cause_name +
+                               "',focusVisible:" + (visible ? "true" : "false") + "}");
+        };
+        root_.on_descendant_focus_event = notify;
+        root_.on_focus_event = [notify, root = &root_](bool gained, FocusCause cause) {
+            notify(*root, gained, cause);
+        };
+    }
     eval_or_throw(engine_, "kJSPreamble", dispatch_prelude_js() + kJSPreamblePart2);
     const auto eval_prelude = [this](const char* name, const auto& prelude) {
         eval_or_throw(engine_, name, preludes::source(prelude));

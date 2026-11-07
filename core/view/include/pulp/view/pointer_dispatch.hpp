@@ -93,6 +93,13 @@ bool yield_to_gesture_with_handoff(View& root, View*& drag_target,
 /// of truth; the process-global focus shim is never consulted.
 bool transfer_input_focus(View& root, View* target);
 
+/// As above, recording why focus moved. The previous holder's loss and the
+/// target's gain both carry `cause`; every ancestor of each is then told
+/// through `on_descendant_focus_changed`. A disabled target (or one inside a
+/// disabled ancestor) is not focusable here. The overload without a cause
+/// reports `FocusCause::programmatic`.
+bool transfer_input_focus(View& root, View* target, FocusCause cause);
+
 /// Return this root's live focused input. Uses RootInteractionState rather than
 /// the process-global compatibility shim.
 View* focused_input_under_root(View& root);

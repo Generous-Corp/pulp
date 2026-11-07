@@ -216,7 +216,7 @@ public:
                 cancel_gesture();
                 return;
             }
-            if (!transfer_input_focus(root, drag_target)) {
+            if (!transfer_input_focus(root, drag_target, FocusCause::pointer)) {
                 if (accepts_original()) {
                     drag_target_.reset();
                     cancel_gesture();

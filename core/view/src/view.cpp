@@ -439,6 +439,15 @@ void apply_pointer(MouseEvent& e, const View::SimulatedPointer& p) {
 
 }  // namespace
 
+bool View::focus_within() const {
+    const RootInteractionState* state =
+        const_cast<View*>(this)->existing_interaction();
+    const View* focused = state ? state->focused_input : nullptr;
+    for (const View* v = focused; v != nullptr; v = v->parent_)
+        if (v == this) return true;
+    return false;
+}
+
 bool View::simulate_modifier_keys(Modifiers modifiers) {
     return deliver_modifier_keys_changed(*this, modifiers);
 }
@@ -659,6 +668,8 @@ void View::simulate_drag(Point start, Point end, int steps,
 }
 
 static void collect_focusable(View& root, std::vector<View*>& out) {
+    // A disabled view and its subtree are not in the tab order.
+    if (!root.enabled()) return;
     if (root.focusable()) out.push_back(&root);
     for (size_t i = 0; i < root.child_count(); ++i)
         collect_focusable(*root.child_at(i), out);

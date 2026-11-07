@@ -47,6 +47,15 @@ enum class RuntimeViewKind : std::uint8_t {
     generic, knob, fader, toggle, scroll, eq_curve, design_frame
 };
 
+/// Why a view gained or lost focus. `:focus-visible` is true only for
+/// `keyboard` and `programmatic`; a pointer press that focuses a control does
+/// not show its focus ring.
+enum class FocusCause : std::uint8_t {
+    pointer,       ///< A mouse, touch or pen press focused the view.
+    keyboard,      ///< Tab, Shift+Tab or another key moved focus.
+    programmatic,  ///< Code moved focus (focus(), setFocus, autofocus).
+};
+
 /// Identity-safe reference to a View captured across native event boundaries.
 /// Capturing records the root and current structure generation while the View
 /// is known-live. `live_in()` is therefore O(1) until a detach invalidates that
@@ -486,6 +495,39 @@ public:
     /// Called when this view gains or loses focus.
     /// Default implementation updates has_focus_ state. Subclasses should call base.
     virtual void on_focus_changed(bool gained) { has_focus_ = gained; }
+
+    /// As above, with the reason focus moved. Hosts and the focus-transfer
+    /// functions call this overload. The default records the cause (see
+    /// `focus_cause()` and `focus_visible()`) and forwards to the overload
+    /// above, so a widget that overrides only that one keeps working.
+    virtual void on_focus_changed(bool gained, FocusCause cause) {
+        focus_cause_ = cause;
+        focus_visible_ = gained && cause != FocusCause::pointer;
+        on_focus_changed(gained);
+    }
+
+    /// Called on every ancestor of a view whose focus changed, nearest first,
+    /// after that view's own `on_focus_changed`. `child` is the view that
+    /// gained or lost focus, not the ancestor's direct child.
+    virtual void on_descendant_focus_changed(View& child, bool gained,
+                                             FocusCause cause) {
+        (void)child; (void)gained; (void)cause;
+    }
+
+    /// Cause of the most recent focus change delivered to this view.
+    FocusCause focus_cause() const { return focus_cause_; }
+    /// CSS `:focus-visible`: this view has focus and got it from the keyboard
+    /// or from code, so a focus ring should show.
+    bool focus_visible() const { return has_focus_ && focus_visible_; }
+    /// CSS `:focus-within`: this view or any descendant holds input focus.
+    bool focus_within() const;
+
+    /// Observers of focus changes, set by the script bridge. `on_focus_event`
+    /// fires for this view's own gain or loss, `on_descendant_focus_event` for
+    /// a descendant's.
+    std::function<void(bool gained, FocusCause cause)> on_focus_event;
+    std::function<void(View& child, bool gained, FocusCause cause)>
+        on_descendant_focus_event;
 
     /// Gesture event (pinch/rotate from multi-touch or trackpad).
     virtual void on_gesture_event(const GestureEvent& event) {
@@ -3089,6 +3131,8 @@ private:
     static std::atomic<std::uint64_t> constructed_count_;
     static std::atomic<std::uint64_t> destroyed_count_;
     /// Clears scene-cache validity up the ancestor chain without counting an
+    bool focus_visible_ = false;
+    FocusCause focus_cause_ = FocusCause::programmatic;
     /// unmarked paint mutation (the repaint requests use it: they mark).
     void stale_subtree_caches_up();
     bool has_focus_ = false;

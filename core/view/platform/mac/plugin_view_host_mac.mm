@@ -286,7 +286,7 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
                 drag_target->set(refreshed.target);
             }
             auto* target = drag_target->live_in(*root);
-            if (!target || !pulp::view::transfer_input_focus(*root, target)) {
+            if (!target || !pulp::view::transfer_input_focus(*root, target, pulp::view::FocusCause::pointer)) {
                 drag_target->reset();
                 return;
             }
@@ -334,7 +334,7 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
             if (!drag_target->live_in(*root)) return;
         }
         auto* target = drag_target->live_in(*root);
-        if (!target || !pulp::view::transfer_input_focus(*root, target)) {
+        if (!target || !pulp::view::transfer_input_focus(*root, target, pulp::view::FocusCause::pointer)) {
             drag_target->reset();
             return;
         }
