@@ -901,8 +901,7 @@ TEST_CASE("a contract session offers the extension to its editor from create on"
     auto& editor = s.editor();
     REQUIRE(editor.at_create != nullptr);
     // The editor and the adapter reach one object.
-    REQUIRE(editor.at_create ==
-            static_cast<NativeSurfaceHost*>(s.session->native_surface_host()));
+    REQUIRE(editor.at_create == static_cast<NativeSurfaceHost*>(s.session->native_surface_host()));
     REQUIRE(s.attach());
     REQUIRE(editor.at_attach == editor.at_create);
 
@@ -916,8 +915,7 @@ TEST_CASE("a contract session offers the extension to its editor from create on"
     s.session->detach();
 }
 
-TEST_CASE("the contract session's other extension ids stay null",
-          "[editor-host][native-surface]") {
+TEST_CASE("the contract session's other extension ids stay null", "[editor-host][native-surface]") {
     pulp::state::StateStore store;
     SilentProcessor processor;
     struct ContextGrab final : public EditorFactory {
@@ -1092,8 +1090,7 @@ TEST_CASE("an empty observer registers nothing", "[editor-host][native-surface]"
     REQUIRE(state.observer_count() == 0);
 }
 
-TEST_CASE("an observation that outlives its host state is inert",
-          "[editor-host][native-surface]") {
+TEST_CASE("an observation that outlives its host state is inert", "[editor-host][native-surface]") {
     NativeSurfaceObservation observation;
     {
         NativeSurfaceHostState state;
