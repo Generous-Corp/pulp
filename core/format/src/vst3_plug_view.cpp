@@ -32,7 +32,7 @@ using namespace Steinberg;
 // does not expose IRunLoop remains static/input-driven, with no fallback worker
 // or fabricated 60 Hz clock.
 class PulpPlugView::LinuxFrameTimer final : public Linux::ITimerHandler {
-public:
+  public:
     explicit LinuxFrameTimer(PulpPlugView& owner) : owner_(&owner) {}
 
     void PLUGIN_API onTimer() override {
@@ -41,7 +41,8 @@ public:
     }
 
     tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
-        if (!obj) return kInvalidArgument;
+        if (!obj)
+            return kInvalidArgument;
         *obj = nullptr;
         if (FUnknownPrivate::iidEqual(iid, Linux::ITimerHandler::iid) ||
             FUnknownPrivate::iidEqual(iid, FUnknown::iid)) {
@@ -52,12 +53,18 @@ public:
         return kNoInterface;
     }
 
-    uint32 PLUGIN_API addRef() override { return 1; }
-    uint32 PLUGIN_API release() override { return 1; }
+    uint32 PLUGIN_API addRef() override {
+        return 1;
+    }
+    uint32 PLUGIN_API release() override {
+        return 1;
+    }
 
-    void clear_owner() { owner_ = nullptr; }
+    void clear_owner() {
+        owner_ = nullptr;
+    }
 
-private:
+  private:
     PulpPlugView* owner_ = nullptr;
 };
 #endif
@@ -145,8 +152,8 @@ void PulpPlugView::unregister_linux_frame_timer() {
 void PulpPlugView::on_linux_frame_timer() {
     if (!editor_host_ || !isAttached())
         return;
-    const double now = std::chrono::duration<double>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
+    const double now =
+        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
     editor_host_->advance_frame(now);
 }
 #endif

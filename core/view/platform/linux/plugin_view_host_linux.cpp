@@ -217,8 +217,7 @@ public:
         in_frame_tick_ = true;
         if (drain_x_events())
             needs_repaint_ = true;
-        if (!should_dispatch_host_frame(frame_pump_, needs_repaint_,
-                                        continuous_frames_,
+        if (!should_dispatch_host_frame(frame_pump_, needs_repaint_, continuous_frames_,
                                         static_cast<bool>(idle_callback_))) {
             in_frame_tick_ = false;
             return;
@@ -231,8 +230,8 @@ public:
             idle_callback_();
         const bool dirty = needs_repaint_;
         needs_repaint_ = false;
-        const auto tick = begin_host_frame(&root_, frame_clock_, frame_pump_,
-                                           timestamp_seconds, dirty);
+        const auto tick =
+            begin_host_frame(&root_, frame_clock_, frame_pump_, timestamp_seconds, dirty);
         if (tick.should_render) {
             advance_host_frame(&root_, frame_clock_, tick.dt);
             in_frame_tick_ = false;
@@ -242,8 +241,8 @@ public:
         }
         // A subscriber/animation may have started or stopped during advance.
         // Re-evaluate after the tick so the next callback is gated correctly.
-        continuous_frames_ = frame_clock_.has_active_subscribers() ||
-                             needs_continuous_frames(&root_);
+        continuous_frames_ =
+            frame_clock_.has_active_subscribers() || needs_continuous_frames(&root_);
     }
 
     // The paint half of repaint(), without the event pump, so the pump itself
@@ -1036,8 +1035,8 @@ private:
         paint_plugin_scene(canvas, root_, frame_geometry(), clip);
     }
 
-    bool render_frame_gpu(std::vector<uint8_t>* cap, uint32_t* cap_w,
-                          uint32_t* cap_h, bool run_idle_callback = true) {
+    bool render_frame_gpu(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h,
+                          bool run_idle_callback = true) {
         if (!gpu_surface_ || !skia_surface_) return false;
 
         PluginFrameRenderer::Request request;
@@ -1082,7 +1081,8 @@ private:
     // dims. Empty on failure.
     std::vector<uint8_t> raster_render(uint32_t* out_w, uint32_t* out_h,
                                        bool run_idle_callback = true) {
-        if (run_idle_callback && idle_callback_) idle_callback_();
+        if (run_idle_callback && idle_callback_)
+            idle_callback_();
         return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h);
     }
 

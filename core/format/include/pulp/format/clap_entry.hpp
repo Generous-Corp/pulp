@@ -609,10 +609,9 @@ inline void install_editor_resize_handler(
 // PluginViewHost's HostFramePump. Hosts that do not expose timer-support keep
 // the honest static/input-triggered behavior and emit an unavailable receipt.
 inline void stop_native_gui_timer(clap_adapter::PulpClapPlugin& plugin) {
-    if (plugin.editor_timer_id != CLAP_INVALID_ID && plugin.editor_host_timer &&
-        plugin.host && plugin.editor_host_timer->unregister_timer) {
-        plugin.editor_host_timer->unregister_timer(plugin.host,
-                                                    plugin.editor_timer_id);
+    if (plugin.editor_timer_id != CLAP_INVALID_ID && plugin.editor_host_timer && plugin.host &&
+        plugin.editor_host_timer->unregister_timer) {
+        plugin.editor_host_timer->unregister_timer(plugin.host, plugin.editor_timer_id);
     }
     plugin.editor_timer_id = CLAP_INVALID_ID;
     plugin.editor_host_timer = nullptr;
@@ -646,8 +645,8 @@ inline void native_gui_on_timer(const clap_plugin_t* plugin, clap_id timer_id) {
     if (!p || !p->editor_host || !p->editor_parent_attached || !p->editor_visible ||
         p->editor_timer_id != timer_id)
         return;
-    const double now = std::chrono::duration<double>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
+    const double now =
+        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
     p->editor_host->advance_frame(now);
 }
 

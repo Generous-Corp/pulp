@@ -53,7 +53,7 @@ public:
     Steinberg::tresult PLUGIN_API onKeyDown(Steinberg::char16 key, Steinberg::int16 keyCode,
                                             Steinberg::int16 modifiers) override;
 
-private:
+  private:
 #if defined(__linux__)
     class LinuxFrameTimer;
     friend class LinuxFrameTimer;

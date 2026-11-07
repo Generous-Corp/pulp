@@ -434,7 +434,7 @@ public:
     // host owns its FrameClock/HostFramePump and gates detached/hidden views;
     // the default keeps foreign hosts that cannot schedule frames honest.
     virtual void advance_frame(double timestamp_seconds) {
-        (void) timestamp_seconds;
+        (void)timestamp_seconds;
     }
 
     // Capture the host's current back buffer as a PNG (mirrors
