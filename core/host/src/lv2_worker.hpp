@@ -69,7 +69,7 @@ class Lv2MessageRing {
             return false;
         copy_out(tail, &size, sizeof(size));
         if (out.size() < size)
-            return false;  // Cannot happen when `out` holds capacity() bytes.
+            return false; // Cannot happen when `out` holds capacity() bytes.
         copy_out(tail + sizeof(size), out.data(), size);
         tail_.store(tail + sizeof(size) + size, std::memory_order_release);
         return true;

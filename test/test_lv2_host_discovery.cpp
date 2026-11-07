@@ -54,8 +54,8 @@ void write_file(const fs::path& path, const std::string& body) {
 void write_manifest(const fs::path& bundle, const std::string& uri, const std::string& binary,
                     const std::vector<std::string>& see_also) {
     std::string body = "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n"
-                       "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n<"
-                       + uri + ">\n    a lv2:Plugin ;\n    lv2:binary <" + binary + ">";
+                       "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n<" +
+                       uri + ">\n    a lv2:Plugin ;\n    lv2:binary <" + binary + ">";
     for (const auto& file : see_also)
         body += " ;\n    rdfs:seeAlso <" + file + ">";
     body += " .\n";
@@ -240,8 +240,7 @@ TEST_CASE("LV2 host discovery parses audio and control port roles",
     REQUIRE(roles[3].name == "Meter");
 }
 
-TEST_CASE("LV2 host discovery resolves the binary the manifest names",
-          "[host][lv2][issue-493]") {
+TEST_CASE("LV2 host discovery resolves the binary the manifest names", "[host][lv2][issue-493]") {
     ScratchDir scratch("binary");
     const auto bundle = scratch.path / "Binary.lv2";
     fs::create_directories(bundle);
@@ -254,12 +253,11 @@ TEST_CASE("LV2 host discovery resolves the binary the manifest names",
     const auto so = bundle / "pulp-probe.so";
     write_file(so, "not a real shared library");
     write_manifest(bundle, "http://example.com/pulp/binary", "pulp-probe.so", {});
-    REQUIRE(fs::canonical(pulp::host::detail::resolve_lv2_binary(bundle.string()))
-            == fs::canonical(so));
+    REQUIRE(fs::canonical(pulp::host::detail::resolve_lv2_binary(bundle.string())) ==
+            fs::canonical(so));
 }
 
-TEST_CASE("LV2 host discovery merges descriptions split across files",
-          "[host][lv2]") {
+TEST_CASE("LV2 host discovery merges descriptions split across files", "[host][lv2]") {
     ScratchDir scratch("sparse");
     const auto missing = scratch.path / "Missing.lv2";
 
@@ -304,8 +302,8 @@ TEST_CASE("LV2 host discovery merges descriptions split across files",
     const auto roles = pulp::host::detail::discover_lv2_ports(bundle.string());
     REQUIRE(roles.size() == 2);
 
-    const auto control = std::find_if(roles.begin(), roles.end(),
-                                      [](const auto& role) { return role.index == 0; });
+    const auto control =
+        std::find_if(roles.begin(), roles.end(), [](const auto& role) { return role.index == 0; });
     REQUIRE(control != roles.end());
     REQUIRE(control->is_control);
     REQUIRE(control->is_input);
@@ -315,14 +313,14 @@ TEST_CASE("LV2 host discovery merges descriptions split across files",
     REQUIRE_THAT(control->min_value, WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(control->max_value, WithinAbs(1.0f, 1e-6f));
 
-    const auto audio = std::find_if(roles.begin(), roles.end(),
-                                    [](const auto& role) { return role.index == 1; });
+    const auto audio =
+        std::find_if(roles.begin(), roles.end(), [](const auto& role) { return role.index == 1; });
     REQUIRE(audio != roles.end());
     REQUIRE(audio->is_audio);
     REQUIRE_FALSE(audio->is_input);
 
-    REQUIRE(fs::canonical(pulp::host::detail::resolve_lv2_binary(bundle.string()))
-            == fs::canonical(module));
+    REQUIRE(fs::canonical(pulp::host::detail::resolve_lv2_binary(bundle.string())) ==
+            fs::canonical(module));
 }
 
 TEST_CASE("LV2 PluginSlot load fails cleanly for invalid bundles",

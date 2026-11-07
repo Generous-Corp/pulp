@@ -196,8 +196,7 @@ TEST_CASE("LV2 slot plays notes, returns the plugin's MIDI, and passes options",
     slot->release();
 }
 
-TEST_CASE("LV2 slot sends the host transport as time:Position",
-          "[host][lv2][slot][lilv]") {
+TEST_CASE("LV2 slot sends the host transport as time:Position", "[host][lv2][slot][lilv]") {
     auto slot = load();
     REQUIRE(slot->prepare(kRate, kFrames));
     Block block;
@@ -235,8 +234,8 @@ TEST_CASE("LV2 slot runs the worker on a thread, or in the block when offline",
         block.run(*slot, transport(0.0, false, 0));
         REQUIRE_THAT(slot->get_parameter(kSeenFreeWheel), WithinAbs(0.0f, 1e-6f));
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (slot->get_parameter(kWorkerResponses) < 1.0f
-               && std::chrono::steady_clock::now() < deadline) {
+        while (slot->get_parameter(kWorkerResponses) < 1.0f &&
+               std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
             block.run(*slot, transport(0.0, false, 0));
         }
@@ -341,7 +340,7 @@ TEST_CASE("LV2 slot saves and restores plugin state and port values",
 TEST_CASE("LV2 instrument in a SignalGraph gets notes, transport, and delay compensation",
           "[host][lv2][slot][lilv][graph]") {
     auto owned = load();
-    PluginSlot* synth_slot = owned.get();  // Observation ports, read after each block.
+    PluginSlot* synth_slot = owned.get(); // Observation ports, read after each block.
     pulp::host::SignalGraph graph;
     // The routed executor is the graph path that hands the transport to a
     // plugin that asks for it.
@@ -376,7 +375,7 @@ TEST_CASE("LV2 instrument in a SignalGraph gets notes, transport, and delay comp
     float peak = 0.0f;
     for (float s : left)
         peak = std::max(peak, s);
-    REQUIRE(peak > 0.4f);  // Level 0.5 at full velocity reached the graph output.
+    REQUIRE(peak > 0.4f); // Level 0.5 at full velocity reached the graph output.
 }
 
 TEST_CASE("LV2 slot refuses a plugin that requires a feature it does not provide",
@@ -384,8 +383,8 @@ TEST_CASE("LV2 slot refuses a plugin that requires a feature it does not provide
     const fs::path dir = pulp::test::make_unique_temp_dir("pulp-lv2-required-feature");
     const fs::path bundle = dir / "NeedsMore.lv2";
     fs::create_directories(bundle);
-    const fs::path module = fs::path(PULP_TEST_LV2_HOST_INSTRUMENT_BUNDLE)
-                            / ("lv2_host_instrument" PULP_TEST_LV2_MODULE_SUFFIX);
+    const fs::path module = fs::path(PULP_TEST_LV2_HOST_INSTRUMENT_BUNDLE) /
+                            ("lv2_host_instrument" PULP_TEST_LV2_MODULE_SUFFIX);
     REQUIRE(fs::exists(module));
     {
         std::ofstream ttl(bundle / "manifest.ttl");

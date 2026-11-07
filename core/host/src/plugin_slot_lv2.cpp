@@ -134,7 +134,7 @@ struct Lv2Bundle {
         nodes = std::make_unique<Lv2Nodes>(world);
         std::string dir = bundle_dir;
         if (dir.back() != '/' && dir.back() != '\\')
-            dir.push_back('/');  // lilv requires a bundle URI to end in a slash.
+            dir.push_back('/'); // lilv requires a bundle URI to end in a slash.
         LilvNode* bundle_uri = lilv_new_file_uri(world, nullptr, dir.c_str());
         if (!bundle_uri)
             return false;
@@ -204,14 +204,15 @@ struct Lv2Bundle {
             auto designated = [&](const char* uri) {
                 return designations && lilv_nodes_contains(designations, n.get(uri));
             };
-            r.reports_latency = !r.is_input && r.is_control
-                                && (has(LV2_CORE__reportsLatency) || designated(LV2_CORE__latency));
+            r.reports_latency = !r.is_input && r.is_control &&
+                                (has(LV2_CORE__reportsLatency) || designated(LV2_CORE__latency));
             r.free_wheeling = r.is_input && r.is_control && designated(LV2_CORE__freeWheeling);
             r.designated_control = r.is_atom && designated(LV2_CORE__control);
             if (designations)
                 lilv_nodes_free(designations);
             if (r.is_atom) {
-                r.supports_midi = lilv_port_supports_event(plugin, port, n.get(LV2_MIDI__MidiEvent));
+                r.supports_midi =
+                    lilv_port_supports_event(plugin, port, n.get(LV2_MIDI__MidiEvent));
                 r.supports_time = lilv_port_supports_event(plugin, port, n.get(LV2_TIME__Position));
                 r.supports_patch =
                     lilv_port_supports_event(plugin, port, n.get(LV2_PATCH__Message));
@@ -237,7 +238,7 @@ struct Lv2Bundle {
             LilvNodes* props = lilv_world_find_nodes(world, subject, n.get(predicate), nullptr);
             if (!props)
                 return;
-            LILV_FOREACH (nodes, it, props) {
+            LILV_FOREACH(nodes, it, props) {
                 const LilvNode* prop = lilv_nodes_get(props, it);
                 if (!lilv_node_is_uri(prop))
                     continue;
@@ -253,10 +254,10 @@ struct Lv2Bundle {
                     range && lilv_node_is_uri(range) ? lilv_node_as_uri(range) : "";
                 if (range)
                     lilv_node_free(range);
-                const bool integral = range_uri == LV2_ATOM__Int || range_uri == LV2_ATOM__Long
-                                      || range_uri == LV2_ATOM__Bool;
+                const bool integral = range_uri == LV2_ATOM__Int || range_uri == LV2_ATOM__Long ||
+                                      range_uri == LV2_ATOM__Bool;
                 if (!integral && range_uri != LV2_ATOM__Float && range_uri != LV2_ATOM__Double)
-                    continue;  // Paths, strings, and URIDs are not scalar parameters.
+                    continue; // Paths, strings, and URIDs are not scalar parameters.
                 detail::Lv2PatchParameter p;
                 p.uri = uri;
                 p.writable = writable;
@@ -283,7 +284,8 @@ struct Lv2Bundle {
         };
         collect(LV2_PATCH__writable, true);
         collect(LV2_PATCH__readable, false);
-        std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.uri < b.uri; });
+        std::sort(out.begin(), out.end(),
+                  [](const auto& a, const auto& b) { return a.uri < b.uri; });
         return out;
     }
 
@@ -312,13 +314,13 @@ bool looks_like_loadable_module(const std::string& path) {
 #elif defined(__APPLE__)
     if (bytes < 4)
         return false;
-    return (magic[0] == 0xfe && magic[1] == 0xed && magic[2] == 0xfa
-            && (magic[3] == 0xce || magic[3] == 0xcf))
-           || (magic[0] == 0xce && magic[1] == 0xfa && magic[2] == 0xed && magic[3] == 0xfe)
-           || (magic[0] == 0xcf && magic[1] == 0xfa && magic[2] == 0xed && magic[3] == 0xfe)
-           || (magic[0] == 0xca && magic[1] == 0xfe && magic[2] == 0xba
-               && (magic[3] == 0xbe || magic[3] == 0xbf))
-           || (magic[0] == 0xbe && magic[1] == 0xba && magic[2] == 0xfe && magic[3] == 0xca);
+    return (magic[0] == 0xfe && magic[1] == 0xed && magic[2] == 0xfa &&
+            (magic[3] == 0xce || magic[3] == 0xcf)) ||
+           (magic[0] == 0xce && magic[1] == 0xfa && magic[2] == 0xed && magic[3] == 0xfe) ||
+           (magic[0] == 0xcf && magic[1] == 0xfa && magic[2] == 0xed && magic[3] == 0xfe) ||
+           (magic[0] == 0xca && magic[1] == 0xfe && magic[2] == 0xba &&
+            (magic[3] == 0xbe || magic[3] == 0xbf)) ||
+           (magic[0] == 0xbe && magic[1] == 0xba && magic[2] == 0xfe && magic[3] == 0xca);
 #else
     return bytes >= 4 && magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F';
 #endif
@@ -353,7 +355,7 @@ class UridMap {
         std::lock_guard<std::mutex> lock(mutex_);
         if (id == 0 || id > uris_.size())
             return nullptr;
-        return uris_[id - 1].c_str();  // A deque never moves its elements.
+        return uris_[id - 1].c_str(); // A deque never moves its elements.
     }
 
     LV2_URID_Map* map_feature() {
@@ -473,8 +475,8 @@ bool atom_scalar(const UridSet& u, const LV2_Atom* atom, float& out) {
 /// One event to forge into an input sequence, ordered by frame.
 struct PendingAtomEvent {
     std::int32_t frame = 0;
-    const midi::MidiEvent* midi = nullptr;  ///< Null for a patch:Set.
-    std::uint32_t ordinal = 0;              ///< Patch parameter, when `midi` is null.
+    const midi::MidiEvent* midi = nullptr; ///< Null for a patch:Set.
+    std::uint32_t ordinal = 0;             ///< Patch parameter, when `midi` is null.
     float value = 0.0f;
 };
 
@@ -545,8 +547,8 @@ class Lv2Slot final : public PluginSlot {
                     const auto& r = ports_[i];
                     if (!r.is_atom || !r.is_input)
                         continue;
-                    if ((pass == 0 && r.supports_patch) || (pass == 1 && r.designated_control)
-                        || pass == 2)
+                    if ((pass == 0 && r.supports_patch) || (pass == 1 && r.designated_control) ||
+                        pass == 2)
                         patch_port_ = static_cast<int>(i);
                 }
             }
@@ -577,8 +579,7 @@ class Lv2Slot final : public PluginSlot {
         if (instance_) {
             pull_host_controls();
             carried = save_state_string_locked();
-        }
-        else
+        } else
             carried.swap(pending_restore_);
         destroy_instance();
 
@@ -638,8 +639,8 @@ class Lv2Slot final : public PluginSlot {
         auto* input = audio.main_input();
         audio::BufferView<float> empty_output;
         audio::BufferView<const float> empty_input;
-        run_block(output ? *output : empty_output, input ? *input : empty_input, midi_in,
-                  midi_out, param_events, num_samples, &transport);
+        run_block(output ? *output : empty_output, input ? *input : empty_input, midi_in, midi_out,
+                  param_events, num_samples, &transport);
     }
 
     std::vector<HostParamInfo> parameters() const override {
@@ -673,8 +674,7 @@ class Lv2Slot final : public PluginSlot {
         // Control inputs reach the plugin at the start of the next block.
         if (static_cast<std::size_t>(id) >= ports_.size() || !is_host_control(id))
             return;
-        control_shadow_[static_cast<std::size_t>(id)].store(plain_value,
-                                                            std::memory_order_relaxed);
+        control_shadow_[static_cast<std::size_t>(id)].store(plain_value, std::memory_order_relaxed);
     }
 
     void set_bypass(bool b) override {
@@ -735,8 +735,8 @@ class Lv2Slot final : public PluginSlot {
     int latency_samples() const override {
         if (latency_port_ < 0)
             return 0;
-        const float v =
-            control_shadow_[static_cast<std::size_t>(latency_port_)].load(std::memory_order_relaxed);
+        const float v = control_shadow_[static_cast<std::size_t>(latency_port_)].load(
+            std::memory_order_relaxed);
         return v > 0.0f ? static_cast<int>(std::lround(v)) : 0;
     }
     LatencyQuery latency_query() const override {
@@ -870,9 +870,9 @@ class Lv2Slot final : public PluginSlot {
 
     std::string save_state_string_locked() {
         LilvState* state = lilv_state_new_from_instance(
-            bundle_->plugin, instance_, urid_map_.map_feature(), nullptr, nullptr, nullptr,
-            nullptr, &Lv2Slot::get_port_value_trampoline, this,
-            LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE, state_features_.data());
+            bundle_->plugin, instance_, urid_map_.map_feature(), nullptr, nullptr, nullptr, nullptr,
+            &Lv2Slot::get_port_value_trampoline, this, LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE,
+            state_features_.data());
         if (!state)
             return {};
         char* text = lilv_state_to_string(bundle_->world, urid_map_.map_feature(),
@@ -1028,8 +1028,8 @@ class Lv2Slot final : public PluginSlot {
         std::unique_lock<std::mutex> state_lock(state_mutex_, std::try_to_lock);
         // A restore or re-prepare holds the lock; this block passes the input
         // through rather than wait on the audio thread.
-        if (!state_lock.owns_lock() || !instance_ || !active_ || num_samples <= 0
-            || num_samples > max_block_size_ || bypassed_.load(std::memory_order_relaxed)) {
+        if (!state_lock.owns_lock() || !instance_ || !active_ || num_samples <= 0 ||
+            num_samples > max_block_size_ || bypassed_.load(std::memory_order_relaxed)) {
             copy_or_zero(output, input, num_samples);
             return;
         }
@@ -1043,9 +1043,9 @@ class Lv2Slot final : public PluginSlot {
         pull_host_controls();
         for (const auto& pe : param_events) {
             if (pe.param_id >= kPatchParamIdBase)
-                continue;  // Forged as patch:Set below, at its own frame.
-            if (static_cast<std::size_t>(pe.param_id) < ports_.size()
-                && is_host_control(pe.param_id)) {
+                continue; // Forged as patch:Set below, at its own frame.
+            if (static_cast<std::size_t>(pe.param_id) < ports_.size() &&
+                is_host_control(pe.param_id)) {
                 control_values_[static_cast<std::size_t>(pe.param_id)] = pe.value;
                 control_shadow_[static_cast<std::size_t>(pe.param_id)].store(
                     pe.value, std::memory_order_relaxed);
@@ -1161,10 +1161,10 @@ class Lv2Slot final : public PluginSlot {
                 const auto* bytes = e.midi->message.data();
                 if (len < 1 || len > 3 || (bytes[0] & 0x80) == 0)
                     continue;
-                if (!lv2_atom_forge_frame_time(&forge, e.frame)
-                    || !lv2_atom_forge_atom(&forge, len, urids_.midi_event)
-                    || !lv2_atom_forge_write(&forge, bytes, len))
-                    break;  // Sequence full: later events in this block are dropped.
+                if (!lv2_atom_forge_frame_time(&forge, e.frame) ||
+                    !lv2_atom_forge_atom(&forge, len, urids_.midi_event) ||
+                    !lv2_atom_forge_write(&forge, bytes, len))
+                    break; // Sequence full: later events in this block are dropped.
             } else if (patch_here) {
                 LV2_Atom_Forge_Frame obj;
                 if (!lv2_atom_forge_frame_time(&forge, e.frame))
@@ -1184,11 +1184,11 @@ class Lv2Slot final : public PluginSlot {
     // or meter changes, and when the position is not where the previous block
     // left it (a locate or a loop wrap).
     bool transport_needs_send(const format::ProcessContext& t) const {
-        if (!transport_sent_ || t.transport_jump || t.transport_changed || t.tempo_changed
-            || t.time_sig_changed)
+        if (!transport_sent_ || t.transport_jump || t.transport_changed || t.tempo_changed ||
+            t.time_sig_changed)
             return true;
-        if (t.is_playing != last_playing_ || t.tempo_bpm != last_tempo_
-            || t.time_sig_numerator != last_num_ || t.time_sig_denominator != last_den_)
+        if (t.is_playing != last_playing_ || t.tempo_bpm != last_tempo_ ||
+            t.time_sig_numerator != last_num_ || t.time_sig_denominator != last_den_)
             return true;
         return t.position_samples != expected_frame_;
     }
@@ -1237,7 +1237,7 @@ class Lv2Slot final : public PluginSlot {
         // a bad size must not walk the host off the buffer.
         if (seq->atom.type != urids_.atom_sequence || seq->atom.size + sizeof(LV2_Atom) > capacity)
             return;
-        LV2_ATOM_SEQUENCE_FOREACH (seq, ev) {
+        LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
             if (ev->body.type == urids_.midi_event) {
                 if (!midi_out || ev->body.size < 1 || ev->body.size > 3)
                     continue;
@@ -1362,15 +1362,14 @@ std::unique_ptr<PluginSlot> load_lv2_plugin(const PluginInfo& info) {
     }
     const std::string bin = bundle->binary_path();
     if (bin.empty() || !looks_like_loadable_module(bin)) {
-        runtime::log_error("LV2 load: plugin binary '{}' is missing or not a loadable module",
-                           bin);
+        runtime::log_error("LV2 load: plugin binary '{}' is missing or not a loadable module", bin);
         return nullptr;
     }
 
     // LV2 forbids instantiating a plugin without every feature it requires.
     if (LilvNodes* required = lilv_plugin_get_required_features(bundle->plugin)) {
         std::string missing;
-        LILV_FOREACH (nodes, it, required) {
+        LILV_FOREACH(nodes, it, required) {
             const char* uri = lilv_node_as_uri(lilv_nodes_get(required, it));
             if (!feature_supported(uri))
                 missing += std::string(missing.empty() ? "" : ", ") + uri;

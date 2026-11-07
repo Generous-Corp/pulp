@@ -78,7 +78,7 @@ struct Instrument {
     float* ports[kPortCount] = {};
     float max_block = 0.0f;
     float sample_rate = 0.0f;
-    float level = 0.0f;  // Current note's velocity / 127; zero when no note.
+    float level = 0.0f; // Current note's velocity / 127; zero when no note.
     float amount = 1.0f;
     std::int32_t note_ons = 0;
     std::int32_t worker_responses = 0;
@@ -184,8 +184,8 @@ void handle_object(Instrument* self, const LV2_Atom_Object* obj) {
         ++self->time_messages;
         const LV2_Atom *speed = nullptr, *bar = nullptr, *bar_beat = nullptr, *unit = nullptr,
                        *per_bar = nullptr, *bpm = nullptr;
-        lv2_atom_object_get(obj, u.time_speed, &speed, u.time_bar, &bar, u.time_bar_beat,
-                            &bar_beat, u.time_beat_unit, &unit, u.time_beats_per_bar, &per_bar,
+        lv2_atom_object_get(obj, u.time_speed, &speed, u.time_bar, &bar, u.time_bar_beat, &bar_beat,
+                            u.time_beat_unit, &unit, u.time_beats_per_bar, &per_bar,
                             u.time_beats_per_minute, &bpm, 0);
         write_port(self, kSeenSpeed, atom_number(u, speed, -1.0f));
         write_port(self, kSeenBar, atom_number(u, bar, -1.0f));
@@ -196,8 +196,8 @@ void handle_object(Instrument* self, const LV2_Atom_Object* obj) {
     } else if (obj->body.otype == u.patch_set) {
         const LV2_Atom *property = nullptr, *value = nullptr;
         lv2_atom_object_get(obj, u.patch_property, &property, u.patch_value, &value, 0);
-        if (property && property->type == u.atom_urid
-            && reinterpret_cast<const LV2_Atom_URID*>(property)->body == u.amount) {
+        if (property && property->type == u.atom_urid &&
+            reinterpret_cast<const LV2_Atom_URID*>(property)->body == u.amount) {
             self->amount = atom_number(u, value, self->amount);
             write_port(self, kSeenAmount, self->amount);
         }
@@ -227,7 +227,7 @@ void run(LV2_Handle h, std::uint32_t frames) {
     };
 
     const auto* control = reinterpret_cast<const LV2_Atom_Sequence*>(self->ports[kControl]);
-    LV2_ATOM_SEQUENCE_FOREACH (control, ev) {
+    LV2_ATOM_SEQUENCE_FOREACH(control, ev) {
         render_to(static_cast<std::uint32_t>(ev->time.frames));
         if (ev->body.type == u.midi_event) {
             const auto* msg = static_cast<const std::uint8_t*>(LV2_ATOM_BODY_CONST(&ev->body));
@@ -241,8 +241,8 @@ void run(LV2_Handle h, std::uint32_t frames) {
                 ++self->note_ons;
                 const std::int32_t note = msg[1];
                 self->schedule->schedule_work(self->schedule->handle, sizeof(note), &note);
-            } else if (status == LV2_MIDI_MSG_NOTE_OFF
-                       || (status == LV2_MIDI_MSG_NOTE_ON && ev->body.size == 3 && msg[2] == 0)) {
+            } else if (status == LV2_MIDI_MSG_NOTE_OFF ||
+                       (status == LV2_MIDI_MSG_NOTE_ON && ev->body.size == 3 && msg[2] == 0)) {
                 self->level = 0.0f;
             } else if (status == LV2_MIDI_MSG_CONTROLLER && ev->body.size == 3 && msg[1] == 20) {
                 self->amount = static_cast<float>(msg[2]) / 10.0f;
@@ -267,7 +267,7 @@ void run(LV2_Handle h, std::uint32_t frames) {
     write_port(self, kTimeMessages, static_cast<float>(self->time_messages));
     write_port(self, kSeenFreeWheel, self->ports[kFreeWheel] ? *self->ports[kFreeWheel] : -1.0f);
     if (self->ports[kModCv] && self->ports[kModCv][0] != 0.0f)
-        write_port(self, kSeenFreeWheel, -2.0f);  // A CV input that is not silent.
+        write_port(self, kSeenFreeWheel, -2.0f); // A CV input that is not silent.
 }
 
 void cleanup(LV2_Handle h) {
@@ -331,7 +331,13 @@ const void* extension_data(const char* uri) {
 }
 
 const LV2_Descriptor kDescriptor = {
-    PULP_LV2_HOST_INSTRUMENT_URI, instantiate, connect_port, activate, run, nullptr, cleanup,
+    PULP_LV2_HOST_INSTRUMENT_URI,
+    instantiate,
+    connect_port,
+    activate,
+    run,
+    nullptr,
+    cleanup,
     extension_data,
 };
 
