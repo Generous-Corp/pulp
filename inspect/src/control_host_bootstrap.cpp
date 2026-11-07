@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cerrno>
 #include <charconv>
+#include <climits>
 #include <limits>
 #include <thread>
 

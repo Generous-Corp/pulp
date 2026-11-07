@@ -1,5 +1,6 @@
 #include <pulp/view/app_framework.hpp>
 #include "user_data_paths.hpp"
+#include <pulp/platform/special_dir.hpp>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -184,21 +185,7 @@ void NativeToolbar::add_separator() {
 // ── AppSettings ──────────────────────────────────────────────────────────
 
 std::filesystem::path detail::platform_settings_root() {
-#ifdef __APPLE__
-    const char* home = std::getenv("HOME");
-    if (home) return std::filesystem::path(home) / "Library" / "Application Support";
-    return {};
-#elif defined(_WIN32)
-    const char* appdata = std::getenv("APPDATA");
-    if (appdata) return std::filesystem::path(appdata);
-    return {};
-#else
-    const char* xdg = std::getenv("XDG_CONFIG_HOME");
-    if (xdg) return std::filesystem::path(xdg);
-    const char* home = std::getenv("HOME");
-    if (home) return std::filesystem::path(home) / ".config";
-    return {};
-#endif
+    return pulp::platform::special_dir(pulp::platform::SpecialDir::config);
 }
 
 static bool parse_settings_int(const std::string& text, int& out) {

@@ -291,6 +291,29 @@ TEST_CASE("pulp graph fmt is byte stable and render produces a WAV", "[cli][shel
     REQUIRE(std::filesystem::file_size(output) > 48000);
 }
 
+TEST_CASE("pulp graph save writes a separate canonical file and requires an output",
+          "[cli][shellout][graph]") {
+    if (!binary_exists())
+        SKIP("pulp not built");
+    const auto project = unique_temp_dir("pulp-graph-save");
+    const auto input = project / "input.pulpgraph";
+    const auto output = project / "output.pulpgraph";
+    write_text(
+        input,
+        R"({"format_version":1,"nodes":[{"id":1,"type":"audio_in","name":"in","num_input_ports":0,"num_output_ports":1,"gain":1}],"connections":[]})");
+
+    const auto saved =
+        run_pulp({"graph", "save", input.string(), "--output", output.string(), "--json"});
+    REQUIRE(saved.exit_code == 0);
+    REQUIRE(saved.stdout_output.find("\"code\":\"saved\"") != std::string::npos);
+    REQUIRE(std::filesystem::is_regular_file(output));
+    REQUIRE(read_file(output).find("\"format_version\": 2") != std::string::npos);
+
+    const auto missing = run_pulp({"graph", "save", input.string(), "--json"});
+    REQUIRE(missing.exit_code == 2);
+    REQUIRE(missing.stdout_output.find("missing_output") != std::string::npos);
+}
+
 TEST_CASE("pulp with no arguments prints help and exits 0", "[cli][shellout]") {
     if (!binary_exists()) {
         SKIP("pulp not built");
