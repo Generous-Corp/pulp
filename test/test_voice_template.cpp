@@ -143,7 +143,7 @@ TEST_CASE(
     forged_manifest.bindings.front().slot_ordinal = 7;
     CHECK_FALSE(encode_voice_bank_state(forged_manifest, forged_state).valid);
     forged_manifest = prepared.manifest;
-    forged_manifest.schema.bindings.front().shared_across_slots = true;
+    forged_manifest.bindings.front().spec.shared_across_slots = true;
     CHECK_FALSE(encode_voice_bank_state(forged_manifest, forged_state).valid);
     auto live = state_for(prepared.manifest, 0.5f);
     const auto unchanged = live;

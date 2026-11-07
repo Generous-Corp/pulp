@@ -245,6 +245,7 @@ bool manifest_matches(const VoiceBankManifest& manifest) {
             actual.spec.type != wanted.spec.type ||
             actual.spec.direction != wanted.spec.direction ||
             actual.spec.shape != wanted.spec.shape || actual.spec.rate != wanted.spec.rate ||
+            actual.spec.shared_across_slots != wanted.spec.shared_across_slots ||
             actual.spec.ordinal != wanted.spec.ordinal ||
             actual.identity.valid != wanted.identity.valid ||
             actual.identity.sha256 != wanted.identity.sha256 ||
