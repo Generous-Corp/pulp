@@ -448,6 +448,20 @@ if(PULP_AUDIO_QUALITY_LAB_GATE)
                 "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
             LABELS "audio;quality-lab;dependency-gate"
             TIMEOUT 120)
+    # Display-only image artifacts: a report with and without them has an
+    # identical gate view, no verdict module imports the exporter, and the
+    # attached block carries no absolute paths. Uses a fake CLI; needs no build.
+    add_test(NAME quality-lab-artifacts
+        COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
+            "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_artifacts.py"
+            -q)
+    set_tests_properties(quality-lab-artifacts
+        PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+            ENVIRONMENT
+                "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+            LABELS "audio;quality-lab;dependency-gate"
+            TIMEOUT 300)
 endif()
 if(PULP_HAS_VST3)
     # The VST3 sibling of the CLAP null above: same deterministic Processor,
