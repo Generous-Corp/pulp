@@ -51,6 +51,14 @@ struct TriggerTestAccess {
         REQUIRE(pin->host_event_projection != nullptr);
         pin->host_event_projection->mpe.reserve(capacity);
     }
+    static void reserve_host_destination_mpe(SignalGraph& g, std::size_t capacity) {
+        auto pin = g.live_slot_.live();
+        REQUIRE(pin);
+        const auto it = pin->runtime.find(pin->host_event_midi_input);
+        REQUIRE(it != pin->runtime.end());
+        REQUIRE(it->second.midi_input_mailbox);
+        it->second.midi_input_mailbox->writer_scratch.mpe.reserve(capacity);
+    }
     static pulp::midi::MpeVoiceTracker& host_projection_tracker(SignalGraph& g) {
         auto pin = g.live_slot_.live();
         REQUIRE(pin);
@@ -252,7 +260,7 @@ TEST_CASE("Host ingress preflights MPE fanout and retries without tracker mutati
     event.midi = pulp::midi::MidiEvent::pitch_bend(1, 10'000);
     const auto before_bend = tracker.find(1, 0)->pitch_bend_semitones;
     REQUIRE(fixture.graph.begin_host_event_block(1, 0, 1) == HostEventResult::Accepted);
-    for (std::uint64_t sequence = 1; sequence <= 4; ++sequence) {
+    for (std::uint64_t sequence = 1; sequence <= 8; ++sequence) {
         event.producer_sequence = sequence;
         REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
     }
@@ -263,11 +271,13 @@ TEST_CASE("Host ingress preflights MPE fanout and retries without tracker mutati
     CHECK(tracker.find(1, 0)->pitch_bend_semitones == before_bend);
     CHECK(Access::host_projection_mpe_size(fixture.graph) == 0);
 
-    // The ingress block was rolled back and sealed. Clearing the deliberately
-    // overfull test tracker lets the same staged records retry without a
-    // second publication, proving the refusal did not consume them.
-    tracker.reset();
-    Access::reserve_host_projection_mpe(fixture.graph, 1024);
+    // The projection has enough room for the fanout, but the graph-owned
+    // destination starts at its smaller 1024-event reservation. Expanding
+    // both destinations lets the same staged records retry without a second
+    // publication, proving the destination refusal did not consume them or
+    // mutate tracker state.
+    Access::reserve_host_projection_mpe(fixture.graph, 2048);
+    Access::reserve_host_destination_mpe(fixture.graph, 2048);
     REQUIRE(fixture.graph.begin_host_event_block(1, 0, 1) == HostEventResult::Accepted);
     REQUIRE(fixture.graph.process_checked(block.out, block.in, 1) == TriggerGraphResult::Accepted);
 }

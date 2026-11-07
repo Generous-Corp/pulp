@@ -894,8 +894,11 @@ HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph, std::uin
     const auto required_mpe = pending_mpe > std::numeric_limits<std::size_t>::max() - event_mpe
                                   ? std::numeric_limits<std::size_t>::max()
                                   : pending_mpe + event_mpe;
-    if (required_mpe >
-        projection.mpe.capacity() - std::min(projection.mpe.capacity(), projection.mpe.size()))
+    const auto projection_mpe_available =
+        projection.mpe.capacity() - std::min(projection.mpe.capacity(), projection.mpe.size());
+    const auto destination_mpe_available =
+        destination.mpe.capacity() - std::min(destination.mpe.capacity(), destination.mpe.size());
+    if (required_mpe > projection_mpe_available || required_mpe > destination_mpe_available)
         return refuse(HostEventResult::OutputCapacity);
 
     const auto mpe_result =
@@ -903,8 +906,6 @@ HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph, std::uin
                    projection.host_event_tracker, projection.mpe);
     if (mpe_result != HostEventResult::Accepted)
         return refuse(mpe_result);
-    if (projection.mpe.size() > destination.mpe.capacity())
-        return refuse(HostEventResult::OutputCapacity);
     // Publish through the graph-owned MidiInput mailbox.  The routed bridge
     // then gathers the same fixed MIDI/UMP/MPE payload into the graph scratch
     // before dispatch, preserving the ordinary graph event-edge semantics.
