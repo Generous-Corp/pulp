@@ -1256,6 +1256,10 @@ pulp_add_test_suite(pulp-test-permissions GROUP pulp-test-group-core-platform
 pulp_add_test_suite(pulp-test-environment GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)
 
+# Special directory resolution (pure per-OS layouts plus the host)
+pulp_add_test_suite(pulp-test-special-dir GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
+
 # Runtime tests
 pulp_add_test_suite(pulp-test-runtime
     SOURCES test_runtime.cpp harness/rt_allocation_probe.cpp

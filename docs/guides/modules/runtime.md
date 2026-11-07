@@ -276,6 +276,38 @@ source.cancel();                             // idempotent; also runs on destruc
 - `CancellationToken` is the former single type that both requested and observed
   cancellation. It still works and converts to `CancelToken`.
 
+## Special directories
+
+`pulp::platform::special_dir` (in `pulp/platform/special_dir.hpp`, which this module
+depends on) is the one place that knows where each OS keeps the user's folders.
+Settings, presets, content and log code call it instead of carrying their own
+`#ifdef` ladders.
+
+```cpp
+#include <pulp/platform/special_dir.hpp>
+using pulp::platform::SpecialDir;
+
+auto logs   = pulp::platform::special_dir(SpecialDir::logs) / "MyApp";
+auto assets = pulp::platform::special_dir(SpecialDir::bundle_dir);   // resource root of this plugin or app
+```
+
+Kinds: `home`, `documents`, `desktop`, `music`, `app_data` (per user),
+`app_data_shared` (all users), `config` (per-user settings), `temp`, `cache`,
+`logs`, `current_executable`, `bundle_dir`, `user_presets`. The header lists the
+exact path each platform returns.
+
+- An empty path means the location is unavailable. Fail closed instead of falling
+  back to a shared folder such as `/tmp`.
+- Nothing is created or checked for existence.
+- `bundle_dir` is the resource root of the binary that contains the Pulp code, so
+  a plugin gets its own bundle, not its host's. `current_executable` is the host.
+- Android resolves under the directory given to the existing `set_app_data_dir`
+  hook. WebAssembly resolves inside the in-memory file system.
+- `set_special_dir_override` redirects a kind for tests or for mobile hosts that
+  learn their sandbox late.
+- `special_dir_for(os, kind, inputs)` computes any platform's layout from an
+  explicit environment, which is how the layouts are tested on every host.
+
 ## ScopeGuard
 
 RAII cleanup — runs a callable on scope exit.

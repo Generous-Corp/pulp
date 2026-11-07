@@ -1,4 +1,5 @@
 #include <pulp/audio/sample_bank.hpp>
+#include <pulp/platform/special_dir.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/system.hpp>
 #include <pulp/state/content_registry.hpp>
@@ -924,20 +925,14 @@ ContentRegistry::ContentRegistry(fs::path data_root) : data_root_(std::move(data
 fs::path ContentRegistry::platform_data_root() {
     if (auto override = runtime::get_env("PULP_USER_DATA_DIR"); override && !override->empty())
         return fs::path(*override);
-#ifdef _WIN32
-    if (auto appdata = runtime::get_env("APPDATA"); appdata && !appdata->empty())
-        return fs::path(*appdata) / "Pulp";
-    if (auto profile = runtime::get_env("USERPROFILE"); profile && !profile->empty())
-        return fs::path(*profile) / "AppData" / "Roaming" / "Pulp";
-#elif defined(__APPLE__)
-    if (auto home = runtime::get_env("HOME"); home && !home->empty())
-        return fs::path(*home) / "Library" / "Application Support" / "Pulp";
+    if (auto base = pulp::platform::special_dir(pulp::platform::SpecialDir::app_data);
+        !base.empty()) {
+#if defined(_WIN32) || defined(__APPLE__)
+        return base / "Pulp";
 #else
-    if (auto xdg = runtime::get_env("XDG_DATA_HOME"); xdg && !xdg->empty())
-        return fs::path(*xdg) / "pulp";
-    if (auto home = runtime::get_env("HOME"); home && !home->empty())
-        return fs::path(*home) / ".local" / "share" / "pulp";
+        return base / "pulp";
 #endif
+    }
     return fs::current_path() / ".pulp-user-data";
 }
 
