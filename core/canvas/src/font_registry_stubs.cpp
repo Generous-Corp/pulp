@@ -39,7 +39,8 @@
 // degraded path: `word_break_step` defers to `cluster_step`, and
 // `line_break_opportunities` returns the trailing offset plus every
 // ASCII-space boundary. The API is always linkable.
-#if defined(PULP_HAS_SKIA) && __has_include(<unicode/brkiter.h>) && __has_include(<unicode/locid.h>)
+#if defined(PULP_HAS_SKIA) && defined(PULP_SYSTEM_ICU) &&                                          \
+    __has_include(<unicode/brkiter.h>) && __has_include(<unicode/locid.h>)
 #  define PULP_HAS_ICU_BREAK_ITERATOR 1
 #  include <unicode/brkiter.h>
 #  include <unicode/locid.h>
