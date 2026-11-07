@@ -24,9 +24,6 @@ from quality_lab import artifacts, pipeline
 
 PACKAGE_DIR = Path(artifacts.__file__).resolve().parent
 
-# The only modules allowed to import `artifacts`: the report assembler that
-# attaches the block after the verdict is final, and the CLI that forwards it.
-ALLOWED_IMPORTERS = {"pipeline.py", "cli.py"}
 
 
 def _gated_view(report: dict) -> str:
@@ -76,55 +73,101 @@ def no_pulp_bin(monkeypatch):
 
 
 def test_report_with_and_without_artifacts_has_identical_gate_view(tmp_path, monkeypatch):
-    without = pipeline.run("identity")
-    before = _gated_view(without)
+    """Drive the REAL attach site (pipeline.run_and_export) twice over the same
+    deterministic case: once with the CLI fence unset, once with a fake CLI that
+    renders files. Every gated field must come out byte-identical, and the
+    plain pipeline.run() report (which never attaches) must agree with both."""
+    baseline = _gated_view(pipeline.run("identity"))
 
-    # Skipped fence: nothing to render, block records why.
     monkeypatch.delenv(artifacts.PULP_BIN_ENV, raising=False)
-    skipped = artifacts.attach(pipeline.run("identity"), {"reference": "r.wav"}, str(tmp_path))
-    assert _gated_view(skipped) == before
-    block = skipped["advisory"]["artifacts"]
+    without = pipeline.run_and_export("identity", str(tmp_path / "without"))
+    assert _gated_view(without) == baseline
+    block = without["advisory"]["artifacts"]
     assert block["display_only"] is True
-    assert block["images"]["reference"]["status"] == "skipped"
-    assert "PULP_BIN" in block["images"]["reference"]["reason"]
+    for name in ("reference", "candidate"):
+        assert block["images"][name]["status"] == "skipped"
+        assert "PULP_BIN" in block["images"][name]["reason"]
 
-    # Fake CLI renders: the block fills in, the gate view does not move.
+    fake = _write_fake_pulp(tmp_path)
+    monkeypatch.setenv(artifacts.PULP_BIN_ENV, str(fake))
+    with_images = pipeline.run_and_export("identity", str(tmp_path / "with"))
+    assert _gated_view(with_images) == baseline
+    assert _gated_view(with_images) == _gated_view(without)
+    images = with_images["advisory"]["artifacts"]["images"]
+    for name in ("reference", "candidate"):
+        assert images[name]["status"] == "ok"
+        assert {item["kind"] for item in images[name]["items"]} == {"spectrogram", "waveform"}
+        assert (tmp_path / "with" / f"{name}.spectrogram.png").exists()
+        assert (tmp_path / "with" / f"{name}.waveform.png.json").exists()
+    # The attached block is the only place the images appear.
+    assert "artifacts" not in with_images
+    assert set(with_images.keys()) == set(without.keys())
+
+
+def test_attach_alone_never_touches_the_gate_view(tmp_path, monkeypatch):
+    report = pipeline.run("identity")
+    before = _gated_view(report)
     fake = _write_fake_pulp(tmp_path)
     monkeypatch.setenv(artifacts.PULP_BIN_ENV, str(fake))
     wav = tmp_path / "ref.wav"
     wav.write_bytes(b"RIFF")
-    rendered = artifacts.attach(pipeline.run("identity"), {"reference": str(wav)}, str(tmp_path))
-    assert _gated_view(rendered) == before
-    images = rendered["advisory"]["artifacts"]["images"]["reference"]
-    assert images["status"] == "ok"
-    kinds = {item["kind"] for item in images["items"]}
-    assert kinds == {"spectrogram", "waveform"}
-    assert (tmp_path / "reference.spectrogram.png").exists()
-    assert (tmp_path / "reference.waveform.png.json").exists()
-    # The attached block is the only place the images appear.
-    assert "artifacts" not in rendered
-    assert set(rendered.keys()) == set(without.keys())
+    assert _gated_view(artifacts.attach(report, {"reference": str(wav)}, str(tmp_path))) == before
 
 
-def test_no_verdict_participating_module_imports_artifacts():
-    offenders = []
+def _artifact_imports(path: Path) -> list[tuple[str, str | None]]:
+    """Every import of the artifacts module in `path` as (kind, enclosing function
+    or None for module level). Walks with parent links so a function-local import
+    can be told from a module-level one."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            setattr(child, "_parent", parent)
+    found: list[tuple[str, str | None]] = []
+    for node in ast.walk(tree):
+        names: list[str] = []
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            names = [module] + [f"{module}.{alias.name}" if module else alias.name for alias in node.names]
+        else:
+            continue
+        if not any(name == "artifacts" or name.endswith(".artifacts") for name in names):
+            continue
+        scope = None
+        cursor = getattr(node, "_parent", None)
+        while cursor is not None:
+            if isinstance(cursor, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                scope = cursor.name
+                break
+            cursor = getattr(cursor, "_parent", None)
+        found.append((type(node).__name__, scope))
+    return found
+
+
+def test_only_the_export_assembler_imports_artifacts():
+    """pipeline.py may import artifacts ONLY inside run_and_export (the one place
+    the block is attached, after the verdict is final); no module-level import
+    there, and no import anywhere else under quality_lab/ including cli.py. A
+    detector or verdict helper that reaches for it fails here, by construction."""
+    offenders: dict[str, list[tuple[str, str | None]]] = {}
     for path in sorted(PACKAGE_DIR.rglob("*.py")):
         if path.name == "artifacts.py":
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            names: list[str] = []
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                names = [module] + [f"{module}.{alias.name}" if module else alias.name for alias in node.names]
-            if any(name == "artifacts" or name.endswith(".artifacts") for name in names):
-                offenders.append(path.relative_to(PACKAGE_DIR).as_posix())
-    unexpected = [o for o in offenders if Path(o).name not in ALLOWED_IMPORTERS or "/" in o]
-    assert not unexpected, f"only the report assembler may import artifacts: {unexpected}"
-    # Control: the assembler really does import it, so the scan can see imports.
+        imports = _artifact_imports(path)
+        if imports:
+            offenders[path.relative_to(PACKAGE_DIR).as_posix()] = imports
+    assert set(offenders) <= {"pipeline.py"}, f"unexpected importers of artifacts: {offenders}"
+    # Control: the assembler really does import it, inside run_and_export only.
     assert "pipeline.py" in offenders
+    assert all(scope == "run_and_export" for _, scope in offenders["pipeline.py"]), offenders["pipeline.py"]
+    # Control for the scanner itself: a module-level import must be seen as such.
+    probe = ast.parse("from . import artifacts\n")
+    for parent in ast.walk(probe):
+        for child in ast.iter_child_nodes(parent):
+            setattr(child, "_parent", parent)
+    module_level = [n for n in ast.walk(probe) if isinstance(n, ast.ImportFrom)]
+    assert module_level and not isinstance(getattr(module_level[0], "_parent"), ast.FunctionDef)
 
 
 def test_attached_block_carries_no_absolute_paths(tmp_path, monkeypatch):
@@ -166,3 +209,43 @@ def test_cli_failure_and_refusal_are_recorded_not_raised(tmp_path, monkeypatch):
     assert block["status"] == "partial"
     assert all(item["status"] == "refused" and item["exit_code"] == 2 for item in block["items"])
     assert all("no frames" in item["reason"] for item in block["items"])
+
+
+def test_failure_reason_is_redacted_to_basenames(tmp_path, monkeypatch):
+    """The CLI echoes the input path in its errors ("not a readable file: <abs>");
+    the stored reason must not carry the absolute input, the output directory or
+    any of their parents."""
+    script = tmp_path / "pulp"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "wav = sys.argv[3]\n"
+        "png = sys.argv[sys.argv.index('--png') + 1]\n"
+        "sys.stderr.write('Error: input is not a readable file: ' + wav + '\\n')\n"
+        "sys.stderr.write('Error: failed to write PNG ' + png + '\\n')\n"
+        "sys.exit(1)\n",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv(artifacts.PULP_BIN_ENV, str(script))
+    nested = tmp_path / "corpus" / "speaker-0417"
+    nested.mkdir(parents=True)
+    wav = nested / "take-03.wav"
+    out_dir = tmp_path / "run-out"
+    out_dir.mkdir()
+    block = artifacts.render(str(wav), str(out_dir))
+    assert block["status"] == "partial"
+    for item in block["items"]:
+        assert item["status"] == "failed"
+        reason = item["reason"]
+        assert str(tmp_path) not in reason
+        assert "corpus/speaker-0417" not in reason
+        assert "take-03.wav" in reason  # the basename survives, the layout does not
+        assert not any(token.startswith("/") for token in reason.split()), reason
+
+
+def test_render_with_nothing_requested_is_skipped(tmp_path, monkeypatch):
+    monkeypatch.setenv(artifacts.PULP_BIN_ENV, str(_write_fake_pulp(tmp_path)))
+    block = artifacts.render(str(tmp_path / "x.wav"), str(tmp_path), spectrogram=False, waveform=False)
+    assert block["status"] == "skipped"
+    assert block["items"] == []

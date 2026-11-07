@@ -38,6 +38,22 @@ def _resolve(env_var: str = PULP_BIN_ENV) -> tuple[str | None, str]:
     return resolved, ""
 
 
+def _redact(text: str, *paths: str) -> str:
+    """Replace every absolute path the CLI may echo (the input, the output dir and
+    each of their parent directories) with its basename, longest first so a parent
+    never clips a child. Error text is the one place a path can leak past the
+    basename-only sidecar, so it is scrubbed before it is stored."""
+    candidates: set[str] = set()
+    for path in paths:
+        current = os.path.abspath(path)
+        while current and current not in ("/", os.path.dirname(current)):
+            candidates.add(current)
+            current = os.path.dirname(current)
+    for candidate in sorted(candidates, key=len, reverse=True):
+        text = text.replace(candidate, os.path.basename(candidate) or "/")
+    return text
+
+
 def _render(binary: str, verb: str, wav_path: str, out_dir: str, stem: str,
             extra_args: list[str], timeout_s: float) -> dict[str, Any]:
     png = os.path.join(out_dir, f"{stem}.{verb}.png")
@@ -46,13 +62,14 @@ def _render(binary: str, verb: str, wav_path: str, out_dir: str, stem: str,
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=timeout_s)
     except (OSError, subprocess.TimeoutExpired) as exc:  # pragma: no cover - environment
-        return {"kind": verb, "status": "failed", "reason": f"{type(exc).__name__}: {exc}"}
+        return {"kind": verb, "status": "failed",
+                "reason": _redact(f"{type(exc).__name__}: {exc}", wav_path, out_dir)}
     if proc.returncode != 0:
         return {
             "kind": verb,
             "status": "failed" if proc.returncode != 2 else "refused",
             "exit_code": proc.returncode,
-            "reason": (proc.stderr or proc.stdout).strip()[-400:],
+            "reason": _redact((proc.stderr or proc.stdout).strip(), wav_path, out_dir)[-400:],
         }
     try:
         with open(sidecar, encoding="utf-8") as fh:
@@ -89,6 +106,8 @@ def render(wav_path: str, out_dir: str, *, stem: str | None = None,
                              spectrogram_args or [], timeout_s))
     if waveform:
         items.append(_render(binary, "waveform", wav_path, out_dir, stem, [], timeout_s))
+    if not items:
+        return {**base, "status": "skipped", "reason": "no image kinds requested", "items": []}
     status = "ok" if all(i["status"] == "ok" for i in items) else "partial"
     return {**base, "status": status, "items": items}
 
