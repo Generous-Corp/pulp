@@ -74,6 +74,7 @@ if(APPLE AND NOT IOS)
         "-framework CoreMIDI"
         "-framework CoreFoundation"
         "-framework CoreBluetooth"
+        "-framework AppKit"  # NSWorkspace wake notification (coremidi_device.mm)
     )
 elseif(APPLE AND IOS)
     target_sources(pulp-midi PRIVATE
