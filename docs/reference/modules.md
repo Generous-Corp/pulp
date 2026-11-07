@@ -344,6 +344,37 @@ auto info = FormatRegistry::instance().read_info("song.mp3");
 // info->duration_seconds, info->num_channels, info->sample_rate
 ```
 
+### Ranged reads from a file, memory or byte source
+
+`AudioReader` decodes only the frames you ask for. WAV, AIFF, FLAC, MP3 and Ogg
+Vorbis seek inside the encoded stream, so reading a window near the end of a
+long file does not decode everything before it. Open it from a path, from
+encoded bytes already in memory, or from your own `AudioByteSource` (an archive
+member or a download cache, for example).
+
+```cpp
+#include <pulp/audio/audio_reader.hpp>
+
+auto reader = AudioReader::open_file("long_take.flac");
+if (reader && reader->supports_ranged_read()) {
+    // Two seconds starting one minute in, every channel.
+    const auto rate = reader->info().sample_rate;
+    auto window = reader->read(60ull * rate, 2ull * rate);
+}
+
+// Encoded bytes you already hold; the format is detected from the first bytes.
+auto from_memory = AudioReader::open_memory(bytes);
+```
+
+The reader applies the same `DecodeLimits` as the registry: the header's
+length and channel claims are checked on open, and the allocating `read()`
+refuses a window larger than `max_output_bytes`. Reading into your own planar
+buffers zero-fills frames past the end and returns how many frames were
+decoded. A format with no seekable decoder (AAC, ALAC and CAF on macOS, opened
+from a path) is decoded once on open and `supports_ranged_read()` returns
+false. Opening and reading decode and allocate, so keep both off the audio
+callback.
+
 For an already-resident RIFF/WAVE byte span, `inspect_wav()` and `decode_wav()`
 in `wav_decoder.hpp` provide a no-file-I/O, no-exceptions path with caller-set
 frame, channel, and decoded-byte ceilings. RF64, W64, and RIFX containers are

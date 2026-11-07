@@ -76,10 +76,26 @@ TEST_CASE("PulpSampler streams continuously across the preload boundary", "[samp
     }
 }
 
+TEST_CASE("PulpSampler streams a FLAC through the ranged decoder",
+          "[sampler][stream][codec]") {
+    TempSamplerFlac flac("codec_ranged_flac");
+    SamplerFixture fixture;
+    const auto loaded = fixture.proc->load_sample_file_result(flac.path);
+    REQUIRE(loaded.status == PulpSamplerLoadStatus::Ok);
+    REQUIRE(loaded.codec_capability == PulpSamplerCodecCapability::Ranged);
+    REQUIRE(loaded.codec() == "FLAC");
+    REQUIRE(loaded.channels == 1);
+    REQUIRE(loaded.sample_rate == 48000);
+    REQUIRE(loaded.total_frames == 32);
+    REQUIRE(fixture.proc->has_sample());
+}
+
 TEST_CASE("PulpSampler reports decode-once FLAC rejection without replacing its source",
           "[sampler][stream][codec][transaction]") {
     TempSamplerWav published("codec_fallback_published", 24000, 0.375f);
-    TempSamplerFlac fallback("codec_fallback_rejected");
+    // No length claim: the frame count comes from decoding the whole stream,
+    // which the strict streaming policy refuses.
+    TempSamplerFlac fallback("codec_fallback_rejected", false);
     SamplerFixture fixture;
     fixture.store.set_value(kSamplerAttack, 0.0f);
     fixture.store.set_value(kSamplerDecay, 0.0f);

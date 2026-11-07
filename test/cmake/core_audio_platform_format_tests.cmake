@@ -50,6 +50,11 @@ pulp_add_test_suite(pulp-test-offline-tracing
 pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
+# AudioReader: ranged reads from a path, memory or byte source equal a full
+# decode for WAV, AIFF, FLAC, MP3 and Ogg Vorbis built from one known signal.
+pulp_add_test_suite(pulp-test-audio-reader GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
 # DecodeLimits contract for the codec-backed readers (FLAC, MP3, OGG Vorbis).
 # A container header is an untrusted size claim: the reader must refuse it
 # before allocating output, and bound an unknown-length stream as it decodes.
