@@ -310,8 +310,10 @@ TEST_CASE("audio waveform reports float input above full scale without normalizi
     auto sel = run_pulp({"audio", "waveform", wav.string(), "--png", (ws / "sel.png").string(),
                          "--select", "0.125,0.333333333"});
     REQUIRE(sel.exit_code == 0);
-    CHECK(read_file(ws / "sel.png.json").find("\"selection_seconds\": [0.125, 0.333333333]") !=
-          std::string::npos);
+    // choc lays the array out one element per line; the values must be exact.
+    const std::string sel_json = read_file(ws / "sel.png.json");
+    const std::regex selection_re(R"re("selection_seconds": \[\s*0\.125,\s*0\.333333333\s*\])re");
+    CHECK(std::regex_search(sel_json, selection_re));
 
     // The spectrogram of the same file reports the same unclamped peak.
     auto s =

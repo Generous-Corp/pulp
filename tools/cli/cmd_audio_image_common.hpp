@@ -18,6 +18,8 @@
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/mmap_reader.hpp>
 
+#include <choc/containers/choc_Value.h>
+
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -29,8 +31,8 @@ namespace pulp::cli::audio_image {
 
 inline constexpr const char* kSidecarSchema = "pulp.audio.image.v1";
 
-/// Flags both verbs share. Verb-specific settings live beside this in the
-/// verb's own struct.
+/// Flags both verbs share. A verb seeds `width` / `height` with its own
+/// defaults before parsing, so there is no sentinel to resolve afterwards.
 struct ImageArgs {
     std::string input;
     std::string png;
@@ -39,8 +41,8 @@ struct ImageArgs {
     std::optional<double> start_s;
     std::optional<double> end_s;
     std::uint32_t channel = 0;
-    std::uint32_t width = 0;  ///< plot width in pixels; 0 = verb default
-    std::uint32_t height = 0; ///< plot height in pixels; 0 = verb default
+    std::uint32_t width = 0;  ///< plot width in pixels (verb default seeded)
+    std::uint32_t height = 0; ///< plot height in pixels (verb default seeded)
 };
 
 enum class CommonArg { not_common, consumed, error };
@@ -77,10 +79,14 @@ struct OpenedInput {
 /// with no frames). Errors are printed to stderr.
 int open_input(const ImageArgs& args, OpenedInput& out);
 
+/// Frames per streamed window. Bounds memory for ranged formats regardless of
+/// file length; the waveform verb rounds it down to a multiple of its peak
+/// resolution so consecutive windows tile the peak table.
+inline constexpr std::uint64_t kStreamWindowFrames = 1u << 20;
+
 /// What the streamed pass observed over the rendered range.
 struct StreamStats {
     double peak_abs = 0.0; ///< max |sample| over the range, unclamped
-    std::uint64_t frames = 0;
 };
 
 /// Streams the selected channel of the resolved range to `sink` in windows
@@ -91,15 +97,15 @@ bool stream_channel(OpenedInput& input, std::uint32_t channel, std::uint64_t win
 
 /// Settings and image facts the verb contributes to the sidecar.
 struct SidecarFields {
-    std::string verb;          ///< "spectrogram" or "waveform"
-    std::string settings_json; ///< a serialized JSON object
+    std::string verb;            ///< "spectrogram" or "waveform"
+    choc::value::Value settings; ///< the verb's typed settings object
     std::uint32_t image_width = 0;
     std::uint32_t image_height = 0;
 };
 
 /// Builds the `pulp.audio.image.v1` sidecar document.
-std::string build_sidecar_json(const ImageArgs& args, const OpenedInput& input,
-                               const SidecarFields& fields, const StreamStats& stats);
+choc::value::Value build_sidecar(const ImageArgs& args, const OpenedInput& input,
+                                 const SidecarFields& fields, const StreamStats& stats);
 
 /// Footer burned into the image: `<basename> sha256:<12 hex> <summary> pulp <version>`.
 std::string footer_text(const OpenedInput& input, const std::string& settings_summary);
@@ -110,9 +116,11 @@ std::string display_path(const ImageArgs& args, const std::string& path);
 /// Resolved sidecar path (`args.json`, or `<png>.json`).
 std::string sidecar_path(const ImageArgs& args);
 
-/// Encodes the image as PNG and writes it plus the sidecar. Returns a process
-/// exit code (0 or 1) and prints errors to stderr.
+/// Encodes the image as PNG and writes it plus the sidecar, each through a
+/// same-directory temporary and rename so a failure leaves neither half of
+/// the pair behind. Returns a process exit code (0 or 1) and prints errors to
+/// stderr.
 int write_outputs(const ImageArgs& args, const pulp::test::audio::RasterImage& image,
-                  const std::string& sidecar_json);
+                  const choc::value::Value& sidecar);
 
 } // namespace pulp::cli::audio_image

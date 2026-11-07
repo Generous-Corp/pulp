@@ -2,20 +2,17 @@
 
 #include "cmd_audio_waveform.hpp"
 
+#include "cli_common.hpp"
 #include "cmd_audio_image_common.hpp"
-#include "json_writer.hpp"
 
 #include <pulp/audio/analysis/waveform_raster.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/waveform_overview.hpp>
 
 #include <algorithm>
-#include <cstdio>
 #include <iostream>
 #include <optional>
 #include <sstream>
-
-extern bool parse_double_arg(const std::string& text, const char* flag, double& out);
 
 namespace {
 
@@ -24,7 +21,6 @@ namespace ana = pulp::test::audio;
 
 constexpr std::uint32_t kDefaultPlotWidth = 1024;
 constexpr std::uint32_t kDefaultPlotHeight = 192;
-constexpr std::uint64_t kStreamWindowFrames = 1u << 20;
 
 void print_usage() {
     std::cout << "Usage: pulp audio waveform <file> --png <out.png> [options]\n"
@@ -38,12 +34,6 @@ void print_usage() {
               << img::common_flags_help()
               << "\n"
                  "Exit codes: 0 rendered; 1 usage or I/O error; 2 nothing to render.\n";
-}
-
-std::string format_seconds(double value) {
-    char buffer[32];
-    std::snprintf(buffer, sizeof(buffer), "%.9g", value);
-    return buffer;
 }
 
 bool parse_selection(const std::string& text, double& start_s, double& end_s) {
@@ -71,6 +61,8 @@ int cmd_audio_waveform(const std::vector<std::string>& args) {
     }
 
     img::ImageArgs common;
+    common.width = kDefaultPlotWidth;
+    common.height = kDefaultPlotHeight;
     std::optional<std::pair<double, double>> selection_s;
 
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -110,19 +102,18 @@ int cmd_audio_waveform(const std::vector<std::string>& args) {
     if (const int rc = img::open_input(common, input); rc != 0)
         return rc;
 
-    const std::uint32_t plot_width = common.width ? common.width : kDefaultPlotWidth;
-    const std::uint32_t plot_height = common.height ? common.height : kDefaultPlotHeight;
     const std::uint32_t sample_rate = input.info.sample_rate;
 
     // Each streamed window becomes its own level-0 overview at a shared base
     // resolution; the chunks concatenate into one level because every window
     // but the last is a whole multiple of samples_per_peak long.
-    const std::uint32_t spp = ana::choose_samples_per_peak(input.range_frames(), plot_width);
-    const std::uint64_t window_frames = (kStreamWindowFrames / spp) * spp;
+    const std::uint32_t spp = ana::choose_samples_per_peak(input.range_frames(), common.width);
+    const std::uint64_t window_frames =
+        std::max<std::uint64_t>((img::kStreamWindowFrames / spp) * spp, spp);
     std::vector<pulp::audio::OverviewLevel> chunks;
     img::StreamStats stats;
     const bool streamed = img::stream_channel(
-        input, common.channel, std::max<std::uint64_t>(window_frames, spp),
+        input, common.channel, window_frames,
         [&](std::span<const float> window) {
             const float* channel_ptr = window.data();
             pulp::audio::BufferView<const float> view(&channel_ptr, 1, window.size());
@@ -140,22 +131,20 @@ int cmd_audio_waveform(const std::vector<std::string>& args) {
         std::cerr << "Error: no peaks could be built from the range\n";
         return 2;
     }
-    ana::WaveformColumns columns = ana::columns_from_level(level, 0, plot_width);
+    ana::WaveformColumns columns = ana::columns_from_level(level, 0, common.width);
 
     ana::WaveformImageOptions image_options;
-    image_options.plot_height = plot_height;
+    image_options.plot_height = common.height;
     if (selection_s) {
         if (selection_s->first < input.start_s || selection_s->second > input.end_s) {
-            std::cerr << "Error: --select " << format_seconds(selection_s->first) << ","
-                      << format_seconds(selection_s->second) << " lies outside the rendered range "
-                      << format_seconds(input.start_s) << ".." << format_seconds(input.end_s)
+            std::cerr << "Error: --select " << selection_s->first << "," << selection_s->second
+                      << " lies outside the rendered range " << input.start_s << ".." << input.end_s
                       << " s\n";
             return 1;
         }
         const double span = input.end_s - input.start_s;
-        const double a = (selection_s->first - input.start_s) / span;
-        const double b = (selection_s->second - input.start_s) / span;
-        image_options.selection_unit = std::make_pair(a, b);
+        image_options.selection_unit = std::make_pair((selection_s->first - input.start_s) / span,
+                                                      (selection_s->second - input.start_s) / span);
     }
 
     std::ostringstream summary;
@@ -169,19 +158,26 @@ int cmd_audio_waveform(const std::vector<std::string>& args) {
 
     const ana::RasterImage image = ana::render_waveform_image(columns, image_options, chrome);
 
-    std::ostringstream settings_json;
-    settings_json << "{\"samples_per_peak\": " << spp << ", \"peaks\": " << level.peaks_per_channel
-                  << ", \"plot_width\": " << plot_width << ", \"plot_height\": " << plot_height
-                  << ", \"clip_marker\": \"abs_sample_at_or_above_1\"";
-    if (selection_s)
-        settings_json << ", \"selection_seconds\": [" << format_seconds(selection_s->first) << ", "
-                      << format_seconds(selection_s->second) << "]";
-    settings_json << "}";
+    using choc::value::createFloat64;
+    using choc::value::createInt64;
+    using choc::value::createString;
+    auto settings_json = choc::value::createObject("");
+    settings_json.addMember("samples_per_peak", createInt64(spp));
+    settings_json.addMember("peaks", createInt64(level.peaks_per_channel));
+    settings_json.addMember("plot_width", createInt64(common.width));
+    settings_json.addMember("plot_height", createInt64(common.height));
+    settings_json.addMember("clip_marker", createString("abs_sample_at_or_above_1"));
+    if (selection_s) {
+        auto selection = choc::value::createEmptyArray();
+        selection.addArrayElement(createFloat64(selection_s->first));
+        selection.addArrayElement(createFloat64(selection_s->second));
+        settings_json.addMember("selection_seconds", selection);
+    }
 
     img::SidecarFields fields;
     fields.verb = "waveform";
-    fields.settings_json = settings_json.str();
+    fields.settings = settings_json;
     fields.image_width = image.width;
     fields.image_height = image.height;
-    return img::write_outputs(common, image, img::build_sidecar_json(common, input, fields, stats));
+    return img::write_outputs(common, image, img::build_sidecar(common, input, fields, stats));
 }

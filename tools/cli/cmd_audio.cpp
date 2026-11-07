@@ -32,11 +32,6 @@
 #include "cmd_audio_validate.hpp"
 #include "cmd_audio_waveform.hpp"
 
-// Parsing helpers (defined in cli_common.cpp, not in header since they are only
-// used by audio command — declare them locally to keep the header lean).
-extern bool parse_size_arg(const std::string& text, const char* flag, std::size_t& out);
-extern bool parse_double_arg(const std::string& text, const char* flag, double& out);
-
 static void print_audio_usage() {
     std::cout << "pulp audio — repo-level audio analysis tooling\n\n";
     std::cout << "Usage:\n";

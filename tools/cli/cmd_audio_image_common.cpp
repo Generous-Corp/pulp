@@ -2,25 +2,28 @@
 
 #include "cmd_audio_image_common.hpp"
 
+#include "atomic_text_file.hpp"
 #include "cli_common.hpp"
 #include "cmd_audio_png.hpp"
-#include "json_writer.hpp"
 
 #include <pulp/audio/format_registry.hpp>
 #include <pulp/runtime/crypto.hpp>
 
+#include <choc/text/choc_JSON.h>
+
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
-#include <sstream>
 #include <system_error>
 
-extern bool parse_size_arg(const std::string& text, const char* flag, std::size_t& out);
-extern bool parse_double_arg(const std::string& text, const char* flag, double& out);
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -53,14 +56,6 @@ bool same_file(const fs::path& a, const fs::path& b) {
     return !na.empty() && na == nb;
 }
 
-std::string json_number(double value) {
-    if (!std::isfinite(value))
-        return "null";
-    char buffer[64];
-    std::snprintf(buffer, sizeof(buffer), "%.9g", value);
-    return buffer;
-}
-
 std::string platform_name() {
 #if defined(__APPLE__)
     return "macos";
@@ -73,6 +68,14 @@ std::string platform_name() {
 #else
     return "unknown";
 #endif
+}
+
+// A double that JSON can carry: non-finite values become null rather than a
+// token no parser accepts.
+choc::value::Value json_double(double value) {
+    if (!std::isfinite(value))
+        return {};
+    return choc::value::createFloat64(value);
 }
 
 } // namespace
@@ -168,6 +171,10 @@ int open_input(const ImageArgs& args, OpenedInput& out) {
     }
     if (args.png.empty()) {
         std::cerr << "Error: --png <out.png> is required\n";
+        return 1;
+    }
+    if (args.width == 0 || args.height == 0) {
+        std::cerr << "Error: --width and --height must be positive\n";
         return 1;
     }
     std::error_code ec;
@@ -288,7 +295,6 @@ bool stream_channel(OpenedInput& input, std::uint32_t channel, std::uint64_t win
             if (magnitude > stats.peak_abs)
                 stats.peak_abs = magnitude;
         }
-        stats.frames += count;
         sink(window);
         frame += count;
     }
@@ -307,60 +313,73 @@ std::string footer_text(const OpenedInput& input, const std::string& settings_su
     return footer;
 }
 
-std::string build_sidecar_json(const ImageArgs& args, const OpenedInput& input,
-                               const SidecarFields& fields, const StreamStats& stats) {
-    std::ostringstream json;
+choc::value::Value build_sidecar(const ImageArgs& args, const OpenedInput& input,
+                                 const SidecarFields& fields, const StreamStats& stats) {
+    using choc::value::createBool;
+    using choc::value::createInt64;
+    using choc::value::createObject;
+    using choc::value::createString;
+
     const double sample_rate = static_cast<double>(input.info.sample_rate);
     const double peak_dbfs = stats.peak_abs > 0.0 ? 20.0 * std::log10(stats.peak_abs)
                                                   : -std::numeric_limits<double>::infinity();
 
-    json << "{\n";
-    json << "  \"schema\": " << json_string(kSidecarSchema) << ",\n";
-    json << "  \"display_only\": true,\n";
-    json << "  \"verb\": " << json_string(fields.verb) << ",\n";
-    json << "  \"tool_version\": " << json_string(PULP_SDK_VERSION) << ",\n";
-    json << "  \"input\": {\n";
-    json << "    \"name\": " << json_string(display_path(args, args.input)) << ",\n";
-    json << "    \"sha256\": " << json_string(input.sha256) << ",\n";
-    json << "    \"sample_rate\": " << input.info.sample_rate << ",\n";
-    json << "    \"channels\": " << input.info.num_channels << ",\n";
-    json << "    \"frames\": " << input.info.num_frames << ",\n";
-    json << "    \"bits_per_sample\": " << input.info.bits_per_sample << "\n";
-    json << "  },\n";
-    json << "  \"decoder\": {\n";
-    json << "    \"name\": " << json_string(input.decoder_name);
-    if (input.decoder_name == "CoreAudio")
-        json << ",\n    \"platform\": " << json_string(platform_name());
-    json << "\n  },\n";
-    json << "  \"time_range\": {\n";
-    json << "    \"start_seconds\": " << json_number(input.start_s) << ",\n";
-    json << "    \"end_seconds\": " << json_number(input.end_s) << ",\n";
-    json << "    \"start_frame\": " << input.start_frame << ",\n";
-    json << "    \"end_frame\": " << input.end_frame << ",\n";
-    json << "    \"frames\": " << input.range_frames() << ",\n";
-    json << "    \"duration_seconds\": " << json_number(input.range_frames() / sample_rate) << "\n";
-    json << "  },\n";
-    json << "  \"channel\": " << args.channel << ",\n";
-    json << "  \"settings\": " << fields.settings_json << ",\n";
-    json << "  \"image\": {\n";
-    json << "    \"png\": " << json_string(display_path(args, args.png)) << ",\n";
-    json << "    \"width\": " << fields.image_width << ",\n";
-    json << "    \"height\": " << fields.image_height << "\n";
-    json << "  },\n";
-    // Sample peak over the rendered range, unclamped: float above full scale
-    // is reported here as-is and shown clamped in the image, never normalized.
-    json << "  \"true_peak\": {\n";
-    json << "    \"method\": \"sample_peak\",\n";
-    json << "    \"linear\": " << json_number(stats.peak_abs) << ",\n";
-    json << "    \"dbfs\": " << json_number(peak_dbfs) << ",\n";
-    json << "    \"clipped\": " << (stats.peak_abs >= 1.0 ? "true" : "false") << "\n";
-    json << "  }\n";
-    json << "}\n";
-    return json.str();
+    auto root = createObject("");
+    root.addMember("schema", createString(kSidecarSchema));
+    root.addMember("display_only", createBool(true));
+    root.addMember("verb", createString(fields.verb));
+    root.addMember("tool_version", createString(PULP_SDK_VERSION));
+
+    auto in = createObject("");
+    in.addMember("name", createString(display_path(args, args.input)));
+    in.addMember("sha256", createString(input.sha256));
+    in.addMember("sample_rate", createInt64(input.info.sample_rate));
+    in.addMember("channels", createInt64(input.info.num_channels));
+    in.addMember("frames", createInt64(static_cast<std::int64_t>(input.info.num_frames)));
+    in.addMember("bits_per_sample", createInt64(input.info.bits_per_sample));
+    root.addMember("input", in);
+
+    // Decoder identity always carries the platform: a system decoder's output
+    // can differ across OS releases, and a reader should not have to know
+    // which names are platform decoders to tell.
+    auto decoder = createObject("");
+    decoder.addMember("name", createString(input.decoder_name));
+    decoder.addMember("platform", createString(platform_name()));
+    root.addMember("decoder", decoder);
+
+    auto range = createObject("");
+    range.addMember("start_seconds", json_double(input.start_s));
+    range.addMember("end_seconds", json_double(input.end_s));
+    range.addMember("start_frame", createInt64(static_cast<std::int64_t>(input.start_frame)));
+    range.addMember("end_frame", createInt64(static_cast<std::int64_t>(input.end_frame)));
+    range.addMember("frames", createInt64(static_cast<std::int64_t>(input.range_frames())));
+    range.addMember("duration_seconds",
+                    json_double(static_cast<double>(input.range_frames()) / sample_rate));
+    root.addMember("time_range", range);
+
+    root.addMember("channel", createInt64(args.channel));
+    root.addMember("settings", fields.settings);
+
+    auto image = createObject("");
+    image.addMember("png", createString(display_path(args, args.png)));
+    image.addMember("width", createInt64(fields.image_width));
+    image.addMember("height", createInt64(fields.image_height));
+    root.addMember("image", image);
+
+    // Sample peak over the rendered channel and range, unclamped: float above
+    // full scale is reported here as-is and shown clamped in the image, never
+    // normalized.
+    auto peak = createObject("");
+    peak.addMember("method", createString("sample_peak"));
+    peak.addMember("linear", json_double(stats.peak_abs));
+    peak.addMember("dbfs", json_double(peak_dbfs));
+    peak.addMember("clipped", createBool(stats.peak_abs >= 1.0));
+    root.addMember("true_peak", peak);
+    return root;
 }
 
 int write_outputs(const ImageArgs& args, const pulp::test::audio::RasterImage& image,
-                  const std::string& sidecar_json) {
+                  const choc::value::Value& sidecar) {
     std::string png_error;
     const auto png = encode_png_rgba(image.width, image.height, image.rgba, &png_error);
     if (png.empty()) {
@@ -371,29 +390,56 @@ int write_outputs(const ImageArgs& args, const pulp::test::audio::RasterImage& i
         return 1;
     }
 
-    auto write_file = [](const fs::path& path, const char* bytes, std::size_t size, bool binary) {
-        std::error_code ec;
-        const auto parent = path.parent_path();
+    const fs::path png_path(args.png);
+    const fs::path sidecar_file(sidecar_path(args));
+    std::error_code ec;
+    for (const fs::path& target : {png_path, sidecar_file}) {
+        const auto parent = target.parent_path();
         if (!parent.empty())
             fs::create_directories(parent, ec);
-        std::ofstream out(path, binary ? std::ios::binary : std::ios::out);
-        if (!out.is_open())
-            return false;
-        out.write(bytes, static_cast<std::streamsize>(size));
-        return out.good();
-    };
+    }
 
-    if (!write_file(args.png, reinterpret_cast<const char*>(png.data()), png.size(), true)) {
-        std::cerr << "Error: failed to write PNG " << args.png << "\n";
+    // The PNG goes to a same-directory temporary first and is renamed into
+    // place only after the sidecar is durably written, so no reader can ever
+    // find an image without its description or a description without its
+    // image.
+#if defined(_WIN32)
+    const auto pid = static_cast<unsigned long long>(_getpid());
+#else
+    const auto pid = static_cast<unsigned long long>(::getpid());
+#endif
+    const fs::path png_temp = png_path.string() + ".tmp-" + std::to_string(pid);
+    auto discard_temp = [&] {
+        std::error_code ignore;
+        fs::remove(png_temp, ignore);
+    };
+    {
+        std::ofstream out(png_temp, std::ios::binary | std::ios::trunc);
+        if (!out.is_open() || !out.write(reinterpret_cast<const char*>(png.data()),
+                                         static_cast<std::streamsize>(png.size()))) {
+            discard_temp();
+            std::cerr << "Error: failed to write PNG " << args.png << "\n";
+            return 1;
+        }
+    }
+
+    const std::string json = choc::json::toString(sidecar, true) + "\n";
+    std::string sidecar_error;
+    if (!write_text_file_atomically(sidecar_file, json, sidecar_error)) {
+        discard_temp();
+        std::cerr << "Error: failed to write sidecar " << sidecar_file.string();
+        if (!sidecar_error.empty())
+            std::cerr << ": " << sidecar_error;
+        std::cerr << "\n";
         return 1;
     }
-    const std::string sidecar = sidecar_path(args);
-    if (!write_file(sidecar, sidecar_json.data(), sidecar_json.size(), false)) {
-        // A PNG without its sidecar is an image nobody can account for; take
-        // it back so the failure leaves no half-written pair behind.
-        std::error_code ec;
-        fs::remove(args.png, ec);
-        std::cerr << "Error: failed to write sidecar " << sidecar << "\n";
+
+    fs::rename(png_temp, png_path, ec);
+    if (ec) {
+        discard_temp();
+        std::error_code ignore;
+        fs::remove(sidecar_file, ignore);
+        std::cerr << "Error: failed to write PNG " << args.png << ": " << ec.message() << "\n";
         return 1;
     }
     return 0;

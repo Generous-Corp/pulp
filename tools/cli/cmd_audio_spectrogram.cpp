@@ -2,19 +2,14 @@
 
 #include "cmd_audio_spectrogram.hpp"
 
+#include "cli_common.hpp"
 #include "cmd_audio_image_common.hpp"
-#include "json_writer.hpp"
 
 #include <pulp/audio/analysis/audio_spectrum.hpp>
 #include <pulp/audio/analysis/spectrogram_raster.hpp>
 
-#include <cstdio>
 #include <iostream>
-#include <limits>
 #include <sstream>
-
-extern bool parse_size_arg(const std::string& text, const char* flag, std::size_t& out);
-extern bool parse_double_arg(const std::string& text, const char* flag, double& out);
 
 namespace {
 
@@ -23,7 +18,6 @@ namespace ana = pulp::test::audio;
 
 constexpr std::uint32_t kDefaultPlotWidth = 1024;
 constexpr std::uint32_t kDefaultPlotHeight = 384;
-constexpr std::uint64_t kStreamWindowFrames = 1u << 20;
 
 void print_usage() {
     std::cout << "Usage: pulp audio spectrogram <file> --png <out.png> [options]\n"
@@ -53,12 +47,6 @@ std::optional<ana::Window> parse_window(const std::string& text) {
     return std::nullopt;
 }
 
-std::string format_db(double value) {
-    char buffer[32];
-    std::snprintf(buffer, sizeof(buffer), "%g", value);
-    return buffer;
-}
-
 } // namespace
 
 int cmd_audio_spectrogram(const std::vector<std::string>& args) {
@@ -68,6 +56,8 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
     }
 
     img::ImageArgs common;
+    common.width = kDefaultPlotWidth;
+    common.height = kDefaultPlotHeight;
     ana::SpectrogramSettings settings;
     ana::SpectrogramImageOptions display;
 
@@ -143,18 +133,22 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
         }
     }
 
+    display.plot_height = common.height;
     if (const std::string reason = ana::validate_spectrogram_settings(settings); !reason.empty()) {
         std::cerr << "Error: " << reason << "\n";
         return 1;
     }
+    if (const std::string reason = ana::validate_spectrogram_image_options(display);
+        !reason.empty()) {
+        std::cerr << "Error: " << reason << "\n";
+        return 1;
+    }
 
-    const std::uint32_t plot_width = common.width ? common.width : kDefaultPlotWidth;
-    const std::uint32_t plot_height = common.height ? common.height : kDefaultPlotHeight;
     // The grid is allocated before the first frame is read; refuse a size that
     // would be gigabytes rather than let bad_alloc answer for the flags.
-    const std::uint64_t grid_bytes = ana::spectrogram_grid_bytes(plot_width, settings.fft_length);
+    const std::uint64_t grid_bytes = ana::spectrogram_grid_bytes(common.width, settings.fft_length);
     if (grid_bytes > ana::kSpectrogramGridBudgetBytes) {
-        std::cerr << "Error: --width " << plot_width << " x " << (settings.fft_length / 2 + 1)
+        std::cerr << "Error: --width " << common.width << " x " << (settings.fft_length / 2 + 1)
                   << " bins needs " << (grid_bytes >> 20)
                   << " MiB for the spectrogram grid, over the "
                   << (ana::kSpectrogramGridBudgetBytes >> 20)
@@ -176,20 +170,18 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
     }
 
     ana::SpectrogramBuilder builder(settings, static_cast<double>(input.info.sample_rate),
-                                    input.range_frames(), plot_width);
+                                    input.range_frames(), common.width);
     img::StreamStats stats;
     if (!img::stream_channel(
-            input, common.channel, kStreamWindowFrames,
+            input, common.channel, img::kStreamWindowFrames,
             [&](std::span<const float> window) { builder.push(window); }, stats))
         return 1;
     const ana::SpectrogramGrid grid = builder.finish();
 
-    display.plot_height = plot_height;
-
     std::ostringstream summary;
     summary << "fft " << settings.fft_length << " hop " << settings.hop << " "
             << ana::window_name(settings.window) << " " << ana::frequency_scale_name(display.scale)
-            << " " << format_db(display.db_range) << "dB ch" << common.channel;
+            << " " << display.db_range << "dB ch" << common.channel;
     ana::ImageChrome chrome;
     chrome.footer = img::footer_text(input, summary.str());
     chrome.start_s = input.start_s;
@@ -197,22 +189,30 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
 
     const ana::RasterImage image = ana::render_spectrogram_image(grid, display, chrome);
 
-    std::ostringstream settings_json;
-    settings_json << "{\"fft\": " << settings.fft_length << ", \"hop\": " << settings.hop
-                  << ", \"window\": " << pulp::cli::json_string(ana::window_name(settings.window))
-                  << ", \"scale\": "
-                  << pulp::cli::json_string(std::string(ana::frequency_scale_name(display.scale)))
-                  << ", \"db_range\": " << format_db(display.db_range) << ", \"db_ceiling\": 0"
-                  << ", \"mel_convention\": \"htk\""
-                  << ", \"column_reduction\": \"peak_hold\""
-                  << ", \"stft_frames\": " << grid.frames_analyzed << ", \"bins\": " << grid.bins
-                  << ", \"plot_width\": " << plot_width << ", \"plot_height\": " << plot_height
-                  << "}";
+    using choc::value::createFloat64;
+    using choc::value::createInt64;
+    using choc::value::createString;
+    auto settings_json = choc::value::createObject("");
+    settings_json.addMember("fft", createInt64(settings.fft_length));
+    settings_json.addMember("hop", createInt64(settings.hop));
+    settings_json.addMember("window", createString(ana::window_name(settings.window)));
+    settings_json.addMember("scale",
+                            createString(std::string(ana::frequency_scale_name(display.scale))));
+    settings_json.addMember("db_range", createFloat64(display.db_range));
+    settings_json.addMember("db_ceiling", createFloat64(display.db_ceiling));
+    settings_json.addMember("mel_convention", createString("htk"));
+    settings_json.addMember("palette", createString("inferno"));
+    settings_json.addMember("column_reduction", createString("peak_hold"));
+    settings_json.addMember("stft_frames",
+                            createInt64(static_cast<std::int64_t>(grid.frames_analyzed)));
+    settings_json.addMember("bins", createInt64(grid.bins));
+    settings_json.addMember("plot_width", createInt64(common.width));
+    settings_json.addMember("plot_height", createInt64(common.height));
 
     img::SidecarFields fields;
     fields.verb = "spectrogram";
-    fields.settings_json = settings_json.str();
+    fields.settings = settings_json;
     fields.image_width = image.width;
     fields.image_height = image.height;
-    return img::write_outputs(common, image, img::build_sidecar_json(common, input, fields, stats));
+    return img::write_outputs(common, image, img::build_sidecar(common, input, fields, stats));
 }
