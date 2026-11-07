@@ -18,6 +18,9 @@ struct TriggerTestAccess {
                                   std::uint8_t port = 0) {
         return g.trigger_test_emit_(target, epoch, port);
     }
+    static TriggerEmitResult schedule(SignalGraph& g, std::int64_t target, std::uint64_t epoch) {
+        return g.trigger_test_schedule_(target, epoch);
+    }
     static void gate(SignalGraph& g, bool held) {
         g.trigger_test_gate_(held);
     }
@@ -187,6 +190,21 @@ TEST_CASE("Typed emission attempts and overflow have distinct budgets", "[trigge
     Access::clock(fixture.graph, 0, 0, 1, 2);
     CHECK(Access::emit(fixture.graph, 0, 1) == TriggerEmitResult::InvalidPhase);
     CHECK(counters(fixture.graph).sequence == 0);
+}
+
+TEST_CASE("Typed transport rejects future targets and caps one sample",
+          "[trigger][negative-control]") {
+    Fixture fixture;
+    Access::clock(fixture.graph, 0, 0, 1, 1);
+    CHECK(Access::schedule(fixture.graph, -1, 1) == TriggerEmitResult::OutOfRange);
+    for (int i = 0; i < 8; ++i)
+        REQUIRE(Access::schedule(fixture.graph, 0, 1) == TriggerEmitResult::Accepted);
+    CHECK(Access::schedule(fixture.graph, 0, 1) == TriggerEmitResult::Overflow);
+    CHECK(counters(fixture.graph).accepted == 8);
+    CHECK(fixture.graph.trigger_trace().size() == 8);
+    CHECK(Access::schedule(fixture.graph, 1, 1) == TriggerEmitResult::Future);
+    Access::clock(fixture.graph, 10, 0, 1, 1);
+    CHECK(Access::schedule(fixture.graph, 9, 1) == TriggerEmitResult::Late);
 }
 
 TEST_CASE("Typed reset replacement and release retire old generation access", "[trigger]") {
