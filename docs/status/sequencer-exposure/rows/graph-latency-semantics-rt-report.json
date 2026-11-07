@@ -1,0 +1,118 @@
+{
+  "id": "graph-latency-semantics-rt-report",
+  "title": "SignalGraph artifact-versus-intentional latency semantics and the static realtime report",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "graph-latency-semantics-rt-report-20261106",
+  "owned_paths": [
+    "core/host/include/pulp/host/custom_node_type.hpp",
+    "core/host/include/pulp/host/graph_rt_report.hpp",
+    "core/host/src/graph_rt_report.cpp",
+    "core/host/src/signal_graph_port_equaliser.hpp",
+    "tools/cli/cmd_graph.cpp",
+    "test/test_signal_graph_latency_semantics.cpp",
+    "test/test_graph_rt_report.cpp",
+    "docs/status/sequencer-exposure/rows/graph-latency-semantics-rt-report.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/custom_node_type.hpp",
+      "needles": [
+        "std::function<int(double /*sample_rate*/)> intentional_delay_samples;",
+        "output_port_latency_samples;",
+        "CustomNodeRtContract rt_contract;"
+      ]
+    },
+    {
+      "path": "core/host/include/pulp/host/graph_rt_report.hpp",
+      "needles": [
+        "GraphRtReport build_graph_rt_report("
+      ]
+    },
+    {
+      "path": "test/test_signal_graph_latency_semantics.cpp",
+      "needles": [
+        "Intentional 500 ms echo on a wet branch never delays the dry path"
+      ]
+    },
+    {
+      "path": "test/test_graph_rt_report.cpp",
+      "needles": [
+        "Graph realtime report measures counted work without allocating"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "CustomNodeType gains appended intentional-delay, per-output-port latency and declared realtime-contract members after every historical field, so positional aggregate initializers keep compiling and an unset member preserves prior behaviour. graph_rt_report.hpp is a new control-thread-only header under the installed host include root.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/custom_node_type.hpp",
+          "needles": [
+            "std::function<int(double /*sample_rate*/)> intentional_delay_samples;"
+          ]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/graph_rt_report.hpp",
+          "needles": [
+            "std::string graph_rt_report_to_json(const GraphRtReport& report);"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "exposed",
+      "rationale": "pulp graph report prepares a saved graph with plugins unloaded and prints the realtime report; it never writes files and admits bounded sample-rate, block-size and measured-block options.",
+      "evidence": [
+        {
+          "kind": "cli_handler",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": [
+            "int report_graph("
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_cli_shellout.cpp",
+          "needles": [
+            "pulp graph report prints the realtime report and refuses bad options"
+          ]
+        },
+        {
+          "kind": "cli_definition",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": [
+            "report: [--sample-rate 48000] [--max-block-size 512]"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "The read-only MCP projection of the report is recorded on the graph MCP command surface row; this row adds no further MCP surface."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Latency semantics are captured at prepare and the report is control-thread only; no live control, event edge or executor authority is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No agent capability entry changes; only reviewed header fingerprints were refreshed."
+    }
+  }
+}

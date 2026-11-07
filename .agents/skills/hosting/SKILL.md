@@ -422,6 +422,18 @@ consequences: a mid-stream change cannot be refused (there is nothing to refuse
 on), and any test of change-handling needs a synthetic latency source rather
 than a real backend.
 
+### Artifact latency is compensated; intentional delay never is
+
+A hosted plugin's reported latency is always artifact latency: the graph
+compensates it where parallel paths reconverge and adds it to the host total.
+Custom nodes may also declare `intentional_delay_samples` (an echo), which is
+reported in `prepared_latency_snapshot()` and the realtime report but never
+compensated. Per-output-port latency is equalised inside the node binding, and
+every `AudioOutput` is aligned to the one reported total because outputs sum
+into the same host buffer. Do not "fix" a dry path that stays undelayed beside
+an echo node; that is the contract. See `docs/reference/signal-graph.md`
+(latency semantics) and `pulp/host/graph_rt_report.hpp`.
+
 The timeline binding builds on this to schedule compensated event streams; the
 contract, including why an event-to-audio device contributes nothing to the
 shift, is `docs/policies/event-stream-pdc.md`.
