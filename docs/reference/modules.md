@@ -2739,7 +2739,7 @@ now explicitly schedule UI-owned `poll()` before reading updated data.
 | Meter | Peak/RMS level meter with configurable ballistics and clip indicators |
 | MultiMeter | Multiple level meters side-by-side for multi-channel monitoring |
 | SpectrogramView | Rolling time-frequency heatmap showing spectral content over time |
-| SpectrumView | Real-time frequency spectrum analyzer with configurable FFT size |
+| SpectrumView | Spectrum analyzer on a log-frequency axis with built-in lock-free analysis (window, FFT size, overlap, level mode) |
 | WaveformView | Audio waveform display with zoom, selection, and playhead |
 | XYPad | Two-dimensional control surface for parameters like pan/width or filter freq/res |
 

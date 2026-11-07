@@ -455,7 +455,22 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
     if (analyzer_enabled_ && !spectrum_smoothed_.empty() && b.width >= 4.0f) {
         const auto columns = static_cast<size_t>(b.width);
         spectrum_db_.resize(columns);
-        resample_spectrum_log(spectrum_smoothed_, sample_rate_, freq_axis, spectrum_db_);
+        // One code path with SpectrumView: columns read the bins through
+        // SpectrumBinMapping (parabolic interpolation where a column is
+        // narrower than a bin, peak aggregation where it is wider).
+        const int fft_size =
+            spectrum_smoothed_.size() >= 2 ? static_cast<int>(spectrum_smoothed_.size() - 1) * 2 : 0;
+        const auto& mc = spectrum_mapping_.config();
+        if (!spectrum_mapping_.valid() || mc.columns != columns || mc.fft_size != fft_size ||
+            mc.sample_rate != static_cast<double>(sample_rate_) ||
+            mc.min_hz != static_cast<double>(freq_axis.min_hz) ||
+            mc.max_hz != static_cast<double>(freq_axis.max_hz)) {
+            spectrum_mapping_.configure({static_cast<double>(sample_rate_), fft_size, columns,
+                                         static_cast<double>(freq_axis.min_hz),
+                                         static_cast<double>(freq_axis.max_hz),
+                                         signal::min_response_db, 200.0f});
+        }
+        spectrum_mapping_.map(spectrum_smoothed_, spectrum_db_, signal::SpectrumAggregation::peak);
 
         // (c) Frequency smoothing: a box moving average over the log-spaced
         // columns. The 10-octave span maps across b.width px, so ~1/12 octave is

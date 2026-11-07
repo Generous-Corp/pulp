@@ -10,6 +10,7 @@
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/capability_fallback.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/graph_scale.hpp>
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/text_overflow.hpp>
 #include <pulp/view/widgets.hpp>
@@ -532,6 +533,13 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 2.0f);
 
+    if (analysis_enabled_)
+        paint_analysis(canvas, b);
+    else
+        paint_supplied_bins(canvas, b);
+}
+
+void SpectrumView::paint_supplied_bins(canvas::Canvas& canvas, const Rect& b) {
     if (bins_.empty())
         return;
 
@@ -583,10 +591,28 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
         }
     }
 
-    // Frequency grid lines (approximate positions)
+    paint_grid(canvas, b, false);
+}
+
+void SpectrumView::paint_grid(canvas::Canvas& canvas, const Rect& b, bool log_axis) {
+    const float db_range = max_db_ - min_db_;
+    if (!(db_range > 0))
+        return;
     auto grid = resolve_color("waveform.grid", canvas::Color::rgba8(50, 50, 65));
     canvas.set_stroke_color(grid);
     canvas.set_line_width(0.5f);
+
+    // Vertical decade/1-2-5 lines on the log axis. The supplied-bins path has
+    // no frequency axis to draw against.
+    if (log_axis && b.width > 0.0f) {
+        const LogFrequencyScale scale{min_hz_, max_hz_, 0.0f, b.width};
+        for (float hz : scale.ticks()) {
+            const float x = scale.to_x(hz);
+            canvas.set_line_width(LogFrequencyScale::is_major_tick(hz) ? 1.0f : 0.5f);
+            canvas.stroke_line(x, 0, x, b.height);
+        }
+        canvas.set_line_width(0.5f);
+    }
 
     // Horizontal dB grid lines at -20, -40, -60
     for (float db : {-20.0f, -40.0f, -60.0f}) {
@@ -594,6 +620,158 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
         float y = b.height - norm * b.height;
         canvas.stroke_line(0, y, b.width, y);
     }
+}
+
+void SpectrumView::apply_analysis_config() {
+    if (analyzer_)
+        analyzer_->configure(analysis_);
+}
+
+void SpectrumView::set_analysis_enabled(bool on) {
+    if (on == analysis_enabled_)
+        return;
+    analysis_enabled_ = on;
+    if (on) {
+        if (!analyzer_)
+            analyzer_ = std::make_unique<signal::SpectrumAnalyzer>();
+        apply_analysis_config();
+        last_paint_.reset();
+        tap_.store(analyzer_.get(), std::memory_order_release);
+    } else {
+        tap_.store(nullptr, std::memory_order_release);
+    }
+    set_continuous_repaint(on);
+    request_repaint();
+}
+
+void SpectrumView::set_sample_rate(double hz) {
+    if (!(hz > 0.0) || !std::isfinite(hz))
+        return;
+    analysis_.sample_rate = hz;
+    apply_analysis_config();
+}
+
+void SpectrumView::set_fft_size(int size) {
+    analysis_.fft_size = signal::SpectrumAnalyzer::clamp_fft_size(size);
+    apply_analysis_config();
+}
+
+void SpectrumView::set_overlap(float overlap) {
+    if (!std::isfinite(overlap))
+        return;
+    analysis_.overlap = std::clamp(overlap, 0.0f, 0.9375f);
+    apply_analysis_config();
+}
+
+void SpectrumView::set_window(WindowType window) {
+    analysis_.window = window;
+    apply_analysis_config();
+}
+
+void SpectrumView::set_level_mode(LevelMode mode) {
+    analysis_.level_mode = mode;
+    apply_analysis_config();
+}
+
+void SpectrumView::set_release_time(float seconds) {
+    if (!std::isfinite(seconds))
+        return;
+    analysis_.release_seconds = std::max(seconds, 0.0f);
+    apply_analysis_config();
+}
+
+void SpectrumView::set_frequency_range(float min_hz, float max_hz) {
+    if (!(min_hz > 0.0f) || !(max_hz > min_hz) || !std::isfinite(max_hz))
+        return;
+    min_hz_ = min_hz;
+    max_hz_ = max_hz;
+}
+
+int SpectrumView::update_analysis(double dt_seconds) {
+    return analyzer_ && analysis_enabled_ ? analyzer_->update(dt_seconds) : 0;
+}
+
+std::vector<float> SpectrumView::analysis_columns(size_t columns) const {
+    std::vector<float> out;
+    if (!analyzer_ || !analysis_enabled_)
+        return out;
+    signal::SpectrumBinMapping mapping;
+    mapping.configure({analyzer_->config().sample_rate, analyzer_->config().fft_size, columns,
+                       min_hz_, max_hz_, analyzer_->config().floor_db, 200.0f});
+    out.resize(columns);
+    mapping.map(analyzer_->bins_db(), out, analyzer_->aggregation());
+    return out;
+}
+
+void SpectrumView::paint_analysis(canvas::Canvas& canvas, const Rect& b) {
+    // Advance the analysis by the real time since the last paint, so the
+    // release looks the same at any frame rate.
+    const auto now = std::chrono::steady_clock::now();
+    const double dt =
+        last_paint_ ? std::chrono::duration<double>(now - *last_paint_).count() : 0.0;
+    last_paint_ = now;
+    update_analysis(dt);
+
+    // Zero-width (or zero-height) view: nothing to map or draw.
+    const float db_range = max_db_ - min_db_;
+    if (!(b.width >= 1.0f) || !(b.height > 0.0f) || !(db_range > 0.0f))
+        return;
+
+    const auto& cfg = analyzer_->config();
+    // Bars read better a few pixels wide; lines and fills use one column per pixel.
+    constexpr float kBarPx = 3.0f;
+    const auto columns = static_cast<size_t>(
+        std::max(1.0f, std::floor(style_ == Style::bars ? b.width / kBarPx : b.width)));
+    if (columns_.size() != columns)
+        columns_.resize(columns);
+    // Rebuild the mapping only when something it depends on changed.
+    const auto& mc = mapping_.config();
+    if (!mapping_.valid() || mc.columns != columns || mc.fft_size != cfg.fft_size ||
+        mc.sample_rate != cfg.sample_rate || mc.min_hz != min_hz_ || mc.max_hz != max_hz_ ||
+        mc.floor_db != cfg.floor_db) {
+        mapping_.configure({cfg.sample_rate, cfg.fft_size, columns, min_hz_, max_hz_, cfg.floor_db,
+                            200.0f});
+    }
+    mapping_.map(analyzer_->bins_db(), columns_, analyzer_->aggregation());
+
+    auto spectrum_color = resolve_color("waveform.line", canvas::Color::rgba8(100, 180, 250));
+    auto y_at = [&](size_t i) {
+        const float v = std::isfinite(columns_[i]) ? columns_[i] : min_db_;
+        const float norm = std::clamp((v - min_db_) / db_range, 0.0f, 1.0f);
+        return b.height - norm * b.height;
+    };
+    const float col_w = b.width / static_cast<float>(columns);
+
+    paint_grid(canvas, b, true);
+
+    if (style_ == Style::bars) {
+        canvas.set_fill_color(spectrum_color);
+        for (size_t i = 0; i < columns; ++i) {
+            const float y = y_at(i);
+            canvas.fill_rect(static_cast<float>(i) * col_w, y, std::max(col_w - 1.0f, 1.0f),
+                             b.height - y);
+        }
+        return;
+    }
+
+    points_.clear();
+    for (size_t i = 0; i < columns; ++i)
+        points_.push_back({(static_cast<float>(i) + 0.5f) * col_w, y_at(i)});
+
+    if (style_ == Style::filled) {
+        auto fill =
+            resolve_color("waveform.fill", canvas::Color::rgba(spectrum_color.r, spectrum_color.g,
+                                                               spectrum_color.b, 60.0f / 255.0f));
+        fill_poly_.clear();
+        fill_poly_.push_back({points_.front().x, b.height});
+        fill_poly_.insert(fill_poly_.end(), points_.begin(), points_.end());
+        fill_poly_.push_back({points_.back().x, b.height});
+        canvas.set_fill_color(fill);
+        canvas.fill_path(fill_poly_.data(), fill_poly_.size());
+    }
+    canvas.set_stroke_color(spectrum_color);
+    canvas.set_line_width(1.5f);
+    canvas.stroke_path(points_.data(), points_.size());
 }
 
 // ── SpectrogramView ──────────────────────────────────────────────────────────

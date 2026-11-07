@@ -1194,6 +1194,11 @@ pulp_add_test_suite(pulp-test-screenshot-capture GROUP pulp-test-group-core-stan
 # STFT and audio visualization signal tests
 pulp_add_test_suite(pulp-test-stft GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
+# Log-frequency column mapping and the display spectrum analyzer
+pulp_add_test_suite(pulp-test-spectrum-bin-mapping GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-spectrum-analyzer GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Visualization bridge and widget tests
 pulp_add_test_suite(pulp-test-visualization
     SOURCES test_visualization.cpp harness/rt_allocation_probe.cpp

@@ -31,6 +31,10 @@ pulp_add_test_suite(pulp-test-splash-screen GROUP pulp-test-group-design-system
 pulp_add_test_suite(pulp-test-phase9-widgets GROUP pulp-test-group-design-system
     LIBRARIES pulp::view)
 
+# SpectrumView built-in analysis, log-frequency axis and EqCurveView overlay mapping
+pulp_add_test_suite(pulp-test-spectrum-view GROUP pulp-test-group-design-system
+    LIBRARIES pulp::view)
+
 pulp_add_test_suite(pulp-test-property-list GROUP pulp-test-group-design-system
     LIBRARIES pulp::view)
 

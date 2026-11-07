@@ -563,7 +563,7 @@ widgets:
     notes: Meter, MultiMeter, CorrelationMeter — peak/RMS level bars with ballistics; CI coverage includes pulp-test-visualization. See core/view/include/pulp/view/widgets.hpp.
   spectrum_view:
     status: usable
-    notes: Real-time FFT spectrum display with log/linear frequency axis; CI coverage includes pulp-test-visualization. See core/view/include/pulp/view/widgets.hpp.
+    notes: FFT spectrum analyzer with built-in lock-free analysis (push_samples), log-frequency axis via signal::SpectrumBinMapping, selectable window, FFT size, overlap, peak/RMS/power/PSD levels and time-based release; caller-supplied dB bins remain supported (soft-deprecated); CI coverage includes pulp-test-spectrum-view, pulp-test-spectrum-bin-mapping and pulp-test-spectrum-analyzer. See core/view/audio/include/pulp/view/audio_widgets.hpp.
   spectrogram_view:
     status: usable
     notes: Scrolling STFT spectrogram; CI coverage includes pulp-test-visualization. See core/view/include/pulp/view/widgets.hpp.
@@ -581,7 +581,7 @@ widgets:
     notes: Searchable, category-grouped preset browser with keyboard navigation; CI coverage includes pulp-test-preset-browser. See core/view/include/pulp/view/preset_browser.hpp.
   eq_curve_view:
     status: usable
-    notes: Draggable EQ band handles over the true biquad magnitude response (signal::response_curve_db), with an optional spectrum overlay resampled onto the shared log-frequency axis; CI coverage includes pulp-test-phase9-widgets. See core/view/audio/include/pulp/view/eq_curve_view.hpp.
+    notes: Draggable EQ band handles over the true biquad magnitude response (signal::response_curve_db), with an optional spectrum overlay mapped onto the shared log-frequency axis by signal::SpectrumBinMapping (same code path as SpectrumView); CI coverage includes pulp-test-phase9-widgets and pulp-test-spectrum-view. See core/view/audio/include/pulp/view/eq_curve_view.hpp.
   graph_editor_view:
     status: usable
     ci_test: pulp-test-graph-editor-view

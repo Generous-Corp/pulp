@@ -6,6 +6,15 @@
 #include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/waveform_recorder_view.hpp>
 
+#include <pulp/signal/spectrum_analyzer.hpp>
+#include <pulp/signal/spectrum_bin_mapping.hpp>
+
+#include <atomic>
+#include <chrono>
+#include <memory>
+#include <optional>
+#include <span>
+
 namespace pulp::audio {
 class WaveformOverview;
 }
@@ -314,14 +323,42 @@ class WaveformView : public View, public InspectorFacts, public SeriesDisplay {
 };
 
 // ── SpectrumView ─────────────────────────────────────────────────────────────
-// Displays frequency spectrum (magnitude data from FFT)
+// Frequency spectrum display on a log-frequency axis.
+//
+// Two ways to feed it:
+//
+//  1. Built-in analysis (preferred). Enable it, then call push_samples() from
+//     the audio thread. The view windows, transforms, applies the level mode,
+//     releases over time and maps the bins onto the log axis itself.
+//
+//        spectrum.set_analysis_enabled(true);          // UI thread, once
+//        spectrum.set_sample_rate(sample_rate);        // UI thread
+//        // audio callback:
+//        spectrum.push_samples(mono, frames);          // audio thread
+//
+//  2. Caller-supplied dB bins via set_spectrum()/set_bins(). This remains
+//     supported and keeps its original linear bin-per-column drawing, but it
+//     is soft-deprecated: it leaves windowing, calibration, the frequency
+//     axis and the release to the caller. When analysis is enabled it takes
+//     precedence over supplied bins.
+//
+// Thread rules, per method:
+//   audio thread  push_samples()                      wait-free, no allocation
+//   UI thread     everything else, including paint(), set_analysis_enabled(),
+//                 the setters, update_analysis() and the getters.
+// The tap that push_samples() writes into lives as long as the view; the view
+// must not be destroyed while the audio thread can still call push_samples().
 
 class SpectrumView : public View, public InspectorFacts, public BinDisplay {
   public:
     enum class Style { bars, line, filled };
+    using LevelMode = signal::SpectrumLevelMode;
+    using WindowType = signal::WindowFunction::Type;
 
     SpectrumView() = default;
+    ~SpectrumView() override = default;
 
+    // ── Caller-supplied bins (soft-deprecated; see the note above) ───────
     // Set spectrum magnitudes (dB, typically -100 to 0)
     void set_spectrum(const float* magnitudes_db, size_t bin_count);
     void set_spectrum(std::vector<float> magnitudes_db);
@@ -351,13 +388,109 @@ class SpectrumView : public View, public InspectorFacts, public BinDisplay {
         max_db_ = max_db;
     }
 
+    // ── Built-in analysis ────────────────────────────────────────────────
+    /// UI thread. Creates the analysis state on first enable. Enabling also
+    /// opts the view into per-vsync repaints; disabling stops them and makes
+    /// push_samples() a no-op.
+    void set_analysis_enabled(bool on);
+    bool analysis_enabled() const {
+        return analysis_enabled_;
+    }
+
+    /// AUDIO THREAD. Queue mono samples for analysis. Wait-free, never
+    /// allocates, never blocks. A no-op until analysis is enabled. Samples that
+    /// do not fit (UI stalled for several frames) are dropped, not queued.
+    void push_samples(const float* samples, size_t count) noexcept {
+        if (auto* tap = tap_.load(std::memory_order_acquire))
+            tap->push_samples(samples, count);
+    }
+
+    /// UI thread. Analysis settings; each applies immediately and is safe while
+    /// audio is running. FFT size is rounded up to a power of two in
+    /// [64, 16384]. Overlap is the fraction of a frame shared with the next.
+    void set_sample_rate(double hz);
+    void set_fft_size(int size);
+    void set_overlap(float overlap);
+    void set_window(WindowType window);
+    void set_level_mode(LevelMode mode);
+    /// Seconds for the shown level to fall by a factor of e. Time-based, so the
+    /// fall looks the same at any frame rate.
+    void set_release_time(float seconds);
+    /// Log-frequency axis range. Ignored unless 0 < min_hz < max_hz.
+    void set_frequency_range(float min_hz, float max_hz);
+
+    double sample_rate() const {
+        return analysis_.sample_rate;
+    }
+    int fft_size() const {
+        return analysis_.fft_size;
+    }
+    float overlap() const {
+        return analysis_.overlap;
+    }
+    WindowType window() const {
+        return analysis_.window;
+    }
+    LevelMode level_mode() const {
+        return analysis_.level_mode;
+    }
+    float release_time() const {
+        return analysis_.release_seconds;
+    }
+    float min_frequency() const {
+        return min_hz_;
+    }
+    float max_frequency() const {
+        return max_hz_;
+    }
+
+    /// UI thread. Drain queued audio, analyse it and advance the release by
+    /// `dt_seconds`. paint() calls this with the wall time since the previous
+    /// paint; call it directly to drive the view headlessly. Returns the number
+    /// of FFT frames analysed.
+    int update_analysis(double dt_seconds);
+
+    /// UI thread. The current analysis mapped onto `columns` log-spaced columns
+    /// across the frequency range, in dB (what paint() draws). Empty when
+    /// analysis is off. Allocates; for tests and tooling, not for paint.
+    std::vector<float> analysis_columns(size_t columns) const;
+
+    /// UI thread. FFT frames discarded because the UI fell behind, and samples
+    /// the audio thread could not queue. Both 0 when analysis is off.
+    std::uint64_t skipped_frame_count() const {
+        return analyzer_ ? analyzer_->skipped_frame_count() : 0;
+    }
+    std::uint64_t overflow_count() const {
+        return analyzer_ ? analyzer_->overflow_count() : 0;
+    }
+
     void paint(canvas::Canvas& canvas) override;
 
   private:
+    void apply_analysis_config();
+    void paint_analysis(canvas::Canvas& canvas, const Rect& b);
+    void paint_supplied_bins(canvas::Canvas& canvas, const Rect& b);
+    void paint_grid(canvas::Canvas& canvas, const Rect& b, bool log_axis);
+
     std::vector<float> bins_;
     Style style_ = Style::filled;
     float min_db_ = -80.0f;
     float max_db_ = 0.0f;
+
+    signal::SpectrumAnalyzerConfig analysis_{};
+    float min_hz_ = 20.0f;
+    float max_hz_ = 20000.0f;
+    bool analysis_enabled_ = false;
+    std::unique_ptr<signal::SpectrumAnalyzer> analyzer_;
+    // Points at analyzer_ while analysis is enabled, null otherwise. The
+    // analyzer itself is never freed before the view, so a push_samples() that
+    // loaded the pointer just before a disable still writes into live memory.
+    std::atomic<signal::SpectrumAnalyzer*> tap_{nullptr};
+    signal::SpectrumBinMapping mapping_;
+    std::vector<float> columns_;
+    std::vector<canvas::Canvas::Point2D> points_;
+    std::vector<canvas::Canvas::Point2D> fill_poly_;
+    std::optional<std::chrono::steady_clock::time_point> last_paint_;
 };
 
 } // namespace pulp::view
