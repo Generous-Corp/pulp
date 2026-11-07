@@ -208,12 +208,21 @@ bool apply_replacement_metadata(int descriptor, const ReplacementMetadata& metad
     struct stat temporary_status{};
     if (::fstat(descriptor, &temporary_status) != 0)
         return false;
+#if defined(__wasi__) || defined(__EMSCRIPTEN__)
+    // Best effort on web targets: the WebAssembly system interface has no
+    // owner or permission-bit calls, and the sandbox owns every file anyway.
+    // The replacement still lands atomically; it just keeps the new file's
+    // default owner and mode instead of copying the old file's.
+    (void)temporary_status;
+    return true;
+#else
     if ((temporary_status.st_uid != metadata.status.st_uid ||
          temporary_status.st_gid != metadata.status.st_gid) &&
         ::fchown(descriptor, metadata.status.st_uid, metadata.status.st_gid) != 0)
         return false;
     if (::fchmod(descriptor, metadata.status.st_mode & static_cast<mode_t>(07777)) != 0)
         return false;
+#endif
 #if defined(__APPLE__)
     if (!metadata.acl_supported)
         return true;
@@ -238,6 +247,9 @@ bool apply_replacement_metadata(int descriptor, const ReplacementMetadata& metad
 std::filesystem::path temporary_sibling(const std::filesystem::path& destination) {
 #if defined(_WIN32)
     const auto process = static_cast<std::uint64_t>(_getpid());
+#elif defined(__wasi__) || defined(__EMSCRIPTEN__)
+    // No process ids on web targets; the serial below keeps names unique.
+    const std::uint64_t process = 0;
 #else
     const auto process = static_cast<std::uint64_t>(::getpid());
 #endif
