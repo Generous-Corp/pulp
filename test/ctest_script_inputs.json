@@ -3220,6 +3220,7 @@
   "pulp-test-native-core-processor",
   "pulp-test-native-metal-audio-comparator",
   "pulp-test-native-metal-compute",
+  "pulp-test-native-metal-surface pulp-test-platform-objc-unique-class pulp-test-native-input",
   "pulp-test-negative-path",
   "pulp-test-network-service-discovery",
   "pulp-test-neural-cpu-simd",
