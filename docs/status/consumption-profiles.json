@@ -62,6 +62,7 @@
       "pulp/audio/mmap_reader.hpp",
       "pulp/audio/offline_processor.hpp",
       "pulp/audio/onset_detector.hpp",
+      "pulp/audio/pcm_capabilities.hpp",
       "pulp/audio/planar_audio_ring_buffer.hpp",
       "pulp/audio/published_sample_store.hpp",
       "pulp/audio/pull_rate_detector.hpp",
@@ -582,8 +583,10 @@
       "pulp/midi/midi_control_bus.hpp",
       "pulp/midi/midi_file.hpp",
       "pulp/midi/midi_message_sequence.hpp",
+      "pulp/midi/mock_midi_system.hpp",
       "pulp/midi/monotonic_timestamp.hpp",
       "pulp/midi/mpe_buffer.hpp",
+      "pulp/midi/mpe_config_messages.hpp",
       "pulp/midi/mpe_synth_voice.hpp",
       "pulp/midi/mpe_voice_tracker.hpp",
       "pulp/midi/mts_esp_tuning.hpp",
@@ -591,6 +594,7 @@
       "pulp/midi/note_repeat.hpp",
       "pulp/midi/note_utility_kernels.hpp",
       "pulp/midi/panic.hpp",
+      "pulp/midi/port_change_watcher.hpp",
       "pulp/midi/raw_midi_parser.hpp",
       "pulp/midi/routing_utility_kernels.hpp",
       "pulp/midi/rpn_parser.hpp",
@@ -600,6 +604,7 @@
       "pulp/midi/strum.hpp",
       "pulp/midi/synthesiser.hpp",
       "pulp/midi/sysex_accumulator.hpp",
+      "pulp/midi/sysex_chunk_assembler.hpp",
       "pulp/midi/tuning.hpp",
       "pulp/midi/ump.hpp",
       "pulp/midi/ump_buffer.hpp",
@@ -706,8 +711,10 @@
       "pulp/render/bench/perf_counters.hpp",
       "pulp/render/dirty_tracker.hpp",
       "pulp/render/draco_decoder.hpp",
+      "pulp/render/gpu_capabilities.hpp",
       "pulp/render/gpu_compute.hpp",
       "pulp/render/gpu_diagnostics.hpp",
+      "pulp/render/gpu_pass.hpp",
       "pulp/render/gpu_proc_installer.hpp",
       "pulp/render/gpu_render_time.hpp",
       "pulp/render/gpu_startup_report.hpp",
@@ -720,7 +727,8 @@
       "pulp/render/sdl3_surface.hpp",
       "pulp/render/skia_surface.hpp",
       "pulp/render/skp_capture.hpp",
-      "pulp/render/texture_atlas.hpp"
+      "pulp/render/texture_atlas.hpp",
+      "pulp/render/wgsl_diagnostics.hpp"
     ],
     "core/runtime/include": [
       "pulp/runtime/activity_channel.hpp",
@@ -837,6 +845,7 @@
       "pulp/audio/mmap_reader.hpp",
       "pulp/audio/offline_processor.hpp",
       "pulp/audio/onset_detector.hpp",
+      "pulp/audio/pcm_capabilities.hpp",
       "pulp/audio/planar_audio_ring_buffer.hpp",
       "pulp/audio/published_sample_store.hpp",
       "pulp/audio/pull_rate_detector.hpp",
@@ -1687,47 +1696,47 @@
           },
           {
             "exported_as": "Pulp::inspect",
-            "closure_node_count": 98
+            "closure_node_count": 99
           },
           {
             "exported_as": "Pulp::standalone",
-            "closure_node_count": 98
+            "closure_node_count": 99
           },
           {
             "exported_as": "Pulp::standalone-native",
-            "closure_node_count": 98
+            "closure_node_count": 99
           },
           {
             "exported_as": "Pulp::inspect-offline-runtime",
-            "closure_node_count": 97
+            "closure_node_count": 98
           },
           {
             "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 96
+            "closure_node_count": 97
           },
           {
             "exported_as": "Pulp::format",
-            "closure_node_count": 94
+            "closure_node_count": 95
           },
           {
             "exported_as": "Pulp::format-view",
-            "closure_node_count": 93
+            "closure_node_count": 94
           },
           {
             "exported_as": "Pulp::inspect-runtime-eval",
-            "closure_node_count": 89
+            "closure_node_count": 90
           },
           {
             "exported_as": "Pulp::view",
-            "closure_node_count": 88
+            "closure_node_count": 89
           },
           {
             "exported_as": "Pulp::view-native",
-            "closure_node_count": 87
+            "closure_node_count": 88
           },
           {
             "exported_as": "Pulp::view-audio",
-            "closure_node_count": 83
+            "closure_node_count": 84
           },
           {
             "exported_as": "Pulp::view-platform",
@@ -1763,7 +1772,7 @@
           },
           {
             "exported_as": "Pulp::gpu-audio",
-            "closure_node_count": 62
+            "closure_node_count": 63
           },
           {
             "exported_as": "Pulp::gpu-device",
@@ -1775,10 +1784,14 @@
           },
           {
             "exported_as": "Pulp::sequence",
-            "closure_node_count": 44
+            "closure_node_count": 45
           },
           {
             "exported_as": "Pulp::format-clap-core",
+            "closure_node_count": 44
+          },
+          {
+            "exported_as": "Pulp::dsl",
             "closure_node_count": 43
           },
           {
@@ -1786,43 +1799,43 @@
             "closure_node_count": 43
           },
           {
-            "exported_as": "Pulp::dsl",
+            "exported_as": "Pulp::format-core",
             "closure_node_count": 42
           },
           {
-            "exported_as": "Pulp::format-core",
-            "closure_node_count": 41
-          },
-          {
             "exported_as": "Pulp::inspect-runtime",
-            "closure_node_count": 41
+            "closure_node_count": 42
           },
           {
             "exported_as": "Pulp::dawproject-import",
-            "closure_node_count": 37
+            "closure_node_count": 38
           },
           {
             "exported_as": "Pulp::dataplane-audio",
-            "closure_node_count": 36
+            "closure_node_count": 37
           },
           {
             "exported_as": "Pulp::playback",
-            "closure_node_count": 36
+            "closure_node_count": 37
           },
           {
             "exported_as": "Pulp::audio-analysis",
-            "closure_node_count": 35
+            "closure_node_count": 36
           },
           {
             "exported_as": "Pulp::authoring-capsule",
-            "closure_node_count": 35
+            "closure_node_count": 36
           },
           {
             "exported_as": "Pulp::audio",
-            "closure_node_count": 34
+            "closure_node_count": 35
           },
           {
             "exported_as": "Pulp::content",
+            "closure_node_count": 26
+          },
+          {
+            "exported_as": "Pulp::graph",
             "closure_node_count": 26
           },
           {
@@ -1834,11 +1847,11 @@
             "closure_node_count": 25
           },
           {
-            "exported_as": "Pulp::graph",
+            "exported_as": "Pulp::inspect-control",
             "closure_node_count": 25
           },
           {
-            "exported_as": "Pulp::inspect-control",
+            "exported_as": "Pulp::midi",
             "closure_node_count": 25
           },
           {
@@ -1855,10 +1868,6 @@
           },
           {
             "exported_as": "Pulp::inspect-protocol",
-            "closure_node_count": 24
-          },
-          {
-            "exported_as": "Pulp::midi",
             "closure_node_count": 24
           },
           {
@@ -2022,7 +2031,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/audio",
           "closure": {
-            "node_count": 34,
+            "node_count": 35,
             "pulp_targets": [
               "pulp-audio",
               "pulp-events",
@@ -2050,7 +2059,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 22,
+            "count": 23,
             "third_party_targets": [
               "everest",
               "gpu-runtime-device-api",
@@ -2066,6 +2075,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -2105,7 +2115,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "tools/audio/analysis",
           "closure": {
-            "node_count": 35,
+            "node_count": 36,
             "pulp_targets": [
               "pulp-audio",
               "pulp-audio-analysis",
@@ -2134,7 +2144,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 22,
+            "count": 23,
             "third_party_targets": [
               "everest",
               "gpu-runtime-device-api",
@@ -2150,6 +2160,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -2221,7 +2232,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/authoring_capsule",
           "closure": {
-            "node_count": 35,
+            "node_count": 36,
             "pulp_targets": [
               "pulp-audio",
               "pulp-authoring-capsule",
@@ -2250,7 +2261,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 22,
+            "count": 23,
             "third_party_targets": [
               "everest",
               "gpu-runtime-device-api",
@@ -2266,6 +2277,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -2589,7 +2601,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/dataplane",
           "closure": {
-            "node_count": 36,
+            "node_count": 37,
             "pulp_targets": [
               "pulp-audio",
               "pulp-dataplane",
@@ -2619,7 +2631,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 22,
+            "count": 23,
             "third_party_targets": [
               "everest",
               "gpu-runtime-device-api",
@@ -2635,6 +2647,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -2736,7 +2749,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/dawproject",
           "closure": {
-            "node_count": 37,
+            "node_count": 38,
             "pulp_targets": [
               "pulp-audio",
               "pulp-dawproject-import",
@@ -2767,7 +2780,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 22,
+            "count": 23,
             "third_party_targets": [
               "everest",
               "gpu-runtime-device-api",
@@ -2783,6 +2796,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -3095,7 +3109,7 @@
           "type": "INTERFACE_LIBRARY",
           "source_dir": "core/dsl",
           "closure": {
-            "node_count": 42,
+            "node_count": 43,
             "pulp_targets": [
               "pulp-audio",
               "pulp-dataplane",
@@ -3131,7 +3145,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 25,
+            "count": 26,
             "third_party_targets": [
               "ausdk",
               "everest",
@@ -3150,6 +3164,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -3279,7 +3294,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 94,
+            "node_count": 95,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -3339,7 +3354,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 64,
+            "count": 65,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -3382,6 +3397,7 @@
             "frameworks": [
               "AVFoundation",
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -3431,7 +3447,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 43,
+            "node_count": 44,
             "pulp_targets": [
               "pulp-audio",
               "pulp-dataplane",
@@ -3468,7 +3484,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 26,
+            "count": 27,
             "third_party_targets": [
               "ausdk",
               "clap",
@@ -3488,6 +3504,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -3521,7 +3538,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 41,
+            "node_count": 42,
             "pulp_targets": [
               "pulp-audio",
               "pulp-dataplane",
@@ -3556,7 +3573,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 25,
+            "count": 26,
             "third_party_targets": [
               "ausdk",
               "everest",
@@ -3575,6 +3592,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -3620,7 +3638,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 93,
+            "node_count": 94,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -3679,7 +3697,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 64,
+            "count": 65,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -3722,6 +3740,7 @@
             "frameworks": [
               "AVFoundation",
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -3803,7 +3822,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/gpu_audio",
           "closure": {
-            "node_count": 62,
+            "node_count": 63,
             "pulp_targets": [
               "pulp-audio",
               "pulp-events",
@@ -3839,7 +3858,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 47,
+            "count": 48,
             "third_party_targets": [
               "everest",
               "gpu-runtime-bootstrap",
@@ -3872,6 +3891,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -4054,7 +4074,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/graph",
           "closure": {
-            "node_count": 25,
+            "node_count": 26,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-graph",
@@ -4078,7 +4098,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 17,
+            "count": 18,
             "third_party_targets": [
               "everest",
               "gpu-runtime-device-api",
@@ -4094,6 +4114,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "Cocoa",
               "CoreBluetooth",
               "CoreFoundation",
@@ -4323,7 +4344,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 98,
+            "node_count": 99,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -4387,7 +4408,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 66,
+            "count": 67,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4432,6 +4453,7 @@
             "frameworks": [
               "AVFoundation",
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -4861,7 +4883,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 97,
+            "node_count": 98,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -4924,7 +4946,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 67,
+            "count": 68,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4970,6 +4992,7 @@
             "frameworks": [
               "AVFoundation",
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -5087,7 +5110,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 41,
+            "node_count": 42,
             "pulp_targets": [
               "pulp-audio",
               "pulp-events",
@@ -5122,7 +5145,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 25,
+            "count": 26,
             "third_party_targets": [
               "everest",
               "gpu-runtime-device-api",
@@ -5141,6 +5164,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -5180,7 +5204,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 89,
+            "node_count": 90,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -5235,7 +5259,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 61,
+            "count": 62,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -5275,6 +5299,7 @@
             "frameworks": [
               "AVFoundation",
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -5804,7 +5829,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 96,
+            "node_count": 97,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -5866,7 +5891,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 64,
+            "count": 65,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -5909,6 +5934,7 @@
             "frameworks": [
               "AVFoundation",
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -6162,7 +6188,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/midi",
           "closure": {
-            "node_count": 24,
+            "node_count": 25,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-midi",
@@ -6185,7 +6211,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 17,
+            "count": 18,
             "third_party_targets": [
               "everest",
               "gpu-runtime-device-api",
@@ -6201,6 +6227,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "Cocoa",
               "CoreBluetooth",
               "CoreFoundation",
@@ -6219,6 +6246,7 @@
             "generated_include_roots": 1
           },
           "direct_dependencies": [
+            "framework:AppKit",
             "framework:CoreBluetooth",
             "framework:CoreFoundation",
             "framework:CoreMIDI",
@@ -6430,7 +6458,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/playback",
           "closure": {
-            "node_count": 36,
+            "node_count": 37,
             "pulp_targets": [
               "pulp-audio",
               "pulp-events",
@@ -6460,7 +6488,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 22,
+            "count": 23,
             "third_party_targets": [
               "everest",
               "gpu-runtime-device-api",
@@ -6476,6 +6504,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -6930,7 +6959,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/sequence",
           "closure": {
-            "node_count": 44,
+            "node_count": 45,
             "pulp_targets": [
               "pulp-audio",
               "pulp-dataplane",
@@ -6968,7 +6997,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 25,
+            "count": 26,
             "third_party_targets": [
               "ausdk",
               "everest",
@@ -6987,6 +7016,7 @@
             "imported_targets": [],
             "frameworks": [
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Cocoa",
               "CoreAudio",
@@ -7322,7 +7352,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 98,
+            "node_count": 99,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7386,7 +7416,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 65,
+            "count": 66,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7430,6 +7460,7 @@
             "frameworks": [
               "AVFoundation",
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -7575,7 +7606,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 98,
+            "node_count": 99,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7639,7 +7670,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 65,
+            "count": 66,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7683,6 +7714,7 @@
             "frameworks": [
               "AVFoundation",
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -8059,7 +8091,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 88,
+            "node_count": 89,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -8113,7 +8145,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 60,
+            "count": 61,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -8152,6 +8184,7 @@
             "frameworks": [
               "AVFoundation",
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -8205,7 +8238,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 83,
+            "node_count": 84,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -8254,7 +8287,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 60,
+            "count": 61,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -8293,6 +8326,7 @@
             "frameworks": [
               "AVFoundation",
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -8643,7 +8677,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 87,
+            "node_count": 88,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -8696,7 +8730,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 60,
+            "count": 61,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -8735,6 +8769,7 @@
             "frameworks": [
               "AVFoundation",
               "Accelerate",
+              "AppKit",
               "AudioToolbox",
               "Carbon",
               "Cocoa",

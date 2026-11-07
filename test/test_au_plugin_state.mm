@@ -31,6 +31,7 @@
 #include <fstream>
 #include <string>
 #include <unistd.h>
+#include <cstring>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -1102,8 +1103,12 @@ TEST_CASE("AU v2 instrument delivers processor MIDI output to the host callback"
             ++r->calls;
             const MIDIPacket* packet = &list->packet[0];
             for (UInt32 i = 0; i < list->numPackets; ++i) {
+                // MIDIPacket is tightly packed, so its timestamp can sit at an address that
+                // is not 8-byte aligned. Copy it out instead of reading it in place.
+                MIDITimeStamp time_stamp = 0;
+                std::memcpy(&time_stamp, &packet->timeStamp, sizeof(time_stamp));
                 r->packets.push_back(
-                    {packet->timeStamp,
+                    {time_stamp,
                      std::vector<uint8_t>(packet->data, packet->data + packet->length)});
                 packet = MIDIPacketNext(packet);
             }
@@ -1189,9 +1194,12 @@ TEST_CASE("AU v2 instrument delivers a panic to the host MIDI callback",
         auto* r = static_cast<Received*>(user);
         const MIDIPacket* packet = &list->packet[0];
         for (UInt32 i = 0; i < list->numPackets; ++i) {
+            // MIDIPacket is tightly packed, so its timestamp can sit at an address that
+            // is not 8-byte aligned. Copy it out instead of reading it in place.
+            MIDITimeStamp time_stamp = 0;
+            std::memcpy(&time_stamp, &packet->timeStamp, sizeof(time_stamp));
             r->packets.push_back(
-                {packet->timeStamp,
-                 std::vector<uint8_t>(packet->data, packet->data + packet->length)});
+                {time_stamp, std::vector<uint8_t>(packet->data, packet->data + packet->length)});
             packet = MIDIPacketNext(packet);
         }
         return noErr;
