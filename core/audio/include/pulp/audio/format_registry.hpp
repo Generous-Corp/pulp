@@ -51,9 +51,7 @@ public:
 
     /// Read entire file into memory, refusing output beyond `limits`. Every
     /// built-in reader overrides this; the default exists for external readers
-    /// that predate limits and falls back to read(path). A declared frame
-    /// count that the stream does not deliver is a refusal; an undeclared
-    /// length (read_info reports num_frames 0) is decoded under the limits.
+    /// that predate limits and falls back to read(path).
     virtual std::optional<AudioFileData> read(const std::string& path, const DecodeLimits& limits) {
         (void)limits;
         return read(path);

@@ -111,6 +111,10 @@ public:
     std::string format_name() const override { return "WAV"; }
 };
 
+// Length contract shared by the codec-backed readers below: a declared frame
+// count that the stream does not deliver is a refusal; an undeclared length
+// (read_info reports num_frames 0) is decoded under the limits.
+
 // ── FLAC Reader (via dr_flac) ───────────────────────────────────────────
 
 class FlacReader : public FormatReader {
