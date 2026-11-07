@@ -119,6 +119,8 @@ TEST_CASE("a recorder sees the drag automation starts and reports its operation"
     request.paths = {files.a.string(), (files.dir / "gone.syx").string(), files.b.string()};
     request.allowed = drag_copy | drag_move;
     request.image = DragImage{8, 4, std::vector<std::uint8_t>(8 * 4 * 4, 255), 2.0f, 2, 1};
+    request.origin_x = 37;
+    request.origin_y = 12;
     std::optional<FileDragEnd> ended;
     // No view, window or pointer event: the recorder needs none.
     REQUIRE(begin_file_drag(scope, nullptr, request, [&](FileDragEnd end) { ended = end; }) ==
@@ -127,6 +129,8 @@ TEST_CASE("a recorder sees the drag automation starts and reports its operation"
     REQUIRE(seen->paths == std::vector<std::string>{files.a.string(), files.b.string()});
     REQUIRE(seen->allowed == (drag_copy | drag_move));
     REQUIRE(seen->image->width == 8);
+    REQUIRE(seen->origin_x == 37);
+    REQUIRE(seen->origin_y == 12);
     REQUIRE_FALSE(ended.has_value()); // reported later, not inside the call
     REQUIRE(pump_until([&] { return ended.has_value(); }));
     REQUIRE(ended->operation == DragOperation::move);

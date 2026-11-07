@@ -55,6 +55,10 @@ struct FileDragRequest {
     std::vector<std::string> paths;
     unsigned allowed = drag_copy;
     std::optional<DragImage> image;
+    /// Where the drag starts, in the view's points from its top-left corner.
+    /// A system drag anchors to the triggering event's location instead; a
+    /// recorder receives this as given.
+    float origin_x = 0, origin_y = 0;
 };
 
 enum class FileDragError {
