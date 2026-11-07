@@ -434,6 +434,9 @@ pulp_add_test_suite(pulp-test-signal-filters GROUP pulp-test-group-core-signal
 # prototype.
 pulp_add_test_suite(pulp-test-signal-svf-outputs GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
+# Korg35-style two-pole filter with a saturating feedback path.
+pulp_add_test_suite(pulp-test-signal-korg35-filter GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # TptFilter and the lockstep voice banks (LadderBank, SvfBank), split from
 # the signal filter tests above.
 pulp_add_test_suite(pulp-test-filter-banks GROUP pulp-test-group-core-signal

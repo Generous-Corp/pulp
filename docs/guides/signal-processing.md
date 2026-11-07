@@ -591,6 +591,37 @@ times faster than a loop over `LadderFilter` instances.
 
 ---
 
+### Korg35Filter
+
+Two-pole lowpass and highpass in the Sallen-Key family used by the Korg35 chip. The feedback path carries a `tanh` saturator, so the filter sings at high resonance and limits itself instead of blowing up. Header: `pulp/signal/korg35_filter.hpp`.
+
+```cpp
+signal::Korg35Filter filter;
+filter.configure(signal::Korg35Filter::Mode::lowpass, sample_rate, 1200.0f,
+                 /*resonance*/ 0.9f, /*drive*/ 1.0f);
+
+for (int i = 0; i < num_samples; ++i)
+    output[i] = filter.process(input[i]);
+```
+
+| Method | Description |
+|---|---|
+| `configure(mode, sample_rate, hz, resonance, drive)` | Set everything in one prewarp. |
+| `set_mode(Mode)` | `lowpass` or `highpass`. |
+| `set_frequency(float hz)` | Cutoff; the TPT integrators keep it exact up to Nyquist. |
+| `set_resonance(float r)` | 0 to 1.25. `r = 1` is the self-oscillation threshold (feedback `k = 2`); above it the filter rings at the cutoff and the saturator sets the amplitude. |
+| `set_drive(float d)` | Feedback saturator `tanh(d x) / d`. Unit small-signal gain for every `d`; 0 makes the loop linear and caps resonance just below the threshold. |
+| `process(float)` / `process(float*, int)` | Filter one sample or a buffer. |
+| `reset()` | Clear state. |
+
+The linear responses are `1 / (s^2 + (2 - k) s + 1)` and `s^2 / (s^2 + (2 - k) s + 1)`, so the peak gain is `1 / (2 - k)` and the peak sits at the cutoff as `k` approaches 2. The instantaneous feedback loop is solved without a unit delay: one scalar equation, a few Newton steps with the saturator, a closed form without it.
+
+**Real-time:** fixed, bounded work per sample; no allocation. Retune freely per sample; the state is the three integrator memories.
+
+**References:** Zavalishin, *The Art of VA Filter Design*, chapters 3, 5 and 6; Pirkle, *Designing Software Synthesizer Plug-Ins in C++*, 2nd ed., Korg35 filter. Tests: `test/test_signal_korg35_filter.cpp`.
+
+---
+
 ### Analog VCF
 
 For measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings—or for
