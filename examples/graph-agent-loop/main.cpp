@@ -1,10 +1,13 @@
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <pulp/host/forge_catalog_export.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -25,6 +28,90 @@ struct Rendered {
     std::vector<float> samples;
     int blocks = 0;
 };
+
+std::string read_text(const std::filesystem::path& path) {
+    std::ifstream file(path);
+    require(file.good(), "open-action-plan");
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+void require_plan_token(const std::string& plan, std::string_view token, const char* rule) {
+    require(plan.find(token) != std::string::npos, rule);
+}
+
+std::string fnv1a_hex(std::string_view text) {
+    std::uint64_t hash = 14695981039346656037ull;
+    for (const unsigned char byte : text) {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
+    std::ostringstream out;
+    out << std::hex << std::setw(16) << std::setfill('0') << hash;
+    return out.str();
+}
+
+std::string semantic_fingerprint(const SignalGraph& graph) {
+    // The fingerprint deliberately excludes mutable parameter values. Node IDs are
+    // also excluded because a replay is allowed to allocate fresh authoring IDs.
+    std::ostringstream out;
+    for (const auto id : graph.processing_order()) {
+        const auto* node = graph.node(id);
+        require(node != nullptr, "fingerprint-node");
+        out << static_cast<int>(node->type) << ':' << node->name << ':' << node->num_input_ports
+            << ':' << node->num_output_ports << ';';
+    }
+    for (const auto& edge : graph.connections()) {
+        const auto* source = graph.node(edge.source_node);
+        const auto* destination = graph.node(edge.dest_node);
+        require(source != nullptr && destination != nullptr, "fingerprint-edge-node");
+        out << source->name << ':' << edge.source_port << '>' << destination->name << ':'
+            << edge.dest_port << ':' << edge.feedback << ':' << edge.midi << ':' << edge.automation
+            << ':' << edge.audio_rate_modulation << ':' << edge.sidechain << ':' << edge.spectral
+            << ';';
+    }
+    return fnv1a_hex(out.str());
+}
+
+void validate_action_plan(const std::string& plan) {
+    require_plan_token(plan, "\"schema\": \"pulp.a9.action-plan/v1\"", "plan-schema");
+    require_plan_token(plan, "\"model_id\": \"deterministic-offline-actions-v1\"", "model-pin");
+    require_plan_token(plan, "\"model_digest\": \"sha256:", "model-digest");
+    require_plan_token(plan, "\"tool_id\": \"pulp-graph-agent-loop\"", "tool-pin");
+    require_plan_token(plan, "\"tool_version\": \"1\"", "tool-version");
+    require_plan_token(plan, "\"source_sha\": \"2f3d36dae75c3dca283c58e47f7731356f088e0d\"",
+                       "source-pin");
+    require_plan_token(plan, "\"network_policy\": \"deny\"", "network-denial");
+    require_plan_token(plan, "\"plugin_policy\": \"deny-ambient\"", "ambient-plugin-denial");
+    require_plan_token(plan, "\"catalog-discover\"", "action-catalog");
+    require_plan_token(plan, "\"author-graph\"", "action-author");
+    require_plan_token(plan, "\"validate-replay\"", "action-validate");
+    require_plan_token(plan, "\"render-probe\"", "action-render");
+    require_plan_token(plan, "\"bounded-edit\"", "action-edit");
+    require_plan_token(plan, "\"saved-input-replay\"", "action-replay");
+    require_plan_token(plan, "\"semantic_fingerprint\"", "fingerprint-rule");
+    require_plan_token(plan, "\"wrong-edit-oracle\"", "mutation-edit");
+    require_plan_token(plan, "\"wrong-replay-input\"", "mutation-replay");
+    // A plan is local-only by construction. Reject URLs and an explicit opt-in
+    // to network/plugin execution even if a caller edits one policy field.
+    require(plan.find("http://") == std::string::npos && plan.find("https://") == std::string::npos,
+            "plan-network-url");
+    require(plan.find("\"network_policy\": \"allow\"") == std::string::npos, "plan-network-allow");
+    require(plan.find("\"plugin_policy\": \"allow-ambient\"") == std::string::npos,
+            "plan-plugin-allow");
+}
+
+void write_action_log(const std::filesystem::path& path, std::string_view plan_digest,
+                      std::string_view baseline_fingerprint, std::string_view edited_fingerprint) {
+    std::ofstream file(path);
+    require(file.good(), "open-action-log");
+    file << "{\"schema\":\"pulp.a9.action-log/v1\",\"plan_digest\":\"" << plan_digest
+         << "\",\"network\":\"denied\",\"ambient_plugins\":\"denied\"}\n";
+    for (const auto& action : {"catalog-discover", "author-graph", "validate-replay",
+                               "render-probe", "bounded-edit", "saved-input-replay"})
+        file << "{\"action\":\"" << action << "\",\"status\":\"pass\"}\n";
+    file << "{\"semantic_fingerprint\":\"" << baseline_fingerprint
+         << "\",\"edited_semantic_fingerprint\":\"" << edited_fingerprint << "\"}\n";
+}
 
 Rendered render(SignalGraph& graph, const std::vector<float>& input, int block_frames) {
     OfflineSignalGraphHost host(graph);
@@ -75,9 +162,20 @@ GraphLoadOptions hermetic_load_options() {
 int main(int argc, char** argv) try {
     const std::filesystem::path output =
         argc == 2 ? argv[1] : std::filesystem::temp_directory_path();
+#ifdef A9_ACTION_PLAN_PATH
+    constexpr const char* kDefaultActionPlan = A9_ACTION_PLAN_PATH;
+#else
+    constexpr const char* kDefaultActionPlan = "fixtures/action-plan.json";
+#endif
+    const auto action_plan =
+        argc >= 3 ? std::filesystem::path(argv[2]) : std::filesystem::path(kDefaultActionPlan);
     std::filesystem::create_directories(output);
     const auto baseline_path = output / "a9-baseline.pulpgraph";
     const auto edited_path = output / "a9-edited.pulpgraph";
+    const auto action_log_path = output / "a9-action-log.jsonl";
+    const auto plan_text = read_text(action_plan);
+    validate_action_plan(plan_text);
+    const auto plan_digest = fnv1a_hex(plan_text);
 
     // Catalog discovery is a value-owned, public SDK operation; no private catalog headers
     // or ambient plugin paths are needed by this fixture.
@@ -108,6 +206,7 @@ int main(int argc, char** argv) try {
 
     const auto baseline = render(validated, input, 4);
     require(baseline.blocks == 3, "baseline-blocks");
+    const auto baseline_fingerprint = semantic_fingerprint(validated);
     const auto stage = node_named(validated, "stage");
     const auto output_node = node_named(validated, "output");
     require(stage != 0 && output_node != 0, "reload-node-names");
@@ -137,6 +236,8 @@ int main(int argc, char** argv) try {
     require(validated.set_node_gain(stage, 0.25f), "bounded-edit");
     const auto edited = render(validated, input, 4);
     require(edited.samples != baseline.samples, "edit-changes-render");
+    const auto edited_fingerprint = semantic_fingerprint(validated);
+    require(edited_fingerprint == baseline_fingerprint, "edit-preserves-topology");
     {
         std::ofstream file(edited_path);
         require(file.good(), "open-edited");
@@ -150,9 +251,13 @@ int main(int argc, char** argv) try {
     const auto reproduced_render = render(reproduced, input, 4);
     require(reproduced_render.samples == baseline.samples, "reproduce-baseline");
     require(reproduced_render.samples != edited.samples, "reproduce-is-before-edit");
+    require(semantic_fingerprint(reproduced) == baseline_fingerprint, "replay-preserves-topology");
+    write_action_log(action_log_path, plan_digest, baseline_fingerprint, edited_fingerprint);
 
     std::cout << "graph-agent-loop PASS checks=" << checks << " catalog_nodes=" << catalog.size()
-              << " baseline_blocks=" << baseline.blocks << " edited_gain=0.25\n";
+              << " baseline_blocks=" << baseline.blocks << " edited_gain=0.25"
+              << " plan_digest=" << plan_digest << " semantic_fingerprint=" << baseline_fingerprint
+              << " network=denied ambient_plugins=denied\n";
     return 0;
 } catch (const std::exception& error) {
     std::cerr << "graph-agent-loop FAIL rule=" << error.what() << '\n';

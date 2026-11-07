@@ -1,7 +1,8 @@
 # A9 agent design loop consumer
 
 This standalone consumer is the bounded A9 flagship slice. It uses only the
-installed `Pulp::host` target and follows one deterministic action plan:
+installed `Pulp::host` target and follows the checked-in, pinned
+`fixtures/action-plan.json`:
 
 1. discover and audit the public catalog;
 2. author an input → gain → output graph and save its `.pulpgraph` notation;
@@ -11,6 +12,15 @@ installed `Pulp::host` target and follows one deterministic action plan:
 5. apply one bounded gain edit and prove the render changes;
 6. reload the original saved input and reproduce the baseline render exactly.
 
+The plan pins a deterministic offline action model, this tool version, and the
+audited source SHA. It declares `network_policy: deny` and
+`plugin_policy: deny-ambient`; the executable rejects URLs, allow policies,
+missing steps, and missing mutation declarations before opening a graph. A
+JSONL action log records the plan digest, every action result, the denial
+policies, and a topology-only semantic fingerprint. Parameter edits must
+change samples while preserving that fingerprint, and replay must restore the
+original samples and fingerprint.
+
 Configure it against an installed SDK:
 
 ```sh
@@ -19,6 +29,11 @@ cmake -S examples/graph-agent-loop -B build/graph-agent-loop \
 cmake --build build/graph-agent-loop
 ctest --test-dir build/graph-agent-loop --output-on-failure
 ```
+
+The CTest suite includes three planted negative plans (`network-allowed`,
+`plugin-allowed`, and `missing-action`). They are expected to fail closed and
+are marked `WILL_FAIL`; a green positive run without those negatives is not an
+admission receipt.
 
 The fixture is hermetic: it disables plugin loading and default plugin roots
 while reloading the saved graph. It does not claim realtime scheduling, model
