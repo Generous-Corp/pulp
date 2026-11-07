@@ -1330,8 +1330,11 @@ std::unique_ptr<PluginSlot> load_vst3_plugin(const PluginInfo& info) {
         entry_fn(nullptr);
     }
 #else
-    auto* entry_fn = (bool (*)())dlsym(handle, "ModuleEntry");
-    if (entry_fn) entry_fn();
+    // The VST3 entry contract is ModuleEntry(void* sharedLibraryHandle); the
+    // module keeps the handle to find its own resources.
+    auto* entry_fn = (bool (*)(void*))dlsym(handle, "ModuleEntry");
+    if (entry_fn)
+        entry_fn(handle);
 #endif
 
     using GetPluginFactoryProc = IPluginFactory* (PLUGIN_API*)();

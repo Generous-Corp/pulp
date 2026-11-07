@@ -1046,13 +1046,21 @@ if((PULP_HAS_VST3 OR PULP_HAS_CLAP) AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN O
     target_include_directories(pulp-test-host-probe-bundles PRIVATE ${PULP_ROOT_DIR}/test)
     if(PULP_HAS_VST3)
         add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_VST3)
+        # CMake's BUNDLE property is Apple-only: on macOS the VST3 is the
+        # .vst3 bundle directory, elsewhere the linker output is a plain module
+        # that PluginSlot's VST3 loader opens directly.
+        if(APPLE)
+            set(_pulp_host_probe_vst3 "${CMAKE_BINARY_DIR}/VST3/Pulp Host Probe.vst3")
+        else()
+            set(_pulp_host_probe_vst3 "$<TARGET_FILE:PulpHostProbe_VST3>")
+        endif()
         target_compile_definitions(pulp-test-host-probe-bundles PRIVATE
-            PULP_TEST_HOST_PROBE_VST3="${CMAKE_BINARY_DIR}/VST3/Pulp Host Probe.vst3")
+            PULP_TEST_HOST_PROBE_VST3="${_pulp_host_probe_vst3}")
     endif()
     if(PULP_HAS_CLAP)
         add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_CLAP)
         target_compile_definitions(pulp-test-host-probe-bundles PRIVATE
-            PULP_TEST_HOST_PROBE_CLAP="${CMAKE_BINARY_DIR}/CLAP/Pulp Host Probe.clap")
+            PULP_TEST_HOST_PROBE_CLAP="$<IF:$<BOOL:${APPLE}>,${CMAKE_BINARY_DIR}/CLAP/Pulp Host Probe.clap,$<TARGET_FILE:PulpHostProbe_CLAP>>")
     endif()
     catch_discover_tests(pulp-test-host-probe-bundles)
 endif()
