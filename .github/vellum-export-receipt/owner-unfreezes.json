@@ -13,12 +13,12 @@
     },
     {
       "path": "core/view/include/pulp/view/input_events.hpp",
-      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approval_url": "https://github.com/Generous-Corp/pulp/pull/11711#issuecomment-6701437864",
       "approved_by": "danielraffel"
     },
     {
       "path": "core/view/include/pulp/view/pointer_dispatch.hpp",
-      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approval_url": "https://github.com/Generous-Corp/pulp/pull/11711#issuecomment-6701437864",
       "approved_by": "danielraffel"
     },
     {
@@ -33,12 +33,12 @@
     },
     {
       "path": "core/view/src/gesture.cpp",
-      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approval_url": "https://github.com/Generous-Corp/pulp/pull/11711#issuecomment-6701437864",
       "approved_by": "danielraffel"
     },
     {
       "path": "core/view/src/pointer_dispatch.cpp",
-      "approval_url": "PENDING-OWNER-APPROVAL",
+      "approval_url": "https://github.com/Generous-Corp/pulp/pull/11711#issuecomment-6701437864",
       "approved_by": "danielraffel"
     }
   ]
