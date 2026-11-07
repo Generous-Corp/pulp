@@ -65,10 +65,11 @@ on a real PR. Do them in order.
      relative path through a `vellum/` directory) or a CMake file under `core/`
      names `find_package(Vellum`, a `Vellum::`/`vellum::` target, or fetches or
      adds a Vellum tree. Pulp core knows nothing about Vellum; the connection
-     belongs in an integration package. The only allowlisted edge is the opt-in
-     D15 GPU-audio provider, pinned by exact count, and it goes away when the
-     shared GPU runtime lands. Its source half is `include_boundary.py
-     --boundary core-vellum`.
+     belongs in an integration package. Nothing is allowlisted. gpu-runtime
+     (`VellumGpuRuntime::*`, fetched by `tools/cmake/PulpGpuRuntime.cmake`) is
+     the neutral device layer, not a Vellum edge: it depends on neither repo,
+     and its target names do not match the check. Its source half is
+     `include_boundary.py --boundary core-vellum`.
    - **change events** (`vellum_freeze_check.py`) — a range touching a path in
      a transferred slice of `.github/vellum-ownership.json` (e.g.
      `core/view/src/pointer_dispatch.cpp` in `retained-ui-kernel`) without a
@@ -506,6 +507,32 @@ macOS.
   the `macos` job's step conclusions (`Build` skipped means `deferred`). A head with no counted
   record, or a `deferred` one, cannot be armed once `tiered_required_checks`
   is set.
+
+## The native-build decision on merge_group uses main, not base_sha
+
+Opposite to the diff-scoped gates below, and on purpose. `classify` decides
+whether a group's tree needs the native matrix, and a passing group lands every
+entry ahead of it, so it diffs the whole batch: main's tip, reached by
+`tools/scripts/resolve_classify_base.py` walking the first-parent chain down
+from `merge_group.base_sha` to `merge_group.base_ref`. Diffing `base_sha`
+itself (the previous speculative group when entries are queued ahead) let a
+docs-only entry at the end of a batch report `native_build_required=false`
+and carry a C++ entry that had failed its own group onto main. A chain the
+resolver cannot walk prints `origin/main`, which every caller treats as "build".
+The exact-generated-version-bump fast path and `protected-receipt-reuse` both
+apply only when the group's first parent is that main tip; a stacked group
+keeps the full matrix. If a merge group reports skip-safe, the
+`[classify-base]` lines in the classify log name the base it diffed.
+
+The merge-group HOLD check and the queue circuit breaker scan from that same
+main tip. The "Resolve the merge group's main base" step runs the protected
+copy of the resolver before any queue-entry code and classify reuses its
+`base` output, so the three cannot disagree. Do not hand either check
+`merge_group.base_sha`: from there a HOLD on an entry ahead in the batch is
+never re-checked by the group that lands it. An unresolved base (`origin/main`)
+fails the HOLD check and a live breaker closed. A group failing with "main's
+tip could not be resolved" is that fallback: read the step's `merge-group base:`
+line, then re-run classify or re-queue.
 
 ## Diff-scoped gates on merge_group use the entry's own base
 
@@ -994,6 +1021,26 @@ its assertions never execute, and a local break-confirm is its only evidence.
 Files that predated the check are in `tools/scripts/unregistered_tests_baseline.json`,
 which only shrinks: registering or deleting one fails the check until its row is
 removed. Register a new test file in the same PR that adds it.
+
+### A C++ test source no CMake file names, and an edit under `external/` no patch explains
+
+`tools/scripts/dead_test_guard.py` is the C++ counterpart: it fails when a `.cpp`
+under `test/` (or `core/<module>/test(s)/`) is named by no CMake file, so a test
+that was never added to a target cannot sit in the tree looking like coverage.
+It reads CMake text, not the configured graph, so a source registered through a
+`foreach` that computes the file name is listed with a reason in
+`tools/scripts/dead_test_guard.json`; a stale entry fails too. When it flags a
+file, register it (`pulp_add_test_suite(pulp-test-<name>` derives
+`test_<name>.cpp`) or delete it and say why in the commit.
+
+`tools/deps/check_patches.py` reads `tools/deps/patches.json`, copies the touched
+vendored files to scratch, reverse-applies the patch series last to first, and
+requires the result to match the recorded upstream hash. A local fix to a file
+under `external/` therefore needs a patch under `tools/deps/patches/<name>/` and a
+manifest entry in the same change. `--verify-upstream` re-downloads each file at
+its upstream commit to prove the recorded hash. `tools/scripts/examples_index_guard.py`
+keeps `examples/README.md` listing every `examples/` directory once. All three run
+in `gates.sh` and in the source-selftest suites.
 
 ### An X11 case that skips on the Linux leg did not run
 
@@ -2074,6 +2121,15 @@ CLI flag or command is enough to stale `docs/status/pulp-tooling-disposition.jso
 (#9283's Sparkle appcast options did). The gate runs the same three and prints
 the regenerate command (`python3 tools/scripts/pulp_tooling_disposition.py
 --write`, and so on) for whichever is stale.
+
+**It also checks two things that used to fail only in CI.** Exit 14 is the real
+`vellum_freeze_check.py --receipt-mode` verdict for an exported path changed
+without a `vellum_inherits` decision, with the export-event skeleton printed (or
+written by `--fix-export-event --inherits true|false --rationale ...`). Exit 15
+is a public header under core/runtime, canvas, events, platform or simd that is
+missing from its `PULP_*_UNIT_HEADERS` list, or listed but gone (the
+`pulp.vellum-closure*` ctests need a configured build), with the exact line to
+add. See the `pulp-vellum-change-routing` skill.
 
 **"Could not be verified" is not "stale".** `pulp_tooling_disposition.py`
 reads `cli-commands.yaml` and needs PyYAML. Without it, the generator exits 3,

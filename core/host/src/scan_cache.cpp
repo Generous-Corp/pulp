@@ -54,6 +54,9 @@ choc::value::Value entry_to_json(const std::string& path,
     obj.addMember("version", e.info.version);
     obj.addMember("plugin_path", e.info.path);
     obj.addMember("unique_id", e.info.unique_id);
+    if (e.info.identity_evidence)
+        obj.addMember("identity_evidence",
+                      serialize_plugin_identity_evidence(*e.info.identity_evidence));
     obj.addMember("format", std::string(format_to_string(e.info.format)));
     obj.addMember("is_instrument", e.info.is_instrument);
     obj.addMember("is_effect", e.info.is_effect);
@@ -88,6 +91,10 @@ bool entry_from_json(const choc::value::ValueView& v,
     out_entry.info.version = v["version"].toString();
     out_entry.info.path = v["plugin_path"].toString();
     out_entry.info.unique_id = v["unique_id"].toString();
+    // Old schema-v1 entries remain unverified. Imported captures are declared.
+    if (v.hasObjectMember("identity_evidence") && v["identity_evidence"].isString())
+        out_entry.info.identity_evidence =
+            parse_plugin_identity_evidence(v["identity_evidence"].toString());
     auto fmt = format_from_string(v["format"].toString());
     if (!fmt) return false;
     out_entry.info.format = *fmt;
@@ -137,7 +144,15 @@ std::optional<PluginInfo> HostScanCache::get(const std::string& path) const {
     if (!s.ok) return std::nullopt;
     if (s.mtime != it->second.mtime) return std::nullopt;
     if (s.size != it->second.size) return std::nullopt;
-    return it->second.info;
+    auto info = it->second.info;
+    // A matching file stamp is a cache hint, never current loaded authority.
+    if (info.identity_evidence) {
+        const auto& capture = *info.identity_evidence;
+        info.identity_evidence = PluginIdentityEvidence::declared(
+            capture.type(), capture.origin(), capture.source_contract_revision(),
+            capture.artifact());
+    }
+    return info;
 }
 
 void HostScanCache::put(const std::string& path, const PluginInfo& info) {

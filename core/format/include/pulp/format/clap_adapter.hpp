@@ -19,6 +19,7 @@
 #include <pulp/state/preset_manager.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <clap/clap.h>
+#include <clap/ext/timer-support.h>
 #include <clap/ext/params.h>
 #include <array>
 #include <atomic>
@@ -92,6 +93,8 @@ struct PulpClapPlugin {
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
     std::unique_ptr<Processor> processor;
+    // Panic requests (Processor::request_panic), serviced before each block.
+    std::shared_ptr<PanicState> panic_state;
     // Keeps a host state.load off the processor while clap_process() is inside
     // it. Declared after processor so it outlives every render that consults it.
     StateRestoreGate state_restore_gate;
@@ -307,6 +310,13 @@ struct PulpClapPlugin {
     // Forwards editor_host's GPU-surface transitions into bridge's scripted UI
     // session. Reset in gui_destroy() before either of them dies.
     view::PluginViewHost::GpuSurfaceSubscription gpu_surface_binding;
+    // Native embedded CLAP editors use the host's timer-support extension as
+    // their UI-thread frame source. The timer is registered only while the
+    // editor is attached and visible; no worker or fabricated clock runs when
+    // the host cannot provide this extension.
+    const clap_host_timer_support_t* editor_host_timer = nullptr;
+    clap_id editor_timer_id = CLAP_INVALID_ID;
+    bool editor_parent_attached = false;
 #endif
     bool editor_visible = false;
 

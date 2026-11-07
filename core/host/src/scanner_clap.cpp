@@ -9,6 +9,7 @@
 // (missing symbol, deinit failure, etc.) so scan() stays best-effort.
 
 #include <pulp/host/scanner.hpp>
+#include "plugin_identity_internal.hpp"
 #include <pulp/runtime/log.hpp>
 
 #include <clap/clap.h>
@@ -81,6 +82,7 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
     std::vector<PluginInfo> results;
 
     auto binary = resolve_clap_binary(path);
+    const auto artifact = detail::clap_artifact_provenance(binary);
     void* handle = dlopen(binary.c_str(), RTLD_LAZY | RTLD_LOCAL);
     if (!handle) { // LCOV_EXCL_START
         // Defensive fallback for malformed/corrupt CLAP bundles. Same family
@@ -196,6 +198,14 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
         info.manufacturer = desc->vendor ? desc->vendor : "";
         info.version = desc->version ? desc->version : "";
         info.unique_id = desc->id ? desc->id : info.name;
+        auto id = detail::clap_descriptor_id(desc->id);
+        if (artifact && std::holds_alternative<std::string>(id)) {
+            auto provenance = *artifact;
+            provenance.descriptor_version =
+                desc->version ? std::optional<std::string>(desc->version) : std::nullopt;
+            info.identity_evidence = detail::ClapIdentityAccess::observed(
+                {"clap", std::get<std::string>(std::move(id))}, std::move(provenance), false);
+        }
 
         // Classify from `features` if present — CLAP declares category strings
         // like "instrument", "audio-effect", "note-effect".
@@ -248,6 +258,11 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
         runtime::log_warn("CLAP scan: entry->deinit threw for '{}'", path);
     } // LCOV_EXCL_STOP
     dlclose(handle);
+    const auto after = detail::clap_artifact_provenance(binary);
+    if (!artifact || !after || artifact->sha256 != after->sha256 ||
+        artifact->byte_length != after->byte_length)
+        for (auto& info : results)
+            info.identity_evidence.reset();
     if (results.empty()) results.push_back(make_filename_fallback(path));
     return results;
 }

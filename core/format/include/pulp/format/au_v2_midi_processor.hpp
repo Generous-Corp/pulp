@@ -161,10 +161,15 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Panic requests (Processor::request_panic), serviced before each block.
+    std::shared_ptr<PanicState> panic_state_;
     // Factory presets, bound to store_ in the constructor. Declared after
     // store_ so reverse member destruction retires the PresetManager while the
     // store it holds a reference to is still alive.
     FactoryPresetTable factory_presets_;
+    // kAudioUnitProperty_RenderContextObserver; bound once the processor
+    // exists, advertised only for an AudioWorkgroupClient processor.
+    RenderContextObserverProperty render_context_;
     // Keeps a host class-info restore off the processor while Render() is
     // inside it. Declared after processor_ so it outlives every render that
     // consults it.

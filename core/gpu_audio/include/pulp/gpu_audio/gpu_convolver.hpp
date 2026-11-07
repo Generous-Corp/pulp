@@ -12,9 +12,7 @@
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/fixed_ir_convolver.hpp>
 
-namespace pulp::render {
-class GpuCompute;
-}
+#include <pulp/platform/gpu_fwd.hpp>
 
 namespace pulp::gpu_audio {
 

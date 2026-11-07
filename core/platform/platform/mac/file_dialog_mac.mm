@@ -193,6 +193,29 @@ std::optional<std::string> FileDialog::choose_folder(
     }
 }
 
+std::vector<std::string> FileDialog::choose_folders(const std::string& title,
+                                                    const std::string& default_path) {
+    @autoreleasepool {
+        NSOpenPanel* panel = [NSOpenPanel openPanel];
+        [panel setTitle:[NSString stringWithUTF8String:title.c_str()]];
+        [panel setCanChooseFiles:NO];
+        [panel setCanChooseDirectories:YES];
+        [panel setAllowsMultipleSelection:YES];
+
+        if (!default_path.empty())
+            [panel setDirectoryURL:[NSURL fileURLWithPath:[NSString
+                                                              stringWithUTF8String:default_path
+                                                                                       .c_str()]]];
+
+        std::vector<std::string> folders;
+        if ([panel runModal] == NSModalResponseOK) {
+            for (NSURL* url in [panel URLs])
+                folders.emplace_back([[url path] UTF8String]);
+        }
+        return folders;
+    }
+}
+
 } // namespace pulp::platform
 
 #else
@@ -203,6 +226,9 @@ std::vector<std::string> FileDialog::open_files(const std::string&, const std::v
 std::optional<std::string> FileDialog::save_file(const std::string&, const std::vector<FileFilter>&, const std::string&, const std::string&) { return std::nullopt; }
 std::optional<std::string> FileDialog::save_copy(const std::string&, const std::string&, const std::vector<FileFilter>&, const std::string&, const std::string&, std::string*) { return std::nullopt; }
 std::optional<std::string> FileDialog::choose_folder(const std::string&, const std::string&) { return std::nullopt; }
+std::vector<std::string> FileDialog::choose_folders(const std::string&, const std::string&) {
+    return {};
+}
 }
 
 #endif

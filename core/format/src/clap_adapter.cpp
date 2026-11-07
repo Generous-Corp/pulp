@@ -267,6 +267,8 @@ bool clap_init(const clap_plugin_t* plugin) {
     self->owner_alive.reset();
     self->processor = self->factory();
     if (!self->processor) return false;
+    self->panic_state = self->processor->panic_state();
+    self->panic_state->attach(self->processor->descriptor().produces_midi);
     self->sample_accurate_params = self->processor->wants_sample_accurate_parameters();
     self->param_events_monitor.arm(!self->sample_accurate_params, &self->param_events);
     self->processor->set_state_store(&self->store);
@@ -1290,11 +1292,15 @@ static void clap_phase_run_processor(
     auto& midi_in = self->midi_in;
     auto& midi_out = self->midi_out;
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
+        if (self->panic_state)
+            service_panic(*self->processor, *self->panic_state, midi_out);
         if (native_f64) {
             self->processor->process_f64(process_buffers64, midi_in, midi_out, ctx);
         } else {
             self->processor->process(process_buffers, midi_in, midi_out, ctx);
         }
+        if (self->panic_state)
+            self->panic_state->observe_midi_out(midi_out);
         if (!native_f64 && main_output_f64 && process->audio_outputs_count > 0 &&
             process->audio_outputs[0].data64) {
             auto& bus = process->audio_outputs[0];

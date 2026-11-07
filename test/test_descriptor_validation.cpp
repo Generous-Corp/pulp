@@ -211,6 +211,18 @@ TEST_CASE("DescriptorValidation: instrument optional or zero-channel inputs do n
         REQUIRE_FALSE(has_warning_on(issues, "input_buses"));
         REQUIRE(descriptor_is_valid(issues));
     }
+
+    SECTION("optional main input plus optional side chain") {
+        // An instrument that can also process audio: the shape the AU v2 /
+        // VST3 / CLAP / AAX adapters expose as an aux input and a side chain.
+        auto d = well_formed_effect();
+        d.category = PluginCategory::Instrument;
+        d.input_buses = {{"Main In", 2, true}, {"Side Chain", 2, true}};
+
+        auto issues = validate_descriptor(d);
+        REQUIRE_FALSE(has_warning_on(issues, "input_buses"));
+        REQUIRE(descriptor_is_valid(issues));
+    }
 }
 
 TEST_CASE("DescriptorValidation: MidiEffect without accepts_midi warns",

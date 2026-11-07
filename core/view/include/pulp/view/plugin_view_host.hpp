@@ -10,9 +10,7 @@
 #include <functional>
 #include <vector>
 
-namespace pulp::render {
-class GpuSurface;
-}
+#include <pulp/platform/gpu_fwd.hpp>
 
 namespace pulp::view {
 
@@ -428,6 +426,15 @@ public:
     // the editor is embedded. CPU hosts ignore it. Default no-op.
     virtual void set_idle_callback(std::function<void()> callback) {
         (void) callback;
+    }
+
+    // Advance one host-owned frame at a monotonic presentation timestamp.
+    // Embedded hosts (CLAP timer support, VST3 Linux IRunLoop, or another
+    // format-owned UI callback) call this on their UI thread. The concrete
+    // host owns its FrameClock/HostFramePump and gates detached/hidden views;
+    // the default keeps foreign hosts that cannot schedule frames honest.
+    virtual void advance_frame(double timestamp_seconds) {
+        (void)timestamp_seconds;
     }
 
     // Capture the host's current back buffer as a PNG (mirrors

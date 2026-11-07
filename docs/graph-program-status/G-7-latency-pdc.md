@@ -6,7 +6,8 @@ checks deterministic per-node input/output latency, checks the delayed fan-in
 branch (zero delay) and the dry fan-in branch (four samples of PDC), and checks
 planted unknown-node and unknown-connection negatives. A copied snapshot stays
 readable after a topology mutation while a fresh query fails closed until the
-graph is prepared again.
+graph is prepared again. The follow-on also repeats the positive PDC and
+planted-negative queries across eight paced 64-frame process blocks.
 
 It does not implement CLI/MCP serialization, realtime qualification, or full
 G-7 completion. The API is control-thread introspection sourced from the
@@ -37,3 +38,38 @@ full G-7 completion.
   prepared snapshot remained readable after topology mutation, while a fresh
   query stayed unavailable until re-prepare. These controls cover the fixture's
   fail-closed and snapshot-lifetime behavior only.
+- **Paced introspection control:** eight 64-frame blocks were processed at a
+  48 kHz wall-clock-shaped cadence. Each control-thread snapshot retained the
+  four-sample PDC map, and the unknown node/edge negatives remained empty. This is continuity evidence for the diagnostic API only; it
+  does not qualify realtime scheduling, callback safety, CLI/MCP serialization,
+  or full G-7 completion.
+
+## Follow-on paced receipt
+
+- **Source base:** `571ea4f74e53f51cea37b506d81e4989a07103af` (the follow-on
+  worktree adds only the consumer and documentation changes).
+- **Installed SDK:** the exact existing SDK at
+  `/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/8ecb5db3c9c0323ed065d7b9055e217ba715b292/11a0d651ba9e`.
+- **Command:** Release CMake configure with `Pulp_DIR`, governed build of
+  `pulp-g7-latency-pdc-consumer`, CTest, then direct execution.
+- **Result:** CTest `1/1` passed; direct output was
+  `g7-latency-pdc PASS total_latency_samples=4 delayed_node_input_latency_samples=0 paced_blocks=8`.
+- **Receipt SHA-256:**
+  `c938042f957c02823896636446658e2f15b9ae7ab2479a08146c98bd2816f7ad`.
+The paced run is diagnostic continuity evidence for control-thread
+introspection. It does not qualify realtime scheduling or callback safety and
+does not add a CLI/MCP surface.
+
+## Wave 2 tooling status
+
+**PARTIAL — current mainline extension.** The bounded offline edge-probe CLI
+and installed MCP sibling now accept opt-in `--plan`, `--latency`, and
+`--node-loads` sections. Plan output is authored topology, latency output is
+copied from the prepared snapshot's deterministic node/PDC map, and node loads
+use the existing opt-in latest-value measurers. The default probe remains
+audio-only and does no per-node clock reads. Control/event taps remain
+deferred until a prepared lock-free producer/consumer contract exists;
+unsupported or unknown requests fail closed. The installed consumer parity
+fixture and planted unknown-option control are the acceptance evidence for
+this tooling slice; this status does not claim realtime qualification or full
+G-7 completion.

@@ -47,6 +47,7 @@
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/midi/message.hpp>
+#include <pulp/midi/panic.hpp>
 #include <pulp/state/store.hpp>
 
 #include <pluginterfaces/vst/ivsteditcontroller.h>
@@ -1057,4 +1058,186 @@ TEST_CASE("vst3 audio parity: an explicit-event param still syncs the "
                                      static_cast<Steinberg::Vst::ParamID>(kEchoParam) &&
                                  r.normalized != default_normalized;
                       }));
+}
+
+// ---------------------------------------------------------------------------
+// Processor panic: Processor::request_panic is serviced by the VST3 adapter
+// before the block, and the panic reaches the host's output event list.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class PanicVstProcessor : public pulp::format::Processor {
+  public:
+    explicit PanicVstProcessor(bool produces_midi) : produces_midi_(produces_midi) {}
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "Vst3PanicTest",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.vst3.panic",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"In", 2}},
+            .output_buses = {{"Out", 2}},
+            .accepts_midi = true,
+            .produces_midi = produces_midi_,
+        };
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void on_panic(pulp::format::PanicMode mode) override {
+        ++panic_calls;
+        last_mode = mode;
+    }
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext&) override {
+        ++process_calls;
+        if (!sent_) {
+            sent_ = true;
+            midi_out.add(pulp::midi::MidiEvent::note_on(2, 64, 100));
+        }
+    }
+    int panic_calls = 0;
+    int process_calls = 0;
+    pulp::format::PanicMode last_mode = pulp::format::PanicMode::release;
+
+  private:
+    bool produces_midi_;
+    bool sent_ = false;
+};
+
+PanicVstProcessor* g_panic_vst = nullptr;
+std::unique_ptr<pulp::format::Processor> make_panic_vst_midi() {
+    auto p = std::make_unique<PanicVstProcessor>(true);
+    g_panic_vst = p.get();
+    return p;
+}
+std::unique_ptr<pulp::format::Processor> make_panic_vst_silent() {
+    auto p = std::make_unique<PanicVstProcessor>(false);
+    g_panic_vst = p.get();
+    return p;
+}
+
+// Run one 64-frame block and return the output events.
+struct VstBlockResult {
+    std::vector<Steinberg::Vst::Event> events;
+};
+
+VstBlockResult run_vst_block(vst3::PulpVst3Processor& processor) {
+    std::vector<float> in_l(64, 0.0f), in_r(64, 0.0f), out_l(64, 0.0f), out_r(64, 0.0f);
+    float* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers audio_in[1]{};
+    audio_in[0].numChannels = 2;
+    audio_in[0].channelBuffers32 = in_ptrs;
+    Steinberg::Vst::AudioBusBuffers audio_out[1]{};
+    audio_out[0].numChannels = 2;
+    audio_out[0].channelBuffers32 = out_ptrs;
+    Steinberg::Vst::EventList input_events(8);
+    Steinberg::Vst::EventList output_events(512);
+    Steinberg::Vst::ProcessData data{};
+    data.symbolicSampleSize = Steinberg::Vst::kSample32;
+    data.numSamples = 64;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_in;
+    data.outputs = audio_out;
+    data.inputEvents = &input_events;
+    data.outputEvents = &output_events;
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    VstBlockResult result;
+    for (Steinberg::int32 i = 0; i < output_events.getEventCount(); ++i) {
+        Steinberg::Vst::Event e{};
+        output_events.getEvent(i, e);
+        result.events.push_back(e);
+    }
+    return result;
+}
+
+struct PanicVstRig {
+    explicit PanicVstRig(pulp::format::ProcessorFactory factory) : processor(factory) {
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        Steinberg::Vst::SpeakerArrangement in_arr[1] = {SpeakerArr::kStereo};
+        Steinberg::Vst::SpeakerArrangement out_arr[1] = {SpeakerArr::kStereo};
+        REQUIRE(processor.setBusArrangements(in_arr, 1, out_arr, 1) == Steinberg::kResultTrue);
+        Steinberg::Vst::ProcessSetup setup{};
+        setup.processMode = Steinberg::Vst::kRealtime;
+        setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+        setup.maxSamplesPerBlock = 64;
+        setup.sampleRate = 48000.0;
+        REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+        REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+    }
+    ~PanicVstRig() {
+        processor.setActive(false);
+        processor.terminate();
+    }
+    // The adapter may spend its first blocks warming up without running the
+    // Processor; run until the Processor has produced its note.
+    void settle() {
+        for (int i = 0; i < 16 && g_panic_vst->process_calls == 0; ++i)
+            run_vst_block(processor);
+        REQUIRE(g_panic_vst->process_calls > 0);
+    }
+    HostApp host_app;
+    vst3::PulpVst3Processor processor;
+};
+
+} // namespace
+
+TEST_CASE("vst3 panic: a request is serviced onto the host output event list", "[vst3][panic]") {
+    PanicVstRig rig(&make_panic_vst_midi);
+    REQUIRE(g_panic_vst != nullptr);
+    CHECK(g_panic_vst->panic_capabilities().serviced);
+    CHECK(g_panic_vst->panic_capabilities().midi_out);
+    rig.settle();
+
+    g_panic_vst->request_panic();
+    const auto result = run_vst_block(rig.processor);
+    CHECK(g_panic_vst->panic_calls == 1);
+    CHECK(g_panic_vst->last_mode == pulp::format::PanicMode::immediate);
+
+    std::size_t note_offs = 0, cc120 = 0, cc123 = 0, bends = 0;
+    for (const auto& e : result.events) {
+        if (e.type == Steinberg::Vst::Event::kNoteOffEvent) {
+            ++note_offs;
+            CHECK(e.noteOff.channel == 2);
+            CHECK(e.noteOff.pitch == 64);
+        } else if (e.type == Steinberg::Vst::Event::kLegacyMIDICCOutEvent) {
+            if (e.midiCCOut.controlNumber == 120)
+                ++cc120;
+            if (e.midiCCOut.controlNumber == 123)
+                ++cc123;
+            if (e.midiCCOut.controlNumber == Steinberg::Vst::kPitchBend) {
+                ++bends;
+                // Centre is 8192: LSB 0, MSB 64.
+                CHECK(e.midiCCOut.value == 0);
+                CHECK(e.midiCCOut.value2 == 64);
+            }
+        }
+    }
+    CHECK(note_offs == 1);
+    CHECK(cc120 == 16);
+    CHECK(cc123 == 16);
+    CHECK(bends == 16);
+    CHECK(result.events.size() == 1 + pulp::midi::panic_message_count(pulp::midi::PanicScope{}));
+
+    // Consumed once.
+    CHECK(run_vst_block(rig.processor).events.empty());
+}
+
+TEST_CASE("vst3 panic: without MIDI output a request resets voices and emits nothing",
+          "[vst3][panic]") {
+    PanicVstRig rig(&make_panic_vst_silent);
+    REQUIRE(g_panic_vst != nullptr);
+    CHECK(g_panic_vst->panic_capabilities().serviced);
+    CHECK_FALSE(g_panic_vst->panic_capabilities().midi_out);
+    rig.settle();
+
+    g_panic_vst->request_panic(pulp::format::PanicMode::release);
+    const auto result = run_vst_block(rig.processor);
+    CHECK(g_panic_vst->panic_calls == 1);
+    CHECK(g_panic_vst->last_mode == pulp::format::PanicMode::release);
+    CHECK(result.events.empty());
 }

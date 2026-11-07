@@ -94,6 +94,38 @@ Validation is separate from unit tests. Unit tests verify internal behavior; val
 Public CI does not build or validate AAX because the SDK and validator are
 developer-supplied and not bundled by Pulp.
 
+## Testing Audio Unit Plug-Ins
+
+Two environment traps make AU tests misleading on macOS. Neither is a Pulp bug,
+but both cost real debugging time.
+
+**Do not point `DYLD_LIBRARY_PATH` at Homebrew.** A test that loads an Audio
+Unit pulls in ImageIO, and ImageIO resolves `libpng` through the dynamic
+loader. With `DYLD_LIBRARY_PATH=/opt/homebrew/lib` it picks up Homebrew's
+`libpng` instead of the system one, and image decoding fails or crashes far
+from the real cause. If a test binary needs a library from a non-system
+location, give it an rpath at link time, or set `DYLD_FALLBACK_LIBRARY_PATH`,
+which the loader consults only after the system locations and so cannot shadow
+them.
+
+**Pump a probe host's run loop inside an autorelease pool.** A probe that opens
+an AU view, drives the main run loop, and closes the view will appear to leak
+that view when the run loop runs outside an `@autoreleasepool`: Cocoa defers
+releases to the pool, the pool never drains while the probe is running, and the
+closed view stays alive. Wrap each pump iteration in its own pool:
+
+```objc
+for (int i = 0; i < iterations; ++i) {
+    @autoreleasepool {
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    }
+}
+```
+
+Check for a leak only after the pool has drained; a view that disappears once
+the pool drains was never leaked.
+
 ## Screenshot Capture
 
 Use one of the project-facing capture paths for agent or CI evidence:

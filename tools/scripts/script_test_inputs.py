@@ -743,7 +743,7 @@ SPAWN_FUNCTIONS = ("exec",)
 # The repo's plugin and module loaders (core/host): PluginSlot::load, the
 # scanner calls that open bundles from disk, and the dlopen shim. PluginSlot alone is an interface that
 # tests implement in memory, so only its loader counts.
-LOAD_APIS = (r"PluginSlot::load\s*\(", r"scan_clap_bundle\s*\(", r"scan_vst3_bundle\s*\(",
+LOAD_APIS = (r"PluginSlot::load\s*\(", r"PluginSlot::load_exact\s*\(", r"load_clap_plugin_exact\s*\(", r"scan_clap_bundle_descriptors\s*\(", r"scan_clap_bundle\s*\(", r"scan_vst3_bundle\s*\(",
              r"scan_lv2_bundle\s*\(", r"scan_directory\s*\(", r"scan_audio_units\s*\(", r"dl_open\s*\(",
              r"load_node_pack\s*\(", r"load_verified_node_pack\s*\(",
              r"add_plugin_node\s*\(", r"add_plugin_node_from_drop\s*\(",

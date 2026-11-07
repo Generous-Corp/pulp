@@ -932,3 +932,72 @@ TEST_CASE("WorkerPool rapid back-to-back batches from a separate thread are race
     CHECK(batches.blocks() == kBlocks);
     batches.check();
 }
+
+// The workgroup publication is a single-writer seqlock. A reader that takes
+// its data with relaxed loads must order them before the closing sequence read
+// with an acquire fence, and the writer must order the opening (odd) sequence
+// store before its data stores with a release fence; an acquire LOAD of the
+// sequence orders only what follows it, so on arm64 a data load can complete
+// after the closing check and return a field from the next publication.
+// Publication n carries a pointer that encodes n and the null policy that
+// publish_audio_workgroup() is called with, so any mix of two publications is
+// detectable from one coherent read.
+TEST_CASE("WorkerPool workgroup publication is never read torn",
+          "[format][worker-pool][workgroup][memory-order]") {
+    GraphRuntimeWorkerPool pool;
+    constexpr std::uint64_t kPublications = 400000;
+    constexpr int kReaders = 3;
+
+    std::atomic<bool> done{false};
+    std::atomic<std::uint64_t> torn{0};
+    std::atomic<std::uint64_t> reads{0};
+    std::atomic<int> ready{0};
+
+    std::vector<std::thread> readers;
+    for (int r = 0; r < kReaders; ++r) {
+        readers.emplace_back([&] {
+            ready.fetch_add(1);
+            std::uint64_t local_reads = 0;
+            std::uint64_t local_torn = 0;
+            while (!done.load(std::memory_order_acquire)) {
+                const auto snap = pool.audio_workgroup_publication_for_test();
+                ++local_reads;
+                const auto bits = reinterpret_cast<std::uintptr_t>(snap.workgroup);
+                if (snap.generation == 2) {
+                    // Initial state: no publication yet.
+                    if (bits != 0 || !snap.fallback_when_null)
+                        ++local_torn;
+                    continue;
+                }
+                const std::uint64_t n = bits >> 1;
+                const bool device_policy = (bits & 1u) == 0u;
+                // Publication n leaves the sequence at 2 + 2n.
+                if (snap.generation != 2 + 2 * n || snap.fallback_when_null != device_policy)
+                    ++local_torn;
+            }
+            reads.fetch_add(local_reads);
+            torn.fetch_add(local_torn);
+        });
+    }
+    while (ready.load() < kReaders)
+        std::this_thread::yield();
+
+    // Single writer, as the class requires. Alternate the two public entry
+    // points so the null policy flips on every publication.
+    for (std::uint64_t n = 1; n <= kPublications; ++n) {
+        const bool device = (n % 2) == 0;
+        auto* handle =
+            reinterpret_cast<void*>(static_cast<std::uintptr_t>((n << 1) | (device ? 0u : 1u)));
+        if (device)
+            pool.set_audio_workgroup(handle);
+        else
+            pool.set_audio_workgroup_from_render_context(handle);
+    }
+    done.store(true, std::memory_order_release);
+    for (auto& t : readers)
+        t.join();
+
+    INFO("reads=" << reads.load() << " publications=" << kPublications);
+    CHECK(reads.load() > 0);
+    CHECK(torn.load() == 0);
+}

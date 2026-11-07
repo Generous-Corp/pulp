@@ -35,6 +35,9 @@ def main():
         for key in ('input', 'source_node', 'source_port', 'destination_node', 'destination_port', 'block_frames'):
             if key in params:
                 command += ['--' + key.replace('_', '-'), str(params[key])]
+        for key in ('plan', 'latency', 'node_loads'):
+            if params.get(key):
+                command += ['--' + key.replace('_', '-')]
         cli = run(command, directory)
         assert cli.returncode == (0 if code == 'Attached' else 2), (cli.returncode, cli.stderr, cli.stdout)
         report = json.loads(cli.stdout)
@@ -64,6 +67,37 @@ def main():
         assert mirrored == report, (mirrored, report)
 
     compare(base, rows=expected)
+    introspection = dict(base, plan=True, latency=True)
+    compare(introspection, rows=expected)
+    report = json.loads(run([args.cli, 'graph', 'probe', introspection['path'], '--json',
+                             '--input', introspection['input'], '--source-node', 'source',
+                             '--source-port', 'audio', '--destination-node', 'downstream',
+                             '--destination-port', 'audio', '--plan', '--latency'], directory).stdout)
+    assert report['plan']['connections'][0]['automation'] is False
+    assert report['plan']['connections'][0]['audio_rate_modulation'] is False
+    assert report['latency_pdc']['nodes'] and report['latency_pdc']['connections']
+    cli = run([args.cli, 'graph', 'probe', introspection['path'], '--json',
+               '--input', introspection['input'], '--source-node', 'source',
+               '--source-port', 'audio', '--destination-node', 'downstream',
+               '--destination-port', 'audio', '--node-loads'], directory)
+    assert cli.returncode == 0, (cli.returncode, cli.stderr, cli.stdout)
+    loads = json.loads(cli.stdout).get('node_loads')
+    assert isinstance(loads, list) and loads, loads
+    assert all('node_id' in row and 'load' in row and 'callback_count' in row for row in loads), loads
+    negative = run([args.cli, 'graph', 'probe', base['path'], '--json', '--input', base['input'],
+                    '--source-node', 'source', '--source-port', 'audio',
+                    '--destination-node', 'downstream', '--destination-port', 'audio',
+                    '--unknown'], directory)
+    assert negative.returncode == 2 and json.loads(negative.stdout)['code'] == 'invalid_option', negative.stdout
+    outside = run([args.cli, 'graph', 'inspect', base['path'], '--json', '--plan'], directory)
+    assert outside.returncode == 2 and json.loads(outside.stdout)['code'] == 'invalid_option', outside.stdout
+    request = dict(jsonrpc='2.0', id=2, method='tools/call',
+                   params=dict(name='pulp_graph', arguments=dict(path=base['path'],
+                                                                  operation='inspect', plan=True)))
+    mcp_outside = run([args.mcp], directory, json.dumps(request) + '\n')
+    response = next(json.loads(line) for line in mcp_outside.stdout.splitlines()
+                    if json.loads(line).get('id') == 2)['result']
+    assert response.get('isError') is True and 'only valid for probe' in response['content'][0]['text']
     compare(dict(base, block_frames=128), rows=[[0, 0, 128, .5, .5], [1, 128, 5, .5, .5]])
     compare(dict(base, source_port='absent'), 'UnknownPort')
     compare(dict(base, destination_node='output'), 'MissingEdge')

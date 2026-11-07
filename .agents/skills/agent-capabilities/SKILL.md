@@ -35,6 +35,14 @@ was a single integer every open branch raced for; one merge staled the rest.
 The sections below that say "increase the counter" describe the hand-bump
 flow that branches no longer need; leave the constants alone instead.
 
+Exception: a change is pending only against the last state the history
+recorded under the SAME counter. When `--status` reports `inventory_version`
+as `assigned` (the history's last entry is an older counter), a header-byte
+change cannot be pending: `--write` refuses it with "public surface changed
+without an inventory_version increase". Then bump `SURFACE_INVENTORY_VERSION`
+by hand, past any integer an open PR already claims (the loop below), and
+`--write` again.
+
 ## Public-header fingerprint refresh
 
 When a SignalGraph or other covered public header changes bytes while its
@@ -1377,6 +1385,13 @@ the bypass trailer by reflex:
   `PULP_SDK_TARGETS` minus INTERFACE targets against that list, so an INTERFACE
   target needs no stem and a STATIC one does.
 
+- **Removing a non-header runtime artifact** — dropping an
+  `install(IMPORTED_RUNTIME_ARTIFACTS …)` block, such as the retired Vellum
+  D15 GPU-audio provider dylib and its notice files, takes no header out of
+  any covered root, so no capability surface changes. Check that no
+  `PULP_SDK_TARGETS` entry or release-matrix stem named the artifact; the
+  provider was never one, so neither list moves.
+
 ## A platform header installed for per-binary recompilation is not capability surface
 
 `PulpInstallRules.cmake` installs more than public API. The macOS ObjC cluster
@@ -1789,3 +1804,12 @@ The `CustomNodeEventBlock::triggers` field also touches sequencer-owned exposure
 maintain the pending bounded-trigger-runtime row with installed SDK evidence
 and explicit product-control gaps. Neither that pointer nor the header ledger
 admits arbitrary Custom trigger producers or claims complete G-5 support.
+
+## Status-matrix truth edits are not capability surface
+
+Correcting `docs/status/support-matrix.yaml` and `docs/reference/capabilities.md`
+to match code that already exists (dropping a stale limitation, adding a row for
+an existing renderer or example, changing a widget label) adds no public header
+and changes no installed capability key. Run
+`python3 tools/docs_generate.py generate` so the generated limitations block
+follows the matrix, and do not touch the capability manifest for it.

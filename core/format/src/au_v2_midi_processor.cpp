@@ -42,6 +42,7 @@ PulpAUMidiProcessor::PulpAUMidiProcessor(AudioComponentInstance ci,
 {
     if (!factory) return;
     processor_ = factory();
+    render_context_.bind(processor_.get());
     if (!processor_) return;
 
     processor_->set_state_store(&store_);
@@ -50,6 +51,8 @@ PulpAUMidiProcessor::PulpAUMidiProcessor(AudioComponentInstance ci,
     // Cache the immutable descriptor once: descriptor() returns by value and
     // allocates its std::string members, so the render path must never call it.
     descriptor_ = processor_->descriptor();
+    panic_state_ = processor_->panic_state();
+    panic_state_->attach(descriptor_.produces_midi);
     // Discover the plug-in's bundled factory presets. Empty for a
     // plug-in that ships none, and for any build not loaded from a
     // bundle (a unit-test binary, a standalone host).
@@ -155,6 +158,8 @@ OSStatus PulpAUMidiProcessor::GetPropertyInfo(AudioUnitPropertyID inID,
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_property_info(store_, inScope, outDataSize,
                                                   outWritable);
+    if (inID == kAudioUnitProperty_RenderContextObserver)
+        return render_context_.property_info(inScope, inElement, outDataSize, outWritable);
     if (inID == kAudioUnitProperty_SupportsMPE)
         return fill_supports_mpe_property_info(descriptor_.effective_capabilities().supports_mpe,
                                                inScope, outDataSize, outWritable);
@@ -214,6 +219,8 @@ OSStatus PulpAUMidiProcessor::GetProperty(AudioUnitPropertyID inID,
         return offline_render_.get(inScope, outData);
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_name(store_, inScope, outData);
+    if (inID == kAudioUnitProperty_RenderContextObserver)
+        return render_context_.get(inScope, inElement, outData);
     if (inID == kAudioUnitProperty_SupportsMPE)
         return fill_supports_mpe(descriptor_.effective_capabilities().supports_mpe, inScope,
                                  outData);
@@ -304,6 +311,9 @@ OSStatus PulpAUMidiProcessor::Initialize()
 
 void PulpAUMidiProcessor::Cleanup()
 {
+    // Leave the host's borrowed workgroup before the processor releases the
+    // threads that joined it.
+    render_context_.clear_after_render_resources();
     if (processor_) processor_->release();
     MusicDeviceBase::Cleanup();
 }
@@ -357,6 +367,11 @@ OSStatus PulpAUMidiProcessor::Render(AudioUnitRenderActionFlags& ioActionFlags,
                                      UInt32 inNumberFrames)
 {
     (void)inTimeStamp;
+
+    // The observer completes a workgroup transition before it returns; this
+    // idempotent guard makes every render verify the current publication
+    // before any early exit, as the AUv3 render block does.
+    render_context_.prepare_for_render();
 
     // The Processor and its scratch were sized in prepare() to
     // GetMaxFramesPerSlice(). Rejecting an oversized render is the canonical AU
@@ -462,7 +477,11 @@ OSStatus PulpAUMidiProcessor::Render(AudioUnitRenderActionFlags& ioActionFlags,
         auto render_lock = state_restore_gate_.lock_for_render();
         if (render_lock) {
             pulp::runtime::ScopedNoAlloc no_alloc_guard;
+            if (panic_state_)
+                service_panic(*processor_, *panic_state_, midi_out_);
             processor_->process(process_buffers, midi_in_, midi_out_, ctx);
+            if (panic_state_)
+                panic_state_->observe_midi_out(midi_out_);
         } else {
             midi_out_.clear();
             midi_out_.clear_sysex();

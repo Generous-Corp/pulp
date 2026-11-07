@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261104-editor-host-dawn-census-watch",
+  "created_at": "2026-11-04T04:15:23Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adds tools/scripts/dawn_binding_census.py, a read-only check that counts Dawn implementations in built artifacts (nm/otool over Mach-O images), its selftest, acceptance item 6a in the editor-host runner, a tools.yaml entry with its generated CLAUDE.md digest line, and a skia-gpu-build skill note. It measures packaging and render-backend linkage and changes none: no design-import, Chromium, rendering or packaging authority moves, and no build, link or bundle step reads it.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-clap-contract-editor",
+    "ctest --test-dir build -R pulp-test-editor-host",
+    "python3 tools/scripts/test_dawn_binding_census.py",
+    "python3 tools/scripts/test_editor_host_acceptance.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

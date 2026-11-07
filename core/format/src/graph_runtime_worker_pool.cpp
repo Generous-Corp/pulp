@@ -170,9 +170,12 @@ void GraphRuntimeWorkerPool::publish_audio_workgroup(
     // CoreAudio device publications are serialized by switch_mutex_ and happen
     // with the device callback stopped. Pointer + generation are one coherent
     // logical publication without allocation, retain/release, or a lock.
-    const auto odd = audio_workgroup_sequence_.fetch_add(
-                         1, std::memory_order_acq_rel) +
-                     1;
+    const auto odd = audio_workgroup_sequence_.fetch_add(1, std::memory_order_relaxed) + 1;
+    // The odd sequence must be visible before any data store. A store-release
+    // (or an acquire-release RMW) orders what came BEFORE it, not the stores
+    // after it, so without this fence the data can become visible while the
+    // reader still sees the old even sequence.
+    std::atomic_thread_fence(std::memory_order_release);
     audio_workgroup_.store(workgroup, std::memory_order_relaxed);
     audio_workgroup_fallback_when_null_.store(fallback_when_null,
                                               std::memory_order_relaxed);
@@ -196,8 +199,12 @@ GraphRuntimeWorkerPool::current_audio_workgroup_publication() const noexcept {
             audio_workgroup_.load(std::memory_order_relaxed);
         const bool fallback_when_null =
             audio_workgroup_fallback_when_null_.load(std::memory_order_relaxed);
-        const auto after =
-            audio_workgroup_sequence_.load(std::memory_order_acquire);
+        // Order the relaxed data loads above before the closing sequence read.
+        // An acquire load orders only the operations AFTER it, so on weakly
+        // ordered CPUs a data load could otherwise complete after this check
+        // and return a field from the next publication.
+        std::atomic_thread_fence(std::memory_order_acquire);
+        const auto after = audio_workgroup_sequence_.load(std::memory_order_relaxed);
         if (before == after) return {workgroup, after, fallback_when_null};
     }
 }

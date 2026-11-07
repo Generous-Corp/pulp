@@ -16,6 +16,8 @@
 #if defined(__APPLE__)
 
 #include <AudioUnitSDK/AUBase.h>
+
+#include <cstddef>
 #include <AudioToolbox/AudioUnitProperties.h>
 
 #include <AudioUnit/AudioUnit.h>
@@ -42,11 +44,18 @@
 #include <memory>
 
 namespace pulp::format {
+class AudioWorkgroupClient;
 class ContractEditorSession;
 class ContractSessionRegistry;
 } // namespace pulp::format
 
 namespace pulp::format::au {
+
+/// Upper bound on `AUChannelInfo` pairs an adapter advertises through
+/// `SupportedNumChannels`. Descriptor widths are validated into {1, 2}, so a
+/// table is a handful of pairs; the constant is a small fixed size so callers
+/// back it with instance storage and never allocate.
+inline constexpr std::size_t kMaxChannelInfoPairs = 16;
 
 /// Custom AU property ID the Cocoa view factory queries to obtain the
 /// host-side Processor + StateStore pointers. Fixes the former
@@ -464,6 +473,55 @@ OSStatus fill_supports_mpe_property_info(bool supports_mpe, AudioUnitScope scope
                                          bool& out_writable);
 
 OSStatus fill_supports_mpe(bool supports_mpe, AudioUnitScope scope, void* out_data);
+
+/// `kAudioUnitProperty_RenderContextObserver`, the v2 form of AUv3's
+/// `renderContextObserver`. A processor that runs auxiliary realtime threads
+/// implements `AudioWorkgroupClient`; the OS then calls the returned block on
+/// the render thread, before each render whose workgroup changed, with the
+/// host's `AudioUnitRenderContext`. The block forwards the context's
+/// workgroup to the client and completes the client's join barrier before
+/// returning, exactly as the AUv3 adapter does. The host-owned workgroup is
+/// borrowed, never retained: Apple documents no reference-count operation as
+/// realtime safe, and the context protocol bounds its lifetime.
+///
+/// Advertised only for a processor that implements `AudioWorkgroupClient`;
+/// any other processor reports `kAudioUnitErr_InvalidProperty`, which a host
+/// reads as "no auxiliary realtime threads". The block is created once and
+/// owned here; `GetProperty` hands out that pointer without transferring
+/// ownership.
+class RenderContextObserverProperty {
+  public:
+    RenderContextObserverProperty() = default;
+    ~RenderContextObserverProperty();
+    RenderContextObserverProperty(const RenderContextObserverProperty&) = delete;
+    RenderContextObserverProperty& operator=(const RenderContextObserverProperty&) = delete;
+
+    /// Bind the processor (call once it exists, before the host can query).
+    /// A processor that is not an `AudioWorkgroupClient` leaves the property
+    /// unadvertised.
+    void bind(Processor* processor);
+
+    OSStatus property_info(AudioUnitScope scope, AudioUnitElement element, UInt32& out_size,
+                           bool& out_writable) const;
+    OSStatus get(AudioUnitScope scope, AudioUnitElement element, void* out_data) const;
+
+    /// Render entry guard: idempotent, realtime safe. Every render verifies
+    /// the current publication before doing anything else.
+    void prepare_for_render() const noexcept;
+
+    /// Off the render thread, when render resources go away (`Cleanup`):
+    /// publish removal and wait until every worker has left the borrowed
+    /// workgroup.
+    void clear_after_render_resources() const noexcept;
+
+    AudioWorkgroupClient* client() const noexcept {
+        return client_;
+    }
+
+  private:
+    AudioWorkgroupClient* client_ = nullptr;
+    void* block_ = nullptr; // AURenderContextObserver, Block_copy-owned
+};
 
 OSStatus fill_parameter_clump_name(const state::StateStore& store,
                                    AudioUnitScope scope,

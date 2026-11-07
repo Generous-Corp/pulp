@@ -79,6 +79,19 @@ function(_pulp_collect_dependencies target)
     endforeach()
 endfunction()
 
+# Pulp::signal links the muFFT backend off Apple when it compiles for the
+# target, so the installed package carries Pulp::signal-mufft exactly there.
+# Apple builds use vDSP and must never see it; elsewhere it is part of every
+# closure that reaches Pulp::signal.
+set(_expected_fft_backend_closure "")
+if(TARGET Pulp::signal-mufft)
+    if(APPLE)
+        message(FATAL_ERROR
+            "Pulp::signal-mufft must not be exported on Apple platforms (vDSP is the FFT backend)")
+    endif()
+    set(_expected_fft_backend_closure Pulp::signal-mufft)
+endif()
+
 set_property(GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE "")
 foreach(_root Pulp::timebase Pulp::timeline Pulp::playback)
     _pulp_collect_dependencies("${_root}")
@@ -104,6 +117,7 @@ set(_expected_engine_closure
     Pulp::runtime
     Pulp::simd
     Pulp::signal
+    ${_expected_fft_backend_closure}
     Pulp::state
     Pulp::timebase
     Pulp::timeline
@@ -269,6 +283,7 @@ set(_expected_importer_closure
     Pulp::runtime
     Pulp::simd
     Pulp::signal
+    ${_expected_fft_backend_closure}
     Pulp::state
     Pulp::timebase
     Pulp::timeline

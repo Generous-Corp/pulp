@@ -2432,6 +2432,15 @@ public:
     void set_subtree_cached(bool v);
     bool subtree_cached() const { return subtree_cached_; }
 
+    /// Retain rendered pixels for static leaf content inside its bounds. This
+    /// avoids rasterizing an unchanged canvas/gradient on every frame. Uses the
+    /// same mutation invalidation as subtree caching, plus device/scale/size
+    /// checks. Unsupported backends, non-leaves, transforms with rotation/skew
+    /// or fractional pixel origins paint directly. Keep externally animated
+    /// textures and backdrop-dependent content uncached. Opacity remains live.
+    /// Turning this off restores the ordinary uncached path.
+    void set_raster_cached(bool enabled);
+
     /// Attach a GPU post-processing effect to this View's compositing layer.
     void set_effect(std::shared_ptr<canvas::ViewEffect> effect) { effect_ = std::move(effect); }
     const std::shared_ptr<canvas::ViewEffect>& effect() const { return effect_; }

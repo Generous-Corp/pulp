@@ -67,6 +67,14 @@ public:
         const std::string& title = "Choose Folder",
         const std::string& default_path = "");
 
+    // Show a folder selection dialog that allows several folders. Returns the
+    // chosen folders in the platform's order, or an empty vector on cancel or
+    // when no backend is available (has_backend() tells the two apart). A
+    // backend that only registered a single-folder handler yields at most one
+    // folder rather than failing; see choose_folders_with().
+    static std::vector<std::string> choose_folders(const std::string& title = "Choose Folders",
+                                                   const std::string& default_path = "");
+
     // ── Host-registered backend ────────────────────────────────────────
     //
     // On platforms without an auto-available native dialog (Windows,
@@ -95,7 +103,19 @@ public:
         std::function<std::optional<std::string>(
             const std::string& title,
             const std::string& default_path)> choose_folder;
+        // Optional. When unset, choose_folders() falls back to choose_folder()
+        // and returns at most one folder.
+        std::function<std::vector<std::string>(const std::string& title,
+                                               const std::string& default_path)>
+            choose_folders;
     };
+
+    // The routing rule behind choose_folders(), exposed so it can be checked
+    // without raising a dialog: the backend's multi-folder handler when it has
+    // one, else its single-folder handler wrapped into a vector, else empty.
+    static std::vector<std::string> choose_folders_with(const Backend& backend,
+                                                        const std::string& title,
+                                                        const std::string& default_path);
 
     using SaveCopyBackend = std::function<std::optional<std::string>(
             const std::string& source_path,

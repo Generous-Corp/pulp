@@ -240,14 +240,19 @@ pulp::midi::MidiBuffer note_on() {
     return events;
 }
 
-Buffer<float> render_live_note(ModularInstrument& fixture, float modulation) {
+Buffer<float> render_live_events(ModularInstrument& fixture, pulp::midi::MidiBuffer events,
+                                 float modulation) {
     REQUIRE(fixture.graph.prepare(kSampleRate, kBlockSize));
     auto input = constant_input(kBlockSize, modulation);
     Buffer<float> output(2, kBlockSize);
-    REQUIRE(fixture.graph.inject_midi(fixture.midi, note_on()));
+    REQUIRE(fixture.graph.inject_midi(fixture.midi, events));
     auto output_view = output.view();
     fixture.graph.process(output_view, std::as_const(input).view(), kBlockSize);
     return output;
+}
+
+Buffer<float> render_live_note(ModularInstrument& fixture, float modulation) {
+    return render_live_events(fixture, note_on(), modulation);
 }
 
 Buffer<float> render_offline_note(ModularInstrument& fixture, float modulation) {
@@ -417,6 +422,38 @@ TEST_CASE("X9 public APIs compose a modular instrument through a live graph",
     REQUIRE(rendered.audio.num_channels() == 2);
     REQUIRE(rendered.audio.num_samples() == kBlockSize * 2);
     REQUIRE(rms(rendered.audio) > 1.0e-5f);
+}
+
+TEST_CASE("X9 bounded MIDI voices and modulation respond through public graph APIs",
+          "[host][graph][x9][midi][polyphony][modulation][partial]") {
+    // The PulpSynth Processor owns a fixed eight-voice bank. This fixture does
+    // not claim G-6 graph/MPE delivery; it proves the public graph MIDI lane
+    // reaches more than one note and that the authored modulation lane changes
+    // the rendered result.
+    ModularInstrument single;
+    ModularInstrument chord_fixture;
+    configure_modular_instrument(single);
+    configure_modular_instrument(chord_fixture);
+    const auto one_voice = render_live_events(single, note_on(), 0.5f);
+    const auto three_voices = render_live_events(chord_fixture, chord(), 0.5f);
+    REQUIRE(rms(one_voice) > 1.0e-5f);
+    REQUIRE(rms(three_voices) > 1.0e-5f);
+    require_finite_and_different(one_voice, three_voices);
+
+    ModularInstrument low_modulation;
+    ModularInstrument high_modulation;
+    configure_modular_instrument(low_modulation);
+    configure_modular_instrument(high_modulation);
+    const auto low = render_live_events(low_modulation, note_on(), 0.1f);
+    const auto high = render_live_events(high_modulation, note_on(), 0.9f);
+    require_finite_and_different(low, high);
+
+    // Planted negative: MIDI publication to a non-MIDI node is rejected and
+    // cannot be mistaken for evidence of host/MPE graph delivery.
+    ModularInstrument invalid;
+    configure_modular_instrument(invalid);
+    REQUIRE(invalid.graph.prepare(kSampleRate, kBlockSize));
+    REQUIRE_FALSE(invalid.graph.inject_midi(invalid.output, note_on()));
 }
 
 TEST_CASE("X9 records the runtime ProcessorNode persistence boundary",

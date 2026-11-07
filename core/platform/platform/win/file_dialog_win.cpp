@@ -116,6 +116,44 @@ std::optional<std::string> run_single(bool save,
     return result;
 }
 
+// Multi-select folder picker.
+std::vector<std::string> run_multi_folders(const std::string& title) {
+    ComInit com;
+    if (!com.usable())
+        return {};
+    IFileOpenDialog* dlg = nullptr;
+    if (FAILED(CoCreateInstance(__uuidof(FileOpenDialog), nullptr, CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&dlg))) ||
+        !dlg) {
+        return {};
+    }
+    std::vector<std::string> out;
+    FILEOPENDIALOGOPTIONS opts = 0;
+    dlg->GetOptions(&opts);
+    dlg->SetOptions(opts | FOS_PICKFOLDERS | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM |
+                    FOS_NOCHANGEDIR);
+    if (!title.empty())
+        dlg->SetTitle(utf8_to_utf16(title).c_str());
+    if (SUCCEEDED(dlg->Show(nullptr))) {
+        IShellItemArray* arr = nullptr;
+        if (SUCCEEDED(dlg->GetResults(&arr)) && arr) {
+            DWORD count = 0;
+            arr->GetCount(&count);
+            for (DWORD i = 0; i < count; ++i) {
+                IShellItem* item = nullptr;
+                if (SUCCEEDED(arr->GetItemAt(i, &item)) && item) {
+                    if (auto p = item_path(item))
+                        out.push_back(*p);
+                    item->Release();
+                }
+            }
+            arr->Release();
+        }
+    }
+    dlg->Release();
+    return out;
+}
+
 }  // namespace
 
 FileDialog::Backend make_win_file_dialog_backend() {
@@ -170,6 +208,10 @@ FileDialog::Backend make_win_file_dialog_backend() {
     backend.choose_folder = [](const std::string& title,
                                const std::string&) -> std::optional<std::string> {
         return run_single(/*save=*/false, title, FOS_PICKFOLDERS, "");
+    };
+    backend.choose_folders = [](const std::string& title,
+                                const std::string&) -> std::vector<std::string> {
+        return run_multi_folders(title);
     };
     return backend;
 }

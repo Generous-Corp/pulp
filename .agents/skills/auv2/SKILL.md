@@ -229,6 +229,38 @@ which is what a host reads as "no" and matches leaving it unimplemented.
 Add the property to **all three** classes when touching this. A helper wired
 into only the instrument leaves an `aumf`/`aumi` MPE plug-in silently
 unreachable, and no test that exercises one class catches it.
+### Host workgroup: `kAudioUnitProperty_RenderContextObserver`
+
+A processor that runs auxiliary realtime threads (a worker pool, an emulator
+thread that feeds the next callback) implements `AudioWorkgroupClient`, and
+needs the host's render workgroup so those threads are scheduled with the
+render thread. AUv3 hosts get it through `-renderContextObserver`; AU v2 hosts
+read `kAudioUnitProperty_RenderContextObserver` (property 60, global scope,
+read-only, value type `AURenderContextObserver`). All three AU v2 classes answer
+it through `RenderContextObserverProperty` in `au_v2_common.hpp`, which mirrors
+the AUv3 block exactly:
+
+- The OS calls the block on the render thread before a render whose workgroup
+  changed. It forwards the **borrowed** workgroup (never `os_retain`) to
+  `set_audio_workgroup_from_render_context` and runs
+  `prepare_audio_workgroup_for_render()`, whose barrier must finish leave/join
+  on every worker before the block returns.
+- Every `Render` calls `prepare_for_render()` first (idempotent guard).
+- `Cleanup` calls `clear_after_render_resources()` **before**
+  `processor_->release()`, so workers leave the workgroup while the threads
+  still exist.
+- It is advertised only for an `AudioWorkgroupClient` processor; others answer
+  `kAudioUnitErr_InvalidProperty` ("no auxiliary realtime threads").
+
+Gotchas: the block is created once with `Block_copy` and owned by the
+property; `GetProperty` hands out the pointer without transferring ownership.
+`static_cast` between `void*` and a block pointer does not compile; the member
+is a plain `void*` (ARC-neutral header) with C-style casts in the `.cpp`.
+Before this property existed, an AU v2 plug-in's auxiliary threads never saw
+a workgroup at all; a processor that must also run on older SDKs keeps its own
+no-workgroup fallback (e.g. `pulp::audio::AudioWorkgroup`'s realtime policy)
+until a publication arrives.
+
 ## Contract editors (`au_v2_contract_view.mm`)
 
 A plug-in that declares `pulp_add_plugin(... UI <package>)` is view-free, since
@@ -389,8 +421,9 @@ stack-owned `ProcessBuffers` block and calls the additive
 the existing `ScopedNoAlloc` guard. Legacy processors still reach the original
 main-in/main-out callback through the default projection, while processors that
 override the richer overload can inspect AU v2 bus metadata directly. The AU v2
-instrument `Render()` path uses the same additive dispatch with an inactive,
-optional main input bus and the active output bus.
+instrument `Render()` path uses the same additive dispatch; its input views are
+built from the descriptor and are active only for the elements pulled that
+block (a classic synth projects an inactive, optional main input).
 
 ### Latency / tail change notifications
 
@@ -406,6 +439,13 @@ these for delivery on the main thread, so it's safe to invoke from
 the audio callback path. Tests live in
 `pulp-test-processor-layout-latency` plus the existing
 `pulp-test-au-v2-effect` suite.
+
+All three classes need it: the effect and the MIDI processor did, but the
+instrument's `Render` did not consume the flags, so an instrument whose
+latency moved (a latency setting, a resampler change) left the host's delay
+compensation on the old value with nothing failing. The instrument's case is
+covered in `pulp-test-au-plugin-state` ("AU v2 instrument fires
+PropertyChanged ...").
 
 ### Bypass audio must be latency-compensated (PDC alignment)
 
@@ -447,7 +487,11 @@ is unit-tested over several descriptors in `test_au_v2_effect.cpp` (`[channels]`
 ### MIDI output (`kAudioUnitProperty_MIDIOutputCallback`)
 
 A Processor that declares `produces_midi = true` now delivers the MIDI it writes
-to `midi_out` during `process()` back to the host on AU v2. The adapter:
+to `midi_out` during `process()` back to the host on AU v2, from all three
+classes: the effect (`ProcessBufferLists`), the MIDI processor, and the
+instrument (`PulpAUInstrument::Render`, which until then filled `midi_out` and
+dropped it, so an instrument's device MIDI or editor feedback never reached the
+host). The adapter:
 
 1. Advertises the output stream via `kAudioUnitProperty_MIDIOutputCallbackInfo`
    (a one-element `CFArrayRef` named after the plugin) and accepts the host's
@@ -566,6 +610,19 @@ The genuine AU v2 multi-bus vehicle is the **instrument** (`aumu` /
     audio-thread allocation), using a PRIVATE flags word so the side chain's
     `OutputIsSilence` never marks the main render silent, then calls the base
     `Render`. The pulled list lives only for that call (`sidechain_pulled_`).
+  - `PulpAUInstrument` does the same for an instrument that declares input
+    buses: `MusicDeviceBase` is constructed with
+    `instrument_input_element_count(desc)` (0 / 1 / 2, since the count must be
+    known before the base runs), the constructor sets each input element's
+    width and names element 1, and `Render()` pulls element 0 and element 1
+    itself (`MusicDeviceBase` pulls nothing) with private flag words. Declare
+    an instrument's inputs `optional`: `build_channel_info` then lists `{0,N}`
+    rows ahead of the pairs so `auval` validates with nothing connected, and an
+    inactive element at another sample rate is re-seeded to the output rate in
+    `Initialize` instead of refused (an element fed by a connection or render
+    callback at another rate is still refused). A side chain needs a main
+    input bus in front of it: elements are positional, so a 0-channel first
+    bus means no input elements at all.
   - `ProcessBufferLists` resolves the pointers with
     `resolve_sidechain_channels`, offset by `slice_frame_offset_`:
     `AUEffectBase::ProcessScheduledSlice` advances ONLY the main buffer lists
@@ -810,6 +867,22 @@ host, about 108 MB per GPU editor open/close in a neutral AU host.
   in-process fake AU whose Processor and StateStore are poisoned after the
   dispose, and check the view deallocates, the tree is destroyed, and each
   observer view hears `on_owner_released()` exactly once (never when freed first).
+
+### Scripted AU v2 editors after owner disposal
+
+The owner-retirement path above assumes every bridge-owned object is safe to
+destroy without the Processor. A scripted AU v2 editor is a deliberate narrow
+exception: its `ScriptedUiSession` destructor flushes deferred gesture releases
+through the Processor's `StateStore`. In `PulpAUEditorOwnership::teardown`, if
+`AliveToken::try_acquire(processor_alive)` fails, log
+`AU v2 editor: view outlived its audio unit` and release the bridge instead of
+calling `notify_owner_released()` or destroying it. This retention applies only
+when the bridge owns that scripted session; custom and AutoUi trees have no such
+destructor and must notify their observers before normal bridge close. The
+native `PluginViewHost` still tears down; keeping a scripted bridge and view
+tree process-live prevents a freed-store access. The
+`ui-script-plugin-editor-au` fixture with `MallocScribble=1` covers this
+owner-disposed ordering, while `test_au_v2_cocoa_ui.mm` covers custom-tree close.
 
 ### Plugin-initiated resize is a Logic-only editor transaction
 
@@ -1259,7 +1332,7 @@ Two host-conformance surfaces beyond the display-string path above:
 - `GetParameterInfo` maps `range.min/max/default_value` to
   `minValue/maxValue/defaultValue` and the unit string to an
   `AudioUnitParameterUnit` (`"Hz"`→Hertz, `"dB"`→Decibels, `"%"`→Percent,
-  Boolean, else Generic). A wrong range/unit silently mis-scales every host
+  Boolean, a discrete non-boolean (Enum) parameter→Indexed so hosts build a menu from the value strings, else Generic). A wrong range/unit silently mis-scales every host
   automation lane — assert the numeric metadata, not just the
   ValuesHaveStrings flag. Test: `test/test_au_v2_param_display.mm`.
 - **Hidden / read-only / non-automatable come from the shared model, and AU has
@@ -1467,3 +1540,36 @@ parameter. Parameters the store does not own still go through the element's
 `SetScheduledEvent`. `[au][automation]` in `test_au_v2_effect.cpp` covers
 dense interleaved events, coincident events, and ramp supersession. Each slice
 is still one full `ProcessBufferLists` and Processor call.
+
+### Instrument channel pairs are enforced at Initialize
+
+`MusicDeviceBase` never checks the negotiated input/output channel counts
+against `SupportedNumChannels` (only `AUEffectBase` does), so an instrument
+that declares input buses advertised `{0,N}` + matched pairs but still
+initialized at any pair a host set. auval probes exactly that (3 in / 1 out)
+and reports `Initialised Unit incorrectly set to InputChans:3 OutputChans:1`
+→ `* * FAIL`. `PulpAUInstrument::Initialize` now applies the effect base's
+rule before the base allocates anything and returns
+`kAudioUnitErr_FormatNotSupported`; instruments without input elements keep
+their previous behaviour. That check only runs when Initialize runs: auval
+initializes at a supported pair, then writes an unsupported one and calls
+Initialize again, which is a no-op on an initialized unit. So
+`StreamFormatWritable` must also return `!IsInitialized()` (as
+`AUEffectBase` does); accepting the write while initialized reproduced the
+same auval FAIL after the Initialize fix. Test: "refuses stream format
+writes while it is initialized". Test: "refuses an input and output channel pair it
+does not advertise" in `test/test_au_v2_instrument_rt.mm`.
+
+## Panic requests: attach, service, observe
+
+Every AU v2 adapter attaches to `Processor::panic_state()` where it creates its
+processor and wraps `process()` with `service_panic()` before and
+`observe_midi_out()` after (see `docs/guides/midi-panic.md`). The `midi_out`
+flag passed to `attach()` is the adapter's honest claim that the host can
+receive MIDI: the effect and MIDI processor use the descriptor's
+`produces_midi`, and so does the `aumu` instrument now that it delivers MIDI
+through `kAudioUnitProperty_MIDIOutputCallback`; a new adapter without a host
+MIDI-output path must pass `false`. Tests: `test_au_v2_midi_processor.cpp` and
+`test_au_plugin_state.mm` (panic reaches the host callback),
+`test_au_v2_effect.cpp` (aufx vs aumf capabilities),
+`test_au_v2_instrument_rt.mm`.

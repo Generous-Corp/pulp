@@ -358,3 +358,81 @@ TEST_CASE("Standalone inspector effect transforms test audio and direct routing 
     REQUIRE(direct_peak < kInputPeak + 0.001f);
     REQUIRE(direct_peak < transformed_peak);
 }
+
+namespace {
+class PanicStandaloneProcessor final : public format::Processor {
+  public:
+    format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "StandalonePanicFixture",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.standalone-panic",
+            .version = "1.0.0",
+            .category = format::PluginCategory::Effect,
+            .input_buses = {{"In", 2}},
+            .output_buses = {{"Out", 2}},
+        };
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const format::PrepareContext&) override {}
+    void on_panic(format::PanicMode mode) override {
+        ++panic_calls;
+        last_mode = mode;
+    }
+    void process(audio::BufferView<float>&, const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer&, const format::ProcessContext&) override {}
+    int panic_calls = 0;
+    format::PanicMode last_mode = format::PanicMode::release;
+};
+PanicStandaloneProcessor* g_panic_standalone = nullptr;
+std::unique_ptr<format::Processor> create_panic_standalone() {
+    auto p = std::make_unique<PanicStandaloneProcessor>();
+    g_panic_standalone = p.get();
+    return p;
+}
+} // namespace
+
+TEST_CASE("Standalone services panic requests as a voice reset without MIDI out",
+          "[standalone][format][panic]") {
+    using pulp::format::StandaloneRenderTestAccess;
+    constexpr int kFrames = 128;
+
+    format::StandaloneConfig cfg;
+    cfg.sample_rate = 48000.0;
+    cfg.buffer_size = kFrames;
+    cfg.output_channels = 2;
+    cfg.input_channels = 2;
+    cfg.persist_settings = false;
+    cfg.transport_playing = false;
+    cfg.route_test_signal_to_output = false;
+
+    format::StandaloneApp app(create_panic_standalone);
+    app.set_config(cfg);
+    StandaloneRenderTestAccess::ensure_processor(app);
+    REQUIRE(g_panic_standalone != nullptr);
+    // Before the render state is prepared nothing services requests.
+    CHECK_FALSE(g_panic_standalone->panic_capabilities().serviced);
+    StandaloneRenderTestAccess::prepare(app);
+    CHECK(g_panic_standalone->panic_capabilities().serviced);
+    CHECK_FALSE(g_panic_standalone->panic_capabilities().midi_out);
+
+    std::array<float, kFrames> in_l{}, in_r{}, out_l{}, out_r{};
+    const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    audio::BufferView<const float> input(in_ptrs, 2, kFrames);
+    audio::BufferView<float> output(out_ptrs, 2, kFrames);
+    audio::CallbackContext ctx;
+    ctx.sample_rate = 48000.0;
+    ctx.buffer_size = kFrames;
+    ctx.sample_position = 0;
+
+    StandaloneRenderTestAccess::render(app, input, output, ctx);
+    CHECK(g_panic_standalone->panic_calls == 0);
+
+    g_panic_standalone->request_panic(format::PanicMode::release);
+    StandaloneRenderTestAccess::render(app, input, output, ctx);
+    CHECK(g_panic_standalone->panic_calls == 1);
+    CHECK(g_panic_standalone->last_mode == format::PanicMode::release);
+    StandaloneRenderTestAccess::render(app, input, output, ctx);
+    CHECK(g_panic_standalone->panic_calls == 1);
+}

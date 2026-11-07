@@ -38,6 +38,7 @@
 #include <pulp/midi/mpe_voice_tracker.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/format/adapter_boundary.hpp>
+#include <pulp/format/factory_program_table.hpp>
 #include <pulp/format/param_group_projection.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/runtime/alive_token.hpp>
@@ -46,6 +47,7 @@
 #include <set>
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <span>
 #include <vector>
@@ -303,6 +305,15 @@ public:
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) override;
     Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) override;
 
+    /// Point factory-preset discovery at @p dir instead of the loaded bundle's
+    /// `Contents/Resources/Presets`. A plug-in that keeps its presets elsewhere
+    /// calls this straight after construction; tests use it to stage a
+    /// fixture. Must run before `initialize()`: the program list is built there
+    /// and its size is fixed for the life of the instance.
+    void set_factory_presets_directory(std::filesystem::path dir) {
+        factory_presets_dir_ = std::move(dir);
+    }
+
     static Steinberg::FUnknown* createInstance(void*);
 
     /// Called by a ContractPlugView (vst3_contract_view.hpp) as it is
@@ -329,8 +340,34 @@ public:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Panic requests (Processor::request_panic), serviced before each block.
+    std::shared_ptr<PanicState> panic_state_;
     std::unique_ptr<ParamGroupProjection> param_groups_;
     Steinberg::Vst::UnitID selected_unit_ = Steinberg::Vst::kRootUnitId;
+
+    // Factory presets, published as the VST3 program list. Built once in
+    // initialize(); `program_list_active_` is false when the plug-in ships none
+    // (or a real parameter already owns the program-change ParamID), in which
+    // case the adapter publishes no list and registers no program parameter.
+    std::filesystem::path factory_presets_dir_;
+    FactoryProgramTable programs_;
+    bool program_list_active_ = false;
+    // The current program, mirrored from the StateStore parameter that holds
+    // the selection. `program_applied_` is false until a program has been
+    // applied or a saved selection restored; until then any selection counts.
+    // Written by whichever thread delivers the program change, read by both.
+    std::atomic<std::int64_t> program_index_{0};
+    std::atomic<bool> program_applied_{false};
+    bool program_change_needed(std::size_t index) const;
+    // Set when the audio thread applied a program: the VST3 parameter objects
+    // still hold the old values until the main thread syncs them.
+    std::atomic<bool> parameter_objects_stale_{false};
+    // Applies program @p index. @p audio_thread selects the write path that
+    // never touches the file system, allocates, or calls the host.
+    void apply_program(std::size_t index, bool audio_thread, std::int32_t offset);
+    // Copies every StateStore value (and the program selection) into the VST3
+    // parameter objects the host reads back. Main thread only.
+    void sync_parameter_objects_from_store();
     // Keeps a host setState() off the processor while process() is inside it.
     // Declared after processor_ so it outlives every render that consults it.
     StateRestoreGate state_restore_gate_;
@@ -707,6 +744,8 @@ public:
     // coalesced flags delivered (0 when nothing was pending).
     std::int32_t poll_pending_restart_for_test() {
         std::int32_t delivered = 0;
+        if (parameter_objects_stale_.exchange(false, std::memory_order_acq_rel))
+            sync_parameter_objects_from_store();
         auto* handler = getComponentHandler();
         restart_publisher_.poll_main_thread(
             [&](std::int32_t flags) {

@@ -2224,3 +2224,66 @@ TEST_CASE("AU v2 effect: Initialize warm-up never runs the Processor or settles 
 
     effect.DoCleanup();
 }
+
+// ── Processor panic: capabilities per AU v2 effect shape ─────────────────────
+namespace {
+class PanicCapabilityEffect : public pulp::format::Processor {
+  public:
+    explicit PanicCapabilityEffect(bool produces_midi) : produces_midi_(produces_midi) {}
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AuPanicCaps",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au.panic-caps",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"In", 2}},
+            .output_buses = {{"Out", 2}},
+            .accepts_midi = produces_midi_,
+            .produces_midi = produces_midi_,
+        };
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+
+  private:
+    bool produces_midi_;
+};
+PanicCapabilityEffect* g_panic_caps_effect = nullptr;
+std::unique_ptr<pulp::format::Processor> make_panic_caps_aufx() {
+    auto p = std::make_unique<PanicCapabilityEffect>(false);
+    g_panic_caps_effect = p.get();
+    return p;
+}
+std::unique_ptr<pulp::format::Processor> make_panic_caps_aumf() {
+    auto p = std::make_unique<PanicCapabilityEffect>(true);
+    g_panic_caps_effect = p.get();
+    return p;
+}
+} // namespace
+
+TEST_CASE("AU v2 effect attaches to panic requests; MIDI out follows produces_midi",
+          "[au][au-v2][panic]") {
+    const auto previous = pulp::format::registered_factory();
+
+    // aufx: serviced, but there is no MIDI output to carry the panic.
+    pulp::format::register_plugin(make_panic_caps_aufx);
+    {
+        pulp::format::au::PulpAUEffect effect(nullptr);
+        REQUIRE(g_panic_caps_effect != nullptr);
+        CHECK(g_panic_caps_effect->panic_capabilities().serviced);
+        CHECK_FALSE(g_panic_caps_effect->panic_capabilities().midi_out);
+    }
+    // aumf with produces_midi: the host MIDI-output callback can carry it.
+    pulp::format::register_plugin(make_panic_caps_aumf);
+    {
+        pulp::format::au::PulpAUEffect effect(nullptr);
+        REQUIRE(g_panic_caps_effect != nullptr);
+        CHECK(g_panic_caps_effect->panic_capabilities().serviced);
+        CHECK(g_panic_caps_effect->panic_capabilities().midi_out);
+    }
+    pulp::format::register_plugin(previous);
+}

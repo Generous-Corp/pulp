@@ -10,11 +10,13 @@ target_include_directories(pulp-platform
 target_sources(pulp-platform PRIVATE
     src/platform.cpp
     src/file_dialog_stub.cpp
+    src/reveal_in_file_manager.cpp
     src/popup_menu_stub.cpp
     src/permissions.cpp
     src/registry.cpp
     src/clipboard_common.cpp
     src/environment.cpp
+    src/special_dir.cpp
     src/dbus.cpp
 )
 
@@ -24,6 +26,7 @@ if(APPLE AND NOT IOS)
         platform/mac/clipboard_mac.mm
         platform/mac/file_dialog_mac.mm
         platform/mac/popup_menu_mac.mm
+        platform/mac/reveal_mac.mm
         platform/mac/environment_mac.mm
         platform/posix/child_process_posix.cpp
     )
@@ -61,7 +64,7 @@ elseif(WIN32)
     )
     # ole32: COM (CoInitializeEx/CoCreateInstance/CoTaskMemFree) for the
     # IFileDialog file-dialog backend in file_dialog_win.cpp.
-    target_link_libraries(pulp-platform PRIVATE user32 advapi32 ole32)
+    target_link_libraries(pulp-platform PRIVATE user32 advapi32 ole32 shell32)
 elseif(ANDROID)
     # Android platform sources wired via PulpAndroid.cmake → pulp_wire_android_sources()
     # The Android permissions_backend.cpp (picked up by that glob) defines
@@ -98,11 +101,14 @@ set(PULP_PLATFORM_UNIT_HEADERS
     include/pulp/platform/device_capability.hpp
     include/pulp/platform/environment.hpp
     include/pulp/platform/file_dialog.hpp
+    include/pulp/platform/gpu_fwd.hpp
     include/pulp/platform/native_handle.hpp
     include/pulp/platform/permissions.hpp
     include/pulp/platform/platform.hpp
     include/pulp/platform/popup_menu.hpp
     include/pulp/platform/progress_parser.hpp
+    include/pulp/platform/reveal_in_file_manager.hpp
+    include/pulp/platform/special_dir.hpp
     include/pulp/platform/win/registry.hpp
     include/pulp/platform/win32_sane.hpp
 )

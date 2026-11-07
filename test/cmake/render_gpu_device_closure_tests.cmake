@@ -59,6 +59,11 @@ endforeach()
 # pulp-gpu-audio's GPU path is compiled exactly when the device target exists,
 # which is always the case inside this PULP_ENABLE_GPU manifest.
 string(APPEND _pulp_gpu_device_props "gpu_audio.expects_device\t1\n")
+if(PULP_HAS_GPU_RUNTIME)
+    string(APPEND _pulp_gpu_device_props "gpu_runtime\t1\n")
+else()
+    string(APPEND _pulp_gpu_device_props "gpu_runtime\t0\n")
+endif()
 set(_pulp_gpu_device_props_file
     "${CMAKE_CURRENT_BINARY_DIR}/gpu_device_link_closure.properties")
 file(WRITE "${_pulp_gpu_device_props_file}" "${_pulp_gpu_device_props}")
@@ -75,6 +80,133 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(gpu-device-link-closure gpu-device-link-closure-rules
         PROPERTIES LABELS "render;gpu-device;link-closure" TIMEOUT 60)
 endif()
+
+# The device-layer mode is one fact for every consumer: PULP_GPU_RUNTIME sits
+# on pulp::platform and pulp::gpu-device-api exactly when this build forwards to
+# gpu-runtime, and a PULP_USE_GPU_RUNTIME=OFF build leaks it nowhere.
+get_target_property(_pulp_platform_defs pulp-platform INTERFACE_COMPILE_DEFINITIONS)
+get_target_property(_pulp_device_api_defs pulp-gpu-device-api INTERFACE_COMPILE_DEFINITIONS)
+foreach(_pulp_defs_var _pulp_platform_defs _pulp_device_api_defs)
+    if(NOT ${_pulp_defs_var})
+        set(${_pulp_defs_var} "")
+    endif()
+    string(REPLACE ";" "|" ${_pulp_defs_var} "${${_pulp_defs_var}}")
+endforeach()
+# The define is a usage requirement, so a target inherits it only through a
+# link to a target that carries it directly. Every direct carrier must also
+# link VellumGpuRuntime::DeviceApi, so the <gpu_runtime/...> include path
+# reaches every target the define reaches. The carriers are collected once
+# every target exists.
+set(_pulp_gpu_runtime_carriers_file "${CMAKE_BINARY_DIR}/gpu-runtime-carriers.txt")
+function(_pulp_gpu_runtime_collect_carriers dir out_var)
+    get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
+    get_property(_subdirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
+    foreach(_sub IN LISTS _subdirs)
+        _pulp_gpu_runtime_collect_carriers("${_sub}" _sub_targets)
+        list(APPEND _targets ${_sub_targets})
+    endforeach()
+    set(${out_var} "${_targets}" PARENT_SCOPE)
+endfunction()
+# Deferred calls expand their arguments when they run, so the path is built
+# here rather than passed in.
+function(_pulp_gpu_runtime_write_carriers)
+    _pulp_gpu_runtime_collect_carriers("${CMAKE_SOURCE_DIR}" _targets)
+    set(_lines "")
+    foreach(_target IN LISTS _targets)
+        # A target-local PULP_BENCHMARK, in a build whose global PULP_BENCHMARK
+        # is off, is a compile-only benchmark rot check.
+        if(NOT PULP_BENCHMARK)
+            get_target_property(_local_defs ${_target} COMPILE_DEFINITIONS)
+            if(_local_defs AND "PULP_BENCHMARK" IN_LIST _local_defs)
+                get_target_property(_type ${_target} TYPE)
+                set(_grb FALSE)
+                if("GPU_RUNTIME_BENCHMARK=1" IN_LIST _local_defs)
+                    set(_grb TRUE)
+                endif()
+                string(APPEND _lines "benchmark-only ${_target} ${_type} ${_grb}\n")
+            endif()
+        endif()
+        set(_carries FALSE)
+        set(_links FALSE)
+        foreach(_prop COMPILE_DEFINITIONS INTERFACE_COMPILE_DEFINITIONS)
+            get_target_property(_defs ${_target} ${_prop})
+            if(_defs AND "${_defs}" MATCHES "PULP_GPU_RUNTIME")
+                set(_carries TRUE)
+            endif()
+        endforeach()
+        if(NOT _carries)
+            continue()
+        endif()
+        foreach(_prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+            get_target_property(_libs ${_target} ${_prop})
+            if(_libs AND "VellumGpuRuntime::DeviceApi" IN_LIST _libs)
+                set(_links TRUE)
+            endif()
+        endforeach()
+        string(APPEND _lines "${_target} ${_links}\n")
+    endforeach()
+    file(WRITE "${CMAKE_BINARY_DIR}/gpu-runtime-carriers.txt" "${_lines}")
+endfunction()
+cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+    CALL _pulp_gpu_runtime_write_carriers)
+add_test(NAME gpu-runtime-mode-consistency
+    COMMAND ${CMAKE_COMMAND}
+        -DHAS_GPU_RUNTIME=${PULP_HAS_GPU_RUNTIME}
+        "-DPLATFORM_DEFS=${_pulp_platform_defs}"
+        "-DAPI_DEFS=${_pulp_device_api_defs}"
+        "-DCARRIERS_FILE=${_pulp_gpu_runtime_carriers_file}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_mode.cmake)
+unset(_pulp_gpu_runtime_carriers_file)
+set_tests_properties(gpu-runtime-mode-consistency
+    PROPERTIES LABELS "render;gpu-device;link-closure" TIMEOUT 20)
+# One Dawn proc-table installer per image: the device-only consumer always, and
+# the GPU-audio provider probe (render plus gpu_audio) where it is configured.
+if(APPLE AND Python3_Interpreter_FOUND)
+    if(PULP_HAS_GPU_RUNTIME)
+        set(_pulp_gpu_topology_mode gpu-runtime)
+    else()
+        set(_pulp_gpu_topology_mode pulp)
+    endif()
+    set(_pulp_gpu_topology_binaries "$<TARGET_FILE:pulp-test-gpu-device-only-consumer>")
+    if(TARGET pulp-gpu-dawn-shared-io-provider-probe)
+        list(APPEND _pulp_gpu_topology_binaries --provider
+            "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>")
+    endif()
+    add_test(NAME gpu-runtime-installer-topology
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/verify_gpu_runtime_topology.py
+            --mode ${_pulp_gpu_topology_mode} ${_pulp_gpu_topology_binaries})
+    set_tests_properties(gpu-runtime-installer-topology
+        PROPERTIES LABELS "render;gpu-device;link-closure" TIMEOUT 30)
+    unset(_pulp_gpu_topology_mode)
+    unset(_pulp_gpu_topology_binaries)
+endif()
+
+add_test(NAME gpu-runtime-prefix-record
+    COMMAND ${CMAKE_COMMAND}
+        -DMODULE=${CMAKE_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/gpu-runtime-prefix-record
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_record.cmake)
+set_tests_properties(gpu-runtime-prefix-record PROPERTIES LABELS "render;gpu-device" TIMEOUT 20)
+add_test(NAME gpu-runtime-benchmark-flavour
+    COMMAND ${CMAKE_COMMAND}
+        -DMODULE=${CMAKE_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_benchmark_flavour.cmake)
+set_tests_properties(gpu-runtime-benchmark-flavour PROPERTIES LABELS "render;gpu-device" TIMEOUT 20)
+# The installed SDK finds gpu-runtime through pulp_find_gpu_runtime_package(),
+# checked here against the gpu-runtime this build fetched.
+if(PULP_HAS_GPU_RUNTIME AND DEFINED vellum_gpu_runtime_BINARY_DIR AND NOT PULP_GPU_RUNTIME_PREFIX)
+    add_test(NAME gpu-runtime-package-find
+        COMMAND ${CMAKE_COMMAND}
+            -DMODULE=${CMAKE_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake
+            -DRUNTIME_BUILD_DIR=${vellum_gpu_runtime_BINARY_DIR}
+            -DSKIA_DIR=${SKIA_DIR}
+            -DVERSION=${PULP_GPU_RUNTIME_VERSION}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/gpu-runtime-package-find
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_package_find.cmake)
+    set_tests_properties(gpu-runtime-package-find PROPERTIES LABELS "render;gpu-device" TIMEOUT 60)
+endif()
+unset(_pulp_platform_defs)
+unset(_pulp_device_api_defs)
 
 unset(_pulp_gpu_device_props)
 unset(_pulp_gpu_device_props_file)

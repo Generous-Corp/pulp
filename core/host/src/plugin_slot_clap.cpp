@@ -6,6 +6,7 @@
 // parameters, and toggle bypass.
 
 #include "plugin_slot_clap_internal.hpp"
+#include "plugin_identity_internal.hpp"
 
 #include <pulp/host/hosted_editor_container.hpp>
 #include <pulp/host/plugin_slot.hpp>
@@ -124,6 +125,13 @@ public:
         // PluginInfo::has_editor is part of the scanned descriptor, so report
         // what we actually resolved rather than leaving the field unset.
         info_.has_editor = has_editor();
+    }
+
+    std::optional<PluginResolvedIdentity> resolved_identity() const override {
+        return identity_;
+    }
+    void set_resolved_identity(PluginResolvedIdentity identity) {
+        identity_ = std::move(identity);
     }
 
     const PluginInfo& info() const override { return info_; }
@@ -922,6 +930,7 @@ public:
     std::unordered_map<uint32_t, float> pending_edits_;
     std::unordered_map<uint32_t, float> cached_values_;
 
+    std::optional<PluginResolvedIdentity> identity_;
     bool active_ = false;
     bool processing_ = false;
     // Channel layout the caller asked for, as handed to
@@ -1019,6 +1028,120 @@ std::unique_ptr<PluginSlot> load_clap_plugin(const PluginInfo& info) {
         filled.unique_id = desc->id;
     slot->attach_plugin(plugin, std::move(filled));
     return slot;
+}
+
+PluginLoadResult load_clap_plugin_exact(const PluginSelection& selection) {
+    using Error = PluginIdentityError;
+    if (auto error = validate_plugin_type_identity(selection.type))
+        return {*error};
+    const auto binary = resolve_clap_binary(selection.path);
+    auto provenance = detail::clap_artifact_provenance(binary);
+    if (!provenance)
+        return {Error::plugin_load_failed};
+    void* handle = dlopen(binary.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    if (!handle)
+        return {Error::plugin_load_failed};
+    const clap_plugin_entry_t* entry = nullptr;
+    bool initialized = false;
+    // Ownership transfers to ClapSlot only after entry initialization. This guard
+    // also closes the library when a plugin throws across the C ABI boundary.
+    const auto close_entry = [&](void*) {
+        if (initialized && entry && entry->deinit) {
+            try {
+                entry->deinit();
+            } catch (...) {
+            }
+        }
+        dlclose(handle);
+    };
+    std::unique_ptr<void, decltype(close_entry)> library(handle, close_entry);
+    auto failure = Error::plugin_load_failed;
+    try {
+        entry = static_cast<const clap_plugin_entry_t*>(dlsym(handle, "clap_entry"));
+        if (!entry || !entry->init || !entry->deinit || !entry->get_factory)
+            return {Error::plugin_load_failed};
+        if (!entry->init(selection.path.c_str()))
+            return {Error::plugin_load_failed};
+        initialized = true;
+        auto* factory =
+            static_cast<const clap_plugin_factory_t*>(entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
+        if (!factory || !factory->get_plugin_count || !factory->get_plugin_descriptor ||
+            !factory->create_plugin)
+            return {Error::descriptor_enumeration_incomplete};
+        failure = Error::descriptor_enumeration_incomplete;
+        const auto count = factory->get_plugin_count(factory);
+        if (count != cap_clap_plugin_count(count))
+            return {Error::descriptor_enumeration_incomplete};
+        std::optional<PluginInfo> selected;
+        for (std::uint32_t index = 0; index < count; ++index) {
+            const auto* descriptor = factory->get_plugin_descriptor(factory, index);
+            if (!descriptor)
+                return {Error::descriptor_enumeration_incomplete};
+            auto id = detail::clap_descriptor_id(descriptor->id);
+            if (auto* error = std::get_if<Error>(&id))
+                return {*error};
+            if (std::get<std::string>(id) != selection.type.descriptor_id)
+                continue;
+            if (selected)
+                return {Error::descriptor_selection_ambiguous};
+            PluginInfo info;
+            info.format = PluginFormat::CLAP;
+            info.path = selection.path;
+            info.unique_id = std::get<std::string>(std::move(id));
+            info.name = descriptor->name ? descriptor->name : "";
+            info.manufacturer = descriptor->vendor ? descriptor->vendor : "";
+            info.version = descriptor->version ? descriptor->version : "";
+            provenance->descriptor_version = descriptor->version
+                                                 ? std::optional<std::string>(descriptor->version)
+                                                 : std::nullopt;
+            selected = std::move(info);
+        }
+        if (!selected)
+            return {Error::descriptor_selection_missing};
+        failure = Error::plugin_load_failed;
+        auto slot = std::make_unique<ClapSlot>(*selected, handle, entry);
+        library.release();
+        auto* plugin =
+            factory->create_plugin(factory, slot->clap_host(), selected->unique_id.c_str());
+        if (!plugin)
+            return {Error::plugin_load_failed};
+        // The ABI requires these callbacks. Do not dereference a null callback.
+        if (!plugin->destroy)
+            return {Error::plugin_load_failed};
+        auto destroy_plugin = [](const clap_plugin_t* p) {
+            try {
+                p->destroy(p);
+            } catch (...) {
+            }
+        };
+        std::unique_ptr<const clap_plugin_t, decltype(destroy_plugin)> instance(plugin,
+                                                                                destroy_plugin);
+        if (!plugin->init || !plugin->get_extension || !plugin->init(plugin))
+            return {Error::plugin_load_failed};
+        auto actual_id = detail::clap_descriptor_id(plugin->desc ? plugin->desc->id : nullptr);
+        if (auto* error = std::get_if<Error>(&actual_id))
+            return {*error};
+        if (std::get<std::string>(actual_id) != selected->unique_id)
+            return {Error::loaded_identity_mismatch};
+        auto after = detail::clap_artifact_provenance(binary);
+        if (!after || after->sha256 != provenance->sha256 ||
+            after->byte_length != provenance->byte_length)
+            return {Error::plugin_load_failed};
+        provenance->descriptor_version = plugin->desc->version
+                                             ? std::optional<std::string>(plugin->desc->version)
+                                             : std::nullopt;
+        auto evidence = detail::ClapIdentityAccess::observed(
+            {"clap", std::get<std::string>(std::move(actual_id))}, std::move(*provenance), true);
+        selected->identity_evidence = evidence;
+        // attach_plugin owns the instance before querying extensions, including
+        // when an extension throws during metadata population.
+        instance.release();
+        slot->attach_plugin(plugin, std::move(*selected));
+        slot->set_resolved_identity({selection.type, std::move(evidence)});
+        return {std::unique_ptr<PluginSlot>(std::move(slot))};
+    } catch (...) {
+        return {failure};
+    }
 }
 
 } // namespace pulp::host

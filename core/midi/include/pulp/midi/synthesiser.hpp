@@ -450,6 +450,23 @@ public:
         };
     }
 
+    /// Silence every voice. `immediate == true` is the All Sound Off semantic:
+    /// each voice is hard-reset, so release tails stop at once. `false` is the
+    /// All Notes Off semantic: sustain and sostenuto holds are dropped and every
+    /// sounding voice enters its normal release, so tails ring out.
+    void panic(bool immediate) {
+        if (immediate) {
+            reset();
+            return;
+        }
+        sustain_down_.fill(false);
+        sostenuto_down_.fill(false);
+        for (auto& v : voices_) {
+            if (v.active() && !v.releasing())
+                v.on_note_off();
+        }
+    }
+
     void reset() {
         for (auto& v : voices_) v.reset();
         sustain_down_.fill(false);

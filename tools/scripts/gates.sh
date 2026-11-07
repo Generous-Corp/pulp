@@ -21,6 +21,10 @@
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - planning-gitlink (no accidental `planning` submodule pointer bump)
+#   - vellum export event + unit header lists (an exported path edited without
+#     a vellum_inherits decision, or a public header under core/runtime, canvas,
+#     events, platform or simd missing from its PULP_*_UNIT_HEADERS list: the
+#     exact event JSON or list line is printed; --fix-export-event writes it)
 #   - vellum-watch (a range touching a watched capability-family path owes a
 #     committed watch event, and one touching a transferred-slice path owes a
 #     committed change event; prints the exact event JSON to add)
@@ -33,6 +37,10 @@
 #     attribution text against the license files actually on disk)
 #   - deps-audit self-tests (tools/deps/test_audit.py — the coverage lane runs
 #     them behind continue-on-error, so nothing enforced them)
+#   - vendored-patch verifier (tools/deps/check_patches.py: each vendored file
+#     minus its recorded patches equals upstream, so an unrecorded edit fails)
+#   - dead-test guard (every test source under test/ is named by a CMake file)
+#   - examples index guard (examples/README.md lists every examples/ directory once)
 #   - worktree-lineage self-tests (continuity metadata cannot silently rot)
 #   - codecov-config (codecov.yml flags/components mirror the live core/* tree
 #     with no double-counts, and its ignore list mirrors diff_cover_excludes)
@@ -273,7 +281,7 @@ if [ -f "$VELLUM_HINT" ]; then
     "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
     vellum_rc=$?
     if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ] ||
-       [ "$vellum_rc" -eq 13 ]; then
+       [ "$vellum_rc" -eq 13 ] || [ "$vellum_rc" -eq 14 ] || [ "$vellum_rc" -eq 15 ]; then
         fail=1
     fi
 fi
@@ -578,6 +586,29 @@ if [ -f "$ROOT/tools/deps/test_audit.py" ]; then
         echo "  deps-audit self-tests: ok" >&2
     fi
 fi
+
+# ── 7a-patches. vendored-patch verifier, dead-test guard, examples index guard ────────────────
+# Each reads only the checkout and finishes in seconds, so they run here
+# directly as well as inside the source-selftest suites below: a gate host that
+# skips those suites still refuses an unrecorded edit under external/, a test
+# source no CMake file names, and an example directory missing from the index.
+for _guard in "tools/deps/check_patches.py:vendored-patch verifier" \
+              "tools/scripts/dead_test_guard.py:dead-test guard" \
+              "tools/scripts/examples_index_guard.py:examples index guard"; do
+    _guard_path="${_guard%%:*}"
+    _guard_label="${_guard#*:}"
+    if [ -f "$ROOT/$_guard_path" ]; then
+        echo "" >&2
+        echo "▸ $_guard_label" >&2
+        if ! _guard_out="$("$PYTHON" "$ROOT/$_guard_path" 2>&1)"; then
+            echo "$_guard_out" | tail -n 20 >&2
+            echo "  $_guard_label: failing — run \`python3 $_guard_path\` for details." >&2
+            fail=1
+        else
+            echo "  $_guard_label: ok" >&2
+        fi
+    fi
+done
 
 # ── 7a-inputs. generated test manifests (configures build-gate if needed) ──
 # The same lane also checks tools/ci/source_selftests.json against the

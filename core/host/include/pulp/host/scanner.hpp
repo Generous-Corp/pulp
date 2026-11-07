@@ -9,6 +9,7 @@
 //   auto plugins = scanner.scan();
 //   for (auto& p : plugins) { ... p.name, p.path, p.format ... }
 
+#include <pulp/host/plugin_identity.hpp>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -68,6 +69,9 @@ struct PluginInfo {
     bool supports_sidechain = false;
     bool supports_midi_in = false;
     bool supports_midi_out = false;
+
+    // Optional descriptor capture; legacy/cache metadata alone has no authority.
+    std::optional<PluginIdentityEvidence> identity_evidence;
 };
 
 // ── Scanner configuration ───────────────────────────────────────────────

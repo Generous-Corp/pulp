@@ -13,6 +13,12 @@ if(Python3_EXECUTABLE)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_editor_host_acceptance.py")
     set_tests_properties(editor-host-acceptance-selftest PROPERTIES LABELS "editor-host")
+    # The Dawn binding census (acceptance item 6a): its rules on synthetic
+    # symbol tables everywhere, and on Mach-O fixtures it compiles on macOS.
+    add_test(NAME dawn-binding-census-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_dawn_binding_census.py")
+    set_tests_properties(dawn-binding-census-selftest PROPERTIES LABELS "editor-host")
 endif()
 
 set(PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX "" CACHE PATH

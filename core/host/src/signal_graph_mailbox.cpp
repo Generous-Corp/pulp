@@ -45,8 +45,18 @@ bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) noexcep
     return inject_midi_into_snapshot_(*cg, id, events);
 }
 
+bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events,
+                              const midi::MpeBuffer& mpe) noexcept {
+    auto read_guard = read_snapshot_(true);
+    auto* cg = read_guard.get();
+    if (!cg)
+        return false;
+    return inject_midi_into_snapshot_(*cg, id, events, &mpe);
+}
+
 bool SignalGraph::inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
-                                             const midi::MidiBuffer& events) noexcept {
+                                             const midi::MidiBuffer& events,
+                                             const midi::MpeBuffer* mpe) noexcept {
     auto it = snapshot.runtime.find(id);
     if (it == snapshot.runtime.end())
         return false;
@@ -58,7 +68,9 @@ bool SignalGraph::inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
 
     auto& mailbox = *it->second.midi_input_mailbox;
     const uint64_t sequence = next_nonzero_mailbox_sequence(mailbox.next_sequence);
-    const bool copied_all = mailbox.writer_scratch.set_from_midi(events, sequence);
+    const bool copied_all = mpe != nullptr
+                                ? mailbox.writer_scratch.set_from_midi(events, *mpe, sequence)
+                                : mailbox.writer_scratch.set_from_midi(events, sequence);
     mailbox.published.write(mailbox.writer_scratch);
     return copied_all;
 }

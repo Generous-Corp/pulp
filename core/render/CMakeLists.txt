@@ -31,19 +31,38 @@ target_compile_features(pulp-gpu-device-api INTERFACE cxx_std_20)
 
 add_library(pulp-gpu-device)
 add_library(pulp::gpu-device ALIAS pulp-gpu-device)
-target_sources(pulp-gpu-device PRIVATE
-    src/gpu_diagnostics.cpp
-    src/gpu_proc_installer.cpp
-    src/gpu_proc_installer_native.cpp
-    src/gpu_startup_report.cpp
-    src/gpu_surface_dawn.cpp
-    src/render_observer.cpp
-    src/gpu_compute.cpp
-)
-target_link_libraries(pulp-gpu-device
-    PUBLIC pulp::gpu-device-api
-    PRIVATE pulp::runtime
-)
+if(PULP_HAS_GPU_RUNTIME)
+    # macOS: the device layer is gpu-runtime's (tools/cmake/PulpGpuRuntime.cmake).
+    # The Pulp headers forward to it under PULP_GPU_RUNTIME, so a pulp::render
+    # GpuSurface is a gpu_runtime::GpuSurface, and the image has one Dawn
+    # proc-table coordinator for rendering and GPU audio alike. This library
+    # keeps only the hooks that route gpu-runtime's log, trace, environment and
+    # Skia log bridge into Pulp; its anchor is named on the link line so every
+    # consumer loads them.
+    target_link_libraries(pulp-gpu-device-api INTERFACE VellumGpuRuntime::DeviceApi)
+    target_compile_definitions(pulp-gpu-device-api INTERFACE PULP_GPU_RUNTIME=1)
+    # render_observer.cpp is the development-only observer design_ir_observe uses.
+    target_sources(pulp-gpu-device PRIVATE src/gpu_runtime_hooks.cpp src/render_observer.cpp)
+    target_link_libraries(pulp-gpu-device
+        PUBLIC pulp::gpu-device-api VellumGpuRuntime::Device
+        PRIVATE pulp::runtime VellumGpuRuntime::SkiaLogBridge
+    )
+    target_link_options(pulp-gpu-device INTERFACE "LINKER:-u,_pulp_gpu_runtime_hooks_anchor")
+else()
+    target_sources(pulp-gpu-device PRIVATE
+        src/gpu_diagnostics.cpp
+        src/gpu_proc_installer.cpp
+        src/gpu_proc_installer_native.cpp
+        src/gpu_startup_report.cpp
+        src/gpu_surface_dawn.cpp
+        src/render_observer.cpp
+        src/gpu_compute.cpp
+    )
+    target_link_libraries(pulp-gpu-device
+        PUBLIC pulp::gpu-device-api
+        PRIVATE pulp::runtime
+    )
+endif()
 
 # Who installs Dawn's process-global proc table. OFF (Pulp's default): Pulp
 # installs Dawn's native procs once, on first use. ON: an embedding host owns
@@ -57,8 +76,9 @@ if(PULP_DAWN_PROCS_HOST_OWNED)
     target_compile_definitions(pulp-gpu-device PRIVATE PULP_DAWN_PROCS_HOST_OWNED=1)
 endif()
 
-# Apple Metal surface helpers for Dawn rendering
-if(PULP_MACOS OR (APPLE AND NOT PULP_IOS))
+# Apple Metal surface helpers for Dawn rendering (gpu-runtime carries its own)
+if(PULP_HAS_GPU_RUNTIME)
+elseif(PULP_MACOS OR (APPLE AND NOT PULP_IOS))
     target_sources(pulp-gpu-device PRIVATE
         src/metal_surface_mac.mm
     )
