@@ -82,6 +82,21 @@ TEST_CASE("G4 voice template persistence restores atomically and supports edit u
     live.parameters.front().value = 0.75f;
     REQUIRE(restore_voice_bank_state(prepared.manifest, undo, live));
     CHECK(live.parameters.front().value == 0.25f);
+    auto truncated = receipt.encoding;
+    truncated.pop_back();
+    CHECK_FALSE(decode_voice_bank_state(truncated, decoded));
+    auto trailing = receipt.encoding;
+    trailing.push_back(0);
+    CHECK_FALSE(decode_voice_bank_state(trailing, decoded));
+    auto oversize = receipt.encoding;
+    const auto count_offset =
+        std::size_t{1} + 4 + std::string("pulp.graph.voice-bank.state").size() + 4 + 4 + 64;
+    REQUIRE(oversize.size() >= count_offset + 4);
+    oversize[count_offset] = 0;
+    oversize[count_offset + 1] = 0;
+    oversize[count_offset + 2] = 0x10;
+    oversize[count_offset + 3] = 0x01;
+    CHECK_FALSE(decode_voice_bank_state(oversize, decoded));
 }
 
 TEST_CASE(
@@ -92,8 +107,8 @@ TEST_CASE(
     CHECK_FALSE(rejected.valid);
 
     auto ordinal_duplicate = schema();
-    ordinal_duplicate.bindings.front().ordinal = 9;
     ordinal_duplicate.bindings.push_back(ordinal_duplicate.bindings.front());
+    ordinal_duplicate.bindings.back().ordinal = 9;
     CHECK_FALSE(prepare_voice_bank(ordinal_duplicate).valid);
 
     auto alias = schema();
@@ -121,6 +136,15 @@ TEST_CASE(
         forged_manifest.bindings.front().identity.sha256[0] == '0' ? '1' : '0';
     auto forged_state = state_for(forged_manifest, 0.5f);
     CHECK_FALSE(encode_voice_bank_state(forged_manifest, forged_state).valid);
+    forged_manifest = prepared.manifest;
+    forged_manifest.bindings.front().identity.valid = false;
+    CHECK_FALSE(encode_voice_bank_state(forged_manifest, forged_state).valid);
+    forged_manifest = prepared.manifest;
+    forged_manifest.bindings.front().slot_ordinal = 7;
+    CHECK_FALSE(encode_voice_bank_state(forged_manifest, forged_state).valid);
+    forged_manifest = prepared.manifest;
+    forged_manifest.schema.bindings.front().shared_across_slots = true;
+    CHECK_FALSE(encode_voice_bank_state(forged_manifest, forged_state).valid);
     auto live = state_for(prepared.manifest, 0.5f);
     const auto unchanged = live;
     auto failed = state_for(prepared.manifest, 0.8f);
@@ -131,10 +155,14 @@ TEST_CASE(
     failed.parameters.front().value = std::numeric_limits<float>::quiet_NaN();
     CHECK_FALSE(restore_voice_bank_state(prepared.manifest, failed, live));
     CHECK(live.parameters.front().value == unchanged.parameters.front().value);
-    failed = state_for(prepared.manifest, 0.8f);
-    failed.parameters.front().path[0] = "filte\xCC\x81r";
-    failed.parameters.push_back(failed.parameters.front());
-    failed.parameters.back().path[0] = "filtér";
-    CHECK_FALSE(restore_voice_bank_state(prepared.manifest, failed, live));
-    CHECK(live.parameters.front().value == unchanged.parameters.front().value);
+    auto alias_schema = schema();
+    alias_schema.bindings[0].path[0] = "filte\xCC\x81r";
+    const auto alias_prepared = prepare_voice_bank(alias_schema);
+    REQUIRE(alias_prepared.valid);
+    VoiceBankState alias_state;
+    alias_state.manifest_sha256 = alias_prepared.manifest.sha256;
+    alias_state.parameters = {{3, {"filte\xCC\x81r"}, "value", 0.8f},
+                              {3, {"filtér"}, "value", 0.9f}};
+    VoiceBankState alias_live = alias_state;
+    CHECK_FALSE(restore_voice_bank_state(alias_prepared.manifest, alias_state, alias_live));
 }

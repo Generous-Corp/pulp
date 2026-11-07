@@ -32,9 +32,6 @@ struct VoiceIdentityKey {
     std::vector<std::string> path;
     bool has_port = false;
     VoicePortKey port{};
-    // Stable authored port target; unlike runtime node IDs, this is part of
-    // the canonical identity whenever a port is present.
-    std::string port_target;
     bool has_parameter = false;
     std::string parameter;
 };

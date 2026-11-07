@@ -13,7 +13,6 @@ VoiceIdentityKey key() {
     result.path = {"node", "osc", "port"};
     result.has_port = true;
     result.port = {VoicePortDirection::Output, VoicePortKind::Audio, 0};
-    result.port_target = "main";
     return result;
 }
 } // namespace
@@ -41,9 +40,6 @@ TEST_CASE("G4 voice identity changes for authored slot and target") {
     CHECK(canonical_voice_identity(changed).sha256 != baseline.sha256);
     changed = key();
     changed.port.ordinal = 1;
-    CHECK(canonical_voice_identity(changed).sha256 != baseline.sha256);
-    changed = key();
-    changed.port_target = "alternate";
     CHECK(canonical_voice_identity(changed).sha256 != baseline.sha256);
 }
 
@@ -90,8 +86,4 @@ TEST_CASE("G4 planted negatives reject noncanonical or unbound identity") {
     REQUIRE(alias_result.valid);
     alias.path[1] = "é";
     CHECK(alias_result.sha256 == canonical_voice_identity(alias).sha256);
-
-    auto missing_port_target = key();
-    missing_port_target.port_target.clear();
-    CHECK_FALSE(canonical_voice_identity(missing_port_target).valid);
 }

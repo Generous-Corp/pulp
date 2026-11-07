@@ -43,7 +43,7 @@ bool normalize_segment(std::string_view raw, std::string& out) {
 }
 
 bool normalize_path(const std::vector<std::string>& input, std::vector<std::string>& output) {
-    if (input.empty())
+    if (input.empty() || input.size() > 1024)
         return false;
     output.clear();
     output.reserve(input.size());
@@ -148,6 +148,11 @@ VoiceIdentityResult make_identity(const VoiceTemplateSchema& schema, std::uint32
     key.slot_ordinal = slot;
     key.path = binding.path;
     if (binding.spec.target_kind == VoiceBindingTarget::Port) {
+        // The existing VoiceIdentityKey wire contract has no port-name field.
+        // Keep that public schema compatible while tagging the authored target
+        // in the binding path with two unambiguous authored segments.
+        key.path.push_back("$port");
+        key.path.push_back(binding.target);
         key.has_port = true;
         key.port.direction = binding.spec.direction == VoiceBindingDirection::Output
                                  ? VoicePortDirection::Output
@@ -158,7 +163,6 @@ VoiceIdentityResult make_identity(const VoiceTemplateSchema& schema, std::uint32
                 : (binding.spec.type == VoiceBindingType::Event ? VoicePortKind::Event
                                                                 : VoicePortKind::Control);
         key.port.ordinal = binding.spec.ordinal;
-        key.port_target = binding.target;
     } else {
         key.has_parameter = true;
         key.parameter = binding.target;
@@ -242,6 +246,7 @@ bool manifest_matches(const VoiceBankManifest& manifest) {
             actual.spec.direction != wanted.spec.direction ||
             actual.spec.shape != wanted.spec.shape || actual.spec.rate != wanted.spec.rate ||
             actual.spec.ordinal != wanted.spec.ordinal ||
+            actual.identity.valid != wanted.identity.valid ||
             actual.identity.sha256 != wanted.identity.sha256 ||
             actual.identity.encoding != wanted.identity.encoding)
             return false;
@@ -359,6 +364,10 @@ VoiceBankPersistenceResult encode_voice_bank_state(const VoiceBankManifest& mani
         result.error = "state schema or manifest identity does not match";
         return result;
     }
+    if (state.parameters.size() > 4096) {
+        result.error = "state parameter count is out of bounds";
+        return result;
+    }
     std::vector<VoiceParameterValue> values;
     values.reserve(state.parameters.size());
     for (const auto& value : state.parameters) {
@@ -466,6 +475,7 @@ bool decode_voice_bank_state(std::span<const std::uint8_t> encoding, VoiceBankSt
     if (!read_u32(count) || count > 4096)
         return fail("voice-bank state parameter count is out of bounds");
     parsed.parameters.reserve(count);
+    std::set<std::string> seen;
     for (std::uint32_t i = 0; i < count; ++i) {
         VoiceParameterValue value;
         if (!read_u32(value.slot_ordinal) || !read_path(value.path) || !read_string(value.target))
@@ -474,6 +484,14 @@ bool decode_voice_bank_state(std::span<const std::uint8_t> encoding, VoiceBankSt
         if (!read_u32(bits))
             return fail("truncated voice-bank parameter value");
         std::memcpy(&value.value, &bits, sizeof(bits));
+        VoiceParameterValue canonical;
+        if (!normalize_parameter(value, canonical))
+            return fail("invalid voice-bank parameter");
+        const auto key = std::to_string(canonical.slot_ordinal) + "\x1f" +
+                         path_key(canonical.path) + "\x1f" + canonical.target;
+        if (!seen.insert(key).second)
+            return fail("duplicate voice-bank parameter");
+        value = std::move(canonical);
         parsed.parameters.push_back(std::move(value));
     }
     if (at != encoding.size())

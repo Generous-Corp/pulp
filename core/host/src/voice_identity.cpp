@@ -67,9 +67,6 @@ VoiceIdentityResult canonical_voice_identity(const VoiceIdentityKey& key) {
     std::string parameter;
     if (key.has_parameter && !segment(key.parameter, parameter))
         return invalid("voice parameter identity must be canonical and slash-free");
-    std::string port_target;
-    if (key.has_port && !segment(key.port_target, port_target))
-        return invalid("voice port target must be canonical and slash-free");
     if (key.has_port && (static_cast<std::uint8_t>(key.port.direction) >
                              static_cast<std::uint8_t>(VoicePortDirection::Output) ||
                          static_cast<std::uint8_t>(key.port.kind) >
@@ -98,7 +95,6 @@ VoiceIdentityResult canonical_voice_identity(const VoiceIdentityKey& key) {
         result.encoding.push_back(static_cast<std::uint8_t>(key.port.direction));
         result.encoding.push_back(static_cast<std::uint8_t>(key.port.kind));
         u32(result.encoding, key.port.ordinal);
-        string_field(result.encoding, port_target);
     }
     result.encoding.push_back(key.has_parameter ? 1 : 0);
     if (key.has_parameter)
