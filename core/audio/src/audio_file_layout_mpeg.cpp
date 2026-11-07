@@ -137,7 +137,7 @@ void parse_id3v2_frames(Builder& b, LayoutRegion& region, const std::uint8_t* p,
         if (frame_size > size - body)
             break;
         ++frames;
-        if (!id.empty() && id[0] == 'T' && b.options.include_metadata_text)
+        if (!id.empty() && id[0] == 'T')
             b.text("ID3v2", id, id3_text(p + body, frame_size));
         at = body + frame_size;
     }
@@ -516,7 +516,7 @@ void parse_leaf(Builder& b, Mp4Facts& facts, LayoutRegion& region, const std::st
                 region.fields.push_back({"first_media_time", static_cast<std::int64_t>(static_cast<std::int32_t>(read_u32be(p + 12u)))});
             }
         }
-    } else if (type == "data" && parent.size() == 4u && size >= 8u && b.options.include_metadata_text) {
+    } else if (type == "data" && parent.size() == 4u && size >= 8u) {
         const auto data_type = read_u32be(p);
         if (data_type == 1u)
             b.text("ilst", parent, trimmed_text(p + 8u, size - 8u));

@@ -280,8 +280,7 @@ void parse_bext(Builder& b, LayoutRegion& region, std::uint64_t payload_offset, 
         region.fields.push_back({"max_momentary_loudness", s16(418u)});
         region.fields.push_back({"max_short_term_loudness", s16(420u)});
     }
-    if (!b.options.include_metadata_text)
-        return;
+    // Builder::text is the one place that decides whether free text is kept.
     if (const auto bext = decode_bext_chunk(payload.data(), payload.size())) {
         b.text("bext", "description", bext->description);
         b.text("bext", "originator", bext->originator);
@@ -307,7 +306,7 @@ void parse_list(Builder& b, LayoutRegion& region, std::uint64_t payload_offset, 
         if (size > payload.size() - value_at)
             break;
         ++entries;
-        if (list_type == "INFO" && b.options.include_metadata_text)
+        if (list_type == "INFO")
             b.text("LIST", id, trimmed_text(payload.data() + value_at, size));
         at = value_at + size + (size & 1u);
     }
