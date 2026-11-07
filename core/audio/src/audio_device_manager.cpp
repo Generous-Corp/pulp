@@ -92,6 +92,11 @@ private:
     bool entered_ = false;
 };
 
+struct AudioDeviceManager::MidiPortLink {
+    std::recursive_mutex mu; // recursive: a subscriber may detach from inside a refresh
+    AudioDeviceManager* manager = nullptr;
+};
+
 AudioDeviceManager::AudioDeviceManager()
     : lifetime_(std::make_shared<int>(0)) {
 }
@@ -108,22 +113,32 @@ AudioDeviceManager::~AudioDeviceManager() {
     {
         pulp::midi::MidiSystem* system = nullptr;
         bool installed = false;
+        std::shared_ptr<MidiPortLink> link;
         {
             std::lock_guard<std::mutex> lk(input_mu_);
+            link = std::move(midi_link_);
             system = midi_system_;
             installed = midi_port_callback_installed_;
             midi_system_ = nullptr;
             midi_port_callback_installed_ = false;
             settings_ = nullptr;
         }
-        if (system && installed) system->set_port_change_callback(nullptr);
+        if (system && installed)
+            system->set_port_change_callback(nullptr);
+        // A callback the system already copied may still arrive. Cutting the
+        // link waits for one that is running and turns later ones into no-ops.
+        if (link) {
+            std::lock_guard<std::recursive_mutex> lk(link->mu);
+            link->manager = nullptr;
+        }
         std::vector<EnabledInput> inputs;
         {
             std::lock_guard<std::mutex> lk(input_mu_);
             inputs.swap(enabled_inputs_);
         }
         for (auto& in : inputs) {
-            if (in.device) in.device->close();
+            if (in.device)
+                in.device->close();
         }
     }
 
@@ -569,11 +584,13 @@ void AudioDeviceManager::set_midi_endpoints(std::vector<MidiEndpoint> endpoints)
         };
         std::unordered_set<std::string> old_ids;
         old_ids.reserve(midi_endpoints_.size());
-        for (const auto& ep : midi_endpoints_) old_ids.insert(key(ep));
+        for (const auto& ep : midi_endpoints_)
+            old_ids.insert(key(ep));
 
         std::unordered_set<std::string> new_ids;
         new_ids.reserve(endpoints.size());
-        for (const auto& ep : endpoints) new_ids.insert(key(ep));
+        for (const auto& ep : endpoints)
+            new_ids.insert(key(ep));
 
         // Removals: in old, not in new.
         for (const auto& ep : midi_endpoints_) {
@@ -627,33 +644,53 @@ void AudioDeviceManager::attach_midi_system(pulp::midi::MidiSystem* system,
                                             bool install_port_change_callback) {
     pulp::midi::MidiSystem* previous = nullptr;
     bool previous_installed = false;
+    std::shared_ptr<MidiPortLink> previous_link;
+    std::shared_ptr<MidiPortLink> link;
+    if (system && install_port_change_callback) {
+        link = std::make_shared<MidiPortLink>();
+        link->manager = this;
+    }
     {
         std::lock_guard<std::mutex> lk(input_mu_);
         previous = midi_system_;
         previous_installed = midi_port_callback_installed_;
+        previous_link = std::move(midi_link_);
         midi_system_ = system;
         midi_port_callback_installed_ = system && install_port_change_callback;
+        midi_link_ = link;
     }
     if (previous && previous_installed && previous != system) {
         previous->set_port_change_callback(nullptr);
     }
-    if (!system) return;
-    if (install_port_change_callback) {
-        system->set_port_change_callback([this] { refresh_midi_endpoints(); });
+    if (previous_link) {
+        std::lock_guard<std::recursive_mutex> lk(previous_link->mu);
+        previous_link->manager = nullptr;
+    }
+    if (!system)
+        return;
+    if (link) {
+        system->set_port_change_callback([link] {
+            std::lock_guard<std::recursive_mutex> lk(link->mu);
+            if (link->manager)
+                link->manager->refresh_midi_endpoints();
+        });
     }
     refresh_midi_endpoints();
 }
 
 void AudioDeviceManager::refresh_midi_endpoints() {
     DispatchGuard guard(this);
-    if (!guard.entered()) return;
+    if (!guard.entered())
+        return;
 
+    std::lock_guard<std::recursive_mutex> refresh_lk(refresh_mu_);
     pulp::midi::MidiSystem* system = nullptr;
     {
         std::lock_guard<std::mutex> lk(input_mu_);
         system = midi_system_;
     }
-    if (!system) return;
+    if (!system)
+        return;
 
     std::vector<MidiEndpoint> endpoints;
     for (auto& p : system->enumerate_inputs()) {
@@ -674,12 +711,14 @@ void AudioDeviceManager::reconcile_midi_inputs() {
         std::lock_guard<std::mutex> lk(midi_ep_mu_);
         known = endpoints_known_;
         for (const auto& ep : midi_endpoints_) {
-            if (ep.is_input) present_inputs.insert(ep.id);
+            if (ep.is_input)
+                present_inputs.insert(ep.id);
         }
     }
 
     std::lock_guard<std::mutex> lk(input_mu_);
-    if (!midi_system_ || closed_.load(std::memory_order_acquire)) return;
+    if (!midi_system_ || closed_.load(std::memory_order_acquire))
+        return;
     for (auto& in : enabled_inputs_) {
         // Before the first snapshot nothing is known, so try to open and let
         // the backend decide.
@@ -693,20 +732,24 @@ void AudioDeviceManager::reconcile_midi_inputs() {
             }
             continue;
         }
-        if (in.device && in.device->is_open()) continue;
+        if (in.device && in.device->is_open())
+            continue;
 
         auto device = midi_system_->create_input();
-        if (!device) continue;
-        const bool opened = device->open(in.id, [this](const pulp::midi::MidiEvent& e) {
-            dispatch_midi_event(e);
-        });
-        if (opened) in.device = std::move(device);
-        else in.device.reset();
+        if (!device)
+            continue;
+        const bool opened =
+            device->open(in.id, [this](const pulp::midi::MidiEvent& e) { dispatch_midi_event(e); });
+        if (opened)
+            in.device = std::move(device);
+        else
+            in.device.reset();
     }
 }
 
 bool AudioDeviceManager::set_midi_input_enabled(const std::string& id, bool enabled) {
-    if (id.empty() || is_closed()) return false;
+    if (id.empty() || is_closed())
+        return false;
 
     std::unique_ptr<pulp::midi::MidiInput> to_close;
     std::vector<std::string> snapshot;
@@ -724,15 +767,20 @@ bool AudioDeviceManager::set_midi_input_enabled(const std::string& id, bool enab
             enabled_inputs_.erase(it);
             changed = true;
         }
-        for (const auto& e : enabled_inputs_) snapshot.push_back(e.id);
+        for (const auto& e : enabled_inputs_)
+            snapshot.push_back(e.id);
         settings = settings_;
     }
-    if (to_close) to_close->close();
-    if (changed && settings) save_enabled_midi_inputs(*settings, snapshot);
+    if (to_close)
+        to_close->close();
+    if (changed && settings)
+        save_enabled_midi_inputs(*settings, snapshot);
 
-    if (!enabled) return false;
+    if (!enabled)
+        return false;
     DispatchGuard guard(this);
-    if (guard.entered()) reconcile_midi_inputs();
+    if (guard.entered())
+        reconcile_midi_inputs();
     return is_midi_input_open(id);
 }
 
@@ -745,7 +793,8 @@ bool AudioDeviceManager::is_midi_input_enabled(const std::string& id) const {
 bool AudioDeviceManager::is_midi_input_open(const std::string& id) const {
     std::lock_guard<std::mutex> lk(input_mu_);
     for (const auto& e : enabled_inputs_) {
-        if (e.id == id) return e.device && e.device->is_open();
+        if (e.id == id)
+            return e.device && e.device->is_open();
     }
     return false;
 }
@@ -754,40 +803,47 @@ std::vector<std::string> AudioDeviceManager::enabled_midi_inputs() const {
     std::lock_guard<std::mutex> lk(input_mu_);
     std::vector<std::string> ids;
     ids.reserve(enabled_inputs_.size());
-    for (const auto& e : enabled_inputs_) ids.push_back(e.id);
+    for (const auto& e : enabled_inputs_)
+        ids.push_back(e.id);
     return ids;
 }
 
 void AudioDeviceManager::bind_settings(pulp::state::ApplicationProperties* props) {
     std::vector<std::string> saved;
-    if (props) saved = load_enabled_midi_inputs(*props);
+    if (props)
+        saved = load_enabled_midi_inputs(*props);
     {
         std::lock_guard<std::mutex> lk(input_mu_);
         settings_ = props;
         for (const auto& id : saved) {
             const bool known = std::any_of(enabled_inputs_.begin(), enabled_inputs_.end(),
                                            [&](const EnabledInput& e) { return e.id == id; });
-            if (!known) enabled_inputs_.push_back({id, nullptr});
+            if (!known)
+                enabled_inputs_.push_back({id, nullptr});
         }
     }
     DispatchGuard guard(this);
-    if (guard.entered()) reconcile_midi_inputs();
+    if (guard.entered())
+        reconcile_midi_inputs();
 }
 
-std::vector<std::string> AudioDeviceManager::load_enabled_midi_inputs(
-    const pulp::state::ApplicationProperties& props) {
+std::vector<std::string>
+AudioDeviceManager::load_enabled_midi_inputs(const pulp::state::ApplicationProperties& props) {
     std::vector<std::string> ids;
     const auto value = props.user_settings().get_string(adm_keys::kEnabledMidiInputs);
-    if (!value) return ids;
+    if (!value)
+        return ids;
     std::size_t start = 0;
     while (start <= value->size()) {
         const auto end = value->find('\n', start);
         const auto len = (end == std::string::npos ? value->size() : end) - start;
         if (len > 0) {
             auto id = value->substr(start, len);
-            if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(std::move(id));
+            if (std::find(ids.begin(), ids.end(), id) == ids.end())
+                ids.push_back(std::move(id));
         }
-        if (end == std::string::npos) break;
+        if (end == std::string::npos)
+            break;
         start = end + 1;
     }
     return ids;
@@ -801,13 +857,15 @@ bool AudioDeviceManager::save_enabled_midi_inputs(pulp::state::ApplicationProper
     } else {
         std::string joined;
         for (const auto& id : ids) {
-            if (!joined.empty()) joined += '\n';
+            if (!joined.empty())
+                joined += '\n';
             joined += id;
         }
         user.set_string(adm_keys::kEnabledMidiInputs, joined);
     }
     if (user.path().empty()) {
-        const std::string dir = pulp::state::ApplicationProperties::user_settings_dir(props.app_name());
+        const std::string dir =
+            pulp::state::ApplicationProperties::user_settings_dir(props.app_name());
         return user.save(dir + "/settings.json");
     }
     return user.save();

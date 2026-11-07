@@ -38,9 +38,8 @@ struct PcmCapabilities {
 
 /// Rates worth offering when a driver reports a continuous range.
 inline const std::array<unsigned, 13>& standard_sample_rates() {
-    static const std::array<unsigned, 13> rates{
-        8000, 11025, 16000, 22050, 32000, 44100, 48000,
-        88200, 96000, 176400, 192000, 352800, 384000};
+    static const std::array<unsigned, 13> rates{8000,  11025, 16000,  22050,  32000,  44100, 48000,
+                                                88200, 96000, 176400, 192000, 352800, 384000};
     return rates;
 }
 
@@ -50,25 +49,30 @@ inline const std::array<unsigned, 13>& standard_sample_rates() {
 /// even when it is not a standard one.
 inline std::vector<double> sample_rates_from(const PcmCapabilities& caps) {
     std::vector<double> out;
-    if (caps.rate_min == 0 || caps.rate_max < caps.rate_min) return out;
+    if (caps.rate_min == 0 || caps.rate_max < caps.rate_min)
+        return out;
     auto in_range = [&](unsigned r) { return r >= caps.rate_min && r <= caps.rate_max; };
 
     std::vector<unsigned> picked;
     if (caps.rates_tested) {
         for (unsigned r : caps.accepted_rates) {
-            if (in_range(r)) picked.push_back(r);
+            if (in_range(r))
+                picked.push_back(r);
         }
     } else {
         for (unsigned r : standard_sample_rates()) {
-            if (in_range(r)) picked.push_back(r);
+            if (in_range(r))
+                picked.push_back(r);
         }
     }
-    if (picked.empty() && caps.rate_min == caps.rate_max) picked.push_back(caps.rate_min);
+    if (picked.empty() && caps.rate_min == caps.rate_max)
+        picked.push_back(caps.rate_min);
 
     std::sort(picked.begin(), picked.end());
     picked.erase(std::unique(picked.begin(), picked.end()), picked.end());
     out.reserve(picked.size());
-    for (unsigned r : picked) out.push_back(static_cast<double>(r));
+    for (unsigned r : picked)
+        out.push_back(static_cast<double>(r));
     return out;
 }
 
@@ -78,17 +82,23 @@ inline std::vector<double> sample_rates_from(const PcmCapabilities& caps) {
 inline std::vector<int> buffer_sizes_from(const PcmCapabilities& caps,
                                           unsigned periods_per_buffer = 2) {
     std::vector<int> out;
-    if (caps.period_min == 0 || caps.period_max < caps.period_min) return out;
-    if (periods_per_buffer == 0) periods_per_buffer = 1;
+    if (caps.period_min == 0 || caps.period_max < caps.period_min)
+        return out;
+    if (periods_per_buffer == 0)
+        periods_per_buffer = 1;
     auto fits = [&](unsigned long p) {
-        if (p < caps.period_min || p > caps.period_max) return false;
-        if (p > 0x7FFFFFFFul) return false;
+        if (p < caps.period_min || p > caps.period_max)
+            return false;
+        if (p > 0x7FFFFFFFul)
+            return false;
         return caps.buffer_max == 0 || p * periods_per_buffer <= caps.buffer_max;
     };
     for (unsigned long p = 16; p <= 16384; p *= 2) {
-        if (fits(p)) out.push_back(static_cast<int>(p));
+        if (fits(p))
+            out.push_back(static_cast<int>(p));
     }
-    if (out.empty() && fits(caps.period_min)) out.push_back(static_cast<int>(caps.period_min));
+    if (out.empty() && fits(caps.period_min))
+        out.push_back(static_cast<int>(caps.period_min));
     return out;
 }
 
@@ -128,10 +138,10 @@ inline void fill_device_info_from_capabilities(DeviceInfo& info,
     info.max_input_channels = has_cap ? static_cast<int>(capture->channels_max) : 0;
 
     if (has_play && has_cap) {
-        info.sample_rates = detail::intersect_sorted(sample_rates_from(*playback),
-                                                     sample_rates_from(*capture));
-        info.buffer_sizes = detail::intersect_sorted(buffer_sizes_from(*playback),
-                                                     buffer_sizes_from(*capture));
+        info.sample_rates =
+            detail::intersect_sorted(sample_rates_from(*playback), sample_rates_from(*capture));
+        info.buffer_sizes =
+            detail::intersect_sorted(buffer_sizes_from(*playback), buffer_sizes_from(*capture));
     } else {
         const auto& only = has_play ? *playback : *capture;
         info.sample_rates = sample_rates_from(only);

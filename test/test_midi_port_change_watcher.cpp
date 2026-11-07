@@ -30,7 +30,7 @@ MidiPortInfo out_port(std::string id, std::string name) {
     return p;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("diff_port_lists reports added and removed ports", "[midi][hotplug]") {
     const auto d = diff_port_lists({in_port("0", "Pad"), in_port("1", "Keys")},
@@ -51,8 +51,8 @@ TEST_CASE("diff_port_lists is empty for identical lists in any order", "[midi][h
 
 TEST_CASE("diff_port_lists treats positional ids that shift as changes", "[midi][hotplug]") {
     // Removing the first of two ports renumbers the second.
-    const auto d = diff_port_lists({in_port("0", "Pad"), in_port("1", "Keys")},
-                                   {in_port("0", "Keys")});
+    const auto d =
+        diff_port_lists({in_port("0", "Pad"), in_port("1", "Keys")}, {in_port("0", "Keys")});
     REQUIRE(d.removed.size() == 2);
     REQUIRE(d.added.size() == 1);
     REQUIRE(d.added[0].id == "0");
@@ -130,11 +130,11 @@ TEST_CASE("PortChangePoller takes its baseline before the thread starts", "[midi
     // The list is already different by the time the first timer tick runs.
     poller.start(
         [&] {
-            if (changed) return std::vector<MidiPortInfo>{in_port("0", "A"), in_port("1", "B")};
+            if (changed)
+                return std::vector<MidiPortInfo>{in_port("0", "A"), in_port("1", "B")};
             return std::vector<MidiPortInfo>{in_port("0", "A")};
         },
-        [&](const PortListDiff&) { ++notified; },
-        std::chrono::milliseconds(5));
+        [&](const PortListDiff&) { ++notified; }, std::chrono::milliseconds(5));
     changed = true;
     for (int i = 0; i < 500 && notified == 0; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -142,13 +142,15 @@ TEST_CASE("PortChangePoller takes its baseline before the thread starts", "[midi
     REQUIRE(notified >= 1);
 }
 
-TEST_CASE("PortChangePoller stop prevents later callbacks and handles restarts", "[midi][hotplug]") {
+TEST_CASE("PortChangePoller stop prevents later callbacks and handles restarts",
+          "[midi][hotplug]") {
     std::atomic<int> notified{0};
     std::atomic<int> generation{0};
     PortChangePoller poller;
     auto enumerate = [&] {
         std::vector<MidiPortInfo> v;
-        for (int i = 0; i <= generation; ++i) v.push_back(in_port(std::to_string(i), "P"));
+        for (int i = 0; i <= generation; ++i)
+            v.push_back(in_port(std::to_string(i), "P"));
         return v;
     };
     poller.start(enumerate, [&](const PortListDiff&) { ++notified; }, std::chrono::milliseconds(5));
@@ -176,16 +178,20 @@ TEST_CASE("PortChangePoller tolerates stop() from its own callback", "[midi][hot
     poller.start(
         [&] {
             std::vector<MidiPortInfo> v{in_port("0", "A")};
-            if (grow) v.push_back(in_port("1", "B"));
+            if (grow)
+                v.push_back(in_port("1", "B"));
             return v;
         },
-        [&](const PortListDiff&) { ++notified; poller.stop(); },
+        [&](const PortListDiff&) {
+            ++notified;
+            poller.stop();
+        },
         std::chrono::milliseconds(5));
     grow = true;
     for (int i = 0; i < 500 && notified == 0; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     REQUIRE(notified == 1);
-    poller.stop();  // joins the wound-down thread
+    poller.stop(); // joins the wound-down thread
     REQUIRE_FALSE(poller.running());
 }

@@ -89,13 +89,21 @@ public:
     /// for both zones. Non-positive values are ignored.
     void set_manager_bend_range(float semitones);
     /// Member-channel range for channel 1 (the first lower-zone member).
-    float member_bend_range() const { return member_bend_semi_[1]; }
+    float member_bend_range() const {
+        return member_bend_semi_[1];
+    }
     /// Member-channel range for one specific channel (0-15).
-    float member_bend_range(uint8_t channel) const { return member_bend_semi_[channel & 0x0F]; }
+    float member_bend_range(uint8_t channel) const {
+        return member_bend_semi_[channel & 0x0F];
+    }
     /// Manager range of the lower zone.
-    float manager_bend_range() const { return manager_bend_semi_[0]; }
+    float manager_bend_range() const {
+        return manager_bend_semi_[0];
+    }
     /// Manager range of one zone.
-    float manager_bend_range(bool upper_zone) const { return manager_bend_semi_[upper_zone ? 1 : 0]; }
+    float manager_bend_range(bool upper_zone) const {
+        return manager_bend_semi_[upper_zone ? 1 : 0];
+    }
 
     // ── Configuration from incoming MIDI ──────────────────────────────────
 
@@ -116,8 +124,12 @@ public:
     /// refined by Data Entry LSB (CC 38). Parameter selection is tracked per
     /// channel, and NRPN selection (CC 99/98) cancels RPN selection on that
     /// channel so NRPN data entry can never be read as RPN.
-    void set_follow_configuration_messages(bool enabled) { follow_config_messages_ = enabled; }
-    bool follows_configuration_messages() const { return follow_config_messages_; }
+    void set_follow_configuration_messages(bool enabled) {
+        follow_config_messages_ = enabled;
+    }
+    bool follows_configuration_messages() const {
+        return follow_config_messages_;
+    }
 
     /// Invoked after an incoming MPE Configuration Message changed `config()`.
     std::function<void(const MpeConfig&)> on_config_change;
@@ -244,8 +256,7 @@ private:
     void update_channel_timbre(uint8_t ch, float timbre, bool upper);
 
     void track_registered_parameter(const MidiEvent& event);
-    void apply_registered_parameter(uint8_t ch, uint16_t param,
-                                    uint8_t data_msb, uint8_t data_lsb);
+    void apply_registered_parameter(uint8_t ch, uint16_t param, uint8_t data_msb, uint8_t data_lsb);
     void apply_configuration_message(uint8_t manager_channel, uint8_t member_count);
     void release_notes_outside_zones();
 

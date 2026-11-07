@@ -79,7 +79,7 @@ constexpr const char* kOutputChannelMask  = "audio_device_manager.output_channel
 constexpr const char* kInputChannelMask   = "audio_device_manager.input_channel_mask";
 /// Newline-separated identifiers of the MIDI inputs the user enabled.
 /// Absent when none are enabled.
-constexpr const char* kEnabledMidiInputs  = "audio_device_manager.enabled_midi_inputs";
+constexpr const char* kEnabledMidiInputs = "audio_device_manager.enabled_midi_inputs";
 }  // namespace adm_keys
 
 class AudioDeviceManager;
@@ -436,8 +436,8 @@ public:
     void bind_settings(pulp::state::ApplicationProperties* props);
 
     /// Read the saved enabled-input identifiers.
-    static std::vector<std::string> load_enabled_midi_inputs(
-        const pulp::state::ApplicationProperties& props);
+    static std::vector<std::string>
+    load_enabled_midi_inputs(const pulp::state::ApplicationProperties& props);
 
     /// Write the enabled-input identifiers; an empty list removes the key.
     static bool save_enabled_midi_inputs(pulp::state::ApplicationProperties& props,
@@ -466,6 +466,11 @@ private:
     void unsubscribe_device_change(uint64_t id) noexcept;
     void unsubscribe_midi_endpoint(uint64_t id) noexcept;
     void reconcile_midi_inputs();
+
+    /// Indirection a MIDI system's port-change callback holds instead of
+    /// `this`, so a notification that arrives while the manager is being
+    /// destroyed finds a cleared pointer rather than freed memory.
+    struct MidiPortLink;
 
     // RAII guard used by every dispatcher; blocks latch_close() until
     // all in-flight dispatches return.
@@ -504,7 +509,7 @@ private:
     mutable std::mutex                                                midi_ep_mu_;
     std::unordered_map<uint64_t, MidiEndpointChangeHandler>           midi_ep_subs_;
     std::vector<MidiEndpoint>                                         midi_endpoints_;
-    bool                                                              endpoints_known_ = false;  ///< Guarded by midi_ep_mu_.
+    bool endpoints_known_ = false; ///< Guarded by midi_ep_mu_.
 
     AudioSystem*                                    attached_system_ = nullptr;
 
@@ -513,14 +518,20 @@ private:
     /// enable/disable on the UI thread. It is never held while subscriber
     /// callbacks run, and device callbacks only take `midi_mu_`.
     struct EnabledInput {
-        std::string                          id;
-        std::unique_ptr<pulp::midi::MidiInput> device;  ///< Null while disconnected.
+        std::string id;
+        std::unique_ptr<pulp::midi::MidiInput> device; ///< Null while disconnected.
     };
-    mutable std::mutex                              input_mu_;
-    std::vector<EnabledInput>                       enabled_inputs_;
-    pulp::midi::MidiSystem*                         midi_system_ = nullptr;
-    bool                                            midi_port_callback_installed_ = false;
-    pulp::state::ApplicationProperties*             settings_ = nullptr;
+    mutable std::mutex input_mu_;
+    std::vector<EnabledInput> enabled_inputs_;
+    pulp::midi::MidiSystem* midi_system_ = nullptr;
+    std::shared_ptr<MidiPortLink> midi_link_;
+    /// Serialises enumerate-then-publish in `refresh_midi_endpoints()` so
+    /// two notifications cannot publish their snapshots out of order, which
+    /// would leave the older list as the final state and drop a live input.
+    /// Recursive: an endpoint subscriber may itself ask for a refresh.
+    std::recursive_mutex refresh_mu_;
+    bool midi_port_callback_installed_ = false;
+    pulp::state::ApplicationProperties* settings_ = nullptr;
 
     AudioProcessLoadMeasurer                     load_;
 

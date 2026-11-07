@@ -66,7 +66,8 @@ public:
             if (on_note_off) on_note_off(ch, note);
         } else if (msg.isController()) {
             const uint8_t cc = msg.getControllerNumber();
-            if (cc == 120 || cc == 123) all_notes_off(msg.getChannel0to15());
+            if (cc == 120 || cc == 123)
+                all_notes_off(msg.getChannel0to15());
         }
     }
 

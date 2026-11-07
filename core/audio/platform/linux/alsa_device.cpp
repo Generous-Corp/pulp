@@ -58,30 +58,38 @@ PcmCapabilities read_pcm_capabilities(snd_pcm_t* pcm, snd_pcm_hw_params_t* param
     int dir = 0;
     unsigned v = 0;
 
-    if (snd_pcm_hw_params_get_rate_min(params, &v, &dir) >= 0) caps.rate_min = v;
-    if (snd_pcm_hw_params_get_rate_max(params, &v, &dir) >= 0) caps.rate_max = v;
+    if (snd_pcm_hw_params_get_rate_min(params, &v, &dir) >= 0)
+        caps.rate_min = v;
+    if (snd_pcm_hw_params_get_rate_max(params, &v, &dir) >= 0)
+        caps.rate_max = v;
     caps.rates_tested = true;
     for (unsigned rate : standard_sample_rates()) {
-        if (rate < caps.rate_min || rate > caps.rate_max) continue;
+        if (rate < caps.rate_min || rate > caps.rate_max)
+            continue;
         if (snd_pcm_hw_params_test_rate(pcm, params, rate, 0) == 0) {
             caps.accepted_rates.push_back(rate);
         }
     }
     // A driver with one fixed rate may not be a standard one.
-    if (caps.rate_min != 0 && caps.rate_min == caps.rate_max
-        && snd_pcm_hw_params_test_rate(pcm, params, caps.rate_min, 0) == 0
-        && std::find(caps.accepted_rates.begin(), caps.accepted_rates.end(), caps.rate_min)
-               == caps.accepted_rates.end()) {
+    if (caps.rate_min != 0 && caps.rate_min == caps.rate_max &&
+        snd_pcm_hw_params_test_rate(pcm, params, caps.rate_min, 0) == 0 &&
+        std::find(caps.accepted_rates.begin(), caps.accepted_rates.end(), caps.rate_min) ==
+            caps.accepted_rates.end()) {
         caps.accepted_rates.push_back(caps.rate_min);
     }
 
-    if (snd_pcm_hw_params_get_channels_min(params, &v) >= 0) caps.channels_min = v;
-    if (snd_pcm_hw_params_get_channels_max(params, &v) >= 0) caps.channels_max = v;
+    if (snd_pcm_hw_params_get_channels_min(params, &v) >= 0)
+        caps.channels_min = v;
+    if (snd_pcm_hw_params_get_channels_max(params, &v) >= 0)
+        caps.channels_max = v;
 
     snd_pcm_uframes_t frames = 0;
-    if (snd_pcm_hw_params_get_period_size_min(params, &frames, &dir) >= 0) caps.period_min = frames;
-    if (snd_pcm_hw_params_get_period_size_max(params, &frames, &dir) >= 0) caps.period_max = frames;
-    if (snd_pcm_hw_params_get_buffer_size_max(params, &frames) >= 0) caps.buffer_max = frames;
+    if (snd_pcm_hw_params_get_period_size_min(params, &frames, &dir) >= 0)
+        caps.period_min = frames;
+    if (snd_pcm_hw_params_get_period_size_max(params, &frames, &dir) >= 0)
+        caps.period_max = frames;
+    if (snd_pcm_hw_params_get_buffer_size_max(params, &frames) >= 0)
+        caps.buffer_max = frames;
     return caps;
 }
 
@@ -89,15 +97,16 @@ PcmCapabilities read_pcm_capabilities(snd_pcm_t* pcm, snd_pcm_hw_params_t* param
 // one direction. Empty when the device cannot be opened for that direction
 // (busy, missing, or no such direction).
 std::optional<PcmCapabilities> probe_pcm_capabilities(const std::string& id,
-                                                       snd_pcm_stream_t stream) {
+                                                      snd_pcm_stream_t stream) {
     snd_pcm_t* pcm = nullptr;
-    if (snd_pcm_open(&pcm, id.c_str(), stream, SND_PCM_NONBLOCK) < 0) return std::nullopt;
+    if (snd_pcm_open(&pcm, id.c_str(), stream, SND_PCM_NONBLOCK) < 0)
+        return std::nullopt;
 
     snd_pcm_hw_params_t* hw_params = nullptr;
     snd_pcm_hw_params_alloca(&hw_params);
     std::optional<PcmCapabilities> caps;
-    if (snd_pcm_hw_params_any(pcm, hw_params) >= 0
-        && snd_pcm_hw_params_set_access(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED) >= 0) {
+    if (snd_pcm_hw_params_any(pcm, hw_params) >= 0 &&
+        snd_pcm_hw_params_set_access(pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED) >= 0) {
         // The stream is opened as float; if the hardware cannot do float
         // natively, report the widest space rather than nothing.
         snd_pcm_hw_params_t* with_format = nullptr;
@@ -115,13 +124,12 @@ std::optional<PcmCapabilities> probe_pcm_capabilities(const std::string& id,
 
 // Fill rates, buffer sizes and channel counts for a device id from the driver.
 void fill_probed_capabilities(DeviceInfo& info) {
-    fill_device_info_from_capabilities(
-        info,
-        probe_pcm_capabilities(info.id, SND_PCM_STREAM_PLAYBACK),
-        probe_pcm_capabilities(info.id, SND_PCM_STREAM_CAPTURE));
+    fill_device_info_from_capabilities(info,
+                                       probe_pcm_capabilities(info.id, SND_PCM_STREAM_PLAYBACK),
+                                       probe_pcm_capabilities(info.id, SND_PCM_STREAM_CAPTURE));
 }
 
-}  // namespace
+} // namespace
 
 // ── AlsaDevice ───────────────────────────────────────────────────────────
 
@@ -379,8 +387,10 @@ DeviceInfo AlsaDevice::info() const {
     if (info.sample_rates.empty() || info.buffer_sizes.empty()) {
         DeviceInfo fallback;
         fill_device_info_from_capabilities(fallback, std::nullopt, std::nullopt);
-        if (info.sample_rates.empty()) info.sample_rates = fallback.sample_rates;
-        if (info.buffer_sizes.empty()) info.buffer_sizes = fallback.buffer_sizes;
+        if (info.sample_rates.empty())
+            info.sample_rates = fallback.sample_rates;
+        if (info.buffer_sizes.empty())
+            info.buffer_sizes = fallback.buffer_sizes;
     }
     return info;
 }

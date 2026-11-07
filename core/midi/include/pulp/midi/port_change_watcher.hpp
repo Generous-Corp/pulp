@@ -26,17 +26,20 @@ namespace pulp::midi {
 struct PortListDiff {
     std::vector<MidiPortInfo> added;
     std::vector<MidiPortInfo> removed;
-    bool empty() const { return added.empty() && removed.empty(); }
+    bool empty() const {
+        return added.empty() && removed.empty();
+    }
 };
 
 namespace detail {
 inline bool same_port(const MidiPortInfo& a, const MidiPortInfo& b) {
-    return a.id == b.id && a.name == b.name
-        && a.is_input == b.is_input && a.is_output == b.is_output;
+    return a.id == b.id && a.name == b.name && a.is_input == b.is_input &&
+           a.is_output == b.is_output;
 }
 inline bool contains_port(const std::vector<MidiPortInfo>& list, const MidiPortInfo& p) {
     for (const auto& q : list) {
-        if (same_port(p, q)) return true;
+        if (same_port(p, q))
+            return true;
     }
     return false;
 }
@@ -60,28 +63,31 @@ inline PortListDiff diff_port_lists(const std::vector<MidiPortInfo>& before,
                 break;
             }
         }
-        if (!found) d.removed.push_back(b);
+        if (!found)
+            d.removed.push_back(b);
     }
     for (std::size_t i = 0; i < after.size(); ++i) {
-        if (!matched[i]) d.added.push_back(after[i]);
+        if (!matched[i])
+            d.added.push_back(after[i]);
     }
     return d;
 }
 
 /// Remembers the last snapshot and reports what changed since.
 class PortListTracker {
-public:
+  public:
     /// Record `current` and return the difference from the previous snapshot.
     /// The first call establishes the baseline and reports no change.
     PortListDiff update(std::vector<MidiPortInfo> current) {
         PortListDiff d;
-        if (have_baseline_) d = diff_port_lists(last_, current);
+        if (have_baseline_)
+            d = diff_port_lists(last_, current);
         last_ = std::move(current);
         have_baseline_ = true;
         return d;
     }
 
-private:
+  private:
     std::vector<MidiPortInfo> last_;
     bool have_baseline_ = false;
 };
@@ -92,14 +98,16 @@ private:
 /// afterwards. `stop()` may be called from `on_change`, in which case the
 /// thread winds down and is joined by the next `stop()` or the destructor.
 class PortChangePoller {
-public:
+  public:
     using Enumerate = std::function<std::vector<MidiPortInfo>()>;
     using OnChange = std::function<void(const PortListDiff&)>;
 
     PortChangePoller() = default;
     PortChangePoller(const PortChangePoller&) = delete;
     PortChangePoller& operator=(const PortChangePoller&) = delete;
-    ~PortChangePoller() { stop(); }
+    ~PortChangePoller() {
+        stop();
+    }
 
     /// Start polling. The baseline is taken on the calling thread before the
     /// worker starts, so a change right after `start()` is never missed.
@@ -108,7 +116,8 @@ public:
                std::chrono::milliseconds interval = std::chrono::milliseconds(1000)) {
         // A change handler that re-registers from the worker thread cannot
         // restart its own thread; ignore the request.
-        if (worker_.joinable() && worker_.get_id() == std::this_thread::get_id()) return;
+        if (worker_.joinable() && worker_.get_id() == std::this_thread::get_id())
+            return;
         stop();
         tracker_ = PortListTracker{};
         tracker_.update(enumerate());
@@ -116,18 +125,20 @@ public:
             std::lock_guard<std::mutex> lk(mu_);
             stopping_ = false;
         }
-        worker_ = std::thread([this, enumerate = std::move(enumerate),
-                               on_change = std::move(on_change), interval] {
-            std::unique_lock<std::mutex> lk(mu_);
-            while (!stopping_) {
-                cv_.wait_for(lk, interval, [this] { return stopping_; });
-                if (stopping_) break;
-                lk.unlock();
-                const auto diff = tracker_.update(enumerate());
-                if (!diff.empty() && on_change) on_change(diff);
-                lk.lock();
-            }
-        });
+        worker_ = std::thread(
+            [this, enumerate = std::move(enumerate), on_change = std::move(on_change), interval] {
+                std::unique_lock<std::mutex> lk(mu_);
+                while (!stopping_) {
+                    cv_.wait_for(lk, interval, [this] { return stopping_; });
+                    if (stopping_)
+                        break;
+                    lk.unlock();
+                    const auto diff = tracker_.update(enumerate());
+                    if (!diff.empty() && on_change)
+                        on_change(diff);
+                    lk.lock();
+                }
+            });
     }
 
     void stop() {
@@ -138,12 +149,15 @@ public:
         cv_.notify_all();
         // Called from inside `on_change`: the loop sees the flag and exits on
         // its own; the next stop() or the destructor joins it.
-        if (worker_.joinable() && worker_.get_id() != std::this_thread::get_id()) worker_.join();
+        if (worker_.joinable() && worker_.get_id() != std::this_thread::get_id())
+            worker_.join();
     }
 
-    bool running() const { return worker_.joinable(); }
+    bool running() const {
+        return worker_.joinable();
+    }
 
-private:
+  private:
     std::mutex mu_;
     std::condition_variable cv_;
     bool stopping_ = false;

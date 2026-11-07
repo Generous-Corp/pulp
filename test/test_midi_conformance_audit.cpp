@@ -19,28 +19,30 @@ namespace {
 
 struct Short {
     uint8_t status, d1, d2;
-    bool operator==(const Short& o) const { return status == o.status && d1 == o.d1 && d2 == o.d2; }
+    bool operator==(const Short& o) const {
+        return status == o.status && d1 == o.d1 && d2 == o.d2;
+    }
 };
 
 std::vector<Short> run_raw(const std::vector<uint8_t>& bytes) {
     std::vector<Short> out;
     RawMidiParserState state;
-    parse_raw_midi_bytes(bytes.data(), bytes.size(), state,
-                         [&](uint8_t s, uint8_t a, uint8_t b) { out.push_back({s, a, b}); }, nullptr);
+    parse_raw_midi_bytes(
+        bytes.data(), bytes.size(), state,
+        [&](uint8_t s, uint8_t a, uint8_t b) { out.push_back({s, a, b}); }, nullptr);
     return out;
 }
 
 std::vector<Short> run_running(const std::vector<uint8_t>& bytes) {
     std::vector<Short> out;
     RunningStatusParser parser;
-    parser.on_short_message([&](const MidiEvent& e) {
-        out.push_back({e.data()[0], e.data()[1], e.data()[2]});
-    });
+    parser.on_short_message(
+        [&](const MidiEvent& e) { out.push_back({e.data()[0], e.data()[1], e.data()[2]}); });
     parser.feed(bytes.data(), bytes.size());
     return out;
 }
 
-}  // namespace
+} // namespace
 
 // ── 32-bit timestamps in BLE-MIDI output ────────────────────────────────
 
@@ -68,9 +70,13 @@ TEST_CASE("BLE-MIDI encoder keeps only 13 bits of a 32-bit timestamp", "[midi][a
 
 // ── F1-F7 cancel running status ─────────────────────────────────────────
 
-TEST_CASE("System common messages cancel running status in the raw parser", "[midi][audit][parser]") {
-    const std::vector<uint8_t> after_common = {0x3C, 0x40};  // data with no status
-    struct Case { std::vector<uint8_t> common; Short expected; };
+TEST_CASE("System common messages cancel running status in the raw parser",
+          "[midi][audit][parser]") {
+    const std::vector<uint8_t> after_common = {0x3C, 0x40}; // data with no status
+    struct Case {
+        std::vector<uint8_t> common;
+        Short expected;
+    };
     const std::vector<Case> cases = {
         {{0xF1, 0x12}, {0xF1, 0x12, 0}},
         {{0xF2, 0x01, 0x02}, {0xF2, 0x01, 0x02}},
@@ -83,7 +89,7 @@ TEST_CASE("System common messages cancel running status in the raw parser", "[mi
         bytes.insert(bytes.end(), after_common.begin(), after_common.end());
         const auto got = run_raw(bytes);
         INFO("system common 0x" << std::hex << int(c.common[0]));
-        REQUIRE(got.size() == 2);  // the note, then the system common; nothing from stray data
+        REQUIRE(got.size() == 2); // the note, then the system common; nothing from stray data
         REQUIRE(got[1] == c.expected);
     }
 }
@@ -95,14 +101,19 @@ TEST_CASE("Undefined system common F4/F5 and stray EOX cancel running status in 
         INFO("status 0x" << std::hex << int(status));
         // Exactly one note-on, no second one rebuilt from the stray data.
         int notes = 0;
-        for (const auto& m : got) if (m.status == 0x90) ++notes;
+        for (const auto& m : got)
+            if (m.status == 0x90)
+                ++notes;
         REQUIRE(notes == 1);
     }
 }
 
 TEST_CASE("System common messages cancel running status in the running-status parser",
           "[midi][audit][parser]") {
-    struct Case { std::vector<uint8_t> common; Short expected; };
+    struct Case {
+        std::vector<uint8_t> common;
+        Short expected;
+    };
     const std::vector<Case> cases = {
         {{0xF1, 0x12}, {0xF1, 0x12, 0}},
         {{0xF2, 0x01, 0x02}, {0xF2, 0x01, 0x02}},
@@ -112,7 +123,7 @@ TEST_CASE("System common messages cancel running status in the running-status pa
     for (const auto& c : cases) {
         std::vector<uint8_t> bytes = {0x90, 0x3C, 0x64};
         bytes.insert(bytes.end(), c.common.begin(), c.common.end());
-        bytes.push_back(0x3C);  // stray data
+        bytes.push_back(0x3C); // stray data
         bytes.push_back(0x40);
         const auto got = run_running(bytes);
         INFO("system common 0x" << std::hex << int(c.common[0]));
@@ -122,15 +133,19 @@ TEST_CASE("System common messages cancel running status in the running-status pa
     }
 }
 
-TEST_CASE("Undefined system common F4/F5 and stray EOX cancel running status in the running-status parser",
+TEST_CASE("Undefined system common F4/F5 and stray EOX cancel running status in the running-status "
+          "parser",
           "[midi][audit][parser]") {
     for (uint8_t status : {uint8_t{0xF4}, uint8_t{0xF5}, uint8_t{0xF7}}) {
         const auto got = run_running({0x90, 0x3C, 0x64, status, 0x3C, 0x40});
         INFO("status 0x" << std::hex << int(status));
         int notes = 0;
-        for (const auto& m : got) if (m.status == 0x90) ++notes;
+        for (const auto& m : got)
+            if (m.status == 0x90)
+                ++notes;
         REQUIRE(notes == 1);
-        for (const auto& m : got) REQUIRE(m.status != 0x00);
+        for (const auto& m : got)
+            REQUIRE(m.status != 0x00);
     }
 }
 
@@ -177,7 +192,8 @@ TEST_CASE("All Sound Off releases held notes", "[midi][audit][keyboard]") {
 TEST_CASE("Other controllers do not disturb held notes", "[midi][audit][keyboard]") {
     MidiKeyboardState keys;
     keys.process(MidiEvent::note_on(0, 60, 100));
-    for (uint8_t cc : {uint8_t{1}, uint8_t{7}, uint8_t{64}, uint8_t{119}, uint8_t{121}, uint8_t{122}}) {
+    for (uint8_t cc :
+         {uint8_t{1}, uint8_t{7}, uint8_t{64}, uint8_t{119}, uint8_t{121}, uint8_t{122}}) {
         keys.process(MidiEvent::cc(0, cc, 127));
     }
     REQUIRE(keys.is_note_on(0, 60));

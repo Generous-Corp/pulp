@@ -24,11 +24,11 @@ PcmCapabilities usb_interface() {
     return c;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("sample_rates_from uses the rates the driver confirmed", "[audio][pcm]") {
     auto c = usb_interface();
-    c.accepted_rates = {48000, 96000};  // 44.1 and 88.2 kHz refused
+    c.accepted_rates = {48000, 96000}; // 44.1 and 88.2 kHz refused
     REQUIRE(sample_rates_from(c) == std::vector<double>{48000, 96000});
 }
 
@@ -36,7 +36,7 @@ TEST_CASE("sample_rates_from never reports a rate outside the driver's range", "
     auto c = usb_interface();
     c.rate_min = 48000;
     c.rate_max = 48000;
-    c.accepted_rates = {44100, 48000, 96000};  // inconsistent input
+    c.accepted_rates = {44100, 48000, 96000}; // inconsistent input
     REQUIRE(sample_rates_from(c) == std::vector<double>{48000});
 }
 
@@ -70,7 +70,7 @@ TEST_CASE("sample_rates_from is sorted and unique and rejects empty ranges", "[a
     c.accepted_rates = {96000, 44100, 96000, 48000};
     REQUIRE(sample_rates_from(c) == std::vector<double>{44100, 48000, 96000});
     REQUIRE(sample_rates_from(PcmCapabilities{}).empty());
-    c.rate_max = 1000;  // max below min
+    c.rate_max = 1000; // max below min
     REQUIRE(sample_rates_from(c).empty());
 }
 
@@ -85,7 +85,7 @@ TEST_CASE("buffer_sizes_from keeps two periods inside the largest buffer", "[aud
     auto c = usb_interface();
     c.period_min = 32;
     c.period_max = 8192;
-    c.buffer_max = 1024;  // two 512-frame periods fit; 1024 does not
+    c.buffer_max = 1024; // two 512-frame periods fit; 1024 does not
     REQUIRE(buffer_sizes_from(c) == std::vector<int>{32, 64, 128, 256, 512});
     REQUIRE(buffer_sizes_from(c, 4).back() == 256);
 }
@@ -96,7 +96,7 @@ TEST_CASE("buffer_sizes_from reports a fixed period even if not a power of two",
     c.period_max = 480;
     c.buffer_max = 4096;
     REQUIRE(buffer_sizes_from(c) == std::vector<int>{480});
-    c.buffer_max = 800;  // two periods no longer fit
+    c.buffer_max = 800; // two periods no longer fit
     REQUIRE(buffer_sizes_from(c).empty());
     REQUIRE(buffer_sizes_from(PcmCapabilities{}).empty());
 }
@@ -134,7 +134,8 @@ TEST_CASE("DeviceInfo lists for a duplex device are what both directions support
     REQUIRE(info.buffer_sizes.front() == 32);
 }
 
-TEST_CASE("DeviceInfo uses a conservative default only when nothing could be probed", "[audio][pcm]") {
+TEST_CASE("DeviceInfo uses a conservative default only when nothing could be probed",
+          "[audio][pcm]") {
     DeviceInfo info;
     fill_device_info_from_capabilities(info, std::nullopt, std::nullopt);
     REQUIRE_FALSE(info.sample_rates.empty());

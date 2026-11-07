@@ -19,7 +19,7 @@
 
 namespace {
 
-constexpr SInt32 kVirtualId = 0x50554C50;  // arbitrary, unlikely to collide
+constexpr SInt32 kVirtualId = 0x50554C50; // arbitrary, unlikely to collide
 
 struct VirtualSource {
     MIDIClientRef client = 0;
@@ -38,12 +38,16 @@ struct VirtualSource {
     }
 
     void destroy() {
-        if (source) { MIDIEndpointDispose(source); source = 0; }
+        if (source) {
+            MIDIEndpointDispose(source);
+            source = 0;
+        }
     }
 
     ~VirtualSource() {
         destroy();
-        if (client) MIDIClientDispose(client);
+        if (client)
+            MIDIClientDispose(client);
     }
 };
 
@@ -57,17 +61,18 @@ bool wait_for(const std::atomic<int>& counter, int at_least) {
 void send_note(MIDIEndpointRef source) {
     MIDIEventList list;
     MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_1_0);
-    const UInt32 word = 0x20903C64;  // note on, channel 0, note 60, velocity 100
+    const UInt32 word = 0x20903C64; // note on, channel 0, note 60, velocity 100
     MIDIEventListAdd(&list, sizeof(list), packet, 0, 1, &word);
     MIDIReceivedEventList(source, &list);
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("CoreMIDI input reports closed when its source is replaced, and reopens",
           "[midi][coremidi][reconnect]") {
     VirtualSource vs;
-    if (!vs.create()) SKIP("CoreMIDI server not reachable; skipping");
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
 
     auto system = pulp::midi::create_midi_system();
     REQUIRE(system != nullptr);
@@ -105,8 +110,10 @@ TEST_CASE("CoreMIDI output stops reporting open when its destination is replaced
         SKIP("CoreMIDI server not reachable; skipping");
     }
     MIDIEndpointRef dest = 0;
-    MIDIReadBlock sink = ^(const MIDIPacketList*, void*) {};
-    REQUIRE(MIDIDestinationCreateWithBlock(client, CFSTR("Pulp Reconnect Dest"), &dest, sink) == noErr);
+    MIDIReadBlock sink = ^(const MIDIPacketList*, void*) {
+    };
+    REQUIRE(MIDIDestinationCreateWithBlock(client, CFSTR("Pulp Reconnect Dest"), &dest, sink) ==
+            noErr);
     MIDIObjectSetIntegerProperty(dest, kMIDIPropertyUniqueID, kVirtualId + 1);
 
     auto system = pulp::midi::create_midi_system();

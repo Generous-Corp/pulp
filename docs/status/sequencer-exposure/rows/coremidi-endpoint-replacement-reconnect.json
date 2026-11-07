@@ -1,0 +1,48 @@
+{
+  "id": "coremidi-endpoint-replacement-reconnect",
+  "title": "A CoreMIDI port reports closed when its endpoint was replaced, so owners reconnect",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "ad459311-ee70-46bb-b5c7-db933751b335",
+  "owned_paths": [
+    "core/midi/platform/mac/coremidi_device.mm",
+    "docs/status/sequencer-exposure/rows/coremidi-endpoint-replacement-reconnect.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/midi/platform/mac/coremidi_device.mm",
+      "needles": [
+        "endpoint_is_current",
+        "NSWorkspaceDidWakeNotification"
+      ]
+    },
+    {
+      "path": "test/test_coremidi_reconnect.cpp",
+      "needles": [
+        "CoreMIDI input reports closed when its source is replaced, and reopens"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No installed header, target or exported symbol changes in this file. The macOS backend gains an AppKit link for the wake notification, which is internal to the already-shipped MIDI library."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag or handler is added or changed. The change is inside the CoreMIDI device backend."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler is added or changed."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation or executor binding changes. MidiInput::is_open() and MidiOutput::is_open() keep their signatures; they now also report false when the endpoint was replaced."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No capability is added, removed or re-keyed. Public MIDI and audio headers changed elsewhere in this branch are classified as infrastructure in the public-surface ledger; this backend file is not a public header."
+    }
+  }
+}

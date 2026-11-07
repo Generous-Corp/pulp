@@ -100,20 +100,29 @@ iterator.
 
 ## Gotchas
 
-### Zones are configured, not auto-discovered
+### Zones start from your config and follow the controller
 
-`MpeVoiceTracker::process()` handles note on/off, pitch bend, channel
-pressure, and CC 74 — it does **not** parse RPN 6 / 7 (MPE Configuration
-Messages). Which channels belong to the lower zone (master ch 1,
-members 2–N) vs the upper zone (master ch 16, members N–15) is decided
-by the `MpeConfig` you pass to the tracker at construction; you're
-responsible for supplying it (usually from the plugin's own
-configuration / saved state), not for trusting the controller to
-negotiate it.
+`MpeVoiceTracker` starts from the `MpeConfig` you pass in and then follows
+the controller: an MPE Configuration Message (RPN 6 on channel 1 or 16, data
+entry MSB = member count) rebuilds the lower or upper zone, and `config()`
+returns the new layout. `on_config_change` fires after each one. Details that
+bite:
 
-If you need live RPN 6/7 negotiation, parse it separately (see
-`core/midi/include/pulp/midi/rpn_parser.hpp`) and reconfigure the
-tracker off the audio thread.
+- The tracker handles these on the same thread as `process()`, so it applies
+  them inline; there is nothing to reconfigure off-thread.
+- The zone being configured wins when the two zones would overlap; the other
+  zone shrinks (both together fit in at most 14 members).
+- A configuration message resets the affected zones to the default ranges
+  (48 member, 2 manager), clears their cached expression, and releases notes
+  on channels that left a zone through `on_note_off`.
+- RPN selection is per channel and an NRPN selection (CC 99/98) cancels it, so
+  NRPN data entry is never read as RPN. The value applies on CC 6; CC 38 only
+  refines it, so senders that omit CC 38 work.
+- `set_follow_configuration_messages(false)` pins the layout to `set_config()`
+  for hosts that own the configuration themselves.
+- To send a layout use `pulp/midi/mpe_config_messages.hpp`
+  (`mpe_zone_layout_messages`, then the pitch-bend-range builders; send ranges
+  after the layout because it resets them). See `docs/guides/mpe-configuration.md`.
 
 ### Pressure ≠ velocity
 
@@ -124,9 +133,11 @@ modulation, not `velocity()`.
 ### Pitch bend range defaults to ±48 semitones
 
 That's the MPE spec default. If your controller sends a different range
-via RPN 0, `MpeVoiceTracker` honors it — but a lot of older controllers
-don't send the RPN. When testing, either send the RPN or document the
-assumption.
+via RPN 0, `MpeVoiceTracker` honors it, per member channel and per zone
+manager (`member_bend_range(channel)`, `manager_bend_range(upper_zone)`) — but
+a lot of older controllers don't send the RPN. A range change scales bend
+messages that arrive afterwards; notes already bending keep the value they
+had. When testing, either send the RPN or document the assumption.
 
 ### Glide detection is refcounted
 

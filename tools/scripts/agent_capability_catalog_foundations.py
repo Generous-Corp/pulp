@@ -361,7 +361,7 @@ EXPORTS = [
                 qualified_name="pulp::midi::MpeVoiceTracker",
                 target="Pulp::midi",
                 header_fingerprint=(
-                    "sha256:646774a38489314af1e830665faa30e4be073c293850ba79d610c495c5c8dc57"
+                    "sha256:c90be261b57145983c90b269c2d4512b9d3211f492032dbc55885c197cfb6299"
                 ),
             )
         ],

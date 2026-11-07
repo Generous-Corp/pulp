@@ -1,5 +1,5 @@
-#include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 #include <pulp/midi/mpe_config_messages.hpp>
 #include <pulp/midi/mpe_voice_tracker.hpp>
@@ -11,9 +11,9 @@ using Catch::Approx;
 
 namespace {
 
-template <typename List>
-void feed(MpeVoiceTracker& t, const List& list) {
-    for (const auto& e : list) t.process(e);
+template <typename List> void feed(MpeVoiceTracker& t, const List& list) {
+    for (const auto& e : list)
+        t.process(e);
 }
 
 void rpn(MpeVoiceTracker& t, uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t data_msb,
@@ -21,13 +21,15 @@ void rpn(MpeVoiceTracker& t, uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t data_
     t.process(MidiEvent::cc(ch, 101, msb));
     t.process(MidiEvent::cc(ch, 100, lsb));
     t.process(MidiEvent::cc(ch, 6, data_msb));
-    if (data_lsb >= 0) t.process(MidiEvent::cc(ch, 38, static_cast<uint8_t>(data_lsb)));
+    if (data_lsb >= 0)
+        t.process(MidiEvent::cc(ch, 38, static_cast<uint8_t>(data_lsb)));
 }
 
 } // namespace
 
-TEST_CASE("MCM on the lower manager channel sets the lower zone member count", "[midi][mpe][config]") {
-    MpeVoiceTracker t{MpeConfig{}};  // no zones
+TEST_CASE("MCM on the lower manager channel sets the lower zone member count",
+          "[midi][mpe][config]") {
+    MpeVoiceTracker t{MpeConfig{}}; // no zones
     REQUIRE_FALSE(t.process(MidiEvent::note_on(1, 60, 100)));
 
     int changes = 0;
@@ -49,7 +51,7 @@ TEST_CASE("MCM sequence builds two zones and shrinks the displaced zone", "[midi
     REQUIRE(t.config().lower_zone.member_channels == 5);
     REQUIRE(t.config().upper_zone.member_channels == 4);
     REQUIRE(t.config().upper_zone.manager_channel == 15);
-    REQUIRE(t.config().zone_for_channel(11)->is_upper());   // 15-4..14
+    REQUIRE(t.config().zone_for_channel(11)->is_upper()); // 15-4..14
     REQUIRE(t.config().zone_for_channel(5)->is_lower());
 
     // Growing the lower zone to 12 members leaves only 2 for the upper zone.
@@ -72,10 +74,10 @@ TEST_CASE("MCM works with the data entry LSB omitted or present and ignores othe
     MpeVoiceTracker t{MpeConfig{}};
     rpn(t, 0, 0, 6, 3, 0);
     REQUIRE(t.config().lower_zone.member_channels == 3);
-    rpn(t, 4, 0, 6, 9);  // a member channel cannot carry an MCM
+    rpn(t, 4, 0, 6, 9); // a member channel cannot carry an MCM
     REQUIRE(t.config().lower_zone.member_channels == 3);
     REQUIRE(t.config().upper_zone.member_channels == 0);
-    rpn(t, 0, 0, 6, 100);  // out of range clamps to 15
+    rpn(t, 0, 0, 6, 100); // out of range clamps to 15
     REQUIRE(t.config().lower_zone.member_channels == 15);
 }
 
@@ -127,7 +129,8 @@ TEST_CASE("Pitch-bend-range RPN changes the tracker's bend scaling", "[midi][mpe
     REQUIRE(t.member_bend_range(1) == Approx(2.5f));
 }
 
-TEST_CASE("Member range RPN is per channel and manager range RPN is per zone", "[midi][mpe][config]") {
+TEST_CASE("Member range RPN is per channel and manager range RPN is per zone",
+          "[midi][mpe][config]") {
     MpeVoiceTracker t{MpeConfig::dual(5, 5)};
     rpn(t, 2, 0, 0, 24);
     REQUIRE(t.member_bend_range(2) == Approx(24.0f));
@@ -246,10 +249,16 @@ TEST_CASE("A layout built from a config round-trips through a tracker", "[midi][
 
     struct Recorder : MidiOutput {
         std::vector<MidiEvent> sent;
-        bool open(const std::string&) override { return true; }
+        bool open(const std::string&) override {
+            return true;
+        }
         void close() override {}
-        bool is_open() const override { return true; }
-        void send(const MidiEvent& e) override { sent.push_back(e); }
+        bool is_open() const override {
+            return true;
+        }
+        void send(const MidiEvent& e) override {
+            sent.push_back(e);
+        }
     } out;
     send_mpe_messages(out, mpe_configuration_message(0, 2));
     REQUIRE(out.sent.size() == 3);

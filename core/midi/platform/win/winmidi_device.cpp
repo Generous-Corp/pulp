@@ -186,16 +186,16 @@ private:
 
         if (msg == MIM_LONGDATA) {
             auto* hdr = reinterpret_cast<LPMIDIHDR>(param1);
-            if (!hdr) return;
+            if (!hdr)
+                return;
 
             // The driver returns a buffer when it is full or when F7 arrives,
             // so a message longer than one buffer comes back in pieces. Join
             // them and deliver once, complete. A zero-byte return happens when
             // midiInReset hands back unused buffers.
             if (hdr->dwBytesRecorded != 0) {
-                if (self->sysex_assembler_.append(
-                        reinterpret_cast<const uint8_t*>(hdr->lpData),
-                        hdr->dwBytesRecorded)) {
+                if (self->sysex_assembler_.append(reinterpret_cast<const uint8_t*>(hdr->lpData),
+                                                  hdr->dwBytesRecorded)) {
                     auto bytes = self->sysex_assembler_.take();
                     if (self->sysex_callback_) {
                         self->sysex_callback_(bytes, self->qpc_seconds_since_open());
@@ -340,8 +340,10 @@ private:
 // ── WinMidiSystem ────────────────────────────────────────────────────────
 
 class WinMidiSystem : public MidiSystem {
-public:
-    ~WinMidiSystem() override { poller_.stop(); }
+  public:
+    ~WinMidiSystem() override {
+        poller_.stop();
+    }
 
     /// The multimedia API has no plug or unplug notification, so the system
     /// enumerates once a second on a background thread and reports any
@@ -353,7 +355,8 @@ public:
             std::lock_guard<std::mutex> lk(cb_mu_);
             port_change_cb_ = cb;
         }
-        if (!cb) return;
+        if (!cb)
+            return;
         poller_.start(
             [this] {
                 auto ports = enumerate_inputs();
@@ -367,7 +370,8 @@ public:
                     std::lock_guard<std::mutex> lk(cb_mu_);
                     current = port_change_cb_;
                 }
-                if (current) current();
+                if (current)
+                    current();
             });
     }
 
@@ -419,7 +423,7 @@ public:
         return std::make_unique<WinMidiOutput>();
     }
 
-private:
+  private:
     std::mutex cb_mu_;
     PortChangeCallback port_change_cb_;
     PortChangePoller poller_;

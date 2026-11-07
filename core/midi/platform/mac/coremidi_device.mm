@@ -49,8 +49,10 @@ double host_ticks_to_seconds(MIDITimeStamp ticks) {
 // nothing, but nothing tells the port so. Comparing the registered object with
 // the one we connected to detects exactly that.
 bool endpoint_is_current(MIDIEndpointRef endpoint, SInt32 unique_id) {
-    if (endpoint == 0) return false;
-    if (unique_id == 0) return true;  // No id to verify against.
+    if (endpoint == 0)
+        return false;
+    if (unique_id == 0)
+        return true; // No id to verify against.
     MIDIObjectRef found = 0;
     MIDIObjectType type = kMIDIObjectType_Other;
     const OSStatus status = MIDIObjectFindByUniqueID(unique_id, &found, &type);
@@ -175,7 +177,8 @@ public:
                 MIDIEndpointRef first = MIDIGetSource(0);
                 status = MIDIPortConnectSource(port_, first, nullptr);
                 is_open_ = (status == noErr);
-                if (is_open_) remember_source(first);
+                if (is_open_)
+                    remember_source(first);
             }
             if (!is_open_) close();
             return is_open_;
@@ -232,7 +235,7 @@ public:
         sysex_callback_ = std::move(cb);
     }
 
-private:
+  private:
     void remember_source(MIDIEndpointRef source) {
         source_ = source;
         source_unique_id_ = 0;
@@ -315,7 +318,8 @@ public:
     }
 
     void send(const MidiEvent& event) override {
-        if (!is_open_ || !dest_ || !endpoint_is_current(dest_, dest_unique_id_)) return;
+        if (!is_open_ || !dest_ || !endpoint_is_current(dest_, dest_unique_id_))
+            return;
 
         // Build a MIDI 1.0 UMP word
         const auto* d = event.data();
@@ -339,7 +343,7 @@ private:
 };
 
 class CoreMidiSystem : public MidiSystem {
-public:
+  public:
     CoreMidiSystem() : notify_(std::make_shared<NotifyState>()) {}
 
     ~CoreMidiSystem() override {
@@ -439,7 +443,7 @@ public:
         return std::make_unique<CoreMidiOutput>();
     }
 
-private:
+  private:
     // Callback slot shared with the blocks the OS holds, so they never
     // dereference a destroyed system.
     struct NotifyState {
@@ -453,7 +457,8 @@ private:
                 std::lock_guard<std::mutex> lk(mu);
                 current = callback;
             }
-            if (current) current();
+            if (current)
+                current();
         }
         std::mutex mu;
         PortChangeCallback callback;
@@ -467,18 +472,19 @@ private:
     // reconnect without any user action.
     void install_wake_observer() {
 #if TARGET_OS_OSX
-        if (wake_observer_) return;
+        if (wake_observer_)
+            return;
         auto notify = notify_;
         id token = [[[NSWorkspace sharedWorkspace] notificationCenter]
             addObserverForName:NSWorkspaceDidWakeNotification
                         object:nil
                          queue:nil
                     usingBlock:^(NSNotification*) {
-                        notify->fire();
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
-                                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                                           notify->fire();
-                                       });
+                      notify->fire();
+                      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+                                     dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                                       notify->fire();
+                                     });
                     }];
         wake_observer_ = token ? CFRetain((__bridge CFTypeRef)token) : nullptr;
 #endif
@@ -486,7 +492,8 @@ private:
 
     void remove_wake_observer() {
 #if TARGET_OS_OSX
-        if (!wake_observer_) return;
+        if (!wake_observer_)
+            return;
         [[[NSWorkspace sharedWorkspace] notificationCenter]
             removeObserver:(__bridge id)wake_observer_];
         CFRelease(wake_observer_);
