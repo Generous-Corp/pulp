@@ -53,7 +53,7 @@ _SUITE_CALL = re.compile(r"\bpulp_add_test_suite\s*\(\s*(pulp-test-[\w\-]+)([^)]
 
 def tracked_files(root: Path) -> list[str]:
     out = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True,
-                         text=True, check=True).stdout
+                         text=True, encoding="utf-8", check=True).stdout
     return [f for f in out.split("\0") if f]
 
 
@@ -240,7 +240,7 @@ def find_dead(root: Path) -> tuple[list[str], list[str]]:
     index, derived = build_index(root, files)
     allow = {}
     if ALLOW_FILE.is_file():
-        allow = {e["path"]: e["reason"] for e in json.loads(ALLOW_FILE.read_text())["allow"]}
+        allow = {e["path"]: e["reason"] for e in json.loads(ALLOW_FILE.read_text(encoding="utf-8"))["allow"]}
     dead, stale = [], []
     seen = set()
     for f in files:

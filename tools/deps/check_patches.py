@@ -92,7 +92,7 @@ def _reverse_apply(scratch: Path, patch: Path) -> str | None:
     try:
         proc = subprocess.run(
             ["git", "apply", "-R", "-p1", "--whitespace=nowarn", str(local)],
-            cwd=scratch, capture_output=True, text=True, check=False, env=env,
+            cwd=scratch, capture_output=True, text=True, encoding="utf-8", check=False, env=env,
         )
     finally:
         local.unlink(missing_ok=True)

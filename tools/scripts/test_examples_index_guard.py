@@ -31,10 +31,10 @@ def make_repo(readme: str, dirs: list[str]) -> tempfile.TemporaryDirectory:
     tmp = tempfile.TemporaryDirectory()
     root = Path(tmp.name)
     (root / "examples").mkdir()
-    (root / "examples" / "README.md").write_text(readme)
+    (root / "examples" / "README.md").write_text(readme, encoding="utf-8")
     for d in dirs:
         (root / "examples" / d).mkdir()
-        (root / "examples" / d / "CMakeLists.txt").write_text("")
+        (root / "examples" / d / "CMakeLists.txt").write_text("", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     return tmp

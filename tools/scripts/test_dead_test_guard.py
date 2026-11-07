@@ -22,7 +22,7 @@ def make_repo(files: dict[str, str]) -> tempfile.TemporaryDirectory:
     for rel, text in files.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        path.write_text(text, encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     return tmp
@@ -118,7 +118,7 @@ class DeadTestGuardTest(unittest.TestCase):
             allow = Path(tmp) / "allow.json"
             allow.write_text(json.dumps({"allow": [
                 {"path": "test/test_a.cpp", "reason": "x"},
-                {"path": "test/gone.cpp", "reason": "x"}]}))
+                {"path": "test/gone.cpp", "reason": "x"}]}), encoding="utf-8")
             original = guard.ALLOW_FILE
             guard.ALLOW_FILE = allow
             try:

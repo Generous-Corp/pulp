@@ -42,11 +42,11 @@ class Fixture:
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         (self.root / "external/lib").mkdir(parents=True)
-        (self.root / self.REL).write_text(tree_text)
+        (self.root / self.REL).write_text(tree_text, encoding="utf-8")
         pdir = self.root / "tools/deps/patches/lib"
         pdir.mkdir(parents=True)
-        (pdir / "0001-first.patch").write_text(unified(V0, V1, self.REL))
-        (pdir / "0002-second.patch").write_text(unified(V1, V2, self.REL))
+        (pdir / "0001-first.patch").write_text(unified(V0, V1, self.REL), encoding="utf-8")
+        (pdir / "0002-second.patch").write_text(unified(V1, V2, self.REL), encoding="utf-8")
         self.manifest = {
             "schema_version": 1,
             "dependencies": [{
@@ -63,7 +63,7 @@ class Fixture:
 
     def write_manifest(self):
         self.path = self.root / "tools/deps/patches.json"
-        self.path.write_text(json.dumps(self.manifest))
+        self.path.write_text(json.dumps(self.manifest), encoding="utf-8")
 
     def run(self):
         manifest = check_patches.load_manifest(self.path)
@@ -114,14 +114,13 @@ class CheckPatchesTest(unittest.TestCase):
 
     def test_unlisted_patch_file_fails(self):
         fx = Fixture()
-        (fx.root / "tools/deps/patches/lib/0003-extra.patch").write_text("")
+        (fx.root / "tools/deps/patches/lib/0003-extra.patch").write_text("", encoding="utf-8")
         self.assertTrue(any("not listed" in p for p in fx.run()))
 
     def test_patch_touching_unlisted_file_fails(self):
         fx = Fixture()
         other = "external/lib/other.c"
-        (fx.root / "tools/deps/patches/lib/0001-first.patch").write_text(
-            unified(V0, V1, other))
+        (fx.root / "tools/deps/patches/lib/0001-first.patch").write_text(unified(V0, V1, other), encoding="utf-8")
         self.assertTrue(any("not listed" in p for p in fx.run()))
 
     def test_unpatched_dependency_must_equal_upstream(self):
@@ -131,7 +130,7 @@ class CheckPatchesTest(unittest.TestCase):
         for p in (fx.root / "tools/deps/patches/lib").glob("*.patch"):
             p.unlink()
         self.assertEqual(fx.run(), [])
-        (fx.root / fx.REL).write_text(V1)
+        (fx.root / fx.REL).write_text(V1, encoding="utf-8")
         self.assertTrue(fx.run())
 
     def test_crlf_checkout_still_verifies(self):
@@ -164,7 +163,7 @@ class CheckPatchesTest(unittest.TestCase):
 
     def test_configure_time_patch_functions_must_exist(self):
         fx = Fixture()
-        (fx.root / "patch.cmake").write_text("function(pulp_patch_x dir)\nendfunction()\n")
+        (fx.root / "patch.cmake").write_text("function(pulp_patch_x dir)\nendfunction()\n", encoding="utf-8")
         dep = {"name": "forked", "in_tree": False, "upstream_repo": "u", "upstream_ref": "r",
                "fork_repo": "f", "fork_ref": "t", "fork_commit": "c",
                "carried_commits": ["abc one"], "files": [], "patches": [],
