@@ -142,8 +142,13 @@ void RunningStatusParser::feed(const uint8_t* data, std::size_t size) {
                            data_expected_ > 0 ? data_[0] : 0,
                            data_expected_ > 1 ? data_[1] : 0);
                 data_count_ = 0;
-                // System-common is one-shot; channel voice sticks.
-                if (!running_status_) current_system_common_ = 0;
+                // System-common is one-shot; channel voice sticks. Clearing the
+                // expected count as well stops a stray data byte after the
+                // message from completing under a status that no longer exists.
+                if (!running_status_) {
+                    current_system_common_ = 0;
+                    data_expected_ = 0;
+                }
             }
         }
     }

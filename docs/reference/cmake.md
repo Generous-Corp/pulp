@@ -879,6 +879,52 @@ pulp::view::register_embedded_script_bytecode(my_ui_bytecode::runtime_js_pjsbc,
 - `script_bytecode_cache_stats().embedded` counts scripts served from embedded
   bytecode.
 
+## pulp_add_wgsl_shaders
+
+**Status**: usable
+
+Embed `.wgsl` files in a target as `std::string_view` constants and validate
+them at build time.
+
+```cmake
+pulp_add_wgsl_shaders(MyPlugin
+    FILES shaders/glow.wgsl shaders/blur.wgsl
+    NAMESPACE my_plugin::shaders)
+```
+
+Each file becomes `<stem>_wgsl.hpp` on the target's private include path:
+
+```cpp
+#include "glow_wgsl.hpp"
+auto shader = device.create_shader_module(my_plugin::shaders::glow_wgsl, "glow.wgsl");
+```
+
+### Parameters
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `FILES` | Yes | -- | WGSL files, relative to the current source directory |
+| `NAMESPACE` | No | `<target>_wgsl` | C++ namespace for the constants |
+| `NO_VALIDATE` | No | off | Embed only; skip build-time validation |
+
+### Behavior
+
+- Headers are generated at build time and regenerated only when a shader
+  changes. The source is stored as a byte array, so a shader of any length
+  compiles on every toolchain; the array is NUL-terminated.
+- Validation runs the `pulp-wgsl-validate` host tool, which compiles each file
+  on Dawn's Null adapter. The Null backend draws nothing but runs the full
+  WGSL compiler, so a failing shader stops the build with
+  `file:line:column: error: message`. The compiler is the one inside the
+  pinned Dawn (BSD-3-Clause), reached only through Dawn's public WebGPU API.
+- Validation is skipped, with a configure-time status message, where the tool
+  does not exist: cross-compiled builds (iOS, Android, the browser), builds
+  without Dawn, and projects built against an installed SDK. If the host
+  cannot create a Null adapter, the tool prints a warning and the build goes
+  on unvalidated.
+- At run time `GpuDevice::create_shader_module()` reports the same
+  diagnostics as a `GpuError` (see [Your First WGSL Pass in a View](../guides/gpu-pass.md)).
+
 ## pulp_add_cargo_staticlib
 
 **Status**: experimental
