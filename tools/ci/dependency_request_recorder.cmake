@@ -7,7 +7,7 @@
 #
 #   cmake -S . -B <dir> \
 #     -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=<repo>/tools/ci/dependency_request_recorder.cmake \
-#     -DPULP_DEPENDENCY_REQUEST_LOG=<dir>/dependency-requests.jsonl
+#     -DDEPENDENCY_REQUEST_LOG=<dir>/dependency-requests.jsonl
 #
 # Each request appends one JSON line, {"method": ..., "name": ...}:
 #
@@ -34,24 +34,24 @@
 
 cmake_minimum_required(VERSION 3.24)
 
-if(NOT PULP_DEPENDENCY_REQUEST_LOG)
-    if(DEFINED ENV{PULP_DEPENDENCY_REQUEST_LOG} AND NOT "$ENV{PULP_DEPENDENCY_REQUEST_LOG}" STREQUAL "")
-        set(PULP_DEPENDENCY_REQUEST_LOG "$ENV{PULP_DEPENDENCY_REQUEST_LOG}")
+if(NOT DEPENDENCY_REQUEST_LOG)
+    if(DEFINED ENV{DEPENDENCY_REQUEST_LOG} AND NOT "$ENV{DEPENDENCY_REQUEST_LOG}" STREQUAL "")
+        set(DEPENDENCY_REQUEST_LOG "$ENV{DEPENDENCY_REQUEST_LOG}")
     else()
-        set(PULP_DEPENDENCY_REQUEST_LOG "${CMAKE_BINARY_DIR}/dependency-requests.jsonl")
+        set(DEPENDENCY_REQUEST_LOG "${CMAKE_BINARY_DIR}/dependency-requests.jsonl")
     endif()
 endif()
-set(PULP_DEPENDENCY_REQUEST_LOG "${PULP_DEPENDENCY_REQUEST_LOG}"
+set(DEPENDENCY_REQUEST_LOG "${DEPENDENCY_REQUEST_LOG}"
     CACHE FILEPATH "Where the dependency request recorder writes its JSON lines" FORCE)
 
 # A fresh log per configure: a re-run must not inherit an earlier run's
 # requests.
-file(WRITE "${PULP_DEPENDENCY_REQUEST_LOG}" "")
+file(WRITE "${DEPENDENCY_REQUEST_LOG}" "")
 
 function(_pulp_dependency_request_recorder method name)
     string(REPLACE "\\" "\\\\" _escaped "${name}")
     string(REPLACE "\"" "\\\"" _escaped "${_escaped}")
-    file(APPEND "${PULP_DEPENDENCY_REQUEST_LOG}"
+    file(APPEND "${DEPENDENCY_REQUEST_LOG}"
         "{\"method\": \"${method}\", \"name\": \"${_escaped}\"}\n")
     # Fulfilling nothing hands the request back to CMake's default handling.
 endfunction()

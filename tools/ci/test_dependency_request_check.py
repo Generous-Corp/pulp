@@ -181,7 +181,7 @@ class RecorderTests(unittest.TestCase):
         if recorder:
             args.append(f"-DCMAKE_PROJECT_TOP_LEVEL_INCLUDES={RECORDER}")
         if log is not None:
-            args.append(f"-DPULP_DEPENDENCY_REQUEST_LOG={log}")
+            args.append(f"-DDEPENDENCY_REQUEST_LOG={log}")
         result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return build
