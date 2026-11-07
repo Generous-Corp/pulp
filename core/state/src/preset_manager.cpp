@@ -170,12 +170,13 @@ bool PresetManager::save(const std::string& name, const std::string& folder,
     if (!metadata.author.empty())
         out << "  \"author\": " << choc::json::getEscapedQuotedString(metadata.author) << ",\n";
     if (!metadata.description.empty())
-        out << "  \"description\": "
-            << choc::json::getEscapedQuotedString(metadata.description) << ",\n";
+        out << "  \"description\": " << choc::json::getEscapedQuotedString(metadata.description)
+            << ",\n";
     if (!metadata.tags.empty()) {
         out << "  \"tags\": [";
         for (std::size_t i = 0; i < metadata.tags.size(); ++i) {
-            if (i > 0) out << ", ";
+            if (i > 0)
+                out << ", ";
             out << choc::json::getEscapedQuotedString(metadata.tags[i]);
         }
         out << "],\n";
@@ -250,9 +251,11 @@ namespace {
 
 PresetMetadata metadata_from_document(const choc::value::ValueView& doc) {
     PresetMetadata meta;
-    if (!doc.isObject()) return meta;
+    if (!doc.isObject())
+        return meta;
     auto text = [&](const char* key) -> std::string {
-        if (!doc.hasObjectMember(key)) return {};
+        if (!doc.hasObjectMember(key))
+            return {};
         auto v = doc[key];
         return v.isString() ? std::string(v.getString()) : std::string{};
     };
@@ -263,24 +266,32 @@ PresetMetadata metadata_from_document(const choc::value::ValueView& doc) {
         if (tags.isArray()) {
             for (std::uint32_t i = 0; i < tags.size(); ++i) {
                 auto t = tags[i];
-                if (t.isString()) meta.tags.emplace_back(t.getString());
+                if (t.isString())
+                    meta.tags.emplace_back(t.getString());
             }
         }
     }
     if (doc.hasObjectMember("program")) {
         auto v = doc["program"];
-        if (v.isInt32()) meta.program = v.getInt32();
-        else if (v.isInt64()) meta.program = static_cast<int>(v.getInt64());
+        if (v.isInt32())
+            meta.program = v.getInt32();
+        else if (v.isInt64())
+            meta.program = static_cast<int>(v.getInt64());
     }
     return meta;
 }
 
 bool number_from_value(const choc::value::ValueView& v, double& out) {
-    if (v.isInt32()) out = v.getInt32();
-    else if (v.isInt64()) out = static_cast<double>(v.getInt64());
-    else if (v.isFloat32()) out = v.getFloat32();
-    else if (v.isFloat64()) out = v.getFloat64();
-    else return false;
+    if (v.isInt32())
+        out = v.getInt32();
+    else if (v.isInt64())
+        out = static_cast<double>(v.getInt64());
+    else if (v.isFloat32())
+        out = v.getFloat32();
+    else if (v.isFloat64())
+        out = v.getFloat64();
+    else
+        return false;
     return std::isfinite(out);
 }
 
@@ -292,7 +303,8 @@ void PreparedPreset::apply_rt(StateStore& store) const {
 
 std::optional<PreparedPreset> PresetManager::prepare(const fs::path& path) const {
     std::ifstream f(path);
-    if (!f.is_open()) return std::nullopt;
+    if (!f.is_open())
+        return std::nullopt;
 
     std::string content((std::istreambuf_iterator<char>(f)),
                          std::istreambuf_iterator<char>());
@@ -314,12 +326,14 @@ std::optional<PreparedPreset> PresetManager::prepare(const fs::path& path) const
         auto doc = choc::json::parse(content);
         if (doc.isObject() && doc.hasObjectMember("parameters")) {
             auto params = doc["parameters"];
-            if (!params.isObject()) return std::nullopt;
+            if (!params.isObject())
+                return std::nullopt;
             structured = true;
             out.schema = (doc.hasObjectMember("schema") && doc["schema"].isInt64())
                              ? static_cast<int>(doc["schema"].getInt64())
                              : (doc.hasObjectMember("schema") && doc["schema"].isInt32()
-                                    ? doc["schema"].getInt32() : 1);
+                                    ? doc["schema"].getInt32()
+                                    : 1);
             out.metadata = metadata_from_document(doc.getView());
 
             std::vector<bool> seen(all_params.size(), false);
@@ -329,33 +343,41 @@ std::optional<PreparedPreset> PresetManager::prepare(const fs::path& path) const
                 const std::string key(member.name);
                 std::size_t index = all_params.size();
                 for (std::size_t k = 0; k < all_params.size(); ++k)
-                    if (all_params[k].name == key) { index = k; break; }
+                    if (all_params[k].name == key) {
+                        index = k;
+                        break;
+                    }
                 if (index == all_params.size()) {
                     out.unknown_params.push_back(key);
                     continue;
                 }
                 double number = 0.0;
-                if (!number_from_value(member.value, number)) continue;
+                if (!number_from_value(member.value, number))
+                    continue;
                 seen[index] = true;
                 out.writes.push_back({all_params[index].id, clamp_to(all_params[index], number)});
             }
             for (std::size_t k = 0; k < all_params.size(); ++k)
-                if (!seen[k]) out.missing_params.push_back(all_params[k].name);
+                if (!seen[k])
+                    out.missing_params.push_back(all_params[k].name);
         } else if (doc.isObject()) {
             return std::nullopt;
         }
     } catch (...) {
         structured = false;
     }
-    if (structured) return out;
+    if (structured)
+        return out;
 
     // Legacy raw-key scan: look for "parameters": { "name": value, ... }.
     out.writes.clear();
     auto params_pos = content.find("\"parameters\"");
-    if (params_pos == std::string::npos) return std::nullopt;
+    if (params_pos == std::string::npos)
+        return std::nullopt;
 
     auto brace = content.find('{', params_pos);
-    if (brace == std::string::npos) return std::nullopt;
+    if (brace == std::string::npos)
+        return std::nullopt;
 
     for (const auto& param : all_params) {
         auto key_pos = content.find("\"" + param.name + "\"", brace);
@@ -402,7 +424,8 @@ bool PresetManager::apply(const PreparedPreset& prepared) {
 
 std::optional<std::vector<ParamSetting>> PresetManager::read_values(const fs::path& path) const {
     auto prepared = prepare(path);
-    if (!prepared) return std::nullopt;
+    if (!prepared)
+        return std::nullopt;
     std::vector<ParamSetting> values;
     values.reserve(prepared->writes.size());
     for (const auto& write : prepared->writes)
@@ -412,7 +435,8 @@ std::optional<std::vector<ParamSetting>> PresetManager::read_values(const fs::pa
 
 bool PresetManager::load(const fs::path& path) {
     auto prepared = prepare(path);
-    if (!prepared) return false;
+    if (!prepared)
+        return false;
     return apply(*prepared);
 }
 

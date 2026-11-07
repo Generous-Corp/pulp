@@ -1810,8 +1810,7 @@ TEST_CASE("PresetManager save escapes parameter names so the file is strict JSON
 
     const auto preset = require_user_preset(pm, "Odd");
     std::ifstream file(preset.path);
-    std::string content((std::istreambuf_iterator<char>(file)),
-                        std::istreambuf_iterator<char>());
+    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
     // A real JSON parser sees the exact parameter name and value.
     auto doc = choc::json::parse(content);
@@ -1887,8 +1886,10 @@ TEST_CASE("PreparedPreset values are clamped at prepare time and apply_rt writes
     REQUIRE(prepared.has_value());
     REQUIRE(prepared->writes.size() == 2);
     for (const auto& w : prepared->writes) {
-        if (w.id == 1) REQUIRE(w.value == Catch::Approx(12.0f));
-        if (w.id == 2) REQUIRE(w.value == Catch::Approx(0.0f));
+        if (w.id == 1)
+            REQUIRE(w.value == Catch::Approx(12.0f));
+        if (w.id == 2)
+            REQUIRE(w.value == Catch::Approx(0.0f));
     }
 
     prepared->apply_rt(store);
@@ -1910,13 +1911,14 @@ TEST_CASE("PresetManager listing parses each unchanged file once", "[state][pres
     const auto after_first = pm.metadata_parse_count();
     REQUIRE(after_first >= 3);
 
-    for (int i = 0; i < 5; ++i) (void)pm.all_presets();
+    for (int i = 0; i < 5; ++i)
+        (void)pm.all_presets();
     REQUIRE(pm.metadata_parse_count() == after_first);
 
     // Changing one file re-parses exactly that file.
     const auto two = require_user_preset(pm, "Two");
-    write_text_file(two.path,
-                    R"json({"tags":["edited"],"parameters":{"Gain":-1,"Mix":1}, "author": "X"})json");
+    write_text_file(
+        two.path, R"json({"tags":["edited"],"parameters":{"Gain":-1,"Mix":1}, "author": "X"})json");
     auto presets = pm.user_presets();
     REQUIRE(pm.metadata_parse_count() == after_first + 1);
     auto it = std::find_if(presets.begin(), presets.end(),

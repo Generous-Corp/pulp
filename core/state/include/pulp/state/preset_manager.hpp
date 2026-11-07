@@ -35,9 +35,9 @@ struct PresetMetadata {
 /// Values are clamped to each parameter's range at prepare time, so
 /// `apply_rt()` can hand them to the real-time batch write unchanged.
 struct PreparedPreset {
-    std::string name;                         ///< File stem
-    std::filesystem::path path;               ///< Source file
-    int schema = 1;                           ///< 1 = legacy file, 2 = schema 2
+    std::string name;           ///< File stem
+    std::filesystem::path path; ///< Source file
+    int schema = 1;             ///< 1 = legacy file, 2 = schema 2
     PresetMetadata metadata;
     std::vector<StateStore::ParamWrite> writes;
     /// Names present in the file that match no registered parameter.
@@ -50,7 +50,6 @@ struct PreparedPreset {
     /// Main-thread listeners are queued until StateStore::pump_listeners().
     void apply_rt(StateStore& store) const;
 };
-
 
 /// Metadata for a single preset file.
 struct PresetInfo {
@@ -111,8 +110,7 @@ public:
     bool save(const std::string& name, const std::string& folder = "");
 
     /// Save with author-supplied metadata (written as schema 2 fields).
-    bool save(const std::string& name, const std::string& folder,
-              const PresetMetadata& metadata);
+    bool save(const std::string& name, const std::string& folder, const PresetMetadata& metadata);
 
     /// Load a preset from a PresetInfo (sets all parameter values).
     /// @return True on success.
@@ -133,7 +131,9 @@ public:
 
     /// Number of preset files parsed for metadata since construction. A
     /// repeated listing of unchanged files must not increase it.
-    std::size_t metadata_parse_count() const { return metadata_parse_count_; }
+    std::size_t metadata_parse_count() const {
+        return metadata_parse_count_;
+    }
     /// Read the parameter values a preset file holds without applying them.
     /// Only parameters the store defines and the file names are returned, in
     /// store order. Returns nullopt when the file cannot be read or has no
