@@ -244,7 +244,8 @@ pulp_add_test_suite(pulp-test-signal-graph-live-swap-staging GROUP pulp-test-gro
 # outputs are equalised, and a latency change needs a re-prepare.
 pulp_add_test_suite(pulp-test-signal-graph-latency-semantics GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_latency_semantics.cpp
-    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 # Static per-node / per-graph realtime report (declared contracts + measured work).
 pulp_add_test_suite(pulp-test-graph-rt-report
     SOURCES test_graph_rt_report.cpp harness/rt_allocation_probe.cpp
