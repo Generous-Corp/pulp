@@ -277,6 +277,8 @@ bool transfer_input_focus(View& root, View* target, FocusCause cause) {
     ViewCapture target_capture;
     target_capture.set(target);
     const bool target_focusable = target && target->focusable() && target->effectively_enabled();
+    if (target && !target_focusable)
+        return true;
     if (!drain_root_focus(root, target_capture, target_focusable, cause))
         return false;
     if (!target) return false;

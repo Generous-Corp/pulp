@@ -130,6 +130,35 @@ TEST_CASE("focus transfer keeps a live non-focusable pointer target",
     REQUIRE(View::focused_input_ == nullptr);
 }
 
+TEST_CASE("focus transfer leaves the current focus when the target is disabled",
+          "[view][input][focus]") {
+    View::focused_input_ = nullptr;
+    View root;
+
+    auto focused = std::make_unique<FocusCallbackSpy>();
+    auto* focused_ptr = focused.get();
+    focused->set_focusable(true);
+    root.add_child(std::move(focused));
+
+    auto disabled = std::make_unique<FocusCallbackSpy>();
+    auto* disabled_ptr = disabled.get();
+    disabled->set_focusable(true);
+    disabled->set_enabled(false);
+    root.add_child(std::move(disabled));
+
+    std::vector<bool> focus_events;
+    focused_ptr->callback = [&](bool gained) { focus_events.push_back(gained); };
+    focused_ptr->on_focus_changed(true);
+    focused_ptr->claim_input_focus();
+    focus_events.clear();
+
+    REQUIRE(transfer_input_focus(root, disabled_ptr));
+    CHECK(focused_input_under_root(root) == focused_ptr);
+    CHECK(focused_ptr->has_focus());
+    CHECK_FALSE(disabled_ptr->has_focus());
+    CHECK(focus_events.empty());
+}
+
 TEST_CASE("focus transfer rejects a target unmounted before focus starts",
           "[view][input][focus]") {
     View::focused_input_ = nullptr;
