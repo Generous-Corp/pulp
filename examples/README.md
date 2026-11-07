@@ -155,7 +155,7 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `graph-edge-probe` | Graph edge kinds from an installed SDK (**SDK project**) | Configure as an SDK project | `test/consumers/graph-edge-probe` |
 | `gpu-fault-continuity` | Plugin that injects GPU faults for the host smoke test; needs `PULP_GPU_AUDIO_FAULT_HOOKS` | `pulp build --examples --target PulpGpuFaultContinuity_CLAP` | `test/consumers/gpu-fault-continuity` |
 | `text-input-test` | Text editor widget in a window | `pulp build --examples --target pulp-text-input-test` | `test/consumers/text-input-test` |
-| `native-ui-phase-f-preview` | Preview of a generated native editor; builds only with the design-import option on macOS | `pulp build --examples --target pulp-native-ui-phase-f-preview` | `test/consumers/native-ui-phase-f-preview` |
+| `native-ui-phase-f-preview` | Preview of a generated native editor; builds only on macOS with the design-import option and a generated editor source present | `pulp build --examples --target pulp-native-ui-phase-f-preview` | `test/consumers/native-ui-phase-f-preview` |
 
 ### The move to `test/consumers/`
 
