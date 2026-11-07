@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-view-spectrum-log-axis-20261106",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T04:00:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/view/audio/include/pulp/view/audio_widgets.hpp",
+    "core/view/audio/include/pulp/view/eq_curve_view.hpp",
+    "core/view/audio/src/eq_curve_view.cpp",
+    "core/view/audio/src/widgets/visualizers.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "SpectrumView's built-in analysis and EqCurveView's use of the shared bin mapping are audio-plugin widgets built on pulp::signal. They are Pulp-specific, so the next Vellum export must not inherit them."
+}

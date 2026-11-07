@@ -10,9 +10,9 @@
   ],
   "rationale": "SpectrumView gains built-in spectrum analysis on a log-frequency axis and EqCurveView's analyzer overlay maps its bins through the same code. Both are audio-plugin view widgets built on the pulp::signal FFT and window primitives. No design-import, Chromium, rendering, or packaging authority moves, and no render backend, asset, or capture path is touched.",
   "tests": [
-    "ctest --test-dir build -R pulp-test-spectrum-analyzer",
-    "ctest --test-dir build -R pulp-test-spectrum-bin-mapping",
-    "ctest --test-dir build -R pulp-test-spectrum-view",
+    "ctest --test-dir build -R SpectrumBinMapping",
+    "ctest --test-dir build -R SpectrumAnalyzer",
+    "ctest --test-dir build -R SpectrumView",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
   ],
