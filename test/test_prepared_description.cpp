@@ -6,7 +6,9 @@
 
 #include <array>
 #include <algorithm>
+#include <set>
 #include <string>
+#include <unordered_map>
 
 using namespace pulp::host;
 
@@ -176,6 +178,54 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
                                      "input:audio:out:channel=R->input:audio:out:channel=R"});
     REQUIRE(exported.value->schedule ==
             std::vector<std::string>{"input", "gain_a", "gain_b", "output"});
+    // Independent topological oracle: derive the ready-node-id order from the
+    // published graph edges rather than copying the exporter schedule.
+    std::unordered_map<NodeId, std::size_t> indegree;
+    for (const auto& node : graph.nodes())
+        indegree[node.id] = 0;
+    for (const auto& connection : graph.connections())
+        ++indegree.at(connection.dest_node);
+    std::set<NodeId> ready;
+    for (const auto& [id, degree] : indegree)
+        if (degree == 0)
+            ready.insert(id);
+    std::vector<std::string> independent_schedule;
+    while (!ready.empty()) {
+        const auto id = *ready.begin();
+        ready.erase(ready.begin());
+        const auto binding_node = std::find_if(
+            binding.nodes.begin(), binding.nodes.end(),
+            [&](const AuthoredNodeBinding& node) { return node.node_id == id; });
+        REQUIRE(binding_node != binding.nodes.end());
+        independent_schedule.push_back(binding_node->authored_key);
+        for (const auto& connection : graph.connections()) {
+            if (connection.source_node != id)
+                continue;
+            auto& degree = indegree.at(connection.dest_node);
+            REQUIRE(degree > 0);
+            if (--degree == 0)
+                ready.insert(connection.dest_node);
+        }
+    }
+    REQUIRE(independent_schedule == exported.value->schedule);
+    REQUIRE(independent_schedule.size() == graph.nodes().size());
+    for (const auto& value : exported.value->buffer_values) {
+        const auto class_marker = value.find("class=");
+        const auto lifetime_marker = value.find(",lifetime=[");
+        REQUIRE(class_marker != std::string::npos);
+        REQUIRE(lifetime_marker != std::string::npos);
+        const auto class_begin = class_marker + 6;
+        const auto class_end = value.find(',', class_begin);
+        const auto class_number = std::stoul(value.substr(class_begin, class_end - class_begin));
+        REQUIRE(class_number < exported.value->buffer_classes.size());
+        const auto lifetime_begin = lifetime_marker + 11;
+        const auto comma = value.find(',', lifetime_begin);
+        const auto close = value.find(')', comma);
+        REQUIRE(comma != std::string::npos);
+        REQUIRE(close != std::string::npos);
+        REQUIRE(std::stoul(value.substr(lifetime_begin, comma - lifetime_begin)) <
+                std::stoul(value.substr(comma + 1, close - comma - 1)));
+    }
     REQUIRE_FALSE(exported.value->buffer_classes.empty());
     REQUIRE_FALSE(exported.value->buffer_values.empty());
     const auto has_buffer_record = [&](std::string_view text) {
