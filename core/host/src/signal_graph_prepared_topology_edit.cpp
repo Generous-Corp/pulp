@@ -264,6 +264,7 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
         !authored_root["nodes"].isObject() || !authored_root["interfaces"].isArray())
         return PreparedDescriptionResult::refused(
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    const auto authored_interfaces = authored_root["interfaces"];
     const auto channel_names = authored_channels(canonical_semantic_payload);
     if (!nodes.empty() && channel_names.size() != 2)
         return PreparedDescriptionResult::refused(
@@ -352,7 +353,72 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
                 PreparedDescriptionRefusal::AuthoredBindingMismatch);
         if (node->type == NodeType::Gain) {
             const auto config = authored_node["config"];
-            if (!config.isObject() || !config["gain"].isString())
+            if (!config.isObject())
+                return PreparedDescriptionResult::refused(
+                    PreparedDescriptionRefusal::AuthoredBindingMismatch);
+            const auto gain = config["gain"];
+            if (!gain.isString())
+                return PreparedDescriptionResult::refused(
+                    PreparedDescriptionRefusal::AuthoredBindingMismatch);
+            constexpr char hex[] = "0123456789abcdef";
+            std::string expected = "f32:";
+            const auto bits = std::bit_cast<std::uint32_t>(node->gain);
+            for (int shift = 28; shift >= 0; shift -= 4)
+                expected.push_back(hex[(bits >> shift) & 0xf]);
+            if (gain.getString() != expected)
+                return PreparedDescriptionResult::refused(
+                    PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        }
+    }
+
+    const auto authored_edges = authored_root["edges"];
+    std::unordered_set<std::string> expected_edge_pairs;
+    for (const auto& connection : candidate_->connections_)
+        expected_edge_pairs.insert(std::to_string(connection.source_node) + ":" +
+                                   std::to_string(connection.dest_node));
+    if (!authored_edges.isObject() || authored_edges.size() != expected_edge_pairs.size())
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    const auto kind_for = [](NodeType type) -> std::string_view {
+        switch (type) {
+        case NodeType::AudioInput:
+            return "audio";
+        case NodeType::AudioOutput:
+            return "audio";
+        case NodeType::Gain:
+            return "audio";
+        default:
+            return {};
+        }
+    };
+    for (const auto& connection : candidate_->connections_) {
+        const auto source = std::find_if(nodes.begin(), nodes.end(), [&](const GraphNode& n) {
+            return n.id == connection.source_node;
+        });
+        const auto destination = std::find_if(nodes.begin(), nodes.end(), [&](const GraphNode& n) {
+            return n.id == connection.dest_node;
+        });
+        if (source == nodes.end() || destination == nodes.end() || connection.feedback ||
+            connection.source_port > 1 || connection.dest_port > 1)
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+        const auto source_key = keys.at(source->id);
+        const auto destination_key = keys.at(destination->id);
+        const std::string edge_key = "[\"audio\",{\"direction\":\"out\",\"kind\":\"" +
+                                     std::string(kind_for(source->type)) + "\",\"node\":\"" +
+                                     source_key +
+                                     "\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"" +
+                                     std::string(kind_for(destination->type)) + "\",\"node\":\"" +
+                                     destination_key + "\",\"port\":\"audio\"},null]";
+        const auto edge = authored_edges[edge_key];
+        if (!edge.isObject() || !edge["channel_map"].isArray() ||
+            edge["channel_map"].size() != channel_names.size())
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        for (std::size_t i = 0; i < channel_names.size(); ++i) {
+            const auto pair = edge["channel_map"][static_cast<std::uint32_t>(i)];
+            if (!pair.isArray() || pair.size() != 2 || !pair[0].isString() || !pair[1].isString() ||
+                pair[0].getString() != channel_names[i] || pair[1].getString() != channel_names[i])
                 return PreparedDescriptionResult::refused(
                     PreparedDescriptionRefusal::AuthoredBindingMismatch);
         }
@@ -385,6 +451,36 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
 
     std::unordered_set<std::string> interfaces;
+    if (authored_interfaces.size() != 2)
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    std::size_t authored_inputs = 0;
+    std::size_t authored_outputs = 0;
+    for (std::size_t i = 0; i < authored_interfaces.size(); ++i) {
+        const auto entry = authored_interfaces[static_cast<std::uint32_t>(i)];
+        if (!entry.isObject() || !entry["channels"].isArray() ||
+            entry["channels"].size() != channel_names.size() || !entry["role"].isString() ||
+            !entry["endpoint"].isObject())
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        for (std::size_t channel = 0; channel < channel_names.size(); ++channel) {
+            if (!entry["channels"][static_cast<std::uint32_t>(channel)].isString() ||
+                entry["channels"][static_cast<std::uint32_t>(channel)].getString() !=
+                    channel_names[channel])
+                return PreparedDescriptionResult::refused(
+                    PreparedDescriptionRefusal::AuthoredBindingMismatch);
+        }
+        if (entry["role"].getString() == "input")
+            ++authored_inputs;
+        else if (entry["role"].getString() == "output")
+            ++authored_outputs;
+        else
+            return PreparedDescriptionResult::refused(
+                PreparedDescriptionRefusal::AuthoredBindingMismatch);
+    }
+    if (authored_inputs != 1 || authored_outputs != 1)
+        return PreparedDescriptionResult::refused(
+            PreparedDescriptionRefusal::AuthoredBindingMismatch);
     for (const auto& binding : bindings.interfaces) {
         if (binding.interface_key.empty() || binding.authored_port != "audio" ||
             binding.authored_ordinal > 1 || binding.authored_channel.empty() ||

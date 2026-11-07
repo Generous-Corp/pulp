@@ -3,7 +3,13 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
+#include <string>
+
 using namespace pulp::host;
+
+static std::string stereo_payload() {
+    return R"({"assets":{},"edges":{"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"input\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"gain_a\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]]},"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"gain_a\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"gain_b\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]]},"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"gain_b\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"output\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]]}},"interfaces":[{"channels":["L","R"],"endpoint":{"direction":"out","kind":"audio","node":"input","port":"audio"},"key":"main-in","kind":"audio","role":"input"},{"channels":["L","R"],"endpoint":{"direction":"in","kind":"audio","node":"output","port":"audio"},"key":"main-out","kind":"audio","role":"output"}],"nodes":{"gain_a":{"config":{"gain":"f32:3f800000"},"kind":"gain"},"gain_b":{"config":{"gain":"f32:3f800000"},"kind":"gain"},"input":{"kind":"audio_input"},"output":{"kind":"audio_output"}},"policies":{},"profile":"pulp.graph.identity.v1"})";
+}
 
 TEST_CASE("D4 empty prepared export is detached and canonical") {
     SignalGraph graph;
@@ -76,14 +82,7 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
         {"main", true, output, "audio", "L", 0, 0, 0},
         {"main", true, output, "audio", "R", 1, 0, 1},
     };
-    const auto bound = edit->bind_authored_identity(
-        "{\"assets\":{},\"edges\":{},\"interfaces\":[{\"channels\":[\"L\",\"R\"],\"kind\":"
-        "\"audio\",\"role\":\"input\"},{\"channels\":[\"L\",\"R\"],\"kind\":\"audio\",\"role\":"
-        "\"output\"}],\"nodes\":{\"input\":{\"kind\":\"audio_input\"},\"gain_a\":{\"kind\":"
-        "\"gain\"},\"gain_b\":{\"config\":{\"gain\":\"f32:3f800000\"},\"kind\":\"gain\"},"
-        "\"output\":{\"kind\":\"audio_output\"}},"
-        "\"policies\":{},\"profile\":\"pulp.graph.identity.v1\"}",
-        binding);
+    const auto bound = edit->bind_authored_identity(stereo_payload(), binding);
     INFO(prepared_description_refusal_name(bound.refusal));
     REQUIRE(bound);
     REQUIRE(edit->prepare(48000.0, 128) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
