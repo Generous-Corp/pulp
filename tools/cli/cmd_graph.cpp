@@ -10,14 +10,18 @@
 #include <iostream>
 #include <map>
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/host/graph_rt_report.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 namespace {
 void usage() {
-    std::cout << "Usage: pulp graph <inspect|validate|explain|render|probe|fmt|canonicalize> "
-                 "<file.pulpgraph> [--json] [--output file.wav (render)]\n";
+    std::cout
+        << "Usage: pulp graph <inspect|validate|explain|render|probe|report|fmt|canonicalize> "
+           "<file.pulpgraph> [--json] [--output file.wav (render)]\n";
+    std::cout << "report: [--sample-rate 48000] [--max-block-size 512] [--block-size N] "
+                 "[--measure-blocks 16] (always JSON)\n";
     std::cout << "probe: --input file.wav --source-node NAME --source-port NAME "
                  "--destination-node NAME --destination-port NAME [--block-frames 64]\n";
 }
@@ -227,6 +231,74 @@ int probe_graph(const std::vector<std::string>& args) {
     std::cout << choc::json::toString(report) << '\n';
     return 0;
 }
+bool parse_report_int(const std::string& text, int min, int max, int& out) {
+    int value = 0;
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || value < min ||
+        value > max)
+        return false;
+    out = value;
+    return true;
+}
+
+// `pulp graph report`: prepare the graph offline and print the static realtime
+// report (declared contracts, latency semantics, and a measured pass) as JSON.
+int report_graph(const std::vector<std::string>& args) {
+    int sample_rate = 48000;
+    int max_block = 512;
+    int block = 0;
+    int measure_blocks = 16;
+    for (std::size_t i = 2; i < args.size(); ++i) {
+        const auto& key = args[i];
+        if (key == "--json")
+            continue;
+        int* target = key == "--sample-rate"      ? &sample_rate
+                      : key == "--max-block-size" ? &max_block
+                      : key == "--block-size"     ? &block
+                      : key == "--measure-blocks" ? &measure_blocks
+                                                  : nullptr;
+        if (target == nullptr) {
+            json_error("invalid_option", "unknown report option: " + key);
+            return 2;
+        }
+        const int min = target == &measure_blocks ? 0 : 1;
+        const int max = target == &sample_rate ? 768000 : target == &measure_blocks ? 4096 : 16384;
+        if (++i == args.size() || !parse_report_int(args[i], min, max, *target)) {
+            json_error("invalid_option", key + " requires an integer from " + std::to_string(min) +
+                                             " to " + std::to_string(max));
+            return 2;
+        }
+    }
+    if (block > max_block) {
+        json_error("invalid_option", "--block-size must not exceed --max-block-size");
+        return 2;
+    }
+    pulp::host::SignalGraph graph;
+    pulp::host::GraphLoadOptions load_options;
+    load_options.load_plugins = false;
+    const auto loaded = pulp::host::GraphSerializer::from_file(graph, args[1], load_options);
+    if (!loaded.ok) {
+        json_error(loaded.error.starts_with("graph file ") ? "file_unreadable" : "invalid_graph",
+                   loaded.error);
+        return 1;
+    }
+    if (!graph.prepare(static_cast<double>(sample_rate), max_block)) {
+        json_error("prepare_failed", "graph preparation failed");
+        return 1;
+    }
+    pulp::host::GraphRtReportOptions report_options;
+    report_options.block_size = block;
+    auto report = pulp::host::build_graph_rt_report(graph, report_options);
+    if (measure_blocks > 0) {
+        pulp::host::GraphRtMeasureOptions measure;
+        measure.blocks = measure_blocks;
+        measure.block_size = report.block_size;
+        if (const auto measured = pulp::host::measure_graph_rt_work(graph, measure))
+            pulp::host::apply_graph_rt_measurement(report, *measured, report_options);
+    }
+    std::cout << pulp::host::graph_rt_report_to_json(report) << '\n';
+    return 0;
+}
 } // namespace
 int cmd_graph(const std::vector<std::string>& args) {
     if (args.empty() || args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
@@ -241,6 +313,8 @@ int cmd_graph(const std::vector<std::string>& args) {
     const std::string path = args[1];
     if (op == "probe")
         return probe_graph(args);
+    if (op == "report")
+        return report_graph(args);
     const bool json = std::find(args.begin() + 2, args.end(), "--json") != args.end();
     if (op != "inspect" && op != "validate" && op != "explain" && op != "render" && op != "fmt" &&
         op != "canonicalize") {

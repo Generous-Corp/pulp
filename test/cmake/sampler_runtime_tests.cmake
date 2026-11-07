@@ -239,6 +239,16 @@ pulp_add_test_suite(pulp-test-live-swap-admission GROUP pulp-test-group-sampler-
 pulp_add_test_suite(pulp-test-signal-graph-live-swap-staging GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_live_swap_staging.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+# Latency semantics: intentional delay is never compensated, artifact latency
+# is compensated only where paths reconverge, multi-output nodes and multiple
+# outputs are equalised, and a latency change needs a re-prepare.
+pulp_add_test_suite(pulp-test-signal-graph-latency-semantics GROUP pulp-test-group-sampler-host-graph
+    SOURCES test_signal_graph_latency_semantics.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+# Static per-node / per-graph realtime report (declared contracts + measured work).
+pulp_add_test_suite(pulp-test-graph-rt-report
+    SOURCES test_graph_rt_report.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 pulp_add_test_suite(pulp-test-signal-graph-executor-parity
     SOURCES test_signal_graph_executor_parity.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph

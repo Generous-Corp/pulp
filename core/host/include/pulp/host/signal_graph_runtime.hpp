@@ -62,6 +62,7 @@ class SpectralRuntimeBank;
 
 namespace detail {
 struct ExactParameterIngressOwner;
+class OutputPortLatencyEqualiser;
 // Mints an exact-parameter ingress ownership token. The type stays defined in
 // the signal-graph translation unit so its identity is owned here, not by the
 // timeline binding that claims nodes with it.
@@ -137,6 +138,16 @@ class SignalGraph : public format::AudioWorkgroupClient {
         NodeId node_id = 0;
         std::int64_t input_latency_samples = 0;
         std::int64_t output_latency_samples = 0;
+        // The node's own compensated (artifact) latency: lookahead, filter or
+        // framing delay. output_latency_samples == input + artifact.
+        std::int64_t artifact_latency_samples = 0;
+        // Declared intentional delay (an echo the author asked for). Reported
+        // only: it is never compensated and never part of any total.
+        std::int64_t intentional_delay_samples = 0;
+        // Declared per-output-port artifact latency before equalisation. Empty
+        // unless the node declares per-port latency; artifact_latency_samples
+        // is then the maximum and every port leaves the node at that value.
+        std::vector<std::int64_t> output_port_latency_samples;
     };
 
     struct PreparedConnectionDelay {
@@ -146,6 +157,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
 
     struct PreparedLatencySnapshot {
         std::int64_t total_latency_samples = 0;
+        double sample_rate = 0.0;
+        int max_block_size = 0;
         std::vector<PreparedNodeLatency> nodes;
         std::vector<PreparedConnectionDelay> connections;
 
@@ -1191,6 +1204,19 @@ class SignalGraph : public format::AudioWorkgroupClient {
         // sample rate and clamped into the declared range. Shared by the legacy
         // PDC pass and the routed snapshot builder.
         std::unordered_map<NodeId, int> custom_latency_samples;
+        // Declared intentional (authored) delay per resolved Custom node.
+        // Reported only; never feeds PDC or the host latency.
+        std::unordered_map<NodeId, int> custom_intentional_delay_samples;
+        // Declared per-output-port artifact latency for Custom nodes that use
+        // CustomNodeType::output_port_latency_samples. The node's scalar entry
+        // in custom_latency_samples is the maximum; the equaliser below delays
+        // the other ports up to it inside the node binding.
+        std::unordered_map<NodeId, std::vector<int>> custom_output_port_latency_samples;
+        // Prepared per-node port equalisers, shared by every callback variant
+        // of the node and carried across a gap-free swap when the declared
+        // port latencies are unchanged so delayed ports keep their history.
+        std::unordered_map<NodeId, std::shared_ptr<detail::OutputPortLatencyEqualiser>>
+            custom_output_port_equalisers;
         // Bound param-aware custom callbacks (bake-layer injection). Populated for
         // any Custom node whose type declared baked_params +
         // process_instance_baked_param. Consumed only by bake(); the live routed

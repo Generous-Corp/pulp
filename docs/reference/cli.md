@@ -1498,7 +1498,19 @@ an alias. Formatting refuses unresolved plugin nodes or rejected plugin state.
 and renders one second at 48 kHz to a float WAV. Its JSON result reports frame,
 sample rate, and block counts. Unresolved node types and prepare failures return
 nonzero errors. The MCP `pulp_graph` tool exposes the read-only `inspect`,
-`validate`, `explain`, `render`, and `probe` operations; file writing stays in the CLI.
+`validate`, `explain`, `render`, `probe`, and `report` operations; file writing stays in the CLI.
+
+`pulp graph report FILE [--sample-rate 48000] [--max-block-size 512]
+[--block-size N] [--measure-blocks 16]` prepares the saved graph without loading
+plugin code and prints the static realtime report as JSON (schema
+`pulp.graph.rt-report`). Each node lists its realtime-safety class and where the
+contract came from, whether allocation-freedom is proven, declared or unproven,
+its declared worst-case counted work and loop bound, and its artifact and
+intentional latency. The graph section reports the compensated total latency,
+the number of delayed connections, a measured pass over impulse and silent
+blocks, and a `verdict` of `holds`, `does_not_hold` or `unknown` for the block
+size, with `reasons`. Unresolved plugin and custom nodes report as unknown.
+See [Signal Graph: latency semantics](signal-graph.md#latency-semantics).
 
 `pulp graph probe FILE --input INPUT.wav --source-node source --source-port audio
 --destination-node downstream --destination-port audio --block-frames 64 --json`

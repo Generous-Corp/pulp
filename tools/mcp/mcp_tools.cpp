@@ -158,7 +158,8 @@ std::string handle_graph(const std::string& params_json) {
     auto op = extract_string(params_json, "operation");
     if (op.empty())
         op = "inspect";
-    if (op != "inspect" && op != "validate" && op != "explain" && op != "render" && op != "probe")
+    if (op != "inspect" && op != "validate" && op != "explain" && op != "render" && op != "probe" &&
+        op != "report")
         return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: operation is not available "
                "through the read-only MCP surface\"}]}";
     fs::path binary;

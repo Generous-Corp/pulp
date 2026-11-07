@@ -58,6 +58,7 @@ target_sources(pulp-host PRIVATE
     src/forge_tape_catalog.cpp
     src/forge_catalog_json.cpp
     src/signal_graph_executor_routing.cpp
+    src/graph_rt_report.cpp
     src/graph_timing_contract.cpp
     src/baked_graph_processor.cpp
     src/baked_graph_param_injection.cpp

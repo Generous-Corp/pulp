@@ -374,6 +374,24 @@ presence. Changing latency requires re-registration/re-prepare and should bump
 the custom type `version` whenever serialized graphs must distinguish the old
 timing contract.
 
+The latency declarations above are artifact latency: delay the node adds as a
+side effect of how it computes, which the graph compensates. Two appended
+declarations complete the vocabulary:
+
+- `intentional_delay_samples(sample_rate)` declares the musical delay the author
+  asked for, such as an echo. It is reported in the prepared latency snapshot
+  and the realtime report and is never compensated or reported to the host.
+- `output_port_latency_samples(sample_rate, port)` declares a different artifact
+  latency per output port. The node's latency is the maximum, and the graph
+  delays the other ports to it inside the node binding. It cannot be combined
+  with `latency_samples`, `latency_samples_for_block` or `lowerable`.
+
+`rt_contract` (`CustomNodeRtContract`) declares the node's realtime-safety
+class, whether it is allocation-free, a worst-case counted-work function per
+block size, and a loop-bound note. The graph realtime report shows these as
+declared, never as measured; see
+[Signal Graph: Realtime report](signal-graph.md#realtime-report).
+
 The node type enum only appends `NodeType::Custom`; built-in enum values stay
 stable. Serialized graphs store the custom `type_id` and `version`, and loads
 preserve that identity even when the target graph has not registered a matching
