@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1840"></a>
+## [1.84.0] - 2026-11-07
+
+- docs/g8 g9 status refresh 20261106 ([#11726](https://github.com/Generous-Corp/pulp/pull/11726))
+- release/version bump ([#11725](https://github.com/Generous-Corp/pulp/pull/11725))
+- codex/g3 wave3 clap 20261106 ([#11705](https://github.com/Generous-Corp/pulp/pull/11705))
+- feature/vellum unfreeze pointer dispatch 20261106 ([#11711](https://github.com/Generous-Corp/pulp/pull/11711))
+- feature/docs status truth 20261106 ([#11703](https://github.com/Generous-Corp/pulp/pull/11703))
+
 <a id="v1830"></a>
 ## [1.83.0] - 2026-11-07
 
@@ -12435,6 +12444,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.84.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.84.0
 [1.83.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.83.0
 [1.82.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.82.0
 [1.81.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.81.0
