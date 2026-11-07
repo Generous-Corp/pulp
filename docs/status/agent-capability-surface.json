@@ -144,7 +144,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/audio_device_manager.hpp",
-      "fingerprint": "sha256:ef2ff83b20d780d73bb09f760d30791355f1caec43e45e8aa88b2b1358425f79",
+      "fingerprint": "sha256:f6a0109662da123a56a199f8581b5a3d8160b1c44701a283ecb4665c5eabdb6b",
       "include": "pulp/audio/audio_device_manager.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
