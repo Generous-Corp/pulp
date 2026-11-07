@@ -44,7 +44,7 @@ def _render(binary: str, verb: str, wav_path: str, out_dir: str, stem: str,
     sidecar = png + ".json"
     cmd = [binary, "audio", verb, wav_path, "--png", png, "--json", sidecar, *extra_args]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=timeout_s)
     except (OSError, subprocess.TimeoutExpired) as exc:  # pragma: no cover - environment
         return {"kind": verb, "status": "failed", "reason": f"{type(exc).__name__}: {exc}"}
     if proc.returncode != 0:

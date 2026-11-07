@@ -63,7 +63,8 @@ def _write_fake_pulp(path: Path) -> Path:
         "       'settings': {'fft': 2048}}\n"
         "with open(side, 'w') as f:\n"
         "    json.dump(doc, f)\n"
-        "sys.exit(0)\n"
+        "sys.exit(0)\n",
+        encoding="utf-8",
     )
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     return script
@@ -155,7 +156,10 @@ def test_attached_block_carries_no_absolute_paths(tmp_path, monkeypatch):
 
 def test_cli_failure_and_refusal_are_recorded_not_raised(tmp_path, monkeypatch):
     script = tmp_path / "pulp"
-    script.write_text("#!/usr/bin/env python3\nimport sys\nsys.stderr.write('Error: no frames\\n')\nsys.exit(2)\n")
+    script.write_text(
+        "#!/usr/bin/env python3\nimport sys\nsys.stderr.write('Error: no frames\\n')\nsys.exit(2)\n",
+        encoding="utf-8",
+    )
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv(artifacts.PULP_BIN_ENV, str(script))
     block = artifacts.render(str(tmp_path / "x.wav"), str(tmp_path))
