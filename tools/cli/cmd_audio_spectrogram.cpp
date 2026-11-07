@@ -69,6 +69,7 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
 
     img::ImageArgs common;
     ana::SpectrogramSettings settings;
+    ana::SpectrogramImageOptions display;
 
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string& arg = args[i];
@@ -121,13 +122,13 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
                 std::cerr << "Error: --scale must be one of linear, log, mel\n";
                 return 1;
             }
-            settings.scale = *scale;
+            display.scale = *scale;
         } else if (arg == "--db-range") {
             if (!take_value("--db-range", value))
                 return 1;
-            if (!parse_double_arg(value, "--db-range", settings.db_range))
+            if (!parse_double_arg(value, "--db-range", display.db_range))
                 return 1;
-            if (settings.db_range <= 0.0 || settings.db_range > 300.0) {
+            if (display.db_range <= 0.0 || display.db_range > 300.0) {
                 std::cerr << "Error: --db-range must be between 0 and 300\n";
                 return 1;
             }
@@ -183,28 +184,25 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
         return 1;
     const ana::SpectrogramGrid grid = builder.finish();
 
-    ana::SpectrogramImageOptions image_options;
-    image_options.plot_height = plot_height;
-    image_options.scale = settings.scale;
-    image_options.db_range = settings.db_range;
+    display.plot_height = plot_height;
 
     std::ostringstream summary;
     summary << "fft " << settings.fft_length << " hop " << settings.hop << " "
-            << ana::window_name(settings.window) << " " << ana::frequency_scale_name(settings.scale)
-            << " " << format_db(settings.db_range) << "dB ch" << common.channel;
+            << ana::window_name(settings.window) << " " << ana::frequency_scale_name(display.scale)
+            << " " << format_db(display.db_range) << "dB ch" << common.channel;
     ana::ImageChrome chrome;
     chrome.footer = img::footer_text(input, summary.str());
     chrome.start_s = input.start_s;
     chrome.end_s = input.end_s;
 
-    const ana::RasterImage image = ana::render_spectrogram_image(grid, image_options, chrome);
+    const ana::RasterImage image = ana::render_spectrogram_image(grid, display, chrome);
 
     std::ostringstream settings_json;
     settings_json << "{\"fft\": " << settings.fft_length << ", \"hop\": " << settings.hop
                   << ", \"window\": " << pulp::cli::json_string(ana::window_name(settings.window))
                   << ", \"scale\": "
-                  << pulp::cli::json_string(std::string(ana::frequency_scale_name(settings.scale)))
-                  << ", \"db_range\": " << format_db(settings.db_range) << ", \"db_ceiling\": 0"
+                  << pulp::cli::json_string(std::string(ana::frequency_scale_name(display.scale)))
+                  << ", \"db_range\": " << format_db(display.db_range) << ", \"db_ceiling\": 0"
                   << ", \"mel_convention\": \"htk\""
                   << ", \"column_reduction\": \"peak_hold\""
                   << ", \"stft_frames\": " << grid.frames_analyzed << ", \"bins\": " << grid.bins

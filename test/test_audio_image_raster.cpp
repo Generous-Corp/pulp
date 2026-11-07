@@ -63,7 +63,7 @@ std::vector<float> chirp(double f0, double f1, double amplitude, double sample_r
     return out;
 }
 
-double luminance(Rgb8 c) {
+double luminance(Color c) {
     return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
 }
 
@@ -133,19 +133,21 @@ void check_against_golden(const RasterImage& image, const std::string& name) {
 
 TEST_CASE("spectrogram palette is clamped, deterministic and monotone in luminance",
           "[audio][image][palette]") {
-    CHECK(spectrogram_palette(-1.0) == spectrogram_palette(0.0));
-    CHECK(spectrogram_palette(2.0) == spectrogram_palette(1.0));
-    // Documented stops: near-black navy at the floor, pale yellow at the ceiling.
-    CHECK(spectrogram_palette(0.0) == Rgb8{8, 8, 24});
-    CHECK(spectrogram_palette(1.0) == Rgb8{255, 250, 200});
-    CHECK(spectrogram_palette(0.5) == Rgb8{170, 40, 180}); // the middle stop, magenta
+    CHECK(spectrogram_colour(-1.0) == spectrogram_colour(0.0));
+    CHECK(spectrogram_colour(2.0) == spectrogram_colour(1.0));
+    // Core's inferno ramp: its own endpoints at the floor and the ceiling.
+    const pulp::signal::ColorMapper inferno(pulp::signal::ColorRamp::inferno);
+    CHECK(spectrogram_colour(0.0) == inferno.map(0.0f));
+    CHECK(spectrogram_colour(1.0) == inferno.map(1.0f));
+    CHECK(spectrogram_colour(0.5) == inferno.map(0.5f));
+    CHECK_FALSE(spectrogram_colour(0.5) == spectrogram_colour(0.0));
     double previous = -1.0;
     for (int step = 0; step <= 100; ++step) {
-        const double lum = luminance(spectrogram_palette(step / 100.0));
+        const double lum = luminance(spectrogram_colour(step / 100.0));
         CHECK(lum >= previous - 1e-9);
         previous = lum;
     }
-    CHECK(luminance(spectrogram_palette(1.0)) > luminance(spectrogram_palette(0.0)) + 150.0);
+    CHECK(luminance(spectrogram_colour(1.0)) > luminance(spectrogram_colour(0.0)) + 150.0);
 }
 
 TEST_CASE("db_to_palette_unit maps the display window onto [0, 1]", "[audio][image][palette]") {
@@ -159,38 +161,44 @@ TEST_CASE("db_to_palette_unit maps the display window onto [0, 1]", "[audio][ima
 
 // ── Frequency axis ─────────────────────────────────────────────────────────
 
-TEST_CASE("mel mapping follows the HTK convention and inverts exactly", "[audio][image][mel]") {
-    CHECK(hz_to_mel(0.0) == Approx(0.0));
-    CHECK(hz_to_mel(1000.0) == Approx(1000.0).epsilon(1e-3));
+TEST_CASE("scale parsing uses core's enum and the CLI spellings", "[audio][image][mel]") {
+    using pulp::signal::FrequencyAxis;
+    CHECK(FrequencyAxis::hz_to_mel(1000.0) == Approx(1000.0).epsilon(1e-3));
     for (double hz : {20.0, 440.0, 1000.0, 4000.0, 12000.0, 24000.0})
-        CHECK(mel_to_hz(hz_to_mel(hz)) == Approx(hz).epsilon(1e-9));
+        CHECK(FrequencyAxis::mel_to_hz(FrequencyAxis::hz_to_mel(hz)) == Approx(hz).epsilon(1e-9));
     CHECK(parse_frequency_scale("mel") == FrequencyScale::mel);
-    CHECK(parse_frequency_scale("log") == FrequencyScale::log);
+    CHECK(parse_frequency_scale("log") == FrequencyScale::logarithmic);
+    CHECK(parse_frequency_scale("logarithmic") == FrequencyScale::logarithmic);
     CHECK(parse_frequency_scale("linear") == FrequencyScale::linear);
     CHECK_FALSE(parse_frequency_scale("bark").has_value());
     CHECK(frequency_scale_name(FrequencyScale::mel) == "mel");
+    CHECK(frequency_scale_name(FrequencyScale::logarithmic) == "log");
 }
 
-TEST_CASE("frequency_to_unit is monotone and spans [0, 1] on every scale", "[audio][image][axis]") {
-    for (auto scale : {FrequencyScale::linear, FrequencyScale::log, FrequencyScale::mel}) {
+TEST_CASE("make_frequency_axis is monotone and spans [0, 1] on every scale",
+          "[audio][image][axis]") {
+    for (auto scale : {FrequencyScale::linear, FrequencyScale::logarithmic, FrequencyScale::mel}) {
         const double lo = axis_low_frequency(48000.0, 2048, scale);
         const double hi = 24000.0;
-        CHECK(frequency_to_unit(lo, lo, hi, scale) == Approx(0.0).margin(1e-12));
-        CHECK(frequency_to_unit(hi, lo, hi, scale) == Approx(1.0).margin(1e-12));
+        const auto axis = make_frequency_axis(48000.0, 2048, scale);
+        CHECK(axis.low_frequency() == Approx(lo));
+        CHECK(axis.hz_to_display(lo) == Approx(0.0).margin(1e-12));
+        CHECK(axis.hz_to_display(hi) == Approx(1.0).margin(1e-9));
         double previous = -1.0;
         for (double hz = std::max(lo, 1.0); hz <= hi; hz *= 1.3) {
-            const double unit = frequency_to_unit(hz, lo, hi, scale);
+            const double unit = axis.hz_to_display(hz);
             CHECK(unit > previous);
-            CHECK(unit_to_frequency(unit, lo, hi, scale) == Approx(hz).epsilon(1e-9));
+            CHECK(axis.display_to_hz(unit) == Approx(hz).epsilon(1e-9));
             previous = unit;
         }
     }
-    CHECK(axis_low_frequency(48000.0, 2048, FrequencyScale::log) == Approx(48000.0 / 2048.0));
+    CHECK(axis_low_frequency(48000.0, 2048, FrequencyScale::logarithmic) ==
+          Approx(48000.0 / 2048.0));
     CHECK(axis_low_frequency(48000.0, 2048, FrequencyScale::linear) == 0.0);
 }
 
 TEST_CASE("row_bin_bands covers every bin exactly once in order", "[audio][image][axis]") {
-    for (auto scale : {FrequencyScale::linear, FrequencyScale::log, FrequencyScale::mel}) {
+    for (auto scale : {FrequencyScale::linear, FrequencyScale::logarithmic, FrequencyScale::mel}) {
         for (std::uint32_t rows : {1u, 3u, 64u, 512u}) {
             for (double sample_rate : {8000.0, 48000.0}) {
                 const int fft = 1024;
@@ -199,7 +207,7 @@ TEST_CASE("row_bin_bands covers every bin exactly once in order", "[audio][image
                 INFO("scale " << frequency_scale_name(scale) << " rows " << rows << " sr "
                               << sample_rate);
                 REQUIRE(bands.size() == rows);
-                const std::uint32_t first_bin = scale == FrequencyScale::log ? 1u : 0u;
+                const std::uint32_t first_bin = scale == FrequencyScale::logarithmic ? 1u : 0u;
                 CHECK(bands.front().last == bins - 1);
                 CHECK(bands.back().first == first_bin);
                 std::vector<int> coverage(bins, 0);
@@ -223,7 +231,7 @@ TEST_CASE("row_bin_bands covers every bin exactly once in order", "[audio][image
 }
 
 TEST_CASE("frequency axis labels land inside the plot", "[audio][image][axis]") {
-    for (auto scale : {FrequencyScale::linear, FrequencyScale::log, FrequencyScale::mel}) {
+    for (auto scale : {FrequencyScale::linear, FrequencyScale::logarithmic, FrequencyScale::mel}) {
         const auto labels = frequency_axis_labels(48000.0, 2048, scale, 256);
         REQUIRE_FALSE(labels.empty());
         for (const auto& label : labels) {
@@ -256,8 +264,8 @@ TEST_CASE("nice tick steps and time ticks", "[audio][image][ticks]") {
     CHECK(format_frequency_label(2500.0) == "2.5k");
     CHECK(format_frequency_label(20000.0) == "20k");
     CHECK(format_frequency_label(50.0) == "50");
-    CHECK(format_seconds_label(1.500, 3) == "1.5");
-    CHECK(format_seconds_label(0.0, 2) == "0");
+    CHECK(format_trimmed_decimal(1.500, 3) == "1.5");
+    CHECK(format_trimmed_decimal(0.0, 2) == "0");
 }
 
 TEST_CASE("5x7 font draws deterministic glyphs and boxes unknown bytes", "[audio][image][font]") {
@@ -270,23 +278,23 @@ TEST_CASE("5x7 font draws deterministic glyphs and boxes unknown bytes", "[audio
     CHECK(text_width_5x7("abc") == 3 * kGlyphAdvance - 1);
     CHECK(text_width_5x7("") == 0);
 
-    RasterImage image = RasterImage::filled(40, 12, Rgb8{0, 0, 0});
-    draw_text_5x7(image, 1, 2, "I", Rgb8{255, 255, 255});
+    RasterImage image = RasterImage::filled(40, 12, Color{0, 0, 0});
+    draw_text_5x7(image, 1, 2, "I", Color{255, 255, 255});
     // 'I' top row is 0x0E: glyph columns 1..3 lit (x = 2..4), the outer
     // columns and the row above dark.
     for (int x = 2; x <= 4; ++x)
-        CHECK(image.get(x, 2) == Rgb8{255, 255, 255});
-    CHECK(image.get(1, 2) == Rgb8{0, 0, 0});
-    CHECK(image.get(5, 2) == Rgb8{0, 0, 0});
-    CHECK(image.get(3, 1) == Rgb8{0, 0, 0});
+        CHECK(image.get(x, 2) == Color{255, 255, 255});
+    CHECK(image.get(1, 2) == Color{0, 0, 0});
+    CHECK(image.get(5, 2) == Color{0, 0, 0});
+    CHECK(image.get(3, 1) == Color{0, 0, 0});
     // Clipping at the edge does not write out of bounds or throw; 'W' lights
     // its first column.
-    draw_text_5x7(image, 38, 10, "WW", Rgb8{255, 0, 0});
-    CHECK(image.get(38, 10) == Rgb8{255, 0, 0});
+    draw_text_5x7(image, 38, 10, "WW", Color{255, 0, 0});
+    CHECK(image.get(38, 10) == Color{255, 0, 0});
 }
 
 TEST_CASE("chrome composition sizes the image from the plot", "[audio][image][chrome]") {
-    const RasterImage plot = RasterImage::filled(100, 50, Rgb8{1, 2, 3});
+    const RasterImage plot = RasterImage::filled(100, 50, Color{1, 2, 3});
     ImageChrome chrome;
     chrome.footer = "x.wav";
     chrome.start_s = 0.0;
@@ -294,8 +302,8 @@ TEST_CASE("chrome composition sizes the image from the plot", "[audio][image][ch
     const RasterImage image = compose_plot_with_chrome(plot, {AxisLabel{1.0, "top"}}, chrome);
     CHECK(image.width == chrome_image_width(100));
     CHECK(image.height == chrome_image_height(50));
-    CHECK(image.get(kChromeLeftMargin, kChromeTopMargin) == Rgb8{1, 2, 3});
-    CHECK(image.get(kChromeLeftMargin + 99, kChromeTopMargin + 49) == Rgb8{1, 2, 3});
+    CHECK(image.get(kChromeLeftMargin, kChromeTopMargin) == Color{1, 2, 3});
+    CHECK(image.get(kChromeLeftMargin + 99, kChromeTopMargin + 49) == Color{1, 2, 3});
 }
 
 // ── STFT grid ──────────────────────────────────────────────────────────────
@@ -325,9 +333,13 @@ TEST_CASE("spectrogram frame count and bin dBFS", "[audio][image][stft]") {
     bad = {};
     bad.hop = 4096;
     CHECK_FALSE(validate_spectrogram_settings(bad).empty());
-    bad = {};
-    bad.db_range = -3.0;
-    CHECK_FALSE(validate_spectrogram_settings(bad).empty());
+    SpectrogramImageOptions bad_display;
+    bad_display.db_range = -3.0;
+    CHECK_FALSE(validate_spectrogram_image_options(bad_display).empty());
+    bad_display = {};
+    bad_display.plot_height = 0;
+    CHECK_FALSE(validate_spectrogram_image_options(bad_display).empty());
+    CHECK(validate_spectrogram_image_options({}).empty());
 }
 
 TEST_CASE("SpectrogramBuilder reads a full-scale tone at 0 dBFS in its bin",
@@ -485,14 +497,14 @@ TEST_CASE("columns_from_level reduces, repeats and folds channels", "[audio][ima
     }
 }
 
-TEST_CASE("columns_from_overview selects a level and concatenate_levels stitches chunks",
+TEST_CASE("best_level_for picks a level and concatenate_levels stitches chunks",
           "[audio][image][waveform]") {
     const auto samples = sine(50.0, 0.8, 8000.0, 8192);
     const float* ptr = samples.data();
     pulp::audio::BufferView<const float> view(&ptr, 1, samples.size());
     const auto overview = pulp::audio::WaveformOverview::build_from_buffer_view(view, 8000, 16);
     REQUIRE_FALSE(overview.empty());
-    const auto columns = columns_from_overview(overview, 0, 32);
+    const auto columns = columns_from_level(overview.level(overview.best_level_for(32)), 0, 32);
     REQUIRE(columns.width() == 32);
     float peak = 0.0f;
     for (float v : columns.max)
@@ -527,7 +539,7 @@ TEST_CASE("waveform plot marks clipped columns and shades the selection",
     options.selection_unit = std::make_pair(0.5, 1.0);
     const RasterImage plot = render_waveform_plot(columns, options);
     REQUIRE(plot.width == 4);
-    const Rgb8 marker = waveform_clip_marker_colour();
+    const Color marker = waveform_clip_marker_colour();
     CHECK(plot.get(1, 0) == marker);
     CHECK(plot.get(1, 39) == marker);
     CHECK_FALSE(plot.get(0, 0) == marker);
@@ -562,13 +574,12 @@ TEST_CASE("golden: linear chirp spectrogram on a log axis", "[audio][image][gold
     SpectrogramSettings settings;
     settings.fft_length = 512;
     settings.hop = 128;
-    settings.scale = FrequencyScale::log;
     const auto samples = chirp(100.0, 20000.0, 0.5, sample_rate, 24000);
     SpectrogramBuilder builder(settings, sample_rate, samples.size(), 256);
     builder.push(samples);
     SpectrogramImageOptions options;
     options.plot_height = 128;
-    options.scale = FrequencyScale::log;
+    options.scale = FrequencyScale::logarithmic;
     ImageChrome chrome;
     chrome.footer = "chirp.wav  sha256:synthetic000  fft 512 hop 128 hann log 90dB ch0  pulp test";
     chrome.start_s = 0.0;
@@ -585,7 +596,7 @@ TEST_CASE("golden: waveform with a clipped burst", "[audio][image][golden]") {
     pulp::audio::BufferView<const float> view(&ptr, 1, samples.size());
     const auto overview = pulp::audio::WaveformOverview::build_from_buffer_view(
         view, 48000, choose_samples_per_peak(samples.size(), 256));
-    const auto columns = columns_from_overview(overview, 0, 256);
+    const auto columns = columns_from_level(overview.level(overview.best_level_for(256)), 0, 256);
     WaveformImageOptions options;
     options.plot_height = 96;
     options.selection_unit = std::make_pair(0.25, 0.5);

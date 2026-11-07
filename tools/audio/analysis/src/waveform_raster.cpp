@@ -72,13 +72,6 @@ WaveformColumns columns_from_level(const OverviewLevel& level, std::uint32_t cha
     return out;
 }
 
-WaveformColumns columns_from_overview(const WaveformOverview& overview, std::uint32_t channel,
-                                      std::uint32_t width) {
-    if (overview.empty() || width == 0)
-        return {};
-    return columns_from_level(overview.level(overview.best_level_for(width)), channel, width);
-}
-
 OverviewLevel concatenate_levels(const std::vector<OverviewLevel>& chunks) {
     OverviewLevel out;
     if (chunks.empty())
@@ -107,17 +100,17 @@ std::vector<AxisLabel> amplitude_axis_labels() {
     };
 }
 
-Rgb8 waveform_clip_marker_colour() noexcept {
-    return Rgb8{255, 64, 64};
+Color waveform_clip_marker_colour() noexcept {
+    return Color{255, 64, 64};
 }
 
 RasterImage render_waveform_plot(const WaveformColumns& columns,
                                  const WaveformImageOptions& options) {
-    constexpr Rgb8 kBackground{18, 18, 22};
-    constexpr Rgb8 kSelection{34, 46, 64};
-    constexpr Rgb8 kGrid{40, 46, 56};
-    constexpr Rgb8 kZero{70, 80, 95};
-    constexpr Rgb8 kWave{90, 200, 140};
+    constexpr Color kBackground{18, 18, 22};
+    constexpr Color kSelection{34, 46, 64};
+    constexpr Color kGrid{40, 46, 56};
+    constexpr Color kZero{70, 80, 95};
+    constexpr Color kWave{90, 200, 140};
 
     const std::uint32_t width = columns.width();
     const std::uint32_t height = options.plot_height;
@@ -153,7 +146,7 @@ RasterImage render_waveform_plot(const WaveformColumns& columns,
         plot.fill_rect(static_cast<int>(column), top, static_cast<int>(column) + 1, bottom + 1,
                        kWave);
         if (columns.clipped[column]) {
-            const Rgb8 marker = waveform_clip_marker_colour();
+            const Color marker = waveform_clip_marker_colour();
             plot.fill_rect(static_cast<int>(column), 0, static_cast<int>(column) + 1, 3, marker);
             plot.fill_rect(static_cast<int>(column), h - 3, static_cast<int>(column) + 1, h,
                            marker);

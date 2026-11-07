@@ -115,7 +115,7 @@ constexpr std::array<std::array<std::uint8_t, 7>, 96> kFont5x7 = {{
 
 } // namespace
 
-RasterImage RasterImage::filled(std::uint32_t width, std::uint32_t height, Rgb8 colour) {
+RasterImage RasterImage::filled(std::uint32_t width, std::uint32_t height, Color colour) {
     RasterImage image;
     image.width = width;
     image.height = height;
@@ -129,7 +129,7 @@ RasterImage RasterImage::filled(std::uint32_t width, std::uint32_t height, Rgb8 
     return image;
 }
 
-void RasterImage::put(int x, int y, Rgb8 colour) noexcept {
+void RasterImage::put(int x, int y, Color colour) noexcept {
     if (x < 0 || y < 0 || x >= static_cast<int>(width) || y >= static_cast<int>(height))
         return;
     const auto idx = (static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)) * 4;
@@ -139,14 +139,14 @@ void RasterImage::put(int x, int y, Rgb8 colour) noexcept {
     rgba[idx + 3] = 255;
 }
 
-Rgb8 RasterImage::get(int x, int y) const noexcept {
+Color RasterImage::get(int x, int y) const noexcept {
     if (x < 0 || y < 0 || x >= static_cast<int>(width) || y >= static_cast<int>(height))
         return {};
     const auto idx = (static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)) * 4;
-    return Rgb8{rgba[idx + 0], rgba[idx + 1], rgba[idx + 2]};
+    return Color{rgba[idx + 0], rgba[idx + 1], rgba[idx + 2]};
 }
 
-void RasterImage::fill_rect(int x0, int y0, int x1, int y1, Rgb8 colour) noexcept {
+void RasterImage::fill_rect(int x0, int y0, int x1, int y1, Color colour) noexcept {
     x0 = std::max(x0, 0);
     y0 = std::max(y0, 0);
     x1 = std::min(x1, static_cast<int>(width));
@@ -170,7 +170,7 @@ int text_width_5x7(std::string_view text, int scale) noexcept {
     return (glyphs * kGlyphAdvance - 1) * scale;
 }
 
-void draw_text_5x7(RasterImage& image, int x, int y, std::string_view text, Rgb8 colour,
+void draw_text_5x7(RasterImage& image, int x, int y, std::string_view text, Color colour,
                    int scale) noexcept {
     scale = std::max(scale, 1);
     int pen = x;
@@ -201,10 +201,10 @@ double nice_tick_step(double lo, double hi, int max_ticks) noexcept {
     return 10.0 * magnitude;
 }
 
-std::string format_seconds_label(double seconds, int decimals) {
+std::string format_trimmed_decimal(double value, int decimals) {
     decimals = std::clamp(decimals, 0, 6);
     char buffer[64];
-    std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, seconds);
+    std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, value);
     std::string text(buffer);
     if (decimals > 0) {
         while (!text.empty() && text.back() == '0')
@@ -229,7 +229,7 @@ std::vector<AxisTick> time_axis_ticks(double start_s, double end_s, int max_tick
     const double first = std::ceil(start_s / step - 1e-9) * step;
     for (double t = first; t <= end_s + step * 1e-6; t += step) {
         const double snapped = std::round(t / step) * step;
-        ticks.push_back(AxisTick{snapped, format_seconds_label(snapped, decimals)});
+        ticks.push_back(AxisTick{snapped, format_trimmed_decimal(snapped, decimals)});
         if (ticks.size() > static_cast<std::size_t>(max_ticks) + 2)
             break;
     }
@@ -247,10 +247,10 @@ std::uint32_t chrome_image_height(std::uint32_t plot_height) noexcept {
 
 RasterImage compose_plot_with_chrome(const RasterImage& plot, const std::vector<AxisLabel>& left,
                                      const ImageChrome& chrome) {
-    constexpr Rgb8 kBackground{14, 14, 18};
-    constexpr Rgb8 kFrame{70, 76, 88};
-    constexpr Rgb8 kText{200, 204, 212};
-    constexpr Rgb8 kTick{120, 128, 140};
+    constexpr Color kBackground{14, 14, 18};
+    constexpr Color kFrame{70, 76, 88};
+    constexpr Color kText{200, 204, 212};
+    constexpr Color kTick{120, 128, 140};
 
     const auto width = chrome_image_width(plot.width);
     const auto height = chrome_image_height(plot.height);
@@ -324,10 +324,10 @@ std::string format_frequency_label(double hz) {
     if (hz >= 1000.0) {
         const double k = hz / 1000.0;
         const double rounded = std::round(k * 10.0) / 10.0;
-        std::string text = format_seconds_label(rounded, 1);
+        std::string text = format_trimmed_decimal(rounded, 1);
         return text + "k";
     }
-    return format_seconds_label(std::round(hz), 0);
+    return format_trimmed_decimal(std::round(hz), 0);
 }
 
 } // namespace pulp::test::audio

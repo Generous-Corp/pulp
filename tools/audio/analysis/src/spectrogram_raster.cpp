@@ -2,17 +2,15 @@
 
 #include <pulp/audio/analysis/spectrogram_raster.hpp>
 
-#include <pulp/audio/analysis/audio_spectrum.hpp>
-
-#include <pulp/signal/fft.hpp>
-
 #include <algorithm>
-#include <array>
 #include <cmath>
-#include <complex>
 #include <limits>
 
 namespace pulp::test::audio {
+
+using pulp::signal::ColorMapper;
+using pulp::signal::ColorRamp;
+using pulp::signal::FrequencyAxis;
 
 // ── Frequency axis ─────────────────────────────────────────────────────────
 
@@ -20,7 +18,7 @@ std::string_view frequency_scale_name(FrequencyScale scale) noexcept {
     switch (scale) {
     case FrequencyScale::linear:
         return "linear";
-    case FrequencyScale::log:
+    case FrequencyScale::logarithmic:
         return "log";
     case FrequencyScale::mel:
         return "mel";
@@ -31,67 +29,25 @@ std::string_view frequency_scale_name(FrequencyScale scale) noexcept {
 std::optional<FrequencyScale> parse_frequency_scale(std::string_view text) noexcept {
     if (text == "linear")
         return FrequencyScale::linear;
-    if (text == "log")
-        return FrequencyScale::log;
+    if (text == "log" || text == "logarithmic")
+        return FrequencyScale::logarithmic;
     if (text == "mel")
         return FrequencyScale::mel;
     return std::nullopt;
 }
 
-double hz_to_mel(double hz) noexcept {
-    return 2595.0 * std::log10(1.0 + hz / 700.0);
-}
-
-double mel_to_hz(double mel) noexcept {
-    return 700.0 * (std::pow(10.0, mel / 2595.0) - 1.0);
-}
-
-namespace {
-
-double axis_transform(double hz, FrequencyScale scale) noexcept {
-    switch (scale) {
-    case FrequencyScale::linear:
-        return hz;
-    case FrequencyScale::log:
-        return std::log2(std::max(hz, std::numeric_limits<double>::min()));
-    case FrequencyScale::mel:
-        return hz_to_mel(std::max(hz, 0.0));
-    }
-    return hz;
-}
-
-double axis_inverse(double value, FrequencyScale scale) noexcept {
-    switch (scale) {
-    case FrequencyScale::linear:
-        return value;
-    case FrequencyScale::log:
-        return std::exp2(value);
-    case FrequencyScale::mel:
-        return mel_to_hz(value);
-    }
-    return value;
-}
-
-} // namespace
-
-double frequency_to_unit(double hz, double f_lo, double f_hi, FrequencyScale scale) noexcept {
-    const double lo = axis_transform(f_lo, scale);
-    const double hi = axis_transform(f_hi, scale);
-    if (!(hi > lo))
-        return 0.0;
-    return (axis_transform(hz, scale) - lo) / (hi - lo);
-}
-
-double unit_to_frequency(double unit, double f_lo, double f_hi, FrequencyScale scale) noexcept {
-    const double lo = axis_transform(f_lo, scale);
-    const double hi = axis_transform(f_hi, scale);
-    return axis_inverse(lo + unit * (hi - lo), scale);
-}
-
 double axis_low_frequency(double sample_rate, int fft_length, FrequencyScale scale) noexcept {
-    if (scale == FrequencyScale::log && fft_length > 0)
+    if (scale == FrequencyScale::logarithmic && fft_length > 0)
         return sample_rate / static_cast<double>(fft_length);
     return 0.0;
+}
+
+FrequencyAxis make_frequency_axis(double sample_rate, int fft_length,
+                                  FrequencyScale scale) noexcept {
+    FrequencyAxis axis;
+    axis.configure(fft_length, static_cast<float>(sample_rate), scale);
+    axis.set_low_frequency(axis_low_frequency(sample_rate, fft_length, scale));
+    return axis;
 }
 
 std::vector<BinBand> row_bin_bands(std::uint32_t bins, double sample_rate, int fft_length,
@@ -101,14 +57,12 @@ std::vector<BinBand> row_bin_bands(std::uint32_t bins, double sample_rate, int f
         return bands;
     bands.reserve(rows);
     const double bin_hz = sample_rate / static_cast<double>(fft_length);
-    const double f_lo = axis_low_frequency(sample_rate, fft_length, scale);
-    const double f_hi = sample_rate / 2.0;
-    const std::uint32_t first_bin = scale == FrequencyScale::log ? 1u : 0u;
+    const FrequencyAxis axis = make_frequency_axis(sample_rate, fft_length, scale);
+    const std::uint32_t first_bin = scale == FrequencyScale::logarithmic ? 1u : 0u;
     const std::uint32_t last_bin = bins - 1;
 
     auto bin_for_frequency = [&](double hz) {
-        const double raw = hz / bin_hz;
-        const long rounded = std::lround(raw);
+        const long rounded = std::lround(hz / bin_hz);
         return static_cast<std::uint32_t>(
             std::clamp<long>(rounded, static_cast<long>(first_bin), static_cast<long>(last_bin)));
     };
@@ -117,8 +71,8 @@ std::vector<BinBand> row_bin_bands(std::uint32_t bins, double sample_rate, int f
         // Row 0 is the top of the plot (highest frequency).
         const double unit_top = 1.0 - static_cast<double>(row) / static_cast<double>(rows);
         const double unit_bottom = 1.0 - static_cast<double>(row + 1) / static_cast<double>(rows);
-        const double hz_top = unit_to_frequency(unit_top, f_lo, f_hi, scale);
-        const double hz_bottom = unit_to_frequency(unit_bottom, f_lo, f_hi, scale);
+        const double hz_top = axis.display_to_hz(unit_top);
+        const double hz_bottom = axis.display_to_hz(unit_bottom);
         // Bins whose centre lies inside [hz_bottom, hz_top).
         const double first_raw = std::ceil(hz_bottom / bin_hz - 1e-9);
         const double last_raw = std::ceil(hz_top / bin_hz - 1e-9) - 1.0;
@@ -150,11 +104,11 @@ std::vector<AxisLabel> frequency_axis_labels(double sample_rate, int fft_length,
         return labels;
     const double f_lo = axis_low_frequency(sample_rate, fft_length, scale);
     const double f_hi = sample_rate / 2.0;
+    const FrequencyAxis axis = make_frequency_axis(sample_rate, fft_length, scale);
     auto add = [&](double hz) {
         if (hz < f_lo - 1e-9 || hz > f_hi + 1e-9)
             return;
-        labels.push_back(
-            AxisLabel{frequency_to_unit(hz, f_lo, f_hi, scale), format_frequency_label(hz)});
+        labels.push_back(AxisLabel{axis.hz_to_display(hz), format_frequency_label(hz)});
     };
     if (scale == FrequencyScale::linear) {
         const int max_ticks = std::max(2, static_cast<int>(rows) / 32);
@@ -173,32 +127,9 @@ std::vector<AxisLabel> frequency_axis_labels(double sample_rate, int fft_length,
 
 // ── Palette ────────────────────────────────────────────────────────────────
 
-Rgb8 spectrogram_palette(double t) noexcept {
-    // Stops chosen so luminance is monotone: a grey-scale copy stays ordered.
-    constexpr std::array<std::array<double, 3>, 5> kStops = {{
-        {8.0, 8.0, 24.0},      // floor: near-black navy
-        {30.0, 60.0, 200.0},   // blue
-        {170.0, 40.0, 180.0},  // magenta
-        {250.0, 140.0, 40.0},  // orange
-        {255.0, 250.0, 200.0}, // ceiling: pale yellow
-    }};
-    if (!(t > 0.0))
-        t = 0.0;
-    if (t > 1.0)
-        t = 1.0;
-    const double scaled = t * static_cast<double>(kStops.size() - 1);
-    const std::size_t index =
-        std::min<std::size_t>(static_cast<std::size_t>(scaled), kStops.size() - 2);
-    const double frac = scaled - static_cast<double>(index);
-    const auto& a = kStops[index];
-    const auto& b = kStops[index + 1];
-    auto mix = [&](int channel) {
-        const double value =
-            a[static_cast<std::size_t>(channel)] +
-            (b[static_cast<std::size_t>(channel)] - a[static_cast<std::size_t>(channel)]) * frac;
-        return static_cast<std::uint8_t>(std::clamp(std::lround(value), 0L, 255L));
-    };
-    return Rgb8{mix(0), mix(1), mix(2)};
+Color spectrogram_colour(double t) noexcept {
+    // ColorMapper sanitizes NaN and clamps to [0, 1] itself.
+    return ColorMapper(ColorRamp::inferno).map(static_cast<float>(t));
 }
 
 double db_to_palette_unit(double db, double ceiling_db, double range_db) noexcept {
@@ -208,10 +139,6 @@ double db_to_palette_unit(double db, double ceiling_db, double range_db) noexcep
 }
 
 // ── STFT grid ──────────────────────────────────────────────────────────────
-
-SpectrogramSettings::SpectrogramSettings()
-    : fft_length(2048), hop(512), window(Window::hann), scale(FrequencyScale::linear),
-      db_range(90.0) {}
 
 std::uint64_t spectrogram_grid_bytes(std::uint32_t columns, int fft_length) noexcept {
     if (fft_length <= 0)
@@ -231,8 +158,16 @@ std::string validate_spectrogram_settings(const SpectrogramSettings& settings) {
         return "hop must be at least 1";
     if (settings.hop > settings.fft_length)
         return "hop must not exceed the fft length";
-    if (!(settings.db_range > 0.0) || !std::isfinite(settings.db_range))
+    return {};
+}
+
+std::string validate_spectrogram_image_options(const SpectrogramImageOptions& options) {
+    if (options.plot_height == 0)
+        return "plot height must be at least 1";
+    if (!(options.db_range > 0.0) || !std::isfinite(options.db_range))
         return "db range must be a positive number";
+    if (!std::isfinite(options.db_ceiling))
+        return "db ceiling must be finite";
     return {};
 }
 
@@ -348,7 +283,7 @@ SpectrogramGrid SpectrogramBuilder::finish() {
 RasterImage render_spectrogram_plot(const SpectrogramGrid& grid,
                                     const SpectrogramImageOptions& options) {
     RasterImage plot =
-        RasterImage::filled(grid.columns, options.plot_height, spectrogram_palette(0.0));
+        RasterImage::filled(grid.columns, options.plot_height, spectrogram_colour(0.0));
     if (grid.columns == 0 || grid.bins == 0 || options.plot_height == 0)
         return plot;
     const auto bands = row_bin_bands(grid.bins, grid.sample_rate, grid.fft_length,
@@ -360,7 +295,7 @@ RasterImage render_spectrogram_plot(const SpectrogramGrid& grid,
             for (std::uint32_t bin = band.first; bin <= band.last; ++bin)
                 peak = std::max(peak, grid.at(column, bin));
             const double unit = db_to_palette_unit(peak, options.db_ceiling, options.db_range);
-            plot.put(static_cast<int>(column), static_cast<int>(row), spectrogram_palette(unit));
+            plot.put(static_cast<int>(column), static_cast<int>(row), spectrogram_colour(unit));
         }
     }
     return plot;

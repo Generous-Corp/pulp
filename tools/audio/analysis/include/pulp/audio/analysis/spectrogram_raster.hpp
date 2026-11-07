@@ -3,11 +3,12 @@
 /// @file spectrogram_raster.hpp
 /// Spectrogram image pipeline over the analysis library's STFT building
 /// blocks (`window_coefficients` from audio_spectrum.hpp and the core/signal
-/// FFT). Every stage is a separately callable pure function so a test or
-/// another tool can verify one stage without rendering a file:
+/// FFT) and core/signal's display math (`FrequencyAxis`, `ColorMapper`).
+/// Every stage is a separately callable pure function so a test or another
+/// tool can verify one stage without rendering a file:
 ///
 ///   samples ──SpectrogramBuilder──▶ SpectrogramGrid (dBFS, peak-hold per column)
-///          ──row_bin_bands + spectrogram_palette──▶ plot RasterImage
+///          ──row_bin_bands + ColorMapper──▶ plot RasterImage
 ///          ──frequency_axis_labels + compose_plot_with_chrome──▶ final image
 ///
 /// Display-only contract: the grid and the image never feed a verdict. The
@@ -15,13 +16,24 @@
 /// can trust the colour bar, but anything that needs a number should call the
 /// analyzers in audio_spectrum.hpp, not read pixels.
 ///
+/// Why not `pulp::signal::StftT`: that class is the realtime visualization
+/// STFT (symmetric windows from `WindowFunction`, an FFT size capped for
+/// display, float magnitudes). The image needs the periodic, coherent-gain
+/// normalized windows that `window_coefficients` produces so a full-scale sine
+/// reads exactly 0 dBFS through any window, a double-precision FFT so the
+/// numbers do not move with the float backend, and FFT lengths up to 65536.
+/// The builder therefore composes `window_coefficients` + `Fft64` itself and
+/// shares nothing with the realtime path but the FFT.
+///
 /// Memory contract: the builder streams. It keeps one FFT frame of carry plus
 /// a grid of `columns x bins` floats, so a 70-minute file costs the same as a
 /// 7-second one — only the input window moves.
 
+#include "audio_spectrum.hpp"
 #include "raster_image.hpp"
 
 #include <pulp/signal/fft.hpp>
+#include <pulp/signal/spectrogram.hpp>
 
 #include <complex>
 #include <cstdint>
@@ -33,43 +45,27 @@
 
 namespace pulp::test::audio {
 
-// Analysis window, defined in audio_spectrum.hpp. Declared opaquely here so
-// this header stays off the buffer/metrics include chain; callers that name
-// a window (`Window::hann`) include audio_spectrum.hpp themselves.
-enum class Window;
-
 // ── Frequency axis ─────────────────────────────────────────────────────────
 
-/// Vertical axis mapping.
-///
-/// `mel` uses the HTK convention, `mel = 2595 * log10(1 + hz / 700)`, which is
-/// librosa's `htk=True` formula. It was chosen over the Slaney variant because
-/// it is a single closed-form expression with an exact inverse, so the axis
-/// has no piecewise seam at 1 kHz and `mel_to_hz(hz_to_mel(f)) == f` to
-/// floating-point precision. This is a display axis, not a filterbank: no
-/// energy is summed per mel band, each pixel row simply covers the FFT bins
-/// whose centre falls in its mel interval (peak-hold).
-enum class FrequencyScale { linear, log, mel };
+/// Vertical axis mapping: core/signal's enum. The CLI spells the logarithmic
+/// axis `log`; `mel` is the HTK convention `FrequencyAxis` implements.
+using FrequencyScale = pulp::signal::FrequencyScale;
 
+/// CLI spelling of a scale: "linear", "log", "mel".
 std::string_view frequency_scale_name(FrequencyScale scale) noexcept;
+
+/// Accepts the CLI spellings plus core's "logarithmic".
 std::optional<FrequencyScale> parse_frequency_scale(std::string_view text) noexcept;
-
-/// HTK mel scale. Exact inverses of each other.
-double hz_to_mel(double hz) noexcept;
-double mel_to_hz(double mel) noexcept;
-
-/// Position of `hz` along an axis spanning [f_lo, f_hi] under `scale`, as a
-/// unit value (0 = f_lo, 1 = f_hi). Monotone in `hz`; values outside the
-/// span extrapolate (callers clamp). For `log`, `f_lo` must be > 0.
-double frequency_to_unit(double hz, double f_lo, double f_hi, FrequencyScale scale) noexcept;
-
-/// Inverse of `frequency_to_unit`.
-double unit_to_frequency(double unit, double f_lo, double f_hi, FrequencyScale scale) noexcept;
 
 /// Lowest frequency the axis shows. 0 Hz for linear and mel (DC bin
 /// included); the first non-DC bin, `sample_rate / fft_length`, for log,
 /// because log(0) has no pixel.
 double axis_low_frequency(double sample_rate, int fft_length, FrequencyScale scale) noexcept;
+
+/// A `FrequencyAxis` configured for the grid: `scale` over [axis floor,
+/// Nyquist]. Use its double-precision `hz_to_display` / `display_to_hz`.
+pulp::signal::FrequencyAxis make_frequency_axis(double sample_rate, int fft_length,
+                                                FrequencyScale scale) noexcept;
 
 /// Inclusive FFT-bin range one pixel row covers.
 struct BinBand {
@@ -94,11 +90,10 @@ std::vector<AxisLabel> frequency_axis_labels(double sample_rate, int fft_length,
 
 // ── Palette ────────────────────────────────────────────────────────────────
 
-/// Fixed five-stop gradient (near-black navy → blue → magenta → orange →
-/// pale yellow), linearly interpolated. `t` is 0 at the dB floor and 1 at
-/// the ceiling; out-of-range values clamp. Luminance rises monotonically so a
-/// grey-scale copy stays readable.
-Rgb8 spectrogram_palette(double t) noexcept;
+/// The image palette: core's inferno ramp (`ColorMapper`), which is monotone
+/// in luminance so a grey-scale copy stays ordered. `t` is 0 at the dB floor
+/// and 1 at the ceiling; out-of-range values clamp.
+Color spectrogram_colour(double t) noexcept;
 
 /// Maps a dBFS value onto the palette parameter for a display window of
 /// [ceiling_db - range_db, ceiling_db].
@@ -106,19 +101,15 @@ double db_to_palette_unit(double db, double ceiling_db, double range_db) noexcep
 
 // ── STFT grid ──────────────────────────────────────────────────────────────
 
+/// Analysis settings: what the STFT computes. Display choices (axis scale,
+/// dB window, plot height) live in `SpectrogramImageOptions`.
 struct SpectrogramSettings {
-    /// Defaults: fft 2048, hop 512, hann, linear, 90 dB. The constructor is
-    /// out of line because `Window` is opaque in this header.
-    SpectrogramSettings();
-
-    int fft_length; ///< power of two, 16..kSpectrogramMaxFftLength
-    int hop;        ///< 1..fft_length
-    Window window;
-    FrequencyScale scale;
-    double db_range; ///< displayed dynamic range below 0 dBFS
+    int fft_length = 2048; ///< power of two, 16..kSpectrogramMaxFftLength
+    int hop = 512;         ///< 1..fft_length
+    Window window = Window::hann;
 };
 
-/// Checks the settings a caller is about to render with. Returns an empty
+/// Checks the settings a caller is about to analyze with. Returns an empty
 /// string when valid, otherwise a one-line reason suitable for a CLI error.
 std::string validate_spectrogram_settings(const SpectrogramSettings& settings);
 
@@ -216,12 +207,17 @@ class SpectrogramBuilder {
 
 // ── Rendering ──────────────────────────────────────────────────────────────
 
+/// Display choices: how the grid becomes pixels. Independent of the analysis
+/// settings, so the same grid can be drawn on any axis or dB window.
 struct SpectrogramImageOptions {
-    std::uint32_t plot_height = 256;
+    std::uint32_t plot_height = 384;
     FrequencyScale scale = FrequencyScale::linear;
-    double db_range = 90.0;
-    double db_ceiling = 0.0;
+    double db_range = 90.0;  ///< displayed dynamic range below the ceiling
+    double db_ceiling = 0.0; ///< dBFS drawn at the top of the palette
 };
+
+/// Checks the display options. Empty when valid, otherwise a one-line reason.
+std::string validate_spectrogram_image_options(const SpectrogramImageOptions& options);
 
 /// Plot pixels only: width = grid columns, height = `plot_height`. Each
 /// pixel is the palette colour of the peak dB over its row's bin band.

@@ -16,6 +16,8 @@
 /// exist so an agent or a person can look at a render; measurements come
 /// from the analyzers, never from pixels.
 
+#include <pulp/signal/spectrogram.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -24,14 +26,10 @@
 
 namespace pulp::test::audio {
 
-/// Opaque 8-bit colour.
-struct Rgb8 {
-    std::uint8_t r = 0;
-    std::uint8_t g = 0;
-    std::uint8_t b = 0;
-
-    friend bool operator==(const Rgb8&, const Rgb8&) = default;
-};
+/// Pixel colour: core/signal's `SpectrogramColor` (RGBA8, alpha defaults to
+/// opaque), so the image layer shares one colour type with the realtime
+/// spectrogram display instead of carrying its own.
+using Color = pulp::signal::SpectrogramColor;
 
 /// RGBA8 pixels, row-major, top row first. Same layout as
 /// `pulp::render::HeadlessSurface::Rgba`, so the CLI can move the vector
@@ -41,7 +39,7 @@ struct RasterImage {
     std::uint32_t height = 0;
     std::vector<std::uint8_t> rgba;
 
-    static RasterImage filled(std::uint32_t width, std::uint32_t height, Rgb8 colour);
+    static RasterImage filled(std::uint32_t width, std::uint32_t height, Color colour);
 
     bool empty() const noexcept {
         return width == 0 || height == 0 || rgba.empty();
@@ -49,13 +47,13 @@ struct RasterImage {
 
     /// Writes one opaque pixel. Out-of-range coordinates are ignored so
     /// callers can draw markers at the image edge without bounds bookkeeping.
-    void put(int x, int y, Rgb8 colour) noexcept;
+    void put(int x, int y, Color colour) noexcept;
 
     /// Reads one pixel. Out-of-range coordinates read as black.
-    Rgb8 get(int x, int y) const noexcept;
+    Color get(int x, int y) const noexcept;
 
     /// Fills the half-open rectangle [x0, x1) x [y0, y1), clipped to the image.
-    void fill_rect(int x0, int y0, int x1, int y1, Rgb8 colour) noexcept;
+    void fill_rect(int x0, int y0, int x1, int y1, Color colour) noexcept;
 };
 
 // ── Built-in 5x7 bitmap font ───────────────────────────────────────────────
@@ -78,7 +76,7 @@ int text_width_5x7(std::string_view text, int scale = 1) noexcept;
 
 /// Draws `text` with its top-left corner at (x, y). Each glyph pixel becomes a
 /// `scale` x `scale` block. Clipped at the image edge.
-void draw_text_5x7(RasterImage& image, int x, int y, std::string_view text, Rgb8 colour,
+void draw_text_5x7(RasterImage& image, int x, int y, std::string_view text, Color colour,
                    int scale = 1) noexcept;
 
 // ── Axis ticks ─────────────────────────────────────────────────────────────
@@ -103,9 +101,10 @@ std::vector<AxisTick> time_axis_ticks(double start_s, double end_s, int max_tick
 /// Formats a frequency for a tick label: "20", "1k", "2.5k", "16k".
 std::string format_frequency_label(double hz);
 
-/// Formats seconds with `decimals` fractional digits, trimmed of trailing
-/// zeros but never of the integer part ("0", "1.5", "12.25").
-std::string format_seconds_label(double seconds, int decimals);
+/// Formats a number with `decimals` fractional digits, trimmed of trailing
+/// zeros but never of the integer part ("0", "1.5", "12.25"). Serves both the
+/// time axis (seconds) and the frequency labels (kHz).
+std::string format_trimmed_decimal(double value, int decimals);
 
 // ── Shared chrome: axes and footer around a plot ───────────────────────────
 

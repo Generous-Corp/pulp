@@ -3,8 +3,8 @@
 /// @file waveform_raster.hpp
 /// Waveform image pipeline over `pulp::audio::WaveformOverview`, the one
 /// display peak pyramid Pulp has. Nothing here builds peaks from samples; it
-/// consumes an overview level (or a whole overview) and reduces its (min,
-/// max) pairs to pixel columns, then paints them.
+/// consumes an overview level (pick it with `WaveformOverview::best_level_for`)
+/// and reduces its (min, max) pairs to pixel columns, then paints them.
 ///
 ///   OverviewLevel ──columns_from_level──▶ WaveformColumns
 ///                 ──render_waveform_plot──▶ plot RasterImage
@@ -68,11 +68,6 @@ std::uint32_t choose_samples_per_peak(std::uint64_t frames, std::uint32_t width)
 WaveformColumns columns_from_level(const pulp::audio::OverviewLevel& level, std::uint32_t channel,
                                    std::uint32_t width);
 
-/// Picks the overview level whose peak count best fits `width`
-/// (`WaveformOverview::best_level_for`) and reduces it.
-WaveformColumns columns_from_overview(const pulp::audio::WaveformOverview& overview,
-                                      std::uint32_t channel, std::uint32_t width);
-
 /// Concatenates per-chunk level-0 tables into one level. Every chunk must
 /// share `samples_per_peak` and channel count; this is how a range longer
 /// than memory is assembled from overviews built on consecutive windows.
@@ -101,6 +96,6 @@ RasterImage render_waveform_image(const WaveformColumns& columns,
                                   const WaveformImageOptions& options, const ImageChrome& chrome);
 
 /// Colour of the clip marker, exposed so a test can look for it.
-Rgb8 waveform_clip_marker_colour() noexcept;
+Color waveform_clip_marker_colour() noexcept;
 
 } // namespace pulp::test::audio
