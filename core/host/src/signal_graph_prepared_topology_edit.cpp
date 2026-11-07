@@ -1564,6 +1564,13 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         auto capture = std::make_shared<PreparedDescriptionData>(*prepared_description_);
         capture->sample_rate = sample_rate;
         capture->max_block_frames = static_cast<std::uint64_t>(max_block_size);
+        capture->canonical_executor_routing_enabled =
+            candidate_->canonical_executor_routing_enabled_.load(std::memory_order_relaxed);
+        capture->parallel_routing_enabled =
+            candidate_->parallel_routing_enabled_.load(std::memory_order_relaxed);
+        capture->anticipation_enabled =
+            candidate_->anticipation_enabled_.load(std::memory_order_relaxed);
+        capture->pdc_execution_domain = "dynamic";
         const auto& limits = candidate_->limits_;
         capture->host_max_nodes = limits.max_nodes;
         capture->host_max_connections = limits.max_connections;

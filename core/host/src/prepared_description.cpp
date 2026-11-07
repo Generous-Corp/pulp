@@ -80,6 +80,17 @@ std::string PreparedDescriptionData::canonical_bytes() const {
     out.push_back('"');
     out += ",\"max_block_frames\":";
     number(out, max_block_frames);
+    out += ",\"execution\":{\"backend\":";
+    quote(out, execution_backend);
+    out += ",\"pdc_domain\":";
+    quote(out, pdc_execution_domain);
+    out += ",\"canonical_executor_routing_enabled\":";
+    out += canonical_executor_routing_enabled ? "true" : "false";
+    out += ",\"parallel_routing_enabled\":";
+    out += parallel_routing_enabled ? "true" : "false";
+    out += ",\"anticipation_enabled\":";
+    out += anticipation_enabled ? "true" : "false";
+    out += "}";
     out += ",\"limits\":{\"profile\":{\"nodes\":";
     number(out, profile_max_nodes);
     out += ",\"connections\":";

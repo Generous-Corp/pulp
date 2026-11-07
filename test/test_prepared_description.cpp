@@ -35,6 +35,26 @@ TEST_CASE("D4 empty prepared export is detached and canonical") {
     REQUIRE(exported.value->content_hash().size() == 64);
 }
 
+TEST_CASE("D4 export rejects a retired owner generation") {
+    SignalGraph graph;
+    auto first = graph.begin_prepared_topology_edit();
+    REQUIRE(first);
+    REQUIRE(
+        first->bind_authored_identity("{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
+                                      "\"policies\":{},\"profile\":\"pulp.graph.identity.v1\"}",
+                                      {}));
+    REQUIRE(first->prepare(48000.0, 128) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(first->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    auto retired = first->committed_execution_snapshot();
+
+    auto second = graph.begin_prepared_topology_edit();
+    REQUIRE(second);
+    REQUIRE(second->prepare(48000.0, 128) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(second->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    REQUIRE(retired.export_prepared_description().refusal ==
+            PreparedDescriptionRefusal::SnapshotChanged);
+}
+
 TEST_CASE("D4 refuses an unbound prepared snapshot") {
     SignalGraph graph;
     auto edit = graph.begin_prepared_topology_edit();

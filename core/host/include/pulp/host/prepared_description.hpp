@@ -86,6 +86,11 @@ struct PreparedDescriptionData {
     std::uint64_t snapshot_id = 0;
     std::uint64_t pool_snapshot_id = 0;
     std::uint64_t owner_generation = 0;
+    std::string execution_backend = "pulp.graph.canonical-executor.f32.v1";
+    std::string pdc_execution_domain = "dynamic";
+    bool canonical_executor_routing_enabled = true;
+    bool parallel_routing_enabled = false;
+    bool anticipation_enabled = false;
     std::uint64_t profile_max_nodes = 512;
     std::uint64_t profile_max_connections = 2048;
     std::uint64_t profile_max_ports = 4096;
