@@ -31,7 +31,7 @@ void print_usage() {
                  "Long files stream through memory-mapped windows; nothing is normalized.\n"
                  "\n"
                  "Options:\n"
-                 "  --fft <n>                FFT length, power of two >= 16 (default: 2048)\n"
+                 "  --fft <n>                FFT length, power of two 16..65536 (default: 2048)\n"
                  "  --hop <n>                Hop in samples, 1..fft (default: 512)\n"
                  "  --window <name>          rectangular|hann|hamming|blackman|flat_top|kaiser\n"
                  "                           (default: hann)\n"
@@ -96,8 +96,10 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
             std::size_t parsed = 0;
             if (!parse_size_arg(value, arg.c_str(), parsed))
                 return 1;
-            if (parsed == 0 || parsed > static_cast<std::size_t>(1u << 20)) {
-                std::cerr << "Error: " << arg << " must be between 1 and 1048576\n";
+            if (parsed == 0 ||
+                parsed > static_cast<std::size_t>(ana::kSpectrogramMaxFftLength)) {
+                std::cerr << "Error: " << arg << " must be between 1 and "
+                          << ana::kSpectrogramMaxFftLength << "\n";
                 return 1;
             }
             (arg == "--fft" ? settings.fft_length : settings.hop) = static_cast<int>(parsed);
@@ -145,6 +147,19 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
         return 1;
     }
 
+    const std::uint32_t plot_width = common.width ? common.width : kDefaultPlotWidth;
+    const std::uint32_t plot_height = common.height ? common.height : kDefaultPlotHeight;
+    // The grid is allocated before the first frame is read; refuse a size that
+    // would be gigabytes rather than let bad_alloc answer for the flags.
+    const std::uint64_t grid_bytes = ana::spectrogram_grid_bytes(plot_width, settings.fft_length);
+    if (grid_bytes > ana::kSpectrogramGridBudgetBytes) {
+        std::cerr << "Error: --width " << plot_width << " x " << (settings.fft_length / 2 + 1)
+                  << " bins needs " << (grid_bytes >> 20) << " MiB for the spectrogram grid, over the "
+                  << (ana::kSpectrogramGridBudgetBytes >> 20)
+                  << " MiB budget; use a smaller --fft or --width\n";
+        return 1;
+    }
+
     img::OpenedInput input;
     if (const int rc = img::open_input(common, input); rc != 0)
         return rc;
@@ -158,8 +173,6 @@ int cmd_audio_spectrogram(const std::vector<std::string>& args) {
         return 2;
     }
 
-    const std::uint32_t plot_width = common.width ? common.width : kDefaultPlotWidth;
-    const std::uint32_t plot_height = common.height ? common.height : kDefaultPlotHeight;
 
     ana::SpectrogramBuilder builder(settings, static_cast<double>(input.info.sample_rate),
                                     input.range_frames(), plot_width);

@@ -190,6 +190,11 @@ TEST_CASE("audio image verbs validate arguments before touching audio",
     expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--json", png},
                  "must not be the PNG");
     expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--width", "0"}, "--width");
+    // Grid sizes that would allocate gigabytes are refused up front (exit 1,
+    // not bad_alloc): an FFT past the cap, and a width x bins over the budget.
+    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--fft", "131072"}, "65536");
+    expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--fft", "65536", "--width", "16384"},
+                 "MiB budget");
     expect_error({"audio", "spectrogram", wav.string(), "--png", png, "--bogus"}, "unknown option");
     expect_error({"audio", "spectrogram", (ws / "missing.wav").string(), "--png", png},
                  "not a readable file");

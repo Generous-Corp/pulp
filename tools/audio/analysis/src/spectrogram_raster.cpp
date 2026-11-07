@@ -207,9 +207,18 @@ double db_to_palette_unit(double db, double ceiling_db, double range_db) noexcep
 
 // ── STFT grid ──────────────────────────────────────────────────────────────
 
+std::uint64_t spectrogram_grid_bytes(std::uint32_t columns, int fft_length) noexcept {
+    if (fft_length <= 0)
+        return 0;
+    const std::uint64_t bins = static_cast<std::uint64_t>(fft_length) / 2 + 1;
+    return static_cast<std::uint64_t>(columns) * bins * sizeof(float);
+}
+
 std::string validate_spectrogram_settings(const SpectrogramSettings& settings) {
     if (settings.fft_length < 16)
         return "fft length must be at least 16";
+    if (settings.fft_length > kSpectrogramMaxFftLength)
+        return "fft length must not exceed " + std::to_string(kSpectrogramMaxFftLength);
     if ((settings.fft_length & (settings.fft_length - 1)) != 0)
         return "fft length must be a power of two";
     if (settings.hop < 1)
@@ -242,11 +251,12 @@ float bin_magnitude_dbfs(double magnitude, int fft_length) noexcept {
 SpectrogramBuilder::SpectrogramBuilder(const SpectrogramSettings& settings, double sample_rate,
                                        std::uint64_t total_frames, std::uint32_t columns)
     : settings_(settings), sample_rate_(sample_rate),
-      columns_(std::max<std::uint32_t>(columns, 1)) {
+      columns_(std::max<std::uint32_t>(columns, 1)), fft_(settings.fft_length) {
     frames_total_ = spectrogram_frame_count(total_frames, settings_.fft_length, settings_.hop);
     bins_ = static_cast<std::uint32_t>(settings_.fft_length / 2 + 1);
     window_ = window_coefficients(settings_.window, settings_.fft_length);
     segment_.assign(static_cast<std::size_t>(settings_.fft_length), 0.0);
+    spectrum_.assign(static_cast<std::size_t>(bins_), {});
     carry_.reserve(static_cast<std::size_t>(settings_.fft_length) * 2);
     column_touched_.assign(columns_, 0);
     grid_.columns = columns_;
@@ -266,16 +276,14 @@ void SpectrogramBuilder::analyze_frame(const float* frame) {
 
     // Fft64 pins the portable double path; the spectrogram's numbers do not
     // move with the float backend (vDSP vs mufft vs radix-2).
-    pulp::signal::Fft64 fft(N);
-    std::vector<std::complex<double>> spectrum(static_cast<std::size_t>(bins_));
-    fft.forward_real_half(segment_.data(), spectrum.data());
+    fft_.forward_real_half(segment_.data(), spectrum_.data());
 
     const std::uint32_t column = static_cast<std::uint32_t>(std::min<std::uint64_t>(
         frames_done_ * columns_ / std::max<std::uint64_t>(frames_total_, 1), columns_ - 1));
     column_touched_[column] = 1;
     float* dst = grid_.magnitude_db.data() + static_cast<std::size_t>(column) * bins_;
     for (std::uint32_t bin = 0; bin < bins_; ++bin) {
-        const float db = bin_magnitude_dbfs(std::abs(spectrum[bin]), N);
+        const float db = bin_magnitude_dbfs(std::abs(spectrum_[bin]), N);
         if (db > dst[bin])
             dst[bin] = db;
     }

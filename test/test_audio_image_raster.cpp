@@ -309,6 +309,14 @@ TEST_CASE("spectrogram frame count and bin dBFS", "[audio][image][stft]") {
     CHECK(spectrogram_frame_count(100, 0, 128) == 0);
     CHECK(bin_magnitude_dbfs(512.0, 1024) == Approx(0.0).margin(1e-6));
     CHECK(bin_magnitude_dbfs(0.0, 1024) == kSpectrogramFloorDb);
+    CHECK(spectrogram_grid_bytes(1024, 2048) == 1024ull * 1025 * 4);
+    CHECK(spectrogram_grid_bytes(1024, 0) == 0);
+    CHECK(spectrogram_grid_bytes(16384, 65536) > kSpectrogramGridBudgetBytes);
+    CHECK(spectrogram_grid_bytes(1024, 65536) <= kSpectrogramGridBudgetBytes);
+    SpectrogramSettings huge;
+    huge.fft_length = 131072;
+    huge.hop = 1024;
+    CHECK(validate_spectrogram_settings(huge) == "fft length must not exceed 65536");
     CHECK(validate_spectrogram_settings({}).empty());
     SpectrogramSettings bad;
     bad.fft_length = 1000;

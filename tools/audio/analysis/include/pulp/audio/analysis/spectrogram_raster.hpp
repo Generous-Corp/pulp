@@ -22,6 +22,9 @@
 #include "audio_spectrum.hpp"
 #include "raster_image.hpp"
 
+#include <pulp/signal/fft.hpp>
+
+#include <complex>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -132,6 +135,19 @@ struct SpectrogramGrid {
 
 inline constexpr float kSpectrogramFloorDb = -200.0f;
 
+/// Largest FFT the image pipeline accepts. Beyond this a single grid column
+/// is already tens of thousands of bins, far past what any plot row can show.
+inline constexpr int kSpectrogramMaxFftLength = 65536;
+
+/// Ceiling on the grid a builder may allocate: `columns * bins * sizeof(float)`.
+/// 256 MiB keeps a default-width image under a few MB and refuses the
+/// combinations (wide image, huge FFT) that would otherwise allocate gigabytes
+/// before the first frame is read.
+inline constexpr std::uint64_t kSpectrogramGridBudgetBytes = 256ull * 1024 * 1024;
+
+/// Bytes the grid for `columns` x (fft_length / 2 + 1) bins occupies.
+std::uint64_t spectrogram_grid_bytes(std::uint32_t columns, int fft_length) noexcept;
+
 /// Number of STFT frames a range of `total_frames` samples yields with the
 /// given FFT length and hop: `(total - fft) / hop + 1`, or 0 when the range
 /// is shorter than one FFT. A trailing partial frame is dropped rather than
@@ -180,6 +196,10 @@ class SpectrogramBuilder {
     std::uint32_t bins_ = 0;
     std::vector<double> window_;
     std::vector<double> segment_;
+    // One FFT plan and one spectrum buffer for the builder's lifetime: the
+    // twiddle tables are built once, not once per STFT frame.
+    pulp::signal::Fft64 fft_;
+    std::vector<std::complex<double>> spectrum_;
     std::vector<float> carry_;
     std::vector<std::uint8_t> column_touched_;
     SpectrogramGrid grid_;
