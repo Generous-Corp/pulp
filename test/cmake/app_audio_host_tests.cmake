@@ -737,6 +737,10 @@ else()
         LIBRARIES pulp::midi)
 endif()
 
+# MPE configuration from incoming MIDI (MCM, pitch-bend-range RPN) and builders
+pulp_add_test_suite(pulp-test-mpe-configuration-messages GROUP pulp-test-group-app-midi
+    LIBRARIES pulp::midi)
+
 # MPE synth voice helpers (voice, allocator, glide detector)
 pulp_add_test_suite(pulp-test-mpe-synth-voice
     SOURCES test_mpe_synth_voice.cpp harness/rt_allocation_probe.cpp

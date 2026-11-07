@@ -82,12 +82,45 @@ public:
     void set_config(const MpeConfig& cfg);
     const MpeConfig& config() const { return config_; }
 
-    /// Set the member-channel pitch-bend range in semitones (per-note bend).
+    /// Set the member-channel pitch-bend range in semitones (per-note bend)
+    /// for every channel. Non-positive values are ignored.
     void set_member_bend_range(float semitones);
-    /// Set the manager-channel pitch-bend range in semitones (zone-wide bend).
+    /// Set the manager-channel pitch-bend range in semitones (zone-wide bend)
+    /// for both zones. Non-positive values are ignored.
     void set_manager_bend_range(float semitones);
-    float member_bend_range() const { return member_bend_semi_; }
-    float manager_bend_range() const { return manager_bend_semi_; }
+    /// Member-channel range for channel 1 (the first lower-zone member).
+    float member_bend_range() const { return member_bend_semi_[1]; }
+    /// Member-channel range for one specific channel (0-15).
+    float member_bend_range(uint8_t channel) const { return member_bend_semi_[channel & 0x0F]; }
+    /// Manager range of the lower zone.
+    float manager_bend_range() const { return manager_bend_semi_[0]; }
+    /// Manager range of one zone.
+    float manager_bend_range(bool upper_zone) const { return manager_bend_semi_[upper_zone ? 1 : 0]; }
+
+    // ── Configuration from incoming MIDI ──────────────────────────────────
+
+    /// When enabled (the default), `process(MidiEvent)` follows two
+    /// Registered Parameter Number messages as they arrive:
+    ///   - RPN 6 on channel 1 or 16 (MPE Configuration Message): sets the
+    ///     member count of the lower or upper zone and updates `config()`.
+    ///     The newly configured zone wins when the zones would overlap; the
+    ///     other zone gives up the channels it can no longer keep. The
+    ///     affected channels return to the default bend ranges (48 member,
+    ///     2 manager) and their cached expression state is cleared. Notes
+    ///     left on channels that no longer belong to a zone are released.
+    ///   - RPN 0 (pitch-bend range, semitones + cents) on any channel: sets
+    ///     that channel's range. On a zone manager channel it sets that
+    ///     zone's manager range; on any other channel it sets the member
+    ///     range for that channel only.
+    /// The data value is applied when Data Entry MSB (CC 6) arrives and
+    /// refined by Data Entry LSB (CC 38). Parameter selection is tracked per
+    /// channel, and NRPN selection (CC 99/98) cancels RPN selection on that
+    /// channel so NRPN data entry can never be read as RPN.
+    void set_follow_configuration_messages(bool enabled) { follow_config_messages_ = enabled; }
+    bool follows_configuration_messages() const { return follow_config_messages_; }
+
+    /// Invoked after an incoming MPE Configuration Message changed `config()`.
+    std::function<void(const MpeConfig&)> on_config_change;
 
     /// Bind a MIDI 2.0 Assignable Per-Note Controller index (status
     /// 0x10) to per-note timbre. The assignable PNC space is host-
@@ -210,6 +243,12 @@ private:
     void update_channel_pressure(uint8_t ch, float pressure, bool upper);
     void update_channel_timbre(uint8_t ch, float timbre, bool upper);
 
+    void track_registered_parameter(const MidiEvent& event);
+    void apply_registered_parameter(uint8_t ch, uint16_t param,
+                                    uint8_t data_msb, uint8_t data_lsb);
+    void apply_configuration_message(uint8_t manager_channel, uint8_t member_count);
+    void release_notes_outside_zones();
+
     void apply_manager_message(const MidiEvent& event, bool upper);
     void apply_manager_ump(const UmpPacket& p, bool upper);
 
@@ -224,6 +263,11 @@ private:
     void apply_per_note_management(uint8_t ch, uint8_t note, uint8_t flags);
 
     static float ump_bend_normalised(uint32_t v32);
+    static std::array<float, 16> make_member_ranges() {
+        std::array<float, 16> r{};
+        r.fill(kDefaultMemberBendSemitones);
+        return r;
+    }
 
     MpeConfig config_;
     std::array<MpeNoteState, kMaxNotes> notes_{};
@@ -232,8 +276,20 @@ private:
     std::array<float, 16> channel_timbre_{};
     ZoneState lower_zone_state_{};
     ZoneState upper_zone_state_{};
-    float member_bend_semi_ = kDefaultMemberBendSemitones;
-    float manager_bend_semi_ = kDefaultManagerBendSemitones;
+    std::array<float, 16> member_bend_semi_ = make_member_ranges();
+    std::array<float, 2> manager_bend_semi_{kDefaultManagerBendSemitones,
+                                            kDefaultManagerBendSemitones};
+
+    /// Per-channel Registered Parameter selection. 127/127 is "null".
+    struct ParameterSelection {
+        uint8_t msb = 127;
+        uint8_t lsb = 127;
+        bool is_rpn = true;
+        uint8_t data_msb = 0;
+        uint8_t data_lsb = 0;
+    };
+    std::array<ParameterSelection, 16> selection_{};
+    bool follow_config_messages_ = true;
     MpeNoteGeneration next_note_generation_ = 1;
     std::uint64_t refused_note_on_count_ = 0;
     std::array<MpeNoteState, kMaxNotes> pending_note_offs_{};

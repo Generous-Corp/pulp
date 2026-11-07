@@ -16,17 +16,22 @@ void MpeVoiceTracker::set_config(const MpeConfig& cfg) {
 }
 
 void MpeVoiceTracker::set_member_bend_range(float semitones) {
-    if (semitones > 0.0f) member_bend_semi_ = semitones;
+    if (semitones > 0.0f) member_bend_semi_.fill(semitones);
 }
 
 void MpeVoiceTracker::set_manager_bend_range(float semitones) {
-    if (semitones > 0.0f) manager_bend_semi_ = semitones;
+    if (semitones > 0.0f) manager_bend_semi_.fill(semitones);
 }
 
 // ── Event ingestion ────────────────────────────────────────────────────────
 
 bool MpeVoiceTracker::process(const MidiEvent& event) {
     const uint8_t ch = event.channel();
+
+    // Configuration messages are interpreted before zone classification: an
+    // MPE Configuration Message arrives on a manager channel whose zone may
+    // not exist yet.
+    if (follow_config_messages_ && event.is_cc()) track_registered_parameter(event);
 
     // Manager channel — global zone state (pitch bend, pressure, CC74).
     if (ch == config_.lower_zone.manager_channel && config_.lower_zone.member_channels > 0) {
@@ -55,7 +60,7 @@ bool MpeVoiceTracker::process(const MidiEvent& event) {
         const uint16_t raw = static_cast<uint16_t>(event.data()[1]
             | (uint16_t(event.data()[2]) << 7));
         const float norm = (static_cast<float>(raw) - 8192.0f) / 8192.0f;
-        update_channel_pitch_bend(ch, norm * member_bend_semi_, upper);
+        update_channel_pitch_bend(ch, norm * member_bend_semi_[ch], upper);
         return true;
     }
     if ((event.data()[0] & 0xF0) == 0xD0) {
@@ -120,7 +125,7 @@ bool MpeVoiceTracker::process(const UmpPacket& p) {
             return true;
         case 0xE0: {
             const float norm = ump_bend_normalised(p.data_32());
-            update_channel_pitch_bend(ch, norm * member_bend_semi_, upper);
+            update_channel_pitch_bend(ch, norm * member_bend_semi_[ch], upper);
             return true;
         }
         case 0xD0: {
@@ -139,7 +144,7 @@ bool MpeVoiceTracker::process(const UmpPacket& p) {
         }
         case 0x60: {  // Per-note pitch bend
             apply_per_note_pitch_bend(ch, p.note_number(),
-                                      ump_bend_normalised(p.data_32()) * member_bend_semi_);
+                                      ump_bend_normalised(p.data_32()) * member_bend_semi_[ch]);
             return true;
         }
         case 0x00: {  // Registered per-note CC
@@ -225,6 +230,127 @@ void MpeVoiceTracker::reset() noexcept {
     pending_note_offs_.fill(MpeNoteState{});
     pending_note_off_head_ = 0;
     pending_note_off_count_ = 0;
+    selection_.fill(ParameterSelection{});
+}
+
+// ── Configuration from incoming MIDI ──────────────────────────────────────
+
+namespace {
+
+constexpr uint16_t kRpnPitchBendRange = 0;
+constexpr uint16_t kRpnMpeConfiguration = 6;
+
+uint16_t zone_channel_mask(const MpeZone& z) {
+    if (z.member_channels == 0) return 0;
+    uint16_t mask = static_cast<uint16_t>(1u << (z.manager_channel & 0x0F));
+    for (uint8_t c = 0; c < 16; ++c) {
+        if (z.contains_channel(c)) mask = static_cast<uint16_t>(mask | (1u << c));
+    }
+    return mask;
+}
+
+} // namespace
+
+void MpeVoiceTracker::track_registered_parameter(const MidiEvent& event) {
+    const uint8_t ch = event.channel();
+    const uint8_t val = event.cc_value();
+    auto& sel = selection_[ch];
+    switch (event.cc_number()) {
+        case 101:  // RPN MSB: a new MSB invalidates the previously selected LSB.
+            sel.is_rpn = true; sel.msb = val; sel.lsb = 127;
+            break;
+        case 100:
+            sel.is_rpn = true; sel.lsb = val;
+            break;
+        case 99:   // NRPN selection: RPN data entry must not follow it.
+        case 98:
+            sel.is_rpn = false; sel.msb = 127; sel.lsb = 127;
+            break;
+        case 6:
+            sel.data_msb = val; sel.data_lsb = 0;
+            if (sel.is_rpn && !(sel.msb == 127 && sel.lsb == 127)) {
+                apply_registered_parameter(ch, static_cast<uint16_t>((sel.msb << 7) | sel.lsb),
+                                           sel.data_msb, sel.data_lsb);
+            }
+            break;
+        case 38:
+            sel.data_lsb = val;
+            if (sel.is_rpn && !(sel.msb == 127 && sel.lsb == 127)) {
+                apply_registered_parameter(ch, static_cast<uint16_t>((sel.msb << 7) | sel.lsb),
+                                           sel.data_msb, sel.data_lsb);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+void MpeVoiceTracker::apply_registered_parameter(uint8_t ch, uint16_t param,
+                                                 uint8_t data_msb, uint8_t data_lsb) {
+    if (param == kRpnPitchBendRange) {
+        const float semitones = static_cast<float>(data_msb)
+                              + static_cast<float>(data_lsb > 99 ? 99 : data_lsb) / 100.0f;
+        if (ch == config_.lower_zone.manager_channel && config_.lower_zone.member_channels > 0) {
+            manager_bend_semi_[0] = semitones;
+        } else if (ch == config_.upper_zone.manager_channel
+                   && config_.upper_zone.member_channels > 0) {
+            manager_bend_semi_[1] = semitones;
+        } else {
+            member_bend_semi_[ch] = semitones;
+        }
+    } else if (param == kRpnMpeConfiguration && (ch == 0 || ch == 15)) {
+        apply_configuration_message(ch, data_msb > 15 ? uint8_t{15} : data_msb);
+    }
+}
+
+void MpeVoiceTracker::apply_configuration_message(uint8_t manager_channel, uint8_t member_count) {
+    const MpeConfig before = config_;
+    const bool upper = manager_channel == 15;
+    MpeZone& target = upper ? config_.upper_zone : config_.lower_zone;
+    MpeZone& other = upper ? config_.lower_zone : config_.upper_zone;
+
+    target = MpeZone{manager_channel, member_count};
+    other.manager_channel = upper ? uint8_t{0} : uint8_t{15};
+    // Both zones share channels 1-14. The zone being configured wins.
+    if (other.member_channels + member_count > 14 && other.member_channels > 0) {
+        other.member_channels = member_count >= 14 ? uint8_t{0}
+                                                   : static_cast<uint8_t>(14 - member_count);
+    }
+    if (other.member_channels == 0) other = MpeZone{other.manager_channel, 0};
+
+    // The configured zone, and the other zone if it lost channels, return to
+    // default bend ranges and cleared expression state.
+    const MpeZone& before_target = upper ? before.upper_zone : before.lower_zone;
+    const MpeZone& before_other = upper ? before.lower_zone : before.upper_zone;
+    uint16_t reset_mask = zone_channel_mask(before_target) | zone_channel_mask(target);
+    if (before_other.member_channels != other.member_channels) {
+        reset_mask |= zone_channel_mask(before_other) | zone_channel_mask(other);
+    }
+    for (uint8_t c = 0; c < 16; ++c) {
+        if (!(reset_mask & (1u << c))) continue;
+        member_bend_semi_[c] = kDefaultMemberBendSemitones;
+        channel_pitch_bend_[c] = 0.0f;
+        channel_pressure_[c] = 0.0f;
+        channel_timbre_[c] = 0.0f;
+    }
+    manager_bend_semi_[upper ? 1 : 0] = kDefaultManagerBendSemitones;
+    (upper ? upper_zone_state_ : lower_zone_state_) = {};
+    if (before_other.member_channels != other.member_channels) {
+        manager_bend_semi_[upper ? 0 : 1] = kDefaultManagerBendSemitones;
+        (upper ? lower_zone_state_ : upper_zone_state_) = {};
+    }
+
+    release_notes_outside_zones();
+    if (on_config_change) on_config_change(config_);
+}
+
+void MpeVoiceTracker::release_notes_outside_zones() {
+    for (std::size_t i = 0; i < notes_.size(); ++i) {
+        if (!notes_[i].active) continue;
+        const MpeZone* z = config_.zone_for_channel(notes_[i].channel);
+        if (z && z->is_upper() == notes_[i].is_upper_zone) continue;
+        remove_note(notes_[i].channel, notes_[i].note);
+    }
 }
 
 // ── Private helpers ────────────────────────────────────────────────────────
@@ -398,7 +524,7 @@ void MpeVoiceTracker::apply_manager_message(const MidiEvent& event, bool upper) 
         const uint16_t raw = static_cast<uint16_t>(event.data()[1]
             | (uint16_t(event.data()[2]) << 7));
         const float norm = (static_cast<float>(raw) - 8192.0f) / 8192.0f;
-        zs.pitch_bend_semitones = norm * manager_bend_semi_;
+        zs.pitch_bend_semitones = norm * manager_bend_semi_[upper ? 1 : 0];
     } else if ((event.data()[0] & 0xF0) == 0xD0) {
         zs.pressure = event.data()[1] / 127.0f;
     } else if (event.is_cc() && event.cc_number() == 74) {
@@ -410,7 +536,7 @@ void MpeVoiceTracker::apply_manager_ump(const UmpPacket& p, bool upper) {
     ZoneState& zs = upper ? upper_zone_state_ : lower_zone_state_;
     const uint8_t status = static_cast<uint8_t>((p.words[0] >> 16) & 0xF0);
     if (status == 0xE0) {
-        zs.pitch_bend_semitones = ump_bend_normalised(p.data_32()) * manager_bend_semi_;
+        zs.pitch_bend_semitones = ump_bend_normalised(p.data_32()) * manager_bend_semi_[upper ? 1 : 0];
     } else if (status == 0xD0) {
         zs.pressure = static_cast<float>(p.data_32()) / 4294967295.0f;
     } else if (status == 0xB0) {
