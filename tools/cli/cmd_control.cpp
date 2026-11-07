@@ -666,27 +666,30 @@ int cmd_control(const std::vector<std::string>& args) {
     // A Pulp operation comes from the frozen registry; a vendor operation only
     // from the exact instance's declaration, which the broker re-checks.
     std::uint32_t operation_version = 1;
-    std::string input_schema;
-    if (const auto* descriptor = resolve_control_operation(operation, 1)) {
-        input_schema = std::string(descriptor->input_schema_json);
-    } else if (const auto vendor = parse_control_vendor_operation_id(operation);
-               vendor && item->hasObjectMember("vendor_operations") &&
-               (*item)["vendor_operations"].isArray()) {
-        const auto declared = (*item)["vendor_operations"];
-        for (std::uint32_t index = 0; index < declared.size(); ++index) {
-            const auto entry = declared[index];
-            if (entry["id"].isString() && entry["id"].getString() == operation &&
-                entry["input_schema"].isObject()) {
-                input_schema = choc::json::toString(entry["input_schema"], false);
-                operation_version = vendor->version;
-                break;
+    std::string vendor_input_schema;
+    const auto* descriptor = resolve_control_operation(operation, 1);
+    if (!descriptor) {
+        const auto vendor = parse_control_vendor_operation_id(operation);
+        if (vendor && item->hasObjectMember("vendor_operations") &&
+            (*item)["vendor_operations"].isArray()) {
+            const auto declared = (*item)["vendor_operations"];
+            for (std::uint32_t index = 0; index < declared.size(); ++index) {
+                const auto entry = declared[index];
+                if (entry["id"].isString() && entry["id"].getString() == operation &&
+                    entry["input_schema"].isObject()) {
+                    vendor_input_schema = choc::json::toString(entry["input_schema"], false);
+                    operation_version = vendor->version;
+                    break;
+                }
             }
         }
+        if (vendor_input_schema.empty())
+            return fail("invalid-request", "unknown operation: " + operation, json);
     }
-    if (input_schema.empty())
-        return fail("invalid-request", "unknown operation: " + operation, json);
     ControlJsonSchemaDiagnostics diagnostics;
-    if (!validate_control_json_schema(params, input_schema, &diagnostics))
+    if (descriptor
+            ? !validate_control_json_schema(params, descriptor->input_schema_json, &diagnostics)
+            : !validate_control_json_schema(params, vendor_input_schema, &diagnostics))
         return fail("invalid-request", diagnostics.explanation, json);
     if (grant_id.empty()) {
         auto grant_params = choc::value::createObject("");
