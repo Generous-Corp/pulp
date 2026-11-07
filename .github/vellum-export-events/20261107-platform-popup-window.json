@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-platform-popup-window",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-08T02:00:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/platform/include/pulp/platform/popup_window.hpp",
+    "core/platform/platform/mac/popup_window_mac.mm",
+    "core/platform/src/popup_window.cpp",
+    "core/platform/src/popup_window_stub.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Adds PopupWindow to the generic platform layer: a borderless, non-activating child window anchored to a rectangle in an editor view and placed on that view's screen, with a layer-backed content view a client draws into, dismissed by a consumed outside click, Escape, focus loss or the parent closing, and closed silently when its MainThreadScope dies. place_popup exposes the placement arithmetic. Additive and free of view or render dependencies, so the next Vellum re-export of core/platform should carry it."
+}
