@@ -1597,6 +1597,10 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         capture->owner_generation = base_authoring_generation_;
         capture->schedule.clear();
         const auto& plan = next->routed.serial.snapshot.plan();
+        capture->prepared_plan_node_count = plan.nodes.size();
+        capture->prepared_plan_connection_count = plan.connections.size();
+        capture->serial_pool_bound =
+            next->routed.serial.pool.bound_to(next->routed.serial.snapshot);
         for (const auto dense_index : plan.processing_order_indices) {
             if (dense_index >= plan.nodes.size())
                 return last_result_ = Result::PreflightFailed;

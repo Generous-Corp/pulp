@@ -90,6 +90,12 @@ std::string PreparedDescriptionData::canonical_bytes() const {
     out += parallel_routing_enabled ? "true" : "false";
     out += ",\"anticipation_enabled\":";
     out += anticipation_enabled ? "true" : "false";
+    out += ",\"plan_node_count\":";
+    number(out, prepared_plan_node_count);
+    out += ",\"plan_connection_count\":";
+    number(out, prepared_plan_connection_count);
+    out += ",\"serial_pool_bound\":";
+    out += serial_pool_bound ? "true" : "false";
     out += "}";
     out += ",\"limits\":{\"profile\":{\"nodes\":";
     number(out, profile_max_nodes);

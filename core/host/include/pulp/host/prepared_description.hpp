@@ -91,6 +91,9 @@ struct PreparedDescriptionData {
     bool canonical_executor_routing_enabled = true;
     bool parallel_routing_enabled = false;
     bool anticipation_enabled = false;
+    std::uint64_t prepared_plan_node_count = 0;
+    std::uint64_t prepared_plan_connection_count = 0;
+    bool serial_pool_bound = false;
     std::uint64_t profile_max_nodes = 512;
     std::uint64_t profile_max_connections = 2048;
     std::uint64_t profile_max_ports = 4096;

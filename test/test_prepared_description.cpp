@@ -113,6 +113,9 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     REQUIRE(exported.value->nodes.size() == 4);
     REQUIRE(exported.value->edges.size() == 6);
     REQUIRE(exported.value->channels == std::vector<std::string>{"L", "R"});
+    REQUIRE(exported.value->prepared_plan_node_count == 4);
+    REQUIRE(exported.value->prepared_plan_connection_count == 6);
+    REQUIRE(exported.value->serial_pool_bound);
 }
 
 TEST_CASE("D4 rejects a swapped authored channel") {
