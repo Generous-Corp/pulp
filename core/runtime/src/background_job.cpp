@@ -4,10 +4,9 @@
 
 namespace pulp::runtime {
 
-BackgroundJobContext::BackgroundJobContext(CancellationToken cancellation,
+BackgroundJobContext::BackgroundJobContext(CancelToken cancellation,
                                            std::function<void(BackgroundJobProgress)> progress)
-    : cancellation_(std::move(cancellation))
-    , progress_(std::move(progress)) {}
+    : cancellation_(std::move(cancellation)), progress_(std::move(progress)) {}
 
 bool BackgroundJobContext::is_cancelled() const {
     return cancellation_.is_cancelled();
@@ -22,7 +21,7 @@ BackgroundJobHandle::BackgroundJobHandle(std::shared_ptr<State> state)
 
 void BackgroundJobHandle::cancel() const {
     if (auto state = state_) {
-        state->token.cancel();
+        state->source.cancel();
     }
 }
 
@@ -76,7 +75,7 @@ BackgroundJobService::~BackgroundJobService() {
 BackgroundJobHandle BackgroundJobService::submit(BackgroundJobOptions options,
                                                  BackgroundJobFunction job) {
     static std::atomic<std::uint64_t> next_sequence{0};
-    auto state = std::make_shared<BackgroundJobHandle::State>(CancellationToken{});
+    auto state = std::make_shared<BackgroundJobHandle::State>();
     BackgroundJobHandle handle(state);
 
     {
@@ -104,7 +103,8 @@ void BackgroundJobService::cancel_all() {
     }
 
     for (auto& job : jobs) {
-        if (job) job->token.cancel();
+        if (job)
+            job->source.cancel();
     }
 }
 

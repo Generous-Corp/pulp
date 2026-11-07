@@ -1,4 +1,5 @@
 #include <pulp/state/properties_file.hpp>
+#include <pulp/platform/special_dir.hpp>
 #include <choc/text/choc_JSON.h>
 #include <cerrno>
 #include <cctype>
@@ -221,27 +222,35 @@ void ApplicationProperties::save() {
 }
 
 std::string ApplicationProperties::user_settings_dir(std::string_view app_name) {
+    namespace plat = pulp::platform;
 #ifdef __APPLE__
-    const char* home = std::getenv("HOME");
-    if (home) return std::string(home) + "/Library/Preferences/" + std::string(app_name);
+    // Preferences, not Application Support: existing settings files live here.
+    const auto home = plat::special_dir(plat::SpecialDir::home);
+    if (!home.empty())
+        return (home / "Library" / "Preferences" / std::string(app_name)).string();
     return "/tmp/" + std::string(app_name);
-#elif defined(_WIN32)
-    const char* appdata = std::getenv("APPDATA");
-    if (appdata) return std::string(appdata) + "\\" + std::string(app_name);
+#else
+    const auto config = plat::special_dir(plat::SpecialDir::config);
+    if (!config.empty())
+        return (config / std::string(app_name)).string();
+#ifdef _WIN32
     return "C:\\Users\\Public\\" + std::string(app_name);
 #else
-    const char* home = std::getenv("HOME");
-    if (home) return std::string(home) + "/.config/" + std::string(app_name);
     return "/tmp/" + std::string(app_name);
+#endif
 #endif
 }
 
 std::string ApplicationProperties::common_settings_dir(std::string_view app_name) {
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(_WIN32)
+    namespace plat = pulp::platform;
+    const auto shared = plat::special_dir(plat::SpecialDir::app_data_shared);
+    if (!shared.empty())
+        return (shared / std::string(app_name)).string();
+#endif
+#if defined(__APPLE__)
     return "/Library/Application Support/" + std::string(app_name);
 #elif defined(_WIN32)
-    const char* progdata = std::getenv("ProgramData");
-    if (progdata) return std::string(progdata) + "\\" + std::string(app_name);
     return "C:\\ProgramData\\" + std::string(app_name);
 #else
     return "/etc/" + std::string(app_name);

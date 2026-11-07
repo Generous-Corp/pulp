@@ -203,7 +203,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/graph_event_contract.hpp',
-        'fingerprint': 'sha256:d0e530c8e75604b4b7ef06afca2503335e4bb8a307c82e87edc8077a47d66ca0',
+        'fingerprint': 'sha256:edf30e0200f48972611b5253942f684befdc8133e10dbcde43fe0a045eb2032d',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded host and graph-authored event boundary contract; it is not wired into SignalGraph admission or a generator-facing capability.',
