@@ -322,6 +322,7 @@ jobs:
 
       - name: Revalidate exact merge result with trusted base controls
         env:
+          GH_TOKEN: ${{ github.token }}
           VELLUM_READER_TOKEN: ${{ steps.vellum-reader-token.outputs.token }}
           VELLUM_READER_APP_JWT: ${{ steps.vellum-reader-jwt.outputs.app_jwt }}
           MERGE_BASE: ${{ github.event.merge_group.base_sha }}

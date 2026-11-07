@@ -903,12 +903,18 @@ def _http_error_detail(exc: Exception, token: str) -> str:
     return detail
 
 
-def _github_json(url: str, token: str) -> dict[str, Any]:
+def _github_json(
+    url: str, token: str, *, allow_anonymous: bool = False
+) -> dict[str, Any]:
     request = urllib.request.Request(
         url,
         headers={
             "Accept": "application/vnd.github+json",
-            "Authorization": "Bearer " + token,
+            **(
+                {"Authorization": "Bearer " + token}
+                if token or not allow_anonymous
+                else {}
+            ),
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
@@ -924,6 +930,36 @@ def _github_json(url: str, token: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise FreezeError("Vellum verification returned a non-object")
     return value
+
+
+def _public_github_json(
+    url: str, token: str, fallback_token: str | None
+) -> dict[str, Any]:
+    """Read a public Vellum object, retrying a 403 with the workflow's own token.
+
+    The shared reader-App installation token has one rate bucket for every
+    concurrent run; when it is refused (403/429), the same read is repeated under
+    ``fallback_token`` (the workflow's GITHUB_TOKEN, a separate bucket) or
+    anonymously. Only the credential changes: the caller still compares the
+    returned blob SHA with the pinned copy, and any other failure, or a failed
+    retry, raises.
+    """
+    try:
+        return _github_json(url, token)
+    except FreezeError as exc:
+        cause = exc.__cause__
+        if not (isinstance(cause, urllib.error.HTTPError) and cause.code in (403, 429)):
+            raise
+        first = str(exc)
+    endpoint = urllib.parse.urlsplit(url).path
+    print(
+        f"::warning::vellum-freeze: reader App token was refused for {endpoint}; "
+        "FALLBACK read of this public path with "
+        + ("the workflow GITHUB_TOKEN" if fallback_token else "no credential")
+        + f" (first failure: {first})",
+        file=sys.stderr,
+    )
+    return _github_json(url, fallback_token or "", allow_anonymous=True)
 
 
 def _git_blob(repo: pathlib.Path, revision: str, path: str) -> str:
@@ -1327,7 +1363,11 @@ def _receipt_mode(args: argparse.Namespace) -> int:
         try:
             problems = receipt.receipt_copy_problems(
                 repo, (base, args.head),
-                lambda path: _github_json(f"https://api.github.com/{path}", token),
+                lambda path: _public_github_json(
+                    f"https://api.github.com/{path}",
+                    token,
+                    os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
+                ),
             )
         except (receipt.ReceiptDriftError, FreezeError, OSError) as exc:
             print(f"vellum-freeze receipt mode: {exc}", file=sys.stderr)
