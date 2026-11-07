@@ -556,6 +556,16 @@ each event into the realtime `ParameterEventQueue` and also updates
 capacity are dropped from the sparse queue and counted as overflow, while the
 latest value still reaches `StateStore` for block-rate reads.
 
+### MIDI Output
+
+A processor whose descriptor sets `produces_midi` reports one MIDI output named
+"MIDI Out" through `AUAudioUnit.MIDIOutputNames`. Hosts install their MIDI
+output block only for a unit that reports an output there, so a MIDI-producing
+plug-in needs this to have its MIDI delivered. Events the processor writes to
+`midi_out` during `process()` are sent to that block on cable 0 with their
+sample offsets. A processor that does not set `produces_midi` reports no MIDI
+outputs, and a bypassed effect emits no MIDI.
+
 ### Multi-Bus / Sidechain
 
 AU v3 exposes descriptor input bus 0 as the main input and descriptor input bus

@@ -634,6 +634,28 @@ if(APPLE AND PULP_HAS_AUSDK)
     )
     catch_discover_tests(pulp-test-au-param-visibility)
 
+    # AUv3 MIDI output declaration: MIDIOutputNames gates the host's
+    # MIDIOutputEventBlock, and a producing processor's MIDI reaches that block.
+    # Compiles au_adapter.mm, mirroring the targets above.
+    add_executable(pulp-test-au-midi-output
+        test_au_midi_output.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_adapter.mm
+    )
+    target_link_libraries(pulp-test-au-midi-output PRIVATE
+        pulp::format
+        ausdk
+        Catch2::Catch2WithMain
+        "-framework AudioToolbox"
+        "-framework AVFoundation"
+        "-framework CoreAudioKit"
+        "-framework Foundation"
+    )
+    set_target_properties(pulp-test-au-midi-output PROPERTIES
+        CXX_STANDARD 23
+        OBJCXX_STANDARD 23
+    )
+    catch_discover_tests(pulp-test-au-midi-output)
+
     # AU v2 instrument (aumu) render-path RT-safety guard. Drives
     # PulpAUInstrument::Render for one steady-state block under
     # ScopedRtProcessProbe. Links the RT interposition trap TU and sets

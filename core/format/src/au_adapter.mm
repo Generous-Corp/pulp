@@ -21,6 +21,7 @@
 //  ├──────────────────────────────────────────┼───────────┼──────────────┼──────────────┤
 //  │ initWithComponentDescription:options:    │ self/nil  │ main (init)  │ YES (init)   │
 //  │ outputBusses / inputBusses               │ NSArray   │ main + audio │ NO (cached)  │
+//  │ MIDIOutputNames                          │ NSArray   │ main         │ YES (build)  │
 //  │ latency                                  │ seconds   │ KVO/main     │ NO           │
 //  │ tailTime                                 │ seconds   │ KVO/main     │ NO           │
 //  │ supportsUserPresets                      │ BOOL=YES  │ main         │ NO (const)   │
@@ -139,6 +140,9 @@ struct AUBridge {
     // Index of the sidechain bus in `inputBusses`. Bus arrays are built in
     // declaration order, so without a main input bus the sidechain sits at 0.
     NSInteger sidechain_bus_index = 1;
+    /// True when the descriptor declares MIDI output (hosts are told through
+    /// `MIDIOutputNames`, and only then install `MIDIOutputEventBlock`).
+    bool produces_midi = false;
     // Dual-tracked bypass.
     //   * `bypass_param_id != 0` means the plugin declared a "Bypass"
     //     parameter; the AUAudioUnit's `shouldBypassEffect` reads/writes
@@ -397,6 +401,7 @@ struct ScopedAuV3HostWriting {
     // installs one; the descriptor flag is the adapter's claim.
     _bridge.panic_state = _bridge.processor->panic_state();
     _bridge.panic_state->attach(_bridge.processor->descriptor().produces_midi);
+    _bridge.produces_midi = _bridge.processor->descriptor().produces_midi;
     _bridge.processor->set_state_store(&_bridge.store);
     _bridge.processor->define_parameters(_bridge.store);
     pulp::format::request_editor_prewarm(*_bridge.processor);
@@ -521,6 +526,16 @@ struct ScopedAuV3HostWriting {
 
 - (AUAudioUnitBusArray *)outputBusses { return _outputBusArray; }
 - (AUAudioUnitBusArray *)inputBusses { return _inputBusArray; }
+
+// MIDI outputs. A host installs `MIDIOutputEventBlock` only for a unit that
+// reports at least one output here, so a plug-in that produces MIDI but answers
+// with an empty list never has its output delivered. One output, matching the
+// single cable the render block writes to.
+- (NSArray<NSString *> *)MIDIOutputNames {
+    if (_bridge.produces_midi)
+        return @[ @"MIDI Out" ];
+    return @[];
+}
 
 - (NSArray<NSNumber *> *)channelCapabilities {
     if (!_bridge.processor) return nil;
