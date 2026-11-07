@@ -867,6 +867,42 @@ def _canonical_sha256(value: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+_DIAGNOSTIC_HEADERS = (
+    "x-ratelimit-remaining",
+    "x-ratelimit-resource",
+    "retry-after",
+    "x-github-sso",
+    "x-github-request-id",
+)
+
+
+def _http_error_detail(exc: Exception, token: str) -> str:
+    """Diagnostic suffix for an HTTP failure: body prefix and selected headers.
+
+    Diagnostics only; the caller still fails closed. The token is never
+    emitted, even if the response body were to echo it.
+    """
+    if not isinstance(exc, urllib.error.HTTPError):
+        return ""
+    try:
+        body = exc.read(500).decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 - diagnostics must not mask the failure
+        body = "<unreadable>"
+    headers = exc.headers
+    parts = []
+    for name in _DIAGNOSTIC_HEADERS:
+        value = headers.get(name) if headers is not None else None
+        if value is not None:
+            parts.append(f"{name}={value}")
+    detail = f" [body={body[:500]!r}"
+    if parts:
+        detail += "; " + ", ".join(parts)
+    detail += "]"
+    if token:
+        detail = detail.replace(token, "<redacted>")
+    return detail
+
+
 def _github_json(url: str, token: str) -> dict[str, Any]:
     request = urllib.request.Request(
         url,
@@ -881,8 +917,9 @@ def _github_json(url: str, token: str) -> dict[str, Any]:
             value = json.load(response)
     except (urllib.error.URLError, json.JSONDecodeError) as exc:
         endpoint = urllib.parse.urlsplit(url).path
+        detail = _http_error_detail(exc, token)
         raise FreezeError(
-            f"cannot verify Vellum authority at {endpoint}: {exc}"
+            f"cannot verify Vellum authority at {endpoint}: {exc}{detail}"
         ) from exc
     if not isinstance(value, dict):
         raise FreezeError("Vellum verification returned a non-object")
