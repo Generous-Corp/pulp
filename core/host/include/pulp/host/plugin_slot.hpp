@@ -87,6 +87,8 @@ struct HostParamInfo {
 
 using ParamRate = state::ParamRate;
 
+struct PluginLoadResult;
+
 // ── Plugin Slot ─────────────────────────────────────────────────────────
 
 class PluginSlot {
@@ -103,6 +105,9 @@ class PluginSlot {
     // Load a plugin from a PluginInfo descriptor.
     // Returns nullptr if the plugin can't be loaded.
     static std::unique_ptr<PluginSlot> load(const PluginInfo& info);
+
+    /// Explicit strict CLAP selection. Legacy load() keeps best-effort behavior.
+    static PluginLoadResult load_exact(const PluginSelection& selection);
 
     // Plugin metadata
     virtual const PluginInfo& info() const = 0;
@@ -398,6 +403,16 @@ class PluginSlot {
     virtual ProcessStatus process_status() const noexcept {
         return ProcessStatus::ok;
     }
+
+    /// Detached strict-load receipt; unavailable for legacy or unsupported loaders.
+    virtual std::optional<PluginResolvedIdentity> resolved_identity() const {
+        return std::nullopt;
+    }
+};
+
+/// Exactly one loaded slot or typed refusal. A successful slot owns its receipt.
+struct PluginLoadResult {
+    std::variant<std::unique_ptr<PluginSlot>, PluginIdentityError> value;
 };
 
 } // namespace pulp::host

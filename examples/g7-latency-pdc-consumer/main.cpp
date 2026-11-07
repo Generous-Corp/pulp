@@ -1,8 +1,10 @@
 #include <pulp/host/signal_graph_runtime.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 
 namespace {
 struct DelayState {
@@ -87,6 +89,36 @@ int main() try {
     require(graph.node_latency_samples(999999) == 0, "unknown-node-zero");
     require(!latency->node(999999).has_value(), "unknown-node-nullopt");
 
+    // Pacing probe: process a short wall-clock-shaped sequence while the
+    // control thread repeatedly reads the copied introspection map. This is a
+    // diagnostic continuity check only; it does not qualify the audio path as
+    // realtime-safe or establish a deadline guarantee.
+    constexpr int kPacedBlocks = 8;
+    constexpr int kPacedFrames = 64;
+    pulp::audio::Buffer<float> paced_input(1, kPacedFrames);
+    pulp::audio::Buffer<float> paced_output(1, kPacedFrames);
+    const auto paced_input_view =
+        static_cast<const pulp::audio::Buffer<float>&>(paced_input).view();
+    auto paced_output_view = paced_output.view();
+    const auto paced_period =
+        std::chrono::duration<double>(static_cast<double>(kPacedFrames) / 48000.0);
+    auto next_paced_deadline = std::chrono::steady_clock::now();
+    for (int block = 0; block < kPacedBlocks; ++block) {
+        next_paced_deadline +=
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(paced_period);
+        graph.process(paced_output_view, paced_input_view, kPacedFrames);
+        const auto paced_snapshot = graph.prepared_latency_snapshot();
+        require(paced_snapshot.has_value(), "paced-latency-snapshot");
+        require(paced_snapshot->total_latency_samples == 4 &&
+                    paced_snapshot->connection_delay(dry_edge) == 4,
+                "paced-pdc-stable");
+        require(!paced_snapshot->node(999999).has_value() &&
+                    !paced_snapshot->connection_delay(pulp::host::Connection{999999, 0, output, 0})
+                         .has_value(),
+                "paced-planted-negatives");
+        std::this_thread::sleep_until(next_paced_deadline);
+    }
+
     // A copied map remains stable, while a topology mutation retires the
     // published prepared snapshot until the next prepare().
     require(graph.disconnect(input, 0, dry, 0), "disconnect-for-mutation");
@@ -98,7 +130,7 @@ int main() try {
     require(graph.prepared_latency_snapshot().has_value(), "reprepared-latency-snapshot");
     std::cout << "g7-latency-pdc PASS total_latency_samples=" << graph.latency_samples()
               << " delayed_node_input_latency_samples=" << graph.node_latency_samples(delayed)
-              << '\n';
+              << " paced_blocks=" << kPacedBlocks << '\n';
     return 0;
 } catch (const std::exception& error) {
     std::cerr << "g7-latency-pdc FAIL rule=" << error.what() << '\n';

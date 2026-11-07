@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <bit>
 #include <cmath>
 #include <complex>
@@ -12,26 +13,27 @@
 namespace pulp::graph {
 
 enum class SpectralError : std::uint8_t {
-    None,
-    InvalidIdentity,
-    InvalidMask,
-    IdentityMismatch,
-    InvalidConnection,
-    UnsupportedOperation,
-    RequiresStoppedController,
-    TransitionPending,
-    Busy,
-    PendingMailboxData,
-    UnsupportedTransactionalReplacement,
-    SpectralPinnedExecutionUnsupported,
-    EpochExhausted,
-    ChronologyExhausted,
-    CapacityExceeded,
-    InvalidFrame,
-    MissingFrame,
-    StageContractViolation,
-    SynthesisOverflow,
-    OutputUnderrun
+    None = 0,
+    InvalidIdentity = 1,
+    InvalidMask = 2,
+    IdentityMismatch = 3,
+    InvalidConnection = 4,
+    UnsupportedOperation = 5,
+    RequiresStoppedController = 6,
+    TransitionPending = 7,
+    Busy = 8,
+    PendingMailboxData = 9,
+    UnsupportedTransactionalReplacement = 10,
+    SpectralPinnedExecutionUnsupported = 11,
+    EpochExhausted = 12,
+    ChronologyExhausted = 13,
+    CapacityExceeded = 14,
+    InvalidFrame = 15,
+    MissingFrame = 16,
+    StageContractViolation = 17,
+    SynthesisOverflow = 18,
+    OutputUnderrun = 19,
+    InvalidContract = 20
 };
 
 template <typename T> struct SpectralResult {
@@ -39,6 +41,83 @@ template <typename T> struct SpectralResult {
     SpectralError error = SpectralError::None;
     explicit operator bool() const noexcept {
         return value.has_value();
+    }
+};
+
+/// Versioned, canonical identity carried by every routed spectral batch.
+/// These fields are semantic data, not an object-layout or enum ordinal.
+struct SpectralFrameContract {
+    static constexpr std::size_t encoded_size = 32;
+    std::uint16_t version = 1;
+    std::uint16_t profile = 1;
+    std::uint32_t fft_size = 0;
+    std::uint32_t hop = 0;
+    std::uint16_t channels = 0;
+    std::uint16_t bins = 0;
+    std::uint64_t sample_rate_bits = 0;
+    std::uint8_t window = 1;        // symmetric float Hann v1
+    std::uint8_t phase = 1;         // local-window-origin v1
+    std::uint8_t normalization = 1; // squared-window WOLA v1
+    std::uint8_t precision = 1;     // binary32 complex bins v1
+
+    friend bool operator==(const SpectralFrameContract&, const SpectralFrameContract&) = default;
+
+    /// Canonical little-endian value encoding. The representation is fixed at
+    /// 32 bytes and is independent of C++ padding, enum values, or host ABI.
+    [[nodiscard]] std::array<std::uint8_t, encoded_size> encode() const noexcept {
+        std::array<std::uint8_t, encoded_size> out{};
+        auto put = [&](std::size_t offset, std::uint64_t value, unsigned bytes) {
+            for (unsigned i = 0; i < bytes; ++i)
+                out[offset + i] = static_cast<std::uint8_t>(value >> (8 * i));
+        };
+        put(0, version, 2);
+        put(2, profile, 2);
+        put(4, fft_size, 4);
+        put(8, hop, 4);
+        put(12, channels, 2);
+        put(14, bins, 2);
+        put(16, sample_rate_bits, 8);
+        out[24] = window;
+        out[25] = phase;
+        out[26] = normalization;
+        out[27] = precision;
+        return out;
+    }
+
+    [[nodiscard]] static SpectralResult<SpectralFrameContract>
+    decode(std::span<const std::uint8_t> bytes) noexcept {
+        if (bytes.size() != encoded_size)
+            return {std::nullopt, SpectralError::InvalidContract};
+        auto get = [&](std::size_t offset, unsigned count) {
+            std::uint64_t value = 0;
+            for (unsigned i = 0; i < count; ++i)
+                value |= std::uint64_t(bytes[offset + i]) << (8 * i);
+            return value;
+        };
+        SpectralFrameContract contract;
+        contract.version = static_cast<std::uint16_t>(get(0, 2));
+        contract.profile = static_cast<std::uint16_t>(get(2, 2));
+        contract.fft_size = static_cast<std::uint32_t>(get(4, 4));
+        contract.hop = static_cast<std::uint32_t>(get(8, 4));
+        contract.channels = static_cast<std::uint16_t>(get(12, 2));
+        contract.bins = static_cast<std::uint16_t>(get(14, 2));
+        contract.sample_rate_bits = get(16, 8);
+        contract.window = bytes[24];
+        contract.phase = bytes[25];
+        contract.normalization = bytes[26];
+        contract.precision = bytes[27];
+        if (contract.version != 1 || contract.profile != 1 || contract.window != 1 ||
+            contract.phase != 1 || contract.normalization != 1 || contract.precision != 1 ||
+            bytes[28] != 0 || bytes[29] != 0 || bytes[30] != 0 || bytes[31] != 0 ||
+            contract.fft_size < 256 || contract.fft_size > 16384 ||
+            (contract.fft_size & (contract.fft_size - 1)) != 0 || contract.hop == 0 ||
+            contract.hop > contract.fft_size / 2 || contract.channels == 0 ||
+            contract.channels > 16 || contract.bins != contract.fft_size / 2 + 1 ||
+            (contract.sample_rate_bits >> 63) ||
+            (contract.sample_rate_bits & 0x7fffffffffffffffULL) == 0 ||
+            (contract.sample_rate_bits & 0x7ff0000000000000ULL) == 0x7ff0000000000000ULL)
+            return {std::nullopt, SpectralError::InvalidContract};
+        return {contract};
     }
 };
 
@@ -71,6 +150,15 @@ class SpectralIdentity {
     }
     std::uint64_t sample_rate_bits() const noexcept {
         return rate_bits_;
+    }
+    SpectralFrameContract frame_contract() const noexcept {
+        SpectralFrameContract contract;
+        contract.fft_size = static_cast<std::uint32_t>(fft_size_);
+        contract.hop = static_cast<std::uint32_t>(hop_);
+        contract.channels = static_cast<std::uint16_t>(channels_);
+        contract.bins = static_cast<std::uint16_t>(bins());
+        contract.sample_rate_bits = rate_bits_;
+        return contract;
     }
     friend bool operator==(const SpectralIdentity&, const SpectralIdentity&) = default;
 
@@ -142,6 +230,11 @@ struct SpectralFrameBatchView {
     std::span<std::complex<float>> bins;
     std::uint32_t count = 0;
     std::uint32_t bins_per_frame = 0;
+    SpectralFrameContract contract;
+    /// Canonical wire identity copied at publication. Consumers validate this
+    /// boundary before reading any frame payload, so mutating either the
+    /// decoded fields or the encoded bytes fails closed.
+    std::array<std::uint8_t, SpectralFrameContract::encoded_size> encoded_contract{};
     bool fatal = false;
     std::int64_t fatal_origin = 0;
 };

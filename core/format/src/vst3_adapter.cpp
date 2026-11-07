@@ -764,6 +764,8 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     processor_ = factory_();
     trace.mark("after_factory");
     if (!processor_) return kInternalError;
+    panic_state_ = processor_->panic_state();
+    panic_state_->attach(processor_->descriptor().produces_midi);
     sample_accurate_params_ = processor_->wants_sample_accurate_parameters();
     param_events_monitor_.arm(!sample_accurate_params_, &param_events_);
 
@@ -2869,6 +2871,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // negotiated layouts retain their existing paths.
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
+        if (!warming_render_path_ && panic_state_)
+            service_panic(*processor_, *panic_state_, midi_out_);
         if (warming_render_path_) {
             // Warm-up block: the Processor never runs, so nothing it owns moves.
         } else if (native_f64) {
@@ -2876,6 +2880,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         } else {
             processor_->process(process_buffers, midi_in_, midi_out_, ctx);
         }
+        if (!warming_render_path_ && panic_state_)
+            panic_state_->observe_midi_out(midi_out_);
     }
     // VST3 puts the obligation to declare output silence on the plugin, and a
     // host is free to propagate its input silenceFlags into the output buffers

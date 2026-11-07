@@ -240,6 +240,11 @@ struct PulpLv2Instance {
     float** control_out_ports = nullptr;  // One per parameter (for output)
 
     int num_audio_inputs = 0;
+    // Width of the first input bus. Ports stay one flat run (the manifest's
+    // numbering is a compatibility contract), so run() splits the connected
+    // input ports at this count: the first ones are the main input, the rest
+    // the Sidechain bus a second declared input bus maps to.
+    int num_main_audio_inputs = 0;
     int num_audio_outputs = 0;
     int num_params = 0;
     std::vector<state::ParamID> param_ids;  // Maps control port index → ParamID

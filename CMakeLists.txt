@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.67.0
+    VERSION 1.84.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -486,6 +486,9 @@ if(PULP_ENABLE_SCENE3D)
 endif()
 # Render must come before view so pulp-view can link pulp-render via if(TARGET)
 if(PULP_ENABLE_GPU)
+    # The shared GPU device layer the render and GPU-audio device targets
+    # forward to on macOS (sets PULP_HAS_GPU_RUNTIME).
+    include(tools/cmake/PulpGpuRuntime.cmake)
     add_subdirectory(core/render)
 endif()
 # After core/render so the GPU convolver node can link pulp::gpu-device when GPU is

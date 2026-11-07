@@ -2,9 +2,7 @@
 
 #include <memory>
 
-namespace pulp::render {
-class GpuCompute;
-}
+#include <pulp/platform/gpu_fwd.hpp>
 
 namespace pulp::gpu_audio {
 class GpuConvolver;

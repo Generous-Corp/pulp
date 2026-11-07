@@ -100,6 +100,7 @@ set(PULP_PLATFORM_UNIT_HEADERS
     include/pulp/platform/device_capability.hpp
     include/pulp/platform/environment.hpp
     include/pulp/platform/file_dialog.hpp
+    include/pulp/platform/gpu_fwd.hpp
     include/pulp/platform/native_handle.hpp
     include/pulp/platform/permissions.hpp
     include/pulp/platform/platform.hpp

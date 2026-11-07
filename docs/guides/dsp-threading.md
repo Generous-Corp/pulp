@@ -623,6 +623,28 @@ Common recipes:
   the job. Publish a prepared sample-map revision atomically; treat cache misses
   as control-thread work, not audio-thread file I/O.
 
+## Render on a worker at a fixed latency
+
+When the audio itself is produced off the audio thread (a hardware emulator,
+offloaded or ML DSP), use `audio::AsyncBlockWorker<Event>`. The callback calls
+`process()` with the host block, its timed events and the output view; a job
+you supply renders the same stream on a worker thread, in chunks of its own
+size. Latency is defined on stream positions, `latency_blocks * max_block`
+frames, so it stays exact when the host changes block size and cannot drift:
+a frame the worker has not finished in time plays as silence (counted in
+`stats().miss_frames`) and is never played late. Report `latency_samples()`
+from the processor's `latency_samples()`, and pass the processor's
+`flag_latency_changed()` as the latency listener so a change made through
+`request_latency_blocks()` or `set_worker_latency_samples()` reaches the host
+through every format adapter.
+
+Pass `AsyncBlockMode::Offline` for a declared offline render, so the bounce
+holds the worker's real output. `AsyncBlockMode::Auto` also waits while
+`audio::PullRateDetector` sees the host pulling faster than real time without
+declaring it, which some hosts do when they bounce or freeze; without it such
+a render is silent. Waits are bounded by the configured deadline. Zero latency
+blocks waits on every call, like rendering inline.
+
 ## Verifying the contract in tests
 
 The no-alloc / no-lock contract is *enforced*, not just documented. On

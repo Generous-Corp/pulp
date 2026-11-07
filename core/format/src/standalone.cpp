@@ -345,6 +345,12 @@ void StandaloneApp::prepare_render_state() {
     prep.output_channels = config_.output_channels;
     processor_->prepare(prep);
 
+    // The standalone host has no MIDI output device path, so a panic resets
+    // the plug-in's voices only. Attached here (not at creation) because this
+    // is the one place every launch path and test passes through before audio.
+    panic_state_ = processor_->panic_state();
+    panic_state_->attach(false);
+
     while (hardware_midi_queue_.try_pop()) {}
     hardware_midi_queue_.reset_overflow_count();
     midi_in_.reserve(detail::kStandaloneMidiBufferEventCapacity);
@@ -611,7 +617,11 @@ void StandaloneApp::render_audio_block(
             // push below runs outside it) so the RT interposition guard traps a
             // regression in test builds.
             pulp::runtime::ScopedNoAlloc no_alloc_guard;
+            if (panic_state_)
+                service_panic(*processor_, *panic_state_, midi_out);
             processor_->process(output, *actual_input, midi_in, midi_out, proc_ctx);
+            if (panic_state_)
+                panic_state_->observe_midi_out(midi_out);
         }
 
         // Direct test-signal routing owns the final device output, but it must

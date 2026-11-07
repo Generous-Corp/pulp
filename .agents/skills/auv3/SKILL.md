@@ -119,11 +119,17 @@ Inside `initWithComponentDescription:…`:
 - Main input bus: when `desc.default_input_channels() > 0`, one
   `AUAudioUnitBus` with that channel count.
 - Sidechain bus: when `desc.input_buses.size() > 1` and
-  `desc.input_buses[1].default_channels > 0`, a **second** input
-  `AUAudioUnitBus` — bus index 1. Hosts connect their sidechain source
-  to bus index 1 and the render block pulls it from that index.
+  `desc.input_buses[1].default_channels > 0`, a further input
+  `AUAudioUnitBus`. Its index is whatever position it lands at in
+  `inBusses` — 1 behind a main input bus, 0 when the main input declares no
+  channels — and `_bridge.sidechain_bus_index` records it when the bus is
+  created so the render block pulls the index the host sees. A pull hard-coded
+  to 1 asked for a bus that did not exist on the side-chain-only shape.
 
-This mirrors the CLAP / VST3 "bus 0 = main, bus 1 = sidechain" rule.
+This mirrors the CLAP / VST3 "bus 0 = main, bus 1 = sidechain" rule for the
+common shape. Instruments get the same buses as effects: an instrument that
+declares input buses (optional, so it validates unconnected) exposes them and
+is pulled the same way; nothing in the category hides them.
 
 ### Parameters: `AUParameterTree`
 
@@ -1690,3 +1696,12 @@ editor, or nothing to prewarm, costs one virtual call. The editor itself does
 not change: an open that races the worker waits for the in-flight result
 instead of compiling again. Details: `view-bridge`, "What the host shows while
 it waits".
+
+## Panic requests
+
+The AU v3 adapter attaches to `Processor::panic_state()` where it creates the
+processor and wraps `process()` with `service_panic()` before and
+`observe_midi_out()` after, passing the descriptor's `produces_midi` as the
+`midi_out` claim (`docs/guides/midi-panic.md`). Keep both calls on any new
+process path (including f64) or `Processor::request_panic()` silently stops
+working there. Tests: test_au_plugin_state.mm (capabilities; the MIDI output block is host-installed, so the emitted MIDI is covered by the CLAP, VST3 and AU v2 tests).

@@ -9,18 +9,11 @@
  },
  "executables": {
   "Pulp UI Script Fixture": {
-   "data": "undeclared",
-   "detected_sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ],
+   "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ],
-   "undeclared_sources": [
-    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
-   ]
+   "sources": [],
+   "undeclared_sources": []
   },
   "pulp-control-broker-crash-fixture": {
    "data": "none",
@@ -318,6 +311,21 @@
    "sources": [],
    "spawning_sources": [
     "test/test_child_process_standard_input.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-clap-identity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-scan-worker",
+    "pulp-test-fixture-clap-identity"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_clap_identity.cpp"
    ],
    "spawns": "declared",
    "undeclared_sources": []
@@ -2769,6 +2777,7 @@
   "pulp-test-audio-edge-cases",
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
+  "pulp-test-audio-reader-idle-wakeups",
   "pulp-test-audio-registration",
   "pulp-test-audio-route-catalog",
   "pulp-test-audio-support",
@@ -2798,6 +2807,7 @@
   "pulp-test-clap-entry",
   "pulp-test-clap-host-validation",
   "pulp-test-clap-hosted-editor",
+  "pulp-test-clap-identity",
   "pulp-test-clap-latency-quirk",
   "pulp-test-clap-midi-events",
   "pulp-test-clap-slot-channel-width",
@@ -2984,6 +2994,7 @@
   "pulp-test-forge-tape-catalog",
   "pulp-test-format-core-only-consumer",
   "pulp-test-frame-stamp",
+  "pulp-test-g5-host-event-consumer",
   "pulp-test-gesture-threading",
   "pulp-test-golden",
   "pulp-test-golden-effect",
@@ -3010,8 +3021,6 @@
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-proc-installer",
-  "pulp-test-gpu-proc-installer-host-owned",
-  "pulp-test-gpu-proc-installer-host-owned-registered",
   "pulp-test-gpu-proc-installer-host-policy",
   "pulp-test-gpu-render-loss-consumer",
   "pulp-test-gpu-shared-io-convolution-pipeline",
@@ -4844,9 +4853,10 @@
    "inputs": [
     "core",
     "core/gpu_audio/CMakeLists.txt",
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
+    "core/platform/include/pulp/platform/gpu_fwd.hpp",
+    "core/render/CMakeLists.txt",
     "core/runtime",
     "core/runtime/include",
     "core/simd",
@@ -4856,6 +4866,9 @@
     "core/view/include",
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/reload_exports.cpp",
+    "tools/cmake",
+    "tools/cmake/PulpGpuRuntime.cmake",
+    "tools/cmake/PulpGpuRuntimeRecord.cmake",
     "tools/scripts/core_vellum_direction.py",
     "tools/scripts/include_boundary.py",
     "tools/scripts/vellum_policy.json",
@@ -4868,7 +4881,11 @@
    "inputs": [
     "core",
     "core/audio/CMakeLists.txt",
+    "core/gpu_audio/CMakeLists.txt",
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "test/ctest_script_inputs.json",
+    "tools/cmake/PulpConfig.cmake.in",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/scripts/test_core_vellum_direction.py"
    ],
    "kind": "python"
@@ -4983,10 +5000,34 @@
    ],
    "kind": "python"
   },
+  "dawn-binding-census-selftest": {
+   "entry": "tools/scripts/test_dawn_binding_census.py",
+   "inputs": [
+    "tools/scripts/dawn_binding_census.py",
+    "tools/scripts/test_dawn_binding_census.py"
+   ],
+   "kind": "python"
+  },
   "dawn-proc-setter-absent-when-host-owned": {
    "entry": "test/verify_dawn_proc_setter_absent.py",
    "inputs": [
     "test/verify_dawn_proc_setter_absent.py"
+   ],
+   "kind": "python"
+  },
+  "dead-test-guard": {
+   "entry": "tools/scripts/dead_test_guard.py",
+   "inputs": [
+    "tools/scripts/dead_test_guard.py"
+   ],
+   "kind": "python"
+  },
+  "dead-test-guard-selftest": {
+   "entry": "tools/scripts/test_dead_test_guard.py",
+   "inputs": [
+    "test/CMakeLists.txt",
+    "tools/scripts/dead_test_guard.py",
+    "tools/scripts/test_dead_test_guard.py"
    ],
    "kind": "python"
   },
@@ -5045,7 +5086,10 @@
    "entry": "tools/deps/test_audit_vellum_drift.py",
    "inputs": [
     "tools/ci/tart-provision.sh",
+    "tools/cmake",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/deps/audit.py",
+    "tools/deps/manifest.json",
     "tools/deps/test_audit_vellum_drift.py",
     "tools/packages/test-stubs"
    ],
@@ -5060,10 +5104,25 @@
    ],
    "kind": "python"
   },
+  "deps-patches-selftest": {
+   "entry": "tools/deps/test_check_patches.py",
+   "inputs": [
+    "tools/deps/check_patches.py",
+    "tools/deps/patches.json",
+    "tools/deps/test_check_patches.py"
+   ],
+   "kind": "python"
+  },
+  "deps-patches-verify": {
+   "entry": "tools/deps/check_patches.py",
+   "inputs": [
+    "tools/deps/check_patches.py"
+   ],
+   "kind": "python"
+  },
   "design-unit-boundary": {
    "entry": "tools/scripts/design_unit_boundary_check.py",
    "inputs": [
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -5085,7 +5144,6 @@
   "design-unit-boundary-selftest": {
    "entry": "tools/scripts/test_design_unit_boundary_check.py",
    "inputs": [
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -5248,6 +5306,7 @@
     "tools/ci/governed-build.sh",
     "tools/scripts/confirm_failure.sh",
     "tools/scripts/core_vellum_direction.py",
+    "tools/scripts/dawn_binding_census.py",
     "tools/scripts/editor_host_acceptance.py",
     "tools/scripts/test_editor_host_acceptance.py"
    ],
@@ -5303,6 +5362,21 @@
     "tools/scripts/example_validation_paths.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/test_example_validation_paths.py"
+   ],
+   "kind": "python"
+  },
+  "examples-index-guard": {
+   "entry": "tools/scripts/examples_index_guard.py",
+   "inputs": [
+    "tools/scripts/examples_index_guard.py"
+   ],
+   "kind": "python"
+  },
+  "examples-index-guard-selftest": {
+   "entry": "tools/scripts/test_examples_index_guard.py",
+   "inputs": [
+    "tools/scripts/examples_index_guard.py",
+    "tools/scripts/test_examples_index_guard.py"
    ],
    "kind": "python"
   },
@@ -5500,7 +5574,6 @@
   "foundation-include-lint": {
    "entry": "tools/scripts/foundation_include_lint.py",
    "inputs": [
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -6884,6 +6957,13 @@
     "tools/scripts/json_schema_lite.py",
     "tools/scripts/release_artifact_contents.py",
     "tools/scripts/test_gpu_recipe_catalog.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-runtime-installer-topology": {
+   "entry": "test/verify_gpu_runtime_topology.py",
+   "inputs": [
+    "test/verify_gpu_runtime_topology.py"
    ],
    "kind": "python"
   },
@@ -8633,7 +8713,6 @@
   "pulp-view-core-include-boundary": {
    "entry": "tools/scripts/include_boundary.py",
    "inputs": [
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8691,7 +8770,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8732,7 +8810,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8764,7 +8841,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8805,7 +8881,6 @@
    "inputs": [
     "core/canvas",
     "core/canvas/CMakeLists.txt",
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -8851,7 +8926,6 @@
     "core/canvas/platform/mac/cg_canvas.mm",
     "core/canvas/src/bundled_fonts.cpp",
     "core/canvas/src/skia_chromium_raw_ptr_compat.cpp",
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/render/include/pulp/render/gpu_compute.hpp",
@@ -8900,7 +8974,6 @@
   "pulp.vellum-view-core-pulp-kept": {
    "entry": "tools/scripts/vellum_view_core_pulp_kept_check.py",
    "inputs": [
-    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
     "core/platform",
     "core/platform/include",
     "core/runtime",
@@ -12544,6 +12617,7 @@
     "core/host",
     "core/host/include",
     "core/host/include/pulp/host",
+    "core/host/src",
     "core/platform/include/pulp/platform/child_process.hpp",
     "docs/status",
     "docs/status/consumption-profiles.json",
@@ -13421,8 +13495,15 @@
     ".githooks/pre-push",
     ".github/vellum-change-events",
     ".github/vellum-expansion-watch-events",
+    ".github/vellum-export-events",
+    ".github/vellum-export-receipt",
+    ".github/vellum-export-receipt/pin.json",
     ".github/vellum-ownership.json",
+    "core/platform",
+    "core/platform/src/file_dialog_stub.cpp",
+    "core/view/cmake/PulpDesignUnits.cmake",
     "core/view/src/pointer_dispatch.cpp",
+    "tools/scripts",
     "tools/scripts/gates.sh",
     "tools/scripts/generate_vellum_ownership_projection.py",
     "tools/scripts/pulp_tooling_disposition.py",

@@ -223,6 +223,7 @@ private:
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
     PluginDescriptor descriptor_;
+    std::shared_ptr<PanicState> panic_state_;
     double sample_rate_ = 48000.0;
     PrepareResourceLimit last_prepare_limit_failure_ = PrepareResourceLimit::None;
 };

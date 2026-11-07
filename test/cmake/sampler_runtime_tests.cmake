@@ -403,6 +403,11 @@ pulp_add_test_suite(pulp-test-realtime-sample-recorder GROUP pulp-test-group-sam
 pulp_add_test_suite(pulp-test-audio-stream-handoff GROUP pulp-test-group-sampler-audio
     LIBRARIES pulp::audio)
 
+# Fixed-latency playout of worker-rendered audio for variable host blocks,
+# and the host pull-rate detector it uses.
+pulp_add_test_suite(pulp-test-async-block-worker GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
+
 # Sampler key/pitch/slice mapping policy kept out of renderers and slot storage.
 pulp_add_test_suite(pulp-test-sample-key-map GROUP pulp-test-group-sampler-audio
     LIBRARIES pulp::audio)

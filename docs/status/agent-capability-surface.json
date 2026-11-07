@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 183,
+  "inventory_version": 191,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,28 +42,28 @@
     }
   ],
   "counts": {
-    "public_headers": 519,
-    "reviewed_headers": 271,
-    "legacy_unreviewed_headers": 248,
+    "public_headers": 526,
+    "reviewed_headers": 281,
+    "legacy_unreviewed_headers": 245,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 102,
-      "legacy_unreviewed": 248,
+      "infrastructure": 112,
+      "legacy_unreviewed": 245,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
-        "public_headers": 114,
-        "reviewed_headers": 18,
-        "legacy_unreviewed_headers": 96,
+        "public_headers": 116,
+        "reviewed_headers": 22,
+        "legacy_unreviewed_headers": 94,
         "unsupported_headers": 0
       },
       "midi": {
-        "public_headers": 50,
-        "reviewed_headers": 25,
-        "legacy_unreviewed_headers": 25,
+        "public_headers": 51,
+        "reviewed_headers": 27,
+        "legacy_unreviewed_headers": 24,
         "unsupported_headers": 0
       },
       "music": {
@@ -97,8 +97,8 @@
         "unsupported_headers": 0
       },
       "host": {
-        "public_headers": 13,
-        "reviewed_headers": 13,
+        "public_headers": 17,
+        "reviewed_headers": 17,
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       }
@@ -113,6 +113,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/async_block_worker.hpp",
+      "fingerprint": "sha256:33f3ba40c7c017a7859242307bb29d51dc50e56f7827e3e262f1ea68795251d2",
+      "include": "pulp/audio/async_block_worker.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Fixed-latency playout of worker-rendered audio and timed events for variable host blocks; threading infrastructure a processor drives from process(), not a generator-facing DSP capability."
     },
     {
       "domain": "audio",
@@ -261,11 +270,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/buffering_reader.hpp",
-      "fingerprint": "sha256:89d37d1bae31a3851126afadf408056980fb1fd09d2e66987a359f762f78945a",
+      "fingerprint": "sha256:051b0e39daded2b42ffa26e82bb2835546bfea02bd927de687d473b16974529f",
       "include": "pulp/audio/buffering_reader.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Background pre-buffering ring for file playback whose worker the audio thread wakes through runtime::WakeSignal; streaming infrastructure, not a generator-facing DSP capability."
     },
     {
       "domain": "audio",
@@ -515,6 +524,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/pull_rate_detector.hpp",
+      "fingerprint": "sha256:d6be164e1d3f435ae45c994b0ee9835a873895bf98f87652c515064253925c5f",
+      "include": "pulp/audio/pull_rate_detector.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Detects a host pulling audio faster than real time without declaring an offline render; a scheduling helper with no DSP or generator claim."
     },
     {
       "domain": "audio",
@@ -978,11 +996,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/streaming_sample_source.hpp",
-      "fingerprint": "sha256:3daf96212583d625d2372780b22f8a7e211104290511e776ca6ff149b2a61e64",
+      "fingerprint": "sha256:c6545cbfd9556d958a6b3a8768b0c0358e654d228cc99fdb1655ac8b4d4d56f9",
       "include": "pulp/audio/streaming_sample_source.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Preloaded-head plus streamed-tail sample source with a background reader woken by the audio thread; the sampler's disk-streaming infrastructure, with no generator capability claim of its own."
     },
     {
       "domain": "audio",
@@ -1180,6 +1198,33 @@
     },
     {
       "domain": "host",
+      "source": "core/host/include/pulp/host/graph_event_contract.hpp",
+      "fingerprint": "sha256:d0e530c8e75604b4b7ef06afca2503335e4bb8a307c82e87edc8077a47d66ca0",
+      "include": "pulp/host/graph_event_contract.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Bounded host and graph-authored event boundary contract; it is not wired into SignalGraph admission or a generator-facing capability."
+    },
+    {
+      "domain": "host",
+      "source": "core/host/include/pulp/host/plugin_identity.hpp",
+      "fingerprint": "sha256:f5d1fe9c5e8038b5cbb564170a8cb23fe7abb79b0c6009f5f6ec8b0d8b578060",
+      "include": "pulp/host/plugin_identity.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema."
+    },
+    {
+      "domain": "host",
+      "source": "core/host/include/pulp/host/plugin_slot.hpp",
+      "fingerprint": "sha256:9285bdcc1d97c35e6c8f2871d92eb938322d58d2817e9ed53a624340857df0e9",
+      "include": "pulp/host/plugin_slot.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema."
+    },
+    {
+      "domain": "host",
       "source": "core/host/include/pulp/host/sample_region_authoring.hpp",
       "fingerprint": "sha256:15e798963f6115b371c9a644de16619a6ea10e5c797845b25db72c14301ebaf7",
       "include": "pulp/host/sample_region_authoring.hpp",
@@ -1210,6 +1255,15 @@
         "signal.sample-region"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "host",
+      "source": "core/host/include/pulp/host/scanner.hpp",
+      "fingerprint": "sha256:23c5d2b996ec52b881d3f7f24055af43e751d60f2a70d0bbc547c7730d316b80",
+      "include": "pulp/host/scanner.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema."
     },
     {
       "domain": "host",
@@ -1254,7 +1308,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:0febf6e74d7fc7eec33505b9f0c96e9e92e48eb550b9a1a508de42658c4e302d",
+      "fingerprint": "sha256:5e5f2547ae4675e5641c608d81a497aefa4b17fa120adbf991a9f96dc7380416",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1274,7 +1328,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/trigger_graph.hpp",
-      "fingerprint": "sha256:c553cd4a35d13a5d4cd6822f5ef8bc254c5f1a3613ea1ff269ddfb1bcf40bccb",
+      "fingerprint": "sha256:f26b6613f55461f4f0d36fe4b2d027b45246b9220f18213b271d17831fbac68a",
       "include": "pulp/host/trigger_graph.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1321,7 +1375,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/block_ops.hpp",
-      "fingerprint": "sha256:563569c0bb61029b1b374a8d91812a77818cb9f3db18cc2706a4c570860dd8a0",
+      "fingerprint": "sha256:7cc39d018aad8ab08ca1ef31a2af8c0ea3dc77ac63877a197434854770bc8d24",
       "include": "pulp/midi/block_ops.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -1521,7 +1575,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/mpe_buffer.hpp",
-      "fingerprint": "sha256:40f4e08a25956811f4466b031734e5fd418e313e4861007304dd33a33ca50e0e",
+      "fingerprint": "sha256:9b08b7224b5ce9c5aa833547fccd1827d70b18445d0c14fc3775bc21eb072cfb",
       "include": "pulp/midi/mpe_buffer.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -1593,6 +1647,15 @@
         "midi.note-length-shaping"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "midi",
+      "source": "core/midi/include/pulp/midi/panic.hpp",
+      "fingerprint": "sha256:5de1b463081d7a2bb4c01c83886bc2b341d54b492c43259dace4a944b67e5495",
+      "include": "pulp/midi/panic.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Pure MIDI 1.0 panic message generation and held-note offs used by processors and adapters; not a generator-facing capability."
     },
     {
       "domain": "midi",
@@ -1668,11 +1731,11 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/synthesiser.hpp",
-      "fingerprint": "sha256:831ae4496996596eea75fb8e6ec7ae6fa7ee3aca61976a633727ac96174eb1a0",
+      "fingerprint": "sha256:2611124e14f31cf1481b9605e99d6bdff7c46fe751073ff1922b01e73e97522c",
       "include": "pulp/midi/synthesiser.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Polyphonic voice allocator used by instrument processors; reviewed when panic() was added. Not a generator-facing capability."
     },
     {
       "domain": "midi",
@@ -3394,7 +3457,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/gain.hpp",
-      "fingerprint": "sha256:54651b70d3f4f19684907be44323e35fd4d726d7e9795b04c07eda1b79aab503",
+      "fingerprint": "sha256:26ea4471471e1af735f3d3e10d795212e9a351c89c50f39d45783802107a557c",
       "include": "pulp/signal/gain.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

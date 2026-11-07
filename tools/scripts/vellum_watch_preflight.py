@@ -54,6 +54,13 @@ Exit codes:
       disposition) is stale; the regenerate command is printed
   12  the change-event check (`vellum_freeze_check.py`) fails the range — most
       often a touched transferred-slice path with no change event
+  14  an exported path (Vellum's pinned export receipt) was edited, added or
+      deleted without a `vellum_inherits` decision: the real receipt-mode
+      checker's verdict, plus the export-event skeleton, or `--fix` to write it
+  15  a `PULP_*_UNIT_HEADERS` list is wrong (a public header under core/runtime,
+      canvas, events, platform or simd that is not listed, or a listed one that
+      is gone); the exact line to add or remove is printed. CI finds this in the
+      `pulp.vellum-closure*` ctests, which need a configured build.
   2   --write-event refused (bad arguments, file exists, nothing owed)
 """
 
@@ -68,6 +75,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import types
 
 SKILL = ".agents/skills/pulp-vellum-change-routing/SKILL.md"
@@ -81,6 +89,8 @@ WRITE_REFUSED = 2
 INVENTORY_STALE = 11
 CHANGE_EVENT_OWED = 12
 INVENTORY_UNVERIFIED = 13
+EXPORT_OWED = 14
+UNIT_HEADERS_WRONG = 15
 # A verifier's own exit status for "this interpreter cannot run me" (a missing
 # dependency such as PyYAML): not evidence that the committed file is stale.
 VERIFIER_MISSING_DEPENDENCY = 3
@@ -842,6 +852,199 @@ def write_event(root: pathlib.Path, base: str, head: str, stream, *,
     return NOTHING_OWED
 
 
+# ── export events and unit header lists ───────────────────────────────────
+
+EXPORT_EVENT_DIR_REL = ".github/vellum-export-events"
+HEADER_EXTS = {".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp"}
+# Directories that hold exactly one Vellum unit, so every header under
+# include/ must be in that unit's list (vellum_closure.unit_public_headers).
+SINGLE_UNIT_DIRS = ("core/runtime", "core/canvas", "core/events", "core/platform",
+                    "core/simd")
+DESIGN_UNITS_CMAKE = "core/view/cmake/PulpDesignUnits.cmake"
+_HEADER_SET_RE = re.compile(r"set\(\s*(PULP_[A-Z0-9_]*HEADERS)\s+(.*?)\)", re.DOTALL)
+EXPORT_DECISION_PLACEHOLDER = ("<DECIDE: true if the next Vellum re-export should carry "
+                               "this change, false if not>")
+
+
+def parse_header_lists(cmake_text: str) -> dict[str, list[str]]:
+    """`set(PULP_..._HEADERS a b c)` blocks, comments and variable refs dropped."""
+    lists: dict[str, list[str]] = {}
+    for name, body in _HEADER_SET_RE.findall(cmake_text):
+        entries: list[str] = []
+        for line in body.splitlines():
+            entries += [t for t in line.split("#", 1)[0].split()
+                        if "${" not in t and not t.startswith("$<")]
+        lists.setdefault(name, []).extend(entries)
+    return lists
+
+
+def check_unit_headers(root: pathlib.Path) -> list[str]:
+    """Problems with the unit header lists, each naming the line to fix.
+
+    Mirrors `vellum_closure.unit_public_headers` without a configured build:
+    for a single-unit directory every header under `include/` must be listed
+    and every listed header must exist. The design units share core/view with
+    other targets, so there only "every listed header exists" is checkable.
+    """
+    problems: list[str] = []
+    for rel_dir in SINGLE_UNIT_DIRS:
+        cmake = root / rel_dir / "CMakeLists.txt"
+        if not cmake.is_file():
+            continue
+        unit_lists = {n: v for n, v in parse_header_lists(
+            cmake.read_text(encoding="utf-8")).items() if n.endswith("UNIT_HEADERS")}
+        if not unit_lists:
+            continue
+        listed = {h for v in unit_lists.values() for h in v}
+        list_name = sorted(unit_lists)[0]
+        include_root = root / rel_dir / "include"
+        present = ({p.relative_to(root / rel_dir).as_posix()
+                    for p in include_root.rglob("*")
+                    if p.is_file() and p.suffix.lower() in HEADER_EXTS}
+                   if include_root.is_dir() else set())
+        for header in sorted(present - listed):
+            before = sorted(h for h in unit_lists[list_name] if h < header)
+            where = f"after `{before[-1]}`" if before else "at the top of the list"
+            problems.append(
+                f"{rel_dir}/CMakeLists.txt: public header {rel_dir}/{header} is not in "
+                f"{list_name}.\n      Add this line {where}:\n          {header}")
+        for header in sorted(listed - present):
+            problems.append(
+                f"{rel_dir}/CMakeLists.txt: {list_name} lists {header}, which does not "
+                f"exist under {rel_dir}/.\n      Remove or rename that line.")
+    design = root / DESIGN_UNITS_CMAKE
+    if design.is_file():
+        lists = parse_header_lists(design.read_text(encoding="utf-8"))
+        for name, headers in sorted(lists.items()):
+            for header in headers:
+                if (pathlib.PurePosixPath(header).suffix.lower() in HEADER_EXTS
+                        and not (root / "core/view" / header).is_file()):
+                    problems.append(
+                        f"{DESIGN_UNITS_CMAKE}: {name} lists {header}, which does not "
+                        f"exist under core/view/.\n      Remove or rename that line.")
+    return problems
+
+
+def export_verdict(root: pathlib.Path, base: str, head: str,
+                   python: str = sys.executable):
+    """(completed process, report dict) from the real receipt-mode checker."""
+    if not (root / FREEZE_CHECKER_REL).is_file():
+        return None, None
+    resolved = _resolve_range(root, base, head)
+    if resolved is None:
+        return None, None
+    base_sha, head_sha = resolved
+    fd, out_name = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    try:
+        try:
+            done = subprocess.run(
+                [python, FREEZE_CHECKER_REL, "--repo", str(root), "--receipt-mode",
+                 "--base", base_sha, "--head", head_sha, "--output", out_name],
+                cwd=root, capture_output=True, text=True, encoding="utf-8",
+                timeout=120)
+        except (OSError, subprocess.SubprocessError):
+            return None, None
+        try:
+            report = json.loads(pathlib.Path(out_name).read_text(encoding="utf-8") or "{}")
+        except ValueError:
+            report = {}
+    finally:
+        pathlib.Path(out_name).unlink(missing_ok=True)
+    return done, report
+
+
+def build_export_event(report: dict, *, event_id: str, created_at: str, inherits,
+                       rationale: str) -> dict:
+    return {
+        "schema_version": 1,
+        "event_id": event_id,
+        "kind": "exported-path-change",
+        "created_at": created_at,
+        "receipt_export_id": report["export_id"],
+        "paths": sorted(report["missing"]),
+        "vellum_inherits": inherits,
+        "rationale": rationale,
+    }
+
+
+def _default_export_event_id(root: pathlib.Path, today: dt.date) -> str:
+    branch = (_git(root, "rev-parse", "--abbrev-ref", "HEAD") or "change").rsplit("/", 1)[-1]
+    return f"{today.strftime('%Y%m%d')}-{_slug(branch)}"
+
+
+def run_unit_and_export(root: pathlib.Path, base: str, head: str, stream, *,
+                        fix: bool = False, inherits: str | None = None,
+                        rationale: str | None = None, event_id: str | None = None,
+                        now: dt.datetime | None = None) -> int:
+    """Print what is wrong; return the highest-ranked exit code (0 if clean)."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    code = NOTHING_OWED
+
+    problems = check_unit_headers(root)
+    if problems:
+        code = UNIT_HEADERS_WRONG
+        _emit(["  ✗ vellum unit header lists (BLOCKING — the `pulp.vellum-closure*` "
+               "ctests fail the same way in CI):"]
+              + ["     " + problem for problem in problems] + [""], stream)
+
+    done, report = export_verdict(root, base, head)
+    missing = (report or {}).get("missing") or []
+    if done is None or (done.returncode == 0 and not missing):
+        return code
+    if not missing:
+        message = (done.stderr or "").strip()
+        if message and (report.get("frozen") or report.get("conflicting")):
+            _emit(["  ✗ vellum export receipt (BLOCKING):",
+                   "     " + message.replace("\n", "\n     ")], stream)
+            return EXPORT_OWED
+        return code
+
+    created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    if fix:
+        if inherits not in ("true", "false") or not rationale \
+                or len(rationale.strip()) < 24 or rationale.lstrip().startswith("<"):
+            print("vellum-export: --fix-export-event needs --inherits true|false and a "
+                  "real --rationale (24+ characters) saying what changed and why Vellum "
+                  "does or does not take it.", file=stream)
+            return WRITE_REFUSED
+        eid = event_id or _default_export_event_id(root, now.date())
+        if not CHANGE_EVENT_ID_RE.fullmatch(eid):
+            print(f"vellum-export: --event-id {eid!r} must look like YYYYMMDD-short-slug.",
+                  file=stream)
+            return WRITE_REFUSED
+        path = root / EXPORT_EVENT_DIR_REL / f"{eid}.json"
+        if path.exists():
+            print(f"vellum-export: {path} already exists; pick another --event-id.",
+                  file=stream)
+            return WRITE_REFUSED
+        event = build_export_event(report, event_id=eid, created_at=created_at,
+                                   inherits=(inherits == "true"), rationale=rationale.strip())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(event, indent=2) + "\n", encoding="utf-8")
+        print(f"wrote {path.relative_to(root)} (commit it: the checker reads the "
+              "commit range, not the working tree)", file=stream)
+        return code
+
+    event = build_export_event(
+        report, event_id=_default_export_event_id(root, now.date()),
+        created_at=created_at, inherits=EXPORT_DECISION_PLACEHOLDER,
+        rationale="<what changed, and why Vellum does or does not take it>")
+    lines = ["  ✗ vellum export receipt (BLOCKING — the required `Vellum freeze` checks "
+             "fail the same way):",
+             "     These exported paths owe an explicit `vellum_inherits` decision:"]
+    lines += [f"       - {p} ({why})" for p, why in sorted((report.get("owed") or {}).items())]
+    lines += ["", f"     Add {EXPORT_EVENT_DIR_REL}/{event['event_id']}.json:", ""]
+    lines += ["       " + ln for ln in json.dumps(event, indent=2).splitlines()]
+    lines += ["", "     Or write it in one step:", "",
+              "       python3 tools/scripts/vellum_watch_preflight.py --fix-export-event \\",
+              "         --inherits true|false --rationale \"<what changed, and why Vellum "
+              "does or does not take it>\"", "",
+              "     Commit it: the checker reads the commit range, not the working tree."]
+    _emit(lines, stream)
+    return EXPORT_OWED
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -863,8 +1066,15 @@ def main(argv: list[str] | None = None) -> int:
         "--inventories", action="store_true",
         help="also verify the freeze job's cut manifest, ownership projection "
              "and tooling disposition (exit 11 when one is stale)")
+    mode.add_argument(
+        "--fix-export-event", action="store_true",
+        help="write the owed export event into "
+             f"{EXPORT_EVENT_DIR_REL}/ (needs --inherits and --rationale)")
+    parser.add_argument("--inherits", choices=("true", "false"),
+                        help="the vellum_inherits decision for --fix-export-event")
     parser.add_argument("--rationale",
-                        help="rationale text for --write-event / --write-change-event")
+                        help="rationale text for --write-event / --write-change-event / "
+                             "--fix-export-event")
     parser.add_argument("--event-id", help="event id for --write-event "
                         "(default: <today>-<branch>-watch) or --write-change-event "
                         "(default: <today>-<branch>)")
@@ -873,6 +1083,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.write_event:
         return write_event(root, args.base, args.head, sys.stdout,
                            rationale=args.rationale, event_id=args.event_id)
+    if args.fix_export_event:
+        try:
+            return run_unit_and_export(root, args.base, args.head, sys.stdout, fix=True,
+                                       inherits=args.inherits, rationale=args.rationale,
+                                       event_id=args.event_id)
+        except Exception:
+            return NO_VERDICT
     if args.write_change_event:
         return write_change_event(root, args.base, args.head, sys.stdout,
                                   rationale=args.rationale, event_id=args.event_id)
@@ -886,6 +1103,10 @@ def main(argv: list[str] | None = None) -> int:
                             enforce=args.enforce)
     except Exception:
         freeze = NO_VERDICT
+    try:
+        extra = run_unit_and_export(root, args.base, args.head, sys.stderr)
+    except Exception:
+        extra = NOTHING_OWED
     inventories = NOTHING_OWED
     if args.inventories:
         try:
@@ -901,6 +1122,8 @@ def main(argv: list[str] | None = None) -> int:
         return CHANGE_EVENT_OWED
     if inventories in (INVENTORY_STALE, INVENTORY_UNVERIFIED):
         return inventories
+    if extra in (EXPORT_OWED, UNIT_HEADERS_WRONG):
+        return extra
     return code
 
 if __name__ == "__main__":

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261106-context-menu-value-label",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-06T10:40:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/view/include/pulp/view/context_menu.hpp",
+    "core/view/src/context_menu.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "The shared ContextMenu widget gains a slider value label (the track and pointer mapping stop short of it), a reserved minimum panel width, and deferral of set_items issued from inside an item callback, which was a use-after-free for any product that rebuilds rows from a row's own on_change. Pure widget behaviour with no Pulp-only dependency, so the next re-export carries it and Vellum menus get the same fix."
+}

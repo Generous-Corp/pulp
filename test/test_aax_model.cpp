@@ -746,3 +746,33 @@ TEST_CASE("AAX model binds a parameter store before reading latency", "[aax][mod
     REQUIRE(result.definition.parameters.size() == 1);
     CHECK(result.definition.parameters[0].id == ParameterLatencyEffect::kLookahead);
 }
+
+TEST_CASE("AAX model accepts an instrument with an optional main input", "[aax][model]") {
+    auto codes = valid_codes();
+
+    // A generator that can also process audio keeps its input stem.
+    ConfigurableProcessor::configure(
+        descriptor_with_buses({{"Main In", 2, true}}, {{"Main Out", 2, false}},
+                              pulp::format::PluginCategory::Instrument, /*accepts_midi=*/true));
+    auto instrument = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE(instrument.ok);
+    REQUIRE(instrument.definition.components.size() == 1);
+    REQUIRE(instrument.definition.components[0].main_input_channels == 2);
+
+    // With a mono optional sidechain behind it, both stems are carried.
+    ConfigurableProcessor::configure(descriptor_with_buses(
+        {{"Main In", 2, true}, {"Sidechain", 1, true}}, {{"Main Out", 2, false}},
+        pulp::format::PluginCategory::Instrument, /*accepts_midi=*/true));
+    auto with_sidechain =
+        pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE(with_sidechain.ok);
+    REQUIRE(with_sidechain.definition.supports_sidechain);
+    REQUIRE(with_sidechain.definition.components[0].sidechain_channels == 1);
+
+    // The effect rule is unchanged: an optional main input is still refused.
+    ConfigurableProcessor::configure(descriptor_with_buses(
+        {{"Main In", 2, true}}, {{"Main Out", 2, false}}, pulp::format::PluginCategory::Effect));
+    auto effect = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(effect.ok);
+    REQUIRE(effect.error.find("optional main input bus") != std::string::npos);
+}

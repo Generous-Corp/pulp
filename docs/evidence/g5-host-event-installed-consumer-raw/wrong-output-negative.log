@@ -1,0 +1,27 @@
+$ cmake -S ...
+-- The CXX compiler identification is AppleClang 21.0.0.21000401
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Pulp min-OS: macOS deployment target = 13.4 (max of: skia;dawn;libcxx)
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Pulp macOS archive floor: 13.0 <= 13.4 (/Volumes/Workshop/Code/agent-worktrees/pulp-g5-host-event-installed-consumer-20261106-1458/external/skia-build/build/mac-gpu/lib/Release/libskia.a)
+-- Pulp macOS archive floor: 13.0 <= 13.4 (/Volumes/Workshop/Code/agent-worktrees/pulp-g5-host-event-installed-consumer-20261106-1458/external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a)
+-- Skia ICU data subset: icu_data_subset: x86_64: 10876560 -> 4847120 bytes (717/2361 items); icu_data_subset: arm64: 10876560 -> 4847120 bytes (717/2361 items)
+-- Skia: found at /Volumes/Workshop/Code/agent-worktrees/pulp-g5-host-event-installed-consumer-20261106-1458/external/skia-build (mac)
+-- Configuring done (2.6s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Volumes/Workshop/Code/agent-worktrees/pulp-g5-host-event-consumer-wrong-output-20261106-1458/build
+$ cmake --build ...
+[1/3] Building CXX object CMakeFiles/pulp-g5-host-event-consumer.dir/main.cpp.o
+[2/3] Rewriting Skia's libskunicode_icu.a with trimmed ICU data
+icu_data_subset: x86_64: 10876560 -> 4847120 bytes (717/2361 items)
+icu_data_subset: arm64: 10876560 -> 4847120 bytes (717/2361 items)
+[3/3] Linking CXX executable pulp-g5-host-event-consumer
+$ consumer (expected failure)
+g5-host-event-contract FAIL rule=host-project-count
+wrong_output_negative_exit=1

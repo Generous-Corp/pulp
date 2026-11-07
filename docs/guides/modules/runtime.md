@@ -15,6 +15,7 @@ The runtime module provides lock-free primitives, logging, assertions, and scope
 | Large data swap | `TripleBuffer<T>` | Wavetables, IR buffers, meter data |
 | Ordered event stream | `SpscQueue<T>` | MIDI events, UI commands |
 | Occurrence-only feedback | `ActivityChannel<N>` | MIDI pad flashes, clip lights |
+| Wake a sleeping worker | `WakeSignal` | Audio thread hands a block to a render or disk thread |
 | Budgeted optional work | `evaluate_runtime_budget()` | Background analysis, voice/cache refresh, validation helpers |
 
 **Never use on the audio thread**: `std::mutex`, `std::condition_variable`, heap allocation, I/O.
@@ -135,6 +136,38 @@ Give the Processor and editor shared ownership of the channel. That keeps a
 host-retained editor safe if the host destroys the Processor first. Use an
 `SpscQueue` instead when every event and its payload must be delivered; use a
 `TripleBuffer` for latest-value meters.
+
+## WakeSignal
+
+Wakes one sleeping consumer thread from a realtime producer. The producer
+publishes its work first (a ring write, a release store) and then calls
+`notify()`, which is a fence and one atomic load: it posts a semaphore only
+while the consumer is actually parked, so a busy consumer costs the audio
+thread no system call. The consumer waits with a predicate over the same
+published state and re-checks it after announcing that it is about to park,
+so a wakeup cannot be lost.
+
+```cpp
+#include <pulp/runtime/wake_signal.hpp>
+
+pulp::runtime::WakeSignal wake;
+
+// Audio thread:
+ring.push(block);
+wake.notify();
+
+// Worker thread:
+while (running) {
+    wake.wait_for([&] { return !ring.empty() || !running; }, std::chrono::seconds(1));
+    drain(ring);
+}
+```
+
+Use it instead of `std::condition_variable::notify_*` from the audio thread,
+which is not realtime safe and loses wakeups unless the producer takes the
+mutex. A worker that waits on a `WakeSignal` needs no short polling timeout,
+so it does not wake the CPU while idle. One consumer per signal; `posts()`,
+`wakes()` and `consumer_parked()` are diagnostics for tests.
 
 ## Budget Policy
 

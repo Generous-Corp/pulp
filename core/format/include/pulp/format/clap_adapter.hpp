@@ -92,6 +92,8 @@ struct PulpClapPlugin {
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
     std::unique_ptr<Processor> processor;
+    // Panic requests (Processor::request_panic), serviced before each block.
+    std::shared_ptr<PanicState> panic_state;
     // Keeps a host state.load off the processor while clap_process() is inside
     // it. Declared after processor so it outlives every render that consults it.
     StateRestoreGate state_restore_gate;

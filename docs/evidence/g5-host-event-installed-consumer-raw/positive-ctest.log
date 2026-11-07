@@ -1,0 +1,13 @@
+Test project /Volumes/Workshop/Code/agent-worktrees/pulp-g5-host-event-consumer-external-20261106-1458/build
+    Start 1: g5-host-event-contract
+1/1 Test #1: g5-host-event-contract ...........   Passed    0.18 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Label Time Summary:
+events           =   0.18 sec*proc (1 test)
+examples         =   0.18 sec*proc (1 test)
+graph            =   0.18 sec*proc (1 test)
+installed-sdk    =   0.18 sec*proc (1 test)
+
+Total Test time (real) =   0.19 sec

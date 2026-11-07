@@ -36,15 +36,7 @@ namespace pulp::view { struct ClaudeBundle; }
 #include <mutex>
 #include <atomic>
 
-namespace pulp::render {
-class GpuSurface;
-}
-
-#ifdef PULP_BENCHMARK
-namespace pulp::render::bench {
-struct PerfCounters;
-}
-#endif
+#include <pulp/platform/gpu_fwd.hpp>
 
 namespace pulp::view {
 

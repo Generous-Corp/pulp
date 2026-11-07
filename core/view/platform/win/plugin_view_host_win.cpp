@@ -937,6 +937,7 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
     PluginFrameRenderer frame_renderer_;
+    RasterSceneCache raster_scene_cache_;
 
     // Tear the surface pair down and tell every consumer BEFORE the objects
     // die. Consumers hold a raw GpuSurface*; publishing after the reset would
@@ -1078,7 +1079,8 @@ class WinPluginViewHost : public PluginViewHost, private win_input::InputRouterH
     std::vector<uint8_t> raster_render_rgba(uint32_t* out_w, uint32_t* out_h) {
         if (idle_callback_)
             idle_callback_();
-        return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h);
+        return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h,
+                                        canvas::TextRasterPolicy::legacy, &raster_scene_cache_);
     }
 
     std::vector<uint8_t> raster_capture_png() {
