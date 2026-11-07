@@ -36,6 +36,15 @@ pulp_add_plugin(PulpUiScriptFixture
     UI_SCRIPT         ui/main.js
 )
 
+# A dev build (PULP_DEV_BUILD, on whenever tests are) compiles the on-disk
+# ui/main.js path into the Standalone image's generated source, which is a
+# runtime read of the checkout; declare it so selectors account for it.
+if(TARGET PulpUiScriptFixture_Standalone AND PULP_DEV_BUILD)
+    pulp_test_data(PulpUiScriptFixture_Standalone
+        PATHS test/fixtures/ui_script_plugin/ui/main.js
+        NO_DEFINE)
+endif()
+
 add_executable(pulp-ui-script-editor-probe editor_probe.mm)
 target_link_libraries(pulp-ui-script-editor-probe PRIVATE
     pulp::host "-framework AppKit" "-framework AudioToolbox")
