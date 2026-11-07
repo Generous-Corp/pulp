@@ -107,6 +107,10 @@ struct PreparedDescriptionData {
     std::vector<std::string> schedule;
     std::uint64_t snapshot_id = 0;
     std::uint64_t pool_snapshot_id = 0;
+    // The adopted compiled generation is process-local provenance.  It is
+    // deliberately excluded from canonical portable bytes; export validates
+    // it against the exact live snapshot before returning a detached copy.
+    std::uint64_t execution_generation = 0;
     // Process-local owner provenance. Deliberately excluded from canonical
     // portable content; reminted only when a candidate is adopted.
     std::uint64_t owner_graph_identity = 0;

@@ -465,9 +465,12 @@ bool strict_semantic_payload(std::string_view payload, choc::value::Value& root,
         }
         kinds.emplace(std::string(member.name), kind);
     }
+    // D1/D2 remains the semantic authority.  Mono and wider channel layouts
+    // are valid authored documents even though this first prepared-export
+    // profile admits stereo only.  Keep parsing/validation separate from the
+    // D4 profile gate so callers receive `unsupported_prepared_profile` rather
+    // than a generic semantic-binding mismatch for a valid non-stereo graph.
     channel_names = std::move(graph_channels);
-    if (channel_names.size() != 2)
-        return false;
     std::unordered_set<std::string> interface_keys;
     std::size_t input_interfaces = 0, output_interfaces = 0;
     for (std::uint32_t i = 0; i < interfaces.size(); ++i) {
@@ -725,7 +728,10 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
 
     try {
     const auto result = std::make_shared<PreparedDescriptionData>();
-    result->semantic_profile = "pulp.graph.authored-io-gain.v1";
+    // The prepared record carries the exact D1/D2 semantic profile.  The
+    // closed prepared shape is a separate D4 admission decision below and must
+    // not masquerade as a replacement semantic profile.
+    result->semantic_profile = "pulp.graph.identity.v1";
     result->semantic_payload.assign(canonical_semantic_payload);
 
     choc::value::Value authored_root;
@@ -1936,6 +1942,8 @@ PreparedDescriptionResult SignalGraph::ExecutionSnapshot::export_prepared_descri
         return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
     if (snapshot_->prepared_description->owner_generation != owner_->authoring_generation_)
         return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
+    if (snapshot_->prepared_description->execution_generation != snapshot_->execution_generation)
+        return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
     const auto selection_generation = owner_->execution_selection_generation_.load(std::memory_order_relaxed);
     if (snapshot_->prepared_description->execution_selection_generation != selection_generation)
         return PreparedDescriptionResult::refused(PreparedDescriptionRefusal::SnapshotChanged);
@@ -2252,6 +2260,7 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         // snapshot. The public pool intentionally does not expose that token;
         // retain the paired snapshot identity as the detached provenance.
         capture->pool_snapshot_id = capture->snapshot_id;
+        capture->execution_generation = next->execution_generation;
         capture->owner_generation = base_authoring_generation_;
         const auto& plan = next->routed.serial.snapshot.plan();
         if (!next->routed.serial.snapshot.valid() || plan.nodes.size() != capture->nodes.size() ||
@@ -2358,8 +2367,10 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             for (std::uint32_t port = 0; port < sources.size(); ++port) {
                 if (sources[port].mode == format::GraphRuntimeSnapshot::InputPortSource::Mode::Sum)
                     return last_result_ = Result::PreflightFailed;
+                if (port >= capture->channels.size())
+                    return last_result_ = Result::PreflightFailed;
                 capture->input_modes.push_back(key + ":port=audio:channel=" +
-                                               std::to_string(port) + ",mode=" +
+                                               capture->channels[port] + ",mode=" +
                                                mode_name(sources[port].mode));
             }
         }
@@ -2411,8 +2422,13 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                 connection.feedback ||
                 assignment.connection_delay_samples[index] != 0)
                 return last_result_ = Result::PreflightFailed;
-            actual_edges.push_back({source_key + ":" + std::to_string(connection.source_port),
-                                    destination_key + ":" + std::to_string(connection.dest_port),
+            if (connection.source_port >= capture->channels.size() ||
+                connection.dest_port >= capture->channels.size())
+                return last_result_ = Result::PreflightFailed;
+            actual_edges.push_back({source_key + ":port=audio:channel=" +
+                                        capture->channels[connection.source_port],
+                                    destination_key + ":port=audio:channel=" +
+                                        capture->channels[connection.dest_port],
                                     connection.source_port, connection.dest_port, std::string(mode),
                                     static_cast<std::uint32_t>(gather),
                                     assignment.connection_delay_samples[index], connection.feedback,
@@ -2480,6 +2496,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             const auto position = processing_positions[dense];
             const auto sources = next->routed.serial.snapshot.input_port_sources(dense);
             for (std::uint32_t port = 0; port < pnode.input_ports; ++port) {
+                if (port >= sources.size() || port >= capture->channels.size())
+                    return last_result_ = Result::PreflightFailed;
                 const auto mode = sources[port].mode;
                 const auto slot = mode == format::GraphRuntimeSnapshot::InputPortSource::Mode::InPlace
                                       ? sources[port].slot
@@ -2488,17 +2506,19 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                 add_value(key + ":port=audio:" + (mode == format::GraphRuntimeSnapshot::InputPortSource::Mode::InPlace
                                                          ? "direction=in,role=input_view"
                                                          : "direction=in,role=input_scratch") +
-                          ",channel=" + std::to_string(port) + ",phase=gather,ordinal=" +
+                          ",channel=" + capture->channels[port] + ",phase=gather,ordinal=" +
                           std::to_string(port) + ",mode=" + mode_name(mode) + ",class=" +
                           std::to_string(slot) + ",lifetime=[" + std::to_string(position) + "," +
                           std::to_string(position + 1) + ")");
             }
             for (std::uint32_t port = 0; port < pnode.output_ports; ++port) {
+                if (port >= capture->channels.size())
+                    return last_result_ = Result::PreflightFailed;
                 const auto slot = slots.output_base + port;
                 add_class(slot);
                 if (pnode.kind == graph::GraphRuntimeNodeKind::AudioInput) {
                     add_value(key + ":port=audio:direction=out,role=external_input,channel=" +
-                              std::to_string(port) + ",phase=execute,ordinal=" +
+                              capture->channels[port] + ",phase=execute,ordinal=" +
                               std::to_string(port) + ",mode=copy,class=" +
                               std::to_string(slot) + ",lifetime=[" + std::to_string(position) + "," +
                               std::to_string(position + 1) + ")");
@@ -2508,7 +2528,7 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                         if (connection.source_index == dense && connection.source_port == port)
                             last_reader = std::max(last_reader, processing_positions[connection.dest_index]);
                     add_value(key + ":port=audio:direction=out,role=node_output,channel=" +
-                              std::to_string(port) + ",phase=execute,ordinal=" +
+                              capture->channels[port] + ",phase=execute,ordinal=" +
                               std::to_string(port) + ",mode=write,class=" + std::to_string(slot) +
                               ",lifetime=[" + std::to_string(position) + "," +
                               std::to_string(last_reader + 1) + ")");
@@ -2516,13 +2536,15 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             }
             if (pnode.kind == graph::GraphRuntimeNodeKind::AudioOutput) {
                 for (std::uint32_t port = 0; port < pnode.input_ports; ++port) {
+                    if (port >= sources.size() || port >= capture->channels.size())
+                        return last_result_ = Result::PreflightFailed;
                     const auto mode = sources[port].mode;
                     const auto slot = mode == format::GraphRuntimeSnapshot::InputPortSource::Mode::InPlace
                                           ? sources[port].slot
                                           : slots.input_base + port;
                     add_class(slot);
                     add_value(key + ":port=audio:direction=in,role=external_output,channel=" +
-                              std::to_string(port) + ",phase=output_copy,ordinal=" +
+                              capture->channels[port] + ",phase=output_copy,ordinal=" +
                               std::to_string(port) + ",mode=copy,class=" + std::to_string(slot) +
                               ",lifetime=[" + std::to_string(position) + "," +
                               std::to_string(position + 1) + ")");
@@ -2885,16 +2907,18 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     if (!base_is_current_locked_() || owner_->in_swap_edit_) {
         return fail_before_commit(Result::StaleBase);
     }
+    if (owner_->authoring_generation_ == std::numeric_limits<std::uint64_t>::max())
+        return fail_before_commit(Result::RuntimeAdoptionFailed);
+    const auto committed_generation = owner_->authoring_generation_ + 1;
 
     std::shared_ptr<const PreparedDescriptionData> reminted_description;
     if (prepared_snapshot_->prepared_description) {
-        if (owner_->authoring_generation_ == std::numeric_limits<std::uint64_t>::max())
-            return fail_before_commit(Result::RuntimeAdoptionFailed);
         try {
             auto value = std::make_shared<PreparedDescriptionData>(
                 *prepared_snapshot_->prepared_description);
             value->owner_graph_identity = owner_->diagnostic_graph_identity_;
-            value->owner_generation = owner_->authoring_generation_ + 1;
+            value->owner_generation = committed_generation;
+            value->execution_generation = committed_generation;
             value->execution_selection_generation =
                 owner_->execution_selection_generation_.load(std::memory_order_relaxed);
             reminted_description = std::move(value);
@@ -2936,7 +2960,11 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     } catch (...) {
         if (!rollback_quiesced_lifecycles_locked_())
             return last_result_ = Result::QuiescedRollbackFailed;
-        throw;
+        // Commit is a transactional control-thread API.  Once preflight has
+        // crossed into publication preparation, an allocation or worker-pool
+        // failure must be reported as a typed refusal after rollback rather
+        // than escaping and leaving callers without a stable failure result.
+        return last_result_ = Result::RuntimeAdoptionFailed;
     }
 
     if (owner_->spectral_mode_.load(std::memory_order_acquire)) {
@@ -2950,6 +2978,11 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
         return last_result_ = Result::Staged;
     }
     owner_->adopt_candidate_authoring_locked_(*candidate_);
+    // The candidate was compiled under its private authoring generation.  The
+    // committed snapshot receives the owner's reminted generation at the same
+    // publication boundary, so detached export cannot pair a candidate token
+    // with the adopted owner state.
+    prepared_snapshot_->execution_generation = committed_generation;
     prepared_snapshot_->legacy_processing_lifetime = owner_->processing_handle_lifetime_;
 
     // The telemetry toggle is an independent control setting, so it does not

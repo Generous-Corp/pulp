@@ -14,6 +14,26 @@ static std::string stereo_payload() {
     return R"G3({"assets":{},"edges":{"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"gain_a\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"gain_b\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]],"destination":{"direction":"in","kind":"audio","node":"gain_b","port":"audio"},"feedback":false,"lane":"audio","semantic_order":null,"source":{"direction":"out","kind":"audio","node":"gain_a","port":"audio"}},"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"gain_b\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"output\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]],"destination":{"direction":"in","kind":"audio","node":"output","port":"audio"},"feedback":false,"lane":"audio","semantic_order":null,"source":{"direction":"out","kind":"audio","node":"gain_b","port":"audio"}},"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"input\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"gain_a\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]],"destination":{"direction":"in","kind":"audio","node":"gain_a","port":"audio"},"feedback":false,"lane":"audio","semantic_order":null,"source":{"direction":"out","kind":"audio","node":"input","port":"audio"}}},"interfaces":[{"channels":["L","R"],"endpoint":{"direction":"out","kind":"audio","node":"input","port":"audio"},"key":"main-in","kind":"audio","role":"input"},{"channels":["L","R"],"endpoint":{"direction":"in","kind":"audio","node":"output","port":"audio"},"key":"main-out","kind":"audio","role":"output"}],"nodes":{"gain_a":{"config":{"gain":"f32:3f800000"},"implementation":"pulp.builtin.gain.v1","initial_state":{"mode":"default","revision":"gain.v1"},"kind":"gain","kind_contract":"gain.v1","parameter_bindings":{},"policies":{},"ports":{"in":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}},"out":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}}}},"gain_b":{"config":{"gain":"f32:3f800000"},"implementation":"pulp.builtin.gain.v1","initial_state":{"mode":"default","revision":"gain.v1"},"kind":"gain","kind_contract":"gain.v1","parameter_bindings":{},"policies":{},"ports":{"in":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}},"out":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}}}},"input":{"config":{},"implementation":"pulp.builtin.audio-input.v1","initial_state":{"mode":"default","revision":"io.v1"},"kind":"audio_input","kind_contract":"io.v1","parameter_bindings":{},"policies":{},"ports":{"in":{},"out":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}}}},"output":{"config":{},"implementation":"pulp.builtin.audio-output.v1","initial_state":{"mode":"default","revision":"io.v1"},"kind":"audio_output","kind_contract":"io.v1","parameter_bindings":{},"policies":{},"ports":{"in":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}},"out":{}}}},"policies":{"event_order":"none","fault":"fail","feedback":"forbid","rate_conversion":"none","seed":null,"state_retention":"none"},"profile":"pulp.graph.identity.v1"})G3";
 }
 
+TEST_CASE("D4 preserves D1/D2 semantic validity for a non-stereo payload") {
+    SignalGraph graph;
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    REQUIRE(edit->add_input_node(2) != 0);
+
+    auto mono = stereo_payload();
+    auto replace_all = [&](std::string_view from, std::string_view to) {
+        std::size_t offset = 0;
+        while ((offset = mono.find(from, offset)) != std::string::npos) {
+            mono.replace(offset, from.size(), to);
+            offset += to.size();
+        }
+    };
+    replace_all("[\"L\",\"R\"]", "[\"C\"]");
+    replace_all("[[\"L\",\"L\"],[\"R\",\"R\"]]", "[[\"C\",\"C\"]]");
+    REQUIRE(edit->bind_authored_identity(mono, {}).refusal ==
+            PreparedDescriptionRefusal::UnsupportedPreparedProfile);
+}
+
 TEST_CASE("D4 empty prepared export is detached and canonical") {
     SignalGraph graph;
     auto edit = graph.begin_prepared_topology_edit();
@@ -32,10 +52,13 @@ TEST_CASE("D4 empty prepared export is detached and canonical") {
     const auto exported = snapshot.export_prepared_description();
     REQUIRE(exported);
     REQUIRE(exported.value->schema == "pulp.graph.prepared-io-gain.v1");
+    REQUIRE(exported.value->semantic_profile == "pulp.graph.identity.v1");
     REQUIRE(exported.value->max_block_frames == 128);
     REQUIRE(exported.value->channels.empty());
     REQUIRE(exported.value->owner_graph_identity == graph.authoring_receipt().graph_identity);
     REQUIRE(exported.value->owner_graph_identity != 0);
+    REQUIRE(exported.value->execution_generation == graph.authoring_receipt().generation);
+    REQUIRE(exported.value->execution_generation != 0);
     REQUIRE(exported.value->semantic_digest.rfind("sha256:", 0) == 0);
     REQUIRE_FALSE(exported.value->canonical_bytes().empty());
     REQUIRE(exported.value->content_hash().size() == 64);
@@ -155,6 +178,8 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     REQUIRE(has_buffer_record("role=external_input"));
     REQUIRE(has_buffer_record("role=external_output"));
     REQUIRE(has_buffer_record("phase=output_copy"));
+    REQUIRE(has_buffer_record("channel=L"));
+    REQUIRE(has_buffer_record("channel=R"));
     REQUIRE(exported.value->nodes[0].kind == "AudioInput");
     REQUIRE(exported.value->nodes[1].kind == "Gain");
     REQUIRE(exported.value->nodes[1].gain_bits == 0x3f800000u);
@@ -170,12 +195,12 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
         actual_edges.push_back(edge.source + "->" + edge.destination + ":" + edge.final_input_mode);
     std::sort(actual_edges.begin(), actual_edges.end());
     REQUIRE(actual_edges == std::vector<std::string>{
-                                "gain_a:0->gain_b:0:in_place",
-                                "gain_a:1->gain_b:1:in_place",
-                                "gain_b:0->output:0:in_place",
-                                "gain_b:1->output:1:in_place",
-                                "input:0->gain_a:0:in_place",
-                                "input:1->gain_a:1:in_place"});
+                                "gain_a:port=audio:channel=L->gain_b:port=audio:channel=L:in_place",
+                                "gain_a:port=audio:channel=R->gain_b:port=audio:channel=R:in_place",
+                                "gain_b:port=audio:channel=L->output:port=audio:channel=L:in_place",
+                                "gain_b:port=audio:channel=R->output:port=audio:channel=R:in_place",
+                                "input:port=audio:channel=L->gain_a:port=audio:channel=L:in_place",
+                                "input:port=audio:channel=R->gain_a:port=audio:channel=R:in_place"});
 }
 
 TEST_CASE("D4 independent alias oracle covers width overlap and restoration") {
