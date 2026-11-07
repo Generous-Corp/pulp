@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 std::string stereo_payload() {
@@ -15,9 +16,12 @@ int run_empty() {
     auto edit = graph.begin_prepared_topology_edit();
     if (!edit)
         return 1;
-    if (!edit->bind_authored_identity("{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
-                                      "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}",
-                                      {}))
+    if (!edit->bind_authored_identity(
+            "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
+            "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\","
+            "\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":"
+            "\"pulp.graph.identity.v1\"}",
+            {}))
         return 2;
     if (edit->prepare(48000.0, 128) !=
         pulp::host::SignalGraph::PreparedTopologyEdit::Result::Prepared)
@@ -71,7 +75,11 @@ int run_stereo() {
         return 12;
     const auto description = edit->committed_execution_snapshot().export_prepared_description();
     if (!description || description.value->nodes.size() != 4 ||
-        description.value->edges.size() != 6)
+        description.value->edges.size() != 6 || description.value->interfaces.size() != 2 ||
+        description.value->nodes[1].gain_bits != 0x3f800000u ||
+        description.value->interfaces[0].runtime_bus_index != 0 ||
+        description.value->interfaces[0].runtime_channel_indices !=
+            std::vector<std::uint32_t>{0, 1})
         return 13;
     std::cout << description.value->canonical_bytes() << '\n';
     return 0;

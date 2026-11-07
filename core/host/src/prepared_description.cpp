@@ -227,6 +227,14 @@ std::string PreparedDescriptionData::canonical_bytes() const {
                 out.push_back(',');
             quote(out, iface.channels[c]);
         }
+        out += "],\"runtime_bus_index\":";
+        number(out, iface.runtime_bus_index);
+        out += ",\"runtime_channel_indices\":[";
+        for (std::size_t c = 0; c < iface.runtime_channel_indices.size(); ++c) {
+            if (c)
+                out.push_back(',');
+            number(out, iface.runtime_channel_indices[c]);
+        }
         out += "]}";
     }
     out += "],\"nodes\":[";

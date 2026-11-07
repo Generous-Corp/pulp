@@ -391,7 +391,9 @@ class GraphRuntimeBufferPool {
     // Control-side provenance for receipts and diagnostics. This is the exact
     // snapshot token written by bind(), rather than a value inferred from the
     // pool's capacity or the caller's requested block size.
-    std::uint64_t bound_snapshot_id() const noexcept { return bound_snapshot_id_; }
+    std::uint64_t bound_snapshot_id() const noexcept {
+        return bound_snapshot_id_;
+    }
 
     // One node's resolved routing state while the pool is bound.
     struct BoundNode {

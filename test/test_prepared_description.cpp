@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
-#include <pulp/format/graph_runtime_executor.hpp>
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <limits>
 #include <set>
@@ -43,10 +43,12 @@ TEST_CASE("D4 empty prepared export is detached and canonical") {
     auto edit = graph.begin_prepared_topology_edit();
     REQUIRE(edit);
 
-    const auto bound =
-        edit->bind_authored_identity("{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
-                                     "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}",
-                                     {});
+    const auto bound = edit->bind_authored_identity(
+        "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_"
+        "conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp."
+        "graph.identity.v1\"}",
+        {});
     REQUIRE(bound);
     REQUIRE(edit->prepare(48000.0, 128) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
     REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
@@ -72,18 +74,19 @@ TEST_CASE("D4 export rejects a retired owner generation") {
     SignalGraph graph;
     auto first = graph.begin_prepared_topology_edit();
     REQUIRE(first);
-    REQUIRE(
-        first->bind_authored_identity("{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
-                                      "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}",
-                                      {}));
+    REQUIRE(first->bind_authored_identity(
+        "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_"
+        "conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp."
+        "graph.identity.v1\"}",
+        {}));
     REQUIRE(first->prepare(48000.0, 128) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
     REQUIRE(first->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
     auto retired = first->committed_execution_snapshot();
 
     auto failed = graph.begin_prepared_topology_edit();
     REQUIRE(failed);
-    REQUIRE(failed->prepare(48000.0, 128) ==
-            SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(failed->prepare(48000.0, 128) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
     REQUIRE_FALSE(failed->disconnect(0, 0, 0, 0));
     REQUIRE(failed->commit() == SignalGraph::PreparedTopologyEdit::Result::InvalidMutation);
     const auto preserved = retired.export_prepared_description();
@@ -156,6 +159,11 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     REQUIRE(exported.value->nodes.size() == 4);
     REQUIRE(exported.value->edges.size() == 6);
     REQUIRE(exported.value->channels == std::vector<std::string>{"L", "R"});
+    REQUIRE(exported.value->interfaces.size() == 2);
+    for (const auto& interface : exported.value->interfaces) {
+        REQUIRE(interface.runtime_bus_index == 0);
+        REQUIRE(interface.runtime_channel_indices == std::vector<std::uint32_t>{0, 1});
+    }
     REQUIRE(exported.value->prepared_plan_node_count == 4);
     REQUIRE(exported.value->prepared_plan_connection_count == 6);
     REQUIRE(exported.value->serial_pool_bound);
@@ -186,12 +194,9 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     // The detached vector retains plan order for diagnostics, while the
     // portable encoder treats nodes as a logical-key map.
     const auto canonical = exported.value->canonical_bytes();
-    REQUIRE(canonical.find("\"key\":\"gain_a\"") <
-            canonical.find("\"key\":\"gain_b\""));
-    REQUIRE(canonical.find("\"key\":\"gain_b\"") <
-            canonical.find("\"key\":\"input\""));
-    REQUIRE(canonical.find("\"key\":\"input\"") <
-            canonical.find("\"key\":\"output\""));
+    REQUIRE(canonical.find("\"key\":\"gain_a\"") < canonical.find("\"key\":\"gain_b\""));
+    REQUIRE(canonical.find("\"key\":\"gain_b\"") < canonical.find("\"key\":\"input\""));
+    REQUIRE(canonical.find("\"key\":\"input\"") < canonical.find("\"key\":\"output\""));
     // Independent topological oracle: derive the ready-node-id order from the
     // published graph edges rather than copying the exporter schedule.
     std::unordered_map<NodeId, std::size_t> indegree;
@@ -207,9 +212,9 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     while (!ready.empty()) {
         const auto id = *ready.begin();
         ready.erase(ready.begin());
-        const auto binding_node = std::find_if(
-            binding.nodes.begin(), binding.nodes.end(),
-            [&](const AuthoredNodeBinding& node) { return node.node_id == id; });
+        const auto binding_node =
+            std::find_if(binding.nodes.begin(), binding.nodes.end(),
+                         [&](const AuthoredNodeBinding& node) { return node.node_id == id; });
         REQUIRE(binding_node != binding.nodes.end());
         independent_schedule.push_back(binding_node->authored_key);
         for (const auto& connection : graph.connections()) {
@@ -243,23 +248,21 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     REQUIRE_FALSE(exported.value->buffer_classes.empty());
     REQUIRE_FALSE(exported.value->buffer_values.empty());
     const auto has_buffer_record = [&](std::string_view text) {
-        return std::any_of(exported.value->buffer_values.begin(),
-                           exported.value->buffer_values.end(),
-                           [&](const std::string& value) {
-                               return value.find(text) != std::string::npos;
-                           });
+        return std::any_of(
+            exported.value->buffer_values.begin(), exported.value->buffer_values.end(),
+            [&](const std::string& value) { return value.find(text) != std::string::npos; });
     };
     REQUIRE(has_buffer_record("role=external_input"));
     REQUIRE(has_buffer_record("role=external_output"));
     REQUIRE(has_buffer_record("phase=output_copy"));
     REQUIRE(has_buffer_record("channel=L"));
     REQUIRE(has_buffer_record("channel=R"));
-    const auto external_input_lifetime = std::find_if(
-        exported.value->buffer_values.begin(), exported.value->buffer_values.end(),
-        [](const std::string& value) {
-            return value.find("input:port=audio:direction=out,role=external_input") !=
-                   std::string::npos;
-        });
+    const auto external_input_lifetime =
+        std::find_if(exported.value->buffer_values.begin(), exported.value->buffer_values.end(),
+                     [](const std::string& value) {
+                         return value.find("input:port=audio:direction=out,role=external_input") !=
+                                std::string::npos;
+                     });
     REQUIRE(external_input_lifetime != exported.value->buffer_values.end());
     // The AudioInput value remains live through its last reader (gain_a at
     // processing position 1), rather than ending at the producer position.
@@ -278,13 +281,14 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     for (const auto& edge : exported.value->edges)
         actual_edges.push_back(edge.source + "->" + edge.destination + ":" + edge.final_input_mode);
     std::sort(actual_edges.begin(), actual_edges.end());
-    REQUIRE(actual_edges == std::vector<std::string>{
-                                "gain_a:port=audio:channel=L->gain_b:port=audio:channel=L:in_place",
-                                "gain_a:port=audio:channel=R->gain_b:port=audio:channel=R:in_place",
-                                "gain_b:port=audio:channel=L->output:port=audio:channel=L:in_place",
-                                "gain_b:port=audio:channel=R->output:port=audio:channel=R:in_place",
-                                "input:port=audio:channel=L->gain_a:port=audio:channel=L:in_place",
-                                "input:port=audio:channel=R->gain_a:port=audio:channel=R:in_place"});
+    REQUIRE(actual_edges ==
+            std::vector<std::string>{
+                "gain_a:port=audio:channel=L->gain_b:port=audio:channel=L:in_place",
+                "gain_a:port=audio:channel=R->gain_b:port=audio:channel=R:in_place",
+                "gain_b:port=audio:channel=L->output:port=audio:channel=L:in_place",
+                "gain_b:port=audio:channel=R->output:port=audio:channel=R:in_place",
+                "input:port=audio:channel=L->gain_a:port=audio:channel=L:in_place",
+                "input:port=audio:channel=R->gain_a:port=audio:channel=R:in_place"});
 }
 
 TEST_CASE("D4 independent alias oracle covers width overlap and restoration") {
@@ -326,8 +330,8 @@ TEST_CASE("D4 independent alias oracle covers width overlap and restoration") {
 
     pulp::audio::Buffer<float> input_storage(2, 64);
     pulp::audio::Buffer<float> output_storage(2, 64);
-    const std::array<const float*, 2> input_channels{
-        input_storage.view().channel_ptr(0), input_storage.view().channel_ptr(1)};
+    const std::array<const float*, 2> input_channels{input_storage.view().channel_ptr(0),
+                                                     input_storage.view().channel_ptr(1)};
     const pulp::audio::BufferView<const float> input_view(input_channels.data(), 2, 64);
     const auto output_view = output_storage.view();
     BusBuffer input_bus{"main", BusDirection::Input, BusRole::Main, true, input_view, {}};
@@ -348,8 +352,8 @@ TEST_CASE("D4 independent alias oracle covers width overlap and restoration") {
     REQUIRE_FALSE(pool.alias_host_input(&narrow_bus, &output_bus, 64));
 
     pulp::audio::Buffer<float> overlap_storage(2, 64);
-    const std::array<const float*, 2> overlap_channels{
-        overlap_storage.view().channel_ptr(0), overlap_storage.view().channel_ptr(1)};
+    const std::array<const float*, 2> overlap_channels{overlap_storage.view().channel_ptr(0),
+                                                       overlap_storage.view().channel_ptr(1)};
     const pulp::audio::BufferView<const float> overlap_input(overlap_channels.data(), 2, 64);
     const auto overlap_output = overlap_storage.view();
     BusBuffer overlap_in{"main", BusDirection::Input, BusRole::Main, true, overlap_input, {}};
@@ -365,7 +369,9 @@ TEST_CASE("D4 binding mutation requires an explicit rebind") {
     REQUIRE(empty_edit);
     REQUIRE(empty_edit->bind_authored_identity(
         "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
-        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}",
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_"
+        "conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp."
+        "graph.identity.v1\"}",
         {}));
     REQUIRE(empty_edit->add_gain_node() != 0);
     REQUIRE(empty_edit->prepare(48000.0, 128) ==
@@ -378,7 +384,9 @@ TEST_CASE("D4 execution selection ABA retires an exported snapshot") {
     REQUIRE(edit);
     REQUIRE(edit->bind_authored_identity(
         "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
-        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}",
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_"
+        "conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp."
+        "graph.identity.v1\"}",
         {}));
     REQUIRE(edit->prepare(48000.0, 128) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
     REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
@@ -393,9 +401,11 @@ TEST_CASE("D4 execution selection ABA retires an exported snapshot") {
 TEST_CASE("D4 execution selection generation saturates") {
     std::atomic<std::uint64_t> generation{std::numeric_limits<std::uint64_t>::max() - 1};
     pulp::host::detail::advance_execution_selection_generation(generation);
-    REQUIRE(generation.load(std::memory_order_relaxed) == std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(generation.load(std::memory_order_relaxed) ==
+            std::numeric_limits<std::uint64_t>::max());
     pulp::host::detail::advance_execution_selection_generation(generation);
-    REQUIRE(generation.load(std::memory_order_relaxed) == std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(generation.load(std::memory_order_relaxed) ==
+            std::numeric_limits<std::uint64_t>::max());
 }
 
 TEST_CASE("D4 selection mutation after binding requires a rebind") {
@@ -404,7 +414,9 @@ TEST_CASE("D4 selection mutation after binding requires a rebind") {
     REQUIRE(edit);
     REQUIRE(edit->bind_authored_identity(
         "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
-        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}",
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_"
+        "conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp."
+        "graph.identity.v1\"}",
         {}));
     edit->set_canonical_executor_routing_enabled(false);
     REQUIRE(edit->prepare(48000.0, 128) ==
@@ -422,7 +434,9 @@ TEST_CASE("D4 actual host limits reject an over-limit preparation transaction") 
     REQUIRE(edit);
     REQUIRE(edit->bind_authored_identity(
         "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
-        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}",
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_"
+        "conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp."
+        "graph.identity.v1\"}",
         {}));
     REQUIRE(edit->prepare(48000.0, 128) ==
             SignalGraph::PreparedTopologyEdit::Result::PreflightFailed);
@@ -447,8 +461,7 @@ TEST_CASE("D4 rejects a swapped authored channel") {
         REQUIRE(edit->connect(gain_b, channel, output, channel));
     }
     AuthoredRuntimeBinding binding;
-    binding.nodes = {{input, "input"}, {gain_a, "gain_a"}, {gain_b, "gain_b"},
-                     {output, "output"}};
+    binding.nodes = {{input, "input"}, {gain_a, "gain_a"}, {gain_b, "gain_b"}, {output, "output"}};
     const auto add_channels = [&](std::uint64_t node, bool output_direction) {
         binding.channels.push_back({node, "audio", output_direction, "L", 0, 0});
         binding.channels.push_back({node, "audio", output_direction, "R", 1, 1});
@@ -513,12 +526,16 @@ TEST_CASE("D4 rejects unknown and duplicate semantic fields") {
     REQUIRE(edit);
     const std::string unknown =
         "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
-        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\",\"unknown\":0}";
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_"
+        "conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp."
+        "graph.identity.v1\",\"unknown\":0}";
     REQUIRE(edit->bind_authored_identity(unknown, {}).refusal ==
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
     const std::string duplicate =
         "{\"assets\":{},\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
-        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}";
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_"
+        "conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp."
+        "graph.identity.v1\"}";
     REQUIRE(edit->bind_authored_identity(duplicate, {}).refusal ==
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
     const std::string escaped_duplicate =
@@ -543,12 +560,15 @@ TEST_CASE("D4 rejects unknown and duplicate semantic fields") {
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
     const std::string trailing_comma =
         "{\"assets\":{},\"edges\":{},\"interfaces\":[,],\"nodes\":{},"
-        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp.graph.identity.v1\"}";
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_"
+        "conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":\"pulp."
+        "graph.identity.v1\"}";
     REQUIRE(edit->bind_authored_identity(trailing_comma, {}).refusal ==
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
     const std::string missing_value =
         "{\"assets\":{},\"edges\":{},\"interfaces\":[],\"nodes\":{},"
-        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":}";
+        "\"policies\":{\"event_order\":\"none\",\"fault\":\"fail\",\"feedback\":\"forbid\",\"rate_"
+        "conversion\":\"none\",\"seed\":null,\"state_retention\":\"none\"},\"profile\":}";
     REQUIRE(edit->bind_authored_identity(missing_value, {}).refusal ==
             PreparedDescriptionRefusal::AuthoredBindingMismatch);
 }

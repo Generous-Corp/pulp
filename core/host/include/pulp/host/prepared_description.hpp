@@ -74,6 +74,11 @@ struct PreparedDescriptionInterface {
     std::string port;
     bool output = false;
     std::vector<std::string> channels;
+    // The admitted profile binds the host main bus explicitly. Keep the bus
+    // and flattened channel ordinals in the detached record instead of
+    // requiring consumers to infer them from vector position.
+    std::uint32_t runtime_bus_index = 0;
+    std::vector<std::uint32_t> runtime_channel_indices;
 };
 
 struct PreparedDescriptionEdge {

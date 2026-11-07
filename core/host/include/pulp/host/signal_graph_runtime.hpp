@@ -63,12 +63,12 @@ namespace detail {
 // Selection generation is a process-local invalidation token. Saturating the
 // increment prevents an ABA after UINT64_MAX while retaining a lock-free,
 // control-side update for callers that flip routing policy before/after prepare.
-inline void advance_execution_selection_generation(std::atomic<std::uint64_t>& generation) noexcept {
+inline void
+advance_execution_selection_generation(std::atomic<std::uint64_t>& generation) noexcept {
     auto current = generation.load(std::memory_order_relaxed);
     while (current != std::numeric_limits<std::uint64_t>::max() &&
-           !generation.compare_exchange_weak(current, current + 1,
-                                              std::memory_order_relaxed,
-                                              std::memory_order_relaxed)) {
+           !generation.compare_exchange_weak(current, current + 1, std::memory_order_relaxed,
+                                             std::memory_order_relaxed)) {
     }
 }
 
