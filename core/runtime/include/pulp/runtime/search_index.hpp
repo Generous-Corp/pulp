@@ -19,7 +19,7 @@
 // byte-for-byte (no case folding beyond ASCII) — deliberate, to keep results
 // deterministic and locale-independent.
 
-#include <pulp/runtime/async_stream.hpp>  // CancellationToken
+#include <pulp/runtime/cancel.hpp>
 
 #include <cstddef>
 #include <string>
@@ -53,7 +53,7 @@ public:
     /// item for case-insensitive matching. Intended to run on a background
     /// thread for large libraries, so it polls `cancel` and returns early when
     /// signalled (the partially-built index must then be discarded, not used).
-    void build(std::vector<std::string> items, const CancellationToken& cancel = {});
+    void build(std::vector<std::string> items, const CancelToken& cancel = {});
 
     std::size_t size() const { return items_.size(); }
     bool empty() const { return items_.empty(); }
@@ -65,11 +65,10 @@ public:
     /// cancellation is observed the scan returns early with whatever it has
     /// gathered so far (callers should discard a cancelled result). An empty
     /// query returns items in original order, bounded by `max_results`.
-    std::vector<Match> query(std::string_view query,
-                             const SearchQueryOptions& options = {},
-                             const CancellationToken& cancel = {}) const;
+    std::vector<Match> query(std::string_view query, const SearchQueryOptions& options = {},
+                             const CancelToken& cancel = {}) const;
 
-private:
+  private:
     std::vector<std::string> items_;       ///< original text, original order
     std::vector<std::string> normalized_;  ///< ASCII-lowercased, 1:1 with items_
 };
