@@ -31,6 +31,18 @@ REQUIRED_ENV = "PULP_AUDIO_DECODE_DUMP_REQUIRED"
 LOSSLESS_SUFFIXES = (".wav", ".wave", ".flac", ".aiff", ".aif", ".aifc")
 DUMP_REFUSED = 2
 
+# Seeds where one decoder accepts and the other refuses BY DESIGN: libsndfile is
+# lenient on malformed files that Pulp refuses by contract, or reads a container
+# Pulp registers no reader for. Each row is (pulp_decodes, libsndfile_decodes,
+# reason). A split not listed here is a finding; the sample comparison itself is
+# never relaxed.
+EXPECTED_ACCEPTANCE_SPLITS: dict[str, tuple[bool, bool, str]] = {
+    "aiff-ssnd-past-eof.aiff": (
+        False, True, "the SSND chunk runs past the end of the file; Pulp refuses truncated streams"),
+    "wav-w64-pcm16-mono.wav": (
+        False, True, "Sony Wave64 envelope; Pulp registers no Wave64 reader"),
+}
+
 
 def _unavailable(reason: str) -> None:
     if os.environ.get(REQUIRED_ENV):
@@ -102,6 +114,9 @@ def test_cpp_decoders_match_libsndfile_bit_exactly():
             findings.append(f"{seed.name}: dump exited {code}")
             continue
         if pulp_decoded != (reference is not None):
+            expected = EXPECTED_ACCEPTANCE_SPLITS.get(seed.name)
+            if expected is not None and expected[:2] == (pulp_decoded, reference is not None):
+                continue  # a documented contract difference, not a finding
             findings.append(
                 f"{seed.name}: pulp {'decoded' if pulp_decoded else 'refused'}, "
                 f"libsndfile {'decoded' if reference is not None else 'refused'}"
@@ -127,6 +142,15 @@ def test_cpp_decoders_match_libsndfile_bit_exactly():
             findings.append(f"{seed.name}: samples differ, first at byte offset {first}")
             continue
         compared += 1
+
+    for name, (pulp_decodes, sf_decodes, _reason) in EXPECTED_ACCEPTANCE_SPLITS.items():
+        seed = CORPUS_DIR / name
+        if not seed.is_file():
+            findings.append(f"{name}: listed in EXPECTED_ACCEPTANCE_SPLITS but absent from the corpus")
+            continue
+        code, _header, _payload = _run_dump(binary, seed)
+        if (code == 0) != pulp_decodes or (_soundfile_decode(sf, seed) is not None) != sf_decodes:
+            findings.append(f"{name}: EXPECTED_ACCEPTANCE_SPLITS row is stale; the split no longer happens")
 
     assert not findings, "\n".join(findings)
     # At least one seed must be well formed, or the differential compared nothing.
