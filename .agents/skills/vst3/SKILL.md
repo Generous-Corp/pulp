@@ -1586,8 +1586,9 @@ parameter (`kVst3ProgramChangeParamId`, `detail/vst3_program_list.hpp`). The
 preset values are read once at init, so a program change delivered inside
 `process()` is a batch of `queue_param_write()` calls and never opens a file;
 the host-visible parameter objects are refreshed on the main thread in
-`deliver_pending_restart()` before `kParamValuesChanged` is sent. Selecting the
-program that is already current is ignored on purpose, so a host that replays
-the selection cannot undo edits. A plug-in with no presets publishes no list and
+`deliver_pending_restart()` before `kParamValuesChanged` is sent. The selection is a StateStore parameter, so it is saved
+and restored with the state (`setState` marks it applied); selecting the program
+that is already current is ignored on purpose, so a host that replays the
+restored selection cannot undo restored edits. A plug-in with no presets publishes no list and
 no extra parameter. `set_factory_presets_directory()` re-points discovery and
 must run before `initialize()`. Tests: test_vst3_program_list.cpp.

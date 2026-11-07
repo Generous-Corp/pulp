@@ -352,9 +352,13 @@ public:
     std::filesystem::path factory_presets_dir_;
     FactoryProgramTable programs_;
     bool program_list_active_ = false;
-    // Program most recently applied, or -1 before any. Written by whichever
-    // thread delivers the program change, read by both.
-    std::atomic<std::int64_t> program_index_{-1};
+    // The current program, mirrored from the StateStore parameter that holds
+    // the selection. `program_applied_` is false until a program has been
+    // applied or a saved selection restored; until then any selection counts.
+    // Written by whichever thread delivers the program change, read by both.
+    std::atomic<std::int64_t> program_index_{0};
+    std::atomic<bool> program_applied_{false};
+    bool program_change_needed(std::size_t index) const;
     // Set when the audio thread applied a program: the VST3 parameter objects
     // still hold the old values until the main thread syncs them.
     std::atomic<bool> parameter_objects_stale_{false};

@@ -514,3 +514,51 @@ TEST_CASE("VST3 program list reports the processor's note names as pitch names",
     REQUIRE(fx.processor.getProgramPitchName(list_id, 0, 37, name) == Steinberg::kResultFalse);
     shared_note_names().clear();
 }
+
+TEST_CASE("VST3 restoring a session keeps the restored values when the host replays the program",
+          "[vst3][program]") {
+    PresetFolder folder;
+    folder.add("Bright", 0.9f, 0.1f);
+    folder.add("Init", 0.5f, 0.5f);
+    folder.add("Warm", 0.25f, 0.75f);
+
+    // A session saved with Warm selected and the level edited afterwards.
+    BufferStream saved;
+    {
+        Fixture fx(folder.path());
+        REQUIRE(fx.processor.setParamNormalized(kProgramParam, 1.0) == Steinberg::kResultOk);
+        REQUIRE(fx.processor.setParamNormalized(kLevel, 0.8) == Steinberg::kResultOk);
+        REQUIRE(fx.processor.getState(&saved) == Steinberg::kResultOk);
+    }
+    saved.position = 0;
+
+    Fixture fx(folder.path());
+    REQUIRE(fx.processor.setState(&saved) == Steinberg::kResultOk);
+
+    // The restore brought back the edited level, the preset's mix, and the
+    // selection itself.
+    REQUIRE(fx.processor.getParamNormalized(kLevel) == 0.8f);
+    REQUIRE(fx.processor.getParamNormalized(kMix) == 0.75f);
+    REQUIRE(fx.processor.getParamNormalized(kProgramParam) == 1.0);
+
+    SECTION("replayed from the main thread") {
+        REQUIRE(fx.processor.setParamNormalized(kProgramParam, 1.0) == Steinberg::kResultOk);
+        REQUIRE(fx.processor.getParamNormalized(kLevel) == 0.8f);
+        REQUIRE(fx.processor.getParamNormalized(kMix) == 0.75f);
+    }
+
+    SECTION("replayed as automation on the audio thread") {
+        fx.activate();
+        g_level_seen.store(-1.0f);
+        fx.process_program_change(1.0);
+        REQUIRE(g_level_seen.load() == 0.8f);
+        REQUIRE(g_mix_seen.load() == 0.75f);
+        fx.processor.setActive(false);
+    }
+
+    SECTION("a different program still applies") {
+        REQUIRE(fx.processor.setParamNormalized(kProgramParam, 0.0) == Steinberg::kResultOk);
+        REQUIRE(fx.processor.getParamNormalized(kLevel) == 0.9f);
+        REQUIRE(fx.processor.getParamNormalized(kProgramParam) == 0.0);
+    }
+}

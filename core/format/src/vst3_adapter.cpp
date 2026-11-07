@@ -903,6 +903,35 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // before parameter registration so the loop below tags it kIsBypass
     // and caches bypass_param_id_. No-op when the accommodation is off.
     maybe_synthesize_bypass(store_, quirks_);
+
+    // Publish the bundled factory presets as the root unit's program list.
+    // The selection lives in the StateStore as a parameter, so it is saved with
+    // the rest of the state and a restore brings it back: a host that replays
+    // the stored selection after restoring a session then sees the current
+    // program and changes nothing. The presets are read here, once, so a
+    // program change on the audio thread never touches the file system.
+    program_list_active_ = false;
+    program_applied_.store(false, std::memory_order_relaxed);
+    program_index_.store(0, std::memory_order_relaxed);
+    programs_.build(store_, desc.manufacturer, desc.name, factory_presets_dir_);
+    if (programs_.size() > 0) {
+        if (store_.info(static_cast<state::ParamID>(detail::kVst3ProgramChangeParamId)) !=
+            nullptr) {
+            runtime::log_warn("VST3: ParamID {} is already a plugin parameter; "
+                              "not publishing the factory program list",
+                              detail::kVst3ProgramChangeParamId);
+        } else {
+            state::ParamInfo program{};
+            program.id = detail::kVst3ProgramChangeParamId;
+            program.name = "Program";
+            program.range.min = 0.0f;
+            program.range.max = static_cast<float>(std::max<std::size_t>(programs_.size() - 1, 1));
+            program.range.default_value = 0.0f;
+            program.range.step = 1.0f;
+            store_.add_parameter(program);
+            program_list_active_ = true;
+        }
+    }
     param_groups_ = std::make_unique<ParamGroupProjection>(store_.all_groups());
     selected_unit_ = kRootUnitId;
 
@@ -1060,6 +1089,13 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
             bypass_param_id_ = param.id;
         }
 
+        // The program selection is a program-change parameter, not a knob.
+        if (program_list_active_ && param.id == detail::kVst3ProgramChangeParamId) {
+            flags = ParameterInfo::kIsProgramChange |
+                    (programs_.size() > 1 ? ParameterInfo::kIsList : 0);
+            step_count = static_cast<int32>(programs_.size()) - 1;
+        }
+
         // Build ParameterInfo with unit assignment
         Steinberg::Vst::ParameterInfo pinfo{};
         pinfo.id = static_cast<ParamID>(param.id);
@@ -1132,34 +1168,6 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
             }
         }
     }
-
-    // Publish the bundled factory presets as the root unit's program list.
-    // The host selects a program through a program-change parameter, so the
-    // list exists only when that parameter can be registered. The presets are
-    // read here, once, so a program change on the audio thread never touches
-    // the file system.
-    program_list_active_ = false;
-    programs_.build(store_, desc.manufacturer, desc.name, factory_presets_dir_);
-    if (programs_.size() > 0) {
-        if (store_.info(static_cast<state::ParamID>(detail::kVst3ProgramChangeParamId)) !=
-            nullptr) {
-            runtime::log_warn("VST3: ParamID {} is already a plugin parameter; "
-                              "not publishing the factory program list",
-                              detail::kVst3ProgramChangeParamId);
-        } else {
-            Steinberg::Vst::ParameterInfo pinfo{};
-            pinfo.id = detail::kVst3ProgramChangeParamId;
-            Steinberg::UString(pinfo.title, 128).fromAscii("Program");
-            pinfo.stepCount = static_cast<int32>(programs_.size()) - 1;
-            pinfo.defaultNormalizedValue = 0.0;
-            pinfo.flags = ParameterInfo::kIsProgramChange |
-                          (programs_.size() > 1 ? ParameterInfo::kIsList : 0);
-            pinfo.unitId = Steinberg::Vst::kRootUnitId;
-            parameters.addParameter(pinfo);
-            program_list_active_ = true;
-        }
-    }
-    program_index_.store(-1, std::memory_order_relaxed);
 
     runtime::log_debug("VST3: initialized '{}' with {} parameters", desc.name,
                        store_.param_count());
@@ -1682,9 +1690,12 @@ void PulpVst3Processor::schedule_host_notifications(InlineFallback fallback) {
 void PulpVst3Processor::apply_program(std::size_t index, bool audio_thread, std::int32_t offset) {
     const auto values = programs_.values_at(index);
     program_index_.store(static_cast<std::int64_t>(index), std::memory_order_relaxed);
+    program_applied_.store(true, std::memory_order_relaxed);
+    const auto selection = static_cast<float>(index);
 
     if (audio_thread) {
         // Same writes the host's own automation makes for this block.
+        queue_param_write(detail::kVst3ProgramChangeParamId, selection);
         for (const auto& setting : values) {
             queue_param_write(setting.id, setting.value);
             if (sample_accurate_params_)
@@ -1698,6 +1709,7 @@ void PulpVst3Processor::apply_program(std::size_t index, bool audio_thread, std:
     {
         // A preset selection is the host's write, not an editor edit.
         const ScopedHostParameterWrite host_write;
+        store_.set_value(detail::kVst3ProgramChangeParamId, selection);
         for (const auto& setting : values)
             store_.set_value(setting.id, setting.value);
     }
@@ -1715,13 +1727,14 @@ void PulpVst3Processor::sync_parameter_objects_from_store() {
             static_cast<ParamID>(param.id),
             state::host_normalized_from_value(param, store_.get_value(param.id)));
     }
-    const auto selected = program_index_.load(std::memory_order_relaxed);
-    if (program_list_active_ && selected >= 0) {
-        SingleComponentEffect::setParamNormalized(
-            detail::kVst3ProgramChangeParamId,
-            detail::vst3_normalized_from_program_index(static_cast<std::size_t>(selected),
-                                                       programs_.size()));
-    }
+}
+
+bool PulpVst3Processor::program_change_needed(std::size_t index) const {
+    // Until a program has been applied or restored, any selection counts. After
+    // that, selecting the current program changes nothing: that is how a host
+    // replaying the restored selection leaves the restored values alone.
+    return !program_applied_.load(std::memory_order_relaxed) ||
+           program_index_.load(std::memory_order_relaxed) != static_cast<std::int64_t>(index);
 }
 
 void PulpVst3Processor::deliver_pending_restart() {
@@ -1917,8 +1930,7 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
                         if (queue->getPoint(point_count - 1, offset, value) == kResultTrue) {
                             const auto index =
                                 detail::vst3_program_index_from_normalized(value, programs_.size());
-                            if (program_index_.load(std::memory_order_relaxed) !=
-                                static_cast<std::int64_t>(index))
+                            if (program_change_needed(index))
                                 apply_program(index, true, offset);
                         }
                         continue;
@@ -3193,7 +3205,7 @@ tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id, ParamValue 
         const auto index = detail::vst3_program_index_from_normalized(value, programs_.size());
         // A host that replays the current selection must not reapply the preset
         // over values the user has since changed.
-        if (program_index_.load(std::memory_order_relaxed) != static_cast<std::int64_t>(index))
+        if (program_change_needed(index))
             apply_program(index, false, 0);
         return result;
     }
@@ -3264,6 +3276,15 @@ tresult PLUGIN_API PulpVst3Processor::setState(IBStream* stream) {
         SingleComponentEffect::setParamNormalized(
             static_cast<ParamID>(param.id),
             state::host_normalized_from_value(param, store_.get_value(param.id)));
+    }
+    // The restored selection is the current program. A host that now replays it
+    // changes nothing, so the restored values win over the preset.
+    if (program_list_active_) {
+        const float saved = store_.get_value(detail::kVst3ProgramChangeParamId);
+        const auto index = std::min<std::size_t>(
+            saved > 0.0f ? static_cast<std::size_t>(saved + 0.5f) : 0, programs_.size() - 1);
+        program_index_.store(static_cast<std::int64_t>(index), std::memory_order_relaxed);
+        program_applied_.store(true, std::memory_order_relaxed);
     }
     return kResultOk;
 }

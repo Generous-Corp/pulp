@@ -241,8 +241,12 @@ publishes them as one program list called "Factory Presets" on the root unit.
   plug-in is created, so a program change that arrives during playback never
   touches the disk. The block that carries the change already renders with the
   new values.
-- **Repeated selections:** selecting the preset that is already current does
-  nothing, so a host that re-sends the current program cannot undo your edits.
+- **Saved with the session:** the current program is stored with the rest of the
+  plug-in state. After a session is restored, a host that sends the stored
+  program value again changes nothing, so edits saved with the session are not
+  overwritten by the preset. Only choosing a different program applies a preset.
+  On a new instance with nothing restored, choosing any program, including the
+  first, applies it.
 - **Read-only:** `setUnitProgramData` can select a preset but refuses to replace
   one with host-supplied data.
 - **No presets, no list:** a plug-in without a `Presets` folder publishes no
