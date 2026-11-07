@@ -1772,6 +1772,49 @@ sample-at-block-start so the offset-(N-1) value wins.
 MixMode::Replace is the default; second Replace edge to the same
 (node, param) is rejected. MixMode::Add sums then clamps.
 
+## The AUAudioUnit slot (`PluginFormat::AudioUnitV3`)
+
+`plugin_slot_auv3.mm` hosts AU v3 extensions and AU v2 components through
+`AUAudioUnit`, out of process by default (`load_auv3_plugin()` takes
+`AuV3LoadOptions` for in-process). Traps found getting it to pass against
+Apple's units and the host probe:
+
+- **Out of process, input buses start disabled.** A disabled bus is never
+  pulled and every render returns `kAudioUnitErr_NoConnection` (-10876). The
+  slot sets `bus.enabled = YES` on every bus it configures.
+- **The pull-input block may get null `mData`.** Hand the unit slot-owned
+  scratch, never the host's const input; the unit may process in place.
+- **A plugin's own parameter edits arrive on the main run loop.** AU v2
+  components post them with `AUEventListenerNotify`, and the bridge delivers
+  them to `AUParameterTree` observers there. Tests must pump the main loop
+  while draining edits (`collect_edits()` in `test_host_probe_bundles.cpp`);
+  `get_parameter()` also lags until then.
+- **Disposing a bridged AU v2 unit with events still queued crashes** inside
+  `AUEventListener::MessagesAreAvailable` on the `AUAudioUnitV2Bridge.eventListener`
+  queue. The slot drops its last reference to the unit after a short delay on a
+  background queue; without that the probe suite crashed on about half its runs.
+- **A remote editor needs a launched app.** Out of process,
+  `requestViewControllerWithCompletionHandler` builds an `NSRemoteView`, which
+  throws "invoked too early" unless `NSApplication` has finished launching.
+  The slot refuses without `NSApp` and catches the exception; tests call
+  `[NSApp finishLaunching]` first.
+- **Big parameter addresses and repeated names.** AUMultiChannelMixer's
+  addresses exceed 32 bits (scope and element are packed in), so ids become
+  list positions, and its many "Gain" parameters get their key path appended.
+- **Out of process needs a registered binary.** `AudioComponentRegister` makes
+  a component findable in this process only, so in-process loading works
+  without an install, but out of process needs the component in
+  `~/Library/Audio/Plug-Ins/Components` (or an AU v3 extension registered
+  through its app). The probe's opt-in out-of-process run is
+  `PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` with the component installed; remove
+  it afterwards. Confirm the process boundary by finding the component mapped
+  in the `AUHostingService` process with `lsof`.
+- **What the probe's AU component cannot report:** it is an `aufx` effect, so
+  it receives no MIDI; the AU v2 adapter reads `CallHostTransportState`, which
+  has no recording flag; and the AU effect base has one output element, so no
+  aux bus. Those are plugin-side limits; cover MIDI with Apple's
+  `DLSMusicDevice` (`aumu:dls :appl`) instead.
+
 ## Bypass is a parameter in VST3/CLAP and a unit property in AU
 
 `ParamFlags::is_bypass` can only describe a bypass that IS a parameter. VST3
