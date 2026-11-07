@@ -14,6 +14,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -119,21 +120,20 @@ class PortChangePoller {
         if (worker_.joinable() && worker_.get_id() == std::this_thread::get_id())
             return;
         stop();
-        tracker_ = PortListTracker{};
-        tracker_.update(enumerate());
-        {
-            std::lock_guard<std::mutex> lk(mu_);
-            stopping_ = false;
-        }
+        // The worker owns this state through a shared pointer and never
+        // touches the poller itself, so it cannot outlive what it uses.
+        auto state = std::make_shared<State>();
+        state->tracker.update(enumerate());
+        state_ = state;
         worker_ = std::thread(
-            [this, enumerate = std::move(enumerate), on_change = std::move(on_change), interval] {
-                std::unique_lock<std::mutex> lk(mu_);
-                while (!stopping_) {
-                    cv_.wait_for(lk, interval, [this] { return stopping_; });
-                    if (stopping_)
+            [state, enumerate = std::move(enumerate), on_change = std::move(on_change), interval] {
+                std::unique_lock<std::mutex> lk(state->mu);
+                while (!state->stopping) {
+                    state->cv.wait_for(lk, interval, [&state] { return state->stopping; });
+                    if (state->stopping)
                         break;
                     lk.unlock();
-                    const auto diff = tracker_.update(enumerate());
+                    const auto diff = state->tracker.update(enumerate());
                     if (!diff.empty() && on_change)
                         on_change(diff);
                     lk.lock();
@@ -142,11 +142,13 @@ class PortChangePoller {
     }
 
     void stop() {
-        {
-            std::lock_guard<std::mutex> lk(mu_);
-            stopping_ = true;
+        if (auto state = state_) {
+            {
+                std::lock_guard<std::mutex> lk(state->mu);
+                state->stopping = true;
+            }
+            state->cv.notify_all();
         }
-        cv_.notify_all();
         // Called from inside `on_change`: the loop sees the flag and exits on
         // its own; the next stop() or the destructor joins it.
         if (worker_.joinable() && worker_.get_id() != std::this_thread::get_id())
@@ -158,11 +160,15 @@ class PortChangePoller {
     }
 
   private:
-    std::mutex mu_;
-    std::condition_variable cv_;
-    bool stopping_ = false;
+    struct State {
+        std::mutex mu;
+        std::condition_variable cv;
+        bool stopping = false;
+        PortListTracker tracker;
+    };
+
+    std::shared_ptr<State> state_;
     std::thread worker_;
-    PortListTracker tracker_;
 };
 
 } // namespace pulp::midi

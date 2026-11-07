@@ -195,3 +195,25 @@ TEST_CASE("PortChangePoller tolerates stop() from its own callback", "[midi][hot
     poller.stop(); // joins the wound-down thread
     REQUIRE_FALSE(poller.running());
 }
+
+TEST_CASE("PortChangePoller can be destroyed while its worker is enumerating", "[midi][hotplug]") {
+    std::atomic<bool> in_enumerate{false};
+    std::atomic<bool> release{false};
+    {
+        PortChangePoller poller;
+        poller.start(
+            [&] {
+                if (in_enumerate.exchange(true)) {
+                    for (int i = 0; i < 1000 && !release; ++i)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                return std::vector<MidiPortInfo>{in_port("0", "A")};
+            },
+            [](const PortListDiff&) {}, std::chrono::milliseconds(1));
+        for (int i = 0; i < 1000 && !in_enumerate; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        REQUIRE(in_enumerate);
+        release = true;
+    } // destructor joins; the worker holds only shared state
+    SUCCEED();
+}
