@@ -83,7 +83,13 @@ on a real PR. Do them in order.
      covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
      surface. New GPU-audio virtual hooks belong at the end of that class;
      inserting one in the middle shifts existing slots even though the SDK
-     remains source-rebuild oriented.
+     remains source-rebuild oriented. The editor-host interfaces (`Editor`,
+     `EditorContext`, `EditorFactory`, `NativeSurfaceHost`) are checked under a
+     stricter FROZEN policy: an appended virtual fails too, because a UI
+     package and a format adapter are separate prebuilt binaries. Don't "fix"
+     the failure by appending at the tail. Ship the capability as a new
+     `query_extension()` id. A `Node-ABI-Break: <Class>` trailer exists for a
+     deliberate break, but on these classes it breaks every prebuilt peer.
 
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
