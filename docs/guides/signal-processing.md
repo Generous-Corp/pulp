@@ -492,7 +492,7 @@ on `SosCascadeT` allocate no memory.
 
 ### Svf
 
-State Variable Filter using Topology Preserving Transform (TPT). Numerically stable at all frequencies with no Nyquist cramping. Provides simultaneous lowpass, highpass, bandpass, and notch outputs (one selected via mode).
+State Variable Filter using Topology Preserving Transform (TPT). Numerically stable at all frequencies with no Nyquist cramping. One pass yields lowpass, highpass, constant-skirt bandpass, unity-gain bandpass, notch, allpass, peak and band-shelf responses. Select one with a mode, or take all of them from `process_all()`.
 
 ```cpp
 signal::Svf filter;
@@ -510,12 +510,33 @@ for (int i = 0; i < num_samples; ++i)
 | `set_sample_rate(float)` | Set sample rate. Recalculates coefficients. |
 | `set_frequency(float hz)` | Set cutoff frequency. Recalculates coefficients. |
 | `set_resonance(float q)` | Set Q factor (default 0.707). Recalculates coefficients. |
-| `set_mode(Mode)` | Select output: `lowpass`, `highpass`, `bandpass`, `notch`. |
+| `set_mode(Mode)` | Select output: `lowpass`, `highpass`, `bandpass`, `notch`, `unity_bandpass`, `allpass`, `peak`, `band_shelf`. |
+| `set_shelf_gain(float)` / `set_shelf_gain_db(float)` | Gain at the cutoff for `band_shelf` (1.0 is transparent). |
 | `process(float)` | Filter one sample. |
+| `process_all(float)` | Filter one sample and return every output in an `Outputs` struct. |
 | `process(float*, int)` | Filter buffer in-place. |
 | `reset()` | Clear internal state. |
 
 **Sample rate dependency:** `set_sample_rate()` required. Coefficients update automatically when frequency, resonance, or sample rate change.
+
+**Responses.** With damping `k = 1/Q`, bandpass state `v1` and lowpass state `v2`:
+bandpass is `v1` (gain `Q` at the cutoff), unity bandpass is `k*v1` (gain 1),
+notch is `in - k*v1`, allpass is `in - 2*k*v1` (unit magnitude at every
+frequency), peak is lowpass minus highpass, and band-shelf is
+`in + (G - 1)*k*v1` (gain `G` at the cutoff, unity far from it). Notch plus
+unity bandpass reconstructs the input exactly. The existing four modes keep
+their numeric values and their output.
+
+```cpp
+signal::Svf filter;
+filter.configure(signal::Svf::Mode::lowpass, sample_rate, 1000.0f, 2.0f);
+filter.set_shelf_gain_db(6.0f);
+const auto out = filter.process_all(input);   // out.lowpass, out.allpass, out.band_shelf, ...
+```
+
+**Real-time:** setters recompute scalar coefficients; `process`, `process_all` and `reset` allocate nothing.
+
+**Reference:** Vadim Zavalishin, *The Art of VA Filter Design*, chapter 4. Tests: `test/test_signal_svf_outputs.cpp`.
 
 ---
 
