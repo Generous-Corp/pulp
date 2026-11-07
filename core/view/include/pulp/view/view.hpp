@@ -1738,6 +1738,16 @@ public:
         /// press until its release or cancel. Lets modifier-key changes reach
         /// the view a drag is captured by without every host tracking it.
         std::vector<std::pair<int, ViewCapture>> pressed_targets;
+        /// Where the buttonless pointer last was (root coordinates), whether it
+        /// is over the surface, the modifiers it carried, the view hover state
+        /// was last brought up to date for, and the pointer's position in that
+        /// view. `simulate_hover` keeps these current; they let a later frame
+        /// notice that content moved under a pointer that did not.
+        Point hover_pointer{};
+        bool hover_pointer_valid = false;
+        std::uint16_t hover_modifiers = 0;
+        ViewCapture hover_target;
+        Point hover_local{};
         /// Instance id of the trigger the latest press reached (0: none); a
         /// claim with no anchor of its own adopts it. See `set_overlay_anchor`.
         std::uint64_t pending_overlay_opener = 0;
@@ -3121,6 +3131,8 @@ private:
     bool visible_after_quarantine_ = true;
     bool focusable_ = false;
     bool enabled_ = true;
+    bool focus_visible_ = false;
+    FocusCause focus_cause_ = FocusCause::programmatic;
     bool layout_dirty_ = false;
     std::uint64_t applied_layout_generation_ = 0;
     std::uint64_t tree_layout_generation_ = 1;
@@ -3131,8 +3143,6 @@ private:
     static std::atomic<std::uint64_t> constructed_count_;
     static std::atomic<std::uint64_t> destroyed_count_;
     /// Clears scene-cache validity up the ancestor chain without counting an
-    bool focus_visible_ = false;
-    FocusCause focus_cause_ = FocusCause::programmatic;
     /// unmarked paint mutation (the repaint requests use it: they mark).
     void stale_subtree_caches_up();
     bool has_focus_ = false;

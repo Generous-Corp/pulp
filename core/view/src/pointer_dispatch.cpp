@@ -344,6 +344,7 @@ void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers,
                         const PointerAttributes& pointer) {
     // 1. Hover STATE first, so a handler reading `is_hovered()` during the
     //    dispatch below sees the state this same move established.
+    root.interaction().hover_modifiers = modifiers;
     root.simulate_hover(root_pt);
 
     // 2. Hit-test AFTER the state pass: an `on_hover_move` handler is allowed
@@ -375,6 +376,36 @@ void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers,
     // 3. Modern + JS channels. `moving` selects the pointer-MOVE callback, the
     //    one a scripted `pointermove` / `mousemove` listener is bound to.
     dispatch_dom_pointer_event(root, target, me, /*moving=*/true);
+}
+
+bool reevaluate_stationary_hover(View& root, const HoverDamage& damage) {
+    auto& state = root.interaction();
+    if (!state.hover_pointer_valid) return false;
+    // A held button owns the pointer; hover waits for the release.
+    if (!state.pressed_targets.empty()) return false;
+    if (!damage.full &&
+        !(damage.has_bounds && damage.bounds.contains(state.hover_pointer)))
+        return false;
+
+    const Point pointer = state.hover_pointer;
+    View* target = hover_target_at(root, pointer);
+    View* current = state.hover_target.live_in(root);
+    if (target != current) {
+        // The view under the pointer changed: run the full hover pass so enter,
+        // exit, the positioned move and the script pointermove all fire.
+        deliver_hover_move(root, pointer, state.hover_modifiers);
+        return true;
+    }
+    if (!target) return false;
+
+    // Same view, but it may have moved under the pointer (a scrolled list row
+    // slides past a still pointer), so the pointer's position inside it moved.
+    const Point local = point_to_local(pointer, target, &root);
+    if (local.x == state.hover_local.x && local.y == state.hover_local.y)
+        return false;
+    state.hover_local = local;
+    target->on_hover_move(local);
+    return true;
 }
 
 void deliver_mouse_drag(View& root, View* target, Point root_pt,

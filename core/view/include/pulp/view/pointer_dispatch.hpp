@@ -226,6 +226,38 @@ void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers = 0);
 void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers,
                         const PointerAttributes& pointer);
 
+/// What a frame repainted, in root coordinates, as far as a host knows it.
+/// `full` is the safe default: assume anything may have moved.
+struct HoverDamage {
+    bool full = true;
+    bool has_bounds = false;
+    Rect bounds{};
+
+    static HoverDamage everything() { return {}; }
+    static HoverDamage region(Rect r) { return {false, true, r}; }
+};
+
+/// Bring hover state back in line with what is on screen after a frame in
+/// which content may have moved under a pointer that did not.
+///
+/// Scrolling, an animation or a list reorder can slide a different view under
+/// a stationary pointer, and no pointer event arrives to say so. Call this once
+/// per presented frame, after layout and animation have run. It does nothing
+/// unless the frame's damage covers the last pointer position, so a frame that
+/// repainted somewhere else costs one comparison. When it does run it hit-tests
+/// the pointer position once and:
+///   - if the view under the pointer changed, runs the full hover pass
+///     (`deliver_hover_move`): the old view sees its exit, the new view its
+///     enter, positioned move and script pointermove;
+///   - if it is the same view but the pointer's position inside it changed
+///     (the view moved), delivers a positioned `on_hover_move` only;
+///   - otherwise does nothing.
+/// It does nothing while a pointer button is held, when no hover pass has run
+/// yet, and after the pointer has left the surface. Returns true when anything
+/// was delivered.
+bool reevaluate_stationary_hover(View& root,
+                                 const HoverDamage& damage = HoverDamage{});
+
 /// Host hooks the portable wheel router calls back into. Kept as a struct so
 /// a new hook can be threaded in without re-touching every call site.
 struct WheelHost {

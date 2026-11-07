@@ -694,6 +694,13 @@ platform_maturity:
       :focus-within follows on_descendant_focus_changed, delivered to every
       ancestor. Script elements receive focus, blur, focusin and focusout from
       native focus changes. Tested by test_focus_cause.cpp.
+  stationary_pointer_hover:
+    status: partial
+    notes: After a frame that moves content under a pointer that did not move,
+      reevaluate_stationary_hover delivers the hover enter, exit and positioned
+      move a mouse movement would have. The macOS standalone and plug-in hosts call
+      it from their per-frame cursor refresh. Other hosts can call it after each
+      presented frame. Tested by test_stationary_hover.cpp.
   accessibility:
     macos:
       status: usable

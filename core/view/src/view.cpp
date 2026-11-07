@@ -2665,6 +2665,17 @@ void View::simulate_hover(Point root_pos) {
     for (auto it = hover_path.rbegin(); it != hover_path.rend(); ++it)
         (*it)->set_hovered(true);
 
+    // Remember what this pass established, so a later frame can tell whether
+    // the content under a stationary pointer has changed. A point outside the
+    // surface (hosts pass one on pointer exit) means no pointer.
+    {
+        RootInteractionState& state = interaction();
+        state.hover_pointer = root_pos;
+        state.hover_pointer_valid = local_bounds().contains(root_pos);
+        state.hover_target.set(target);
+        if (!target) state.hover_target.reset();
+    }
+
     if (pulp::view::motion::input_recording_enabled()) {
         const std::string id = target ? target->id() : std::string();
         std::vector<std::pair<std::string, double>> coords;
@@ -2677,14 +2688,12 @@ void View::simulate_hover(Point root_pos) {
         // sub-region of itself the pointer is over (e.g. the
         // inspector ToolStrip's per-button tooltip, which set_hovered() alone
         // can't drive because on_mouse_enter carries no coordinate). Convert
-        // the root-space point into the target's local space by subtracting
-        // its accumulated bounds origin up the parent chain.
-        float ox = 0.0f, oy = 0.0f;
-        for (View* v = target; v; v = v->parent()) {
-            ox += v->bounds().x;
-            oy += v->bounds().y;
-        }
-        target->on_hover_move(Point{root_pos.x - ox, root_pos.y - oy});
+        // the root-space point with the same scale- and scroll-aware walk the
+        // press and move verbs use, so a row inside a scrolled list sees where
+        // the pointer is in the row, not in the unscrolled content.
+        const Point local = point_to_local(root_pos, target, this);
+        interaction().hover_local = local;
+        target->on_hover_move(local);
     }
 }
 

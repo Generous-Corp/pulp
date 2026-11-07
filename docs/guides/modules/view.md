@@ -206,6 +206,16 @@ In a scripted UI, native focus changes become `focus`, `blur`, `focusin` and
 `focusout` events, keep `document.activeElement` current, and drive the CSS
 `:focus`, `:focus-visible` and `:focus-within` selectors.
 
+### Hover under a stationary pointer
+
+Scrolling, an animation or a list reorder can slide a different view under a
+pointer that has not moved. Call `reevaluate_stationary_hover(root)` from
+`pointer_dispatch.hpp` once per presented frame. If the view under the pointer
+changed, the old view sees its pointer-exit and the new view its enter and
+positioned move. If the same view moved under the pointer, it gets a positioned
+move only. Pass a `HoverDamage` region to skip the work when the frame repainted
+somewhere other than the pointer. It does nothing while a button is held.
+
 ## Accessibility
 
 Every widget has an access role, label, and value for screen readers:

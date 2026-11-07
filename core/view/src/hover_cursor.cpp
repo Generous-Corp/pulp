@@ -1,6 +1,7 @@
 #include <pulp/view/hover_cursor.hpp>
 
 #include <pulp/view/overlay_dismissal.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 
 namespace pulp::view {
 
@@ -27,6 +28,10 @@ std::optional<View::CursorStyle> HoverCursorTracker::poll_resolved(
 
 std::optional<View::CursorStyle> HoverCursorTracker::poll(View& root) {
     if (!has_pointer_) return std::nullopt;
+    // The frame that moved content under a still pointer must fix hover state
+    // as well as the cursor, and hover first so the cursor resolves against the
+    // same tree state the pointer now sees.
+    reevaluate_stationary_hover(root);
     return poll_resolved(hover_cursor_at(root, pointer_));
 }
 

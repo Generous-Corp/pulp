@@ -1089,6 +1089,9 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
 - (void)refreshHoverCursor {
     if (!self.rootView || !_hoverCursor.has_pointer()) return;
     if (_pointerOverNativeChild) return;
+    // The frame may have slid a different view under a pointer that did not
+    // move; bring hover state in line before resolving the cursor.
+    pulp::view::reevaluate_stationary_hover(*self.rootView);
     auto style = [self resolveHoverCursorAt:_hoverCursor.pointer()];
     if (!style) return;
     if (auto changed = _hoverCursor.poll_resolved(*style))
