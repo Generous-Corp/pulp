@@ -1,5 +1,7 @@
 #include <pulp/midi/ble_midi_registry.hpp>
 #include <pulp/midi/device.hpp>
+#include <pulp/midi/port_change_watcher.hpp>
+#include <pulp/midi/sysex_chunk_assembler.hpp>
 #include <pulp/runtime/log.hpp>
 
 #ifndef _WIN32
@@ -148,6 +150,7 @@ public:
             slot.bytes.clear();
             ZeroMemory(&slot.hdr, sizeof(slot.hdr));
         }
+        sysex_assembler_.reset();
         is_open_ = false;
         closing_.store(false, std::memory_order_release);
     }
@@ -183,22 +186,28 @@ private:
 
         if (msg == MIM_LONGDATA) {
             auto* hdr = reinterpret_cast<LPMIDIHDR>(param1);
-            if (!hdr || hdr->dwBytesRecorded == 0) return;
+            if (!hdr) return;
 
-            if (self->sysex_callback_) {
-                std::vector<uint8_t> bytes(
-                    reinterpret_cast<const uint8_t*>(hdr->lpData),
-                    reinterpret_cast<const uint8_t*>(hdr->lpData)
-                        + hdr->dwBytesRecorded);
-                self->sysex_callback_(bytes,
-                    self->qpc_seconds_since_open());
+            // The driver returns a buffer when it is full or when F7 arrives,
+            // so a message longer than one buffer comes back in pieces. Join
+            // them and deliver once, complete. A zero-byte return happens when
+            // midiInReset hands back unused buffers.
+            if (hdr->dwBytesRecorded != 0) {
+                if (self->sysex_assembler_.append(
+                        reinterpret_cast<const uint8_t*>(hdr->lpData),
+                        hdr->dwBytesRecorded)) {
+                    auto bytes = self->sysex_assembler_.take();
+                    if (self->sysex_callback_) {
+                        self->sysex_callback_(bytes, self->qpc_seconds_since_open());
+                    }
+                }
             }
 
-            // Re-arm the buffer for the next packet, but skip if the
-            // device is closing. midiInReset can deliver the last
-            // batch of buffers with non-zero dwBytesRecorded; re-queuing
-            // them races with unprepare/close and can leave headers
-            // MIDIERR_STILLPLAYING.
+            // Hand the buffer back to the driver, but not while closing:
+            // re-queuing during midiInReset races with unprepare/close and
+            // can leave headers MIDIERR_STILLPLAYING. Every other return,
+            // including an empty one, must re-queue or the input slowly runs
+            // out of receive buffers and long messages stop arriving.
             if (self->closing_.load(std::memory_order_acquire)) return;
             hdr->dwBytesRecorded = 0;
             midiInAddBuffer(self->handle_, hdr, sizeof(*hdr));
@@ -211,6 +220,7 @@ private:
             if (self->closing_.load(std::memory_order_acquire)) return;
             auto* hdr = reinterpret_cast<LPMIDIHDR>(param1);
             if (hdr) {
+                self->sysex_assembler_.reset();
                 hdr->dwBytesRecorded = 0;
                 midiInAddBuffer(self->handle_, hdr, sizeof(*hdr));
             }
@@ -233,6 +243,9 @@ private:
     LARGE_INTEGER      qpc_freq_{};
     LARGE_INTEGER      qpc_open_{};
     SysexSlot          sysex_slots_[kSysexSlots]{};
+    // Joins buffers of one long message. Touched only from the driver's
+    // callback thread, and reset in close() after the callbacks have drained.
+    SysexChunkAssembler sysex_assembler_;
     // closing_ guards the MIM_LONGDATA / MIM_LONGERROR re-queue paths
     // during close() so a callback racing with midiInReset doesn't add
     // a buffer that's about to be unprepared.
@@ -328,6 +341,36 @@ private:
 
 class WinMidiSystem : public MidiSystem {
 public:
+    ~WinMidiSystem() override { poller_.stop(); }
+
+    /// The multimedia API has no plug or unplug notification, so the system
+    /// enumerates once a second on a background thread and reports any
+    /// difference in the combined input and output lists. The callback runs
+    /// on that thread. Passing an empty callback stops the thread.
+    void set_port_change_callback(PortChangeCallback cb) override {
+        poller_.stop();
+        {
+            std::lock_guard<std::mutex> lk(cb_mu_);
+            port_change_cb_ = cb;
+        }
+        if (!cb) return;
+        poller_.start(
+            [this] {
+                auto ports = enumerate_inputs();
+                auto outs = enumerate_outputs();
+                ports.insert(ports.end(), outs.begin(), outs.end());
+                return ports;
+            },
+            [this](const PortListDiff&) {
+                PortChangeCallback current;
+                {
+                    std::lock_guard<std::mutex> lk(cb_mu_);
+                    current = port_change_cb_;
+                }
+                if (current) current();
+            });
+    }
+
     std::vector<MidiPortInfo> enumerate_inputs() override {
         std::vector<MidiPortInfo> ports;
         UINT count = midiInGetNumDevs();
@@ -375,6 +418,11 @@ public:
     std::unique_ptr<MidiOutput> create_output() override {
         return std::make_unique<WinMidiOutput>();
     }
+
+private:
+    std::mutex cb_mu_;
+    PortChangeCallback port_change_cb_;
+    PortChangePoller poller_;
 };
 
 } // namespace pulp::midi::win

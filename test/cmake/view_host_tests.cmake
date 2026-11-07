@@ -526,6 +526,12 @@ pulp_add_test_suite(pulp-test-midi-buffer-sysex GROUP pulp-test-group-view-host-
 # Windows-only cases guarded by #ifdef _WIN32.
 pulp_add_test_suite(pulp-test-winmidi-sysex GROUP pulp-test-group-view-host-midi
     LIBRARIES pulp::midi)
+# Port-list diffing + polling notifier (Windows multimedia hotplug) and
+# long-SysEx buffer joining. Platform-independent.
+pulp_add_test_suite(pulp-test-midi-port-change-watcher GROUP pulp-test-group-view-host-midi
+    LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-sysex-chunk-assembler GROUP pulp-test-group-view-host-midi
+    LIBRARIES pulp::midi)
 # WinRT MIDI 2.0 (UMP) backend — W3 (UMP↔MIDI1 + shared sysex7 reassembly + F0..F7 framing; WinRT TU opt-in via PULP_HAS_WINRT_MIDI, #error-guarded off non-Windows).
 pulp_add_test_suite(pulp-test-winrt-midi GROUP pulp-test-group-view-host-midi
     LIBRARIES pulp::midi)
