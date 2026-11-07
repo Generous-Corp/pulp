@@ -581,10 +581,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::uint64_t audio_edge_probe_dropped() const;
     EdgeProbeStatus audio_edge_probe_status() const;
     EdgeProbeIdentity audio_edge_probe_identity() const;
-    // Control probes observe one prepared automation edge after source mapping
-    // and slew, before the destination consumes the parameter events. The
-    // destination is identified by NodeId + public parameter id because
-    // automation edges do not have a destination audio port.
+    // Control probes observe one prepared sparse automation edge after its
+    // per-edge source mapping and slew, before destination mixing and bounds
+    // clamping. The destination is identified by NodeId + public parameter id
+    // because automation edges do not have a destination audio port.
     EdgeProbeStatus attach_control_edge_probe(const PortHandle& source, NodeId destination,
                                               std::uint32_t parameter_id);
     void detach_control_edge_probe();

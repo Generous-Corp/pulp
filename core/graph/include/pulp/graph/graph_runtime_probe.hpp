@@ -23,8 +23,9 @@ struct GraphRuntimeProbeSample {
     std::uint32_t frames = 0;
     float peak = 0.0f;
     float rms = 0.0f;
-    // Control lane: mapped parameter value at block start/end. Event lane:
-    // number of events delivered on this edge and first event metadata.
+    // Control lane: selected edge's mapped/slewed contribution at block
+    // start/end, before destination mixing and bounds. Event lane: number of
+    // events delivered on this edge and first event metadata.
     float value = 0.0f;
     float value_end = 0.0f;
     std::uint32_t payload_id = 0;

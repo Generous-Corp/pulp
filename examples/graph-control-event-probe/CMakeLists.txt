@@ -12,3 +12,7 @@ add_test(NAME graph-control-event-probe-planted-negative
          COMMAND pulp-graph-control-event-probe --planted-missing-publication)
 set_tests_properties(graph-control-event-probe-planted-negative
                      PROPERTIES WILL_FAIL TRUE LABELS "graph;negative;mutation")
+add_test(NAME graph-control-event-probe-event-planted-negative
+         COMMAND pulp-graph-control-event-probe --planted-missing-event-publication)
+set_tests_properties(graph-control-event-probe-event-planted-negative
+                     PROPERTIES WILL_FAIL TRUE LABELS "graph;negative;mutation")

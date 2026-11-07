@@ -42,9 +42,9 @@ struct GraphRuntimeAudioEdgeProbe {
 };
 
 // One source audio -> destination parameter observation. The source buffer is
-// sampled at the same control-rate mapping used by the automation gather, so
-// the report is the value delivered to the destination parameter, not a
-// second approximation made by the diagnostic surface.
+// sampled after per-edge range mapping and slew, before the destination's
+// per-parameter mixing and bounds clamp. It describes the selected edge's
+// mapped/slewed contribution, not the final value consumed by the parameter.
 struct GraphRuntimeControlEdgeProbe {
     static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
                   std::atomic<bool>::is_always_lock_free);
