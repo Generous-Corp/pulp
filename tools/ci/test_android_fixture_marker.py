@@ -23,6 +23,7 @@ def has_marker(output: str, marker: str) -> bool:
         ["bash", "-c", script, "bash", output, marker],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     return result.returncode == 0
@@ -41,7 +42,7 @@ class MarkerDetectionTests(unittest.TestCase):
         self.assertTrue(has_marker(big, "pulp-fixture-runner:"))
 
     def test_lane_uses_helper_not_pipe(self) -> None:
-        text = LANE.read_text()
+        text = LANE.read_text(encoding="utf-8")
         self.assertIn("output_has_marker", text)
         self.assertNotIn("grep -Fq \"$required_marker\"", text)
 

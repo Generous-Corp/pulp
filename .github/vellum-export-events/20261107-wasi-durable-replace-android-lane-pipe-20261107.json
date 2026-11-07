@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-wasi-durable-replace-android-lane-pipe-20261107",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T17:47:54Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/runtime/src/durable_file_replacement.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Skips the owner and permission copy and the process id in temporary names only on WASI and Emscripten targets, so native behavior is unchanged and Vellum has nothing to carry."
+}
