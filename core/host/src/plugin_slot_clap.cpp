@@ -217,19 +217,22 @@ class ClapSlot final : public detail::RequestDrivenSlot {
         in_event_storage_.reserve(params_.size() + ParameterEventQueue::kCapacity +
                                   kReservedMidiEvents);
         pending_edits_.reserve(params_.size());
-        if (!plugin_->start_processing(plugin_)) {
-            runtime::log_warn("ClapSlot: start_processing failed for '{}'", info_.name);
-        } else {
-            processing_ = true;
-        }
+        // start_processing() is an [audio-thread] call, so the first process()
+        // makes it, not prepare().
+        start_refused_.store(false, std::memory_order_relaxed);
         return true;
     }
 
     void release() override {
         if (!plugin_) return;
-        if (processing_) {
+        if (processing_.load(std::memory_order_acquire)) {
+            // stop_processing() is [audio-thread] too, but release() runs only
+            // while no process() call is in flight, so no audio thread exists to
+            // make it. The releasing thread stands in for that role for this one
+            // call, which is what thread_check then reports.
+            detail::AudioThreadScope audio_role;
             plugin_->stop_processing(plugin_);
-            processing_ = false;
+            processing_.store(false, std::memory_order_release);
         }
         if (active_) {
             plugin_->deactivate(plugin_);
@@ -240,7 +243,19 @@ class ClapSlot final : public detail::RequestDrivenSlot {
     void process_request(const detail::SlotProcessRequest& request) override {
         auto& audio = *request.audio;
         const int num_samples = request.num_samples;
-        if (!plugin_ || !processing_ || bypassed_.load(std::memory_order_relaxed)) {
+        if (plugin_ && active_ && !processing_.load(std::memory_order_relaxed) &&
+            !start_refused_.load(std::memory_order_relaxed)) {
+            // On the audio thread, inside this host's process call, as CLAP
+            // requires. A refusal is remembered until the next prepare().
+            if (plugin_->start_processing(plugin_))
+                processing_.store(true, std::memory_order_release);
+            else
+                start_refused_.store(true, std::memory_order_relaxed);
+        }
+        if (!plugin_ || !processing_.load(std::memory_order_relaxed) ||
+            bypassed_.load(std::memory_order_relaxed)) {
+            if (plugin_ && active_ && start_refused_.load(std::memory_order_relaxed))
+                process_status_.store(ProcessStatus::failed, std::memory_order_release);
             detail::SlotBusBinder::pass_through(audio, num_samples);
             return;
         }
@@ -842,7 +857,9 @@ class ClapSlot final : public detail::RequestDrivenSlot {
             return;
         if (callback_requested_.exchange(false) && plugin_->on_main_thread)
             plugin_->on_main_thread(plugin_);
-        if (flush_requested_.load() && !processing_) {
+        // flush() is [active ? audio-thread : main-thread]: from here only while
+        // deactivated. An active plugin's next process() carries the flush.
+        if (flush_requested_.load() && !active_) {
             flush_requested_.store(false);
             if (params_ext_ && params_ext_->flush) {
                 clap_input_events_t in{};
@@ -1324,7 +1341,10 @@ class ClapSlot final : public detail::RequestDrivenSlot {
 
     std::optional<PluginResolvedIdentity> identity_;
     bool active_ = false;
-    bool processing_ = false;
+    // Written by the audio thread (start) and by release() when no process()
+    // call is in flight (stop).
+    std::atomic<bool> processing_{false};
+    std::atomic<bool> start_refused_{false};
     // Channel layout the caller asked for, as handed to
     // set_preferred_channel_layout before prepare. -1 means "no request", in
     // which case prepare does not police the width at all.

@@ -70,6 +70,10 @@ struct FakeClap {
     bool audio_thread_during_process = false;
     bool main_thread_during_process = true;
     int on_main_thread_calls = 0;
+    int start_calls = 0;
+    int stop_calls = 0;
+    bool start_saw_audio_thread = false;
+    bool stop_saw_audio_thread = false;
 
     // Emitted on the next process() call.
     bool emit_note = false;
@@ -177,10 +181,19 @@ bool CLAP_ABI p_activate(const clap_plugin_t*, double, uint32_t, uint32_t) {
     return true;
 }
 void CLAP_ABI p_deactivate(const clap_plugin_t*) {}
+bool on_audio_thread_now() {
+    auto* check = static_cast<const clap_host_thread_check_t*>(host_ext(CLAP_EXT_THREAD_CHECK));
+    return check && check->is_audio_thread(g->host);
+}
 bool CLAP_ABI p_start(const clap_plugin_t*) {
+    ++g->start_calls;
+    g->start_saw_audio_thread = on_audio_thread_now();
     return true;
 }
-void CLAP_ABI p_stop(const clap_plugin_t*) {}
+void CLAP_ABI p_stop(const clap_plugin_t*) {
+    ++g->stop_calls;
+    g->stop_saw_audio_thread = on_audio_thread_now();
+}
 void CLAP_ABI p_reset(const clap_plugin_t*) {}
 void CLAP_ABI p_on_main_thread(const clap_plugin_t*) {
     ++g->on_main_thread_calls;
@@ -715,4 +728,23 @@ TEST_CASE("SignalGraph hands its hosted process mode to hosted plugins at prepar
     graph.set_hosted_plugin_process_mode(fmt::ProcessMode::Realtime);
     REQUIRE(graph.prepare(48000.0, 128));
     CHECK(fake.render_mode == CLAP_RENDER_REALTIME);
+}
+
+TEST_CASE("CLAP start and stop processing are made in the audio-thread role",
+          "[host][clap][host-context]") {
+    FakeClap fake;
+    auto slot = make_slot(fake);
+    REQUIRE(slot->prepare(48000.0, 64));
+    // start_processing is [audio-thread]: not from prepare, but from the first
+    // process call.
+    CHECK(fake.start_calls == 0);
+    Block b;
+    b.run(*slot);
+    CHECK(fake.start_calls == 1);
+    CHECK(fake.start_saw_audio_thread);
+    b.run(*slot);
+    CHECK(fake.start_calls == 1);
+    slot->release();
+    CHECK(fake.stop_calls == 1);
+    CHECK(fake.stop_saw_audio_thread);
 }
