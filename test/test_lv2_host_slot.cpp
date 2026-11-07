@@ -634,11 +634,12 @@ TEST_CASE("LV2 slot saves state while blocks keep running", "[host][lv2][slot][l
         }
     });
     std::size_t saved = 0;
-    while (blocks.load() < 400) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (blocks.load() < 400 && std::chrono::steady_clock::now() < deadline)
         saved += slot->save_state().empty() ? 0 : 1;
-    }
     stop.store(true);
     audio.join();
+    REQUIRE(blocks.load() >= 400);
     REQUIRE(saved > 0);
     // Every block ran the plugin: a save never made one pass through and
     // lose its note.

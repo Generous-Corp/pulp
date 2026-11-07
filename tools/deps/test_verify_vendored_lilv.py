@@ -39,7 +39,7 @@ class VendoredLilvTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             copy = Path(tmp) / "lilv"
             shutil.copytree(v.VENDOR_DIR, copy)
-            (copy / "sord" / "src" / "sordi.c").write_text("int main(void) { return 0; }\n")
+            (copy / "sord" / "src" / "sordi.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
             (copy / "extra").mkdir()
             problems = "\n".join(v.check(copy))
             self.assertIn("sordi.c", problems)
