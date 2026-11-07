@@ -437,6 +437,10 @@ pulp_add_test_suite(pulp-test-signal-svf-outputs GROUP pulp-test-group-core-sign
 # Korg35-style two-pole filter with a saturating feedback path.
 pulp_add_test_suite(pulp-test-signal-korg35-filter GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
+# Four-stage diode-coupled ladder lowpass, including agreement with the
+# transistor ladder at low resonance.
+pulp_add_test_suite(pulp-test-signal-diode-ladder-filter GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # TptFilter and the lockstep voice banks (LadderBank, SvfBank), split from
 # the signal filter tests above.
 pulp_add_test_suite(pulp-test-filter-banks GROUP pulp-test-group-core-signal

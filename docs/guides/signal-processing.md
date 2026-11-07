@@ -622,6 +622,37 @@ The linear responses are `1 / (s^2 + (2 - k) s + 1)` and `s^2 / (s^2 + (2 - k) s
 
 ---
 
+### DiodeLadderFilter
+
+Four-stage diode-coupled ladder lowpass in the TB-303 style. Each capacitor loads both neighbours, so the four poles are spread apart instead of coincident: the knee is gentler than the transistor ladder's, resonance costs bass (DC gain `1 / (1 + k)`), and the filter self-oscillates at feedback `k = 17`. Header: `pulp/signal/diode_ladder_filter.hpp`.
+
+```cpp
+signal::DiodeLadderFilter filter;
+filter.configure(sample_rate, 900.0f, /*resonance*/ 0.8f, /*drive*/ 1.0f);
+filter.set_bass_compensation(0.5f);   // optional: win back some low end
+
+for (int i = 0; i < num_samples; ++i)
+    output[i] = filter.process(input[i]);
+```
+
+| Method | Description |
+|---|---|
+| `configure(sample_rate, hz, resonance, drive)` | Set everything in one prewarp. |
+| `set_frequency(float hz)` | The frequency the filter self-oscillates at. The unresonant -3 dB corner is far lower: `kUnresonantCornerRatio` (about 0.106) of this value before warping. |
+| `set_resonance(float r)` | 0 to 1.25; 1 is the oscillation threshold (`k = 17 r`). |
+| `set_drive(float d)` | Feedback saturator `tanh(d x) / d`; 0 is a linear loop capped just below the threshold. |
+| `set_bass_compensation(float)` | 0 to 1; scales the input by `1 + amount * k`. 1 holds the passband at unity gain. |
+| `process(float)` / `process(float*, int)` | Filter one sample or a buffer. |
+| `reset()` | Clear state. |
+
+Compared with `LadderFilter` at zero resonance, the two agree within 0.25 dB from DC up to the -3 dB corner when that corner is set equal on both (checked in the tests); above the corner the diode ladder rolls off more gently. The four coupled stages are solved together without a unit delay: the inverse of the stage matrix is rebuilt when the cutoff changes, and the saturated resonance loop is a single scalar equation solved by bracketed Newton iteration.
+
+**Real-time:** a 4x4 matrix-vector product and a bounded number of `tanh` calls per sample; no allocation. Retuning rebuilds the matrix inverse (control-rate).
+
+**References:** Zavalishin, *The Art of VA Filter Design*, chapter 6; Pirkle, *Designing Software Synthesizer Plug-Ins in C++*, 2nd ed., diode ladder filter. Tests: `test/test_signal_diode_ladder_filter.cpp`.
+
+---
+
 ### Analog VCF
 
 For measured Juno, Jupiter-8, Prophet-5, and Minimoog panel voicings—or for
