@@ -1,11 +1,12 @@
 {
   "id": "coremidi-endpoint-replacement-reconnect",
-  "title": "A CoreMIDI port reports closed when its endpoint was replaced, so owners reconnect",
+  "title": "MIDI backend reconnect and MPE configuration notes: a replaced CoreMIDI endpoint reports closed",
   "classification": "engine_internal",
   "delivery_state": "pending",
   "claim_id": "ad459311-ee70-46bb-b5c7-db933751b335",
   "owned_paths": [
     "core/midi/platform/mac/coremidi_device.mm",
+    ".agents/skills/mpe/SKILL.md",
     "docs/status/sequencer-exposure/rows/coremidi-endpoint-replacement-reconnect.json"
   ],
   "evidence": [
