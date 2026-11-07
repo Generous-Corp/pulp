@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -54,6 +55,15 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def normalize_eol(data: bytes) -> bytes:
+    """Fold CRLF to LF.
+
+    A Windows checkout may convert line endings. Upstream hashes and patch
+    files are recorded with LF, so both sides are compared after this fold.
+    """
+    return data.replace(b"\r\n", b"\n")
+
+
 def load_manifest(path: Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -73,10 +83,19 @@ def patch_targets(patch_text: str) -> set[str]:
 
 def _reverse_apply(scratch: Path, patch: Path) -> str | None:
     """Reverse-apply one patch in scratch. Returns an error text or None."""
-    proc = subprocess.run(
-        ["git", "apply", "-R", "-p1", "--whitespace=nowarn", str(patch)],
-        cwd=scratch, capture_output=True, text=True, check=False,
-    )
+    local = scratch.parent / f"{scratch.name}.{patch.name}"
+    local.write_bytes(normalize_eol(patch.read_bytes()))
+    # Stop git from finding a repository above the scratch directory (for
+    # example when TMPDIR sits inside a checkout): it would then resolve the
+    # patch paths against that repository and skip files outside this directory.
+    env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(scratch.parent))
+    try:
+        proc = subprocess.run(
+            ["git", "apply", "-R", "-p1", "--whitespace=nowarn", str(local)],
+            cwd=scratch, capture_output=True, text=True, check=False, env=env,
+        )
+    finally:
+        local.unlink(missing_ok=True)
     if proc.returncode != 0:
         return (proc.stderr or proc.stdout).strip() or "git apply failed"
     return None
@@ -133,7 +152,7 @@ def check_dependency(dep: dict, repo_root: Path) -> list[str]:
                 return [f"{name}: vendored file {f['path']} is missing"]
             dst = scratch / f["path"]
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dst)
+            dst.write_bytes(normalize_eol(src.read_bytes()))
         for rel, p in reversed(list(zip(patches, patch_paths))):
             err = _reverse_apply(scratch, p)
             if err:

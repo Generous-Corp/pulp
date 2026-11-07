@@ -6,6 +6,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -132,6 +133,25 @@ class CheckPatchesTest(unittest.TestCase):
         self.assertEqual(fx.run(), [])
         (fx.root / fx.REL).write_text(V1)
         self.assertTrue(fx.run())
+
+    def test_crlf_checkout_still_verifies(self):
+        fx = Fixture()
+        path = fx.root / fx.REL
+        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        self.assertEqual(fx.run(), [])
+
+    def test_scratch_inside_another_repository(self):
+        # The verifier must work when the temporary directory sits inside some
+        # other repository, as it does when TMPDIR points into a checkout.
+        outer = tempfile.TemporaryDirectory()
+        subprocess.run(["git", "init", "-q"], cwd=outer.name, check=True)
+        previous = tempfile.tempdir
+        tempfile.tempdir = outer.name
+        try:
+            self.assertEqual(Fixture().run(), [])
+        finally:
+            tempfile.tempdir = previous
+            outer.cleanup()
 
     def test_missing_vendored_file_fails(self):
         fx = Fixture()
