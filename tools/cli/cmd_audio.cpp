@@ -27,7 +27,9 @@
 #include "cmd_audio_plugin_inspect.hpp"
 #include "cmd_audio_render.hpp"
 #include "cmd_audio_sampler_mip.hpp"
+#include "cmd_audio_spectrogram.hpp"
 #include "cmd_audio_validate.hpp"
+#include "cmd_audio_waveform.hpp"
 
 // Parsing helpers (defined in cli_common.cpp, not in header since they are only
 // used by audio command — declare them locally to keep the header lean).
@@ -54,6 +56,10 @@ static void print_audio_usage() {
     std::cout
         << "  pulp audio plugin-inspect --plugin <bundle> [--format <fmt>] [--id <id>]  # JSON\n";
     std::cout << "  pulp audio sampler-mip build <source> [--levels <1|2>] [--json]\n";
+    std::cout << "  pulp audio spectrogram <file> --png <out.png> [--fft 2048 --hop 512 --window hann "
+                 "--scale linear|log|mel --db-range 90 --start s --end s --channel n --json <sidecar>]\n";
+    std::cout << "  pulp audio waveform <file> --png <out.png> [--start s --end s --channel n "
+                 "--width px --height px --select a,b --json <sidecar>]\n";
     std::cout << "  pulp audio heritage <validate|canonicalize|inspect|render> ...\n";
 }
 
@@ -476,6 +482,12 @@ int cmd_audio(const std::vector<std::string>& args) {
 
     if (args[0] == "sampler-mip") {
         return cmd_audio_sampler_mip({args.begin() + 1, args.end()});
+    }
+    if (args[0] == "spectrogram") {
+        return cmd_audio_spectrogram({args.begin() + 1, args.end()});
+    }
+    if (args[0] == "waveform") {
+        return cmd_audio_waveform({args.begin() + 1, args.end()});
     }
 
     if (args[0] == "heritage") {

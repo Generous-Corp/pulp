@@ -647,6 +647,12 @@ endif()
 pulp_test_data(pulp-test-audio-image-raster PATHS test/fixtures/audio/images)
 catch_discover_tests(pulp-test-audio-image-raster)
 
+# Shell-out coverage for `pulp audio spectrogram` and `pulp audio waveform`.
+add_executable(pulp-test-cli-audio-image test_cli_audio_image.cpp)
+target_link_libraries(pulp-test-cli-audio-image PRIVATE pulp::audio pulp::runtime pulp::platform Catch2::Catch2WithMain)
+pulp_bind_cli_shellout_target(pulp-test-cli-audio-image)
+catch_discover_tests(pulp-test-cli-audio-image)
+
 add_executable(pulp-test-cli-audio-latency test_cli_audio_latency.cpp)
 target_link_libraries(pulp-test-cli-audio-latency PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-audio-latency)
