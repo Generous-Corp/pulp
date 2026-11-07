@@ -810,7 +810,16 @@ HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph, std::uin
         }
     } end_ingress{&trigger_controller_->host_ingress};
 
+    bool projected_records = false;
     const auto refuse = [&](HostEventResult result) noexcept {
+        if (projected_records) {
+            // project() removes the current window from the fixed staging
+            // area before sorting it.  Any later refusal must put the exact
+            // insertion order back before the RAII block seal, otherwise a
+            // retry either loses records or reorders equal-time events.
+            trigger_controller_->host_ingress.rollback_projection();
+            projected_records = false;
+        }
         ++trigger_controller_->host_counters.refused;
         if (result == HostEventResult::Overflow || result == HostEventResult::OutputCapacity)
             ++trigger_controller_->host_counters.overflow;
@@ -835,6 +844,7 @@ HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph, std::uin
         std::span<HostEventRecord>(projection.records.data(), projection.records.size()), count);
     if (result != HostEventResult::Accepted)
         return refuse(result);
+    projected_records = true;
     projection.count = count;
     projection.incomplete = false;
     projection.midi.clear();
@@ -856,11 +866,28 @@ HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph, std::uin
         return refuse(HostEventResult::Overflow);
     projection.midi.sort();
     projection.ump.sort();
+
+    // The mailbox copy is another bounded transaction.  Check the fixed
+    // destination capacities before deriving MPE or publishing the mailbox;
+    // set_from_midi() clears its writer scratch before it reports a failed
+    // copy, so calling it speculatively would make a retry observe partial
+    // output even after the ingress records are restored.
+    const auto runtime_it = graph.runtime.find(graph.host_event_midi_input);
+    if (runtime_it == graph.runtime.end() || !runtime_it->second.midi_input_mailbox)
+        return refuse(HostEventResult::Unbound);
+    const auto& destination = runtime_it->second.midi_input_mailbox->writer_scratch;
+    if (projection.midi.size() > destination.events.event_capacity() ||
+        projection.midi.sysex().size() > destination.events.sysex_capacity() ||
+        projection.ump.size() > destination.ump.capacity())
+        return refuse(HostEventResult::OutputCapacity);
+
     const auto mpe_result =
         derive_mpe(std::span<const HostEventRecord>(projection.records.data(), count), sample_start,
                    projection.host_event_tracker, projection.mpe);
     if (mpe_result != HostEventResult::Accepted)
         return refuse(mpe_result);
+    if (projection.mpe.size() > destination.mpe.capacity())
+        return refuse(HostEventResult::OutputCapacity);
     // Publish through the graph-owned MidiInput mailbox.  The routed bridge
     // then gathers the same fixed MIDI/UMP/MPE payload into the graph scratch
     // before dispatch, preserving the ordinary graph event-edge semantics.

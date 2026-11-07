@@ -214,8 +214,14 @@ TEST_CASE("Host ingress projection refusal seals the active block",
     REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
     CHECK(fixture.graph.process_checked(block.out, block.in, 1) ==
           TriggerGraphResult::ProcessingFailure);
-    CHECK(fixture.graph.reset_host_event_ingress(1) == HostEventResult::Accepted);
+    // The refusal seals the active block, but the staged record remains for a
+    // retry. Re-publishing its producer sequence is therefore rejected as a
+    // duplicate, while begin_host_event_block() is no longer wedged.
     CHECK(fixture.graph.begin_host_event_block(1, 0, 1) == HostEventResult::Accepted);
+    CHECK(fixture.graph.publish_host_event(event) == HostEventResult::InvalidSequence);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 1) ==
+          TriggerGraphResult::ProcessingFailure);
+    CHECK(fixture.graph.reset_host_event_ingress(1) == HostEventResult::Accepted);
     CHECK(fixture.graph.process_checked(block.out, block.in, 1) == TriggerGraphResult::Accepted);
 }
 
