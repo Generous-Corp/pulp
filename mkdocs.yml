@@ -170,6 +170,7 @@ nav:
       - Web Plugins: guides/web-plugins.md
       - Copyright Protection: guides/copyright-protection.md
       - GPU Validation: guides/gpu-validation-checklist.md
+      - Your First WGSL Pass: guides/gpu-pass.md
       - Partial Repaint: guides/partial-repaint.md
       - Text Shaping Determinism: reference/text-shaping.md
       - Test Coverage: guides/coverage.md
