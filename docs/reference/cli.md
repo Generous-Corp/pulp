@@ -2113,6 +2113,8 @@ pulp audio heritage inspect PROFILE [--json]
 pulp audio heritage render PROFILE --fixture impulse|sine|two-tone|WAV --out WAV --report JSON [--frames N] [--block-size N]
 pulp audio scope [target] --window 2048 --trigger rising-zero --channel 0 [--json scope.json]
 pulp audio scope --input-wav tone.wav --window 2048 [--json scope.json] [--png scope.png]
+pulp audio spectrogram <file> --png <out.png> [--fft 2048 --hop 512 --window hann --scale linear|log|mel --db-range 90 --start s --end s --channel n --width px --height px --json <sidecar> --absolute-paths]
+pulp audio waveform <file> --png <out.png> [--start s --end s --channel n --width px --height px --select a,b --json <sidecar> --absolute-paths]
 pulp audio validate summarize <file.wav> [--json]
 pulp audio validate doctor <file.wav> [--thd] [--response f1,f2,...] [--fundamental <hz>]
 pulp audio validate compare <a.wav> <b.wav> [--mode null|spectral] [--tolerance <dbfs>]
@@ -2153,6 +2155,8 @@ same mistake as reading it as a pass.
 | `heritage inspect` | Print the neutral profile ID, schema, digest, declared host rate, typed block counts, active mechanisms, stateful seeds, capabilities, prepared latency, profile clock/live source-consumption ratio, resident exemption and 4x streamed-admission bound, and clean-path-assistance policy; `--json` emits a stable object and identifies runtime note pitch as an external multiplier |
 | `heritage render` | Deterministically render a built-in analytic or exact-rate mono WAV fixture through checked voice plans and the typed bus, writing Float32 WAV plus a canonical evidence report. Record-commit blocks run as a separately reported verified transaction rather than being silently composed across a rate boundary |
 | `scope` | Capture `pulp.audio.scope.v1` JSON from a live standalone target or a speakerless offline WAV; offline mode can also write a PNG trace artifact |
+| `spectrogram` | Display-only spectrogram PNG of an audio file (STFT over memory-mapped windows, linear/log/mel axis, fixed palette, burned-in footer) with a `pulp.audio.image.v1` sidecar. Exit `2` when there is nothing to render |
+| `waveform` | Display-only peak waveform PNG from `WaveformOverview` levels with red clip markers at or above full scale, plus the same sidecar. Exit `2` when there is nothing to render |
 | `validate summarize` | Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/dominant pitch); `--json` for machine output |
 | `validate doctor` | Offline Audio Doctor over a WAV: THD/THD+N (`--thd`) and/or spectrum magnitude at checkpoints (`--response`); writes a JSON curve artifact |
 | `validate compare` | Sample-residual (null) verdict between two WAVs; exits nonzero past tolerance. `--mode spectral` currently applies a looser default tolerance to the same residual (a true spectral-distance metric is a later slice) |
@@ -2262,6 +2266,82 @@ reports its new, larger latency. It is correctly compensated; it just got slower
 `--latency-expect` pins the value the plugin is *supposed* to have, so that drift
 fails too. It never masks a real mismatch: if the audio and the report already
 disagree, that is what you are told.
+
+#### Spectrogram and waveform images (`audio spectrogram`, `audio waveform`)
+
+Both verbs produce an image an agent or a person can look at, plus a JSON
+sidecar that says exactly what was drawn. They are **display only**: nothing
+they emit participates in any verdict, gate or comparison. Measurements come
+from `audio validate`, `audio compare` and the analysis library; the images
+exist so a render can be seen without a DAW.
+
+```bash
+pulp audio spectrogram take.wav --png take.png --scale log --start 12 --end 18
+pulp audio waveform take.wav --png take-wave.png --select 12,18
+```
+
+Input is read through `MemoryMappedAudioReader` in fixed windows, so a
+multi-hour file renders with bounded memory and never goes through the
+whole-file WAV decoder (which caps at 100,000,000 frames). Formats the ranged
+reader cannot seek (FLAC, MP3, Ogg) fall back to the registry's whole-file
+decode; lossy decoders on Apple platforms are CoreAudio and the sidecar says
+so. Float input above 0 dBFS is drawn clamped and reported unclamped; nothing
+is normalized.
+
+Common flags:
+
+| Flag | Meaning |
+|------|---------|
+| `--png <out.png>` | Output image (required). Must not be the input file. |
+| `--json <sidecar>` | Sidecar path (default `<out.png>.json`). Must not be the input or the PNG. |
+| `--start <s>` / `--end <s>` | Time range in seconds; `--end` is clamped to the file's end. `--start` at or past the end, or `--end <= --start`, is an error. |
+| `--channel <n>` | Channel index to render (default `0`); out of range is an error that names the channel count. |
+| `--width <px>` / `--height <px>` | Plot area size in pixels (axes, ticks and footer are added around it). Defaults: spectrogram 1024x384, waveform 1024x192. |
+| `--absolute-paths` | Write full paths into the sidecar instead of basenames. The footer burned into the image is always the basename. |
+
+Spectrogram flags: `--fft <n>` (power of two, at least 16; default 2048),
+`--hop <n>` (1..fft; default 512), `--window rectangular|hann|hamming|blackman|flat_top|kaiser`
+(default `hann`; the coefficients are the coherent-gain-normalized windows from
+`audio_spectrum.hpp`, so a full-scale sine reads 0 dBFS at its bin through any
+of them), `--scale linear|log|mel` (default `linear`; `mel` is the HTK
+convention `2595 log10(1 + f/700)`, which librosa calls `htk=True`), and
+`--db-range <dB>` (dynamic range shown below 0 dBFS; default 90). Each image
+column holds the peak over the STFT frames it covers; a trailing partial frame
+is dropped rather than zero-padded. A range shorter than one FFT exits `2`
+with the fix in the message.
+
+Waveform flags: `--select <start>,<end>` shades a selection in seconds. Peaks
+come from `WaveformOverview` at a base resolution chosen for the plot width;
+a column whose peak reaches full scale carries a red marker at the top and
+bottom edge.
+
+Exit codes: `0` rendered; `1` usage or I/O error; `2` nothing to render (an
+input with no frames, or a range shorter than one FFT).
+
+Sidecar (`schema: "pulp.audio.image.v1"`), one object per image:
+
+| Field | Meaning |
+|-------|---------|
+| `schema` | `pulp.audio.image.v1` |
+| `display_only` | Always `true`. The document describes a picture, never a measurement a gate may read. |
+| `verb` | `spectrogram` or `waveform` |
+| `tool_version` | The CLI version that rendered the image |
+| `input.name` | Input basename (full path only with `--absolute-paths`) |
+| `input.sha256` | SHA-256 of the input bytes, so the image can be matched back to its file |
+| `input.sample_rate`, `input.channels`, `input.frames`, `input.bits_per_sample` | Header facts from the reader |
+| `decoder.name` | The registry reader that decoded the file (`WAV`, `AIFF`, `FLAC`, `MP3`, `OGG`, `CoreAudio`, ...) |
+| `decoder.platform` | Present only for platform decoders (`CoreAudio`), because their output can differ across OS releases |
+| `time_range.start_seconds`, `end_seconds`, `start_frame`, `end_frame`, `frames`, `duration_seconds` | The rendered range after clamping |
+| `channel` | The channel index rendered |
+| `settings` | Spectrogram: `fft`, `hop`, `window`, `scale`, `db_range`, `db_ceiling`, `mel_convention`, `column_reduction`, `stft_frames`, `bins`, `plot_width`, `plot_height`. Waveform: `samples_per_peak`, `peaks`, `plot_width`, `plot_height`, `clip_marker`, and `selection_seconds` when `--select` was given |
+| `image.png`, `image.width`, `image.height` | Output basename (or full path) and final pixel size including axes and footer |
+| `true_peak.method` | `sample_peak`: the maximum absolute sample value over the rendered range, not an oversampled inter-sample peak |
+| `true_peak.linear`, `true_peak.dbfs` | That peak, unclamped (float above full scale reports above 1.0 / above 0 dBFS) |
+| `true_peak.clipped` | `true` when the peak is at or above full scale |
+
+The same images are reachable over MCP as `pulp_audio_spectrogram` and
+`pulp_audio_waveform`, and the Audio Quality Lab attaches them under its
+report's `advisory.artifacts` block.
 
 `pulp audio scope` is the lower-level sample-window view. Live mode wraps
 `pulp run --audio-scope-json` and may open the audio device; use

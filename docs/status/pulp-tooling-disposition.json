@@ -323,6 +323,136 @@
             "subcommands": []
           },
           {
+            "name": "spectrogram",
+            "arguments": [
+              {
+                "name": "file",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--png",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--fft",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--hop",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--window",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--scale",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--db-range",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--start",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--end",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--channel",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--width",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--height",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--absolute-paths",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "waveform",
+            "arguments": [
+              {
+                "name": "file",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--png",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--select",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--start",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--end",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--channel",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--width",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--height",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--absolute-paths",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
             "name": "validate summarize",
             "arguments": [
               {
@@ -4889,6 +5019,14 @@
       },
       {
         "name": "pulp_audio_scope",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_spectrogram",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_waveform",
         "disposition": "excluded"
       },
       {
