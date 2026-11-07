@@ -6,8 +6,8 @@
 #include <pulp/view/musical_typing_keyboard.hpp>
 #include <pulp/view/waveform_recorder_view.hpp>
 
-#include <pulp/signal/spectrum_analyzer.hpp>
 #include <pulp/signal/spectrum_bin_mapping.hpp>
+#include <pulp/signal/windowing.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -17,6 +17,11 @@
 
 namespace pulp::audio {
 class WaveformOverview;
+}
+namespace pulp::signal {
+// Defined in pulp/signal/spectrum_analyzer.hpp, which pulls in the FFT backend
+// (and with it platform headers); keep it out of this widely included header.
+class SpectrumAnalyzer;
 }
 namespace pulp::view {
 // ── Meter ────────────────────────────────────────────────────────────────────
@@ -355,8 +360,8 @@ class SpectrumView : public View, public InspectorFacts, public BinDisplay {
     using LevelMode = signal::SpectrumLevelMode;
     using WindowType = signal::WindowFunction::Type;
 
-    SpectrumView() = default;
-    ~SpectrumView() override = default;
+    SpectrumView();
+    ~SpectrumView() override;
 
     // ── Caller-supplied bins (soft-deprecated; see the note above) ───────
     // Set spectrum magnitudes (dB, typically -100 to 0)
@@ -400,10 +405,7 @@ class SpectrumView : public View, public InspectorFacts, public BinDisplay {
     /// AUDIO THREAD. Queue mono samples for analysis. Wait-free, never
     /// allocates, never blocks. A no-op until analysis is enabled. Samples that
     /// do not fit (UI stalled for several frames) are dropped, not queued.
-    void push_samples(const float* samples, size_t count) noexcept {
-        if (auto* tap = tap_.load(std::memory_order_acquire))
-            tap->push_samples(samples, count);
-    }
+    void push_samples(const float* samples, size_t count) noexcept;
 
     /// UI thread. Analysis settings; each applies immediately and is safe while
     /// audio is running. FFT size is rounded up to a power of two in
@@ -457,12 +459,8 @@ class SpectrumView : public View, public InspectorFacts, public BinDisplay {
 
     /// UI thread. FFT frames discarded because the UI fell behind, and samples
     /// the audio thread could not queue. Both 0 when analysis is off.
-    std::uint64_t skipped_frame_count() const {
-        return analyzer_ ? analyzer_->skipped_frame_count() : 0;
-    }
-    std::uint64_t overflow_count() const {
-        return analyzer_ ? analyzer_->overflow_count() : 0;
-    }
+    std::uint64_t skipped_frame_count() const;
+    std::uint64_t overflow_count() const;
 
     void paint(canvas::Canvas& canvas) override;
 
@@ -477,7 +475,15 @@ class SpectrumView : public View, public InspectorFacts, public BinDisplay {
     float min_db_ = -80.0f;
     float max_db_ = 0.0f;
 
-    signal::SpectrumAnalyzerConfig analysis_{};
+    struct AnalysisSettings {
+        double sample_rate = 48000.0;
+        int fft_size = 2048;
+        float overlap = 0.5f;
+        WindowType window = WindowType::hann;
+        LevelMode level_mode = LevelMode::peak;
+        float release_seconds = 0.25f;
+    };
+    AnalysisSettings analysis_{};
     float min_hz_ = 20.0f;
     float max_hz_ = 20000.0f;
     bool analysis_enabled_ = false;

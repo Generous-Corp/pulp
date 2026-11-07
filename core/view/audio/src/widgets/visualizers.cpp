@@ -10,6 +10,7 @@
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/capability_fallback.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/signal/spectrum_analyzer.hpp>
 #include <pulp/view/graph_scale.hpp>
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/text_overflow.hpp>
@@ -622,9 +623,33 @@ void SpectrumView::paint_grid(canvas::Canvas& canvas, const Rect& b, bool log_ax
     }
 }
 
+SpectrumView::SpectrumView() = default;
+SpectrumView::~SpectrumView() = default;
+
+void SpectrumView::push_samples(const float* samples, size_t count) noexcept {
+    if (auto* tap = tap_.load(std::memory_order_acquire))
+        tap->push_samples(samples, count);
+}
+
+std::uint64_t SpectrumView::skipped_frame_count() const {
+    return analyzer_ ? analyzer_->skipped_frame_count() : 0;
+}
+
+std::uint64_t SpectrumView::overflow_count() const {
+    return analyzer_ ? analyzer_->overflow_count() : 0;
+}
+
 void SpectrumView::apply_analysis_config() {
-    if (analyzer_)
-        analyzer_->configure(analysis_);
+    if (!analyzer_)
+        return;
+    signal::SpectrumAnalyzerConfig config;
+    config.sample_rate = analysis_.sample_rate;
+    config.fft_size = analysis_.fft_size;
+    config.overlap = analysis_.overlap;
+    config.window = analysis_.window;
+    config.level_mode = analysis_.level_mode;
+    config.release_seconds = analysis_.release_seconds;
+    analyzer_->configure(config);
 }
 
 void SpectrumView::set_analysis_enabled(bool on) {

@@ -51,8 +51,6 @@
 
 namespace pulp::signal {
 
-enum class SpectrumLevelMode : std::uint8_t { peak, rms, power_db, psd };
-
 struct SpectrumAnalyzerConfig {
     double sample_rate = 48000.0;
     int fft_size = 2048; ///< power of two in [kMinFftSize, kMaxFftSize]

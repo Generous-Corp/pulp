@@ -49,6 +49,16 @@ enum class SpectrumAggregation : std::uint8_t {
     power_mean, ///< mean power of the covered bins
 };
 
+/// What a spectrum display level means. Calibrated so full-scale content
+/// reads 0 dB; the matching column aggregation is peak for `peak`, power_sum
+/// for `power_db`, and power_mean for `rms` and `psd`.
+enum class SpectrumLevelMode : std::uint8_t {
+    peak,     ///< per-bin peak amplitude; a full-scale sine reads 0 dB
+    rms,      ///< per-bin RMS amplitude; a full-scale sine reads -3.01 dB
+    power_db, ///< per-bin power; the bins of a signal sum to its mean square
+    psd,      ///< power per Hz (dB re 1/Hz)
+};
+
 struct SpectrumBinMappingConfig {
     double sample_rate = 48000.0;
     int fft_size = 2048; ///< transform size; the input has fft_size/2+1 bins
