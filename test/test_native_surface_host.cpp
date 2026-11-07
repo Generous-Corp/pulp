@@ -14,10 +14,8 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/state/store.hpp>
 
-#include <cmath>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <vector>
 
 using namespace pulp::format;
