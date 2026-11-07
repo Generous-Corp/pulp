@@ -1871,7 +1871,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/diode_ladder_filter.hpp",
-        "fingerprint": "sha256:a84ace865f9a8cf9c9a18939a431e40848ed5d727cf9887745be33349d44f2bd",
+        "fingerprint": "sha256:c1fd09177806e9ce5bc39a9d94bb85a7cc41293005e25a7a699c388b0cf4c7a7",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

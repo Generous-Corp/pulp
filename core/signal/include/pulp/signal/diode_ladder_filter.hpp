@@ -25,12 +25,17 @@
 /// is `1 / (1 + k)`: bass is lost as resonance rises, as on the hardware;
 /// `set_bass_compensation()` restores it.
 ///
-/// `set_frequency()` is the frequency the filter self-oscillates at (the chain
-/// reaches the stability edge at `w = sqrt(2)` in the units above, so the
-/// integrator rate is the cutoff over `sqrt(2)`). The unresonant -3 dB corner
-/// lies far lower, at about 0.106 of that frequency before warping, because the
-/// four poles are spread over a wide range; kUnresonantCornerRatio gives the
-/// number. `set_resonance(r)` maps `r` to `k = 17 r`, so `r = 1` is the oscillation
+/// Cutoff convention: `set_frequency()` means what it means on `LadderFilter`
+/// and `Svf`. Those two define their cutoff as the filter's characteristic
+/// frequency, where the resonance peak sits and where the filter self-oscillates
+/// (the transistor ladder's -3 dB point at zero resonance is 0.435 of it, not
+/// at it). Here too it is the self-oscillation / resonance-peak frequency. The
+/// unresonant -3 dB corner is a fixed fraction of it, kUnresonantCornerRatio
+/// (about 0.106, lower than the transistor ladder's 0.435 because the four
+/// diode-coupled poles are spread wide), before the small prewarp shift.
+/// The chain reaches the stability edge at `w = sqrt(2)` in the units above, so
+/// the integrator rate is the cutoff over `sqrt(2)`. `set_resonance(r)` maps `r`
+/// to `k = 17 r`, so `r = 1` is the oscillation
 /// threshold; above it the saturator `T(x) = tanh(d x) / d` limits the
 /// amplitude.
 ///

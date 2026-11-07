@@ -28,8 +28,10 @@ struct OnsetDetectionConfig {
     // SuperFlux settings; ignored by the other methods. SuperFlux needs
     // `frame_size` <= 65536, at most 256 channels and `hop_size` <= `frame_size`,
     // and reports each marker at the centre of the analysis window that
-    // produced it, where its novelty peaks (the other methods report the
-    // window start).
+    // produced it, where its novelty peaks (the other methods keep reporting
+    // the window start, as they always have, so existing slice maps do not
+    // move; a Hann-windowed attack is only fully seen at the window centre,
+    // which is why SuperFlux does not use the start).
     signal::SuperFluxConfig superflux{};
 };
 

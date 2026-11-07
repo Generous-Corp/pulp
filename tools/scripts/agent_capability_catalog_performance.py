@@ -417,7 +417,7 @@ EXPORTS = [
             include="pulp/audio/onset_detector.hpp",
             qualified_name="pulp::audio::OnsetDetector",
             target="Pulp::audio",
-            header_fingerprint="sha256:0ca5edce96b27dc174ee612fa8eafe33aff2e4e037c1a0ff1bf0134bd04789b7",
+            header_fingerprint="sha256:73de2cc1ba382ea6250e57592f042285a84305881ee1387f17aa40df557d1e12",
         )],
         _link_probes=[{
             "role": "entrypoint",

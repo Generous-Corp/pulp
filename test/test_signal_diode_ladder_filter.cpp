@@ -215,6 +215,49 @@ TEST_CASE("Diode ladder stays finite and bounded across the parameter space",
     }
 }
 
+TEST_CASE("Diode ladder cutoff means the same as on the transistor ladder and the Svf",
+          "[signal][diode-ladder][convention]") {
+    // On LadderFilter and Svf the cutoff is the characteristic frequency: the
+    // resonance peak sits there and the filter self-oscillates there. At the
+    // same set_frequency and a resonance below the threshold, the small-signal
+    // resonance peak of the diode ladder lands in the same place.
+    auto peak_hz = [&](auto make) {
+        double best = 0.0, best_hz = 0.0;
+        for (double hz = 150.0; hz < 0.4 * kFs; hz *= 1.02) {
+            auto f = make();
+            const double g = sine_gain([&](double x) { return f.process(x); }, hz, 1e-4);
+            if (g > best) {
+                best = g;
+                best_hz = hz;
+            }
+        }
+        return best_hz;
+    };
+    for (const double cutoff : {500.0, 1500.0}) {
+        const double diode_hz = peak_hz([&] {
+            Filter f;
+            f.configure(kFs, cutoff, 0.9, 0.0);
+            return f;
+        });
+        const double ladder_hz = peak_hz([&] {
+            struct Wrap {
+                pulp::signal::LadderFilter64 l;
+                double process(double x) {
+                    return l.process_reference(x);
+                }
+            } w;
+            w.l.set_sample_rate(kFs);
+            w.l.set_frequency(cutoff);
+            w.l.set_resonance(0.9);
+            return w;
+        });
+        INFO("cutoff " << cutoff << " diode peak " << diode_hz << " ladder peak " << ladder_hz);
+        CHECK(std::abs(diode_hz - cutoff) / cutoff < 0.05);
+        CHECK(std::abs(ladder_hz - cutoff) / cutoff < 0.05);
+        CHECK(std::abs(diode_hz - ladder_hz) / cutoff < 0.06);
+    }
+}
+
 TEST_CASE("Diode ladder feedback solver matches bisection", "[signal][diode-ladder][solver]") {
     for (const double drive : {0.25, 1.0, 4.0, 16.0}) {
         for (const double ck : {0.0, 0.5, 4.0, 21.0}) {

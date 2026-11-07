@@ -499,7 +499,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/onset_detector.hpp",
-      "fingerprint": "sha256:0ca5edce96b27dc174ee612fa8eafe33aff2e4e037c1a0ff1bf0134bd04789b7",
+      "fingerprint": "sha256:73de2cc1ba382ea6250e57592f042285a84305881ee1387f17aa40df557d1e12",
       "include": "pulp/audio/onset_detector.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -2849,7 +2849,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/diode_ladder_filter.hpp",
-      "fingerprint": "sha256:a84ace865f9a8cf9c9a18939a431e40848ed5d727cf9887745be33349d44f2bd",
+      "fingerprint": "sha256:c1fd09177806e9ce5bc39a9d94bb85a7cc41293005e25a7a699c388b0cf4c7a7",
       "include": "pulp/signal/diode_ladder_filter.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
