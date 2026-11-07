@@ -3,9 +3,12 @@
 
 #include "system_audio_codec_backend.hpp"
 
+#include <pulp/runtime/log.hpp>
+
 #import <AudioToolbox/AudioToolbox.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <vector>
@@ -13,6 +16,16 @@
 namespace pulp::audio::detail {
 
 namespace {
+
+// Logs the failing stage and its OSStatus, so a false return can be told
+// apart (an unsupported format from a full disk, for example).
+bool check(OSStatus status, const char* stage) {
+    if (status == noErr)
+        return true;
+    runtime::log_warn("System codec (ExtAudioFile): {} failed, OSStatus {}", stage,
+                      static_cast<int>(status));
+    return false;
+}
 
 AudioFileTypeID file_type(SystemAudioContainer container) {
     switch (container) {
@@ -73,8 +86,8 @@ bool file_format(const SystemAudioWriteOptions& options, Float64 rate, UInt32 ch
     }
     }
     UInt32 size = sizeof(out);
-    return AudioFormatGetProperty(kAudioFormatProperty_FormatInfo, 0, nullptr, &size, &out) ==
-           noErr;
+    return check(AudioFormatGetProperty(kAudioFormatProperty_FormatInfo, 0, nullptr, &size, &out),
+                 "describing the stored format");
 }
 
 AudioStreamBasicDescription float_client_format(Float64 rate, UInt32 channels) {
@@ -90,21 +103,51 @@ AudioStreamBasicDescription float_client_format(Float64 rate, UInt32 channels) {
     return client;
 }
 
+// The encoder accepts bitrates in ranges that depend on the sample rate and
+// channel count. Round the request to the nearest accepted value, as the
+// Windows backend does, instead of failing the write.
+UInt32 nearest_applicable_bitrate(AudioConverterRef converter, UInt32 requested) {
+    UInt32 size = 0;
+    if (AudioConverterGetPropertyInfo(converter, kAudioConverterApplicableEncodeBitRates, &size,
+                                      nullptr) != noErr ||
+        size < sizeof(AudioValueRange))
+        return requested;
+    std::vector<AudioValueRange> ranges(size / sizeof(AudioValueRange));
+    if (AudioConverterGetProperty(converter, kAudioConverterApplicableEncodeBitRates, &size,
+                                  ranges.data()) != noErr)
+        return requested;
+    double best = 0.0;
+    double best_distance = -1.0;
+    for (const auto& range : ranges) {
+        const double candidate =
+            std::clamp(static_cast<double>(requested), range.mMinimum, range.mMaximum);
+        const double distance = std::abs(candidate - static_cast<double>(requested));
+        if (best_distance < 0.0 || distance < best_distance) {
+            best = candidate;
+            best_distance = distance;
+        }
+    }
+    return best_distance < 0.0 ? requested : static_cast<UInt32>(best);
+}
+
 bool apply_bitrate(ExtAudioFileRef file, std::uint32_t bitrate) {
     AudioConverterRef converter = nullptr;
     UInt32 size = sizeof(converter);
-    if (ExtAudioFileGetProperty(file, kExtAudioFileProperty_AudioConverter, &size, &converter) !=
-            noErr ||
+    if (!check(
+            ExtAudioFileGetProperty(file, kExtAudioFileProperty_AudioConverter, &size, &converter),
+            "getting the encoder") ||
         !converter)
         return false;
-    UInt32 value = bitrate;
-    if (AudioConverterSetProperty(converter, kAudioConverterEncodeBitRate, sizeof(value), &value) !=
-        noErr)
+    UInt32 value = nearest_applicable_bitrate(converter, bitrate);
+    if (!check(AudioConverterSetProperty(converter, kAudioConverterEncodeBitRate, sizeof(value),
+                                         &value),
+               "setting the AAC bitrate"))
         return false;
     // A null config tells ExtAudioFile to pick up the converter's new state.
     CFArrayRef config = nullptr;
-    return ExtAudioFileSetProperty(file, kExtAudioFileProperty_ConverterConfig, sizeof(config),
-                                   &config) == noErr;
+    return check(ExtAudioFileSetProperty(file, kExtAudioFileProperty_ConverterConfig,
+                                         sizeof(config), &config),
+                 "applying the AAC bitrate");
 }
 
 } // namespace
@@ -141,13 +184,14 @@ bool system_backend_write(const std::string& path, const AudioFileData& data,
     const OSStatus created = ExtAudioFileCreateWithURL(url, file_type(options.container), &stored,
                                                        nullptr, kAudioFileFlags_EraseFile, &file);
     CFRelease(url);
-    if (created != noErr || !file)
+    if (!check(created, "creating the file") || !file)
         return false;
 
     bool ok = true;
     const auto client = float_client_format(rate, channels);
-    if (ExtAudioFileSetProperty(file, kExtAudioFileProperty_ClientDataFormat, sizeof(client),
-                                &client) != noErr)
+    if (!check(ExtAudioFileSetProperty(file, kExtAudioFileProperty_ClientDataFormat, sizeof(client),
+                                       &client),
+               "setting the float input format"))
         ok = false;
     if (ok && options.encoding == SystemAudioEncoding::AAC && options.aac_bitrate != 0)
         ok = apply_bitrate(file, options.aac_bitrate);
@@ -165,11 +209,11 @@ bool system_backend_write(const std::string& path, const AudioFileData& data,
         buffers.mBuffers[0].mNumberChannels = channels;
         buffers.mBuffers[0].mDataByteSize = static_cast<UInt32>(count * channels * sizeof(float));
         buffers.mBuffers[0].mData = interleaved.data();
-        ok = ExtAudioFileWrite(file, static_cast<UInt32>(count), &buffers) == noErr;
+        ok = check(ExtAudioFileWrite(file, static_cast<UInt32>(count), &buffers), "encoding");
     }
 
     // Disposing flushes the encoder's final packets and writes the header.
-    const bool closed = ExtAudioFileDispose(file) == noErr;
+    const bool closed = check(ExtAudioFileDispose(file), "finishing the file");
     if (!(ok && closed)) {
         std::remove(path.c_str());
         return false;

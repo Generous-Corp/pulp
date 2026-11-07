@@ -5,6 +5,8 @@
 #include "decode_limits_detail.hpp"
 #include "system_audio_codec_backend.hpp"
 
+#include <pulp/runtime/log.hpp>
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -66,6 +68,16 @@ class MediaFoundationScope {
     bool com_owned_ = false;
     bool mf_started_ = false;
 };
+
+// Logs the failing stage and its HRESULT, so a false return can be told apart
+// (an unsupported format from a full disk, for example).
+bool succeeded(HRESULT hr, const char* stage) {
+    if (SUCCEEDED(hr))
+        return true;
+    runtime::log_warn("System codec (Media Foundation): {} failed, HRESULT 0x{:08x}", stage,
+                      static_cast<unsigned>(hr));
+    return false;
+}
 
 std::wstring widen(const std::string& text) {
     if (text.empty() || text.size() > static_cast<std::size_t>(INT_MAX))
@@ -268,8 +280,10 @@ bool system_backend_write(const std::string& path, const AudioFileData& data,
                           const SystemAudioWriteOptions& options) {
     const auto channels = static_cast<UINT32>(data.num_channels());
     const UINT32 rate = data.sample_rate;
-    // The Windows AAC encoder accepts these rates and layouts only.
-    if ((rate != 44100 && rate != 48000) || (channels != 1 && channels != 2 && channels != 6))
+    // The Windows AAC encoder accepts these rates. Its four average byte
+    // rates below are documented for mono and stereo; 5.1 uses other values
+    // and is not offered until it can be tested on a Windows host.
+    if ((rate != 44100 && rate != 48000) || (channels != 1 && channels != 2))
         return false;
 
     MediaFoundationScope scope;
@@ -284,7 +298,8 @@ bool system_backend_write(const std::string& path, const AudioFileData& data,
         FAILED(attributes->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_MPEG4)))
         return false;
     ComPtr<IMFSinkWriter> writer;
-    if (FAILED(MFCreateSinkWriterFromURL(wide.c_str(), nullptr, attributes.Get(), &writer)))
+    if (!succeeded(MFCreateSinkWriterFromURL(wide.c_str(), nullptr, attributes.Get(), &writer),
+                   "creating the sink writer"))
         return false;
 
     bool ok = true;
@@ -297,8 +312,10 @@ bool system_backend_write(const std::string& path, const AudioFileData& data,
          SUCCEEDED(stored->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels)) &&
          SUCCEEDED(stored->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
                                      aac_bytes_per_second(options.aac_bitrate)));
+    if (!ok)
+        runtime::log_warn("System codec (Media Foundation): describing the AAC output failed");
     DWORD stream = 0;
-    ok = ok && SUCCEEDED(writer->AddStream(stored.Get(), &stream));
+    ok = ok && succeeded(writer->AddStream(stored.Get(), &stream), "adding the AAC stream");
 
     // The encoder takes 16-bit PCM input.
     const UINT32 block_align = 2u * channels;
@@ -311,8 +328,9 @@ bool system_backend_write(const std::string& path, const AudioFileData& data,
          SUCCEEDED(input->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels)) &&
          SUCCEEDED(input->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, block_align)) &&
          SUCCEEDED(input->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, block_align * rate)) &&
-         SUCCEEDED(writer->SetInputMediaType(stream, input.Get(), nullptr)) &&
-         SUCCEEDED(writer->BeginWriting());
+         succeeded(writer->SetInputMediaType(stream, input.Get(), nullptr),
+                   "setting the PCM input format") &&
+         succeeded(writer->BeginWriting(), "starting to write");
 
     constexpr std::size_t kChunkFrames = 4096;
     const std::size_t total = static_cast<std::size_t>(data.num_frames());
@@ -339,9 +357,9 @@ bool system_backend_write(const std::string& path, const AudioFileData& data,
         ok = SUCCEEDED(buffer->SetCurrentLength(bytes)) && SUCCEEDED(MFCreateSample(&sample)) &&
              SUCCEEDED(sample->AddBuffer(buffer.Get())) && SUCCEEDED(sample->SetSampleTime(time)) &&
              SUCCEEDED(sample->SetSampleDuration(duration)) &&
-             SUCCEEDED(writer->WriteSample(stream, sample.Get()));
+             succeeded(writer->WriteSample(stream, sample.Get()), "encoding");
     }
-    ok = ok && SUCCEEDED(writer->Finalize());
+    ok = ok && succeeded(writer->Finalize(), "finishing the file");
     writer.Reset();
     if (!ok)
         DeleteFileW(wide.c_str());

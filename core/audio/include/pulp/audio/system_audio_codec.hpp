@@ -4,8 +4,8 @@
 /// Write AAC, ALAC and PCM audio files through the operating system's codecs.
 ///
 /// On Apple platforms this uses ExtAudioFile from AudioToolbox. On Windows it
-/// uses Media Foundation's sink writer, which encodes AAC into an MPEG-4
-/// file. Other platforms have no system codec and every write returns false.
+/// uses Media Foundation's sink writer, which encodes mono or stereo AAC at
+/// 44.1 or 48 kHz into an MPEG-4 file. Other platforms have no system codec and every write returns false.
 /// No third-party encoder is linked, so these paths add no licensing terms.
 ///
 /// FormatRegistry registers a writer built on this for the extensions no
@@ -48,17 +48,24 @@ struct SystemAudioWriteOptions {
     /// Write 32-bit float PCM instead of integer. CAF only.
     bool float_pcm = false;
     /// AAC target bitrate in bits per second; zero keeps the codec's default.
-    /// The codec may round it to a rate it supports for the sample rate and
-    /// channel count.
+    /// A request is rounded to the nearest rate the encoder accepts for the
+    /// sample rate and channel count: any value within the encoder's ranges
+    /// on Apple platforms, and one of 96, 128, 160 or 192 kbps on Windows.
     std::uint32_t aac_bitrate = 0;
 };
 
 /// True when this platform's codecs can write `encoding` into `container`.
 bool system_audio_can_write(SystemAudioContainer container, SystemAudioEncoding encoding);
 
-/// Encodes `data` to `path`, replacing any existing file. Returns false when
-/// the combination is unsupported, the data is empty or ragged, the sample
-/// rate is zero, or the system codec refuses the format.
+/// Encodes `data` to `path`. The file is written beside `path` and renamed
+/// over it only once encoding succeeds, so a failed write leaves any existing
+/// file at `path` unchanged. Returns false when the combination is
+/// unsupported, the data is empty or ragged, the sample rate is zero, or the
+/// system codec refuses the format (an AAC sample rate it does not accept,
+/// for example); the failing stage and its status code are logged.
+///
+/// No metadata is written: no encoder tag, and no channel layout, so AAC
+/// beyond two channels takes the codec's default layout.
 bool write_system_audio_file(const std::string& path, const AudioFileData& data,
                              const SystemAudioWriteOptions& options);
 

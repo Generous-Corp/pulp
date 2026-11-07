@@ -450,7 +450,7 @@ if (system_audio_can_write(options.container, options.encoding))
 
 | Container | macOS | Windows |
 |-----------|-------|---------|
-| M4A | AAC, ALAC | AAC (44.1 or 48 kHz; 1, 2 or 6 channels) |
+| M4A | AAC, ALAC | AAC (44.1 or 48 kHz; mono or stereo) |
 | ADTS (`.aac`) | AAC | — |
 | CAF | AAC, ALAC, PCM (integer or float) | — |
 | AIFF | PCM (16, 24 or 32-bit integer) | — |
@@ -460,8 +460,11 @@ writer for `.m4a`, `.aac`, `.alac` and `.caf` when no installed optional
 encoder claims the extension first, so an FDK AAC install keeps `.m4a` and
 `.aac`. Through the registry, `.m4a` and `.aac` write AAC at the codec's
 default bitrate, `.alac` writes 16-bit ALAC in M4A, and `.caf` writes 32-bit
-float PCM. Encoding allocates and performs file I/O, so keep it off the audio
-callback.
+float PCM. The file is encoded beside its destination and renamed into place
+only on success, so a refused write leaves an existing file untouched; the
+failing stage is logged. An AAC bitrate is rounded to the nearest one the
+encoder accepts. No metadata or channel layout is written. Encoding allocates
+and performs file I/O, so keep it off the audio callback.
 
 ### Sampler, looper, and analysis primitives
 

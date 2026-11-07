@@ -1167,9 +1167,9 @@ limitations:
   audio_io.jack:
     - text: "Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending."
   audio_file_codecs.extaudiofile:
-    - text: "Through FormatRegistry, .m4a and .aac use the codec's default AAC bitrate and .alac writes 16-bit ALAC; other settings need write_system_audio_file(). Multichannel AAC beyond stereo has no channel-layout control."
+    - text: "Through FormatRegistry, .m4a and .aac use the codec's default AAC bitrate and .alac writes 16-bit ALAC; other settings need write_system_audio_file(). Multichannel AAC beyond stereo has no channel-layout control, and no metadata is written."
   audio_file_codecs.media_foundation:
-    - text: "Writes AAC in M4A only, at 44.1 or 48 kHz with 1, 2 or 6 channels and one of four bitrates (96, 128, 160 or 192 kbps); no ALAC, CAF or AIFF writing. Only the Windows CI build leg compiles it, and the round-trip test has not yet run on a Windows host."
+    - text: "Writes AAC in M4A only, mono or stereo at 44.1 or 48 kHz, at one of four bitrates (96, 128, 160 or 192 kbps); no ALAC, CAF or AIFF writing. Only the Windows CI build leg compiles it, and the round-trip test has not yet run on a Windows host."
   midi_io.coremidi:
     - text: "MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback."
   midi_io.win32_midi:
