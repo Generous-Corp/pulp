@@ -79,6 +79,8 @@ std::string handle_audio_read_bundle(const std::string& params_json);
 std::string handle_audio_excerpt_find(const std::string& params_json);
 std::string handle_audio_probe_json(const std::string& params_json);
 std::string handle_audio_scope(const std::string& params_json);
+std::string handle_audio_spectrogram(const std::string& params_json);
+std::string handle_audio_waveform(const std::string& params_json);
 std::string handle_audio_plugin_inspect(const std::string& params_json);
 std::string handle_audio_render(const std::string& params_json);
 std::string handle_audio_compare(const std::string& params_json);
