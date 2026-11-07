@@ -740,6 +740,8 @@ public:
     // coalesced flags delivered (0 when nothing was pending).
     std::int32_t poll_pending_restart_for_test() {
         std::int32_t delivered = 0;
+        if (parameter_objects_stale_.exchange(false, std::memory_order_acq_rel))
+            sync_parameter_objects_from_store();
         auto* handler = getComponentHandler();
         restart_publisher_.poll_main_thread(
             [&](std::int32_t flags) {

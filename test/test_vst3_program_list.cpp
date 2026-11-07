@@ -8,12 +8,13 @@
 #include <pulp/format/detail/vst3_program_list.hpp>
 #include <pulp/format/vst3_adapter.hpp>
 
+#include <pluginterfaces/base/ibstream.h>
 #include <pluginterfaces/vst/ivsteditcontroller.h>
-#include <public.sdk/source/common/memorystream.h>
 #include <public.sdk/source/vst/hosting/parameterchanges.h>
 
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -97,6 +98,60 @@ class CountingHandler final : public Steinberg::Vst::IComponentHandler {
     }
 
     Steinberg::int32 restart_flags = 0;
+};
+
+/// A growable in-memory IBStream.
+class BufferStream final : public Steinberg::IBStream {
+  public:
+    Steinberg::tresult PLUGIN_API read(void* buffer, Steinberg::int32 num_bytes,
+                                       Steinberg::int32* num_read) override {
+        const auto left = static_cast<Steinberg::int32>(bytes.size() - position);
+        const auto count = num_bytes < left ? num_bytes : left;
+        if (count > 0)
+            std::memcpy(buffer, bytes.data() + position, static_cast<std::size_t>(count));
+        position += static_cast<std::size_t>(count > 0 ? count : 0);
+        if (num_read)
+            *num_read = count > 0 ? count : 0;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API write(void* buffer, Steinberg::int32 num_bytes,
+                                        Steinberg::int32* num_written) override {
+        const auto* p = static_cast<const unsigned char*>(buffer);
+        bytes.insert(bytes.end(), p, p + num_bytes);
+        if (num_written)
+            *num_written = num_bytes;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API seek(Steinberg::int64 pos, Steinberg::int32 mode,
+                                       Steinberg::int64* result) override {
+        if (mode == kIBSeekSet)
+            position = static_cast<std::size_t>(pos);
+        else if (mode == kIBSeekEnd)
+            position = bytes.size();
+        else
+            position += static_cast<std::size_t>(pos);
+        if (result)
+            *result = static_cast<Steinberg::int64>(position);
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API tell(Steinberg::int64* pos) override {
+        if (pos)
+            *pos = static_cast<Steinberg::int64>(position);
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID, void** obj) override {
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override {
+        return 1;
+    }
+    Steinberg::uint32 PLUGIN_API release() override {
+        return 1;
+    }
+
+    std::vector<unsigned char> bytes;
+    std::size_t position = 0;
 };
 
 std::vector<NoteName>& shared_note_names() {
@@ -367,9 +422,9 @@ TEST_CASE("VST3 selecting a program applies the preset", "[vst3][program]") {
     REQUIRE((fx.handler.restart_flags & Steinberg::Vst::kParamValuesChanged) != 0);
 
     // The selection reaches the state the host saves.
-    Steinberg::MemoryStream saved;
+    BufferStream saved;
     REQUIRE(fx.processor.getState(&saved) == Steinberg::kResultOk);
-    REQUIRE(saved.getSize() > 0);
+    REQUIRE(saved.bytes.size() > 0);
 
     SECTION("a host that replays the current selection does not undo later edits") {
         REQUIRE(fx.processor.setParamNormalized(kLevel, 0.8) == Steinberg::kResultOk);
@@ -431,7 +486,7 @@ TEST_CASE("VST3 setUnitProgramData selects a program and refuses foreign data", 
     REQUIRE(fx.processor.setUnitProgramData(list_id + 5, 0, nullptr) == Steinberg::kResultFalse);
 
     // Factory programs are read-only: a payload cannot replace one.
-    Steinberg::MemoryStream payload;
+    BufferStream payload;
     Steinberg::int32 written = 0;
     const char bytes[] = "not a preset";
     payload.write(const_cast<char*>(bytes), sizeof(bytes), &written);

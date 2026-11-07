@@ -76,19 +76,6 @@ struct StandaloneConfig {
     // restored at startup (the first launch keeps the configured defaults).
     bool persist_settings = true;
 
-    // Remember the plug-in's own state (parameters plus anything it saves with
-    // serialize_plugin_state) across launches, in the same settings file as the
-    // device selection. Saved when the app quits and shortly after the state
-    // stops changing; restored at startup before the editor opens. Applies only
-    // while `persist_settings` is on, and never to a headless or screenshot
-    // launch, which must stay reproducible. A developer who wants device memory
-    // without state memory sets this false. States over 8 MiB are not saved.
-    bool persist_plugin_state = true;
-    // How long the state must stay unchanged before it is saved, in
-    // milliseconds. A knob being dragged keeps pushing the save back; one that
-    // has been changing for ten seconds is saved regardless.
-    int state_save_debounce_ms = 1500;
-
     // Development Inspector activation. Empty/"off" is inert, "local" owns
     // only the in-window overlay, and agent profiles start an authenticated
     // endpoint.
@@ -211,6 +198,19 @@ struct StandaloneConfig {
     // Appended to preserve every legacy positional aggregate initializer.
     bool inspector_runtime_eval = false;
 
+    // Appended to preserve every legacy positional aggregate initializer.
+    // Remember the plug-in's own state (parameters plus anything it saves with
+    // serialize_plugin_state) across launches, in the same settings file as the
+    // device selection. Saved when the app quits and shortly after the state
+    // stops changing; restored at startup before the editor opens. Applies only
+    // while `persist_settings` is on, and never to a headless or screenshot
+    // launch, which must stay reproducible. A developer who wants device memory
+    // without state memory sets this false. States over 8 MiB are not saved.
+    bool persist_plugin_state = true;
+    // How long the state must stay unchanged before it is saved, in
+    // milliseconds. A knob being dragged keeps pushing the save back; one that
+    // has been changing for ten seconds is saved regardless.
+    int state_save_debounce_ms = 1500;
 };
 
 namespace detail {
