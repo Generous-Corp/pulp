@@ -15,21 +15,18 @@ import io
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
 
-import importlib.util
-
 HERE = Path(__file__).resolve().parent
-RECORDER = HERE / "dependency_request_recorder.cmake"
-CHECKER = HERE / "dependency_request_check.py"
+REPO = HERE.parent.parent
+RECORDER = REPO / "tools/ci/dependency_request_recorder.cmake"
+sys.path.insert(0, str(HERE))
 
-_spec = importlib.util.spec_from_file_location("dependency_request_check", CHECKER)
-assert _spec and _spec.loader
-drc = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(drc)
+import dependency_request_check as drc  # noqa: E402
 
 
 def write_log(directory: Path, entries: list[dict[str, str]] | str) -> Path:

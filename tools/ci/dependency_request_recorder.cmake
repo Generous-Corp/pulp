@@ -19,7 +19,7 @@
 #   FETCHCONTENT_SOURCE_DIR_<NAME> cache entry is set (the usual way a shared
 #   source cache is wired in), so at the end of the configure the recorder logs
 #   every such dependency that was actually populated.
-# - Anything a project fetches by other means (file(DOWNLOAD), a provisioning
+# - Anything a project fetches by other means (a raw CMake download, a provisioning
 #   script) is logged only where the project calls
 #   dependency_request_recorder_note(<method> <name>) at that point. Guard the
 #   call with if(COMMAND dependency_request_recorder_note), because the command
