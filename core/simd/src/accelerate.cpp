@@ -157,8 +157,11 @@ void decimate2(const float* x, const float* h, float* y, std::size_t n_out,
 void sub(const float* a, const float* b, float* dst, std::size_t n) noexcept {
     vDSP_vsub(b, 1, a, 1, dst, 1, len(n)); // vDSP computes (second operand) - (first)
 }
+// vDSP_vdiv is not correctly rounded either (it can differ from IEEE division
+// in the last bit), so the float kernel also divides through a plain loop and
+// stays bit-identical to the scalar reference.
 void div(const float* a, const float* b, float* dst, std::size_t n) noexcept {
-    vDSP_vdiv(b, 1, a, 1, dst, 1, len(n)); // (second operand) / (first)
+    detail::div_impl(a, b, dst, n);
 }
 void negate(const float* a, float* dst, std::size_t n) noexcept {
     vDSP_vneg(a, 1, dst, 1, len(n));
