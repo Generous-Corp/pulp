@@ -254,3 +254,13 @@ if(APPLE AND NOT PULP_IOS)
         "-framework AppKit"
         "-framework CoreFoundation")
 endif()
+if(TARGET pulp-native)
+    # integrations/pulp-native: FramePump on the real display link (no link
+    # until started, rate cap, one-shot, off-screen pause, delivery thread,
+    # no queued frames, start/stop churn).
+    add_executable(pulp-test-native-frame-pump test_native_frame_pump.mm)
+    target_compile_options(pulp-test-native-frame-pump PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-native-frame-pump PRIVATE
+        pulp::native Catch2::Catch2WithMain "-framework Foundation")
+    catch_discover_tests(pulp-test-native-frame-pump)
+endif()
