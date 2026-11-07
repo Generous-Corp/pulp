@@ -18,6 +18,9 @@
 #define HWY_TARGET_INCLUDE "src/highway.cpp"
 #include <hwy/foreach_target.h>
 #include <hwy/highway.h>
+// Header-only vector math (Apache-2.0), used for atan2 here and for the
+// transcendental kernels. Compiled once per target like the code below.
+#include <hwy/contrib/math/math-inl.h>
 
 HWY_BEFORE_NAMESPACE();
 
@@ -555,6 +558,197 @@ PULP_SIMD_HWY_INSTANTIATE(F64, double)
 
 #undef PULP_SIMD_HWY_INSTANTIATE
 
+// ── complex kernels ──────────────────────────────────────────────────────────
+// One body serves both layouts. For an interleaved buffer the load splits a
+// vector's worth of complex values into real and imaginary registers and the
+// store merges them again; for split buffers they are plain loads and stores.
+// The scalar tail runs the strided reference loop on the remaining elements.
+
+template <typename T, bool kInterleaved, class D, class V>
+HWY_INLINE void LoadComplex(D d, const T* re, const T* im, size_t i, V& vr, V& vi) {
+    if constexpr (kInterleaved) {
+        (void)im;
+        hn::LoadInterleaved2(d, re + 2 * i, vr, vi);
+    } else {
+        vr = hn::LoadU(d, re + i);
+        vi = hn::LoadU(d, im + i);
+    }
+}
+
+template <typename T, bool kInterleaved, class D, class V>
+HWY_INLINE void StoreComplex(D d, V vr, V vi, T* re, T* im, size_t i) {
+    if constexpr (kInterleaved) {
+        (void)im;
+        hn::StoreInterleaved2(vr, vi, d, re + 2 * i);
+    } else {
+        hn::StoreU(vr, d, re + i);
+        hn::StoreU(vi, d, im + i);
+    }
+}
+
+template <typename T, bool I> constexpr size_t Stride() {
+    return I ? 2 : 1;
+}
+
+/// Imaginary pointer for the strided scalar reference: z + 1 when interleaved.
+template <bool I, typename P> HWY_INLINE P ImagOf(P re, P im) {
+    return I ? re + 1 : im;
+}
+
+template <typename T, bool I>
+void ComplexMultiplyT(const T* ar, const T* ai, const T* br, const T* bi, T* dr, T* di,
+                      size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi, yr, yi;
+        LoadComplex<T, I>(d, ar, ai, i, xr, xi);
+        LoadComplex<T, I>(d, br, bi, i, yr, yi);
+        const auto rr = hn::NegMulAdd(xi, yi, hn::Mul(xr, yr));
+        const auto ri = hn::MulAdd(xi, yr, hn::Mul(xr, yi));
+        StoreComplex<T, I>(d, rr, ri, dr, di, i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_multiply_impl(ar + i * S, ImagOf<I>(ar, ai) + i * S, S,
+                                                br + i * S, ImagOf<I>(br, bi) + i * S, S,
+                                                dr + i * S, ImagOf<I>(dr, di) + i * S, S, count - i);
+}
+
+template <typename T, bool I>
+void ComplexMultiplyConjT(const T* ar, const T* ai, const T* br, const T* bi, T* dr, T* di,
+                          size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi, yr, yi;
+        LoadComplex<T, I>(d, ar, ai, i, xr, xi);
+        LoadComplex<T, I>(d, br, bi, i, yr, yi);
+        const auto rr = hn::MulAdd(xi, yi, hn::Mul(xr, yr));
+        const auto ri = hn::NegMulAdd(xr, yi, hn::Mul(xi, yr));
+        StoreComplex<T, I>(d, rr, ri, dr, di, i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_multiply_conj_impl(
+        ar + i * S, ImagOf<I>(ar, ai) + i * S, S, br + i * S, ImagOf<I>(br, bi) + i * S, S,
+        dr + i * S, ImagOf<I>(dr, di) + i * S, S, count - i);
+}
+
+template <typename T, bool I>
+void ComplexMultiplyAccumulateT(const T* ar, const T* ai, const T* br, const T* bi, T* cr, T* ci,
+                                size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi, yr, yi, cur, cui;
+        LoadComplex<T, I>(d, ar, ai, i, xr, xi);
+        LoadComplex<T, I>(d, br, bi, i, yr, yi);
+        LoadComplex<T, I>(d, cr, ci, i, cur, cui);
+        // acc.re += xr*yr - xi*yi ; acc.im += xr*yi + xi*yr
+        cur = hn::NegMulAdd(xi, yi, hn::MulAdd(xr, yr, cur));
+        cui = hn::MulAdd(xi, yr, hn::MulAdd(xr, yi, cui));
+        StoreComplex<T, I>(d, cur, cui, cr, ci, i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_multiply_accumulate_impl(
+        ar + i * S, ImagOf<I>(ar, ai) + i * S, S, br + i * S, ImagOf<I>(br, bi) + i * S, S,
+        cr + i * S, ImagOf<I>(cr, ci) + i * S, S, count - i);
+}
+
+template <typename T, bool I>
+void ComplexMagnitudeSquaredT(const T* re, const T* im, T scale, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    const auto vs = hn::Set(d, scale);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi;
+        LoadComplex<T, I>(d, re, im, i, xr, xi);
+        hn::StoreU(hn::Mul(hn::MulAdd(xr, xr, hn::Mul(xi, xi)), vs), d, dst + i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_magnitude_squared_impl(re + i * S, ImagOf<I>(re, im) + i * S, S,
+                                                         scale, dst + i, count - i);
+}
+
+template <typename T, bool I>
+void ComplexMagnitudeT(const T* re, const T* im, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi;
+        LoadComplex<T, I>(d, re, im, i, xr, xi);
+        hn::StoreU(hn::Sqrt(hn::MulAdd(xr, xr, hn::Mul(xi, xi))), d, dst + i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_magnitude_impl(re + i * S, ImagOf<I>(re, im) + i * S, S, dst + i,
+                                                 count - i);
+}
+
+template <typename T, bool I> void ComplexPhaseT(const T* re, const T* im, T* dst, size_t count) {
+    const hn::ScalableTag<T> d;
+    const size_t N = hn::Lanes(d);
+    size_t i = 0;
+    for (; i + N <= count; i += N) {
+        hn::Vec<decltype(d)> xr, xi;
+        LoadComplex<T, I>(d, re, im, i, xr, xi);
+        hn::StoreU(hn::Atan2(d, xi, xr), d, dst + i);
+    }
+    constexpr size_t S = Stride<T, I>();
+    ::pulp::simd::detail::complex_phase_impl(re + i * S, ImagOf<I>(re, im) + i * S, S, dst + i,
+                                             count - i);
+}
+
+#define PULP_SIMD_HWY_INSTANTIATE_COMPLEX(SUFFIX, T)                                               \
+    void ComplexMultiply##SUFFIX(const T* a, const T* b, T* dst, size_t n) {                       \
+        ComplexMultiplyT<T, true>(a, nullptr, b, nullptr, dst, nullptr, n);                        \
+    }                                                                                              \
+    void ComplexMultiplyConj##SUFFIX(const T* a, const T* b, T* dst, size_t n) {                   \
+        ComplexMultiplyConjT<T, true>(a, nullptr, b, nullptr, dst, nullptr, n);                    \
+    }                                                                                              \
+    void ComplexMultiplyAccumulate##SUFFIX(const T* a, const T* b, T* acc, size_t n) {             \
+        ComplexMultiplyAccumulateT<T, true>(a, nullptr, b, nullptr, acc, nullptr, n);              \
+    }                                                                                              \
+    void ComplexMagnitude##SUFFIX(const T* z, T* dst, size_t n) {                                  \
+        ComplexMagnitudeT<T, true>(z, nullptr, dst, n);                                            \
+    }                                                                                              \
+    void ComplexMagnitudeSquared##SUFFIX(const T* z, T scale, T* dst, size_t n) {                  \
+        ComplexMagnitudeSquaredT<T, true>(z, nullptr, scale, dst, n);                              \
+    }                                                                                              \
+    void ComplexPhase##SUFFIX(const T* z, T* dst, size_t n) {                                      \
+        ComplexPhaseT<T, true>(z, nullptr, dst, n);                                                \
+    }                                                                                              \
+    void ComplexMultiplySplit##SUFFIX(const T* ar, const T* ai, const T* br, const T* bi, T* dr,   \
+                                      T* di, size_t n) {                                           \
+        ComplexMultiplyT<T, false>(ar, ai, br, bi, dr, di, n);                                     \
+    }                                                                                              \
+    void ComplexMultiplyConjSplit##SUFFIX(const T* ar, const T* ai, const T* br, const T* bi,      \
+                                          T* dr, T* di, size_t n) {                                \
+        ComplexMultiplyConjT<T, false>(ar, ai, br, bi, dr, di, n);                                 \
+    }                                                                                              \
+    void ComplexMultiplyAccumulateSplit##SUFFIX(const T* ar, const T* ai, const T* br,             \
+                                                const T* bi, T* cr, T* ci, size_t n) {             \
+        ComplexMultiplyAccumulateT<T, false>(ar, ai, br, bi, cr, ci, n);                           \
+    }                                                                                              \
+    void ComplexMagnitudeSplit##SUFFIX(const T* re, const T* im, T* dst, size_t n) {               \
+        ComplexMagnitudeT<T, false>(re, im, dst, n);                                               \
+    }                                                                                              \
+    void ComplexMagnitudeSquaredSplit##SUFFIX(const T* re, const T* im, T scale, T* dst,           \
+                                              size_t n) {                                          \
+        ComplexMagnitudeSquaredT<T, false>(re, im, scale, dst, n);                                 \
+    }                                                                                              \
+    void ComplexPhaseSplit##SUFFIX(const T* re, const T* im, T* dst, size_t n) {                   \
+        ComplexPhaseT<T, false>(re, im, dst, n);                                                   \
+    }
+
+PULP_SIMD_HWY_INSTANTIATE_COMPLEX(F32, float)
+PULP_SIMD_HWY_INSTANTIATE_COMPLEX(F64, double)
+
+#undef PULP_SIMD_HWY_INSTANTIATE_COMPLEX
+
 } // namespace HWY_NAMESPACE
 } // namespace pulp::simd::backend::highway
 
@@ -719,6 +913,82 @@ PULP_SIMD_HWY_DEFINE(F32, float)
 PULP_SIMD_HWY_DEFINE(F64, double)
 
 #undef PULP_SIMD_HWY_DEFINE
+
+#define PULP_SIMD_HWY_EXPORT_COMPLEX(SUFFIX) \
+    HWY_EXPORT(ComplexMultiply##SUFFIX); \
+    HWY_EXPORT(ComplexMultiplyConj##SUFFIX); \
+    HWY_EXPORT(ComplexMultiplyAccumulate##SUFFIX); \
+    HWY_EXPORT(ComplexMagnitude##SUFFIX); \
+    HWY_EXPORT(ComplexMagnitudeSquared##SUFFIX); \
+    HWY_EXPORT(ComplexPhase##SUFFIX); \
+    HWY_EXPORT(ComplexMultiplySplit##SUFFIX); \
+    HWY_EXPORT(ComplexMultiplyConjSplit##SUFFIX); \
+    HWY_EXPORT(ComplexMultiplyAccumulateSplit##SUFFIX); \
+    HWY_EXPORT(ComplexMagnitudeSplit##SUFFIX); \
+    HWY_EXPORT(ComplexMagnitudeSquaredSplit##SUFFIX); \
+    HWY_EXPORT(ComplexPhaseSplit##SUFFIX);
+
+PULP_SIMD_HWY_EXPORT_COMPLEX(F32)
+PULP_SIMD_HWY_EXPORT_COMPLEX(F64)
+#undef PULP_SIMD_HWY_EXPORT_COMPLEX
+
+#define PULP_SIMD_HWY_DEFINE_COMPLEX(SUFFIX, T)                                                    \
+    void complex_multiply(const T* a, const T* b, T* dst, std::size_t n) noexcept {                \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiply##SUFFIX)(a, b, dst, n);                               \
+    }                                                                                              \
+    void complex_multiply_conj(const T* a, const T* b, T* dst, std::size_t n) noexcept {           \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiplyConj##SUFFIX)(a, b, dst, n);                           \
+    }                                                                                              \
+    void complex_multiply_accumulate(const T* a, const T* b, T* acc, std::size_t n) noexcept {     \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiplyAccumulate##SUFFIX)(a, b, acc, n);                     \
+    }                                                                                              \
+    void complex_magnitude(const T* z, T* dst, std::size_t n) noexcept {                           \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitude##SUFFIX)(z, dst, n);                                 \
+    }                                                                                              \
+    void complex_magnitude_squared(const T* z, T* dst, std::size_t n) noexcept {                   \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitudeSquared##SUFFIX)(z, T(1), dst, n);                    \
+    }                                                                                              \
+    void complex_phase(const T* z, T* dst, std::size_t n) noexcept {                               \
+        HWY_DYNAMIC_DISPATCH(ComplexPhase##SUFFIX)(z, dst, n);                                     \
+    }                                                                                              \
+    void complex_power_spectrum(const T* z, T scale, T* dst, std::size_t n) noexcept {             \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitudeSquared##SUFFIX)(z, scale, dst, n);                   \
+    }                                                                                              \
+    void complex_multiply_split(const T* a_re, const T* a_im, const T* b_re, const T* b_im,        \
+                                T* dst_re, T* dst_im, std::size_t n) noexcept {                    \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiplySplit##SUFFIX)(a_re, a_im, b_re, b_im, dst_re, dst_im, \
+                                                           n);                                     \
+    }                                                                                              \
+    void complex_multiply_conj_split(const T* a_re, const T* a_im, const T* b_re, const T* b_im,   \
+                                     T* dst_re, T* dst_im, std::size_t n) noexcept {               \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiplyConjSplit##SUFFIX)(a_re, a_im, b_re, b_im, dst_re,     \
+                                                               dst_im, n);                         \
+    }                                                                                              \
+    void complex_multiply_accumulate_split(const T* a_re, const T* a_im, const T* b_re,            \
+                                           const T* b_im, T* acc_re, T* acc_im,                    \
+                                           std::size_t n) noexcept {                               \
+        HWY_DYNAMIC_DISPATCH(ComplexMultiplyAccumulateSplit##SUFFIX)(a_re, a_im, b_re, b_im,       \
+                                                                     acc_re, acc_im, n);           \
+    }                                                                                              \
+    void complex_magnitude_split(const T* re, const T* im, T* dst, std::size_t n) noexcept {       \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitudeSplit##SUFFIX)(re, im, dst, n);                       \
+    }                                                                                              \
+    void complex_magnitude_squared_split(const T* re, const T* im, T* dst,                         \
+                                         std::size_t n) noexcept {                                 \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitudeSquaredSplit##SUFFIX)(re, im, T(1), dst, n);          \
+    }                                                                                              \
+    void complex_phase_split(const T* re, const T* im, T* dst, std::size_t n) noexcept {           \
+        HWY_DYNAMIC_DISPATCH(ComplexPhaseSplit##SUFFIX)(re, im, dst, n);                           \
+    }                                                                                              \
+    void complex_power_spectrum_split(const T* re, const T* im, T scale, T* dst,                   \
+                                      std::size_t n) noexcept {                                    \
+        HWY_DYNAMIC_DISPATCH(ComplexMagnitudeSquaredSplit##SUFFIX)(re, im, scale, dst, n);         \
+    }
+
+PULP_SIMD_HWY_DEFINE_COMPLEX(F32, float)
+PULP_SIMD_HWY_DEFINE_COMPLEX(F64, double)
+
+#undef PULP_SIMD_HWY_DEFINE_COMPLEX
 
 // HWY_DYNAMIC_DISPATCH expands its argument relative to the generated target
 // namespace. Keep these calls inside the backend namespace so the single-target

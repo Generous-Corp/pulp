@@ -37,7 +37,17 @@ conversion (`from_int16`, `from_int32`, `to_int16`, `to_int32`, with a scale),
 stereo `interleave2` / `deinterleave2`, and FIR correlation (`correlate`,
 `decimate2`), for `float` and `double`. The conversions to integer round half to
 even, saturate, and turn NaN into 0 on every backend. A copy with gain is
-`scale`. `pulp::signal` links this module, so DSP headers can call it without
+`scale`.
+
+Spectral work has its own kernels, for interleaved (`re, im, re, im, ...`, the
+layout of `std::complex<T>`) and split (separate real and imaginary arrays,
+`_split` suffix) buffers: `complex_multiply`, `complex_multiply_conj`
+(`a * conj(b)`), `complex_multiply_accumulate`, `complex_magnitude`,
+`complex_magnitude_squared`, `complex_phase` and `complex_power_spectrum`
+(`scale * |z|^2`). They use the plain product formulas, so unlike
+`std::complex::operator*` they do not recover a NaN from infinity times zero;
+use them on finite spectra. The zero-latency convolver's spectral
+multiply-accumulate runs on them. `pulp::signal` links this module, so DSP headers can call it without
 acquiring `pulp::runtime`.
 
 **Link:** `pulp::simd` (also reached through `pulp::signal` and `pulp::runtime`) · **Include prefix:** `<pulp/simd/...>`

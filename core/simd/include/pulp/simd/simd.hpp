@@ -130,6 +130,54 @@
     void interleave2(const T* left, const T* right, T* dst, std::size_t frames) noexcept;          \
     void deinterleave2(const T* src, T* left, T* right, std::size_t frames) noexcept;
 
+// Complex kernels. `count` is the number of complex values. An interleaved
+// buffer holds re, im, re, im, ... (2 * count scalars; the layout of
+// std::complex<T> and of an FFT's packed output); a split buffer is two arrays
+// of `count` scalars. Real outputs (magnitude, phase, power) are `count`
+// scalars.
+//
+//   complex_multiply(a, b, dst, n)              dst = a * b
+//   complex_multiply_conj(a, b, dst, n)         dst = a * conj(b)
+//   complex_multiply_accumulate(a, b, acc, n)   acc += a * b
+//   complex_magnitude(z, dst, n)                dst[i] = sqrt(re^2 + im^2)
+//   complex_magnitude_squared(z, dst, n)        dst[i] = re^2 + im^2
+//   complex_phase(z, dst, n)                    dst[i] = atan2(im, re), in [-pi, pi]
+//   complex_power_spectrum(z, scale, dst, n)    dst[i] = scale * (re^2 + im^2)
+//
+// Each has a `_split` form taking separate real and imaginary arrays for every
+// complex operand, e.g. complex_multiply_split(a_re, a_im, b_re, b_im,
+// dst_re, dst_im, n). For the multiply family dst (or acc) may equal an input
+// exactly, never partially. Magnitude, phase and power outputs must not overlap
+// their input.
+//
+// The products are the plain formulas (ar*br - ai*bi, ar*bi + ai*br): unlike
+// std::complex::operator*, they do not branch to recover a NaN from an
+// infinity times zero, so they are for finite spectra. Magnitude does not
+// guard against overflow of re^2 + im^2. Phase of (0, 0) is 0; phase at a
+// signed-zero boundary (such as (-0, +0)) is not pinned across backends.
+
+#define PULP_SIMD_DECLARE_COMPLEX_KERNELS(T)                                                       \
+    void complex_multiply(const T* a, const T* b, T* dst, std::size_t count) noexcept;             \
+    void complex_multiply_conj(const T* a, const T* b, T* dst, std::size_t count) noexcept;        \
+    void complex_multiply_accumulate(const T* a, const T* b, T* acc, std::size_t count) noexcept;  \
+    void complex_magnitude(const T* z, T* dst, std::size_t count) noexcept;                        \
+    void complex_magnitude_squared(const T* z, T* dst, std::size_t count) noexcept;                \
+    void complex_phase(const T* z, T* dst, std::size_t count) noexcept;                            \
+    void complex_power_spectrum(const T* z, T scale, T* dst, std::size_t count) noexcept;          \
+    void complex_multiply_split(const T* a_re, const T* a_im, const T* b_re, const T* b_im,        \
+                                T* dst_re, T* dst_im, std::size_t count) noexcept;                 \
+    void complex_multiply_conj_split(const T* a_re, const T* a_im, const T* b_re, const T* b_im,   \
+                                     T* dst_re, T* dst_im, std::size_t count) noexcept;            \
+    void complex_multiply_accumulate_split(const T* a_re, const T* a_im, const T* b_re,            \
+                                           const T* b_im, T* acc_re, T* acc_im,                    \
+                                           std::size_t count) noexcept;                            \
+    void complex_magnitude_split(const T* re, const T* im, T* dst, std::size_t count) noexcept;    \
+    void complex_magnitude_squared_split(const T* re, const T* im, T* dst,                         \
+                                         std::size_t count) noexcept;                              \
+    void complex_phase_split(const T* re, const T* im, T* dst, std::size_t count) noexcept;        \
+    void complex_power_spectrum_split(const T* re, const T* im, T scale, T* dst,                   \
+                                      std::size_t count) noexcept;
+
 namespace pulp::simd {
 
 namespace backend {
@@ -137,12 +185,16 @@ namespace backend {
 namespace scalar {
 PULP_SIMD_DECLARE_KERNELS(float)
 PULP_SIMD_DECLARE_KERNELS(double)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(float)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(double)
 } // namespace scalar
 
 #if defined(PULP_SIMD_HAS_HIGHWAY)
 namespace highway {
 PULP_SIMD_DECLARE_KERNELS(float)
 PULP_SIMD_DECLARE_KERNELS(double)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(float)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(double)
 } // namespace highway
 #endif
 
@@ -150,6 +202,8 @@ PULP_SIMD_DECLARE_KERNELS(double)
 namespace accelerate {
 PULP_SIMD_DECLARE_KERNELS(float)
 PULP_SIMD_DECLARE_KERNELS(double)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(float)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(double)
 } // namespace accelerate
 #endif
 
@@ -167,6 +221,8 @@ PULP_SIMD_DECLARE_KERNELS(double)
 namespace pulp::simd::backend::inline_scalar {
 PULP_SIMD_SCALAR_DEFINE(inline, float)
 PULP_SIMD_SCALAR_DEFINE(inline, double)
+PULP_SIMD_SCALAR_DEFINE_COMPLEX(inline, float)
+PULP_SIMD_SCALAR_DEFINE_COMPLEX(inline, double)
 } // namespace pulp::simd::backend::inline_scalar
 #endif
 
@@ -192,6 +248,20 @@ using active_backend::add;
 using active_backend::add_scaled;
 using active_backend::clamp;
 using active_backend::correlate;
+using active_backend::complex_magnitude;
+using active_backend::complex_magnitude_split;
+using active_backend::complex_magnitude_squared;
+using active_backend::complex_magnitude_squared_split;
+using active_backend::complex_multiply;
+using active_backend::complex_multiply_accumulate;
+using active_backend::complex_multiply_accumulate_split;
+using active_backend::complex_multiply_conj;
+using active_backend::complex_multiply_conj_split;
+using active_backend::complex_multiply_split;
+using active_backend::complex_phase;
+using active_backend::complex_phase_split;
+using active_backend::complex_power_spectrum;
+using active_backend::complex_power_spectrum_split;
 using active_backend::decimate2;
 using active_backend::deinterleave2;
 using active_backend::div;
@@ -241,4 +311,5 @@ inline constexpr std::size_t double_lanes() noexcept {
 
 } // namespace pulp::simd
 
+#undef PULP_SIMD_DECLARE_COMPLEX_KERNELS
 #undef PULP_SIMD_DECLARE_KERNELS

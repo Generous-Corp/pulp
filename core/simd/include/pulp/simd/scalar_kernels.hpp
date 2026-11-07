@@ -248,6 +248,70 @@ inline void deinterleave2_impl(const T* src, T* l, T* r, std::size_t n) noexcept
     }
 }
 
+// ── complex kernels ──────────────────────────────────────────────────────────
+// Every complex kernel is written once over strided real/imaginary pointers:
+// an interleaved buffer is (z, z + 1, stride 2), split buffers are
+// (re, im, stride 1). Results are formed from the inputs of an element before
+// any output of that element is written, so dst may equal a source exactly.
+
+template <typename T>
+inline void complex_multiply_impl(const T* ar, const T* ai, std::size_t sa, const T* br,
+                                  const T* bi, std::size_t sb, T* dr, T* di, std::size_t sd,
+                                  std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T xr = ar[i * sa], xi = ai[i * sa], yr = br[i * sb], yi = bi[i * sb];
+        dr[i * sd] = xr * yr - xi * yi;
+        di[i * sd] = xr * yi + xi * yr;
+    }
+}
+
+template <typename T>
+inline void complex_multiply_conj_impl(const T* ar, const T* ai, std::size_t sa, const T* br,
+                                       const T* bi, std::size_t sb, T* dr, T* di, std::size_t sd,
+                                       std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T xr = ar[i * sa], xi = ai[i * sa], yr = br[i * sb], yi = bi[i * sb];
+        dr[i * sd] = xr * yr + xi * yi;
+        di[i * sd] = xi * yr - xr * yi;
+    }
+}
+
+template <typename T>
+inline void complex_multiply_accumulate_impl(const T* ar, const T* ai, std::size_t sa, const T* br,
+                                             const T* bi, std::size_t sb, T* cr, T* ci,
+                                             std::size_t sc, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T xr = ar[i * sa], xi = ai[i * sa], yr = br[i * sb], yi = bi[i * sb];
+        cr[i * sc] += xr * yr - xi * yi;
+        ci[i * sc] += xr * yi + xi * yr;
+    }
+}
+
+template <typename T>
+inline void complex_magnitude_squared_impl(const T* re, const T* im, std::size_t s, T scale,
+                                           T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T x = re[i * s], y = im[i * s];
+        dst[i] = (x * x + y * y) * scale;
+    }
+}
+
+template <typename T>
+inline void complex_magnitude_impl(const T* re, const T* im, std::size_t s, T* dst,
+                                   std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T x = re[i * s], y = im[i * s];
+        dst[i] = std::sqrt(x * x + y * y);
+    }
+}
+
+template <typename T>
+inline void complex_phase_impl(const T* re, const T* im, std::size_t s, T* dst,
+                               std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::atan2(im[i * s], re[i * s]);
+}
+
 } // namespace pulp::simd::detail
 
 // Defines every kernel overload for element type T in the current namespace.
@@ -350,4 +414,62 @@ inline void deinterleave2_impl(const T* src, T* l, T* r, std::size_t n) noexcept
     SPEC void decimate2(const T* x, const T* h, T* y, std::size_t n_out,                           \
                         std::size_t taps) noexcept {                                               \
         ::pulp::simd::detail::decimate2_impl(x, h, y, n_out, taps);                                \
+    }
+
+// Complex kernels: interleaved (re, im, re, im, ...) and split layouts.
+#define PULP_SIMD_SCALAR_DEFINE_COMPLEX(SPEC, T)                                                   \
+    SPEC void complex_multiply(const T* a, const T* b, T* dst, std::size_t n) noexcept {           \
+        ::pulp::simd::detail::complex_multiply_impl(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n); \
+    }                                                                                              \
+    SPEC void complex_multiply_conj(const T* a, const T* b, T* dst, std::size_t n) noexcept {      \
+        ::pulp::simd::detail::complex_multiply_conj_impl(a, a + 1, 2, b, b + 1, 2, dst, dst + 1,   \
+                                                         2, n);                                    \
+    }                                                                                              \
+    SPEC void complex_multiply_accumulate(const T* a, const T* b, T* acc,                          \
+                                          std::size_t n) noexcept {                                \
+        ::pulp::simd::detail::complex_multiply_accumulate_impl(a, a + 1, 2, b, b + 1, 2, acc,      \
+                                                               acc + 1, 2, n);                     \
+    }                                                                                              \
+    SPEC void complex_magnitude(const T* z, T* dst, std::size_t n) noexcept {                      \
+        ::pulp::simd::detail::complex_magnitude_impl(z, z + 1, 2, dst, n);                         \
+    }                                                                                              \
+    SPEC void complex_magnitude_squared(const T* z, T* dst, std::size_t n) noexcept {              \
+        ::pulp::simd::detail::complex_magnitude_squared_impl(z, z + 1, 2, T(1), dst, n);           \
+    }                                                                                              \
+    SPEC void complex_phase(const T* z, T* dst, std::size_t n) noexcept {                          \
+        ::pulp::simd::detail::complex_phase_impl(z, z + 1, 2, dst, n);                             \
+    }                                                                                              \
+    SPEC void complex_power_spectrum(const T* z, T scale, T* dst, std::size_t n) noexcept {        \
+        ::pulp::simd::detail::complex_magnitude_squared_impl(z, z + 1, 2, scale, dst, n);          \
+    }                                                                                              \
+    SPEC void complex_multiply_split(const T* a_re, const T* a_im, const T* b_re, const T* b_im,   \
+                                     T* dst_re, T* dst_im, std::size_t n) noexcept {               \
+        ::pulp::simd::detail::complex_multiply_impl(a_re, a_im, 1, b_re, b_im, 1, dst_re, dst_im,  \
+                                                    1, n);                                         \
+    }                                                                                              \
+    SPEC void complex_multiply_conj_split(const T* a_re, const T* a_im, const T* b_re,             \
+                                          const T* b_im, T* dst_re, T* dst_im,                     \
+                                          std::size_t n) noexcept {                                \
+        ::pulp::simd::detail::complex_multiply_conj_impl(a_re, a_im, 1, b_re, b_im, 1, dst_re,     \
+                                                         dst_im, 1, n);                            \
+    }                                                                                              \
+    SPEC void complex_multiply_accumulate_split(const T* a_re, const T* a_im, const T* b_re,       \
+                                                const T* b_im, T* acc_re, T* acc_im,               \
+                                                std::size_t n) noexcept {                          \
+        ::pulp::simd::detail::complex_multiply_accumulate_impl(a_re, a_im, 1, b_re, b_im, 1,       \
+                                                               acc_re, acc_im, 1, n);              \
+    }                                                                                              \
+    SPEC void complex_magnitude_split(const T* re, const T* im, T* dst, std::size_t n) noexcept {  \
+        ::pulp::simd::detail::complex_magnitude_impl(re, im, 1, dst, n);                           \
+    }                                                                                              \
+    SPEC void complex_magnitude_squared_split(const T* re, const T* im, T* dst,                    \
+                                              std::size_t n) noexcept {                            \
+        ::pulp::simd::detail::complex_magnitude_squared_impl(re, im, 1, T(1), dst, n);             \
+    }                                                                                              \
+    SPEC void complex_phase_split(const T* re, const T* im, T* dst, std::size_t n) noexcept {      \
+        ::pulp::simd::detail::complex_phase_impl(re, im, 1, dst, n);                               \
+    }                                                                                              \
+    SPEC void complex_power_spectrum_split(const T* re, const T* im, T scale, T* dst,              \
+                                           std::size_t n) noexcept {                               \
+        ::pulp::simd::detail::complex_magnitude_squared_impl(re, im, 1, scale, dst, n);            \
     }

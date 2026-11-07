@@ -639,13 +639,18 @@ private:
                             g.spectra[static_cast<std::size_t>(source.src * np + slot)].data();
                         const std::complex<SampleType>* h =
                             g.ir_spectra[static_cast<std::size_t>(cell * np + p)].data();
-                        std::complex<SampleType>* a = acc.data();
+                        // std::complex<T> is layout-compatible with T[2]
+                        // ([complex.numbers]), the interleaved layout the
+                        // complex kernels take. The spectra are finite, so the
+                        // plain product formula is what operator* computes.
+                        const auto count = static_cast<std::size_t>(take);
+                        const auto* xs = reinterpret_cast<const SampleType*>(x + g.job_cursor);
+                        const auto* hs = reinterpret_cast<const SampleType*>(h + g.job_cursor);
+                        auto* as = reinterpret_cast<SampleType*>(acc.data() + g.job_cursor);
                         if (p == 0)
-                            for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
-                                a[i] = x[i] * h[i];
+                            pulp::simd::complex_multiply(xs, hs, as, count);
                         else
-                            for (int i = g.job_cursor; i < g.job_cursor + take; ++i)
-                                a[i] += x[i] * h[i];
+                            pulp::simd::complex_multiply_accumulate(xs, hs, as, count);
                     }
                 } else {
                     // Compute the cross tail even while its render gate is off.

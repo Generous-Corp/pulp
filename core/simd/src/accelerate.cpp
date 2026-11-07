@@ -38,6 +38,13 @@ template <typename T> inline void scrub_nan(T* x, std::size_t n) noexcept {
             x[i] = T(0);
 }
 
+inline DSPSplitComplex as_split(const float* re, const float* im) noexcept {
+    return DSPSplitComplex{const_cast<float*>(re), const_cast<float*>(im)};
+}
+inline DSPDoubleSplitComplex as_split(const double* re, const double* im) noexcept {
+    return DSPDoubleSplitComplex{const_cast<double*>(re), const_cast<double*>(im)};
+}
+
 } // namespace
 
 // ── float ────────────────────────────────────────────────────────────────────
@@ -381,6 +388,228 @@ void interleave2(const double* l, const double* r, double* dst, std::size_t n) n
 void deinterleave2(const double* src, double* l, double* r, std::size_t n) noexcept {
     cblas_dcopy(static_cast<int>(n), src, 2, l, 1);
     cblas_dcopy(static_cast<int>(n), src + 1, 2, r, 1);
+}
+
+// ── complex (float) ─────────────────────────────────────────────────────────────
+// The vDSP split-complex routines take a stride, so an interleaved buffer is
+// a split view with real part at z, imaginary part at z + 1 and stride 2.
+
+namespace {
+
+inline void cmul_strided(const float* ar, const float* ai, std::size_t sa, const float* br, const float* bi,
+                         std::size_t sb, float* dr, float* di, std::size_t sd, std::size_t n,
+                         bool conj_b) noexcept {
+    if (n == 0)
+        return;
+    const auto a = as_split(ar, ai);
+    const auto b = as_split(br, bi);
+    const auto d = as_split(dr, di);
+    if (conj_b) // vDSP conjugates its first operand, so swap the operands
+        vDSP_zvmul(&b, static_cast<vDSP_Stride>(sb), &a, static_cast<vDSP_Stride>(sa), &d,
+                      static_cast<vDSP_Stride>(sd), len(n), -1);
+    else
+        vDSP_zvmul(&a, static_cast<vDSP_Stride>(sa), &b, static_cast<vDSP_Stride>(sb), &d,
+                      static_cast<vDSP_Stride>(sd), len(n), 1);
+}
+
+inline void cmac_strided(const float* ar, const float* ai, std::size_t sa, const float* br, const float* bi,
+                         std::size_t sb, float* cr, float* ci, std::size_t sc, std::size_t n) noexcept {
+    if (n == 0)
+        return;
+    const auto a = as_split(ar, ai);
+    const auto b = as_split(br, bi);
+    const auto c = as_split(cr, ci);
+    vDSP_zvma(&a, static_cast<vDSP_Stride>(sa), &b, static_cast<vDSP_Stride>(sb), &c,
+                 static_cast<vDSP_Stride>(sc), &c, static_cast<vDSP_Stride>(sc), len(n));
+}
+
+inline void power_strided(const float* re, const float* im, std::size_t s, float scale, float* dst,
+                          std::size_t n) noexcept {
+    if (n == 0)
+        return;
+    const auto a = as_split(re, im);
+    vDSP_zvmags(&a, static_cast<vDSP_Stride>(s), dst, 1, len(n));
+    if (scale != float(1))
+        vDSP_vsmul(dst, 1, &scale, dst, 1, len(n));
+}
+
+inline void mag_strided(const float* re, const float* im, std::size_t s, float* dst,
+                        std::size_t n) noexcept {
+    if (n == 0)
+        return;
+    const auto a = as_split(re, im);
+    vDSP_zvabs(&a, static_cast<vDSP_Stride>(s), dst, 1, len(n));
+}
+
+inline void phase_strided(const float* re, const float* im, std::size_t s, float* dst,
+                          std::size_t n) noexcept {
+    if (n == 0)
+        return;
+    const auto a = as_split(re, im);
+    vDSP_zvphas(&a, static_cast<vDSP_Stride>(s), dst, 1, len(n));
+}
+
+} // namespace
+
+void complex_multiply(const float* a, const float* b, float* dst, std::size_t n) noexcept {
+    cmul_strided(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n, false);
+}
+void complex_multiply_conj(const float* a, const float* b, float* dst, std::size_t n) noexcept {
+    cmul_strided(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n, true);
+}
+void complex_multiply_accumulate(const float* a, const float* b, float* acc, std::size_t n) noexcept {
+    cmac_strided(a, a + 1, 2, b, b + 1, 2, acc, acc + 1, 2, n);
+}
+void complex_magnitude(const float* z, float* dst, std::size_t n) noexcept {
+    mag_strided(z, z + 1, 2, dst, n);
+}
+void complex_magnitude_squared(const float* z, float* dst, std::size_t n) noexcept {
+    power_strided(z, z + 1, 2, float(1), dst, n);
+}
+void complex_phase(const float* z, float* dst, std::size_t n) noexcept {
+    phase_strided(z, z + 1, 2, dst, n);
+}
+void complex_power_spectrum(const float* z, float scale, float* dst, std::size_t n) noexcept {
+    power_strided(z, z + 1, 2, scale, dst, n);
+}
+void complex_multiply_split(const float* a_re, const float* a_im, const float* b_re, const float* b_im,
+                            float* dst_re, float* dst_im, std::size_t n) noexcept {
+    cmul_strided(a_re, a_im, 1, b_re, b_im, 1, dst_re, dst_im, 1, n, false);
+}
+void complex_multiply_conj_split(const float* a_re, const float* a_im, const float* b_re,
+                                 const float* b_im, float* dst_re, float* dst_im,
+                                 std::size_t n) noexcept {
+    cmul_strided(a_re, a_im, 1, b_re, b_im, 1, dst_re, dst_im, 1, n, true);
+}
+void complex_multiply_accumulate_split(const float* a_re, const float* a_im, const float* b_re,
+                                       const float* b_im, float* acc_re, float* acc_im,
+                                       std::size_t n) noexcept {
+    cmac_strided(a_re, a_im, 1, b_re, b_im, 1, acc_re, acc_im, 1, n);
+}
+void complex_magnitude_split(const float* re, const float* im, float* dst, std::size_t n) noexcept {
+    mag_strided(re, im, 1, dst, n);
+}
+void complex_magnitude_squared_split(const float* re, const float* im, float* dst,
+                                     std::size_t n) noexcept {
+    power_strided(re, im, 1, float(1), dst, n);
+}
+void complex_phase_split(const float* re, const float* im, float* dst, std::size_t n) noexcept {
+    phase_strided(re, im, 1, dst, n);
+}
+void complex_power_spectrum_split(const float* re, const float* im, float scale, float* dst,
+                                  std::size_t n) noexcept {
+    power_strided(re, im, 1, scale, dst, n);
+}
+
+// ── complex (double) ─────────────────────────────────────────────────────────────
+// The vDSP split-complex routines take a stride, so an interleaved buffer is
+// a split view with real part at z, imaginary part at z + 1 and stride 2.
+
+namespace {
+
+inline void cmul_strided(const double* ar, const double* ai, std::size_t sa, const double* br, const double* bi,
+                         std::size_t sb, double* dr, double* di, std::size_t sd, std::size_t n,
+                         bool conj_b) noexcept {
+    if (n == 0)
+        return;
+    const auto a = as_split(ar, ai);
+    const auto b = as_split(br, bi);
+    const auto d = as_split(dr, di);
+    if (conj_b) // vDSP conjugates its first operand, so swap the operands
+        vDSP_zvmulD(&b, static_cast<vDSP_Stride>(sb), &a, static_cast<vDSP_Stride>(sa), &d,
+                      static_cast<vDSP_Stride>(sd), len(n), -1);
+    else
+        vDSP_zvmulD(&a, static_cast<vDSP_Stride>(sa), &b, static_cast<vDSP_Stride>(sb), &d,
+                      static_cast<vDSP_Stride>(sd), len(n), 1);
+}
+
+inline void cmac_strided(const double* ar, const double* ai, std::size_t sa, const double* br, const double* bi,
+                         std::size_t sb, double* cr, double* ci, std::size_t sc, std::size_t n) noexcept {
+    if (n == 0)
+        return;
+    const auto a = as_split(ar, ai);
+    const auto b = as_split(br, bi);
+    const auto c = as_split(cr, ci);
+    vDSP_zvmaD(&a, static_cast<vDSP_Stride>(sa), &b, static_cast<vDSP_Stride>(sb), &c,
+                 static_cast<vDSP_Stride>(sc), &c, static_cast<vDSP_Stride>(sc), len(n));
+}
+
+inline void power_strided(const double* re, const double* im, std::size_t s, double scale, double* dst,
+                          std::size_t n) noexcept {
+    if (n == 0)
+        return;
+    const auto a = as_split(re, im);
+    vDSP_zvmagsD(&a, static_cast<vDSP_Stride>(s), dst, 1, len(n));
+    if (scale != double(1))
+        vDSP_vsmulD(dst, 1, &scale, dst, 1, len(n));
+}
+
+inline void mag_strided(const double* re, const double* im, std::size_t s, double* dst,
+                        std::size_t n) noexcept {
+    if (n == 0)
+        return;
+    const auto a = as_split(re, im);
+    vDSP_zvabsD(&a, static_cast<vDSP_Stride>(s), dst, 1, len(n));
+}
+
+inline void phase_strided(const double* re, const double* im, std::size_t s, double* dst,
+                          std::size_t n) noexcept {
+    if (n == 0)
+        return;
+    const auto a = as_split(re, im);
+    vDSP_zvphasD(&a, static_cast<vDSP_Stride>(s), dst, 1, len(n));
+}
+
+} // namespace
+
+void complex_multiply(const double* a, const double* b, double* dst, std::size_t n) noexcept {
+    cmul_strided(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n, false);
+}
+void complex_multiply_conj(const double* a, const double* b, double* dst, std::size_t n) noexcept {
+    cmul_strided(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n, true);
+}
+void complex_multiply_accumulate(const double* a, const double* b, double* acc, std::size_t n) noexcept {
+    cmac_strided(a, a + 1, 2, b, b + 1, 2, acc, acc + 1, 2, n);
+}
+void complex_magnitude(const double* z, double* dst, std::size_t n) noexcept {
+    mag_strided(z, z + 1, 2, dst, n);
+}
+void complex_magnitude_squared(const double* z, double* dst, std::size_t n) noexcept {
+    power_strided(z, z + 1, 2, double(1), dst, n);
+}
+void complex_phase(const double* z, double* dst, std::size_t n) noexcept {
+    phase_strided(z, z + 1, 2, dst, n);
+}
+void complex_power_spectrum(const double* z, double scale, double* dst, std::size_t n) noexcept {
+    power_strided(z, z + 1, 2, scale, dst, n);
+}
+void complex_multiply_split(const double* a_re, const double* a_im, const double* b_re, const double* b_im,
+                            double* dst_re, double* dst_im, std::size_t n) noexcept {
+    cmul_strided(a_re, a_im, 1, b_re, b_im, 1, dst_re, dst_im, 1, n, false);
+}
+void complex_multiply_conj_split(const double* a_re, const double* a_im, const double* b_re,
+                                 const double* b_im, double* dst_re, double* dst_im,
+                                 std::size_t n) noexcept {
+    cmul_strided(a_re, a_im, 1, b_re, b_im, 1, dst_re, dst_im, 1, n, true);
+}
+void complex_multiply_accumulate_split(const double* a_re, const double* a_im, const double* b_re,
+                                       const double* b_im, double* acc_re, double* acc_im,
+                                       std::size_t n) noexcept {
+    cmac_strided(a_re, a_im, 1, b_re, b_im, 1, acc_re, acc_im, 1, n);
+}
+void complex_magnitude_split(const double* re, const double* im, double* dst, std::size_t n) noexcept {
+    mag_strided(re, im, 1, dst, n);
+}
+void complex_magnitude_squared_split(const double* re, const double* im, double* dst,
+                                     std::size_t n) noexcept {
+    power_strided(re, im, 1, double(1), dst, n);
+}
+void complex_phase_split(const double* re, const double* im, double* dst, std::size_t n) noexcept {
+    phase_strided(re, im, 1, dst, n);
+}
+void complex_power_spectrum_split(const double* re, const double* im, double scale, double* dst,
+                                  std::size_t n) noexcept {
+    power_strided(re, im, 1, scale, dst, n);
 }
 
 } // namespace pulp::simd::backend::accelerate
