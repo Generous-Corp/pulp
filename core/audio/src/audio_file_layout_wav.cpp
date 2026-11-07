@@ -157,6 +157,7 @@ std::optional<ChunkHeader> read_chunk_header(Builder& b, const Envelope& env,
     if (env.w64) {
         if (std::memcmp(raw.data() + 4u, kW64ChunkSuffix.data(), kW64ChunkSuffix.size()) == 0) {
             header.id = fourcc(raw.data());
+            header.printable = raw_id_printable(raw.data(), 4u);
         } else {
             header.id = hex_bytes(raw.data(), 16u);
         }
@@ -166,11 +167,11 @@ std::optional<ChunkHeader> read_chunk_header(Builder& b, const Envelope& env,
             header.printable = false;
     } else {
         header.id = fourcc(raw.data());
+        header.printable = raw_id_printable(raw.data(), 4u);
         const auto size = read_u32le(raw.data() + 4u);
         header.declared = size;
         header.sentinel = size == kSizeSentinel;
     }
-    header.printable = header.printable && printable_id(header.id);
     return header;
 }
 
@@ -227,13 +228,15 @@ void parse_fmt(Builder& b, LayoutRegion& region, Walk& walk, std::uint64_t paylo
         region.fields.push_back(
             {"sub_format_tag", static_cast<std::uint64_t>(read_u16le(payload.data() + 24u))});
         region.fields.push_back({"sub_format_guid", hex_bytes(payload.data() + 24u, 16u)});
-        if (fields.valid_bits > fields.bits_per_sample) {
+        // The decoder reads the first fmt only, so a second fmt's field
+        // disagreements are not warnings of their own; duplicate_fmt covers it.
+        if (walk.fmt_count == 1u && fields.valid_bits > fields.bits_per_sample) {
             b.warn(LayoutWarningKind::valid_bits_above_container, region.offset,
                    "valid bits " + std::to_string(fields.valid_bits) + " exceed container bits " +
                        std::to_string(fields.bits_per_sample));
         }
         const auto mask_channels = static_cast<std::uint32_t>(std::popcount(fields.channel_mask));
-        if (fields.channel_mask != 0u && mask_channels != fields.channels) {
+        if (walk.fmt_count == 1u && fields.channel_mask != 0u && mask_channels != fields.channels) {
             b.warn(LayoutWarningKind::extensible_mask_channel_mismatch, region.offset,
                    "channel mask names " + std::to_string(mask_channels) + " speakers for " +
                        std::to_string(fields.channels) + " channels");
@@ -250,7 +253,7 @@ void parse_ds64(Builder& b, LayoutRegion& region, Ds64& ds64, std::uint64_t payl
                 std::uint64_t declared) {
     auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, 4096u));
     if (payload.size() < 28u) {
-        region.note = "ds64 payload shorter than 28 bytes";
+        region.note = "ds64 too short: payload is under the 28-byte minimum";
         return;
     }
     ds64.riff_size = read_u64le(payload.data());
@@ -587,12 +590,29 @@ void inspect_wav_layout(Builder& b) {
                 region.note = "second data chunk; the decoder uses the first";
             }
         } else if (header->id == "fact") {
-            auto payload = b.reader.read(payload_offset, std::min<std::uint64_t>(declared, 4u));
-            if (payload.size() == 4u) {
-                const auto count = read_u32le(payload.data());
-                region.fields.push_back({"sample_length", static_cast<std::uint64_t>(count)});
+            // dr_wav reads a fixed 4 bytes (8 in Wave64) from any fact chunk
+            // before data, then subtracts that from the declared size. A
+            // shorter chunk underflows and the seek to the next chunk fails,
+            // except when the underflow plus the pad byte lands back on zero
+            // (RIFF size 3, Wave64 size 7), so the decoder stops exactly on
+            // sizes 0, 1, 2 (0 to 6 but 7 for Wave64).
+            const std::uint64_t count_bytes = env.w64 ? 8u : 4u;
+            if (!env.rf64 && !walk.data_seen && declared < count_bytes &&
+                declared != count_bytes - 1u && !walk.structural_fault) {
+                walk.structural_fault = true;
+                walk.first_fault = "fact chunk shorter than " + std::to_string(count_bytes) +
+                                   " bytes stops the decoder before data";
+            }
+            auto payload =
+                b.reader.read(payload_offset, std::min<std::uint64_t>(declared, count_bytes));
+            if (payload.size() == count_bytes) {
+                const std::uint64_t count =
+                    env.w64 ? read_u64le(payload.data()) : read_u32le(payload.data());
+                region.fields.push_back({"sample_length", count});
                 if (!walk.fact_frames)
                     walk.fact_frames = count;
+            } else {
+                region.note = "fact payload shorter than its sample count";
             }
         } else if (header->id == "ds64") {
             region.note = "ds64 after the first chunk position; the decoder ignores it here";

@@ -283,6 +283,17 @@ inline std::vector<Fixture> decoder_fixtures() {
     auto trailing = one_frame;
     append_chunk(trailing, "JUNK", Bytes{0x42u, 0x43u});
     add("trailing chunk outside envelope", trailing);
+    // A fact chunk between fmt and data at every size the decoder treats
+    // differently: it reads four bytes regardless, so 0, 1 and 2 stop it, 3
+    // lands back on the next header through its pad byte, 4 is well-formed.
+    for (std::size_t fact_size = 0u; fact_size <= 5u; ++fact_size) {
+        add("fact chunk of " + std::to_string(fact_size) + " bytes before data",
+            make_wav_with_chunks(make_format(1u, 1u, 48'000u, 16u), two16,
+                                 {{"fact", Bytes(fact_size, 0u)}}));
+    }
+    add("fact chunk of 2 bytes after data",
+        make_wav_with_chunks(make_format(1u, 1u, 48'000u, 16u), two16, {},
+                             {{"fact", Bytes(2u, 0u)}}));
     return fixtures;
 }
 

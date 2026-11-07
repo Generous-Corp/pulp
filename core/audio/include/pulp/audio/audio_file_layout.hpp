@@ -14,8 +14,10 @@
 ///
 /// The WAV facts that drive decodability (rate, channels, bits, frames) come
 /// from the same dr_wav interpretation `inspect_wav` uses, through
-/// `interpret_wav_format`, so this report and the decoder cannot disagree on
-/// what a `fmt ` chunk means.
+/// `interpret_wav_format`, and the accept/reject verdict mirrors the
+/// decoder's chunk-walk rules. A parity test holds the two together; the
+/// walk here is deliberately tolerant where the decoder is strict, so any
+/// new decoder-stopping condition must be mirrored in the WAV walker.
 
 #include <pulp/audio/wav_decoder.hpp>
 
