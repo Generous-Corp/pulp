@@ -39,6 +39,7 @@ Choosing an alias policy:
 |---|---|---|---|
 | `adaa` (default) | 0.5 sample | two-tap mean: −3.0 dB at a quarter of the rate | Low latency, moderate drive |
 | `adaa2` | 1 sample (reported, dry path matched) | three-tap mean: −9.5 dB at a quarter of the rate, null at a third | Content below about a sixth of the rate, where its worst-case aliasing measures at least 12 dB below `adaa`'s and under -50 dBc (tanh at +18 dB drive); higher up its roll-off costs more than it saves |
+| `adaa_iir` | about 1.4 samples (the kernel's group delay, reported; dry path matched) | fourth-order Butterworth at 0.3 of the rate: -0.9 dB at a quarter of the rate | Heavily driven signals: its aliasing sits several dB below `adaa2`'s (about 7 dB for tanh at +30 dB drive) and 20 dB below the raw curve |
 | `oversample_2x` | 64 samples (linear phase) | flat | Phase coherence with another linear-phase oversampled stage |
 | `off` | 0 | flat | Measurement and the CPU floor |
 

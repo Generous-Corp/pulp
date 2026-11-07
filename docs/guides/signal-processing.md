@@ -1206,6 +1206,40 @@ oversampling and can compose the curve with `OversamplerT`.
 
 ---
 
+### AntiderivativeIir
+
+Antiderivative antialiasing with an IIR kernel, for static nonlinearities. It models what an analog chain would do (interpolate the input, apply the curve in continuous time, low-pass, sample) and uses any causal low-pass with simple poles as the antialiasing filter, so the cut can be much steeper than the averaging kernels of first- and second-order ADAA. Cost grows linearly with the filter order. Header: `pulp/signal/antiderivative_iir.hpp`.
+
+```cpp
+signal::AntiderivativeIir aa;            // fourth-order Butterworth, -3 dB at 0.3 of the sample rate
+signal::TanhNonlinearity tanh_curve;
+signal::HardClipNonlinearity clip{1.0};  // clip level
+
+for (int i = 0; i < num_samples; ++i)
+    output[i] = aa.process(tanh_curve, input[i] * drive);
+
+aa.set_kernel(signal::AntiderivativeIirKernel::butterworth(6, 0.35));  // steeper, more delay
+```
+
+Nonlinearities are small structs with `operator()(double)`, `breakpoints(lo, hi, out)` (the points where the curve is not smooth, so quadrature never straddles a kink), `length_scale()` and a `piecewise_linear` flag. `TanhNonlinearity` and `HardClipNonlinearity` are provided; the curve must satisfy `f(0) = 0`. Piecewise-linear curves are integrated exactly; smooth ones with eight-point Gauss-Legendre panels, as many as the input span per sample needs (capped at 16 per smooth span).
+
+The same method is a `Saturator` alias policy:
+
+```cpp
+signal::Saturator sat;
+sat.prepare(sample_rate);
+sat.set_alias_policy(signal::SaturatorAliasPolicy::adaa_iir);
+sat.set_adaa_iir_kernel(signal::AntiderivativeIirKernel::butterworth(6, 0.35));  // optional
+```
+
+`group_delay_samples()` reports the kernel's low-frequency delay (about 1.4 samples for the default) and `latency_samples()` its whole samples, with the dry path matched. Poles must be simple; kernels up to eight poles. A non-finite input resets the state.
+
+**Real-time:** `process()` allocates nothing and does bounded work: the nonlinearity is evaluated once per quadrature node (8 nodes for a sample whose input moves less than two length scales, more for large jumps). Kernel changes are control-thread operations.
+
+**References:** La Pastina, D'Angelo and Gabrielli, "Arbitrary-Order IIR Antiderivative Antialiasing", DAFx 2021, pp. 9-16; Parker, Zavalishin and Le Bivic, "Reducing the Aliasing of Nonlinear Waveshaping Using Continuous-Time Convolution", DAFx 2016. Tests: `test/test_signal_adaa_iir.cpp`.
+
+---
+
 ### Oversampler
 
 Runs a processing callback at 2x, 4x, 8x, or 16x sample rate with anti-aliasing filters on input and output.

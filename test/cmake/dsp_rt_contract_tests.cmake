@@ -269,6 +269,14 @@ pulp_add_test_suite(pulp-test-signal-saturator
     LIBRARIES pulp::signal pulp::audio-analysis
     TIMEOUT 900)
 
+# Arbitrary-order IIR antiderivative antialiasing: kernel design, a
+# brute-force reference through the kinks, the alias floor against ADAA and the
+# naive curve, the Saturator policy, and the allocation probe.
+pulp_add_test_suite(pulp-test-signal-adaa-iir GROUP pulp-test-group-dsp-rt-signal
+    SOURCES test_signal_adaa_iir.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
 pulp_add_test_suite(pulp-test-signal-nonlinear-shaping GROUP pulp-test-group-dsp-rt-signal
     SOURCES test_signal_nonlinear_shaping.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
