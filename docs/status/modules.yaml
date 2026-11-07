@@ -189,7 +189,7 @@ modules:
     docs: reference/modules.md#format
 
   - name: platform
-    summary: Platform detection, native file dialogs, clipboard, popup menus, main-thread posting and common-mode timers, Windows registry, child process execution
+    summary: Platform detection, native file dialogs (sync and async), async alerts, open URL, clipboard, popup menus, main-thread posting and common-mode timers, Windows registry, child process execution
     status: usable
     dependencies: []
     docs: reference/modules.md#platform

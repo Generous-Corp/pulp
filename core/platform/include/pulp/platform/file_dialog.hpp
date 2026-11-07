@@ -5,6 +5,10 @@
 #include <optional>
 #include <functional>
 
+#include <pulp/platform/dialog_session.hpp>
+#include <pulp/platform/main_thread.hpp>
+#include <pulp/platform/native_handle.hpp>
+
 namespace pulp::platform {
 
 // File filter (e.g., {"Audio Files", "wav;flac;mp3"})
@@ -146,6 +150,64 @@ public:
     // blocks, so the default "no backend → no selection" contract must hold
     // for headless/test callers until a host opts in.
     static bool install_native_backend();
+
+    // ── Asynchronous dialogs ───────────────────────────────────────────
+    //
+    // Non-blocking versions for editors, parented to the window that holds
+    // `parent` (an NSView* on macOS): a sheet on that window, or a free
+    // standing panel when the view is not in a window yet. Each returns at
+    // once; `done` runs later, exactly once, on the main thread, unless the
+    // MainThreadScope is destroyed first, which closes the panel and drops
+    // `done`. Cancelling gives an empty result. Without a native or async
+    // backend the empty result is delivered asynchronously too.
+
+    struct OpenRequest {
+        std::string title = "Open";
+        std::vector<FileFilter> filters;
+        std::string default_path;
+        bool choose_files = true;
+        bool choose_directories = false;
+        bool multiple = false;
+    };
+
+    struct SaveRequest {
+        std::string title = "Save";
+        std::vector<FileFilter> filters;
+        std::string default_path;
+        std::string default_name;
+    };
+
+    static DialogSession open_async(MainThreadScope& scope, NativeViewHandle parent,
+                                    OpenRequest request,
+                                    std::function<void(std::vector<std::string>)> done);
+    static DialogSession save_async(MainThreadScope& scope, NativeViewHandle parent,
+                                    SaveRequest request,
+                                    std::function<void(std::optional<std::string>)> done);
+    // As save_copy(): the copy happens while the platform still holds the
+    // selection grant. `error` is empty on success and on cancellation.
+    static DialogSession save_copy_async(
+        MainThreadScope& scope, NativeViewHandle parent, std::string source_path,
+        SaveRequest request,
+        std::function<void(std::optional<std::string> destination, std::string error)> done);
+
+    // Host- or test-provided asynchronous dialogs. When installed they serve
+    // the *_async calls on every platform, macOS included. Each handler must
+    // call its completion once, from any thread; delivery to `done` is
+    // always posted through the scope. `cancel` closes whatever is showing.
+    struct AsyncBackend {
+        std::function<void(const OpenRequest&, std::function<void(std::vector<std::string>)>)> open;
+        std::function<void(const SaveRequest&, std::function<void(std::optional<std::string>)>)>
+            save;
+        std::function<void()> cancel;
+    };
+    static void set_async_backend(AsyncBackend backend);
+    static void clear_async_backend();
+    static bool has_async_backend();
+
+    // The system content types the filters name, as uniform type identifiers
+    // (macOS; dynamic identifiers for extensions the system does not know, so
+    // none is dropped). Empty off macOS.
+    static std::vector<std::string> content_type_ids_for(const std::vector<FileFilter>& filters);
 };
 
 } // namespace pulp::platform

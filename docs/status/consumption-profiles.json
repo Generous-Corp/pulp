@@ -637,6 +637,7 @@
       "pulp/osc/osc_parameter_map.hpp"
     ],
     "core/platform/include": [
+      "pulp/platform/alert.hpp",
       "pulp/platform/android/jni.hpp",
       "pulp/platform/android/motion_bridge.h",
       "pulp/platform/child_process.hpp",
@@ -644,12 +645,13 @@
       "pulp/platform/dbus.hpp",
       "pulp/platform/detect.hpp",
       "pulp/platform/device_capability.hpp",
+      "pulp/platform/dialog_session.hpp",
       "pulp/platform/environment.hpp",
       "pulp/platform/file_dialog.hpp",
       "pulp/platform/gpu_fwd.hpp",
       "pulp/platform/main_thread.hpp",
       "pulp/platform/native_handle.hpp",
-      "pulp/platform/objc_unique_class.hpp",
+      "pulp/platform/open_url.hpp",
       "pulp/platform/permissions.hpp",
       "pulp/platform/platform.hpp",
       "pulp/platform/popup_menu.hpp",
