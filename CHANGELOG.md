@@ -9,6 +9,25 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1870"></a>
+## [1.87.0] - 2026-11-07
+
+- release/version bump ([#11739](https://github.com/Generous-Corp/pulp/pull/11739))
+- release/version bump ([#11735](https://github.com/Generous-Corp/pulp/pull/11735))
+- codex/g5 full semantics 20261106 ([#11729](https://github.com/Generous-Corp/pulp/pull/11729))
+
+<a id="v1850"></a>
+## [1.85.0] - 2026-11-07
+
+- release/version bump ([#11730](https://github.com/Generous-Corp/pulp/pull/11730))
+- feature/runtime cancel log dirs 20261106 ([#11708](https://github.com/Generous-Corp/pulp/pull/11708))
+- codex/linux sdk icu portable ([#11724](https://github.com/Generous-Corp/pulp/pull/11724))
+- codex/g4 subgraph prep 20261106 ([#11704](https://github.com/Generous-Corp/pulp/pull/11704))
+- repair/g2 web linkage 20261106 ([#11698](https://github.com/Generous-Corp/pulp/pull/11698))
+- feature/process gates patch verifier 20261106 ([#11723](https://github.com/Generous-Corp/pulp/pull/11723))
+- codex/g12 flagship readiness 20261107 ([#11727](https://github.com/Generous-Corp/pulp/pull/11727))
+- feature/state tree transactions 20261106 ([#11707](https://github.com/Generous-Corp/pulp/pull/11707))
+
 <a id="v1840"></a>
 ## [1.84.0] - 2026-11-07
 
@@ -12444,6 +12463,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.87.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.87.0
+[1.85.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.85.0
 [1.84.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.84.0
 [1.83.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.83.0
 [1.82.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.82.0

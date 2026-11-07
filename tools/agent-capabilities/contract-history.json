@@ -2487711,7 +2487711,7 @@
       },
       "surface": {
         "schema": "pulp.agent-capability-surface.v1",
-        "inventory_version": 191,
+        "inventory_version": 198,
         "headers": [
           {
             "include": "pulp/audio/analyzer_provider.hpp",
@@ -2488310,7 +2488310,7 @@
           },
           {
             "include": "pulp/host/graph_event_contract.hpp",
-            "fingerprint": "sha256:d0e530c8e75604b4b7ef06afca2503335e4bb8a307c82e87edc8077a47d66ca0",
+            "fingerprint": "sha256:b2ddd08614b17b0c5bf7df8023dae68489913601e52813f8fe3b05393dfb4a97",
             "disposition": "infrastructure"
           },
           {
@@ -2490346,7 +2490346,7 @@
         ],
         "tombstones": []
       },
-      "entry_digest": "sha256:9baf689d50142f314a82bc69464c007798c82898fd45f51c85c24a5e1e24c44a"
+      "entry_digest": "sha256:e3cbcebe26794ab842c94dd2caedb5091b5891e18b369fe3e4bf51b16e719e40"
     }
   ]
 }
