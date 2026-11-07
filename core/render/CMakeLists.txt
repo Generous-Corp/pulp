@@ -98,6 +98,32 @@ elseif(PULP_IOS)
     )
 endif()
 
+include("${PULP_ROOT_DIR}/tools/cmake/PulpWgslShaders.cmake")
+
+# Build-time WGSL validator behind pulp_add_wgsl_shaders(). It compiles each
+# shader on Dawn's Null adapter, so it needs a host build with Dawn. It links
+# the device layer only (never pulp-render), which is what lets pulp-render's
+# own shaders be validated while pulp-render builds. The Tint compiler it
+# reaches is part of the pinned Dawn (BSD-3-Clause) and is used only through
+# Dawn's public WebGPU API. Only where Dawn is linked statically inside the
+# Skia slice, so running the tool as a build step never depends on finding a
+# WebGPU runtime library.
+if(PULP_HAS_SKIA AND PULP_HAS_WEBGPU AND PULP_SKIA_PROVIDES_DAWN AND NOT CMAKE_CROSSCOMPILING
+   AND NOT EMSCRIPTEN AND NOT ANDROID AND NOT PULP_IOS)
+    add_executable(pulp-wgsl-validate
+        ${PULP_ROOT_DIR}/tools/wgsl/pulp_wgsl_validate.cpp
+        src/wgsl_compile.cpp
+        src/wgsl_diagnostics.cpp
+    )
+    target_include_directories(pulp-wgsl-validate PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${SKIA_INCLUDE_DIRS})
+    if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+        target_include_directories(pulp-wgsl-validate PRIVATE "${SKIA_INCLUDE_DIRS}/dawn")
+    endif()
+    target_link_libraries(pulp-wgsl-validate PRIVATE pulp::gpu-device)
+endif()
+
 add_library(pulp-render)
 add_library(pulp::render ALIAS pulp-render)
 
@@ -108,6 +134,9 @@ target_include_directories(pulp-render
 )
 
 target_sources(pulp-render PRIVATE
+    src/gpu_capabilities.cpp
+    src/gpu_pass.cpp
+    src/wgsl_diagnostics.cpp
     src/headless_surface.cpp
     src/skia_surface.cpp
     src/skp_capture.cpp
@@ -120,6 +149,11 @@ if(PULP_ENABLE_SCENE3D)
     target_sources(pulp-render PRIVATE
         src/renderer3d.cpp
     )
+    # The scene shader is a .wgsl file, embedded (and validated where the
+    # host can run Dawn) at build time.
+    pulp_add_wgsl_shaders(pulp-render
+        FILES shaders/renderer3d_scene.wgsl
+        NAMESPACE pulp::render::shaders)
     target_compile_definitions(pulp-render PUBLIC PULP_ENABLE_SCENE3D=1)
     target_include_directories(pulp-render PRIVATE
         ${PULP_ROOT_DIR}/core/scene/include
@@ -284,3 +318,13 @@ endif()
 unset(_pulp_gpu_target)
 unset(_pulp_gpu_provider_scope)
 unset(_pulp_gpu_provider_def_scope)
+
+# Dawn-dependent sources of the typed GPU pass API and the readback helper
+# Renderer3D shares. They need the Dawn headers, which arrive with Skia, and
+# build under the same condition as Renderer3D's Dawn path.
+if(PULP_HAS_SKIA AND PULP_HAS_WEBGPU)
+    target_sources(pulp-render PRIVATE
+        src/gpu_readback.cpp
+        src/wgsl_compile.cpp
+    )
+endif()
