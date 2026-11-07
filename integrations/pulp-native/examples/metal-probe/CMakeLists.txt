@@ -88,3 +88,33 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-native-metal-probe
         PROPERTIES LABELS "native-surface;editor-host")
 endif()
+
+# The built plug-in loaded the way a host loads it, in this process only
+# (nothing is installed): CLAP through clap_entry, AU v2 through
+# AudioComponentRegister. Each processes a block and opens its GUI into a
+# native surface. Plug-in editors refuse to open under CI and headless
+# environment flags, so those are cleared for these cases.
+if(PULP_BUILD_TESTS AND (TARGET PulpNativeMetalProbe_CLAP OR TARGET PulpNativeMetalProbe_AU))
+    add_executable(pulp-test-native-metal-probe-host ${PROJECT_SOURCE_DIR}/test/native_metal_probe_hosts.mm)
+    target_compile_options(pulp-test-native-metal-probe-host PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-native-metal-probe-host PRIVATE clap ${CMAKE_DL_LIBS}
+        "-framework AppKit" "-framework AudioToolbox" "-framework AudioUnit")
+    set(_probe_env
+        "CI=unset:;PULP_HEADLESS=unset:;PULP_TEST_MODE=unset:;PULP_DISABLE_PLUGIN_EDITOR=unset:")
+    if(TARGET PulpNativeMetalProbe_CLAP)
+        add_dependencies(pulp-test-native-metal-probe-host PulpNativeMetalProbe_CLAP)
+        add_test(NAME native-metal-probe-clap-host
+            COMMAND pulp-test-native-metal-probe-host clap $<TARGET_FILE:PulpNativeMetalProbe_CLAP>)
+        set_tests_properties(native-metal-probe-clap-host PROPERTIES
+            LABELS "native-surface;editor-host;clap" TIMEOUT 60
+            ENVIRONMENT_MODIFICATION "${_probe_env}")
+    endif()
+    if(TARGET PulpNativeMetalProbe_AU)
+        add_dependencies(pulp-test-native-metal-probe-host PulpNativeMetalProbe_AU)
+        add_test(NAME native-metal-probe-au-host
+            COMMAND pulp-test-native-metal-probe-host au $<TARGET_BUNDLE_DIR:PulpNativeMetalProbe_AU>)
+        set_tests_properties(native-metal-probe-au-host PROPERTIES
+            LABELS "native-surface;editor-host;auv2" TIMEOUT 60
+            ENVIRONMENT_MODIFICATION "${_probe_env}")
+    endif()
+endif()
