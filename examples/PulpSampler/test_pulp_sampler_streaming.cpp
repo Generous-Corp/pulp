@@ -115,7 +115,9 @@ TEST_CASE("PulpSampler reports decode-once FLAC rejection without replacing its 
     REQUIRE(rejected.codec() == "FLAC");
     REQUIRE(rejected.channels == 1);
     REQUIRE(rejected.sample_rate == 48000);
-    REQUIRE(rejected.total_frames == 32);
+    // The strict probe does not decode the stream to learn its length, so
+    // a stream with no length claim reports zero frames.
+    REQUIRE(rejected.total_frames == 0);
 
     const auto source_after =
         PulpSamplerTestAccess::published_stream_source(*fixture.proc);

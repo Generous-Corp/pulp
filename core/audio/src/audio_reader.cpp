@@ -41,6 +41,8 @@ class MemoryByteSource final : public AudioByteSource {
     explicit MemoryByteSource(std::span<const std::uint8_t> bytes) : bytes_(bytes) {}
 
     std::size_t read(void* destination, std::size_t bytes) override {
+        // seek() refuses positions past the end, so position_ <= size and
+        // this subtraction cannot wrap.
         const auto available = bytes_.size() - static_cast<std::size_t>(position_);
         const auto count = std::min(bytes, available);
         if (count > 0)
@@ -248,6 +250,9 @@ Container sniff_container(AudioByteSource& source) {
         return Container::Flac;
     if (starts_with(0, "OggS"))
         return Container::Ogg;
+    // An ID3v2 tag also prefixes some FLAC files. Such a FLAC with no
+    // extension sniffs as MP3, fails to open, and the caller falls back to
+    // the registry reader; a ".flac" hint avoids the detour.
     if (starts_with(0, "ID3") || (got >= 2 && head[0] == 0xFF && (head[1] & 0xE0) == 0xE0))
         return Container::Mp3;
     return Container::Unknown;
@@ -325,6 +330,10 @@ struct StreamingDecoder : Decoder {
             produced += got;
         }
         cursor_ += produced;
+        // A short decode means an error or the real end of the stream; seek
+        // again next time rather than trusting a cursor the codec has left.
+        if (produced < frames)
+            cursor_valid_ = false;
         return produced;
     }
 
@@ -454,6 +463,11 @@ struct Mp3Decoder final : StreamingDecoder {
     }
 
     bool seek_to(std::uint64_t frame) override {
+        // dr_mp3 treats a seek to its own position as done. That position can
+        // only equal the target here after a short read, when the decoder may
+        // be stuck at a failed frame, so rewind to the start first.
+        if (frame == mp3.currentPCMFrame && drmp3_seek_to_pcm_frame(&mp3, 0) != DRMP3_TRUE)
+            return false;
         return drmp3_seek_to_pcm_frame(&mp3, frame) == DRMP3_TRUE;
     }
 
@@ -524,9 +538,38 @@ struct VorbisDecoder final : StreamingDecoder {
     }
 };
 
+// Byte offset of a RIFF/RF64 file's "data" chunk payload, or nullopt. Leaves
+// the source position unspecified.
+std::optional<std::uint64_t> wav_data_offset(AudioByteSource& source) {
+    std::uint8_t header[12];
+    if (!source.seek(0) || source.read(header, sizeof(header)) != sizeof(header))
+        return std::nullopt;
+    std::uint64_t position = sizeof(header);
+    for (int chunk = 0; chunk < 64; ++chunk) {
+        std::uint8_t chunk_header[8];
+        if (!source.seek(position) ||
+            source.read(chunk_header, sizeof(chunk_header)) != sizeof(chunk_header))
+            return std::nullopt;
+        const std::uint64_t size = static_cast<std::uint64_t>(chunk_header[4]) |
+                                   (static_cast<std::uint64_t>(chunk_header[5]) << 8) |
+                                   (static_cast<std::uint64_t>(chunk_header[6]) << 16) |
+                                   (static_cast<std::uint64_t>(chunk_header[7]) << 24);
+        if (std::memcmp(chunk_header, "data", 4) == 0)
+            return position + sizeof(chunk_header);
+        position += sizeof(chunk_header) + size + (size & 1u);
+    }
+    return std::nullopt;
+}
+
 struct WavDecoder final : Decoder {
     bool open(std::unique_ptr<AudioByteSource> byte_source) {
         source = std::move(byte_source);
+        // An RF64 header's ds64 length is not clamped to the bytes present,
+        // and choc reads past the end without reporting it. Bound the frame
+        // count by the bytes that follow the data chunk header.
+        const auto data_offset = wav_data_offset(*source);
+        if (!data_offset || !source->seek(0))
+            return false;
         buffer = std::make_unique<SourceStreamBuf>(*source);
         stream = std::make_shared<std::istream>(buffer.get());
         choc::audio::WAVAudioFileFormat<false> format;
@@ -538,7 +581,13 @@ struct WavDecoder final : Decoder {
             return false;
         info.sample_rate = static_cast<std::uint32_t>(props.sampleRate);
         info.num_channels = props.numChannels;
-        info.num_frames = props.numFrames;
+        const std::uint64_t frame_bytes =
+            static_cast<std::uint64_t>(choc::audio::getBytesPerSample(props.bitDepth)) *
+            props.numChannels;
+        const std::uint64_t present =
+            *data_offset < source->size() ? source->size() - *data_offset : 0;
+        info.num_frames =
+            frame_bytes == 0 ? 0 : std::min<std::uint64_t>(props.numFrames, present / frame_bytes);
         info.bits_per_sample = choc::audio::getBytesPerSample(props.bitDepth) * 8;
         finish_info(info, props.formatName);
         return true;
@@ -673,7 +722,8 @@ std::unique_ptr<Decoder> open_seekable(std::unique_ptr<AudioByteSource> source, 
 // the whole stream, so max_output_bytes bounds each allocating read rather
 // than the file's length. A stream with no length claim is decoded once, with
 // every ceiling checked as it decodes, so its frames can be addressed.
-std::unique_ptr<Decoder> admit(std::unique_ptr<Decoder> decoder, const DecodeLimits& limits) {
+std::unique_ptr<Decoder> admit(std::unique_ptr<Decoder> decoder, const DecodeLimits& limits,
+                               AudioReaderFallback fallback) {
     if (!decoder)
         return nullptr;
     const auto& info = decoder->info;
@@ -685,7 +735,7 @@ std::unique_ptr<Decoder> admit(std::unique_ptr<Decoder> decoder, const DecodeLim
     if (info.num_frames != 0)
         return decoder;
     auto* streaming = decoder->as_streaming();
-    if (streaming == nullptr)
+    if (streaming == nullptr || fallback == AudioReaderFallback::Refuse)
         return nullptr;
     auto decoded = streaming->decode_all(limits);
     if (!decoded)
@@ -729,7 +779,8 @@ AudioReader::AudioReader(std::unique_ptr<Decoder> decoder, const DecodeLimits& l
 AudioReader::~AudioReader() = default;
 
 std::unique_ptr<AudioReader> AudioReader::open_file(const std::string& path,
-                                                    const DecodeLimits& limits) {
+                                                    const DecodeLimits& limits,
+                                                    AudioReaderFallback fallback) {
     auto container = container_from_extension(std::filesystem::path(path).extension().string());
     std::unique_ptr<Decoder> decoder;
     if (container == Container::Ogg) {
@@ -746,9 +797,11 @@ std::unique_ptr<AudioReader> AudioReader::open_file(const std::string& path,
         decoder = open_seekable(std::move(source), container, limits, {});
     }
     if (decoder) {
-        decoder = admit(std::move(decoder), limits);
+        decoder = admit(std::move(decoder), limits, fallback);
         if (!decoder)
             return nullptr;
+    } else if (fallback == AudioReaderFallback::Refuse) {
+        return nullptr;
     } else {
         // No seekable decoder (for example a compressed AIFF-C or a format
         // the platform reader decodes); the registry reader enforces limits.
@@ -761,14 +814,16 @@ std::unique_ptr<AudioReader> AudioReader::open_file(const std::string& path,
 
 std::unique_ptr<AudioReader> AudioReader::open_memory(std::span<const std::uint8_t> bytes,
                                                       std::string_view format_hint,
-                                                      const DecodeLimits& limits) {
+                                                      const DecodeLimits& limits,
+                                                      AudioReaderFallback fallback) {
     if (bytes.empty())
         return nullptr;
     auto source = make_memory_byte_source(bytes);
     auto container = container_from_extension(format_hint);
     if (container == Container::Unknown)
         container = sniff_container(*source);
-    auto decoder = admit(open_seekable(std::move(source), container, limits, bytes), limits);
+    auto decoder =
+        admit(open_seekable(std::move(source), container, limits, bytes), limits, fallback);
     if (!decoder)
         return nullptr;
     return std::unique_ptr<AudioReader>(new AudioReader(std::move(decoder), limits));
@@ -776,7 +831,8 @@ std::unique_ptr<AudioReader> AudioReader::open_memory(std::span<const std::uint8
 
 std::unique_ptr<AudioReader> AudioReader::open_source(std::unique_ptr<AudioByteSource> source,
                                                       std::string_view format_hint,
-                                                      const DecodeLimits& limits) {
+                                                      const DecodeLimits& limits,
+                                                      AudioReaderFallback fallback) {
     if (!source || source->size() == 0)
         return nullptr;
     auto container = container_from_extension(format_hint);
@@ -784,7 +840,7 @@ std::unique_ptr<AudioReader> AudioReader::open_source(std::unique_ptr<AudioByteS
         container = sniff_container(*source);
     if (!source->seek(0))
         return nullptr;
-    auto decoder = admit(open_seekable(std::move(source), container, limits, {}), limits);
+    auto decoder = admit(open_seekable(std::move(source), container, limits, {}), limits, fallback);
     if (!decoder)
         return nullptr;
     return std::unique_ptr<AudioReader>(new AudioReader(std::move(decoder), limits));

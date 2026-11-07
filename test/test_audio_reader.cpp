@@ -15,6 +15,9 @@
 #include <pulp/audio/streaming_sample_source_file.hpp>
 #include <pulp/runtime/base64.hpp>
 
+// Declarations only; pulp-audio compiles the implementation once.
+#include "../external/dr_libs/dr_mp3.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -23,10 +26,12 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -36,6 +41,7 @@ namespace fixtures = pulp::test::audio_reader_fixtures;
 using pulp::audio::AudioByteSource;
 using pulp::audio::AudioFileData;
 using pulp::audio::AudioReader;
+using pulp::audio::AudioReaderFallback;
 using pulp::audio::DecodeLimits;
 
 constexpr std::uint32_t kRate = 22050;
@@ -481,4 +487,285 @@ TEST_CASE("Memory-mapped readers keep the decode-once fallback for a FLAC with n
     REQUIRE(permissive.valid);
     CHECK_FALSE(permissive.supports_ranged_read);
     CHECK(permissive.total_frames == kFrames);
+}
+
+namespace {
+
+// Once armed, fails every read that reaches past `fail_from` until `heal()`
+// is called, as a network cache or flaky disk might. Seeks always succeed.
+class FlakySource final : public AudioByteSource {
+  public:
+    FlakySource(std::vector<std::uint8_t> bytes, std::size_t fail_from)
+        : bytes_(std::move(bytes)), fail_from_(fail_from) {}
+    std::size_t read(void* destination, std::size_t bytes) override {
+        auto count = std::min<std::size_t>(bytes, bytes_.size() - position_);
+        if (failing_ && position_ + count > fail_from_)
+            count = position_ < fail_from_ ? fail_from_ - position_ : 0;
+        std::memcpy(destination, bytes_.data() + position_, count);
+        position_ += count;
+        return count;
+    }
+    bool seek(std::uint64_t position) override {
+        if (position > bytes_.size())
+            return false;
+        position_ = static_cast<std::size_t>(position);
+        return true;
+    }
+    std::uint64_t position() const override {
+        return position_;
+    }
+    std::uint64_t size() const override {
+        return bytes_.size();
+    }
+    void arm() {
+        failing_ = true;
+    }
+    void heal() {
+        failing_ = false;
+    }
+
+  private:
+    std::vector<std::uint8_t> bytes_;
+    std::size_t fail_from_;
+    std::size_t position_ = 0;
+    bool failing_ = false;
+};
+
+void put_le32(std::vector<std::uint8_t>& bytes, std::size_t at, std::uint32_t value) {
+    for (int i = 0; i < 4; ++i)
+        bytes[at + i] = static_cast<std::uint8_t>(value >> (8 * i));
+}
+
+void put_le64(std::vector<std::uint8_t>& bytes, std::size_t at, std::uint64_t value) {
+    for (int i = 0; i < 8; ++i)
+        bytes[at + i] = static_cast<std::uint8_t>(value >> (8 * i));
+}
+
+// Rewrites a canonical RIFF WAV (fmt then data) as RF64 whose ds64 chunk
+// claims `claimed_frames`, more than the bytes hold.
+std::vector<std::uint8_t> as_rf64(const std::vector<std::uint8_t>& wav,
+                                  std::uint64_t claimed_frames, std::uint32_t frame_bytes) {
+    // Locate fmt and data in the RIFF file.
+    std::size_t fmt_at = 0, data_at = 0;
+    std::uint32_t fmt_size = 0, data_size = 0;
+    for (std::size_t pos = 12; pos + 8 <= wav.size();) {
+        const std::uint32_t size = wav[pos + 4] | (wav[pos + 5] << 8) | (wav[pos + 6] << 16) |
+                                   (static_cast<std::uint32_t>(wav[pos + 7]) << 24);
+        if (std::memcmp(&wav[pos], "fmt ", 4) == 0) {
+            fmt_at = pos;
+            fmt_size = size;
+        } else if (std::memcmp(&wav[pos], "data", 4) == 0) {
+            data_at = pos;
+            data_size = size;
+            break;
+        }
+        pos += 8 + size + (size & 1u);
+    }
+    REQUIRE(fmt_at != 0);
+    REQUIRE(data_at != 0);
+    std::vector<std::uint8_t> out(12 + 36);
+    std::memcpy(out.data(), "RF64", 4);
+    put_le32(out, 4, 0xFFFFFFFFu);
+    std::memcpy(out.data() + 8, "WAVE", 4);
+    std::memcpy(out.data() + 12, "ds64", 4);
+    put_le32(out, 16, 28);
+    // RIFF size is filled in once the file is assembled.
+    put_le64(out, 28, claimed_frames * frame_bytes); // data size claim
+    put_le64(out, 36, claimed_frames);               // sample count claim
+    put_le32(out, 44, 0);                            // table length
+    out.insert(out.end(), wav.begin() + static_cast<std::ptrdiff_t>(fmt_at),
+               wav.begin() + static_cast<std::ptrdiff_t>(fmt_at + 8 + fmt_size));
+    const std::uint8_t data_header[8] = {'d', 'a', 't', 'a', 0xFF, 0xFF, 0xFF, 0xFF};
+    out.insert(out.end(), data_header, data_header + 8);
+    out.insert(out.end(), wav.begin() + static_cast<std::ptrdiff_t>(data_at + 8),
+               wav.begin() + static_cast<std::ptrdiff_t>(data_at + 8 + data_size));
+    put_le64(out, 20, out.size() - 8); // the real RIFF size; only the data claim lies
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("AudioReaderFallback::Refuse opens only readers that seek", "[audio][audio-reader]") {
+    const auto no_length = flac_without_length();
+    CHECK_FALSE(AudioReader::open_memory(no_length, ".flac", {}, AudioReaderFallback::Refuse));
+    CHECK_FALSE(AudioReader::open_source(std::make_unique<VectorSource>(no_length), ".flac", {},
+                                         AudioReaderFallback::Refuse));
+    auto seekable = AudioReader::open_memory(decode_fixture(fixtures::kFlacBase64), ".flac", {},
+                                             AudioReaderFallback::Refuse);
+    REQUIRE(seekable);
+    CHECK(seekable->supports_ranged_read());
+
+    TempDir dir;
+    const auto path = dir.path / "unknown_length.flac";
+    write_bytes(path, no_length);
+    CHECK_FALSE(AudioReader::open_file(path.string(), {}, AudioReaderFallback::Refuse));
+    CHECK(AudioReader::open_file(path.string()));
+}
+
+TEST_CASE("A strict memory-mapped open refuses a no-length FLAC without decoding it",
+          "[audio][audio-reader][mmap]") {
+    TempDir dir;
+    const auto path = dir.path / "unknown_length.flac";
+    write_bytes(path, flac_without_length());
+
+    // The permissive open decodes once, so it learns the length.
+    pulp::audio::MemoryMappedAudioReader permissive;
+    REQUIRE(permissive.open(path.string()));
+    CHECK(permissive.info().num_frames == kFrames);
+
+    // The ranged-only open does not decode: it keeps the header's claim of
+    // zero frames and reports no ranged reads, as main did before ranged
+    // compressed reads existed.
+    pulp::audio::MemoryMappedAudioReader strict;
+    REQUIRE(strict.open(path.string(), std::numeric_limits<std::size_t>::max(), true));
+    CHECK_FALSE(strict.supports_ranged_read());
+    CHECK(strict.info().num_frames == 0);
+
+    // A seekable FLAC still opens ranged under the strict policy.
+    const auto seekable = dir.path / "seekable.flac";
+    write_bytes(seekable, decode_fixture(fixtures::kFlacBase64));
+    const auto file = pulp::audio::make_memory_mapped_frame_reader(seekable.string(), true);
+    REQUIRE(file.valid);
+    CHECK(file.supports_ranged_read);
+    CHECK(file.total_frames == kFrames);
+}
+
+TEST_CASE("AudioReader re-seeks after a short decode instead of trusting the cursor",
+          "[audio][audio-reader]") {
+    for (auto [name, encoded, tolerance] : {std::tuple{".flac", fixtures::kFlacBase64, 1e-6f},
+                                            std::tuple{".mp3", fixtures::kMp3Base64, 1e-6f}}) {
+        INFO(name);
+        const auto bytes = decode_fixture(encoded);
+        auto reference_reader = AudioReader::open_memory(bytes, name);
+        REQUIRE(reference_reader);
+        const auto total = reference_reader->info().num_frames;
+        const auto reference = full_decode(*reference_reader);
+
+        auto source = std::make_unique<FlakySource>(bytes, bytes.size() / 2);
+        auto* flaky = source.get();
+        auto reader = AudioReader::open_source(std::move(source), name);
+        REQUIRE(reader);
+        REQUIRE(reader->info().num_frames == total);
+        flaky->arm();
+
+        std::vector<std::vector<float>> out(2, std::vector<float>(total));
+        float* pointers[2] = {out[0].data(), out[1].data()};
+        const auto first = reader->read(0, pointers, 2, total);
+        REQUIRE(first < total);
+
+        // The source recovers; reading on from where the short read stopped
+        // must decode the right frames rather than continue from codec state
+        // the failure left behind.
+        flaky->heal();
+        const auto rest = total - first;
+        const auto second = reader->read(first, pointers, 2, rest);
+        REQUIRE(second == rest);
+        for (std::uint64_t i = 0; i < rest; ++i)
+            REQUIRE(std::fabs(out[0][i] - reference.channels[0][first + i]) <= tolerance);
+    }
+}
+
+TEST_CASE("AudioReader bounds an RF64 length claim by the bytes present", "[audio][audio-reader]") {
+    TempDir dir;
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto wav_path = dir.path / "signal.wav";
+    REQUIRE(registry.write(wav_path.string(), make_signal()));
+    const auto rf64 = as_rf64(read_bytes(wav_path), kFrames * 10, 2u * 2u);
+    auto reader = AudioReader::open_memory(rf64, ".wav");
+    REQUIRE(reader);
+    CHECK(reader->info().num_frames == kFrames);
+    const auto data = reader->read(0, kFrames * 10);
+    REQUIRE(data);
+    CHECK(data->num_frames() == kFrames);
+}
+
+TEST_CASE("AudioReader refuses empty streams and survives extreme offsets",
+          "[audio][audio-reader]") {
+    TempDir dir;
+    AudioFileData empty;
+    empty.sample_rate = kRate;
+    empty.channels.assign(2, {});
+    const auto wav_path = dir.path / "empty.wav";
+    pulp::audio::write_wav_file(wav_path.string(), empty);
+    if (fs::exists(wav_path))
+        CHECK_FALSE(AudioReader::open_memory(read_bytes(wav_path), ".wav"));
+
+    for (auto& format : make_formats(dir)) {
+        INFO(format.name);
+        auto reader = AudioReader::open_memory(format.bytes, format.extension);
+        REQUIRE(reader);
+        std::vector<std::vector<float>> out(2, std::vector<float>(16, 9.0f));
+        float* pointers[2] = {out[0].data(), out[1].data()};
+        CHECK(reader->read(std::numeric_limits<std::uint64_t>::max() - 4, pointers, 2, 16) == 0);
+        for (float sample : out[0])
+            CHECK(sample == 0.0f);
+    }
+}
+
+TEST_CASE("AudioReader decodes truncated MP3 and Ogg short without overrunning",
+          "[audio][audio-reader]") {
+    for (auto encoded : {fixtures::kMp3Base64, fixtures::kOggVorbisBase64}) {
+        auto bytes = decode_fixture(encoded);
+        bytes.resize(bytes.size() / 2);
+        auto reader = AudioReader::open_memory(bytes);
+        if (!reader)
+            continue; // a cut before the header completes is refused, which is fine
+        std::vector<std::vector<float>> out(2, std::vector<float>(kFrames * 2, 9.0f));
+        float* pointers[2] = {out[0].data(), out[1].data()};
+        const auto got = reader->read(0, pointers, 2, kFrames * 2);
+        CHECK(got <= kFrames * 2);
+        for (std::uint64_t i = got; i < kFrames * 2; ++i)
+            REQUIRE(out[0][i] == 0.0f);
+    }
+}
+
+// The MP3 decoder seeks by decoding forward instead of through dr_mp3's seek
+// table. This pins the reason: in the vendored dr_mp3, a seek-table seek
+// lands away from the requested frame for this fixture, while a decode-
+// forward seek is exact. If an updated dr_mp3 makes this test fail, the seek
+// table has become exact and Mp3Decoder can use it to make backward seeks
+// cheap.
+TEST_CASE("Vendored dr_mp3 seek-table seeks are inexact while decode-forward seeks are exact",
+          "[audio][audio-reader]") {
+    const auto bytes = decode_fixture(fixtures::kMp3Base64);
+    drmp3 reference{};
+    REQUIRE(drmp3_init_memory(&reference, bytes.data(), bytes.size(), nullptr));
+    const auto total = drmp3_get_pcm_frame_count(&reference);
+    std::vector<float> all(static_cast<std::size_t>(total) * reference.channels);
+    REQUIRE(drmp3_seek_to_pcm_frame(&reference, 0));
+    REQUIRE(drmp3_read_pcm_frames_f32(&reference, total, all.data()) == total);
+    const auto channels = reference.channels;
+    drmp3_uninit(&reference);
+
+    drmp3 tabled{};
+    REQUIRE(drmp3_init_memory(&tabled, bytes.data(), bytes.size(), nullptr));
+    drmp3_uint32 count = 64;
+    std::vector<drmp3_seek_point> points(count);
+    REQUIRE(drmp3_calculate_seek_points(&tabled, &count, points.data()));
+    REQUIRE(drmp3_bind_seek_table(&tabled, count, points.data()));
+
+    auto mismatch = [&](drmp3& mp3, std::uint64_t target) {
+        std::vector<float> got(64 * channels);
+        if (!drmp3_seek_to_pcm_frame(&mp3, target))
+            return true;
+        const auto n = drmp3_read_pcm_frames_f32(&mp3, 64, got.data());
+        for (std::uint64_t i = 0; i < n * channels; ++i)
+            if (std::fabs(got[i] - all[target * channels + i]) > 1e-6f)
+                return true;
+        return n != 64;
+    };
+
+    bool any_tabled_mismatch = false;
+    for (std::uint64_t target : {1500ull, 3000ull, 4500ull, 1200ull})
+        if (target + 64 <= total)
+            any_tabled_mismatch |= mismatch(tabled, target);
+    drmp3_uninit(&tabled);
+    CHECK(any_tabled_mismatch);
+
+    drmp3 forward{};
+    REQUIRE(drmp3_init_memory(&forward, bytes.data(), bytes.size(), nullptr));
+    for (std::uint64_t target : {1500ull, 3000ull, 4500ull, 1200ull})
+        if (target + 64 <= total)
+            CHECK_FALSE(mismatch(forward, target));
+    drmp3_uninit(&forward);
 }

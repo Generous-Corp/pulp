@@ -112,6 +112,11 @@ bool MemoryMappedAudioReader::open(std::string_view path) {
 }
 
 bool MemoryMappedAudioReader::open(std::string_view path, std::size_t maximum_mapped_bytes) {
+    return open(path, maximum_mapped_bytes, false);
+}
+
+bool MemoryMappedAudioReader::open(std::string_view path, std::size_t maximum_mapped_bytes,
+                                   bool ranged_only) {
     close();
     path_ = std::string(path);
 
@@ -176,9 +181,10 @@ bool MemoryMappedAudioReader::open(std::string_view path, std::size_t maximum_ma
                    extension == ".oga") {
             // The snapshot path was chosen by the user or host; the caller owns
             // the bound.
-            ranged_->codec =
-                AudioReader::open_memory({backing_->snapshot.data(), backing_->snapshot.size()},
-                                         extension, DecodeLimits::unbounded());
+            ranged_->codec = AudioReader::open_memory(
+                {backing_->snapshot.data(), backing_->snapshot.size()}, extension,
+                DecodeLimits::unbounded(),
+                ranged_only ? AudioReaderFallback::Refuse : AudioReaderFallback::DecodeOnce);
         }
     }
     if (ranged_ && ranged_->reader) {

@@ -3,15 +3,24 @@
 /// @file audio_reader.hpp
 /// Seekable audio reader over a file, a block of memory, or any byte source.
 ///
-/// AudioReader decodes only the frames a caller asks for. WAV, AIFF, FLAC, MP3
-/// and Ogg Vorbis seek inside the compressed stream, so reading a window out
-/// of a three-hour file costs about the same as reading it out of a short one.
-/// MP3 has no frame index, so a backward seek decodes forward from the start
-/// of the stream (cost grows with the target offset, memory does not); reads
-/// that continue where the last one ended never seek. A format without a
-/// seekable decoder (for example AAC on Apple platforms, which only opens from
-/// a path) is decoded once on open and served from that copy;
-/// supports_ranged_read() reports which of the two a reader uses.
+/// AudioReader decodes only the frames a caller asks for, and its memory does
+/// not grow with the file. The time a read takes depends on the format:
+///
+/// - WAV and AIFF compute the byte offset of any frame directly.
+/// - FLAC and Ogg Vorbis seek within the encoded stream, so reading a window
+///   near the end of a three-hour file costs about the same as near the start.
+/// - MP3 has no frame index. Opening a file without a Xing or Info header
+///   reads every frame header once to count the frames, and a seek backward
+///   decodes forward from the start of the stream, so its cost grows with the
+///   target offset. Reads that continue where the last one ended never seek.
+///
+/// A format without a seekable decoder (for example AAC on Apple platforms,
+/// which only opens from a path) is decoded once on open and served from that
+/// copy, as is a FLAC or Ogg stream whose header gives no length.
+/// supports_ranged_read() reports which of the two a reader uses, and
+/// AudioReaderFallback::Refuse opens only readers that seek.
+///
+/// An empty stream (zero frames) does not open.
 ///
 /// Threading: one AudioReader serves one caller at a time. Opening and reading
 /// decode, allocate and perform I/O, so they belong on a control or background
@@ -57,6 +66,13 @@ std::unique_ptr<AudioByteSource> make_memory_byte_source(std::span<const std::ui
 /// A byte source over a file opened for reading, or nullptr if it cannot open.
 std::unique_ptr<AudioByteSource> make_file_byte_source(const std::string& path);
 
+/// What an open does with a stream it cannot seek by frame: a format with no
+/// seekable decoder, or a FLAC or Ogg stream whose header gives no length.
+enum class AudioReaderFallback {
+    DecodeOnce, ///< Decode the whole stream on open, within the limits.
+    Refuse,     ///< Return nullptr without decoding.
+};
+
 /// Decodes ranges of frames from one encoded audio stream.
 ///
 /// Decode limits: opening refuses a stream whose header claims more frames or
@@ -68,24 +84,29 @@ class AudioReader {
     /// Opens `path`. The format comes from the extension, then from the first
     /// bytes when the extension is unknown. Any format the registry reads is
     /// accepted; formats without a seekable decoder are decoded once here.
-    static std::unique_ptr<AudioReader> open_file(const std::string& path,
-                                                  const DecodeLimits& limits = {});
+    static std::unique_ptr<AudioReader>
+    open_file(const std::string& path, const DecodeLimits& limits = {},
+              AudioReaderFallback fallback = AudioReaderFallback::DecodeOnce);
 
     /// Opens encoded bytes held in memory without copying them. `bytes` must
     /// outlive the reader. `format_hint` is an extension such as ".flac"; when
     /// it is empty or unknown the format is detected from the first bytes.
     /// Only seekable formats open from memory.
-    static std::unique_ptr<AudioReader> open_memory(std::span<const std::uint8_t> bytes,
-                                                    std::string_view format_hint = {},
-                                                    const DecodeLimits& limits = {});
+    static std::unique_ptr<AudioReader>
+    open_memory(std::span<const std::uint8_t> bytes, std::string_view format_hint = {},
+                const DecodeLimits& limits = {},
+                AudioReaderFallback fallback = AudioReaderFallback::DecodeOnce);
 
     /// Opens a caller-supplied byte source, which the reader then owns. Same
     /// format rules as open_memory(). Ogg Vorbis needs its whole stream in
     /// memory to seek, so a byte source holding Ogg is copied into memory
-    /// once, up to the limits' max_output_bytes.
-    static std::unique_ptr<AudioReader> open_source(std::unique_ptr<AudioByteSource> source,
-                                                    std::string_view format_hint = {},
-                                                    const DecodeLimits& limits = {});
+    /// once. That copy is refused above the limits' max_output_bytes and above
+    /// 2 GiB, the most stb_vorbis addresses; with default limits an Ogg byte
+    /// source can therefore allocate up to 2 GiB of encoded bytes.
+    static std::unique_ptr<AudioReader>
+    open_source(std::unique_ptr<AudioByteSource> source, std::string_view format_hint = {},
+                const DecodeLimits& limits = {},
+                AudioReaderFallback fallback = AudioReaderFallback::DecodeOnce);
 
     ~AudioReader();
     AudioReader(const AudioReader&) = delete;

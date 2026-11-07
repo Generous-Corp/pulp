@@ -282,8 +282,30 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/audio/mmap_reader.hpp",
+        "fingerprint": "sha256:e690b373b06a9a9b87d68702f1c6b31e1bfc2f6c8df565194c325bc38cf71478",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Memory-mapped, snapshot-backed ranged audio file reading is host "
+            "infrastructure that sample streaming consumes; it is not an "
+            "independently selected generator-facing capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/streaming_sample_source_file.hpp",
+        "fingerprint": "sha256:2e0b805a65e4e5c0197bb41c9c196214e67dd064b7e07d394bacbf2472ac8f90",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Binding a memory-mapped file to a StreamingSampleSource frame reader "
+            "is host infrastructure for sampler playback; it is not an "
+            "independently selected generator-facing capability."
+        ),
+    },
+    {
         "include": "pulp/audio/audio_reader.hpp",
-        "fingerprint": "sha256:0b35c2e0e930b9eb551b2a482314f2a7b3f9e9a1e511eef36a747cddee087dfd",
+        "fingerprint": "sha256:de0e49f8b8fcfbf633e2b169c683bb85a306778f4b923a2682a620464eff32f7",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

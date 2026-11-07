@@ -346,11 +346,17 @@ auto info = FormatRegistry::instance().read_info("song.mp3");
 
 ### Ranged reads from a file, memory or byte source
 
-`AudioReader` decodes only the frames you ask for. WAV, AIFF, FLAC, MP3 and Ogg
-Vorbis seek inside the encoded stream, so reading a window near the end of a
-long file does not decode everything before it. Open it from a path, from
-encoded bytes already in memory, or from your own `AudioByteSource` (an archive
-member or a download cache, for example).
+`AudioReader` decodes only the frames you ask for, and its memory does not grow
+with the file. Open it from a path, from encoded bytes already in memory, or
+from your own `AudioByteSource` (an archive member or a download cache, for
+example). The cost of reaching a frame depends on the format:
+
+| Format | Open | Seek to any frame |
+|--------|------|-------------------|
+| WAV, AIFF | Reads the header | Direct byte offset |
+| FLAC | Reads the header | Seeks within the encoded stream |
+| Ogg Vorbis | Reads the header (a byte source is copied into memory, up to 2 GiB) | Seeks within the encoded stream |
+| MP3 | Reads every frame header once when the file has no Xing or Info header | Forward seeks decode onward; a backward seek decodes from the start of the stream |
 
 ```cpp
 #include <pulp/audio/audio_reader.hpp>
@@ -372,8 +378,10 @@ refuses a window larger than `max_output_bytes`. Reading into your own planar
 buffers zero-fills frames past the end and returns how many frames were
 decoded. A format with no seekable decoder (AAC, ALAC and CAF on macOS, opened
 from a path) is decoded once on open and `supports_ranged_read()` returns
-false. Opening and reading decode and allocate, so keep both off the audio
-callback.
+false, as does a FLAC or Ogg stream whose header gives no length. Pass
+`AudioReaderFallback::Refuse` to open only readers that seek; such a stream
+then returns `nullptr` without being decoded. An empty stream does not open.
+Opening and reading decode and allocate, so keep both off the audio callback.
 
 For an already-resident RIFF/WAVE byte span, `inspect_wav()` and `decode_wav()`
 in `wav_decoder.hpp` provide a no-file-I/O, no-exceptions path with caller-set

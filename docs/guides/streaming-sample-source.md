@@ -28,8 +28,12 @@ truncate of the source path therefore cannot change playback or fault the
 mapping. WAV, uncompressed AIFF/AIFF-C `NONE`, FLAC, MP3 and Ogg Vorbis files
 use bounded ranged decode from the snapshot bytes; they are not decoded
 completely before playback. The compressed formats seek inside the encoded
-stream through `AudioReader`, so a long FLAC or MP3 streams with the same memory
-as a short one.
+stream through `AudioReader`, so a long FLAC, MP3 or Ogg file streams with the
+same memory as a short one. Time differs by format. FLAC and Ogg seek directly,
+but MP3 has no frame index: opening an MP3 without a Xing or Info header reads
+every frame header once, and a backward seek, such as a loop restart, decodes
+forward from the start of the file while the reader's lock is held. Prefer FLAC
+or Ogg for long looped material.
 Concurrent non-RT reads on one reader are serialized internally; open, close,
 move, and destruction still require quiescent reads.
 
