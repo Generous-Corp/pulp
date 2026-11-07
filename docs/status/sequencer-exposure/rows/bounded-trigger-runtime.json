@@ -56,7 +56,7 @@
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "A fresh exact-head Release install and external consumer receipt exercises trigger_graph.hpp and custom_node_events.hpp through Pulp::host. The positive consumer executes the admitted framework onset/envelope pair and bounded audio factories against the installed host library; a copied wrong-output control exits nonzero. The event-block pointer does not admit arbitrary Custom callbacks as typed producers; preparation refuses opaque Custom state and mixed spectral plans. This is a bounded typed runtime slice marked PARTIAL, not full G-5 or realtime qualification.",
+      "rationale": "A fresh exact-head Release install and external consumer receipt exercises trigger_graph.hpp and custom_node_events.hpp through Pulp::host. The positive consumer executes the admitted framework onset/envelope pair and bounded audio factories against the installed host library; a copied wrong-output control exits nonzero. The event-block pointer does not admit arbitrary Custom callbacks as typed producers; preparation refuses opaque Custom state and mixed spectral plans. This is a bounded typed runtime slice marked PARTIAL, not full G-5 or realtime qualification. Wave 2 keeps the admitted producer current-sample only; emit_at_sample rejects future targets until a separate scheduler contract is approved.",
       "evidence": [
         {
           "kind": "sdk_header",
@@ -88,6 +88,13 @@
             "Planted-negative control",
             "private-header negative",
             "host timestamp"
+          ]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/trigger_graph.hpp",
+          "needles": [
+            "emit_at_sample("
           ]
         }
       ],
