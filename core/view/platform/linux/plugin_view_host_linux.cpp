@@ -140,6 +140,11 @@ public:
     ~X11PluginViewHost() override {
         frame_pump_.suspend();
         root_.set_frame_clock(nullptr);
+        if (display_ && pointer_grabbed_) {
+            XUngrabPointer(display_, CurrentTime);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+        }
         root_.set_plugin_view_host(nullptr);
 #ifdef PULP_HAS_SKIA
         // Publish the teardown before the surfaces die, so a consumer holding
@@ -148,11 +153,6 @@ public:
         release_gpu_surfaces(GpuSurfaceState::unavailable);
 #endif
         if (display_) {
-            if (pointer_grabbed_) {
-                XUngrabPointer(display_, CurrentTime);
-                XFlush(display_);
-                pointer_grabbed_ = false;
-            }
             if (gc_) XFreeGC(display_, gc_);
             if (child_) XDestroyWindow(display_, child_);
             XFlush(display_);
@@ -550,14 +550,21 @@ public:
         if (!target) {
             pointer_capture_.reset();
             pointer_button_ = MouseButton::none;
+            if (display_ && pointer_grabbed_) {
+                XUngrabPointer(display_, event.time);
+                XFlush(display_);
+                pointer_grabbed_ = false;
+            }
             return;
         }
         MouseUpHost host;
-        host.fire_click = [](const std::function<void()>& click_handler, const std::string&,
-                             uint16_t) {
-            if (click_handler)
-                click_handler();
-        };
+        if (button == MouseButton::left) {
+            host.fire_click = [](const std::function<void()>& click_handler, const std::string&,
+                                 uint16_t) {
+                if (click_handler)
+                    click_handler();
+            };
+        }
         deliver_mouse_up(root_, target, pointer_point(event.x, event.y),
                          pointer_modifiers(event.state), 1, host, button, PointerAttributes{});
         pointer_capture_.reset();

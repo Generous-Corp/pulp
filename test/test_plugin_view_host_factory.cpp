@@ -228,12 +228,30 @@ namespace {
 // host routed the XDND payload through the dispatch core.
 class RecordingDropZone : public pulp::view::View, public pulp::view::DropReceiver {
   public:
-    bool accept_drop(const pulp::view::DropData& data, pulp::view::Point) override {
+    void on_mouse_down(pulp::view::Point point) override {
+        ++pointer_downs;
+        last_pointer = point;
+    }
+    void on_mouse_drag(pulp::view::Point point) override {
+        ++pointer_drags;
+        last_pointer = point;
+    }
+    void on_mouse_up(pulp::view::Point point) override {
+        ++pointer_ups;
+        last_pointer = point;
+    }
+    bool accept_drop(const pulp::view::DropData& data, pulp::view::Point point) override {
         last = data;
+        last_point = point;
         drops += 1;
         return true; // consume
     }
     pulp::view::DropData last;
+    pulp::view::Point last_point{};
+    pulp::view::Point last_pointer{};
+    int pointer_downs = 0;
+    int pointer_drags = 0;
+    int pointer_ups = 0;
     int drops = 0;
 };
 
@@ -252,6 +270,28 @@ void send_client_message(Display* dpy, Window target, Window source, Atom type, 
     ev.xclient.data.l[3] = d3;
     ev.xclient.data.l[4] = d4;
     XSendEvent(dpy, target, False, NoEventMask, &ev);
+    XFlush(dpy);
+}
+
+void send_pointer_event(Display* dpy, Window target, int type, int x, int y,
+                        unsigned button = Button1) {
+    XEvent ev;
+    std::memset(&ev, 0, sizeof(ev));
+    ev.type = type;
+    ev.xbutton.display = dpy;
+    ev.xbutton.window = target;
+    ev.xbutton.root = DefaultRootWindow(dpy);
+    ev.xbutton.subwindow = None;
+    ev.xbutton.time = CurrentTime;
+    ev.xbutton.x = x;
+    ev.xbutton.y = y;
+    ev.xbutton.state = type == MotionNotify ? Button1Mask : 0;
+    ev.xbutton.button = button;
+    ev.xbutton.same_screen = True;
+    const long mask = type == MotionNotify
+                          ? PointerMotionMask
+                          : (type == ButtonPress ? ButtonPressMask : ButtonReleaseMask);
+    XSendEvent(dpy, target, False, mask, &ev);
     XFlush(dpy);
 }
 
@@ -283,12 +323,39 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     auto host = pulp::view::PluginViewHost::create(root, opts);
     REQUIRE(host != nullptr);
 
-    // Parent the child onto the X11 root so it has a real on-screen origin the
-    // source can target. After this, child-local == root coords (origin 0,0).
+    // Parent the child below two nested X11 windows. Pointer events are
+    // child-local while XDND positions are root-relative; this topology catches
+    // accidental parent-space mixing.
     Window x_root = DefaultRootWindow(src);
-    host->attach_to_parent(reinterpret_cast<void*>(static_cast<uintptr_t>(x_root)));
+    Window outer = XCreateSimpleWindow(src, x_root, 17, 23, 300, 250, 0, 0, 0);
+    Window inner = XCreateSimpleWindow(src, outer, 11, 13, 240, 190, 0, 0, 0);
+    XMapWindow(src, outer);
+    XMapWindow(src, inner);
+    XFlush(src);
+    host->attach_to_parent(reinterpret_cast<void*>(static_cast<uintptr_t>(inner)));
     Window child = static_cast<Window>(reinterpret_cast<uintptr_t>(host->native_handle()));
     REQUIRE(child != 0);
+
+    host->set_scale_factor(1.0f);
+    constexpr int child_local_x = 40;
+    constexpr int child_local_y = 30;
+    send_pointer_event(src, child, ButtonPress, child_local_x, child_local_y);
+    host->pump_x_events();
+    send_pointer_event(src, child, MotionNotify, child_local_x + 15, child_local_y + 5);
+    host->pump_x_events();
+    send_pointer_event(src, child, ButtonRelease, child_local_x + 15, child_local_y + 5);
+    host->pump_x_events();
+    CHECK(zone->pointer_downs == 1);
+    CHECK(zone->pointer_drags == 1);
+    CHECK(zone->pointer_ups == 1);
+    CHECK(zone->last_pointer.x == static_cast<float>(child_local_x + 15));
+    CHECK(zone->last_pointer.y == static_cast<float>(child_local_y + 5));
+
+    int child_root_x = 0;
+    int child_root_y = 0;
+    Window translated_child = 0;
+    REQUIRE(XTranslateCoordinates(src, child, x_root, 0, 0, &child_root_x, &child_root_y,
+                                  &translated_child));
 
     // Verify the host advertised XdndAware on the child window.
     Atom xa_aware = XInternAtom(src, "XdndAware", False);
@@ -332,8 +399,11 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     // XdndEnter: version 5 in the top byte of data.l[1], single inline type.
     send_client_message(src, child, source, xa_enter, 0, (5L << 24), static_cast<long>(xa_uri_list),
                         0, 0);
-    // XdndPosition: pointer at root (40,30); packed (x<<16)|y in data.l[2].
-    send_client_message(src, child, source, xa_position, 0, 0, (40L << 16) | 30L, CurrentTime,
+    // XdndPosition is root-space. Add the child origin so the host must
+    // subtract both nested-window offsets before dispatching (40,30) locally.
+    const long root_x = child_root_x + child_local_x;
+    const long root_y = child_root_y + child_local_y;
+    send_client_message(src, child, source, xa_position, 0, 0, (root_x << 16) | root_y, CurrentTime,
                         static_cast<long>(XInternAtom(src, "XdndActionCopy", False)));
 
     // Drive the host until it replies XdndStatus (accept) for the position.
@@ -419,8 +489,13 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     REQUIRE(zone->last.type == pulp::view::DropData::Type::files);
     REQUIRE(zone->last.file_paths.size() == 1);
     CHECK(zone->last.file_paths[0] == "/tmp/dropped sample.wav");
+    CHECK(zone->last_point.x == static_cast<float>(child_local_x));
+    CHECK(zone->last_point.y == static_cast<float>(child_local_y));
     CHECK(got_finished);
 
+    host.reset();
+    XDestroyWindow(src, inner);
+    XDestroyWindow(src, outer);
     XDestroyWindow(src, source);
     XCloseDisplay(src);
 }
