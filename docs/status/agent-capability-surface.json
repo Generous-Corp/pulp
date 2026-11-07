@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 191,
+  "inventory_version": 192,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,28 +42,28 @@
     }
   ],
   "counts": {
-    "public_headers": 526,
-    "reviewed_headers": 281,
-    "legacy_unreviewed_headers": 245,
+    "public_headers": 531,
+    "reviewed_headers": 288,
+    "legacy_unreviewed_headers": 243,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 112,
-      "legacy_unreviewed": 245,
+      "infrastructure": 119,
+      "legacy_unreviewed": 243,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
-        "public_headers": 116,
-        "reviewed_headers": 22,
-        "legacy_unreviewed_headers": 94,
+        "public_headers": 117,
+        "reviewed_headers": 24,
+        "legacy_unreviewed_headers": 93,
         "unsupported_headers": 0
       },
       "midi": {
-        "public_headers": 51,
-        "reviewed_headers": 27,
-        "legacy_unreviewed_headers": 24,
+        "public_headers": 55,
+        "reviewed_headers": 32,
+        "legacy_unreviewed_headers": 23,
         "unsupported_headers": 0
       },
       "music": {
@@ -144,11 +144,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/audio_device_manager.hpp",
-      "fingerprint": "sha256:9d1b63aef909a1cfe643e3d67e295dae20f2c8d788952ae7b7bfbb0f174547c3",
+      "fingerprint": "sha256:57eb9644a378fc44cf2506765b7accf911bfa1baf9c2fde620ce1ffd6c9732ac",
       "include": "pulp/audio/audio_device_manager.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Application-level audio and MIDI device manager: persistence, enabled-input reconnection and hotplug policy used by hosts; not a generator-facing capability."
     },
     {
       "domain": "audio",
@@ -506,6 +506,15 @@
         "audio.onset-detection"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/pcm_capabilities.hpp",
+      "fingerprint": "sha256:b3d71602d02ae70e333b84310e482cc706df9dc4377f23411d1daa67dc6f9001",
+      "include": "pulp/audio/pcm_capabilities.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Pure conversion of driver-reported PCM ranges into DeviceInfo lists for the ALSA backend; not a generator-facing capability."
     },
     {
       "domain": "audio",
@@ -1465,11 +1474,11 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/keyboard_state.hpp",
-      "fingerprint": "sha256:bec4e61084cecc823ee01cd0abb9b1a679d483d68bee499f319f142c07c6b76b",
+      "fingerprint": "sha256:b64208b12aa83a4df9c76f0a5b56f0869491915bb1cc34fd75f9dc94d4f563fd",
       "include": "pulp/midi/keyboard_state.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Held-key tracker for on-screen keyboards; now also honours All Sound Off and All Notes Off. Not a generator-facing capability."
     },
     {
       "domain": "midi",
@@ -1565,6 +1574,15 @@
     },
     {
       "domain": "midi",
+      "source": "core/midi/include/pulp/midi/mock_midi_system.hpp",
+      "fingerprint": "sha256:e6b84e6ef076414b06574b51bea7b535c2caa9c50524e9ceb7b652b99490df63",
+      "include": "pulp/midi/mock_midi_system.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Scriptable in-memory MIDI backend for headless tests and hosts; not a generator-facing capability."
+    },
+    {
+      "domain": "midi",
       "source": "core/midi/include/pulp/midi/monotonic_timestamp.hpp",
       "fingerprint": "sha256:1008341155436ccd7b672cde9b1d7f2c0f948a95e05a81e5c055f37f7d86faa1",
       "include": "pulp/midi/monotonic_timestamp.hpp",
@@ -1585,6 +1603,15 @@
     },
     {
       "domain": "midi",
+      "source": "core/midi/include/pulp/midi/mpe_config_messages.hpp",
+      "fingerprint": "sha256:56e5cb27a3dbea4aa18470d97f3f387d915c6ba57a93a9e980118e163b117e90",
+      "include": "pulp/midi/mpe_config_messages.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Allocation-free builders for MPE zone layout and pitch-bend-range messages sent to a device; not a generator-facing capability."
+    },
+    {
+      "domain": "midi",
       "source": "core/midi/include/pulp/midi/mpe_synth_voice.hpp",
       "fingerprint": "sha256:2426bb49591fb4510aaab4a70931899c4928793f34b23935f14b6af19c918db4",
       "include": "pulp/midi/mpe_synth_voice.hpp",
@@ -1597,7 +1624,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/mpe_voice_tracker.hpp",
-      "fingerprint": "sha256:aca221889b5e62dd37fe9890c1d8009f7d8479a0b83f4a49986bde3fa2a6dbdc",
+      "fingerprint": "sha256:646774a38489314af1e830665faa30e4be073c293850ba79d610c495c5c8dc57",
       "include": "pulp/midi/mpe_voice_tracker.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1656,6 +1683,15 @@
       "disposition": "infrastructure",
       "capability_keys": [],
       "rationale": "Pure MIDI 1.0 panic message generation and held-note offs used by processors and adapters; not a generator-facing capability."
+    },
+    {
+      "domain": "midi",
+      "source": "core/midi/include/pulp/midi/port_change_watcher.hpp",
+      "fingerprint": "sha256:bbd6cf6191f240e9dde36722aed1565995b29dbf908db6f49481d07e9d6ae383",
+      "include": "pulp/midi/port_change_watcher.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Port-list diffing and polling notifier for backends without native hotplug events; not a generator-facing capability."
     },
     {
       "domain": "midi",
@@ -1745,6 +1781,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "midi",
+      "source": "core/midi/include/pulp/midi/sysex_chunk_assembler.hpp",
+      "fingerprint": "sha256:6f73ed00dce019d0ebf2fb48471f34f6645e40c0430da0dfbe6a757a32f46cea",
+      "include": "pulp/midi/sysex_chunk_assembler.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Joins driver receive buffers of one long SysEx message for the Windows multimedia backend; not a generator-facing capability."
     },
     {
       "domain": "midi",
