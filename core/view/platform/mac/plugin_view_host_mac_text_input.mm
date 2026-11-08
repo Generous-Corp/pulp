@@ -9,6 +9,7 @@
 
 #include <pulp/canvas/text_utf8.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
@@ -44,7 +45,9 @@ pulp::view::View* pulp_plugin_focus_under_root(pulp::view::View* root) {
 }
 
 pulp::view::TextEditor* pulp_plugin_focused_text_editor(pulp::view::View* root) {
-    return dynamic_cast<pulp::view::TextEditor*>(pulp_plugin_focus_under_root(root));
+    auto* te = dynamic_cast<pulp::view::TextEditor*>(pulp_plugin_focus_under_root(root));
+    // A disabled field takes no composition either.
+    return (te && !te->effectively_enabled()) ? nullptr : te;
 }
 
 bool pulp_plugin_apply_replacement_range(pulp::view::TextEditor* te,
@@ -131,7 +134,7 @@ void pulp_plugin_insert_text(NSView* host,
     }
     pulp::view::TextInputEvent event;
     event.text = inspector_event.text;
-    fv->on_text_input(event);
+    pulp::view::deliver_text_input(*fv, event);
     pulp_plugin_request_text_redraw(host, root);
 }
 

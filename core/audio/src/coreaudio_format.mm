@@ -140,6 +140,18 @@ public:
     }
 
     std::string format_name() const override { return "CoreAudio"; }
+
+    FormatCapabilities capabilities() const override {
+        // ExtAudioFile decodes AAC (lossy) and ALAC (lossless) in M4A, ADTS
+        // and CAF, and PCM in CAF. One report covers them all, so it states
+        // the weakest case: compressed and not lossless.
+        return {.format_name = "CoreAudio",
+                .extensions = {".m4a", ".aac", ".caf", ".alac"},
+                .bit_depths = {16, 20, 24, 32},
+                .float_samples = true,
+                .compressed = true,
+                .lossless = false};
+    }
 };
 
 std::unique_ptr<FormatReader> create_coreaudio_reader() {

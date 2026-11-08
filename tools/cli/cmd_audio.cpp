@@ -23,6 +23,7 @@
 #include <pulp/tools/audio/service.hpp>
 
 #include "cmd_audio_compare.hpp"
+#include "cmd_audio_formats.hpp"
 #include "cmd_audio_heritage.hpp"
 #include "cmd_audio_plugin_inspect.hpp"
 #include "cmd_audio_png.hpp"
@@ -52,6 +53,7 @@ static void print_audio_usage() {
                  "--duration-frames <n>) [options]\n";
     std::cout
         << "  pulp audio plugin-inspect --plugin <bundle> [--format <fmt>] [--id <id>]  # JSON\n";
+    std::cout << "  pulp audio formats [--json]\n";
     std::cout << "  pulp audio sampler-mip build <source> [--levels <1|2>] [--json]\n";
     std::cout
         << "  pulp audio spectrogram <file> --png <out.png> [--fft 2048 --hop 512 --window hann "
@@ -493,6 +495,10 @@ int cmd_audio(const std::vector<std::string>& args) {
 
     if (args[0] == "compare") {
         return cmd_audio_compare({args.begin() + 1, args.end()});
+    }
+
+    if (args[0] == "formats") {
+        return cmd_audio_formats({args.begin() + 1, args.end()});
     }
 
     if (args[0] == "sampler-mip") {
