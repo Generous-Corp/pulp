@@ -10,7 +10,6 @@
    "test/cmake/cmake_smoke_tests.cmake",
    "test/cmake/test_pulp_add_sparkle.cmake",
    "test/cmake/test_wgpu_native_pin.cmake",
-   "test/ctest_script_inputs",
    "test/fixtures",
    "test/support",
    "tools/ci",
@@ -33,7 +32,6 @@
    "tools/scripts/gate_common.py",
    "tools/scripts/process_liveness.py",
    "tools/scripts/run_changed_surface_tests.py",
-   "tools/scripts/script_inputs_store.py",
    "tools/scripts/script_test_inputs.py",
    "tools/scripts/test_run_changed_surface_tests.py"
   ],

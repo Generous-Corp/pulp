@@ -826,7 +826,6 @@
    "external/pugixml/pugixml.cpp",
    "external/tweetnacl/tweetnacl.c",
    "test/cmake/pr_fast_tests.cmake",
-   "test/ctest_script_inputs",
    "test/fixtures",
    "test/fixtures/perfetto-gpu",
    "test/fixtures/sample-region-compat",
@@ -875,7 +874,6 @@
    "tools/scripts/release_product_matrix.json",
    "tools/scripts/run_changed_surface_tests.py",
    "tools/scripts/sample_region_compat_baseline.py",
-   "tools/scripts/script_inputs_store.py",
    "tools/scripts/script_test_inputs.py",
    "tools/scripts/test_generated_version_bump_check.py",
    "tools/scripts/test_sample_region_compat_baseline.py"

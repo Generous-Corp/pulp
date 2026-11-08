@@ -8,7 +8,7 @@
    "docs/status/consumption-profiles.json",
    "docs/status/consumption-profiles.schema.json",
    "test/cmake/consumption_census_tests.cmake",
-   "test/ctest_script_inputs",
+   "test/ctest_script_inputs.json",
    "tools/ci/install_visual_python_deps.sh",
    "tools/motion/visual/requirements.lock",
    "tools/motion/visual/requirements.txt",
@@ -17,7 +17,6 @@
    "tools/scripts/queue_batch_attribute.py",
    "tools/scripts/queue_known_flakes.json",
    "tools/scripts/script_argv.py",
-   "tools/scripts/script_inputs_store.py",
    "tools/scripts/test_script_argv.py",
    "tools/scripts/trace_frame_cost.py"
   ],

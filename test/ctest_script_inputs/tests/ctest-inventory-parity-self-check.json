@@ -7,7 +7,6 @@
    "core/host",
    "core/host/include",
    "docs/status",
-   "test/ctest_script_inputs",
    "test/fixtures",
    "test/support",
    "tools/ci/load_api_exemptions.json",
@@ -16,7 +15,6 @@
    "tools/scripts/changed_surface_inventory.py",
    "tools/scripts/ctest_inventory_parity.py",
    "tools/scripts/gate_common.py",
-   "tools/scripts/script_inputs_store.py",
    "tools/scripts/script_test_inputs.py"
   ],
   "kind": "python"

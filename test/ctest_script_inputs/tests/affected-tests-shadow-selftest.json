@@ -4,14 +4,12 @@
   "entry": "tools/ci/test_affected_tests_shadow.py",
   "inputs": [
    "docs/status",
-   "test/ctest_script_inputs",
    "tools/ci/affected_tests_shadow.py",
    "tools/ci/codemodel_digest.py",
    "tools/ci/spawn_closure.py",
    "tools/ci/test_affected_tests_shadow.py",
    "tools/cmake",
    "tools/scripts/lib",
-   "tools/scripts/script_inputs_store.py",
    "tools/templates/gain/ui/main.js"
   ],
   "kind": "python"

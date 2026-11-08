@@ -5,10 +5,9 @@
   "inputs": [
    ".github/workflows",
    "test/cmake",
-   "test/ctest_script_inputs",
+   "test/ctest_script_inputs.json",
    "tools/ci/source_selftests.json",
    "tools/cmake",
-   "tools/scripts/script_inputs_store.py",
    "tools/scripts/test_unregistered_tests_check.py",
    "tools/scripts/unregistered_tests_baseline.json",
    "tools/scripts/unregistered_tests_check.py"

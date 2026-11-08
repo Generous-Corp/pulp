@@ -7,7 +7,6 @@
    "core/host",
    "core/host/include",
    "docs/status",
-   "test/ctest_script_inputs",
    "test/fixtures",
    "test/support",
    "tools/ci/load_api_exemptions.json",
@@ -15,7 +14,6 @@
    "tools/cmake/PulpTestData.cmake",
    "tools/scripts/changed_surface_inventory.py",
    "tools/scripts/gate_common.py",
-   "tools/scripts/script_inputs_store.py",
    "tools/scripts/script_test_inputs.py",
    "tools/scripts/test_changed_surface_registration_projection.py"
   ],
