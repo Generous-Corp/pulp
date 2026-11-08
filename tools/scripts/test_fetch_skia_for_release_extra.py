@@ -613,5 +613,272 @@ class ArtifactCacheTests(unittest.TestCase):
             self.assertIsNone(skia.artifact_cache_blob(self.sha))
 
 
+_GH_URL = ("https://github.com/danielraffel/skia-builder/releases/download/"
+           "chrome/m158/skia-build-mac-universal-gpu-release.zip")
+_GH_RELEASE = ("https://api.github.com/repos/danielraffel/skia-builder/"
+               "releases/tags/chrome/m158")
+_GH_ASSET = "https://api.github.com/repos/danielraffel/skia-builder/releases/assets/42"
+
+
+class _FakeGitHub:
+    """Routes urlopen by URL: each route is a list of results, last one repeats."""
+
+    def __init__(self, routes):
+        self.routes = {url: list(results) for url, results in routes.items()}
+        self.calls = []
+
+    def __call__(self, target, *args, **kwargs):
+        url = target if isinstance(target, str) else target.full_url
+        self.calls.append(target)
+        results = self.routes.get(url)
+        if not results:
+            raise AssertionError(f"unexpected request to {url}")
+        result = results.pop(0) if len(results) > 1 else results[0]
+        if isinstance(result, BaseException):
+            raise result
+        return _FakeResponse(result)
+
+    def urls(self):
+        return [t if isinstance(t, str) else t.full_url for t in self.calls]
+
+
+def _release_json(name="skia-build-mac-universal-gpu-release.zip", asset_id=42):
+    return json.dumps({"tag_name": "chrome/m158",
+                       "assets": [{"id": asset_id, "name": name}]}).encode()
+
+
+class DownloadFallbackSource(unittest.TestCase):
+    """A failing release download URL falls back to the GitHub API asset endpoint."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.zip_path = pathlib.Path(self._tmp.name) / "asset.zip"
+        self.payload = b"pinned skia archive"
+        env = mock.patch.dict(os.environ, {}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+        for name in ("GITHUB_TOKEN", "GH_TOKEN"):
+            os.environ.pop(name, None)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self, fake):
+        out = io.StringIO()
+        with mock.patch.object(skia.urllib.request, "urlopen", side_effect=fake), \
+                contextlib.redirect_stdout(out):
+            source = skia.download_with_fallback(_GH_URL, self.zip_path,
+                                                 sleep=lambda _s: None)
+        return source, out.getvalue()
+
+    def test_primary_504_falls_back_to_the_api(self) -> None:
+        fake = _FakeGitHub({_GH_URL: [_http_error(504)],
+                            _GH_RELEASE: [_release_json()],
+                            _GH_ASSET: [self.payload]})
+        source, out = self._run(fake)
+        self.assertEqual(source, _GH_ASSET)
+        self.assertEqual(self.zip_path.read_bytes(), self.payload)
+        self.assertEqual(fake.urls().count(_GH_URL), skia._DOWNLOAD_ATTEMPTS,
+                         "a 5xx is retried on the first source before falling back")
+        self.assertIn("trying the GitHub API asset endpoint", out)
+        asset_request = fake.calls[-1]
+        self.assertEqual(asset_request.get_header("Accept"), "application/octet-stream")
+        self.assertIsNone(asset_request.get_header("Authorization"))
+        self.assertFalse(self.zip_path.with_name("asset.zip.release.json").exists())
+
+    def test_primary_404_falls_back_at_once(self) -> None:
+        fake = _FakeGitHub({_GH_URL: [_http_error(404)],
+                            _GH_RELEASE: [_release_json()],
+                            _GH_ASSET: [self.payload]})
+        source, _ = self._run(fake)
+        self.assertEqual(source, _GH_ASSET)
+        self.assertEqual(fake.urls().count(_GH_URL), 1)
+
+    def test_both_sources_failing_names_both(self) -> None:
+        fake = _FakeGitHub({_GH_URL: [_http_error(504)],
+                            _GH_RELEASE: [_http_error(503)]})
+        with self.assertRaises(skia.AssetDownloadError) as raised:
+            self._run(fake)
+        message = str(raised.exception)
+        self.assertIn(_GH_URL, message)
+        self.assertIn("504", message)
+        self.assertIn("GitHub API asset endpoint", message)
+        self.assertIn("503", message)
+
+    def test_a_release_without_the_asset_is_a_named_failure(self) -> None:
+        fake = _FakeGitHub({_GH_URL: [_http_error(404)],
+                            _GH_RELEASE: [_release_json(name="other.zip")]})
+        with self.assertRaises(skia.AssetDownloadError) as raised:
+            self._run(fake)
+        self.assertIn("no single asset named", str(raised.exception))
+
+    def test_success_on_the_first_source_never_calls_the_api(self) -> None:
+        fake = _FakeGitHub({_GH_URL: [self.payload]})
+        source, out = self._run(fake)
+        self.assertEqual((source, fake.urls()), (_GH_URL, [_GH_URL]))
+        self.assertNotIn("GitHub API", out)
+
+    def test_token_is_sent_only_to_the_api_and_never_redirected(self) -> None:
+        os.environ["GITHUB_TOKEN"] = "job-token"
+        fake = _FakeGitHub({_GH_URL: [_http_error(504)],
+                            _GH_RELEASE: [_release_json()],
+                            _GH_ASSET: [self.payload]})
+        self._run(fake)
+        api_calls = [c for c in fake.calls if not isinstance(c, str)]
+        self.assertTrue(api_calls)
+        for request in api_calls:
+            self.assertEqual(request.unredirected_hdrs.get("Authorization"),
+                             "Bearer job-token")
+            self.assertNotIn("Authorization", request.headers)
+
+    def test_urllib_drops_the_token_when_following_the_asset_redirect(self) -> None:
+        request = skia._api_request(_GH_ASSET, "application/octet-stream", "job-token")
+        handler = skia.urllib.request.HTTPRedirectHandler()
+        follow = handler.redirect_request(
+            request, None, 302, "Found", {},
+            "https://release-assets.githubusercontent.com/signed?sig=x")
+        self.assertEqual(request.unredirected_hdrs["Authorization"], "Bearer job-token")
+        self.assertIsNone(follow.get_header("Authorization"))
+        self.assertEqual(follow.get_header("Accept"), "application/octet-stream")
+
+    def test_a_refused_token_retries_anonymously(self) -> None:
+        os.environ["GH_TOKEN"] = "stale"
+        fake = _FakeGitHub({_GH_URL: [_http_error(504)],
+                            _GH_RELEASE: [_http_error(401), _release_json()],
+                            _GH_ASSET: [self.payload]})
+        source, _ = self._run(fake)
+        self.assertEqual(source, _GH_ASSET)
+        self.assertIsNone(fake.calls[-1].get_header("Authorization"))
+
+    def test_a_forbidden_token_retries_anonymously_once(self) -> None:
+        os.environ["GITHUB_TOKEN"] = "job-token-without-access"
+        fake = _FakeGitHub({_GH_URL: [_http_error(404)],
+                            _GH_RELEASE: [_http_error(403), _release_json()],
+                            _GH_ASSET: [self.payload]})
+        source, _ = self._run(fake)
+        self.assertEqual(source, _GH_ASSET)
+        self.assertEqual(fake.urls().count(_GH_RELEASE), 2)
+        self.assertIsNone(fake.calls[-1].get_header("Authorization"))
+
+    def test_a_second_refusal_is_not_retried_again(self) -> None:
+        os.environ["GITHUB_TOKEN"] = "job-token"
+        fake = _FakeGitHub({_GH_URL: [_http_error(404)],
+                            _GH_RELEASE: [_http_error(403)]})
+        with self.assertRaises(skia.AssetDownloadError):
+            self._run(fake)
+        self.assertEqual(fake.urls().count(_GH_RELEASE), 2)
+
+    def test_an_exhausted_rate_limit_is_named_with_its_reset_time(self) -> None:
+        limited = _http_error(403)
+        limited.headers["X-RateLimit-Remaining"] = "0"
+        limited.headers["X-RateLimit-Reset"] = "1794142800"
+        fake = _FakeGitHub({_GH_URL: [_http_error(504)], _GH_RELEASE: [limited]})
+        with self.assertRaises(skia.AssetDownloadError) as raised:
+            self._run(fake)
+        message = str(raised.exception)
+        self.assertIn("GitHub API rate limit reached", message)
+        self.assertIn("resets at 2026-11-08T13:00:00Z", message)
+        self.assertIn(_GH_URL, message)
+
+    def test_a_429_with_retry_after_is_named_as_a_rate_limit(self) -> None:
+        fake = _FakeGitHub({_GH_URL: [_http_error(404)],
+                            _GH_RELEASE: [_http_error(429, retry_after="17")]})
+        with self.assertRaises(skia.AssetDownloadError) as raised:
+            self._run(fake)
+        self.assertIn("GitHub API rate limit reached (HTTP 429; retry after 17s)",
+                      str(raised.exception))
+
+    def test_a_plain_403_is_not_called_a_rate_limit(self) -> None:
+        fake = _FakeGitHub({_GH_URL: [_http_error(404)], _GH_RELEASE: [_http_error(403)]})
+        with self.assertRaises(skia.AssetDownloadError) as raised:
+            self._run(fake)
+        self.assertNotIn("rate limit", str(raised.exception))
+        self.assertIn("HTTP Error 403", str(raised.exception))
+
+    def test_a_malformed_release_reply_is_a_named_failure(self) -> None:
+        for body in (b"[]", b"42", b'"text"', b'{"assets": {"id": 42}}', b"{}"):
+            with self.subTest(body=body):
+                fake = _FakeGitHub({_GH_URL: [_http_error(404)], _GH_RELEASE: [body]})
+                with self.assertRaises(skia.AssetDownloadError) as raised:
+                    self._run(fake)
+                self.assertIn(_GH_URL, str(raised.exception))
+                self.assertIn("release lookup", str(raised.exception))
+
+    def test_a_non_github_url_has_no_fallback(self) -> None:
+        fake = _FakeGitHub({"https://example.invalid/skia.zip": [_http_error(504)]})
+        with mock.patch.object(skia.urllib.request, "urlopen", side_effect=fake), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                self.assertRaises(urllib.error.HTTPError):
+            skia.download_with_fallback("https://example.invalid/skia.zip",
+                                        self.zip_path, sleep=lambda _s: None)
+
+    def test_a_local_write_error_is_not_retried_elsewhere(self) -> None:
+        fake = _FakeGitHub({_GH_URL: [self.payload]})
+        with mock.patch.object(skia.urllib.request, "urlopen", side_effect=fake), \
+                mock.patch.object(pathlib.Path, "open", side_effect=OSError(28, "ENOSPC")), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                self.assertRaises(OSError):
+            skia.download_with_fallback(_GH_URL, self.zip_path, sleep=lambda _s: None)
+        self.assertEqual(fake.urls(), [_GH_URL])
+
+
+class DownloadFallbackThroughMain(unittest.TestCase):
+    def _manifest(self, digest: str) -> None:
+        pathlib.Path("tools/deps").mkdir(parents=True)
+        pathlib.Path("tools/deps/manifest.json").write_text(
+            json.dumps({"dependencies": [{
+                "name": "Skia",
+                "determinism": {"release_assets": {
+                    "mac-arm64": {"url": _GH_URL, "sha256": digest},
+                }},
+            }]}),
+            encoding="utf-8",
+        )
+
+    def test_fallback_bytes_with_the_wrong_hash_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
+            data = make_provider_zip_bytes(b"real")
+            self._manifest(hashlib.sha256(data).hexdigest())
+            fake = _FakeGitHub({_GH_URL: [_http_error(504)],
+                                _GH_RELEASE: [_release_json()],
+                                _GH_ASSET: [make_provider_zip_bytes(b"tampered")]})
+            err = io.StringIO()
+            with mock.patch.object(skia.urllib.request, "urlopen", side_effect=fake), \
+                    mock.patch.object(skia.time, "sleep"), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(err):
+                self.assertEqual(skia.main(["fetch", "darwin-arm64"]), 1)
+            self.assertIn("sha256 mismatch", err.getvalue())
+            self.assertFalse(skia.expected_library_path("darwin-arm64").exists())
+
+    def test_fallback_publishes_then_the_cached_receipt_needs_no_network(self) -> None:
+        with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
+            data = make_provider_zip_bytes(b"from-api")
+            digest = hashlib.sha256(data).hexdigest()
+            self._manifest(digest)
+            root = pathlib.Path(td) / "cache"
+            argv = ["fetch", "darwin-arm64", "--cache-root", str(root),
+                    "--cache-lock-timeout", "5"]
+            fake = _FakeGitHub({_GH_URL: [_http_error(504)],
+                                _GH_RELEASE: [_release_json()],
+                                _GH_ASSET: [data]})
+            out = io.StringIO()
+            with mock.patch.object(skia.urllib.request, "urlopen", side_effect=fake), \
+                    mock.patch.object(skia.time, "sleep"), \
+                    contextlib.redirect_stdout(out):
+                self.assertEqual(skia.main(argv), 0)
+            self.assertIn(f"from {_GH_ASSET}", out.getvalue())
+            dest = skia.keyed_cache_dest(str(root), "darwin-arm64", digest)
+            self.assertTrue(skia.cache_generation_valid(dest, "darwin-arm64", digest))
+
+            def _no_network(*_a, **_k):
+                raise AssertionError("a valid cached receipt must not touch the network")
+            out = io.StringIO()
+            with mock.patch.object(skia.urllib.request, "urlopen", side_effect=_no_network), \
+                    contextlib.redirect_stdout(out):
+                self.assertEqual(skia.main(argv), 0)
+            self.assertIn("immutable Skia cache generation ready", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

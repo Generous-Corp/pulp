@@ -285,11 +285,22 @@ shipping artifact.
 - **A failed `fetch_skia_for_release.py` is not always a bad pin.** The pinned
   archive is a few hundred megabytes from a release CDN, fetched fresh on lanes
   with no warm cache, so a single transient 5xx or dropped connection there fails
-  the whole configure. The fetcher now retries that class with backoff, so a
-  failure that survives it is worth reading literally: a 403/404 is refused on the
-  first attempt and means the pin names a missing or revoked asset, and an
-  `OSError` is refused too because it is usually a full disk rather than the
-  network. Check free space before re-running a fetch that failed on write.
+  the whole configure. The fetcher now retries that class with backoff, and when
+  the GitHub release download URL still fails (or answers 403/404 at once) it
+  fetches the same asset through the GitHub REST API asset endpoint, logging
+  `trying the GitHub API asset endpoint` and then `Downloaded N bytes from
+  https://api.github.com/...`. Before any of that, a valid cached generation
+  under `--cache-root` is used with no network at all
+  (`OK: immutable Skia cache generation ready`), so only cold hosts download. The API path uses `GITHUB_TOKEN` or `GH_TOKEN` when
+  set and works without one. The macOS gate's sandboxed configure has no token,
+  so there the fallback is anonymous and shares GitHub's limit of 60 API
+  requests per hour per IP; an exhausted limit is reported as `GitHub API rate
+  limit reached` with its reset time. The pinned sha256 check applies to either source. A
+  failure that survives both names both sources, so read it literally: a 404 from
+  both means the pin names a missing or revoked asset. An `OSError` is never
+  retried or sent to the second source because it is usually a full disk rather
+  than the network. Check free space before re-running a fetch that failed on
+  write.
 
 - **On a tartci gate VM the archive may come from the host, not the CDN.** When
   `TARTCI_ARTIFACT_CACHE` is set, the fetcher first copies
