@@ -186,7 +186,7 @@ query($owner:String!,$name:String!,$number:Int!){
     commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{
       __typename
       ... on CheckRun{name conclusion isRequired(pullRequestNumber:$number)}
-      ... on StatusContext{context state isRequired(pullRequestNumber:$number)}}}}}}}}}
+      ... on StatusContext{context state isRequired(pullRequestNumber:$number)}}}}}}}}}}
 """
 
 

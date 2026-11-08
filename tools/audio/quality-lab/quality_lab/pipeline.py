@@ -193,7 +193,7 @@ def run_and_export(
     `listening` block of relative paths to the report."""
     import os
 
-    from . import mir, perceptual, regions
+    from . import artifacts, mir, perceptual, regions
 
     x = _execute(degradation, detectors, latency_ms, smear_ms, case)
     listening = regions.export_artifacts(
@@ -214,6 +214,9 @@ def run_and_export(
     report["perceptual"] = perceptual.evaluate(ref_wav, cand_wav)
     # MIR structural oracles (advisory cross-checks, not metrics; own env-path fence).
     report.setdefault("advisory", {})["mir_oracles"] = mir.evaluate(ref_wav, cand_wav)
+    # Display-only spectrogram/waveform PNGs from the Pulp CLI (`PULP_BIN` fence);
+    # attached after the verdict is final, under the advisory namespace only.
+    artifacts.attach(report, {"reference": ref_wav, "candidate": cand_wav}, out_dir)
     return report
 
 

@@ -45,10 +45,13 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
                 "$<TARGET_FILE_DIR:pulp-test-control-dspx04-graph-product-e2e>/pulp-mcp"
         COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-test-control-dspx04-graph-product-e2e>"
                 "$<TARGET_FILE_DIR:pulp-test-control-dspx04-graph-product-e2e>/pulp-control-broker"
+        # The broker trusts a client copy beside itself. It must sit inside this
+        # test's own directory: a shared ../tools/cli path is overwritten by
+        # any other control e2e target, and this test then fails enrollment.
         COMMAND "${CMAKE_COMMAND}" -E make_directory
-                "$<TARGET_FILE_DIR:pulp-test-control-dspx04-graph-product-e2e>/../tools/cli"
+                "$<TARGET_FILE_DIR:pulp-test-control-dspx04-graph-product-e2e>/tools/cli"
         COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-test-control-dspx04-graph-product-e2e>"
-                "$<TARGET_FILE_DIR:pulp-test-control-dspx04-graph-product-e2e>/../tools/cli/pulp-cpp"
+                "$<TARGET_FILE_DIR:pulp-test-control-dspx04-graph-product-e2e>/tools/cli/pulp-cpp"
         VERBATIM)
     pulp_scaled_test_timeout(_pulp_dspx04_graph_product_timeout 180)
     catch_discover_tests(pulp-test-control-dspx04-graph-product-e2e

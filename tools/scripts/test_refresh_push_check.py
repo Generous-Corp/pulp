@@ -41,6 +41,17 @@ if mode == "fail":
     print("network unreachable", file=sys.stderr); sys.exit(1)
 if mode == "hang":
     time.sleep(30)
+# GitHub rejects a query whose braces do not balance ("Expected NAME") and
+# `gh api` exits 1. Answering it from the fixture anyway hid exactly that bug
+# in the required-ness query, so the fake refuses the same way.
+body = next((a[len("query="):] for a in sys.argv if a.startswith("query=")), "")
+depth = 0
+for ch in body:
+    depth += {"{": 1, "}": -1}.get(ch, 0)
+    if depth < 0:
+        break
+if depth != 0:
+    print("gh: Expected NAME, actual: (none)", file=sys.stderr); sys.exit(1)
 fixture = json.loads(open(os.environ["FAKE_GH_FIXTURE"]).read())
 key = "required" if "isRequired" in query else "pr"
 print(json.dumps(fixture[key]))
@@ -308,6 +319,26 @@ def case_justified_refreshes_allowed(fx: Fixture) -> None:
     fx.set_pr(pr_fixture(head=feat, failing="advisory-lint", required=False))
     res = fx.run(feat, PULP_REFRESH_PUSH_POLICY="refuse")
     assert res.returncode == 1 and fx.entries()[-1]["decision"] == "refused", fx.entries()[-1]
+
+
+def case_lookup_queries_are_well_formed(fx: Fixture) -> None:
+    """Both GraphQL documents balance their braces and parentheses.
+
+    A malformed required-ness query made every lookup on a PR with any failing
+    check end `partial:exit:1`, which counts as a failing required check, so
+    the policy allowed nearly every pure refresh without a word.
+    """
+    sys.path.insert(0, str(SCRIPT.parent))
+    import refresh_push_check as rpc  # noqa: PLC0415
+
+    for name in ("PR_QUERY", "REQUIRED_QUERY"):
+        query = getattr(rpc, name)
+        for open_ch, close_ch in (("{", "}"), ("(", ")")):
+            depth = 0
+            for ch in query:
+                depth += 1 if ch == open_ch else -1 if ch == close_ch else 0
+                assert depth >= 0, f"{name}: unmatched {close_ch!r}"
+            assert depth == 0, f"{name}: {depth} unclosed {open_ch!r}"
 
 
 def case_network_failure_fails_open(fx: Fixture) -> None:

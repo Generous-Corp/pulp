@@ -266,6 +266,45 @@ def load_facts(build_dir: Path) -> dict:
     return facts
 
 
+def stale_facts_reason(build_dir: Path, source_root: Path) -> str | None:
+    """Why the facts dump cannot be trusted, or None when it is current.
+
+    The dump is rewritten only by a configure. After merging main, a tree that
+    was not reconfigured still holds the older target graph, and a `--write`
+    from it silently reverts main's newer census entries. A facts file older
+    than any tracked CMake input is that tree.
+    """
+    facts = build_dir / FACTS_NAME
+    try:
+        facts_mtime = facts.stat().st_mtime
+        out = subprocess.run(
+            ["git", "-C", str(source_root), "ls-files", "-z"],
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    newest, newest_mtime = None, facts_mtime
+    for raw in out.split(b"\0"):
+        rel = raw.decode("utf-8", "replace")
+        name = rel.rsplit("/", 1)[-1]
+        if not (name == "CMakeLists.txt" or name.endswith(".cmake")):
+            continue
+        try:
+            mtime = (source_root / rel).stat().st_mtime
+        except OSError:
+            continue
+        if mtime > newest_mtime:
+            newest, newest_mtime = rel, mtime
+    if newest is None:
+        return None
+    return (
+        f"build tree is older than {newest}: {facts} predates it, so it still describes the "
+        f"target graph from before the last merge. Reconfigure first: "
+        f"cmake -S {source_root} -B {build_dir} -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=ON"
+    )
+
+
 def find_export_file(build_dir: Path) -> Path:
     candidates = sorted(build_dir.glob("CMakeFiles/Export/*/PulpTargets.cmake"))
     if not candidates:
@@ -1280,6 +1319,11 @@ def run_check(
         print("consumption_census: the census no longer matches the build tree", file=sys.stderr)
         for line in lines:
             print(f"  {line}", file=sys.stderr)
+        stale = stale_facts_reason(build_dir, source_root)
+        if stale:
+            print(f"  note: {stale}", file=sys.stderr)
+            print("  the drift above may be this stale tree, not the census.", file=sys.stderr)
+            return 1
         print(
             "  regenerate with: python3 tools/scripts/consumption_census.py "
             f"--build-dir {build_dir} --write",
@@ -1314,6 +1358,12 @@ def main(argv: list[str]) -> int:
             skip = check_profile_recorded(build_dir, census_path, schema_path)
             if skip is not None:
                 return skip
+
+        if args.write:
+            stale = stale_facts_reason(build_dir, source_root)
+            if stale:
+                print(f"consumption_census: refusing to write: {stale}", file=sys.stderr)
+                return 2
 
         profile = build_profile(build_dir, source_root)
 

@@ -120,6 +120,24 @@ linker keeps whichever copy it sees first. The proof is
 `PluginSlot`, asserting `mode=scripted`, `gpu=true`, and the script's own
 console line) plus `ui-script-plugin-editor-installed-sdk`.
 
+### Pick the UI stack before writing the editor
+
+Everything in this skill assumes the default stack, Vellum on Skia/Dawn: the
+in-tree scripted UI or a Vellum `UI <package>`. RmlUi and a bring-your-own
+native surface are opt-in alternatives, not peers to weigh on every task (see
+`CLAUDE.md` "Choosing a UI stack" and the `rmlui` skill). In practice:
+
+- Do not propose RmlUi for a new editor because it "might be lighter". Use it
+  only when the product already ships RML/RCSS skins or Lua skin scripts, or
+  when the developer asks for it.
+- An RmlUi or native-surface editor does not go through `create_view()` or
+  `ViewBridge`. It reaches the host only through the editor-host contract
+  (`editor_host.hpp`), so none of the ViewBridge, WidgetBridge or scripted-UI
+  rules below apply to it.
+- One editor, one stack. A Vellum view tree and a separately owned GPU device
+  in the same editor is two devices presenting into one window. Keep them in
+  separate editors.
+
 ### `UI <package>` is the editor-host contract's default, per binary
 
 `pulp_add_plugin(... UI <package>)` names a UI package target that declares

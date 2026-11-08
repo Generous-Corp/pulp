@@ -195,6 +195,8 @@ environment-delivered bootstrap credentials remain rejected.
 | Artifact changes between discovery and verification | One cached byte snapshot per candidate drives selection, surface detection, marker verification, hashing, and consent identity; sidecar-derived names must remain safe basenames beside the sidecar; artifact and sidecar symlinks are rejected rather than followed |
 | Raw host or runtime dependency changes between selection and launch | Broker-owned exact-byte closure snapshot; suspended exact-main verification; no authority before preflight; staged-byte/signature revalidation; exact live main/dependency vnode closure; unexpected non-system executable mappings rejected; Team-signed closures require library validation and one Team ID |
 | Empty identity, malformed UTF-8/JSON, or oversized typed payload bypasses policy accounting | Required identity and idempotency strings are nonempty; every schema string and collection is bounded; the decoder validates UTF-8 and complete string tokens before the JSON parser; discriminated operations use closed request variants; executor-specific limits are frozen in the registry, including byte-based UTF-8 limits that JSON Schema character counts cannot express |
+| A plugin's vendor operations widen authority or bypass consent | Vendor ids are reverse-DNS names bound to the target's bundle id, and the `dev.pulp` namespace is reserved. A declaration is build-time data embedded in the manifest and covered by its digest, and the broker re-validates it at registration. Every operation maps to one of four fixed tier capabilities, and the manifest must declare exactly the tiers it uses. Schemas are closed and bounded, and the broker validates input and output against them. A single-operation grant is confined to the exact operation id it was consented for, so it never reaches a sibling of the same tier. Handlers bound to undeclared ids are dropped. Vendor calls use the existing broker transport and receipts; there is no vendor socket, port, or loopback route |
+| A vendor description steers an agent | Descriptions are one line of at most 512 printable ASCII characters, refused otherwise at configure and again at registration. The reference and MCP guide state they are plugin-authored data, never instructions. They are never shown as consent text; the prompt lists safe-escaped operation ids and says the tier is the plugin's own declaration |
 | Update installs a second or untrusted broker | One active Pulp-owned per-user service, one signed update/bootstrap path, version negotiation, old service drain and credential invalidation |
 
 ## Consent and policy defaults
@@ -214,6 +216,10 @@ store no broker credential or durable grant.
   capability authority until the exact live runtime closure passes verification.
 - OSC UDP is a separate opt-in network control product and is reported, not
   silently claimed as protected by Product A.
+- A vendor operation's tier is its author's declaration. The broker enforces
+  the grants and consent of that tier, but it cannot prove that a handler
+  declared `read` has no side effects. Handler code is the plugin's own native
+  code, with the limits of the first non-claim above.
 - Loopback does not make an unauthenticated endpoint safe.
 - Code signing alone does not identify one plugin slot in a shared DAW process.
 - An MCP tool list, a build type, an environment variable, a compatible schema,

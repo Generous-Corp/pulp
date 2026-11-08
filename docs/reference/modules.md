@@ -29,10 +29,113 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 ## simd
 
-Portable block kernels for DSP: elementwise buffer arithmetic, reductions
-(`sum`, `dot`, `sum_squares`, `max_abs`, `maximum`, `minimum`), gain ramps
-(`ramp_mul`) and FIR correlation (`correlate`, `decimate2`), for `float` and
-`double`. `pulp::signal` links this module, so DSP headers can call it without
+Portable block kernels for DSP: elementwise buffer arithmetic (`add`, `sub`,
+`mul`, `div`, `negate`, `fma`, `scale`, `abs`, `clamp`), reductions (`sum`,
+`mean`, `rms`, `dot`, `sum_squares`, `max_abs`, `maximum`, `minimum`,
+`find_maximum` and `find_minimum` with the index), threshold replacement
+(`replace_below`, `replace_above`), gain ramps (`ramp_mul`), sample-format
+conversion (`from_int16`, `from_int32`, `to_int16`, `to_int32`, with a scale),
+stereo `interleave2` / `deinterleave2`, and FIR correlation (`correlate`,
+`decimate2`), for `float` and `double`. The conversions to integer round half to
+even, saturate, and turn NaN into 0 on every backend. A copy with gain is
+`scale`.
+
+Spectral work has its own kernels, for interleaved (`re, im, re, im, ...`, the
+layout of `std::complex<T>`) and split (separate real and imaginary arrays,
+`_split` suffix) buffers: `complex_multiply`, `complex_multiply_conj`
+(`a * conj(b)`), `complex_multiply_accumulate`, `complex_magnitude`,
+`complex_magnitude_squared`, `complex_phase` and `complex_power_spectrum`
+(`scale * |z|^2`). They use the plain product formulas, so unlike
+`std::complex::operator*` they do not recover a NaN from infinity times zero;
+use them on finite spectra. The zero-latency convolver's spectral
+multiply-accumulate runs on them. On every backend an element's result does
+not depend on where it sits in the buffer or on how a long buffer is split
+into calls, so chunked processing gives the same bits as one call (checked by
+`test/test_simd_complex.cpp`). `complex_multiply_conj(z, z)` can leave a
+last-bit imaginary part where the target fuses multiply-add; use
+`complex_magnitude_squared` for `|z|^2`.
+
+`mean` and `rms` accumulate in `double`, also for `float` input, so a long
+buffer keeps its precision: over four million `float` samples near 1.0 the
+measured relative error is 5.8e-9 (mean) and 4.7e-8 (rms), one rounding to
+`float`, where a running `float` sum was 5e-4 off. For `double` the bound is
+about `n * 2^-53`. `find_maximum` and `find_minimum` return the first NaN and
+its index when the buffer holds one, on every backend; `maximum`, `minimum`
+and `max_abs` with a NaN in the buffer are unspecified and differ by backend.
+
+### Vector math and accuracy tiers
+
+`exp`, `log`, `sin`, `cos`, `sincos`, `tanh`, `sqrt` and `wrap_phase` run over
+buffers of `float` or `double`. Each takes a `pulp::simd::Accuracy`, default
+`Accuracy::precise`:
+
+```cpp
+pulp::simd::exp(x, y, n);                               // precise
+pulp::simd::sincos(phase, s, c, n, pulp::simd::Accuracy::fast);
+pulp::simd::log(x, 1e-12f, y, n);                       // ln(max(x, 1e-12))
+pulp::simd::wrap_phase(phase, wrapped, n);              // into [-pi, pi]
+```
+
+- `precise` is within a stated number of units in the last place (ULP) of the
+  true result. Highway uses its `hwy/contrib/math` kernels (Apache-2.0, fetched
+  with Highway itself) and Apple platforms use Accelerate's vForce.
+- `fast` is for `float` and trades accuracy for fewer operations: a lower-degree
+  polynomial in Highway. Accelerate and the scalar backend have one algorithm
+  per function and ignore the argument, and a `double` request runs the
+  `precise` kernel, so a result is never worse than the tier asked for.
+- `log` takes a floor: `ln(max(x, floor))`. A floor at or below zero, or NaN,
+  means the smallest normal number, so the result is always finite for finite
+  input.
+- `sqrt` is correctly rounded on every backend and has no tier; the hardware
+  square root is already the fast path. `wrap_phase` has one implementation.
+- A result does not depend on where an element sits in the buffer, on the
+  buffer length, or on whether the call is in place.
+- `wrap_phase` stays within `[-pi, pi]` (one ulp at the ends) on every
+  backend, including inputs that sit on a half turn, for `abs x` up to 1e4
+  (`float`) and 1e6 (`double`). The test checks every half turn and multiple
+  of pi in that range, not only random points.
+- `precise` `sin`, `cos` and `sincos` meet the bound for `abs x` up to 39000 on
+  every backend, the range Highway documents for its `float` kernels. Past it
+  Highway's `float` kernels degrade (measured within 4 ULP to about 4e6, wrong
+  past about 1e7), while Accelerate and the scalar backend stay accurate over
+  the whole `float` range, and `double` holds to at least 1e8 everywhere. Bring
+  an accumulating phase back with `wrap_phase` before taking its sine.
+
+Measured worst case over random inputs in the stated range, on arm64 macOS
+(Highway NEON, and Accelerate), as checked by the `[simd][math][accuracy]` cases
+in `test/test_simd_math.cpp`. Print the same figures with
+`pulp-test-simd-math "[accuracy-report]"`. Highway states at most 4 ULP for
+each of these kernels on all its targets; only the arm64 NEON target was
+measured here, and the test asserts the bound on whatever machine runs it.
+
+| Function (range) | Tier | float, measured | double, measured | Documented bound |
+|---|---|---|---|---|
+| exp ([-87, 88]) | precise | 1.4 ULP | 1 ULP | 4 ULP |
+| exp (subnormal results: [-103.9, -87.4] float, [-745, -708.5] double) | precise | 0.91 ULP | 1 ULP | 4 ULP |
+| log (1e-30 to 1e30) | precise | 2.2 ULP | 2 ULP | 4 ULP |
+| sin, cos (abs x up to 39000) | precise | 2.2 ULP | 3 ULP | 4 ULP |
+| tanh (abs x up to 10) | precise | 2.4 ULP | 3 ULP | 4 ULP |
+| sqrt | both | exact | exact | correctly rounded |
+| exp ([-87, 88]) | fast | 3.6e-6 relative | as precise | 4e-6 relative |
+| log (floor to float max) | fast | 3.6e-6 relative (1.95e-6 absolute) | as precise | 4.5e-6 relative |
+| sin, cos (abs x up to 1e4) | fast | 1.2e-7, 1.9e-7 absolute | as precise | 2.5e-7 absolute |
+| tanh | fast | 1.6e-6 absolute | as precise | 2.2e-6 absolute |
+| wrap_phase (abs x up to 1e4 float, 1e6 double, half turns included) | one | 1.2e-7 absolute | 8.9e-16 absolute | 3e-7 float, 1e-15 double |
+
+ULP is measured against the C library in double. For `double` that makes the
+figure the distance from libm, which is itself well under one ULP. The `fast`
+sin and cos are accurate near their zeros in absolute terms only; their relative
+error there is not bounded. The `wrap_phase` figure is the distance on the
+circle, because `pi` and `-pi` are the same angle.
+
+Edges. The `precise` tier gives `exp(+large)` = +inf, `exp(-large)` = 0,
+`log(+inf)` = +inf, `sin` and `cos` of an infinity = NaN, and NaN in gives NaN
+out. Accelerate's `double` `cos(0)` is `1 - 1.1e-16`, one ulp below 1, so do
+not test `cos(0) == 1` exactly. The `fast` tier does not define NaN or infinity, saturates `exp` at
+`exp(88)` and `exp(-87.3)`, and needs `log` input between the floor and the
+largest float (so the floor must be a positive normal number, which is the
+default when it is zero or negative).
+ `pulp::signal` links this module, so DSP headers can call it without
 acquiring `pulp::runtime`.
 
 **Link:** `pulp::simd` (also reached through `pulp::signal` and `pulp::runtime`) · **Include prefix:** `<pulp/simd/...>`
@@ -345,6 +448,65 @@ auto info = FormatRegistry::instance().read_info("song.mp3");
 // info->duration_seconds, info->num_channels, info->sample_rate
 ```
 
+### Ranged reads from a file, memory or byte source
+
+`AudioReader` decodes only the frames you ask for, and its memory does not grow
+with the file. Open it from a path, from encoded bytes already in memory, or
+from your own `AudioByteSource` (an archive member or a download cache, for
+example). The cost of reaching a frame depends on the format:
+
+| Format | Open | Seek to any frame |
+|--------|------|-------------------|
+| WAV, AIFF | Reads the header | Direct byte offset |
+| FLAC | Reads the header | Seeks within the encoded stream |
+| Ogg Vorbis | Reads the header (a byte source is copied into memory, up to 2 GiB) | Seeks within the encoded stream |
+| MP3 | Reads every frame header once when the file has no Xing or Info header | Forward seeks decode onward; a backward seek decodes from the start of the stream |
+
+```cpp
+#include <pulp/audio/audio_reader.hpp>
+
+auto reader = AudioReader::open_file("long_take.flac");
+if (reader && reader->supports_ranged_read()) {
+    // Two seconds starting one minute in, every channel.
+    const auto rate = reader->info().sample_rate;
+    auto window = reader->read(60ull * rate, 2ull * rate);
+}
+
+// Encoded bytes you already hold; the format is detected from the first bytes.
+auto from_memory = AudioReader::open_memory(bytes);
+```
+
+The reader applies the same `DecodeLimits` as the registry: the header's
+length and channel claims are checked on open, and the allocating `read()`
+refuses a window larger than `max_output_bytes`. Reading into your own planar
+buffers zero-fills frames past the end and returns how many frames were
+decoded. A format with no seekable decoder (AAC, ALAC and CAF on macOS, opened
+from a path) is decoded once on open and `supports_ranged_read()` returns
+false, as does a FLAC or Ogg stream whose header gives no length. Pass
+`AudioReaderFallback::Refuse` to open only readers that seek; such a stream
+then returns `nullptr` without being decoded. An empty stream does not open.
+Opening and reading decode and allocate, so keep both off the audio callback.
+
+To choose a format before writing, ask the registry what each reader and writer
+supports. `reader_capabilities()` and `writer_capabilities()` return one
+`FormatCapabilities` per registered handler: its extensions, integer bit
+depths, whether it handles float samples, allowed sample rates, channel limit,
+whether the stream is compressed or lossy, and the encoder settings `write()`
+applies. An empty list means the format does not restrict that value. The
+registry write path uses each encoder setting at the value reported; none can
+be chosen per call yet.
+
+```cpp
+for (const auto& caps : FormatRegistry::instance().writer_capabilities()) {
+    // caps.format_name, caps.extensions, caps.bit_depths, caps.sample_rates,
+    // caps.max_channels, caps.compressed, caps.lossless, caps.quality_options
+}
+```
+
+`pulp audio formats` prints the same table for the current build, and
+`pulp audio formats --json` emits it as JSON with `readers` and `writers`
+arrays; the CLI reference lists every field.
+
 For an already-resident RIFF/WAVE byte span, `inspect_wav()` and `decode_wav()`
 in `wav_decoder.hpp` provide a no-file-I/O, no-exceptions path with caller-set
 frame, channel, and decoded-byte ceilings. RF64, W64, and RIFX containers are
@@ -417,18 +579,55 @@ therefore counts it twice.
 
 | Format | Read | Write | Backend |
 |--------|:----:|:-----:|---------|
-| AAC | macOS | ✓* | Read through ExtAudioFile on macOS; optional FDK AAC adds writing (`pulp add fdk-aac --accept-license FDK-AAC`) |
-| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian) |
-| ALAC | macOS | ✓* | Read through ExtAudioFile on macOS; optional Apple ALAC adds writing (`pulp add alac`) |
-| CAF | macOS | — | Read through ExtAudioFile on macOS |
+| AAC | macOS, Windows | macOS, Windows, ✓* | Read through ExtAudioFile on macOS and Media Foundation on Windows. Written by the system codec writer (M4A or ADTS on macOS, M4A at 44.1 or 48 kHz on Windows) or optional FDK AAC (`pulp add fdk-aac --accept-license FDK-AAC`). FDK AAC writes an ADTS stream for both `.aac` and `.m4a`, so a `.m4a` it writes is not an MPEG-4 file and some players refuse it |
+| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian); the system codec writer adds 24- and 32-bit AIFF on macOS |
+| ALAC | macOS | macOS, ✓* | Read through ExtAudioFile on macOS. Written by the system codec writer on macOS or optional Apple ALAC (`pulp add alac`) |
+| CAF | macOS | macOS | Read and written through ExtAudioFile on macOS (AAC, ALAC or PCM inside) |
 | FLAC | ✓ | ✓* | dr_flac / libflac (`pulp add libflac`) |
 | MP3 | ✓ | ✓* | dr_mp3 / LAME (`pulp add lame --accept-license LGPL-2.0`) |
 | OGG Vorbis | ✓ | — | stb_vorbis |
 | WAV | ✓ | ✓ | CHOC + bounded in-memory decoder + StreamingWriter |
+| WMA | Windows | — | Read through Media Foundation on Windows |
 
 *\*Write via optional `pulp add` packages. Those packages do not add portable
 AAC/ALAC readers. Permissive (libflac, ALAC) packages install freely; copyleft
 (LAME, fdk-aac) packages require `--accept-license`.*
+
+#### Writing through the system codecs
+
+`write_system_audio_file()` in `system_audio_codec.hpp` encodes through the
+operating system's own codecs, so it links no third-party encoder and adds no
+license terms. Choose the container and encoding, plus the bit depth for ALAC
+or integer PCM, float PCM for CAF, or an AAC bitrate:
+
+```cpp
+#include <pulp/audio/system_audio_codec.hpp>
+
+SystemAudioWriteOptions options;
+options.container = SystemAudioContainer::M4A;
+options.encoding = SystemAudioEncoding::ALAC;
+options.bit_depth = 24;
+if (system_audio_can_write(options.container, options.encoding))
+    write_system_audio_file("take.m4a", data, options);
+```
+
+| Container | macOS | Windows |
+|-----------|-------|---------|
+| M4A | AAC, ALAC | AAC (44.1 or 48 kHz; mono or stereo) |
+| ADTS (`.aac`) | AAC | — |
+| CAF | AAC, ALAC, PCM (integer or float) | — |
+| AIFF | PCM (16, 24 or 32-bit integer) | — |
+
+Other platforms refuse every write. `FormatRegistry::write()` uses this
+writer for `.m4a`, `.aac`, `.alac` and `.caf` when no installed optional
+encoder claims the extension first, so an FDK AAC install keeps `.m4a` and
+`.aac`. Through the registry, `.m4a` and `.aac` write AAC at the codec's
+default bitrate, `.alac` writes 16-bit ALAC in M4A, and `.caf` writes 32-bit
+float PCM. The file is encoded beside its destination and renamed into place
+only on success, so a refused write leaves an existing file untouched; the
+failing stage is logged. An AAC bitrate is rounded to the nearest one the
+encoder accepts. No metadata or channel layout is written. Encoding allocates
+and performs file I/O, so keep it off the audio callback.
 
 ### Sampler, looper, and analysis primitives
 
@@ -2765,7 +2964,7 @@ now explicitly schedule UI-owned `poll()` before reading updated data.
 | Meter | Peak/RMS level meter with configurable ballistics and clip indicators |
 | MultiMeter | Multiple level meters side-by-side for multi-channel monitoring |
 | SpectrogramView | Rolling time-frequency heatmap showing spectral content over time |
-| SpectrumView | Real-time frequency spectrum analyzer with configurable FFT size |
+| SpectrumView | Spectrum analyzer on a log-frequency axis with built-in lock-free analysis (window, FFT size, overlap, level mode) |
 | WaveformView | Audio waveform display with zoom, selection, and playhead |
 | XYPad | Two-dimensional control surface for parameters like pan/width or filter freq/res |
 
