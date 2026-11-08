@@ -417,10 +417,9 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     // Trigger generations normally omit the ordinary MIDI egress scratch, but
     // a G-5 host-ingress generation may carry a routed MidiOutput sink.  Keep
     // that fixed scratch available whenever the topology admits one.
-    const bool has_midi_output = std::any_of(
-        nodes_.begin(), nodes_.end(), [](const auto& node) {
-            return node.type == NodeType::MidiOutput;
-        });
+    const bool has_midi_output = std::any_of(nodes_.begin(), nodes_.end(), [](const auto& node) {
+        return node.type == NodeType::MidiOutput;
+    });
     auto cg = std::make_shared<CompiledGraph>(!compiling_trigger_state_ || has_midi_output);
     cg->execution_generation = authoring_generation_;
     if (std::any_of(nodes_.begin(), nodes_.end(),

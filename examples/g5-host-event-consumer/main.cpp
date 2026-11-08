@@ -181,8 +181,7 @@ GraphObservation render_graph(std::span<const std::size_t> partitions) {
     check(input_node != 0 && output_node != 0 && midi_input != 0 && midi_output != 0 &&
               producer != 0 && envelope != 0,
           "graph-node-creation");
-    check(graph.connect(input_node, 0, producer, 0) &&
-              graph.connect(envelope, 0, output_node, 0) &&
+    check(graph.connect(input_node, 0, producer, 0) && graph.connect(envelope, 0, output_node, 0) &&
               graph.connect_midi(midi_input, midi_output) &&
               graph.connect_trigger({producer, envelope}) == TriggerGraphResult::Accepted,
           "graph-admission");
@@ -238,14 +237,13 @@ GraphObservation render_graph(std::span<const std::size_t> partitions) {
         delivered.attach_ump(&delivered_ump);
         check(graph.extract_midi(midi_output, delivered), "graph-host-extract");
         for (const auto& event : delivered)
-            observation.events.emplace_back(cursor + static_cast<std::uint64_t>(event.sample_offset),
-                                            event.data()[1]);
+            observation.events.emplace_back(
+                cursor + static_cast<std::uint64_t>(event.sample_offset), event.data()[1]);
         cursor += frames;
     }
     check(cursor == 256 && observation.events.size() == 5 && observation.audio.size() == 256,
           "graph-host-observation-shape");
-    check(observation.audio[0] == 1.0f && observation.audio[1] == 0.5f,
-          "graph-host-audio-tuple");
+    check(observation.audio[0] == 1.0f && observation.audio[1] == 0.5f, "graph-host-audio-tuple");
     return observation;
 }
 
@@ -256,10 +254,10 @@ void graph_ingress_controls() {
     constexpr std::array<std::size_t, 4> sixty_four{64, 64, 64, 64};
     constexpr std::array<std::size_t, 2> one_twenty_seven{127, 129};
     const auto baseline = render_graph(one_block);
-    for (const auto partitions : {std::span<const std::size_t>(one_and_rest),
-                                  std::span<const std::size_t>(thirty_two),
-                                  std::span<const std::size_t>(sixty_four),
-                                  std::span<const std::size_t>(one_twenty_seven)}) {
+    for (const auto partitions :
+         {std::span<const std::size_t>(one_and_rest), std::span<const std::size_t>(thirty_two),
+          std::span<const std::size_t>(sixty_four),
+          std::span<const std::size_t>(one_twenty_seven)}) {
         const auto candidate = render_graph(partitions);
         check(candidate.events == baseline.events && candidate.audio == baseline.audio,
               "graph-partition-invariance");

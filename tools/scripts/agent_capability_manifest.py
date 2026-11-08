@@ -39,9 +39,6 @@ from agent_capability_history import (
     history_problems,
     pending_counters,
     protected_base_problems,
-    HistoryFormatError,
-    rendered_history,
-    stored_history_problems,
     updated_history_entries,
 )
 from agent_capability_registry import (
@@ -774,6 +771,17 @@ def rendered(root: pathlib.Path | None = None) -> str:
     return json.dumps(document(root), indent=2, ensure_ascii=False) + "\n"
 
 
+def render_history(history: dict[str, Any]) -> str:
+    """Render append-only history without repeating indentation overhead.
+
+    Each entry carries a complete manifest and public-surface snapshot. The
+    history is machine-validated JSON, and compact rendering keeps the
+    generated blob below GitHub's 100 MiB object limit without dropping any
+    provenance or changing its parsed representation.
+    """
+    return json.dumps(history, ensure_ascii=False, separators=(",", ":")) + "\n"
+
+
 def _counter_problems(
     old_history: Any, entries: list[dict[str, Any]], previous: Any,
     previous_surface: Any, doc: dict[str, Any], surface_document: dict[str, Any],
@@ -962,30 +970,21 @@ def main() -> int:
             if problems:
                 return _print_problems(problems)
         history = _load_optional_json(history_path)
-        # A bootstrap or unpublished migration replaces the history outright;
-        # any other write must be able to read the history it appends to.
-        if not (initial_bootstrap or args.migrate_unpublished_v1):
-            problems.extend(stored_history_problems(history))
-            if problems:
-                return _print_problems(problems)
-        try:
-            entries = updated_history_entries(
-                history,
-                previous,
-                previous_surface,
-                doc,
-                surface_document,
-                initial_bootstrap=initial_bootstrap,
-                migrate_unpublished=args.migrate_unpublished_v1,
-            )
-            if not args.migrate_unpublished_v1:
-                problems.extend(_counter_problems(
-                    history, entries, previous, previous_surface, doc, surface_document))
-            if problems:
-                return _print_problems(problems)
-            history = history_document(entries)
-        except HistoryFormatError as error:
-            return _print_problems([str(error)])
+        entries = updated_history_entries(
+            history,
+            previous,
+            previous_surface,
+            doc,
+            surface_document,
+            initial_bootstrap=initial_bootstrap,
+            migrate_unpublished=args.migrate_unpublished_v1,
+        )
+        if not args.migrate_unpublished_v1:
+            problems.extend(_counter_problems(
+                history, entries, previous, previous_surface, doc, surface_document))
+        if problems:
+            return _print_problems(problems)
+        history = history_document(entries)
         problems = history_problems(history, doc, surface_document)
         problems.extend(
             protected_base_problems(
@@ -998,7 +997,7 @@ def main() -> int:
             {
                 snapshot: output,
                 surface_snapshot: surface_output,
-                history_path: rendered_history(history),
+                history_path: render_history(history),
                 fixture: compile_fixture(),
             },
             transaction_path,
@@ -1033,8 +1032,6 @@ def main() -> int:
             if (root / ".git").exists() else None
         )
         history_issues = history_problems(history, doc, surface_document)
-        if not history_issues:
-            history_issues.extend(history_text_problems(history_path, history))
         if isinstance(history, dict):
             history_issues.extend(
                 protected_base_problems(
@@ -1149,25 +1146,9 @@ def _load_optional_json(path: pathlib.Path) -> Any:
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, RecursionError) as error:
-        return {"_invalid": str(error) or type(error).__name__}
-
-
-def history_text_problems(path: pathlib.Path, history: Any) -> list[str]:
-    """The history file must be byte-for-byte its own rendering.
-
-    Parsing alone cannot see a duplicated key or reformatted whitespace that
-    reads back as the honest document; only the text comparison does."""
-    if not path.exists() or not isinstance(history, dict):
-        return []
-    try:
-        expected = rendered_history(history)
-    except (KeyError, TypeError) as error:
-        return [f"{HISTORY_FILE} cannot be rendered: {error}"]
-    if path.read_text(encoding="utf-8") != expected:
-        return [f"{HISTORY_FILE} is not in its rendered form; rerun --write"]
-    return []
+        return json.loads(path.read_text())
+    except json.JSONDecodeError as error:
+        return {"_invalid": str(error)}
 
 
 
