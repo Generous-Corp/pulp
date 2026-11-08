@@ -62,6 +62,7 @@
     "tools/cli/cmd_audio_compare.cpp",
     "tools/cli/cmd_audio_formats.cpp",
     "tools/cli/cmd_audio_heritage.cpp",
+    "tools/cli/cmd_audio_inspect.cpp",
     "tools/cli/cmd_audio_plugin_common.cpp",
     "tools/cli/cmd_audio_plugin_inspect.cpp",
     "tools/cli/cmd_audio_render.cpp",
@@ -250,6 +251,27 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-audio-file-layout": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
+  "pulp-test-audio-file-layout-containers": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_audio_file_layout_containers.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/audio/inspect"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_audio_file_layout_containers.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-authoring-capsule-hostile": {
    "data": "declared",
    "detected_sources": [
@@ -354,6 +376,20 @@
    "sources": [
     "test/test_cli_audio_compare.cpp"
    ],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-audio-inspect": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
@@ -2671,6 +2707,13 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-voice-template": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-widget-bridge-api-contracts": {
    "data": "declared",
    "detected_sources": [
@@ -2788,6 +2831,8 @@
   "pulp-test-audio-device-manager",
   "pulp-test-audio-doctor",
   "pulp-test-audio-edge-cases",
+  "pulp-test-audio-file-layout",
+  "pulp-test-audio-file-layout-containers",
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
   "pulp-test-audio-reader-idle-wakeups",
@@ -2827,6 +2872,7 @@
   "pulp-test-clap-webview",
   "pulp-test-cli-au-info-plist",
   "pulp-test-cli-audio-compare",
+  "pulp-test-cli-audio-inspect",
   "pulp-test-cli-audio-latency",
   "pulp-test-cli-audio-validate",
   "pulp-test-cli-bake",
@@ -3424,6 +3470,7 @@
   "pulp-test-voice-identity",
   "pulp-test-voice-modulation-sources",
   "pulp-test-voice-runtime-facade",
+  "pulp-test-voice-template",
   "pulp-test-vst3-audio-parity",
   "pulp-test-vst3-bundle-entry",
   "pulp-test-vst3-connection",
@@ -3713,6 +3760,14 @@
    "inputs": [
     "test/fixtures/agent-panels/magneto",
     "tools/import-validation/check_agent_panel_invariants.py"
+   ],
+   "kind": "python"
+  },
+  "android-fixture-lane-selftest": {
+   "entry": "tools/ci/test_android_fixture_lane.py",
+   "inputs": [
+    "tools/ci/android-fixture-lane.sh",
+    "tools/ci/test_android_fixture_lane.py"
    ],
    "kind": "python"
   },
@@ -5091,6 +5146,7 @@
    "entry": "tools/deps/test_audit_extra.py",
    "inputs": [
     "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/deps/audit.py",
     "tools/deps/test_audit_extra.py",
     "tools/packages/test-stubs"
@@ -5102,6 +5158,7 @@
    "inputs": [
     "tools/ci/tart-provision.sh",
     "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/cmake/PulpWclap.cmake",
     "tools/deps/audit.py",
     "tools/deps/test_audit.py",
@@ -5127,6 +5184,7 @@
    "entry": "tools/deps/audit.py",
    "inputs": [
     "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/deps/audit.py",
     "tools/packages/test-stubs"
    ],
@@ -10975,8 +11033,10 @@
     "core/events/src/timer.cpp",
     "core/events/src/volume_detector.cpp",
     "core/format/include/pulp/format/audio_workgroup_client.hpp",
+    "core/format/include/pulp/format/editor_host.hpp",
     "core/format/include/pulp/format/graph_runtime_executor.hpp",
     "core/format/include/pulp/format/graph_runtime_worker_pool.hpp",
+    "core/format/include/pulp/format/native_surface_host.hpp",
     "core/format/include/pulp/format/note_name.hpp",
     "core/format/include/pulp/format/plugin_descriptor.hpp",
     "core/format/include/pulp/format/prepare_resources.hpp",
@@ -11806,8 +11866,10 @@
     "core/events/src/timer.cpp",
     "core/events/src/volume_detector.cpp",
     "core/format/include/pulp/format/audio_workgroup_client.hpp",
+    "core/format/include/pulp/format/editor_host.hpp",
     "core/format/include/pulp/format/graph_runtime_executor.hpp",
     "core/format/include/pulp/format/graph_runtime_worker_pool.hpp",
+    "core/format/include/pulp/format/native_surface_host.hpp",
     "core/format/include/pulp/format/note_name.hpp",
     "core/format/include/pulp/format/plugin_descriptor.hpp",
     "core/format/include/pulp/format/prepare_resources.hpp",
