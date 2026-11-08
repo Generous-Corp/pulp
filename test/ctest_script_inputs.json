@@ -2706,6 +2706,13 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-voice-template": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-widget-bridge-api-contracts": {
    "data": "declared",
    "detected_sources": [
@@ -3462,6 +3469,7 @@
   "pulp-test-voice-identity",
   "pulp-test-voice-modulation-sources",
   "pulp-test-voice-runtime-facade",
+  "pulp-test-voice-template",
   "pulp-test-vst3-audio-parity",
   "pulp-test-vst3-bundle-entry",
   "pulp-test-vst3-connection",

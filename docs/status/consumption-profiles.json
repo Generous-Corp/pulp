@@ -550,7 +550,8 @@
       "pulp/host/timeline_offline_graph.hpp",
       "pulp/host/timeline_offline_renderer.hpp",
       "pulp/host/trigger_graph.hpp",
-      "pulp/host/voice_identity.hpp"
+      "pulp/host/voice_identity.hpp",
+      "pulp/host/voice_template.hpp"
     ],
     "core/interchange/include": [
       "pulp/interchange/capability.hpp",
