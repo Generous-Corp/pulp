@@ -119,14 +119,14 @@ class DownloadRetryPolicy(unittest.TestCase):
             dest = pathlib.Path(td) / "out.bin"
             # The CLI sleeps for real; one retry costs ~5s at most 6.25s.
             ok = subprocess.run([sys.executable, str(SCRIPT), srv.url, str(dest)],
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(ok.returncode, 0, ok.stderr)
             self.assertEqual(dest.read_bytes(), b"payload")
             self.assertFalse(dest.with_name("out.bin.part").exists())
         with tempfile.TemporaryDirectory() as td, _Server([404]) as srv:
             dest = pathlib.Path(td) / "out.bin"
             bad = subprocess.run([sys.executable, str(SCRIPT), srv.url, str(dest)],
-                                 capture_output=True, text=True)
+                                 capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(bad.returncode, 1)
             self.assertFalse(dest.exists())
             self.assertEqual(srv.hits, 1)
