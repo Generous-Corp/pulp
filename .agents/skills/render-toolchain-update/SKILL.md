@@ -445,7 +445,8 @@ retain those fields in the PR/landing evidence.
   same sha256 check. The token, if any, is sent only to the API host and never
   follows the redirect to storage. Only when both sources fail does the fetch fail,
   and the error names both; a 404 from both means the pin names an asset that is
-  not there. A bare
+  not there. A host whose `--cache-root` already holds a valid generation for the
+  pin skips every source and makes no request. A bare
   `OSError` is deliberately not transient either: it is what a full disk raises on
   the write side, and retrying re-downloads hundreds of megabytes to fill the same
   disk. When a pin bump fails here, read which class it was before assuming the
