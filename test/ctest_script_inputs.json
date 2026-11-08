@@ -9,10 +9,20 @@
  },
  "executables": {
   "Pulp UI Script Fixture": {
-   "data": "none",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/ui_script_plugin/ui/main.js"
+   ],
    "kind": "compiled",
-   "sources": [],
+   "sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/PulpUiScriptFixture_PulpUiScriptFixture_Standalone_STANDALONE_control_shipping_marker.cpp",
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp",
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_mac_objc/PulpUiScriptFixture_Standalone_mac_objc_cluster.mm",
+    "test/fixtures/ui_script_plugin/main.cpp"
+   ],
    "undeclared_sources": []
   },
   "pulp-control-broker-crash-fixture": {
@@ -2762,6 +2772,8 @@
   "pulp-test-anticipation-lane",
   "pulp-test-ara-scaffold",
   "pulp-test-au-bundle-entry",
+  "pulp-test-au-midi-output",
+  "pulp-test-au-multibus",
   "pulp-test-au-param-visibility",
   "pulp-test-au-plugin-state",
   "pulp-test-au-v2-cocoa-shipping",
@@ -2912,6 +2924,7 @@
   "pulp-test-coreaudio-default-follow",
   "pulp-test-coreaudio-input-only",
   "pulp-test-coreaudio-native-lifetime",
+  "pulp-test-coremidi-reconnect",
   "pulp-test-coremidi-shared-client",
   "pulp-test-create-template-app",
   "pulp-test-create-template-bare",
@@ -3003,6 +3016,7 @@
   "pulp-test-gpu-audio-plugin-boundary-continuity",
   "pulp-test-gpu-audio-trace",
   "pulp-test-gpu-audio-transport",
+  "pulp-test-gpu-capabilities",
   "pulp-test-gpu-compute",
   "pulp-test-gpu-compute-async",
   "pulp-test-gpu-compute-kernel-override",
@@ -3019,6 +3033,7 @@
   "pulp-test-gpu-neural-realtime-node",
   "pulp-test-gpu-neural-shadow-policy",
   "pulp-test-gpu-neural-shadow-simd",
+  "pulp-test-gpu-pass",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-proc-installer",
@@ -3418,6 +3433,7 @@
   "pulp-test-vst3-note-names",
   "pulp-test-vst3-param-display",
   "pulp-test-vst3-plugin-state",
+  "pulp-test-vst3-program-list",
   "pulp-test-vst3-state-sync",
   "pulp-test-wam-adapter",
   "pulp-test-wam-wclap",
@@ -3443,6 +3459,7 @@
   "pulp-test-yoga-layout-bench",
   "pulp-ui-script-editor-probe",
   "pulp-unique-temp-dir-fixture",
+  "pulp-wgsl-validate",
   "sample-region-allpass-consumer"
  ],
  "executables_scanned_for": [
@@ -5069,6 +5086,15 @@
    ],
    "kind": "python"
   },
+  "dependency-request-recorder-selftest": {
+   "entry": "tools/ci/test_dependency_request_check.py",
+   "inputs": [
+    "tools/ci/dependency_request_check.py",
+    "tools/ci/dependency_request_recorder.cmake",
+    "tools/ci/test_dependency_request_check.py"
+   ],
+   "kind": "python"
+  },
   "deps-audit-extra-selftest": {
    "entry": "tools/deps/test_audit_extra.py",
    "inputs": [
@@ -5319,6 +5345,13 @@
     "tools/scripts/dawn_binding_census.py",
     "tools/scripts/editor_host_acceptance.py",
     "tools/scripts/test_editor_host_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "embed-wgsl-selftest": {
+   "entry": "tools/cmake/scripts/test_embed_wgsl.py",
+   "inputs": [
+    "tools/cmake/scripts/test_embed_wgsl.py"
    ],
    "kind": "python"
   },
@@ -7800,7 +7833,9 @@
     ".github/workflows/build.yml",
     "tools/ci/fixtures/merge_group_hold/pr-10114-verdicts.json",
     "tools/ci/merge_group_hold_check.py",
-    "tools/ci/test_merge_group_hold_check.py"
+    "tools/ci/merge_queue_fixture.py",
+    "tools/ci/test_merge_group_hold_check.py",
+    "tools/scripts/resolve_classify_base.py"
    ],
    "kind": "python"
   },
@@ -9057,8 +9092,10 @@
    "entry": "tools/ci/test_queue_breaker.py",
    "inputs": [
     ".github/workflows/build.yml",
+    "tools/ci/merge_queue_fixture.py",
     "tools/ci/queue_breaker.py",
-    "tools/ci/test_queue_breaker.py"
+    "tools/ci/test_queue_breaker.py",
+    "tools/scripts/resolve_classify_base.py"
    ],
    "kind": "python"
   },

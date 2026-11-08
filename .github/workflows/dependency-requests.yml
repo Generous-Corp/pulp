@@ -1,0 +1,111 @@
+name: Dependency requests
+
+# Proves a Pulp-only configure never asks for a UI stack it does not use:
+# no Skia, Dawn, wgpu-native, Vellum, RmlUi, Lua or FreeType. "Nothing was
+# downloaded" cannot show that, because a machine-wide FetchContent cache
+# satisfies a request without a download, so the configure runs with
+# tools/ci/dependency_request_recorder.cmake injected and the check reads what
+# was REQUESTED. The second configure is the control: the same instrument on a
+# GPU configure must show Skia and WebGPU, or the clean reading above proves
+# nothing.
+#
+# Advisory: not a required context, so it runs on pull requests and pushes
+# that touch the build, never on merge groups.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'CMakeLists.txt'
+      - '**/CMakeLists.txt'
+      - 'tools/cmake/**'
+      - 'tools/ci/dependency_request_*'
+      - 'setup.sh'
+      - 'integrations/**'
+      - '.github/workflows/dependency-requests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'CMakeLists.txt'
+      - '**/CMakeLists.txt'
+      - 'tools/cmake/**'
+      - 'tools/ci/dependency_request_*'
+      - 'setup.sh'
+      - 'integrations/**'
+      - '.github/workflows/dependency-requests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-requests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pulp-only:
+    name: Pulp-only configure requests no UI stack (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: false
+
+      - name: Install Linux dev headers
+        uses: ./.github/actions/install-linux-build-deps
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Configure Pulp only (GPU off) with the recorder
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-pulp-only \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES="$PWD/tools/ci/dependency_request_recorder.cmake" \
+            -DDEPENDENCY_REQUEST_LOG="$PWD/build-pulp-only/dependency-requests.jsonl"
+
+      - name: Check the Pulp-only requests
+        shell: bash
+        run: |
+          python3 tools/ci/dependency_request_check.py \
+            --log build-pulp-only/dependency-requests.jsonl \
+            --forbid 'skia' --forbid 'dawn*' --forbid 'webgpu' --forbid 'wgpu*' \
+            --forbid '*vellum*' --forbid 'rmlui*' --forbid 'lua*' --forbid 'freetype*'
+
+      - name: Configure the GPU control with the recorder
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The control only has to ASK for Skia, so it skips the Skia
+          # download; the request is noted before provisioning starts.
+          cmake -S . -B build-gpu-control \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_ENABLE_GPU=ON \
+            -DPULP_SKIA_AUTOFETCH=OFF \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES="$PWD/tools/ci/dependency_request_recorder.cmake" \
+            -DDEPENDENCY_REQUEST_LOG="$PWD/build-gpu-control/dependency-requests.jsonl"
+
+      - name: Check the control sees the GPU stack
+        shell: bash
+        run: |
+          python3 tools/ci/dependency_request_check.py \
+            --log build-gpu-control/dependency-requests.jsonl \
+            --require 'skia' --require 'webgpu'
+
+      - name: Upload the request logs
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: dependency-requests
+          path: |
+            build-pulp-only/dependency-requests.jsonl
+            build-gpu-control/dependency-requests.jsonl
+          if-no-files-found: warn

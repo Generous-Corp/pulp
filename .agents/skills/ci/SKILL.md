@@ -524,6 +524,16 @@ apply only when the group's first parent is that main tip; a stacked group
 keeps the full matrix. If a merge group reports skip-safe, the
 `[classify-base]` lines in the classify log name the base it diffed.
 
+The merge-group HOLD check and the queue circuit breaker scan from that same
+main tip. The "Resolve the merge group's main base" step runs the protected
+copy of the resolver before any queue-entry code and classify reuses its
+`base` output, so the three cannot disagree. Do not hand either check
+`merge_group.base_sha`: from there a HOLD on an entry ahead in the batch is
+never re-checked by the group that lands it. An unresolved base (`origin/main`)
+fails the HOLD check and a live breaker closed. A group failing with "main's
+tip could not be resolved" is that fallback: read the step's `merge-group base:`
+line, then re-run classify or re-queue.
+
 ## Diff-scoped gates on merge_group use the entry's own base
 
 `Enforce version & skill sync` diffs against `merge_group.base_sha` on a queued
@@ -2635,6 +2645,31 @@ commit was dispatched. It publishes
   its tag name forever; the workflow refuses to rebuild a commit that already
   has one, because a second build on a newer runner image is different bytes.
   Downstream identity is the attested manifest, not a rebuild.
+
+### Proving a configure never asked for a dependency
+
+`.github/workflows/dependency-requests.yml` checks that a Pulp-only configure
+(GPU off) requests no UI stack: no Skia, Dawn, wgpu-native, Vellum, RmlUi, Lua
+or FreeType. Don't replace it with a download log. A shared FetchContent cache
+satisfies a request without downloading anything, so "nothing was downloaded"
+reads the same whether a dependency was unneeded or already cached.
+`tools/ci/dependency_request_recorder.cmake`, injected with
+`CMAKE_PROJECT_TOP_LEVEL_INCLUDES`, logs what was REQUESTED instead.
+
+Three things it cannot see on its own:
+
+- **CMake skips the provider for a `FETCHCONTENT_SOURCE_DIR_<NAME>` override**,
+  which is exactly how `setup.sh` wires in the shared source cache. An
+  end-of-configure pass records those, but only for dependencies that were
+  actually populated.
+- **Script provisioning and `file(DOWNLOAD)`** are logged only where the
+  project calls `dependency_request_recorder_note()`. Skia and Dawn do.
+- **An empty log is exit 2, not a pass.** Every real configure requests
+  something, so an empty log means the recorder never ran.
+
+The job's second configure is the control: GPU on, with
+`PULP_SKIA_AUTOFETCH=OFF` so it skips the download. It must show Skia and
+WebGPU. A forbidden-list pass without a green control proves nothing.
 
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 

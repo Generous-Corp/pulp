@@ -4,7 +4,9 @@
 #include <pulp/runtime/system.hpp>
 #include <choc/text/choc_JSON.h>
 #include <cmath>
+#include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <algorithm>
 #include <string_view>
@@ -134,6 +136,11 @@ void PresetManager::ensure_user_dir() {
 // ── Save/Load ────────────────────────────────────────────────────────────
 
 bool PresetManager::save(const std::string& name, const std::string& folder) {
+    return save(name, folder, PresetMetadata{});
+}
+
+bool PresetManager::save(const std::string& name, const std::string& folder,
+                         const PresetMetadata& metadata) {
     if (!is_safe_path_component(name) || !is_safe_relative_folder(folder)) {
         return false;
     }
@@ -150,16 +157,32 @@ bool PresetManager::save(const std::string& name, const std::string& folder) {
 
     // Serialize the preset into a buffer first so the file can be written
     // atomically below. Metadata strings are emitted through choc's JSON string
-    // escaper so a name / manufacturer / plugin containing a quote, backslash,
-    // or control character can never produce a corrupt (unparseable) file.
-    // Parameter-name keys are left raw to stay compatible with load()'s
-    // raw-key string scan.
+    // escaper so a name / manufacturer / plugin / parameter name containing a
+    // quote, backslash, or control character can never produce a corrupt
+    // (unparseable) file.
     std::ostringstream out;
     out << "{\n";
+    out << "  \"schema\": 2,\n";
     out << "  \"name\": " << choc::json::getEscapedQuotedString(name) << ",\n";
     out << "  \"manufacturer\": " << choc::json::getEscapedQuotedString(manufacturer_) << ",\n";
     out << "  \"plugin\": " << choc::json::getEscapedQuotedString(plugin_name_) << ",\n";
     out << "  \"version\": " << store_.state_version() << ",\n";
+    if (!metadata.author.empty())
+        out << "  \"author\": " << choc::json::getEscapedQuotedString(metadata.author) << ",\n";
+    if (!metadata.description.empty())
+        out << "  \"description\": " << choc::json::getEscapedQuotedString(metadata.description)
+            << ",\n";
+    if (!metadata.tags.empty()) {
+        out << "  \"tags\": [";
+        for (std::size_t i = 0; i < metadata.tags.size(); ++i) {
+            if (i > 0)
+                out << ", ";
+            out << choc::json::getEscapedQuotedString(metadata.tags[i]);
+        }
+        out << "],\n";
+    }
+    if (metadata.program && *metadata.program >= 0)
+        out << "  \"program\": " << *metadata.program << ",\n";
     out << "  \"parameters\": {";
 
     auto params = store_.all_params();
@@ -179,7 +202,7 @@ bool PresetManager::save(const std::string& name, const std::string& folder) {
             const float def = params[i].range.default_value;
             value = std::isfinite(def) ? def : 0.0f;
         }
-        out << "\n    \"" << params[i].name << "\": " << value;
+        out << "\n    " << choc::json::getEscapedQuotedString(params[i].name) << ": " << value;
     }
     out << "\n  }\n";
     out << "}\n";
@@ -224,23 +247,138 @@ bool PresetManager::load(const PresetInfo& preset) {
     return load(preset.path);
 }
 
-bool PresetManager::load(const fs::path& path) {
+namespace {
+
+PresetMetadata metadata_from_document(const choc::value::ValueView& doc) {
+    PresetMetadata meta;
+    if (!doc.isObject())
+        return meta;
+    auto text = [&](const char* key) -> std::string {
+        if (!doc.hasObjectMember(key))
+            return {};
+        auto v = doc[key];
+        return v.isString() ? std::string(v.getString()) : std::string{};
+    };
+    meta.author = text("author");
+    meta.description = text("description");
+    if (doc.hasObjectMember("tags")) {
+        auto tags = doc["tags"];
+        if (tags.isArray()) {
+            for (std::uint32_t i = 0; i < tags.size(); ++i) {
+                auto t = tags[i];
+                if (t.isString())
+                    meta.tags.emplace_back(t.getString());
+            }
+        }
+    }
+    if (doc.hasObjectMember("program")) {
+        auto v = doc["program"];
+        if (v.isInt32())
+            meta.program = v.getInt32();
+        else if (v.isInt64())
+            meta.program = static_cast<int>(v.getInt64());
+    }
+    return meta;
+}
+
+bool number_from_value(const choc::value::ValueView& v, double& out) {
+    if (v.isInt32())
+        out = v.getInt32();
+    else if (v.isInt64())
+        out = static_cast<double>(v.getInt64());
+    else if (v.isFloat32())
+        out = v.getFloat32();
+    else if (v.isFloat64())
+        out = v.getFloat64();
+    else
+        return false;
+    return std::isfinite(out);
+}
+
+} // namespace
+
+void PreparedPreset::apply_rt(StateStore& store) const {
+    store.set_values_rt(writes);
+}
+
+std::optional<PreparedPreset> PresetManager::prepare(const fs::path& path) const {
     std::ifstream f(path);
-    if (!f.is_open()) return false;
+    if (!f.is_open())
+        return std::nullopt;
 
     std::string content((std::istreambuf_iterator<char>(f)),
                          std::istreambuf_iterator<char>());
 
-    // Simple JSON parameter extraction
-    // Look for "parameters": { "name": value, ... }
+    PreparedPreset out;
+    out.path = path;
+    out.name = path.stem().string();
+
+    const auto all_params = store_.all_params();
+    auto clamp_to = [&](const ParamInfo& param, double value) {
+        return std::clamp(static_cast<float>(value), param.range.min, param.range.max);
+    };
+
+    // Strict JSON first: handles escaped parameter names and metadata. A file
+    // that is not valid JSON (hand-edited, truncated) falls back to the legacy
+    // key scan below so previously loadable files keep loading.
+    bool structured = false;
+    try {
+        auto doc = choc::json::parse(content);
+        if (doc.isObject() && doc.hasObjectMember("parameters")) {
+            auto params = doc["parameters"];
+            if (!params.isObject())
+                return std::nullopt;
+            structured = true;
+            out.schema = (doc.hasObjectMember("schema") && doc["schema"].isInt64())
+                             ? static_cast<int>(doc["schema"].getInt64())
+                             : (doc.hasObjectMember("schema") && doc["schema"].isInt32()
+                                    ? doc["schema"].getInt32()
+                                    : 1);
+            out.metadata = metadata_from_document(doc.getView());
+
+            std::vector<bool> seen(all_params.size(), false);
+            const auto count = params.size();
+            for (std::uint32_t i = 0; i < count; ++i) {
+                auto member = params.getObjectMemberAt(i);
+                const std::string key(member.name);
+                std::size_t index = all_params.size();
+                for (std::size_t k = 0; k < all_params.size(); ++k)
+                    if (all_params[k].name == key) {
+                        index = k;
+                        break;
+                    }
+                if (index == all_params.size()) {
+                    out.unknown_params.push_back(key);
+                    continue;
+                }
+                double number = 0.0;
+                if (!number_from_value(member.value, number))
+                    continue;
+                seen[index] = true;
+                out.writes.push_back({all_params[index].id, clamp_to(all_params[index], number)});
+            }
+            for (std::size_t k = 0; k < all_params.size(); ++k)
+                if (!seen[k])
+                    out.missing_params.push_back(all_params[k].name);
+        } else if (doc.isObject()) {
+            return std::nullopt;
+        }
+    } catch (...) {
+        structured = false;
+    }
+    if (structured)
+        return out;
+
+    // Legacy raw-key scan: look for "parameters": { "name": value, ... }.
+    out.writes.clear();
     auto params_pos = content.find("\"parameters\"");
-    if (params_pos == std::string::npos) return false;
+    if (params_pos == std::string::npos)
+        return std::nullopt;
 
     auto brace = content.find('{', params_pos);
-    if (brace == std::string::npos) return false;
+    if (brace == std::string::npos)
+        return std::nullopt;
 
-    // Parse each "name": value pair
-    auto all_params = store_.all_params();
     for (const auto& param : all_params) {
         auto key_pos = content.find("\"" + param.name + "\"", brace);
         if (key_pos == std::string::npos) continue;
@@ -248,7 +386,6 @@ bool PresetManager::load(const fs::path& path) {
         auto colon = content.find(':', key_pos);
         if (colon == std::string::npos) continue;
 
-        // Read the numeric value
         auto val_start = colon + 1;
         while (val_start < content.size() && content[val_start] == ' ') ++val_start;
 
@@ -260,22 +397,47 @@ bool PresetManager::load(const fs::path& path) {
             std::size_t parsed = 0;
             float value = std::stof(val_str, &parsed);
             if (!has_only_trailing_space(val_str, parsed)) continue;
-            store_.set_value(param.id, value);
+            out.writes.push_back({param.id, std::isfinite(value) ? clamp_to(param, value) : value});
         } catch (...) {
             continue;
         }
     }
+    return out;
+}
 
-    // Extract preset name from path
-    current_name_ = path.stem().string();
+bool PresetManager::apply(const PreparedPreset& prepared) {
+    for (const auto& write : prepared.writes)
+        store_.set_value(write.id, write.value);
+
+    current_name_ = prepared.name;
     unsaved_changes_ = false;
 
     PresetInfo info;
     info.name = current_name_;
-    info.path = path;
+    info.path = prepared.path;
+    info.author = prepared.metadata.author;
+    info.description = prepared.metadata.description;
+    info.tags = prepared.metadata.tags;
     if (on_preset_loaded) on_preset_loaded(info);
-
     return true;
+}
+
+std::optional<std::vector<ParamSetting>> PresetManager::read_values(const fs::path& path) const {
+    auto prepared = prepare(path);
+    if (!prepared)
+        return std::nullopt;
+    std::vector<ParamSetting> values;
+    values.reserve(prepared->writes.size());
+    for (const auto& write : prepared->writes)
+        values.push_back({write.id, write.value});
+    return values;
+}
+
+bool PresetManager::load(const fs::path& path) {
+    auto prepared = prepare(path);
+    if (!prepared)
+        return false;
+    return apply(*prepared);
 }
 
 bool PresetManager::delete_preset(const PresetInfo& preset) {
@@ -335,6 +497,36 @@ void PresetManager::scan_directory(const fs::path& dir, bool is_factory,
         info.name = entry.path().stem().string();
         info.path = entry.path();
         info.is_factory = is_factory;
+
+        // Author metadata is parsed once per (path, mtime, size); an unchanged
+        // file is not re-read on later listings.
+        {
+            std::error_code ec;
+            const auto mtime = fs::last_write_time(entry.path(), ec);
+            const auto size = ec ? std::uintmax_t{0} : fs::file_size(entry.path(), ec);
+            const std::string cache_key = entry.path().string();
+            auto it = metadata_cache_.find(cache_key);
+            if (it == metadata_cache_.end() || it->second.mtime != mtime ||
+                it->second.size != size) {
+                MetadataCacheEntry fresh;
+                fresh.mtime = mtime;
+                fresh.size = size;
+                ++metadata_parse_count_;
+                std::ifstream in(entry.path());
+                if (in.is_open()) {
+                    std::string body((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+                    try {
+                        fresh.metadata = metadata_from_document(choc::json::parse(body).getView());
+                    } catch (...) {
+                    }
+                }
+                it = metadata_cache_.insert_or_assign(cache_key, std::move(fresh)).first;
+            }
+            info.author = it->second.metadata.author;
+            info.description = it->second.metadata.description;
+            info.tags = it->second.metadata.tags;
+        }
 
         // Compute relative folder path
         auto rel = fs::relative(entry.path().parent_path(), dir);

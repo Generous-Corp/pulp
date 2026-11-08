@@ -221,7 +221,7 @@ format_limitations:
     - "The InsertOrAudioSuite role is declared, but no AAX_IHostProcessor is registered, so the dedicated AudioSuite offline-render path is not implemented. Implementing it is out of scope."
   auv3:
     - "Presets are advertised on both halves: factoryPresets serves the plugin bundle's Presets folder, and supportsUserPresets is YES with setCurrentPreset: restoring a negative preset number through AUAudioUnit's own preset store via presetStateFor: + fullState. Pulp owns no writable preset location of its own, so user presets live wherever the base class puts them. Neither half has been verified against a live host."
-    - "Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet."
+    - "Every descriptor-declared bus with channels (up to eight per direction) is exposed as a host bus and routed through ProcessBuffers: bus 0 and the sidechain as before, further inputs as auxiliary inputs, further outputs as auxiliary outputs rendered from one process() call per time stamp. Bus formats are negotiated through shouldChangeToFormat:forBus: (float, non-interleaved, mono or stereo by default, or the descriptor's supported_bus_layouts). This is covered by in-process tests only and has not been verified against a live multi-output host."
     - "iOS jetsam pressure not modeled — heavy V8 / WebView workloads in the AUv3 process risk termination at ~50 MB."
   wam_v2:
     - "Browser origin sandbox only; no Pulp-side capability manifest yet (security plan v4 §4.5)."
@@ -282,8 +282,9 @@ audio_io:
     notes: >-
       Output and input capture both work; an AlsaDevice is one direction, so
       duplex means opening one input and one output device and routing between
-      them. Real device-metadata enumeration remains pending: the sample-rate
-      list is hardcoded.
+      them. Sample rates, channel counts and buffer sizes are read from the
+      driver; a device that cannot be opened for probing reports a
+      conservative default list.
   jack:
     status: experimental
     platform: linux
@@ -1136,7 +1137,7 @@ limitations:
     - text: "Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation."
     - text: "Controller and per-note expression input is host-mediated: CC, pitch bend, and channel aftertouch arrive when the host honors IMidiMapping hidden parameters, and per-note tuning/pressure/timbre arrive for MPE-enabled plug-ins through INoteExpressionController. There is no separate raw poly-pressure event route."
   formats.auv3:
-    - text: "Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet."
+    - text: "MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch."
     - text: "iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge."
   formats.lv2:
     - text: "Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process()."
@@ -1144,14 +1145,12 @@ limitations:
     - text: "Full-duplex render/capture is not exposed as one synchronized WASAPI device: a WasapiDevice wraps either one render endpoint or one capture endpoint, so callers that need synchronized input/output must open and synchronize two devices."
     # Hotplug: IMMNotificationClient device-change callbacks are wired;
     # no stale stub limitation remains.
-  audio_io.alsa:
-    - text: "Hardcoded sample-rate list; no real enumeration."
   audio_io.jack:
     - text: "Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending."
   midi_io.coremidi:
     - text: "MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback."
   midi_io.win32_midi:
-    - text: "Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport and no hotplug; SysEx input is routed via MIM_LONGDATA. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK."
+    - text: "Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport. Port changes are detected by polling once a second rather than by an operating-system notification, so a plug or unplug is reported up to a second late. SysEx input is routed via MIM_LONGDATA and long messages are joined across receive buffers. This path is compile-checked in CI and has not been exercised against Windows MIDI hardware. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK."
   midi_io.alsa_midi:
     - text: "Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually."
   platform_maturity.accessibility.windows:
