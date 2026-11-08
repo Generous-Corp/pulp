@@ -1021,6 +1021,11 @@ def exercise_evolution(canonical: dict) -> int:
             json.loads((ROOT / surface.SURFACE_SNAPSHOT).read_text()),
         )
     ])
+    compact_history = manifest.render_history(history)
+    assert compact_history.count("\n") == 1
+    assert json.loads(compact_history) == history
+    checks += 1
+
     bypass = copy.deepcopy(canonical)
     bypass["capabilities"][0]["scheduling"] = "edited-source-and-snapshot"
     refresh_digest(bypass["capabilities"][0])

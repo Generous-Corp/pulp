@@ -1850,3 +1850,10 @@ an existing renderer or example, changing a widget label) adds no public header
 and changes no installed capability key. Run
 `python3 tools/docs_generate.py generate` so the generated limitations block
 follows the matrix, and do not touch the capability manifest for it.
+## Compact contract-history serialization
+
+`tools/agent-capabilities/contract-history.json` stores complete append-only
+manifest and surface entries. Preserve every entry and digest, but render the
+machine-validated history with compact JSON separators so the GitHub blob stays
+below its 100 MiB limit. A formatting-only compaction must round-trip through
+`json.loads` and must not be mistaken for deleting provenance.

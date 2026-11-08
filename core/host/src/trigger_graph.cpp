@@ -691,8 +691,7 @@ TriggerGraphResult SignalGraph::try_reset_events() noexcept {
     return TriggerGraphResult::Accepted;
 }
 
-HostEventResult SignalGraph::begin_host_event_block(std::uint64_t epoch,
-                                                    std::uint64_t sample_start,
+HostEventResult SignalGraph::begin_host_event_block(std::uint64_t epoch, std::uint64_t sample_start,
                                                     std::size_t frames) noexcept {
     if (!trigger_controller_)
         return HostEventResult::Unbound;
@@ -767,8 +766,8 @@ HostEventResult SignalGraph::reset_host_event_ingress(std::uint64_t epoch) noexc
     return HostEventResult::Accepted;
 }
 
-HostEventResult SignalGraph::host_event_counters(
-    HostEventIngressCounters& counters) const noexcept {
+HostEventResult
+SignalGraph::host_event_counters(HostEventIngressCounters& counters) const noexcept {
     if (!trigger_controller_)
         return HostEventResult::Unbound;
     detail::Gate gate(trigger_controller_->gate);
@@ -795,8 +794,7 @@ std::span<const HostEventRecord> SignalGraph::host_event_trace() const noexcept 
     return {trigger_controller_->host_trace.data(), trigger_controller_->host_trace_size};
 }
 
-HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph,
-                                                  std::uint64_t sample_start,
+HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph, std::uint64_t sample_start,
                                                   std::size_t frames) noexcept {
     if (!trigger_controller_ || !trigger_controller_->host_ingress.active())
         return HostEventResult::Accepted;
