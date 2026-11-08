@@ -433,7 +433,7 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
     schema_path = root / MANIFEST_SCHEMA_FILE
     if not schema_path.is_file():
         return [f"manifest schema is missing: {schema_path}"]
-    schema_document = json.loads(schema_path.read_text())
+    schema_document = json.loads(schema_path.read_text(encoding="utf-8"))
     problems = json_schema_lite.validate(doc, schema_document)
     if not isinstance(doc, dict):
         return problems
@@ -473,7 +473,7 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
     if forge_path.exists():
         forge_keys = {
             row.get("key")
-            for row in json.loads(forge_path.read_text()).get("nodes", [])
+            for row in json.loads(forge_path.read_text(encoding="utf-8")).get("nodes", [])
         }
 
     seen: set[str] = set()
@@ -743,7 +743,7 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
             problems.extend(
                 json_schema_lite.validate(
                     current_surface,
-                    json.loads(surface_schema_path.read_text()),
+                    json.loads(surface_schema_path.read_text(encoding="utf-8")),
                     "surface",
                 )
             )
@@ -914,7 +914,7 @@ def main() -> int:
         if problems:
             return _print_problems(problems)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(surface.rendered(baseline))
+        path.write_text(surface.rendered(baseline), encoding="utf-8")
         print(
             f"agent-capabilities: bootstrapped frozen baseline with "
             f"{baseline['frozen_count']} headers"
@@ -926,9 +926,9 @@ def main() -> int:
 
     if args.validate:
         try:
-            fixture = json.loads(pathlib.Path(args.validate).read_text())
+            fixture = json.loads(pathlib.Path(args.validate).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
-            return _print_problems([f"could not read fixture: {error}"])
+        return _print_problems([f"could not read fixture: {error}"])
         return _print_problems(validate(fixture, root), success_message=None)
 
     try:
@@ -1019,11 +1019,11 @@ def main() -> int:
                 f"pending interrupted write transaction: {WRITE_TRANSACTION_FILE}; "
                 "rerun --write to recover it"
             )
-        if not snapshot.exists() or snapshot.read_text() != output:
+        if not snapshot.exists() or snapshot.read_text(encoding="utf-8") != output:
             stale.append(f"{snapshot} differs from curated exports")
-        if not surface_snapshot.exists() or surface_snapshot.read_text() != surface_output:
+        if not surface_snapshot.exists() or surface_snapshot.read_text(encoding="utf-8") != surface_output:
             stale.append(f"{surface.SURFACE_SNAPSHOT} differs from public headers")
-        if not fixture.exists() or fixture.read_text() != compile_fixture():
+        if not fixture.exists() or fixture.read_text(encoding="utf-8") != compile_fixture():
             stale.append(f"{COMPILE_FIXTURE} differs from typed bindings")
         history = _load_optional_json(history_path)
         base_ref = os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
@@ -1146,7 +1146,7 @@ def _load_optional_json(path: pathlib.Path) -> Any:
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         return {"_invalid": str(error)}
 
