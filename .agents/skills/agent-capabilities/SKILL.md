@@ -78,7 +78,7 @@ version-at-land assignment". A mixed-base hand bump stays pending and records
 nothing, so it is unaffected.
 
 **`main` is a mixed base right now (2026-11-08)**: `manifest_revision` 91 is
-pending, `inventory_version` 205 is assigned, and the history's last entry is
+pending, `inventory_version` is assigned (209 at the time of writing; branches still hand-bump it), and the history's last entry is
 still at inventory 200. Until the next `chore: bump versions` runs
 `--assign-pending` (which records the state), a branch that touches a public
 header still needs a hand bump of `SURFACE_INVENTORY_VERSION`: re-derive, and
