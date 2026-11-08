@@ -218,6 +218,10 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
     bool active() const noexcept {
         return active_;
     }
+    /// Frame count of the window fixed by the most recent begin_block().
+    std::size_t frames() const noexcept {
+        return frames_;
+    }
 
   private:
     static constexpr std::size_t kMaxFrames = 4096;
