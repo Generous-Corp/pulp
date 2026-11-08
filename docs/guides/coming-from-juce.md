@@ -143,9 +143,11 @@ your callback fires after `this` was destroyed.
 
 If your JUCE project has a MIDI-learn layer that maps incoming controller
 messages to `AudioProcessorValueTreeState` parameters, port that to
-`pulp::state::MidiParameterMap`. It is a plugin-owned `(channel, cc) ->
-ParamID` map with an `arm_learn()` mode, so the next incoming CC can bind to the
-target parameter and subsequent CCs write the parameter in the normalized domain.
+`pulp::state::MidiLearnEngine` (see [MIDI Learn](midi-learn.md)). It maps CC,
+14-bit CC, NRPN/RPN, pitch bend and pressure to parameters, learns a binding
+from a burst of messages, and writes the parameter in the normalized domain from
+the audio thread. The older `MidiParameterMap` (a plugin-owned `(channel, cc) ->
+ParamID` map with `arm_learn()`) is superseded but still available.
 
 That covers parameter learn. It is separate from "learn the next MIDI note and
 store it as a setting" workflows, which should use a small note-listener helper

@@ -65,6 +65,11 @@ struct ControlGrantRequest {
     ControlRegistrationId registration_id;
     std::vector<InspectorCapability> capabilities;
     std::chrono::milliseconds ttl = std::chrono::minutes(15);
+    /// Exact vendor operation ids a single-operation grant was consented for.
+    /// Every vendor operation of one tier shares that tier's capability, so a
+    /// non-empty list confines the grant's vendor-tier capabilities to these
+    /// ids. Empty means a profile grant, which covers its tiers as a whole.
+    std::vector<std::string> vendor_operations;
 };
 
 enum class ControlGrantSelectorKind : std::uint8_t {
@@ -93,9 +98,16 @@ struct ControlGrant {
     std::string instance_id;
     std::string publication_id;
     std::vector<InspectorCapability> capabilities;
+    /// See ControlGrantRequest::vendor_operations.
+    std::vector<std::string> vendor_operations;
     std::string consent_decision_id;
     std::chrono::steady_clock::time_point expires_at;
     bool revoked = false;
+
+    /// True unless `capability` is a vendor tier and this grant is confined
+    /// to vendor operations that do not include `operation_id`.
+    bool permits_vendor_operation(std::string_view operation_id,
+                                  InspectorCapability capability) const;
 };
 
 struct ControlGrantResult {

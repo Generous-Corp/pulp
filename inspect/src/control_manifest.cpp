@@ -1,4 +1,5 @@
 #include <pulp/inspect/control_manifest.hpp>
+#include <pulp/inspect/control_vendor_operations.hpp>
 
 #include <pulp/runtime/crypto.hpp>
 
@@ -207,7 +208,7 @@ static_assert(control_operations_are_unique_and_complete(),
 #undef PULP_PRODUCED_ARTIFACT_OPERATION
 #undef PULP_SCHEMA_EMPTY
 
-constexpr std::array<std::string_view, 12> kManifestFields{
+constexpr std::array<std::string_view, 13> kManifestFields{
     "schema",
     "schema_version",
     "profile",
@@ -220,6 +221,7 @@ constexpr std::array<std::string_view, 12> kManifestFields{
     "unsafe_runtime_eval_acknowledged",
     "permission_terms",
     "capabilities",
+    "vendor_operations",
 };
 
 std::string json_escape(std::string_view value) {
@@ -440,6 +442,8 @@ std::string_view control_manifest_error_id(ControlManifestError error) {
         return "manifest.endpoint-mismatch";
     case ControlManifestError::UnsafeAcknowledgementMismatch:
         return "manifest.unsafe-acknowledgement-mismatch";
+    case ControlManifestError::InvalidVendorOperations:
+        return "manifest.invalid-vendor-operations";
     }
     return "manifest.parse";
 }
@@ -546,6 +550,30 @@ ControlManifestValidation validate_control_manifest_detailed(const ControlManife
                         std::string(capability_contract_id(capability)) +
                             " requires dev.pulp.session/control@1");
         }
+    }
+    std::shared_ptr<const ControlVendorOperationTable> vendor_table;
+    if (!manifest.vendor_operations.empty()) {
+        ControlVendorOperationsDiagnostics vendor_diagnostics;
+        vendor_table = parse_control_vendor_operations(manifest.vendor_operations,
+                                                       manifest.bundle_id, &vendor_diagnostics);
+        if (!vendor_table)
+            return fail(ControlManifestError::InvalidVendorOperations, vendor_diagnostics.error);
+        for (const auto& operation : vendor_table->operations()) {
+            const auto capability = control_vendor_tier_capability(operation.tier);
+            if (!contains_capability(manifest, capability))
+                return fail(ControlManifestError::MissingCapabilityDependency,
+                            operation.id + " requires " +
+                                std::string(capability_contract_id(capability)));
+        }
+    }
+    // A tier capability is authority only for declared operations, so a tier
+    // with nothing behind it is a malformed declaration rather than spare room.
+    for (const auto capability : manifest.capabilities) {
+        const auto tier = control_vendor_tier_for_capability(capability);
+        if (tier && (!vendor_table || !vendor_table->declares_tier(*tier)))
+            return fail(ControlManifestError::InvalidCapabilitySet,
+                        std::string(capability_contract_id(capability)) +
+                            " is declared without a vendor operation of that tier");
     }
     if (manifest.unsafe_runtime_eval_acknowledged != contains_eval) {
         return fail(ControlManifestError::UnsafeAcknowledgementMismatch,
@@ -682,6 +710,15 @@ std::optional<ControlManifest> parse_control_manifest(std::string_view json,
             }
             manifest.capabilities.push_back(*capability);
         }
+        if (root.hasObjectMember("vendor_operations")) {
+            const auto vendor_operations = root["vendor_operations"];
+            if (!vendor_operations.isString() || vendor_operations.getString().empty()) {
+                result.code = ControlManifestError::MissingOrInvalidField;
+                result.error = "vendor_operations must be a non-empty string when present";
+                return std::nullopt;
+            }
+            manifest.vendor_operations = std::string(vendor_operations.getString());
+        }
         const auto validation = validate_control_manifest_detailed(manifest);
         if (!validation.valid) {
             result.code = validation.code;
@@ -726,7 +763,12 @@ std::string serialize_control_manifest(const ControlManifest& manifest) {
             out << ", ";
         out << "\"" << capability_contract_id(capabilities[index]) << "\"";
     }
-    out << "]\n}\n";
+    out << "]";
+    // Emitted only when declared, so every manifest without vendor operations
+    // keeps its existing canonical bytes and digest.
+    if (!manifest.vendor_operations.empty())
+        out << ",\n  \"vendor_operations\": \"" << json_escape(manifest.vendor_operations) << "\"";
+    out << "\n}\n";
     return out.str();
 }
 

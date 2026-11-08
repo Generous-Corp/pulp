@@ -1,0 +1,50 @@
+{
+  "id": "control-vendor-operations",
+  "title": "Vendor-namespaced control operations reuse shared control files without a sequencer surface",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "9572ec76-6efe-48d3-87e7-2690ebdc8a29",
+  "owned_paths": [
+    "tools/cli/cmd_control.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "docs/status/sequencer-exposure/rows/control-vendor-operations.json"
+  ],
+  "evidence": [
+    {
+      "path": "tools/cli/cmd_control.cpp",
+      "needles": [
+        "parse_control_vendor_operation_id(operation)",
+        "validate_control_json_schema(params, descriptor->input_schema_json"
+      ]
+    },
+    {
+      "path": "inspect/src/control_standalone_host.cpp",
+      "needles": [
+        "declared_vendor_handlers",
+        "sequencer_channel_factory()"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The vendor operation headers are inspect control headers, not sequencer SDK surface. No sequencer header, target, or symbol changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The CLI change lets the generic live-control verb call a vendor id the exact instance declares. pulp seq and the timeline document path are unchanged."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline MCP tool, schema, or handler changes. The new MCP tool is a live-control vendor call."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Vendor operations are product-declared operations, not sequencer operations. The Standalone host keeps its sequencer state and transport executors as they were and only adds a vendor dispatch branch."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time agent capability is added or changed."
+    }
+  }
+}

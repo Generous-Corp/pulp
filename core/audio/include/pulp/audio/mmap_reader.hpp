@@ -29,6 +29,13 @@ class MemoryMappedAudioReader {
     /// Open and memory-map an audio file. Returns false on failure.
     bool open(std::string_view path);
     bool open(std::string_view path, std::size_t maximum_mapped_bytes);
+    /// With `ranged_only`, a compressed stream that cannot be seeked by frame
+    /// (a FLAC or Ogg Vorbis stream whose header gives no length) is not
+    /// decoded at open. The reader then reports supports_ranged_read() false
+    /// and the header's frame count, which is zero for such a stream, so a
+    /// caller that wants ranged reads can refuse it without paying for a
+    /// whole-file decode. Without it, such a stream is decoded once at open.
+    bool open(std::string_view path, std::size_t maximum_mapped_bytes, bool ranged_only);
 
     /// Close the mapped file.
     void close();
