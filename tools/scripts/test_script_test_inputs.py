@@ -203,6 +203,14 @@ class ProfileIndependenceTests(unittest.TestCase):
         self.assertIn("older than the source tree", proc.stderr)
         self.assertEqual(out.read_bytes(), b"sentinel\n")
 
+    def test_fresh_build_newer_than_source_may_write(self) -> None:
+        self._profile_cache(self.repo.build)
+        source = self.repo.root / "tools/scripts/test_alpha.py"
+        old = source.stat().st_mtime - 10
+        os.utime(source, (old, old))
+        reasons = sti.outside_gate_profile_build(self.repo.build, self.repo.inventory(), self.repo.root)
+        self.assertFalse([r for r in reasons if "STALE_BUILD" in r])
+
     def test_inline_python_skip_command_is_not_an_inventory_entry(self) -> None:
         for suffix, command in (
             ("direct", ["/usr/bin/python3", "-c", "sys.exit(77)"]),

@@ -39,6 +39,9 @@ from agent_capability_history import (
     history_problems,
     pending_counters,
     protected_base_problems,
+    HistoryFormatError,
+    rendered_history,
+    stored_history_problems,
     updated_history_entries,
 )
 from agent_capability_registry import (
@@ -54,7 +57,7 @@ from agent_capability_transaction import recover_transaction, write_transaction
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
 MANIFEST_REVISION = 91
-SURFACE_INVENTORY_VERSION = 205
+SURFACE_INVENTORY_VERSION = 206
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
 )
@@ -433,7 +436,7 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
     schema_path = root / MANIFEST_SCHEMA_FILE
     if not schema_path.is_file():
         return [f"manifest schema is missing: {schema_path}"]
-    schema_document = json.loads(schema_path.read_text(encoding="utf-8"))
+    schema_document = json.loads(schema_path.read_text())
     problems = json_schema_lite.validate(doc, schema_document)
     if not isinstance(doc, dict):
         return problems
@@ -473,7 +476,7 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
     if forge_path.exists():
         forge_keys = {
             row.get("key")
-            for row in json.loads(forge_path.read_text(encoding="utf-8")).get("nodes", [])
+            for row in json.loads(forge_path.read_text()).get("nodes", [])
         }
 
     seen: set[str] = set()
@@ -743,7 +746,7 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
             problems.extend(
                 json_schema_lite.validate(
                     current_surface,
-                    json.loads(surface_schema_path.read_text(encoding="utf-8")),
+                    json.loads(surface_schema_path.read_text()),
                     "surface",
                 )
             )
@@ -769,17 +772,6 @@ def validate(doc: Any, root: pathlib.Path) -> list[str]:
 
 def rendered(root: pathlib.Path | None = None) -> str:
     return json.dumps(document(root), indent=2, ensure_ascii=False) + "\n"
-
-
-def render_history(history: dict[str, Any]) -> str:
-    """Render append-only history without repeating indentation overhead.
-
-    Each entry carries a complete manifest and public-surface snapshot. The
-    history is machine-validated JSON, and compact rendering keeps the
-    generated blob below GitHub's 100 MiB object limit without dropping any
-    provenance or changing its parsed representation.
-    """
-    return json.dumps(history, ensure_ascii=False, separators=(",", ":")) + "\n"
 
 
 def _counter_problems(
@@ -914,7 +906,7 @@ def main() -> int:
         if problems:
             return _print_problems(problems)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(surface.rendered(baseline), encoding="utf-8")
+        path.write_text(surface.rendered(baseline))
         print(
             f"agent-capabilities: bootstrapped frozen baseline with "
             f"{baseline['frozen_count']} headers"
@@ -926,9 +918,9 @@ def main() -> int:
 
     if args.validate:
         try:
-            fixture = json.loads(pathlib.Path(args.validate).read_text(encoding="utf-8"))
+            fixture = json.loads(pathlib.Path(args.validate).read_text())
         except (OSError, json.JSONDecodeError) as error:
-        return _print_problems([f"could not read fixture: {error}"])
+            return _print_problems([f"could not read fixture: {error}"])
         return _print_problems(validate(fixture, root), success_message=None)
 
     try:
@@ -970,21 +962,30 @@ def main() -> int:
             if problems:
                 return _print_problems(problems)
         history = _load_optional_json(history_path)
-        entries = updated_history_entries(
-            history,
-            previous,
-            previous_surface,
-            doc,
-            surface_document,
-            initial_bootstrap=initial_bootstrap,
-            migrate_unpublished=args.migrate_unpublished_v1,
-        )
-        if not args.migrate_unpublished_v1:
-            problems.extend(_counter_problems(
-                history, entries, previous, previous_surface, doc, surface_document))
-        if problems:
-            return _print_problems(problems)
-        history = history_document(entries)
+        # A bootstrap or unpublished migration replaces the history outright;
+        # any other write must be able to read the history it appends to.
+        if not (initial_bootstrap or args.migrate_unpublished_v1):
+            problems.extend(stored_history_problems(history))
+            if problems:
+                return _print_problems(problems)
+        try:
+            entries = updated_history_entries(
+                history,
+                previous,
+                previous_surface,
+                doc,
+                surface_document,
+                initial_bootstrap=initial_bootstrap,
+                migrate_unpublished=args.migrate_unpublished_v1,
+            )
+            if not args.migrate_unpublished_v1:
+                problems.extend(_counter_problems(
+                    history, entries, previous, previous_surface, doc, surface_document))
+            if problems:
+                return _print_problems(problems)
+            history = history_document(entries)
+        except HistoryFormatError as error:
+            return _print_problems([str(error)])
         problems = history_problems(history, doc, surface_document)
         problems.extend(
             protected_base_problems(
@@ -997,7 +998,7 @@ def main() -> int:
             {
                 snapshot: output,
                 surface_snapshot: surface_output,
-                history_path: render_history(history),
+                history_path: rendered_history(history),
                 fixture: compile_fixture(),
             },
             transaction_path,
@@ -1019,11 +1020,11 @@ def main() -> int:
                 f"pending interrupted write transaction: {WRITE_TRANSACTION_FILE}; "
                 "rerun --write to recover it"
             )
-        if not snapshot.exists() or snapshot.read_text(encoding="utf-8") != output:
+        if not snapshot.exists() or snapshot.read_text() != output:
             stale.append(f"{snapshot} differs from curated exports")
-        if not surface_snapshot.exists() or surface_snapshot.read_text(encoding="utf-8") != surface_output:
+        if not surface_snapshot.exists() or surface_snapshot.read_text() != surface_output:
             stale.append(f"{surface.SURFACE_SNAPSHOT} differs from public headers")
-        if not fixture.exists() or fixture.read_text(encoding="utf-8") != compile_fixture():
+        if not fixture.exists() or fixture.read_text() != compile_fixture():
             stale.append(f"{COMPILE_FIXTURE} differs from typed bindings")
         history = _load_optional_json(history_path)
         base_ref = os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
@@ -1032,6 +1033,8 @@ def main() -> int:
             if (root / ".git").exists() else None
         )
         history_issues = history_problems(history, doc, surface_document)
+        if not history_issues:
+            history_issues.extend(history_text_problems(history_path, history))
         if isinstance(history, dict):
             history_issues.extend(
                 protected_base_problems(
@@ -1147,8 +1150,24 @@ def _load_optional_json(path: pathlib.Path) -> Any:
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        return {"_invalid": str(error)}
+    except (json.JSONDecodeError, RecursionError) as error:
+        return {"_invalid": str(error) or type(error).__name__}
+
+
+def history_text_problems(path: pathlib.Path, history: Any) -> list[str]:
+    """The history file must be byte-for-byte its own rendering.
+
+    Parsing alone cannot see a duplicated key or reformatted whitespace that
+    reads back as the honest document; only the text comparison does."""
+    if not path.exists() or not isinstance(history, dict):
+        return []
+    try:
+        expected = rendered_history(history)
+    except (KeyError, TypeError) as error:
+        return [f"{HISTORY_FILE} cannot be rendered: {error}"]
+    if path.read_text(encoding="utf-8") != expected:
+        return [f"{HISTORY_FILE} is not in its rendered form; rerun --write"]
+    return []
 
 
 
