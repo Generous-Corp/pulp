@@ -64,6 +64,8 @@
     "pulp_audio_read_bundle": "Sub-tool of `pulp audio` — audio service surface, no top-level CLI peer",
     "pulp_audio_render": "Sub-tool of `pulp audio` — offline render RPC, no top-level CLI peer",
     "pulp_audio_scope": "Sub-tool of `pulp audio` — scope JSON/PNG surface, no top-level CLI peer",
+    "pulp_audio_spectrogram": "Sub-tool of `pulp audio` — display-only spectrogram PNG + pulp.audio.image.v1 sidecar mirroring `pulp audio spectrogram`; `audio` is a parent command, so no top-level CLI peer",
+    "pulp_audio_waveform": "Sub-tool of `pulp audio` — display-only waveform PNG + pulp.audio.image.v1 sidecar mirroring `pulp audio waveform`; `audio` is a parent command, so no top-level CLI peer",
     "pulp_compat": "Introspection tool — reports pulp-mcp / MCP protocol / project SDK versions + per-tool min_sdk floors so clients can pre-filter (#2070). No CLI peer because `pulp doctor --versions` already covers the human surface.",
     "pulp_content_install": "Sub-tool of `pulp content` — explicit content-pack install RPC, no top-level CLI peer",
     "pulp_content_list": "Sub-tool of `pulp content` — content-pack inventory RPC, no top-level CLI peer",
