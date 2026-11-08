@@ -1741,6 +1741,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-graph-control-event-probe": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_graph_control_event_probe.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-graph-identity": {
    "data": "none",
    "inputs": [],
@@ -3123,6 +3135,7 @@
   "pulp-test-gpu-wavenet-descriptor",
   "pulp-test-gpu-wavenet-realtime-node",
   "pulp-test-gpu-wavenet-session",
+  "pulp-test-graph-control-event-probe",
   "pulp-test-graph-executor-routing",
   "pulp-test-graph-identity",
   "pulp-test-graph-plugin-resolution",
