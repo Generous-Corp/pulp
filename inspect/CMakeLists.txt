@@ -24,6 +24,7 @@ add_library(pulp-inspect-protocol
     src/control_protocol.cpp
     src/control_protocol_codec.cpp
     src/control_protocol_fields.cpp
+    src/control_vendor_operations.cpp
     src/main_thread_rpc.cpp
     src/protocol.cpp
     src/session.cpp
@@ -137,6 +138,7 @@ add_library(pulp-inspect-runtime
     src/control_main_thread_executor.cpp
     src/control_sequencer_transport_executor.cpp
     src/control_trace_session_executor.cpp
+    src/control_vendor_operation_executor.cpp
     src/trace_inspector.cpp)
 add_library(pulp::inspect-runtime ALIAS pulp-inspect-runtime)
 target_include_directories(pulp-inspect-runtime
