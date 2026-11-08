@@ -137,18 +137,18 @@
       "name": "stb_vorbis",
       "in_tree": true,
       "upstream_repo": "https://github.com/nothings/stb.git",
-      "upstream_ref": "v1.22 (file header; the vendored copy predates this record, so no upstream commit is pinned)",
+      "upstream_ref": "v1.22",
       "files": [
         {
           "path": "external/dr_libs/stb_vorbis.c",
           "upstream_path": "stb_vorbis.c",
-          "vendored_sha256_before_patches": "4c7cb2ff1f7011e9d67950446b7eb9ca044f2e464d76bfbb0b84dd2e23e65636"
+          "upstream_sha256": "4c7cb2ff1f7011e9d67950446b7eb9ca044f2e464d76bfbb0b84dd2e23e65636"
         }
       ],
       "patches": [
         "tools/deps/patches/dr_libs/0002-stb_vorbis-reject-negative-header-string-lengths.patch"
       ],
-      "note": "The patch directory is shared with dr_libs because the file lives beside those headers. start_decoder's comment-header fields (vendor length, comment count, each comment length) are 32-bit values read from the file; the patch rejects a negative value and anything above a ceiling (1 MiB per string, 65536 comments), because (len + 1) or count * sizeof(char*) near INT_MAX wraps negative and defeats setup_malloc's arena bound."
+      "note": "The patch directory is shared with dr_libs because the file lives beside those headers. start_decoder's comment-header fields (vendor length, comment count, each comment length) are 32-bit values read from the file; the patch rejects a negative value and anything above a ceiling (1 MiB per string, 65536 comments), because (len + 1) or count * sizeof(char*) near INT_MAX wraps negative and defeats setup_malloc's arena bound. upstream_sha256 is the vendored file with every recorded patch reversed; the vendored copy predates this record, so no upstream commit is pinned."
     }
   ]
 }
