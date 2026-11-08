@@ -98,6 +98,11 @@ Maintain three related artifacts:
 - `tools/agent-capabilities/contract-history.json` is the repository-only,
   append-only evolution history checked against the protected Git tip. Shallow
   GitHub Actions checkouts fetch the immutable event base SHA when necessary.
+  It stores each repeated object once, keyed by its SHA-256 digest; `entries`
+  lists entry digests, not material. Read entries with
+  `agent_capability_history.history_entries(document)`, which expands them in
+  full. Never edit the file by hand: `--check` re-encodes it and refuses any
+  difference.
 
 The consumer manifest, its schema, and the handoff schema install into the SDK.
 Official release packaging stamps `agent-capability-handoff.json` only after
@@ -213,6 +218,15 @@ For a new public header or symbol:
 4. Leave `SURFACE_INVENTORY_VERSION` and `MANIFEST_REVISION` at the base
    value; the version-at-land bump assigns them (see the top of this skill).
 
+Worked example (2026-11-07): extending `pulp/signal/spectrogram.hpp`
+(FrequencyAxis double overloads) changed the bytes of a header the ledger held
+as frozen `legacy_unreviewed`. The fix was step 3, not a fingerprint refresh:
+add an `infrastructure` row for it in `agent_capability_registry.py` with the
+measured digest and a rationale, pick a `SURFACE_INVENTORY_VERSION` no open PR
+claims (the loop below found 200-202 taken, so 203), then `--write`. Plain
+`--write` keeps refusing with "public header fingerprint changed" until the
+classification exists; that refusal is the gate working, not a tool fault.
+
 For overloaded C++ free functions, keep the public `qualified_name` as the real
 API name and give each overload a distinct binding role. Use private generator
 metadata for an explicit `static_cast` address expression so the generated
@@ -321,9 +335,9 @@ For an existing capability change:
   fingerprint and a durable rationale, and leave the baseline untouched. The
   reviewed branch is consulted ahead of the baseline, so the stale baseline
   entry is simply no longer read; dozens of headers already sit in both.
-- `--write` appends a full snapshot to
-  `tools/agent-capabilities/contract-history.json` (tens of thousands of lines)
-  only when the change moves `MANIFEST_REVISION` or `SURFACE_INVENTORY_VERSION`.
+- `--write` appends a snapshot to
+  `tools/agent-capabilities/contract-history.json` (only the changed objects,
+  typically a few kilobytes) only when the change moves `MANIFEST_REVISION` or `SURFACE_INVENTORY_VERSION`.
   The snapshot is the previous published state, so a refresh that leaves both
   counters alone (a catalog binding's `header_fingerprint`) appends nothing,
   and the next counter move records the state it started from. `--check` never
@@ -687,9 +701,10 @@ deletion-free. Compare entry counts:
 ```bash
 python3 -c "
 import json,subprocess
-c=json.load(open('tools/agent-capabilities/contract-history.json'))['entries']
-b=json.loads(subprocess.run(['git','show','origin/main:tools/agent-capabilities/contract-history.json'],
-                            capture_output=True,text=True,check=True).stdout)['entries']
+import sys; sys.path.insert(0,'tools/scripts'); from agent_capability_history import history_entries
+c=history_entries(json.load(open('tools/agent-capabilities/contract-history.json')))
+b=history_entries(json.loads(subprocess.run(['git','show','origin/main:tools/agent-capabilities/contract-history.json'],
+                            capture_output=True,text=True,check=True).stdout))
 print('delta', len(c)-len(b), 'prefix-identical', c[:len(b)]==b)"
 ```
 
@@ -743,7 +758,7 @@ python3 tools/scripts/agent_capability_manifest.py --write
 
 ### Dropping `contract-history.json` is safe for a NEW capability, not for a changed one
 
-Dropping the ~18k-line history snapshot keeps a capability PR reviewable, and it
+Dropping the history change keeps a capability PR reviewable, and it
 is correct when you are only *introducing* a capability. It is **wrong** on a
 change that moves an existing capability's `contract_version`: `--check` reads
 the history as its new-capability oracle, so without an entry the capability
@@ -884,9 +899,8 @@ same mismatch with the old digest, which reads as "regeneration is broken"
 rather than "one more literal to edit". Grep the old digest across
 `tools/` and `docs/` and replace every hit.
 
-`--write` then also appends a full manifest snapshot to
-`tools/agent-capabilities/contract-history.json` — tens of thousands of lines
-recording the (`manifest_revision`, `inventory_version`) pair. That append is
+`--write` then also appends a manifest snapshot to
+`tools/agent-capabilities/contract-history.json`, recording the (`manifest_revision`, `inventory_version`) pair. That append is
 not required for freshness: `--check` reports `fresh` on the three-file edit
 alone, so discard the history hunk unless the change is one whose lineage the
 history is meant to carry. Confirm with `--check` rather than assuming either
@@ -1762,8 +1776,9 @@ appends nothing, and still reports writing `contract-history.json`; `--check`
 says `fresh`. Moving the MIDI routers to major 2 showed it: from a base history
 the first `--write` left 84 entries ending at major 1, and a second `--write`
 produced 85 ending at major 2. Until the tool records the current manifest
-itself, confirm `entries[-1].manifest.capabilities[<key>].contract_version`
-shows the new version and that the file differs from the base by exactly one
+itself, confirm that the last expanded entry
+(`history_entries(document)[-1]["manifest"]["capabilities"]`) holds `<key>` at
+the new `contract_version`, and that the file differs from the base by exactly one
 entry before shipping.
 
 ## SignalGraph authoring contract header

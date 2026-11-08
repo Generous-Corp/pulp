@@ -405,8 +405,10 @@ suites after moving a method across these translation units.
 `int` either way and so cannot separate "this device reports zero" from "this
 backend has no way to ask". Ask the query first and fail closed on
 `Unsupported` / `QueryFailed`; coercing an unanswered query to zero is what a
-later alignment proof would then certify. The hosted LV2 backend really does
-return `Unsupported`, so this is not hypothetical.
+later alignment proof would then certify. The LV2 backend used to return
+`Unsupported`; it now reads `lv2:reportsLatency` (running one silent block in
+`prepare()` so the value exists before the graph asks), so do not assume every
+backend answers.
 
 Read it on the CONTROL THREAD, at admission, exactly once, and cache it into the
 prepared snapshot. The metadata accessors reach into the live plugin object
@@ -1446,20 +1448,55 @@ rate change.
   `component_->getBusCount(kAudio, kInput)` and ignores `setBusArrangements`'
   status ("missing buses degrade gracefully"); CLAP and VST3 both size
   `ProcessData` from the caller's view. AU was the outlier.
-- **The LV2 slot cannot safely host an instrument — and it fails as UB, not
-  cleanly.** Port discovery keeps only `lv2:AudioPort`/`lv2:ControlPort` stanzas
-  (`plugin_slot_lv2.cpp`, `if (!is_audio && !is_control) continue;`), so atom /
-  event / CV ports are never seen and never `connect_port`'d — yet `run()` is
-  called anyway. The LV2 spec requires **every** port be connected before
-  `run()` unless it is `lv2:connectionOptional`; running with unconnected ports
-  is undefined behavior and commonly segfaults. Every LV2 instrument has an atom
-  MIDI input port, and many effects carry atom ports for transport. There is
-  also no MIDI delivery path for LV2 at all. Unlike the AU trap above this does
-  not fail loudly — so **do not claim "Pulp hosts instruments" unqualified**:
-  AU yes, VST3/CLAP plausibly, LV2 no. Fixing it means an atom-sequence input
-  buffer + MIDI mapping; the minimum stopgap is to detect non-audio/non-control
-  input ports at discovery and refuse `prepare()` loudly unless
-  `connectionOptional`.
+- **LV2 goes through lilv now; keep it that way.** `plugin_slot_lv2.cpp`
+  reads bundles with the vendored lilv in `external/lilv` (manifest first, then
+  `rdfs:seeAlso`), and connects every port before `run()`: audio, control, CV
+  (silence), and atom. A required port of an unknown kind is refused at
+  `load()`. The old regex TTL reader skipped atom ports, which made running an
+  instrument undefined behavior; do not reintroduce a hand-rolled reader.
+- **LV2 audio thread: no URID mapping, no shared floats.** `UridMap::map()`
+  takes a mutex, and `lv2_atom_forge_init()` maps a dozen URIs, so the slot's
+  forge is initialised once in the constructor and the audio thread only calls
+  `lv2_atom_forge_set_buffer()`. Control ports are connected to
+  `control_values_`, which only the thread running the instance touches;
+  `set_parameter()`/`get_parameter()` go through the atomic `control_shadow_`,
+  pulled into the ports at block start and published from outputs after
+  `run()`. Calls that run the instance off the audio thread hold
+  `state_mutex_`; the audio thread only try-locks it.
+- **A transport-sensitive slot in a graph needs the routed executor.** The
+  default reference walk never passes `ProcessContext` to a plugin. Call
+  `set_canonical_executor_routing_enabled(true)`, and give `process()` an input
+  view whose frame count matches the block: an empty input view fails
+  `ProcessBlock::validate()`, the block silently falls back to the walk, and
+  only `routed_walk_fallbacks()` shows it. `test/test_lv2_host_slot.cpp`
+  asserts that counter stays zero.
+- **LV2 sequence overflow hides behind a 24-byte rhythm.** Every event the
+  slot forges is a multiple of 24 bytes, so a 16384-byte port (16368 after the
+  header) fills exactly and even unchecked forging stops cleanly. The torn
+  event (timestamp and header written, body not) only shows at the default
+  8192 bytes, which leave 16. `append_event()` checks the room before writing
+  and rolls back offset, sequence size, and frame stack; the fixture's
+  `malformed_events` port is what catches a regression, since a torn body
+  reads as zeros and counts as nothing.
+- **patch:Set carries the range's atom type.** Plugins compare
+  `value->type` with their URID and ignore anything else, so forge Int, Long,
+  Bool, Double, or Float from `Lv2PatchParameter::range`. The fixture accepts
+  only the declared type; keep it strict, or the test cannot fail.
+- **An LV2 save shares the lock with run().** `state_mutex_` is a
+  `shared_mutex`: run() try-locks it shared, save takes it shared plus
+  `save_mutex_`, and prepare, release, and restore take it exclusive. A save
+  reads control inputs from `control_shadow_`, never from the ports.
+- **`lilv_plugin_verify()` gates load.** It refuses parse errors, no ports,
+  and no `doap:name` (which LV2 requires), so hand-written test bundles need
+  a `doap:name`.
+- **An allocation-probe control must not be elidable.** Clang removes an
+  unused `std::vector`, so a "does the probe see an allocation" control that
+  builds one proves nothing; call `::operator new` directly.
+- **The LV2 fixture is a real bundle.** `test/fixtures/lv2_host_instrument`
+  builds an instrument module plus `manifest.ttl`/`plugin.ttl` and reports
+  what it observed (time:Position fields, options, worker answers, patch
+  values) on output control ports, which the test reads through
+  `get_parameter(port index)`. Extend it rather than mocking lilv.
 - **Test hosts against a real *instrument*, not just a real effect.** The
   effect-only integration test in `test/test_plugin_slot_au.mm` passed happily
   through the bug above. Apple's bundled `DLSMusicDevice`
@@ -1724,14 +1761,15 @@ audio-thread snapshot contracts:
   state save/load via a `VectorStream` IBStream implementation.
 - **AU**: `AudioUnitScheduleParameters` per block from
   ParameterEventQueue — sample-accurate AUv2 automation.
-- **LV2**: control-port discovery extended into the regex TTL parser
-  (lv2:ControlPort + name/default/min/max), per-port float scratch in
-  `control_values_`, `connect_port` wired at process() block start,
-  param_events apply last-write-wins.
+- **LV2**: control input ports are parameters by port index (read at block
+  start, last event wins); `patch:writable`/`patch:readable` properties are
+  parameters from `0x40000000`, sent as sample-accurate `patch:Set` and
+  updated from the plugin's own `patch:Set`.
 - LV2 bundle discovery has a private test seam in
-  `core/host/src/lv2_discovery.hpp`; keep TTL port/binary parsing tests in
-  `test/test_lv2_host_discovery.cpp` rather than reaching through real
-  plug-in binaries for deterministic coverage.
+  `core/host/src/lv2_discovery.hpp` (lilv-backed); keep port/binary parsing
+  tests in `test/test_lv2_host_discovery.cpp`. Bundles there need a
+  `manifest.ttl`, and binary paths come back through the `/var` symlink on
+  macOS, so compare with `fs::canonical` on both sides.
 
 Param domain: **plain values** at the PluginSlot boundary (not
 normalized). Loaders convert internally if they natively normalize
