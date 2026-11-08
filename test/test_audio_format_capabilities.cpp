@@ -9,10 +9,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -45,9 +47,14 @@ AudioFileData tone(std::uint32_t channels, std::uint32_t frames, std::uint32_t r
 }
 
 fs::path temp_path(const std::string& extension) {
+    // CTest runs each case as its own process, in parallel, so the name must
+    // be unique across processes, not only within one.
+    static const auto process_tag =
+        std::to_string(std::random_device{}()) + "_" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     static std::atomic<int> counter{0};
-    return fs::temp_directory_path() /
-           ("pulp_format_caps_" + std::to_string(counter.fetch_add(1)) + extension);
+    return fs::temp_directory_path() / ("pulp_format_caps_" + process_tag + "_" +
+                                        std::to_string(counter.fetch_add(1)) + extension);
 }
 
 template <typename Handler>
