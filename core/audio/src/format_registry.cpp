@@ -222,9 +222,15 @@ public:
         if (!drmp3_init_file(&mp3, path.c_str(), nullptr))
             return std::nullopt;
 
-        // MP3 carries no trustworthy frame count, so the running decoded
-        // size is the only check; decode in chunks so allocation follows it.
+        // A Xing/Info header declares a frame count, which dr_mp3 reports net
+        // of the encoder delay and padding it also trims from the decode;
+        // without one the field stays at its maximum and the stream declares
+        // nothing (the count is taken only from the header here, never by
+        // scanning). Either way the running decoded size is the ceiling
+        // check, so decode in chunks and let allocation follow it.
         const uint32_t channels = mp3.channels;
+        const uint64_t claimed_frames =
+            mp3.totalPCMFrameCount == DRMP3_UINT64_MAX ? 0u : drmp3_get_pcm_frame_count(&mp3);
         if (channels == 0 || !detail::within_decode_limits("MP3", 0, channels, limits)) {
             drmp3_uninit(&mp3);
             return std::nullopt;
@@ -251,7 +257,10 @@ public:
         }
         drmp3_uninit(&mp3);
 
-        if (!within_limits || frames_read == 0)
+        // The length contract above: a declared frame count the stream does
+        // not deliver is a refusal, an undeclared length is decoded.
+        if (!within_limits || frames_read == 0 ||
+            (claimed_frames != 0 && frames_read != claimed_frames))
             return std::nullopt;
         return data;
     }
