@@ -1886,7 +1886,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/svf.hpp",
-        "fingerprint": "sha256:9d3b9632299a64a68d78b62fb79fd264860d62b7b4d10269323cc25a94c5c87e",
+        "fingerprint": "sha256:30e4e76d67700ee5e97934e2d5f1f8879ca82306b443990e3baae1c5d2e4c494",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1894,6 +1894,42 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "pure design() for its coefficients, and a register-resident block path. A "
             "bounded DSP primitive documented in the signal guide; it makes no installed "
             "agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/korg35_filter.hpp",
+        "fingerprint": "sha256:d6466500fb59e0612c1363b84787ec3ff4faf884e54d563a330cba87320d8e7f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Two-pole lowpass/highpass Sallen-Key-family filter with a saturating feedback path solved in zero-delay form; a change of mode restarts it from rest. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/diode_ladder_filter.hpp",
+        "fingerprint": "sha256:381d92d35bce20345ed8fd1e9c4e938eb618de103733560e82932dfb07ce5a33",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Four-stage diode-coupled ladder lowpass with zero-delay feedback, a saturating resonance path and a bracketed Newton solve exposed as solve_loop(). A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/antiderivative_iir.hpp",
+        "fingerprint": "sha256:5a32e2c25423ddd8ba30551f059c6e7822b4abbf854375f75460e227ee8734a3",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Antiderivative antialiasing for static nonlinearities with an IIR kernel designed in partial-fraction form, tanh and hard-clip curve traits, and the Saturator adaa_iir policy built on it. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/audio/slice_point_analyzer.hpp",
+        "fingerprint": "sha256:8df0af8bf567877dcb9c4c24c61a4f6892b4f669db50b737d14cc2c5096df09f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Off-real-time slice-point analysis that merges detected or supplied onsets with beat-grid, silence, manual and loop markers, with an option to run onset detection first. Background analysis plumbing documented in the signal guide; it makes no installed agent capability claim of its own."
         ),
     },
     {
