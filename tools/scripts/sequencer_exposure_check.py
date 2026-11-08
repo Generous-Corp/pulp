@@ -1091,11 +1091,14 @@ class _GitProvenanceFacts:
             )
         return min(PROVENANCE_COMMAND_TIMEOUT_SECONDS, remaining)
 
-    def run(self, *arguments: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+    def run(
+        self, *arguments: str, input_text: str | None = None, cache: bool = True
+    ) -> subprocess.CompletedProcess[str]:
         key = tuple(arguments) + (("--input", input_text) if input_text is not None else ())
-        cached = self._cache.get(key)
-        if cached is not None:
-            return cached
+        if cache:
+            cached = self._cache.get(key)
+            if cached is not None:
+                return cached
         timeout = self._check_budget()
         result = _git(
             self.repo_root, *arguments, input_text=input_text, timeout_seconds=timeout
@@ -1103,7 +1106,8 @@ class _GitProvenanceFacts:
         self.commands += 1
         if result.returncode == 124 and "timed out" in result.stderr:
             raise _ProvenanceTimeout(result.stderr.strip())
-        self._cache[key] = result
+        if cache:
+            self._cache[key] = result
         return result
 
     def clear_object_batch(self) -> None:
@@ -1239,7 +1243,9 @@ def validate_git_provenance(
             fetched = facts.run(
                 "fetch", "--no-tags", "--quiet", "origin", f"refs/pull/{pr}/head"
             )
-            fetched_head = facts.run("rev-parse", "FETCH_HEAD")
+            # FETCH_HEAD is rewritten by every fetch above, so never reuse a
+            # cached value from a prior squash row.
+            fetched_head = facts.run("rev-parse", "FETCH_HEAD", cache=False)
             if (fetched.returncode != 0 or fetched_head.returncode != 0 or
                     fetched_head.stdout.strip() != accepted):
                 detail = fetched.stderr.strip() or "pull ref did not match recorded head"

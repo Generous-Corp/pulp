@@ -543,12 +543,37 @@ def main() -> int:
                 "tombstone provenance escaped frozen head: " +
                 "\n".join(frozen_tombstone_errors)
             )
+        # A fresh checkout must prove each squash row against the FETCH_HEAD
+        # produced by its own pull-ref fetch.  The ref is mutable, so caching
+        # its first value would make the second row fail (or validate against
+        # the wrong accepted head).
+        git(root, "checkout", "-q", "main")
+        git(root, "checkout", "-q", "-b", "squash-source-two")
+        write(root, "squash-two.txt", "content-stable second squash")
+        git(root, "add", "squash-two.txt")
+        git(root, "commit", "-q", "-m", "fixture second squash source")
+        squash_source_two = git(root, "rev-parse", "HEAD")
+        git(root, "checkout", "-q", "main")
+        git(root, "merge", "-q", "--squash", "squash-source-two")
+        git(root, "commit", "-q", "-m", "fixture second squash result (#104)")
+        squash_merge_two = git(root, "rev-parse", "HEAD")
+        squash_valid_two = copy.deepcopy(squash_valid)
+        second_row = copy.deepcopy(squash_valid["rows"][0])
+        second_row["owned_paths"] = ["squash-two.txt"]
+        second_row["release"] = {
+            "pr": 104,
+            "accepted_head": squash_source_two,
+            "merge_sha": squash_merge_two,
+            "integration_mode": "squash",
+        }
+        squash_valid_two["rows"] = [squash_valid["rows"][0], second_row]
         remote = root.parent / f"{root.name}-remote.git"
         fresh = root.parent / f"{root.name}-fresh"
         subprocess.run(
             ["git", "clone", "-q", "--bare", str(root), str(remote)], check=True
         )
         git(remote, "update-ref", "refs/pull/103/head", squash_source)
+        git(remote, "update-ref", "refs/pull/104/head", squash_source_two)
         subprocess.run(
             [
                 "git", "clone", "-q", "--no-local", "--single-branch",
@@ -564,10 +589,11 @@ def main() -> int:
         )
         if missing_before_fetch.returncode == 0:
             raise AssertionError("fresh-clone control unexpectedly contained squash PR head")
-        provenance_errors = validate_git_provenance(squash_valid, fresh)
+        provenance_errors = validate_git_provenance(squash_valid_two, fresh)
         if provenance_errors:
             raise AssertionError(
-                "fresh-clone squash fetch proof failed:\n" + "\n".join(provenance_errors)
+                "fresh-clone multi-row squash fetch proof failed:\n"
+                + "\n".join(provenance_errors)
             )
         shutil.rmtree(fresh)
         shutil.rmtree(remote)

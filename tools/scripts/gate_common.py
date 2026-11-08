@@ -54,14 +54,28 @@ def set_git_probe_deadline(deadline: float | None) -> None:
 
 def _run_git(*args, **kwargs):
     timeout = kwargs.pop("timeout", _GIT_PROBE_TIMEOUT_SECONDS)
+    check = kwargs.get("check", False)
     if _GIT_PROBE_DEADLINE is not None:
         remaining = _GIT_PROBE_DEADLINE - time.monotonic()
         if remaining <= 0:
-            return subprocess.CompletedProcess(args[0], 124, stdout="", stderr="git validation timed out")
+            if check:
+                raise subprocess.CalledProcessError(
+                    124, args[0], output="", stderr="git validation timed out"
+                )
+            return subprocess.CompletedProcess(
+                args[0], 124, stdout="", stderr="git validation timed out"
+            )
         timeout = min(timeout, remaining)
     try:
         return subprocess.run(*args, timeout=timeout, **kwargs)
     except subprocess.TimeoutExpired as expired:
+        if check:
+            raise subprocess.CalledProcessError(
+                124,
+                expired.cmd,
+                output=expired.output or expired.stdout or "",
+                stderr=expired.stderr or "git command timed out",
+            ) from expired
         return subprocess.CompletedProcess(
             args[0], 124, stdout=expired.stdout or "", stderr="git command timed out"
         )
