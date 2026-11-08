@@ -280,6 +280,10 @@ links and loads its seeds. Adding a target: `pulp_add_libfuzzer_target()` in
 the owning manifest, then both lists in the workflow's `libfuzzer` job. The
 `ci` skill carries the crash-plant recipe that proves a new target reaches its
 parser.
+`pulp-fuzz-audio-decoder` writes each input to a scratch file under
+`$TMPDIR/pulp-audio-decoder-fuzz-<pid>/`; the oracle path removes that directory
+before it aborts, but a sanitizer abort inside a third-party reader cannot, so
+one may be left behind after such a finding.
 
 ## The source-selftest lane
 
