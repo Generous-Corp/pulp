@@ -9,10 +9,20 @@
  },
  "executables": {
   "Pulp UI Script Fixture": {
-   "data": "none",
-   "inputs": [],
+   "data": "declared",
+   "detected_sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/ui_script_plugin/ui/main.js"
+   ],
    "kind": "compiled",
-   "sources": [],
+   "sources": [
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/PulpUiScriptFixture_PulpUiScriptFixture_Standalone_STANDALONE_control_shipping_marker.cpp",
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp",
+    "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_mac_objc/PulpUiScriptFixture_Standalone_mac_objc_cluster.mm",
+    "test/fixtures/ui_script_plugin/main.cpp"
+   ],
    "undeclared_sources": []
   },
   "pulp-control-broker-crash-fixture": {
@@ -51,6 +61,7 @@
     "tools/cli/cmd_audio.cpp",
     "tools/cli/cmd_audio_compare.cpp",
     "tools/cli/cmd_audio_heritage.cpp",
+    "tools/cli/cmd_audio_inspect.cpp",
     "tools/cli/cmd_audio_plugin_common.cpp",
     "tools/cli/cmd_audio_plugin_inspect.cpp",
     "tools/cli/cmd_audio_render.cpp",
@@ -239,6 +250,27 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-audio-file-layout": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
+  "pulp-test-audio-file-layout-containers": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_audio_file_layout_containers.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/audio/inspect"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_audio_file_layout_containers.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-authoring-capsule-hostile": {
    "data": "declared",
    "detected_sources": [
@@ -343,6 +375,20 @@
    "sources": [
     "test/test_cli_audio_compare.cpp"
    ],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-audio-inspect": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
@@ -2660,6 +2706,13 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-voice-template": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-widget-bridge-api-contracts": {
    "data": "declared",
    "detected_sources": [
@@ -2777,6 +2830,8 @@
   "pulp-test-audio-device-manager",
   "pulp-test-audio-doctor",
   "pulp-test-audio-edge-cases",
+  "pulp-test-audio-file-layout",
+  "pulp-test-audio-file-layout-containers",
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
   "pulp-test-audio-reader-idle-wakeups",
@@ -2816,6 +2871,7 @@
   "pulp-test-clap-webview",
   "pulp-test-cli-au-info-plist",
   "pulp-test-cli-audio-compare",
+  "pulp-test-cli-audio-inspect",
   "pulp-test-cli-audio-latency",
   "pulp-test-cli-audio-validate",
   "pulp-test-cli-bake",
@@ -2914,6 +2970,7 @@
   "pulp-test-coreaudio-default-follow",
   "pulp-test-coreaudio-input-only",
   "pulp-test-coreaudio-native-lifetime",
+  "pulp-test-coremidi-reconnect",
   "pulp-test-coremidi-shared-client",
   "pulp-test-create-template-app",
   "pulp-test-create-template-bare",
@@ -3005,6 +3062,7 @@
   "pulp-test-gpu-audio-plugin-boundary-continuity",
   "pulp-test-gpu-audio-trace",
   "pulp-test-gpu-audio-transport",
+  "pulp-test-gpu-capabilities",
   "pulp-test-gpu-compute",
   "pulp-test-gpu-compute-async",
   "pulp-test-gpu-compute-kernel-override",
@@ -3021,6 +3079,7 @@
   "pulp-test-gpu-neural-realtime-node",
   "pulp-test-gpu-neural-shadow-policy",
   "pulp-test-gpu-neural-shadow-simd",
+  "pulp-test-gpu-pass",
   "pulp-test-gpu-probe-native-recipes",
   "pulp-test-gpu-probe-result",
   "pulp-test-gpu-proc-installer",
@@ -3410,6 +3469,7 @@
   "pulp-test-voice-identity",
   "pulp-test-voice-modulation-sources",
   "pulp-test-voice-runtime-facade",
+  "pulp-test-voice-template",
   "pulp-test-vst3-audio-parity",
   "pulp-test-vst3-bundle-entry",
   "pulp-test-vst3-connection",
@@ -3446,6 +3506,7 @@
   "pulp-test-yoga-layout-bench",
   "pulp-ui-script-editor-probe",
   "pulp-unique-temp-dir-fixture",
+  "pulp-wgsl-validate",
   "sample-region-allpass-consumer"
  ],
  "executables_scanned_for": [
@@ -5063,10 +5124,20 @@
    ],
    "kind": "python"
   },
+  "dependency-request-recorder-selftest": {
+   "entry": "tools/ci/test_dependency_request_check.py",
+   "inputs": [
+    "tools/ci/dependency_request_check.py",
+    "tools/ci/dependency_request_recorder.cmake",
+    "tools/ci/test_dependency_request_check.py"
+   ],
+   "kind": "python"
+  },
   "deps-audit-extra-selftest": {
    "entry": "tools/deps/test_audit_extra.py",
    "inputs": [
     "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/deps/audit.py",
     "tools/deps/test_audit_extra.py",
     "tools/packages/test-stubs"
@@ -5078,6 +5149,7 @@
    "inputs": [
     "tools/ci/tart-provision.sh",
     "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/cmake/PulpWclap.cmake",
     "tools/deps/audit.py",
     "tools/deps/test_audit.py",
@@ -5103,6 +5175,7 @@
    "entry": "tools/deps/audit.py",
    "inputs": [
     "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/deps/audit.py",
     "tools/packages/test-stubs"
    ],
@@ -5313,6 +5386,13 @@
     "tools/scripts/dawn_binding_census.py",
     "tools/scripts/editor_host_acceptance.py",
     "tools/scripts/test_editor_host_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "embed-wgsl-selftest": {
+   "entry": "tools/cmake/scripts/test_embed_wgsl.py",
+   "inputs": [
+    "tools/cmake/scripts/test_embed_wgsl.py"
    ],
    "kind": "python"
   },

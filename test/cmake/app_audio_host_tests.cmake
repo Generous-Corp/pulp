@@ -623,6 +623,13 @@ target_link_libraries(pulp-test-cli-audio-validate PRIVATE pulp::audio pulp::pla
 pulp_bind_cli_shellout_target(pulp-test-cli-audio-validate)
 catch_discover_tests(pulp-test-cli-audio-validate)
 
+# `pulp audio inspect` shell-out: raw-PCM refusal, schema ids, basename
+# redaction, decode-limit facts, extension-blind sniffing, exit codes.
+add_executable(pulp-test-cli-audio-inspect test_cli_audio_inspect.cpp)
+target_link_libraries(pulp-test-cli-audio-inspect PRIVATE pulp::audio pulp::platform Catch2::Catch2WithMain)
+pulp_bind_cli_shellout_target(pulp-test-cli-audio-inspect)
+catch_discover_tests(pulp-test-cli-audio-inspect)
+
 add_executable(pulp-test-cli-audio-compare test_cli_audio_compare.cpp)
 target_link_libraries(pulp-test-cli-audio-compare PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-audio-compare)
@@ -751,6 +758,10 @@ else()
     pulp_add_test_suite(pulp-test-mpe-voice-tracker GROUP pulp-test-group-app-midi
         LIBRARIES pulp::midi)
 endif()
+
+# MPE configuration from incoming MIDI (MCM, pitch-bend-range RPN) and builders
+pulp_add_test_suite(pulp-test-mpe-configuration-messages GROUP pulp-test-group-app-midi
+    LIBRARIES pulp::midi)
 
 # MPE synth voice helpers (voice, allocator, glide detector)
 pulp_add_test_suite(pulp-test-mpe-synth-voice
