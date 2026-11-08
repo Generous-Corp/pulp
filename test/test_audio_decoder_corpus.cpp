@@ -7,8 +7,10 @@
 
 #include "fuzz/audio_decoder_fuzz_oracle.hpp"
 #include "support/fixture_root.hpp"
+#include "support/unique_temp_dir.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/format_registry.hpp>
 #include <pulp/audio/wav_decoder.hpp>
 
@@ -117,13 +119,7 @@ std::vector<uint8_t> make_pcm_wav(uint16_t bits, const std::vector<int32_t>& cod
 }
 
 struct TempDir {
-    fs::path path;
-    TempDir() {
-        path = fs::temp_directory_path() /
-               ("pulp-audio-decoder-corpus-" +
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        fs::create_directories(path);
-    }
+    fs::path path = pulp::test::make_unique_temp_dir("pulp-audio-decoder-corpus");
     ~TempDir() {
         std::error_code ec;
         fs::remove_all(path, ec);
