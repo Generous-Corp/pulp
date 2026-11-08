@@ -3881,6 +3881,46 @@ asserting only "nonzero exit and the message is present" passes on the crash and
 proves nothing. Assert the exact code, and that stderr carries no termination
 banner.
 
+## `audio spectrogram` / `audio waveform` are display-only image verbs
+
+`pulp audio spectrogram <file> --png <out>` and `pulp audio waveform <file>
+--png <out>` draw a PNG and write a `pulp.audio.image.v1` sidecar beside it.
+They exist so an agent can *look* at a render; nothing they emit may feed a
+verdict, and the MCP tools (`pulp_audio_spectrogram`, `pulp_audio_waveform`)
+and the Quality Lab's `advisory.artifacts` block inherit that contract. The
+rasterizers live in `tools/audio/analysis` (`spectrogram_raster.hpp`,
+`waveform_raster.hpp`, `raster_image.hpp`); the verbs in `tools/cli/` only
+parse flags, stream the input and write files, through the shared
+`cmd_audio_image_common.{hpp,cpp}`.
+
+Things that are easy to get wrong when touching them:
+
+- **Input streams through `MemoryMappedAudioReader::read_frames` in windows.**
+  Never route these verbs through `read_audio_file` / `decode_wav`: the WAV
+  decoder caps at 100,000,000 frames, and the shell-out suite renders a
+  sparse 70-minute WAV that it refuses. `read_frames` fills the first N
+  channels, so reaching channel k means passing k+1 buffers.
+- **Exit 2 means nothing to render** (zero frames, or a range shorter than one
+  FFT), distinct from exit 1 (usage or I/O). Keep the mapping the other audio
+  verbs use; see "Exit 2 means could not measure".
+- **Sidecar paths are basenames by default.** `--absolute-paths` is the only
+  way a full path reaches the JSON, and the footer burned into the pixels is
+  always the basename. A test asserts the temp directory never appears.
+- **Float above 0 dBFS is reported, not normalized.** `true_peak` is the
+  unclamped sample peak over the rendered range (`method: sample_peak`, not an
+  oversampled inter-sample peak); the image clamps and marks the column.
+- **Goldens live in `test/fixtures/audio/images/`** and are compared through
+  ImageIO on macOS only (the required gate); regenerate with
+  `PULP_AUDIO_IMAGE_WRITE_GOLDENS=1 ./build/test/pulp-test-audio-image-raster "[golden]"`.
+- **`confirm_failure.sh --subject build/tools/cli/pulp-cpp` is INCONCLUSIVE for
+  `cmd_audio_image_common.cpp`.** Its driver-links-the-edited-object check
+  compares strong `nm` symbols, and on this toolchain libc++ template
+  instantiations (`__ZNSt3__1...B9nqe220106...`) show up as strong `T` in the
+  object and in `pulp-test-cli-audio-image`, so it reports the driver as
+  linking the CLI source. Confirm the clamp behaviour at the unit level
+  (`waveform_raster.cpp`, no `--subject`) and confirm the lab's byte-identity
+  test with `--python`; the CLI-level loop needs the instrument fixed first.
+
 ## `audio heritage` owns sampler-profile interchange and evidence renders
 
 `pulp audio heritage <validate|canonicalize|inspect|render>` is the neutral,
