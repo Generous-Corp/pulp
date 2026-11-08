@@ -42,22 +42,22 @@
     }
   ],
   "counts": {
-    "public_headers": 539,
-    "reviewed_headers": 299,
-    "legacy_unreviewed_headers": 240,
+    "public_headers": 540,
+    "reviewed_headers": 302,
+    "legacy_unreviewed_headers": 238,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 130,
-      "legacy_unreviewed": 240,
+      "infrastructure": 133,
+      "legacy_unreviewed": 238,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
-        "public_headers": 120,
-        "reviewed_headers": 29,
-        "legacy_unreviewed_headers": 91,
+        "public_headers": 121,
+        "reviewed_headers": 32,
+        "legacy_unreviewed_headers": 89,
         "unsupported_headers": 0
       },
       "midi": {
@@ -221,6 +221,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/audio_reader.hpp",
+      "fingerprint": "sha256:33c68086a43d7c58391f312a37d363aa1401f8cc9ce2e288baf4382f7bd680ac",
+      "include": "pulp/audio/audio_reader.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Ranged audio file decoding (AudioReader over a path, memory or byte source, bounded by DecodeLimits) is host infrastructure that sample streaming and file playback consume; it is not an independently selected generator-facing capability."
     },
     {
       "domain": "audio",
@@ -499,11 +508,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/mmap_reader.hpp",
-      "fingerprint": "sha256:483e1c322fc564087a3594548ae7b57d53fc76b1823253a92b6e07c459d91650",
+      "fingerprint": "sha256:e690b373b06a9a9b87d68702f1c6b31e1bfc2f6c8df565194c325bc38cf71478",
       "include": "pulp/audio/mmap_reader.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Memory-mapped, snapshot-backed ranged audio file reading is host infrastructure that sample streaming consumes; it is not an independently selected generator-facing capability."
     },
     {
       "domain": "audio",
@@ -1032,11 +1041,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/streaming_sample_source_file.hpp",
-      "fingerprint": "sha256:578ae30905a7c954ca6eeb78d6d9545d316b291660034c5a39e931c4b6f6391e",
+      "fingerprint": "sha256:2e0b805a65e4e5c0197bb41c9c196214e67dd064b7e07d394bacbf2472ac8f90",
       "include": "pulp/audio/streaming_sample_source_file.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Binding a memory-mapped file to a StreamingSampleSource frame reader is host infrastructure for sampler playback; it is not an independently selected generator-facing capability."
     },
     {
       "domain": "audio",
