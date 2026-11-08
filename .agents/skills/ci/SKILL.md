@@ -2671,6 +2671,16 @@ The job's second configure is the control: GPU on, with
 `PULP_SKIA_AUTOFETCH=OFF` so it skips the download. It must show Skia and
 WebGPU. A forbidden-list pass without a green control proves nothing.
 
+The Pulp-only configure runs under `tools/ci/run_without_network.sh` (a fresh
+network namespace on Linux, `sandbox-exec` on macOS), so a download path that
+makes no note fails instead of passing unseen. Two controls go with it:
+`--probe` must see github.com blocked inside and reachable outside, and a GPU
+configure against an empty `PULP_SKIA_CACHE_ROOT` must fail at the Skia
+download. Be precise about what this proves. The configure downloads
+nothing, but the bootstrap step before it (`setup.sh --deps-only`) still primes
+the shared caches with the network on, so it is not proof that a dependency
+was never fetched on the runner.
+
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
 Making a skip visible is safe. Removing the skip is not, and the two must not

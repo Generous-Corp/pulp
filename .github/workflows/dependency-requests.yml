@@ -9,6 +9,15 @@ name: Dependency requests
 # GPU configure must show Skia and WebGPU, or the clean reading above proves
 # nothing.
 #
+# The Pulp-only configure also runs with no network
+# (tools/ci/run_without_network.sh), so a download path that records no
+# request (a script, a raw download) fails the configure instead of passing
+# unseen. What that proves is that the configure itself downloads nothing; the
+# bootstrap step before it still primes the shared source cache with the
+# network on. Two controls keep it honest: a probe that the wrapper blocks a
+# real request, and a GPU configure against an empty Skia cache that must fail
+# under the same wrapper.
+#
 # Advisory: not a required context, so it runs on pull requests and pushes
 # that touch the build, never on merge groups.
 on:
@@ -58,11 +67,15 @@ jobs:
         run: ./setup.sh --ci --deps-only
         shell: bash
 
-      - name: Configure Pulp only (GPU off) with the recorder
+      - name: Prove the wrapper cuts the network
+        shell: bash
+        run: tools/ci/run_without_network.sh --probe
+
+      - name: Configure Pulp only (GPU off) with the recorder and no network
         shell: bash
         run: |
           set -euo pipefail
-          cmake -S . -B build-pulp-only \
+          tools/ci/run_without_network.sh cmake -S . -B build-pulp-only \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_ENABLE_GPU=OFF \
             -DPULP_BUILD_TESTS=OFF \
@@ -92,6 +105,29 @@ jobs:
             -DPULP_BUILD_EXAMPLES=OFF \
             -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES="$PWD/tools/ci/dependency_request_recorder.cmake" \
             -DDEPENDENCY_REQUEST_LOG="$PWD/build-gpu-control/dependency-requests.jsonl"
+
+      - name: Control - a configure that must download fails without the network
+        shell: bash
+        run: |
+          set -uo pipefail
+          # An empty private Skia cache: the GPU configure has to download
+          # Skia, and with the network cut it must fail saying so.
+          empty="$RUNNER_TEMP/empty-skia-cache"
+          mkdir -p "$empty"
+          PULP_SKIA_CACHE_ROOT="$empty" tools/ci/run_without_network.sh cmake -S . -B build-nonet-control \
+            -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=ON -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF > nonet-control.log 2>&1
+          rc=$?
+          tail -20 nonet-control.log
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the no-network control configured; the wrapper did not block the Skia download"
+            exit 1
+          fi
+          if ! grep -q "Skia: pinned cache generation" nonet-control.log; then
+            echo "::error::the no-network control failed, but not at the Skia download"
+            exit 1
+          fi
+          echo "no-network control failed at the Skia download, as it must (rc=$rc)"
 
       - name: Check the control sees the GPU stack
         shell: bash
