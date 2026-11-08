@@ -42,22 +42,22 @@
     }
   ],
   "counts": {
-    "public_headers": 536,
-    "reviewed_headers": 295,
-    "legacy_unreviewed_headers": 241,
+    "public_headers": 539,
+    "reviewed_headers": 299,
+    "legacy_unreviewed_headers": 240,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 126,
-      "legacy_unreviewed": 241,
+      "infrastructure": 130,
+      "legacy_unreviewed": 240,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
         "public_headers": 120,
-        "reviewed_headers": 28,
-        "legacy_unreviewed_headers": 92,
+        "reviewed_headers": 29,
+        "legacy_unreviewed_headers": 91,
         "unsupported_headers": 0
       },
       "midi": {
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 283,
-        "reviewed_headers": 161,
+        "public_headers": 286,
+        "reviewed_headers": 164,
         "legacy_unreviewed_headers": 122,
         "unsupported_headers": 2
       },
@@ -517,7 +517,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/onset_detector.hpp",
-      "fingerprint": "sha256:d0cac999018c626de8cbd2165150788c1d3be62777cc639d550d7f80f9f56560",
+      "fingerprint": "sha256:9fc9b55fef9c42057386588c738ecf7fb70908e900ad9698c7e2ff89f753c11c",
       "include": "pulp/audio/onset_detector.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -996,11 +996,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/slice_point_analyzer.hpp",
-      "fingerprint": "sha256:03fd4177e69bc444770b683dc880ab523dd6ad437ec68705c1f58deee672db5e",
+      "fingerprint": "sha256:8df0af8bf567877dcb9c4c24c61a4f6892b4f669db50b737d14cc2c5096df09f",
       "include": "pulp/audio/slice_point_analyzer.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Off-real-time slice-point analysis that merges detected or supplied onsets with beat-grid, silence, manual and loop markers, with an option to run onset detection first. Background analysis plumbing documented in the signal guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "audio",
@@ -2437,13 +2437,22 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/analysis_frontends.hpp",
-      "fingerprint": "sha256:6ebbd05760a83309228a7c7ac5d0ae7e2460529b20e1866295821012f96a56ec",
+      "fingerprint": "sha256:1c61b8a488617ee1cde8fd1d8092c0b1533bf55cbce5102d55ae153d40aaeca0",
       "include": "pulp/signal/analysis_frontends.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "signal.streaming-analysis-frontends"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/antiderivative_iir.hpp",
+      "fingerprint": "sha256:5a32e2c25423ddd8ba30551f059c6e7822b4abbf854375f75460e227ee8734a3",
+      "include": "pulp/signal/antiderivative_iir.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Antiderivative antialiasing for static nonlinearities with an IIR kernel designed in partial-fraction form, tanh and hard-clip curve traits, and the Saturator adaa_iir policy built on it. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -2523,7 +2532,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/breakpoint_envelope.hpp",
-      "fingerprint": "sha256:c70262f82754eff2117acabf88d55e8ccc86d0e783d6cea6e04d6af6a671a9f7",
+      "fingerprint": "sha256:4f37c4c188e7094d8bf615144d0735a629d26a974f394f40e380a69d82a74c06",
       "include": "pulp/signal/breakpoint_envelope.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -2908,6 +2917,15 @@
         "signal.dynamics-envelope-contract"
       ],
       "rationale": "Existing dynamics processor adopting the shared exact envelope or canonical non-negative gain-reduction telemetry contract; its topology is not a new capability claim in this slice."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/diode_ladder_filter.hpp",
+      "fingerprint": "sha256:381d92d35bce20345ed8fd1e9c4e938eb618de103733560e82932dfb07ce5a33",
+      "include": "pulp/signal/diode_ladder_filter.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Four-stage diode-coupled ladder lowpass with zero-delay feedback, a saturating resonance path and a bracketed Newton solve exposed as solve_loop(). A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -3641,6 +3659,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/korg35_filter.hpp",
+      "fingerprint": "sha256:d6466500fb59e0612c1363b84787ec3ff4faf884e54d563a330cba87320d8e7f",
+      "include": "pulp/signal/korg35_filter.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Two-pole lowpass/highpass Sallen-Key-family filter with a saturating feedback path solved in zero-delay form; a change of mode restarts it from rest. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -4412,7 +4439,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/saturator.hpp",
-      "fingerprint": "sha256:5f3e39f13efe4c52be18675c58fb85a23a8dff283eb5abefadd0e5304df0073b",
+      "fingerprint": "sha256:667d9d469664030330fd147b71a092407d327a5338fc6e09018c943a2f919e6e",
       "include": "pulp/signal/saturator.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4790,7 +4817,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/svf.hpp",
-      "fingerprint": "sha256:9d3b9632299a64a68d78b62fb79fd264860d62b7b4d10269323cc25a94c5c87e",
+      "fingerprint": "sha256:30e4e76d67700ee5e97934e2d5f1f8879ca82306b443990e3baae1c5d2e4c494",
       "include": "pulp/signal/svf.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -5146,7 +5173,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/zero_latency_convolver.hpp",
-      "fingerprint": "sha256:f2ffe01d98618d870a3e7c7dee8e935948a3333090f01094d8bb0dd601a0861e",
+      "fingerprint": "sha256:8b48ec3c8df0ff7f8cac45f71468f29bf045452815393b2987253cf76e939db9",
       "include": "pulp/signal/zero_latency_convolver.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

@@ -279,3 +279,37 @@ TEST_CASE("broker consent authority rate limits global and per-client prompt fat
     CHECK_FALSE(timeout_authority.decide(first).approved);
     CHECK(timeout_prompts == 2);
 }
+
+TEST_CASE("broker consent binds a scoped vendor grant and names its plugin-defined tier",
+          "[inspect][control][consent][vendor]") {
+    const auto vendor_request = [](std::vector<std::string> scope) {
+        auto scoped = request();
+        scoped.grant.capabilities = {InspectorCapability::VendorRender};
+        scoped.grant.vendor_operations = std::move(scope);
+        scoped.selector_id = "dev.pulp.trace/session-control@1";
+        return scoped;
+    };
+    // Identical entropy and clocks, so the only difference between decision
+    // ids is the framed request.
+    const auto decide = [](const ControlGrantConsentRequest& input) {
+        auto now = std::chrono::steady_clock::time_point{10s};
+        std::uint8_t entropy = 1;
+        auto config = config_for(ControlConsentPromptResult::Approved, now, entropy);
+        config.prompt = [](const ControlConsentPrompt& prompt, std::chrono::milliseconds) {
+            CHECK(prompt.primary_message.ends_with(
+                ". Includes operations defined by the plugin; their risk tier is the "
+                "plugin's own declaration"));
+            CHECK(prompt.technical_details_display.find(
+                      "Plugin-defined operation: dev.com.acme/notes.play@1") != std::string::npos);
+            return ControlConsentPromptResult::Approved;
+        };
+        ControlBrokerConsentAuthority authority{std::move(config)};
+        const auto decision = authority.decide(input);
+        REQUIRE(decision.approved);
+        return decision.decision_id;
+    };
+    const auto play = decide(vendor_request({"dev.com.acme/notes.play@1"}));
+    CHECK(play == decide(vendor_request({"dev.com.acme/notes.play@1"})));
+    CHECK(play !=
+          decide(vendor_request({"dev.com.acme/notes.play@1", "dev.com.acme/render.bounce@1"})));
+}

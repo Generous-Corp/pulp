@@ -20,6 +20,7 @@
 #include <pulp/inspect/control_standalone_ui_adapter.hpp>
 #include <pulp/inspect/control_state_read_executor.hpp>
 #include <pulp/inspect/control_state_write_executor.hpp>
+#include <pulp/inspect/control_vendor_operation_executor.hpp>
 #include <pulp/inspect/motion_inspector.hpp>
 #include <pulp/inspect/motion_scrubber.hpp>
 #include <pulp/inspect/runtime_eval_component.hpp>
@@ -91,7 +92,11 @@ extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
         "PULP_INSPECT_CAPABILITY_SEQUENCER_TRANSPORT_WRITE_V1\0"
         "PULP_INSPECT_CAPABILITY_TIMELINE_DOCUMENT_SESSION_V1\0"
         "PULP_INSPECT_CAPABILITY_GRAPH_SAMPLE_REGION_READ_V1\0"
-        "PULP_INSPECT_CAPABILITY_GRAPH_SAMPLE_REGION_EDIT_V1";
+        "PULP_INSPECT_CAPABILITY_GRAPH_SAMPLE_REGION_EDIT_V1\0"
+        "PULP_INSPECT_CAPABILITY_VENDOR_READ_V1\0"
+        "PULP_INSPECT_CAPABILITY_VENDOR_GESTURE_V1\0"
+        "PULP_INSPECT_CAPABILITY_VENDOR_RENDER_V1\0"
+        "PULP_INSPECT_CAPABILITY_VENDOR_DESTRUCTIVE_V1";
 
 #undef PULP_CONTROL_COMPONENT_MARKER
 
@@ -136,6 +141,29 @@ std::atomic<detail::StandaloneSignalGraphAuthorityFactory>& signal_graph_authori
 std::atomic<detail::StandaloneSampleRegionTargetFactory>& sample_region_target_factory() {
     static std::atomic<detail::StandaloneSampleRegionTargetFactory> factory{nullptr};
     return factory;
+}
+
+std::atomic<StandaloneVendorOperationsFactory>& vendor_operations_factory() {
+    static std::atomic<StandaloneVendorOperationsFactory> factory{nullptr};
+    return factory;
+}
+
+/// Keeps only handlers for operations the exact manifest declares, so code
+/// that drifted from the build-time declaration can never be reached.
+std::shared_ptr<const ControlVendorOperationHandlers>
+declared_vendor_handlers(const ControlManifest& manifest,
+                         const std::shared_ptr<const ControlVendorOperationHandlers>& bound) {
+    if (!bound || manifest.vendor_operations.empty())
+        return {};
+    const auto table =
+        parse_control_vendor_operations(manifest.vendor_operations, manifest.bundle_id);
+    if (!table)
+        return {};
+    auto declared = std::make_shared<ControlVendorOperationHandlers>();
+    for (const auto& operation : table->operations())
+        if (const auto* handler = bound->find(operation.id))
+            (void)declared->add(operation.id, *handler);
+    return declared;
 }
 
 std::filesystem::path current_executable() {
@@ -481,9 +509,16 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             make_control_signal_graph_executor([&processor](const ControlAdmissionPlan&) {
                 return detail::create_standalone_signal_graph_authority(processor);
             });
+        // Vendor handlers touch the Processor and its StateStore, so they are
+        // fenced onto the host main thread like every other state operation.
+        const auto vendor_handlers = declared_vendor_handlers(
+            *manifest, create_standalone_vendor_operations(processor, store));
+        ControlMainThreadExecutor main_vendor(
+            rpc_, make_control_vendor_operation_executor(vendor_handlers));
+        auto fenced_vendor = main_vendor.executor();
         ControlOperationExecutor state_executor =
             [state_read = std::move(state_read), state_write = std::move(fenced_state_write),
-             sequencer_read = std::move(fenced_sequencer_read),
+             vendor = std::move(fenced_vendor), sequencer_read = std::move(fenced_sequencer_read),
              sequencer_edit = std::move(fenced_sequencer_edit),
              gpu_health_read = std::move(gpu_health_read),
              transport_read = std::move(fenced_transport_read),
@@ -516,6 +551,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     return signal_graph_route(plan, request, context);
                 if (request.operation_id == "dev.pulp.timeline/document-session@1")
                     return timeline_document_session(plan, request, context);
+                if (is_control_vendor_operation_id(request.operation_id))
+                    return vendor(plan, request, context);
                 return unavailable_operation();
             };
 
@@ -1070,5 +1107,20 @@ create_standalone_sample_region_target(format::Processor& processor, state::Stat
 }
 
 } // namespace detail
+
+bool install_standalone_vendor_operations_factory(
+    StandaloneVendorOperationsFactory factory) noexcept {
+    if (!factory)
+        return false;
+    auto expected = static_cast<StandaloneVendorOperationsFactory>(nullptr);
+    return vendor_operations_factory().compare_exchange_strong(
+        expected, factory, std::memory_order_release, std::memory_order_relaxed);
+}
+
+std::shared_ptr<const ControlVendorOperationHandlers>
+create_standalone_vendor_operations(format::Processor& processor, state::StateStore& store) {
+    const auto factory = vendor_operations_factory().load(std::memory_order_acquire);
+    return factory ? factory(processor, store) : nullptr;
+}
 
 } // namespace pulp::inspect
