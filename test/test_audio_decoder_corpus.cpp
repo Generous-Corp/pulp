@@ -431,9 +431,18 @@ TEST_CASE("a declared length the stream does not deliver is refused, an undeclar
         CHECK_FALSE(registry.read(path.string(), limits).has_value());
     }
 
-    for (const char* name : {"ogg-page-bad-crc.ogg", "ogg-truncated-page.ogg"}) {
-        const auto path = corpus_dir() / name;
-        INFO(name);
+    // Both Ogg files declare no length (0), and stb_vorbis reports neither a
+    // truncated page nor a bad page CRC as a decoder error: it treats both as
+    // the end of the stream. So both decode what the stream held, and the
+    // oracle checks rate and channels against the header.
+    struct OggExpectation {
+        const char* name;
+        bool decodes;
+    };
+    for (const auto& expected : {OggExpectation{"ogg-truncated-page.ogg", true},
+                                 OggExpectation{"ogg-page-bad-crc.ogg", true}}) {
+        const auto path = corpus_dir() / expected.name;
+        INFO(expected.name);
         REQUIRE(fs::exists(path));
         const auto info = registry.read_info(path.string());
         REQUIRE(info.has_value());

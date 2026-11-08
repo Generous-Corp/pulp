@@ -90,6 +90,10 @@ public:
         // The last page's granule position is an untrusted length claim
         // (zero when unknown); refuse before any output allocation.
         const uint64_t claimed_frames = stb_vorbis_stream_length_in_samples(v);
+        // Failing to find the last page leaves VORBIS_cant_find_last_page set
+        // and nothing clears it; reading it here lets the check after the
+        // decode loop measure the decode itself.
+        (void)stb_vorbis_get_error(v);
         if (!detail::within_decode_limits("OGG Vorbis", claimed_frames, channels, limits)) {
             stb_vorbis_close(v);
             return std::nullopt;
