@@ -29,7 +29,7 @@ class Repo:
 
     def git(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", str(self.root), *args], env=GIT_ENV, capture_output=True,
-                              text=True, check=True)
+                              text=True, encoding="utf-8", check=True)
 
     def write(self, rel: str, text: str) -> None:
         p = self.root / rel
@@ -42,7 +42,7 @@ class Repo:
 
     def run(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, str(SCRIPT), "--root", str(self.root), *args],
-                              capture_output=True, text=True, env={**GIT_ENV, **(env or {})}, timeout=60)
+                              capture_output=True, text=True, encoding="utf-8", env={**GIT_ENV, **(env or {})}, timeout=60)
 
 
 def repo_with_aggregate(tmp: str) -> Repo:

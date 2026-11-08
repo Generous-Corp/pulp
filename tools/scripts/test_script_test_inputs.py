@@ -59,7 +59,7 @@ def tree_bytes(path: Path) -> dict[str, bytes]:
     """Every fragment file's bytes, so a test can assert a write changed nothing."""
     if path.is_file():
         return {path.name: path.read_bytes()}
-    return {f.relative_to(path).as_posix(): f.read_bytes() for f in sorted(path.rglob("*")) if f.is_file()}
+    return {rel: text.encode("utf-8") for rel, text in store._read_dir(path).items()}
 
 
 def as_doc(snapshot: dict[str, bytes]) -> dict:
@@ -714,7 +714,8 @@ class CheckModeTests(unittest.TestCase):
             self.g("add", "tools/scripts/extra.py", "tools/scripts/alpha_lib.py")
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
             dirty = subprocess.run(["git", "-C", str(repo.root), "status", "--porcelain", "--",
-                                    store.FRAGMENT_DIR.as_posix()], capture_output=True, text=True).stdout
+                                    store.FRAGMENT_DIR.as_posix()], capture_output=True, text=True,
+                                   encoding="utf-8").stdout
             moved = {line[3:] for line in dirty.splitlines()}
             doc = store.load(repo.root)
             reach = {store.fragment_path(store.TESTS_DIR, n) for n, rec in doc["tests"].items()

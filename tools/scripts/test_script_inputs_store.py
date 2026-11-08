@@ -49,7 +49,7 @@ class Repo:
 
     def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", str(self.root), *args], env=GIT_ENV, capture_output=True,
-                              text=True, check=check)
+                              text=True, encoding="utf-8", check=check)
 
     def commit(self, msg: str) -> None:
         self.git("add", "--", "test")

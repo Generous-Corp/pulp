@@ -1159,6 +1159,13 @@ def validate_tombstone_provenance(
 
 def is_sequencer_owned_path(path: str) -> bool:
     """Return whether a changed path participates in the sequencer program."""
+    # The generated script-test input list holds one fragment per test, named
+    # after the test (script_inputs_store.py). A fragment is derived accounting
+    # for a registration that is itself judged here (its test/cmake and test
+    # sources), so a timeline test's fragment is not a sequencer surface; the
+    # single file it replaced never matched a token either.
+    if path.startswith("test/ctest_script_inputs/"):
+        return False
     lowered = path.lower()
     if any(
         token in lowered

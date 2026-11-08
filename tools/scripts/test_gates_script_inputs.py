@@ -515,7 +515,7 @@ class TouchReasonsTests(unittest.TestCase):
         # One fragment per entry: editing any fragment is editing the list.
         frag = self.root / "test/ctest_script_inputs/tests/a.json"
         frag.parent.mkdir(parents=True)
-        frag.write_text("{}\n")
+        frag.write_text("{}\n", encoding="utf-8")
         git(self.root, "add", str(frag))
         self.assertTrue(any(r.startswith("test/ctest_script_inputs/tests/a.json (the list itself")
                             for r in self.sti.touch_reasons(self.root, "main")))
