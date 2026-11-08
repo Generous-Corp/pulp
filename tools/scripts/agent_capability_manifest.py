@@ -39,6 +39,7 @@ from agent_capability_history import (
     history_problems,
     pending_counters,
     protected_base_problems,
+    state_is_recorded,
     updated_history_entries,
 )
 from agent_capability_registry import (
@@ -828,10 +829,16 @@ def counter_status(root: pathlib.Path, doc: dict[str, Any],
             return 1
         print("agent-capabilities: every counter is assigned")
         return 0
-    if not any(pending):
-        print("agent-capabilities: nothing pending to assign")
-        return 0
     source = pathlib.Path(__file__).resolve()
+    if not any(pending):
+        if state_is_recorded(history, doc, surface_document):
+            print("agent-capabilities: nothing pending to assign")
+            return 0
+        # An assigned state the history has not recorded (a hand-bumped
+        # counter) blocks the next branch from leaving its counter alone.
+        # --write records it; nothing is renumbered.
+        print("agent-capabilities: nothing pending; recording the assigned state")
+        return subprocess.run([sys.executable, str(source), "--write"], cwd=root).returncode
     text = source.read_text(encoding="utf-8")
     for (constant, _), value, is_pending in zip(COUNTER_CONSTANTS, values, pending):
         if is_pending:
@@ -1034,7 +1041,7 @@ def main() -> int:
             return 1
         print(
             f"agent-capabilities: fresh; {len(doc['capabilities'])} keys and "
-            f"{surface_document['counts']['public_headers']} public headers checked"
+            f"{len(surface_document['headers'])} public headers checked"
         )
         if comparison is not None:
             print("agent-capabilities: comparison receipt=" +

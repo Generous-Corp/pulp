@@ -600,17 +600,39 @@ def exercise_evolution(canonical: dict) -> int:
     assert entries == [capability_history.history_entry(canonical, evolved_surface)]
     checks += 1
 
-    # Past the bootstrap, the previous published state is appended only when a
-    # counter moves. A fingerprint-only refresh leaves the history alone.
+    # Past the bootstrap, an assigned state is recorded exactly once: the
+    # history's last entry is the state a branch starts from, so a change
+    # under the same counter is pending. A refresh on a RECORDED base appends
+    # nothing.
     base_surface = manifest.build_surface(ROOT)[0]
+    base_entry = capability_history.history_entry(canonical, base_surface)
+    recorded = capability_history.history_document([base_entry])
+    refreshed_surface = copy.deepcopy(base_surface)
+    refreshed_surface["headers"][0]["fingerprint"] = "sha256:" + "b" * 64
+    unmoved = capability_history.updated_history_entries(
+        recorded,
+        canonical,
+        base_surface,
+        canonical,
+        refreshed_surface,
+        initial_bootstrap=False,
+        migrate_unpublished=False,
+    )
+    assert unmoved == recorded["entries"], "a refresh on a recorded base appended"
+    assert capability_history.pending_counters(
+        capability_history.history_document(unmoved), canonical, refreshed_surface
+    ) == (False, True)
+    checks += 1
+
+    # A base whose assigned state predates the invariant (a hand-bumped
+    # counter the history never recorded) is recorded by the first refresh,
+    # and the refresh is then pending rather than an error.
     older_surface = copy.deepcopy(base_surface)
     older_surface["inventory_version"] -= 1
     published = capability_history.history_document([
         capability_history.history_entry(canonical, older_surface)
     ])
-    refreshed_surface = copy.deepcopy(base_surface)
-    refreshed_surface["headers"][0]["fingerprint"] = "sha256:" + "b" * 64
-    unmoved = capability_history.updated_history_entries(
+    unrecorded = capability_history.updated_history_entries(
         published,
         canonical,
         base_surface,
@@ -619,9 +641,12 @@ def exercise_evolution(canonical: dict) -> int:
         initial_bootstrap=False,
         migrate_unpublished=False,
     )
-    assert unmoved == published["entries"], "a fingerprint-only refresh appended"
+    assert unrecorded == published["entries"] + [base_entry], (
+        "an unrecorded assigned base was not recorded before a pending change"
+    )
     checks += 1
 
+    # A counter move records the prior assigned state and the new one.
     bumped_surface = copy.deepcopy(refreshed_surface)
     bumped_surface["inventory_version"] += 1
     moved = capability_history.updated_history_entries(
@@ -634,8 +659,9 @@ def exercise_evolution(canonical: dict) -> int:
         migrate_unpublished=False,
     )
     assert moved == published["entries"] + [
-        capability_history.history_entry(canonical, base_surface)
-    ], "a counter move did not append the prior state"
+        base_entry,
+        capability_history.history_entry(canonical, bumped_surface),
+    ], "a counter move did not record the prior and the assigned state"
     checks += 1
 
     bumped_manifest = copy.deepcopy(canonical)
@@ -649,8 +675,9 @@ def exercise_evolution(canonical: dict) -> int:
         initial_bootstrap=False,
         migrate_unpublished=False,
     )
-    assert revised[-1] == capability_history.history_entry(canonical, base_surface)
-    assert len(revised) == len(published["entries"]) + 1
+    assert revised[-2] == base_entry
+    assert revised[-1] == capability_history.history_entry(bumped_manifest, base_surface)
+    assert len(revised) == len(published["entries"]) + 2
     checks += 1
 
     with tempfile.TemporaryDirectory(prefix="pulp-agent-transaction-") as temp:
@@ -1533,11 +1560,19 @@ def exercise_counters_assigned_at_land(canonical: dict) -> int:
     assert capability_history.pending_counters(history, published, surface_changed) == (False, True)
     checks += 1
 
-    # A pending state is never recorded: it names no contract identity.
+    # A pending state is never recorded: it names no contract identity. The
+    # state that assigns it is recorded in the same write, so the next branch
+    # starts from a recorded state.
     entries = capability_history.updated_history_entries(
         history, changed, surface_doc, assigned, surface_doc,
         initial_bootstrap=False, migrate_unpublished=False)
-    assert entries == history["entries"], "a pending previous state was appended"
+    assert entries == history["entries"] + [
+        capability_history.history_entry(assigned, surface_doc)
+    ], "a pending previous state was appended, or the assigned state was not"
+    entries = capability_history.updated_history_entries(
+        history, published, surface_doc, changed, surface_doc,
+        initial_bootstrap=False, migrate_unpublished=False)
+    assert entries == history["entries"], "a pending current state was appended"
     entries = capability_history.updated_history_entries(
         capability_history.history_document([]), published, surface_doc, changed, surface_doc,
         initial_bootstrap=False, migrate_unpublished=False)
@@ -1567,6 +1602,209 @@ def exercise_counters_assigned_at_land(canonical: dict) -> int:
     status = json.loads(result.stdout)
     assert set(status) == {"manifest_revision", "inventory_version"}
     assert all(item["state"] in {"assigned", "pending"} for item in status.values())
+    checks += 1
+    return checks
+
+
+def _merge_texts(base: str, ours: str, theirs: str, name: str) -> tuple[bool, str]:
+    """Run a real three-way git merge of one file; (clean, merged text)."""
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-merge-") as temp:
+        repo = pathlib.Path(temp)
+        _git(repo, "init", "--quiet", "--initial-branch=main", ".")
+        _git(repo, "config", "user.email", "test@pulp.invalid")
+        _git(repo, "config", "user.name", "pulp test")
+        path = repo / name
+
+        def commit(text: str, message: str) -> None:
+            path.write_text(text, encoding="utf-8")
+            _git(repo, "add", name)
+            _git(repo, "commit", "--quiet", "--allow-empty", "-m", message)
+
+        commit(base, "base")
+        _git(repo, "checkout", "--quiet", "-b", "theirs")
+        commit(theirs, "theirs")
+        _git(repo, "checkout", "--quiet", "main")
+        commit(ours, "ours")
+        merged = subprocess.run(
+            ["git", "merge", "--quiet", "--no-edit", "theirs"],
+            cwd=repo, text=True, capture_output=True,
+        )
+        return merged.returncode == 0, path.read_text(encoding="utf-8")
+
+
+def _added_header(base: dict, include: str, domain: str) -> dict:
+    """The surface ledger with one more reviewed header, counter unchanged."""
+    record = {
+        "domain": domain,
+        "source": f"core/{domain}/include/{include}",
+        "fingerprint": "sha256:" + "c" * 64,
+        "include": include,
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": "Synthetic header for the independent-branch merge test.",
+    }
+    return surface.assemble_surface_document(
+        base["headers"] + [record], base["tombstones"], base["inventory_version"])
+
+
+def exercise_independent_branches_merge_cleanly(canonical: dict) -> int:
+    """Two branches that each add public surface merge without a conflict.
+
+    Every open PR used to rewrite the same lines: a hand-bumped
+    SURFACE_INVENTORY_VERSION / inventory_version, and the ledger's aggregate
+    `counts`. The second PR to land conflicted, or merged cleanly to a wrong
+    total that only --check on main noticed. Now a branch leaves both counters
+    at the base (the change is pending), the ledger commits no totals, and the
+    version-at-land bump assigns the counter and records the state in one
+    serialized commit. Each step below runs the production function, and each
+    relaxed rule is paired with the strict rule it must still enforce."""
+    import agent_capability_rederive as rederive
+
+    checks = 0
+    base_surface = manifest.build_surface(ROOT)[0]
+    base_text = surface.rendered(base_surface)
+    history = capability_history.history_document(
+        [capability_history.history_entry(canonical, base_surface)])
+
+    # Same domain on purpose: the shared per-domain totals were the worst
+    # case. Two headers at the SAME sorted position still conflict, as any
+    # two insertions at one place in any file do; that is a real collision.
+    branch_a = _added_header(base_surface, "pulp/audio/aa_branch_a.hpp", "audio")
+    branch_b = _added_header(base_surface, "pulp/audio/zz_branch_b.hpp", "audio")
+    both = surface.assemble_surface_document(
+        base_surface["headers"] + [
+            next(row for row in branch["headers"] if row["include"] == include)
+            for branch, include in ((branch_a, "pulp/audio/aa_branch_a.hpp"),
+                                    (branch_b, "pulp/audio/zz_branch_b.hpp"))
+        ],
+        base_surface["tombstones"], base_surface["inventory_version"])
+
+    # 1. Each branch derives the base counters: the change can stay pending.
+    for branch in (branch_a, branch_b):
+        assert rederive.derive(canonical, branch, canonical, base_surface, history) == (
+            canonical["manifest_revision"], base_surface["inventory_version"]
+        ), "a branch on a recorded base was told to bump a counter"
+    # Without the base history (or for a mixed base) it still advances.
+    assert rederive.derive(canonical, branch_a, canonical, base_surface) == (
+        canonical["manifest_revision"], base_surface["inventory_version"] + 1)
+    checks += 1
+
+    # 2. Each branch's --write: history untouched, the counter rules accept it.
+    for branch in (branch_a, branch_b):
+        entries = capability_history.updated_history_entries(
+            history, canonical, base_surface, canonical, branch,
+            initial_bootstrap=False, migrate_unpublished=False)
+        assert entries == history["entries"], "a pending branch rewrote the history"
+        assert not manifest._counter_problems(
+            history, entries, canonical, base_surface, canonical, branch)
+    checks += 1
+
+    # 3. The two ledgers merge textually, with no conflict, to exactly what
+    #    regeneration produces for the merged tree.
+    clean, merged = _merge_texts(
+        base_text, surface.rendered(branch_a), surface.rendered(branch_b),
+        "agent-capability-surface.json")
+    assert clean, "two independent surface additions conflicted:\n" + merged
+    assert merged == surface.rendered(both), (
+        "the merged ledger differs from the regenerated one (a committed "
+        "aggregate merged to a wrong value)")
+    assert capability_history.pending_counters(history, canonical, both) == (False, True)
+    assert not capability_history.history_problems(history, canonical, both)
+    checks += 1
+
+    # 4. The bump assigns once for both and records the assigned state, so a
+    #    branch cut after it also leaves the counter alone.
+    assigned = copy.deepcopy(both)
+    assigned["inventory_version"] += 1
+    after_bump = capability_history.updated_history_entries(
+        history, canonical, both, canonical, assigned,
+        initial_bootstrap=False, migrate_unpublished=False)
+    assert after_bump == history["entries"] + [
+        capability_history.history_entry(canonical, assigned)]
+    assert not manifest._counter_problems(
+        history, after_bump, canonical, both, canonical, assigned)
+    bumped_history = capability_history.history_document(after_bump)
+    branch_c = _added_header(assigned, "pulp/midi/zz_branch_c.hpp", "midi")
+    assert rederive.derive(canonical, branch_c, canonical, assigned, bumped_history) == (
+        canonical["manifest_revision"], assigned["inventory_version"])
+    entries_c = capability_history.updated_history_entries(
+        bumped_history, canonical, assigned, canonical, branch_c,
+        initial_bootstrap=False, migrate_unpublished=False)
+    assert entries_c == after_bump
+    assert not manifest._counter_problems(
+        bumped_history, entries_c, canonical, assigned, canonical, branch_c), (
+        "a branch cut after the bump could not leave its counter alone")
+    checks += 1
+
+    # 5. A base the history never recorded (a hand-bumped counter): every
+    #    branch records the same prior state, byte-identical, so the 
+    #    append-only history still merges cleanly.
+    unrecorded = capability_history.history_document(history["entries"])
+    old_base = copy.deepcopy(base_surface)
+    old_base["inventory_version"] -= 1
+    unrecorded["entries"] = [capability_history.history_entry(canonical, old_base)]
+    appended = []
+    for branch in (branch_a, branch_b):
+        entries = capability_history.updated_history_entries(
+            unrecorded, canonical, base_surface, canonical, branch,
+            initial_bootstrap=False, migrate_unpublished=False)
+        assert not manifest._counter_problems(
+            unrecorded, entries, canonical, base_surface, canonical, branch)
+        appended.append(capability_history.history_document(entries))
+    assert appended[0] == appended[1]
+    render = lambda document: json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+    clean, merged = _merge_texts(
+        render(unrecorded), render(appended[0]), render(appended[1]),
+        "contract-history.json")
+    assert clean and merged == render(appended[0])
+    checks += 1
+
+    # 6. The guards still hold under the relaxed counter rule.
+    #    a) A mixed base (one side pending, the other an unrecorded hand bump)
+    #       cannot stay pending on the unrecorded side.
+    pending_manifest = copy.deepcopy(canonical)
+    pending_manifest["capabilities"][0]["summary"] += " (edited)"
+    mixed = capability_history.history_document([
+        capability_history.history_entry(canonical, old_base)])
+    assert capability_history.counters_that_can_stay(
+        mixed, pending_manifest, base_surface) == (True, False)
+    entries = capability_history.updated_history_entries(
+        mixed, pending_manifest, base_surface, pending_manifest, branch_a,
+        initial_bootstrap=False, migrate_unpublished=False)
+    expect_problem(
+        manifest._counter_problems(
+            mixed, entries, pending_manifest, base_surface, pending_manifest, branch_a),
+        "public surface changed without an inventory_version increase")
+    #    b) Two materials never share a recorded counter.
+    expect_problem(
+        capability_history.history_problems(
+            capability_history.history_document(
+                history["entries"] + [capability_history.history_entry(canonical, both)]),
+            canonical, both),
+        "public surface changed without an inventory_version increase")
+    #    c) A pending removal still needs its tombstone.
+    removed = surface.assemble_surface_document(
+        base_surface["headers"][1:], base_surface["tombstones"],
+        base_surface["inventory_version"])
+    if base_surface["headers"][0]["disposition"] != "legacy_unreviewed":
+        expect_problem(
+            manifest.surface_evolution_problems(
+                base_surface, removed, surface.SURFACE_SCHEMA, unassigned=True),
+            "removed reviewed header lacks a tombstone")
+    else:
+        expect_problem(
+            manifest.surface_evolution_problems(
+                base_surface, removed, surface.SURFACE_SCHEMA, unassigned=True),
+            "lacks a tombstone")
+    #    d) The committed ledger may not carry the derived totals again.
+    with_counts = {**base_surface, "counts": surface.surface_counts(base_surface["headers"])}
+    assert json_schema_lite.validate(
+        with_counts, json.loads((ROOT / surface.SURFACE_SCHEMA_FILE).read_text()))
+    #    e) The derived totals still describe the ledger.
+    totals = surface.surface_counts(both["headers"])
+    assert totals["public_headers"] == len(base_surface["headers"]) + 2
+    assert totals["by_disposition"]["infrastructure"] == surface.surface_counts(
+        base_surface["headers"])["by_disposition"]["infrastructure"] + 2
     checks += 1
     return checks
 
@@ -1684,6 +1922,7 @@ def main() -> int:
     checks += exercise_compatibility(canonical)
     checks += exercise_base_drift()
     checks += exercise_counters_assigned_at_land(canonical)
+    checks += exercise_independent_branches_merge_cleanly(canonical)
     checks += exercise_release_guard_wiring()
     checks += exercise_authority_navigation()
     print(f"agent-capabilities: {checks} negative/evolution/surface/compatibility checks passed")
