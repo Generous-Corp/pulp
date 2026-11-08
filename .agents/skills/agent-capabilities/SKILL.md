@@ -70,7 +70,21 @@ pending and the other is an assigned state the history never recorded
 it bumps only that side. The next version-at-land bump records the state and
 ends the case; `--assign-pending` also records an unrecorded assigned state
 when nothing is pending. Do not hand-bump in any other case, since that brings
-back the race.
+back the race. `--check` enforces it: past the protected base, the history may
+gain only the base's own state or its `--assign-pending` assignment (the base
+material with each pending counter + 1), so a branch that records its own
+hand bump fails with "neither the protected base's own state nor its
+version-at-land assignment". A mixed-base hand bump stays pending and records
+nothing, so it is unaffected.
+
+**`main` is a mixed base right now (2026-11-08)**: `manifest_revision` 91 is
+pending, `inventory_version` 205 is assigned, and the history's last entry is
+still at inventory 200. Until the next `chore: bump versions` runs
+`--assign-pending` (which records the state), a branch that touches a public
+header still needs a hand bump of `SURFACE_INVENTORY_VERSION`: re-derive, and
+pick past any integer an open PR already holds. The recording rule must merge
+before that next release bump so the bump is the one that heals `main`; once
+`--status` shows `main` fully recorded, this paragraph is history.
 
 A new header that is not a generator-facing capability takes an
 `infrastructure` row in `agent_capability_registry.py` with the

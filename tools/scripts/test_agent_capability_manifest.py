@@ -1816,6 +1816,101 @@ def exercise_independent_branches_merge_cleanly(canonical: dict) -> int:
     return checks
 
 
+def exercise_single_writer_recording(canonical: dict) -> int:
+    """Only the base's own state or its assignment may be recorded past it.
+
+    `--write` records an assigned state as soon as it produces one, so a
+    branch that still hand-bumps a counter would record its own state too and
+    recording would stop being single-writer. The protected-base comparison
+    refuses that, through the real git read, while the paths that must keep
+    working still pass: a pending branch, the version-at-land assignment, a
+    branch recording an unrecorded base, and the mixed-base hand bump."""
+    checks = 0
+    needle = "neither the protected base's own state nor its version-at-land assignment"
+    base_surface = manifest.build_surface(ROOT)[0]
+    branch_a = _added_header(base_surface, "pulp/audio/aa_branch_a.hpp", "audio")
+    entry = capability_history.history_entry
+    document = capability_history.history_document
+
+    def bumped(doc: dict, key: str) -> dict:
+        result = copy.deepcopy(doc)
+        result[key] += 1
+        return result
+
+    def problems(base_manifest: dict, base_surface_doc: dict, base_entries: list,
+                 entries: list, current_manifest: dict, current_surface: dict) -> list[str]:
+        with tempfile.TemporaryDirectory(prefix="pulp-agent-single-writer-") as temp:
+            repo = pathlib.Path(temp)
+            _git(repo, "init", "--quiet", "--initial-branch=main", ".")
+            _git(repo, "config", "user.email", "test@pulp.invalid")
+            _git(repo, "config", "user.name", "pulp test")
+            files = {
+                capability_history.SNAPSHOT:
+                    json.dumps(base_manifest, indent=2, ensure_ascii=False) + "\n",
+                surface.SURFACE_SNAPSHOT: surface.rendered(base_surface_doc),
+                capability_history.HISTORY_FILE:
+                    capability_history.rendered_history(document(base_entries)),
+            }
+            for relative, text in files.items():
+                (repo / relative).parent.mkdir(parents=True, exist_ok=True)
+                (repo / relative).write_text(text, encoding="utf-8")
+                _git(repo, "add", str(relative))
+            _git(repo, "commit", "--quiet", "-m", "protected base")
+            saved = os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF")
+            os.environ["PULP_AGENT_CAPABILITY_BASE_REF"] = "main"
+            try:
+                return capability_history.protected_base_problems(
+                    repo, document(entries), current_manifest, current_surface)
+            finally:
+                if saved is None:
+                    os.environ.pop("PULP_AGENT_CAPABILITY_BASE_REF", None)
+                else:
+                    os.environ["PULP_AGENT_CAPABILITY_BASE_REF"] = saved
+
+    # A recorded base: a branch that hand-bumps and records its state is refused,
+    hand = bumped(branch_a, "inventory_version")
+    recorded = [entry(canonical, base_surface)]
+    expect_problem(
+        problems(canonical, base_surface, recorded,
+                 recorded + [entry(canonical, hand)], canonical, hand),
+        needle)
+    # ... while the same change left pending records nothing and passes.
+    assert not problems(canonical, base_surface, recorded, recorded, canonical, branch_a)
+    checks += 1
+
+    # A pending base: the version-at-land assignment (base material, pending
+    # counter + 1) passes; an "assignment" that also carries new material is
+    # a second writer and is refused.
+    assigned = bumped(branch_a, "inventory_version")
+    assert not problems(canonical, branch_a, recorded,
+                        recorded + [entry(canonical, assigned)], canonical, assigned)
+    extra = _added_header(assigned, "pulp/audio/zz_branch_b.hpp", "audio")
+    expect_problem(
+        problems(canonical, branch_a, recorded,
+                 recorded + [entry(canonical, extra)], canonical, extra),
+        needle)
+    checks += 1
+
+    # An unrecorded base: the branch that records the base's own state passes.
+    old_base = copy.deepcopy(base_surface)
+    old_base["inventory_version"] -= 1
+    unrecorded = [entry(canonical, old_base)]
+    assert not [problem for problem in problems(
+        canonical, base_surface, unrecorded,
+        unrecorded + [entry(canonical, base_surface)], canonical, branch_a)
+        if needle in problem]
+    # A mixed base (manifest pending, surface an unrecorded hand bump): the
+    # documented surface hand bump records nothing, so it is not refused.
+    pending_manifest = copy.deepcopy(canonical)
+    pending_manifest["capabilities"][0]["summary"] += " (edited)"
+    mixed_bump = bumped(branch_a, "inventory_version")
+    assert not [problem for problem in problems(
+        pending_manifest, base_surface, unrecorded, unrecorded,
+        pending_manifest, mixed_bump) if needle in problem]
+    checks += 1
+    return checks
+
+
 def _workflow_steps(text: str) -> list[dict[str, str]]:
     """The steps of a single-job workflow as {"name", "id", "if", "run", <env>}.
 
@@ -2141,6 +2236,7 @@ def main() -> int:
     checks += exercise_base_drift()
     checks += exercise_counters_assigned_at_land(canonical)
     checks += exercise_independent_branches_merge_cleanly(canonical)
+    checks += exercise_single_writer_recording(canonical)
     checks += exercise_history_storage()
     checks += exercise_release_guard_wiring()
     checks += exercise_authority_navigation()

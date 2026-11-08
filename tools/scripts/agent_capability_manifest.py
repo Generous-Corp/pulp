@@ -841,7 +841,8 @@ def counter_status(root: pathlib.Path, doc: dict[str, Any],
         # counter) blocks the next branch from leaving its counter alone.
         # --write records it; nothing is renumbered.
         print("agent-capabilities: nothing pending; recording the assigned state")
-        return subprocess.run([sys.executable, str(source), "--write"], cwd=root).returncode
+        return subprocess.run([sys.executable, str(source), "--write"], cwd=root,
+                              env=_assignment_environment()).returncode
     text = source.read_text(encoding="utf-8")
     for (constant, _), value, is_pending in zip(COUNTER_CONSTANTS, values, pending):
         if is_pending:
@@ -851,8 +852,19 @@ def counter_status(root: pathlib.Path, doc: dict[str, Any],
             text = text.replace(line, f"{constant} = {value + 1}\n")
     source.write_text(text, encoding="utf-8")
     # The constants are read at import, so the write runs in a fresh process.
-    result = subprocess.run([sys.executable, str(source), "--write"], cwd=root)
+    result = subprocess.run([sys.executable, str(source), "--write"], cwd=root,
+                            env=_assignment_environment())
     return result.returncode
+
+
+def _assignment_environment() -> dict[str, str]:
+    """Assign against the commit being assigned, not a CI event's base.
+
+    An assignment is the base's own material with its pending counters
+    advanced, so the protected base for that write is HEAD. On a push event
+    the default resolution would pick the pre-push commit instead, and the
+    single-writer rule would refuse the bump's own entry."""
+    return {**os.environ, "PULP_AGENT_CAPABILITY_BASE_REF": "HEAD"}
 
 
 def main() -> int:

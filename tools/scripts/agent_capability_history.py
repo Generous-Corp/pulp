@@ -599,6 +599,8 @@ def protected_base_problems(
     old_manifest, old_surface, old_history = parsed
     problems: list[str] = []
     problems.extend(append_only_history_problems(old_history, history))
+    problems.extend(recorded_beyond_base_problems(
+        old_history, history, old_manifest, old_surface))
     manifest_pending, surface_pending = pending_counters(
         history, current_manifest, current_surface)
     base_manifest_pending, base_surface_pending = pending_counters(
@@ -620,6 +622,51 @@ def protected_base_problems(
         )
     )
     return _deduplicate(problems)
+
+def recorded_beyond_base_problems(
+    base_history: Any, history: Any, base_manifest: Any, base_surface: Any
+) -> list[str]:
+    """Keep recording single-writer: only two entries may follow the base's.
+
+    A branch may append (a) the base's own state, which records a base an
+    older hand bump left unrecorded, or (b) the base's material with each of
+    its pending counters advanced by exactly one, which is what
+    `--assign-pending` writes. Anything else is a branch recording its own
+    hand-bumped counter as assigned: two such branches race for the same
+    integer, which is the conflict this rule exists to end. A hand bump on a
+    mixed base is still pending, so it is never recorded and is unaffected."""
+    old_entries = _entries_or_none(base_history)
+    new_entries = _entries_or_none(history)
+    if old_entries is None or new_entries is None:
+        return []  # append_only_history_problems names the unreadable side
+    appended = new_entries[len(old_entries):]
+    if not appended:
+        return []
+    try:
+        allowed = {history_entry(base_manifest, base_surface)["entry_digest"]}
+        manifest_pending, surface_pending = pending_counters(
+            base_history, base_manifest, base_surface)
+        if manifest_pending or surface_pending:
+            assigned_manifest = copy.deepcopy(base_manifest)
+            assigned_surface = copy.deepcopy(base_surface)
+            if manifest_pending:
+                assigned_manifest["manifest_revision"] += 1
+            if surface_pending:
+                assigned_surface["inventory_version"] += 1
+            allowed.add(history_entry(assigned_manifest, assigned_surface)["entry_digest"])
+    except (KeyError, TypeError):
+        return ["protected base capability snapshots cannot be read as a history entry"]
+    problems = []
+    for offset, entry in enumerate(appended):
+        if entry.get("entry_digest") not in allowed:
+            problems.append(
+                f"capability history entries[{len(old_entries) + offset}] records a state "
+                "that is neither the protected base's own state nor its version-at-land "
+                "assignment; a branch must leave MANIFEST_REVISION and "
+                "SURFACE_INVENTORY_VERSION at the base value (run "
+                "agent_capability_rederive.py) rather than record a hand bump")
+    return problems
+
 
 def append_only_history_problems(previous: Any, current: Any) -> list[str]:
     """Every protected entry is still recorded, unchanged and in order.

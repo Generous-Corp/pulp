@@ -122,15 +122,27 @@ def _read_base_history(
 ) -> Any:
     """The protected base's contract history, or None when it cannot be read.
 
-    None only costs the conflict-free path (derive falls back to base + 1);
-    `--write` and `--check` still validate the history in full."""
+    None costs the conflict-free path: derive falls back to base + 1, which is
+    the integer every open branch races for. That is never silent; the
+    warning names the fallback and why. `--write` and `--check` still
+    validate the history in full."""
     item = history.read_git_path(root, comparison, history.HISTORY_FILE)
+    reason = None
     if item.status != "available":
-        return None
-    try:
-        return history.json.loads(item.content or "")
-    except history.json.JSONDecodeError:
-        return None
+        reason = f"it is {item.status}"
+    else:
+        try:
+            return history.json.loads(item.content or "")
+        except history.json.JSONDecodeError as error:
+            reason = f"it is not valid JSON ({error})"
+    print(
+        f"agent-capability-rederive: WARNING: could not read the protected "
+        f"base's {history.HISTORY_FILE} ({reason}), so a moved counter falls "
+        "back to base + 1 instead of staying pending. Two branches that do this "
+        "race for the same integer and conflict; fix the base read and re-run.",
+        file=sys.stderr,
+    )
+    return None
 
 
 def rewrite_constants(root: pathlib.Path, revision: int, inventory: int) -> bool:
