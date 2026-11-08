@@ -36,6 +36,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pulp::audio {
 
@@ -96,6 +97,15 @@ class AudioReader {
     open_memory(std::span<const std::uint8_t> bytes, std::string_view format_hint = {},
                 const DecodeLimits& limits = {},
                 AudioReaderFallback fallback = AudioReaderFallback::DecodeOnce);
+
+    /// Refused at compile time: the reader keeps a view of `bytes`, so a
+    /// temporary vector would be destroyed while the reader still reads it.
+    /// Keep the vector alive in a variable, or use open_source() with a byte
+    /// source that owns its data.
+    static std::unique_ptr<AudioReader>
+    open_memory(std::vector<std::uint8_t>&& bytes, std::string_view format_hint = {},
+                const DecodeLimits& limits = {},
+                AudioReaderFallback fallback = AudioReaderFallback::DecodeOnce) = delete;
 
     /// Opens a caller-supplied byte source, which the reader then owns. Same
     /// format rules as open_memory(). Ogg Vorbis needs its whole stream in

@@ -29,9 +29,11 @@
 #include <limits>
 #include <memory>
 #include <numbers>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -342,7 +344,7 @@ TEST_CASE("AudioReader enforces decode limits on open and on allocating reads",
 TEST_CASE("AudioReader refuses unknown, empty and truncated input", "[audio][audio-reader]") {
     const std::vector<std::uint8_t> garbage(512, 0x42);
     CHECK_FALSE(AudioReader::open_memory(garbage));
-    CHECK_FALSE(AudioReader::open_memory({}));
+    CHECK_FALSE(AudioReader::open_memory(std::span<const std::uint8_t>{}));
     CHECK_FALSE(AudioReader::open_source(nullptr));
     CHECK_FALSE(AudioReader::open_file("/no/such/file.flac"));
 
@@ -453,7 +455,8 @@ TEST_CASE("AudioReader decodes a stream with no length claim once and serves it"
     CHECK_FALSE(reader->supports_ranged_read());
     CHECK(reader->info().num_frames == kFrames);
 
-    auto ranged = AudioReader::open_memory(decode_fixture(fixtures::kFlacBase64));
+    const auto ranged_bytes = decode_fixture(fixtures::kFlacBase64);
+    auto ranged = AudioReader::open_memory(ranged_bytes);
     REQUIRE(ranged);
     const auto reference = full_decode(*ranged);
     check_range(*reader, reference, 4000, 700, 0.0f);
@@ -590,8 +593,9 @@ TEST_CASE("AudioReaderFallback::Refuse opens only readers that seek", "[audio][a
     CHECK_FALSE(AudioReader::open_memory(no_length, ".flac", {}, AudioReaderFallback::Refuse));
     CHECK_FALSE(AudioReader::open_source(std::make_unique<VectorSource>(no_length), ".flac", {},
                                          AudioReaderFallback::Refuse));
-    auto seekable = AudioReader::open_memory(decode_fixture(fixtures::kFlacBase64), ".flac", {},
-                                             AudioReaderFallback::Refuse);
+    const auto seekable_bytes = decode_fixture(fixtures::kFlacBase64);
+    auto seekable =
+        AudioReader::open_memory(seekable_bytes, ".flac", {}, AudioReaderFallback::Refuse);
     REQUIRE(seekable);
     CHECK(seekable->supports_ranged_read());
 
@@ -687,8 +691,10 @@ TEST_CASE("AudioReader refuses empty streams and survives extreme offsets",
     empty.channels.assign(2, {});
     const auto wav_path = dir.path / "empty.wav";
     pulp::audio::write_wav_file(wav_path.string(), empty);
-    if (fs::exists(wav_path))
-        CHECK_FALSE(AudioReader::open_memory(read_bytes(wav_path), ".wav"));
+    if (fs::exists(wav_path)) {
+        const auto empty_bytes = read_bytes(wav_path);
+        CHECK_FALSE(AudioReader::open_memory(empty_bytes, ".wav"));
+    }
 
     for (auto& format : make_formats(dir)) {
         INFO(format.name);
@@ -768,4 +774,32 @@ TEST_CASE("Vendored dr_mp3 seek-table seeks are inexact while decode-forward see
         if (target + 64 <= total)
             CHECK_FALSE(mismatch(forward, target));
     drmp3_uninit(&forward);
+}
+
+// The reader keeps a view of the bytes it is given, so a temporary vector is
+// refused at compile time; passing one used to read freed memory once the
+// reader decoded (an AddressSanitizer heap-use-after-free).
+template <typename Bytes>
+concept OpensFromMemory =
+    requires(Bytes&& bytes) { AudioReader::open_memory(std::forward<Bytes>(bytes), ".flac"); };
+static_assert(!OpensFromMemory<std::vector<std::uint8_t>>);
+static_assert(OpensFromMemory<std::vector<std::uint8_t>&>);
+static_assert(OpensFromMemory<const std::vector<std::uint8_t>&>);
+static_assert(OpensFromMemory<std::span<const std::uint8_t>>);
+
+TEST_CASE("AudioReader decodes the whole stream from memory the caller keeps alive",
+          "[audio][audio-reader]") {
+    // Each read reaches the end of the stream through the caller's bytes,
+    // so a lifetime mistake here is an AddressSanitizer failure.
+    for (auto encoded : {fixtures::kFlacBase64, fixtures::kMp3Base64, fixtures::kOggVorbisBase64}) {
+        const auto bytes = decode_fixture(encoded);
+        auto reader = AudioReader::open_memory(bytes);
+        REQUIRE(reader);
+        const auto total = reader->info().num_frames;
+        const auto data = reader->read(0, total);
+        REQUIRE(data);
+        CHECK(data->num_frames() == total);
+        const auto tail = reader->read(total / 2, total);
+        REQUIRE(tail);
+    }
 }
