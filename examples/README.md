@@ -148,6 +148,7 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `g5-host-event-consumer` | Public host event boundary from an external program (**SDK project**) | `ctest -R g5-host-event-public-consumer` | `test/consumers/g5-host-event-consumer` |
 | `g5-trigger-admission-consumer` | Graph planner admits trigger edges in a release build (**SDK project**) | `ctest -R trigger-admission-public-consumer` | `test/consumers/g5-trigger-admission-consumer` |
 | `g5-trigger-runtime-consumer` | Graph-produced onsets render through a typed trigger edge (**SDK project**) | `ctest -R trigger-runtime-public-consumer` | `test/consumers/g5-trigger-runtime-consumer` |
+| `g4-voice-bank-consumer` | Voice-bank persistence save/load/edit/undo/redo and binding refusal from an installed SDK (**SDK project**) | `ctest -R cmake-g4-voice-bank-sdk-consumer` | `test/consumers/g4-voice-bank-consumer` |
 | `g6-voice-contract-consumer` | Existing MIDI voice allocation state (**SDK project**) | `ctest -R cmake-g6-voice-contract-sdk-consumer` | `test/consumers/g6-voice-contract-consumer` |
 | `g7-latency-pdc-consumer` | Public latency reporting on a graph (**SDK project**) | Configure as an SDK project | `test/consumers/g7-latency-pdc-consumer` |
 | `spectral-frame-codec-consumer` | Spectral frame codec from an installed SDK (**SDK project**) | `ctest -R cmake-spectral-frame-codec-consumer` | `test/consumers/spectral-frame-codec-consumer` |
