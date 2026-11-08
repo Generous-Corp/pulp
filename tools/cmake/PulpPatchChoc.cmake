@@ -262,3 +262,76 @@ function(pulp_patch_choc_wav_block_align_bounds choc_source_dir)
     file(WRITE "${_pulp_choc_wav_header}" "${_pulp_choc_wav}")
     message(STATUS "Pulp: applied CHOC WAV block-align bounds patch")
 endfunction()
+
+# CHOC's WAV metadata readers size their string reads from the chunk header:
+# readStringToEndOfChunk computes "chunk end minus position" as unsigned, so a
+# chunk whose fixed fields have already run past its declared end (a bext
+# chunk shorter than BWAV's 602 fixed bytes) wraps to about 4 GiB and
+# std::string::resize asks for it before a byte is read (a libFuzzer
+# out-of-memory finding). The patch bounds every metadata read to the bytes
+# the stream still holds and to the chunk it belongs to, and keeps a bext
+# chunk shorter than its fixed fields as opaque bytes instead of parsing it.
+function(pulp_patch_choc_wav_bounded_metadata_reads choc_source_dir)
+    set(_pulp_choc_wav_header
+        "${choc_source_dir}/choc/audio/choc_AudioFileFormat_WAV.h")
+    if(NOT EXISTS "${_pulp_choc_wav_header}")
+        message(FATAL_ERROR
+            "Pulp: CHOC WAV header not found for the bounded-metadata patch: ${_pulp_choc_wav_header}")
+    endif()
+
+    file(READ "${_pulp_choc_wav_header}" _pulp_choc_wav)
+    _pulp_choc_apply_patch(_pulp_choc_wav "WAV bounded readString"
+"        std::string readString (uint32_t size)
+        {
+            std::string s;
+            s.resize (size);"
+"        std::string readString (uint32_t size)
+        {
+            auto pos = getPosition(); // never size a read past the bytes the stream still holds
+            if (pos >= streamEndPosition)
+                return {};
+            size = static_cast<uint32_t> (std::min<uint64_t> (size, streamEndPosition - pos));
+            std::string s;
+            s.resize (size);")
+    _pulp_choc_apply_patch(_pulp_choc_wav "WAV bounded readStringToEndOfChunk"
+"        std::string readStringToEndOfChunk (ChunkRange range)
+        {
+            return readString (static_cast<uint32_t> (range.getEnd() - getPosition()));
+        }"
+"        std::string readStringToEndOfChunk (ChunkRange range)
+        {
+            auto pos = getPosition(); // a chunk whose fixed fields overran it has nothing left to read
+            if (pos >= range.getEnd())
+                return {};
+            return readString (static_cast<uint32_t> (std::min<uint64_t> (range.getEnd() - pos, 0xffffffffu)));
+        }")
+    _pulp_choc_apply_patch(_pulp_choc_wav "WAV bounded readIntoBase64"
+"        template <typename Size>
+        std::string readIntoBase64 (Size size)
+        {
+            std::vector<char> data;
+            data.resize (static_cast<size_t>  (size));"
+"        template <typename Size>
+        std::string readIntoBase64 (Size size)
+        {
+            auto pos = getPosition(); // never size a read past the bytes the stream still holds
+            auto remaining = pos < streamEndPosition ? streamEndPosition - pos : 0u;
+            size = static_cast<Size> (std::min<uint64_t> (static_cast<uint64_t> (size), remaining));
+            std::vector<char> data;
+            data.resize (static_cast<size_t>  (size));")
+    _pulp_choc_apply_patch(_pulp_choc_wav "WAV bext minimum size"
+"        void readMetadata_BWAV (std::string type, ChunkRange chunkRange)
+        {
+            auto readUMID = [this]"
+"        void readMetadata_BWAV (std::string type, ChunkRange chunkRange)
+        {
+            if (chunkRange.length < 602) // shorter than BWAV's fixed fields: keep the bytes, do not parse them
+            {
+                readMetadata_Unknown (type, chunkRange);
+                return;
+            }
+
+            auto readUMID = [this]")
+    file(WRITE "${_pulp_choc_wav_header}" "${_pulp_choc_wav}")
+    message(STATUS "Pulp: applied CHOC WAV bounded metadata reads patch")
+endfunction()

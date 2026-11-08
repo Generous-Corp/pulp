@@ -86,6 +86,7 @@ path or timestamp (the m4a `mvhd`/`tkhd`/`mdhd` times are zeroed).
 | `wav-riff-header-only.wav` | 8 | Python | Malformed: `RIFF` plus a zero size, nothing else. |
 | `wav-riff-size-lying-small.wav` | 1644 | Python | Malformed: RIFF size declares 100 data bytes while the `data` chunk and file carry 1600. |
 | `wav-block-align-smaller-than-frame.wav` | 1644 | fuzzer | Malformed: libFuzzer reproducer; the fmt chunk declares two 8-bit channels with nBlockAlign 1, a frame smaller than its own samples. CHOC once read past its raw block on it. Not produced by the generator script. |
+| `wav-bext-declares-4gib.wav` | 866 | fuzzer | Malformed: libFuzzer reproducer; a 128-byte bext chunk is shorter than BWAV's 602 fixed bytes, so CHOC's "chunk end minus position" wrapped to about 4 GiB and sized a string read from it. Not produced by the generator script. |
 
 ### AIFF family
 
@@ -161,6 +162,7 @@ differential tests exist to surface.
 | `wav-riff-header-only.wav` | refuses ("Invalid data found") | refuses |
 | `wav-riff-size-lying-small.wav` | ignores the RIFF size, 0.1 s | honours it, 0.0065 s |
 | `wav-block-align-smaller-than-frame.wav` | duration=0.100000 | estimated duration: 0.100000 sec |
+| `wav-bext-declares-4gib.wav` | "no 'data' tag found", refuses | estimated duration 0 s |
 | all AIFF/AIFF-C seeds | decode clean 0.1 s, including `aiff-comm-after-ssnd.aiff`; `aiff-ssnd-past-eof.aiff` is clamped to the bytes present with no complaint | agree; both readers accept the truncated `SSND` silently |
 | `flac-fixed-blocksize-mono.flac`, `flac-seektable-padding.flac`, `flac-variable-blocksize-verbatim.flac` | decode clean, 0.1 s; `flac -t` exit 0 | agree (`flac` reports 0 frames/packet for the variable-blocksize stream) |
 | `flac-truncated-midframe.flac` | "invalid residual", `decode_frame() failed`; `flac -t` exit 1 | opens, reports 0.1 s from STREAMINFO |

@@ -198,6 +198,11 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
         {"ogg-vendor-length-negative.ogg", E{false, {}, {}, "negative vendor-string length"}},
         {"ogg-comment-length-int-max.ogg",
          E{false, {}, {}, "comment-string length near INT_MAX; len + 1 overflowed the allocator"}},
+        {"wav-bext-declares-4gib.wav",
+         E{false,
+           {},
+           {},
+           "bext chunk shorter than its fixed fields; CHOC once sized a 4 GiB string read"}},
         {"wav-block-align-smaller-than-frame.wav",
          E{false, true, true,
            "nBlockAlign smaller than channels x sample width: the registry refuses the layout, "
@@ -503,6 +508,28 @@ TEST_CASE("an MP3 with no declared length reports the frames the decoder deliver
     REQUIRE(data.has_value());
     CHECK(data->num_frames() == 3456u);
     CHECK(info->num_frames == data->num_frames());
+}
+
+TEST_CASE("a WAV whose bext chunk is shorter than its fixed fields is refused without allocating",
+          "[fuzz][audio][wav]") {
+    // libFuzzer reproducer: a 128-byte bext chunk; the BWAV reader's fixed
+    // fields ran past it and the remaining-length subtraction wrapped to
+    // about 4 GiB, which std::string::resize then requested. The file has no
+    // data chunk, so info reports zero frames (as a zero-length data chunk
+    // does) and the decode is refused; both must finish without that request.
+    const auto path = corpus_dir() / "wav-bext-declares-4gib.wav";
+    REQUIRE(fs::exists(path));
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto started = std::chrono::steady_clock::now();
+    const auto direct = pulp::audio::read_audio_file_info(path.string());
+    REQUIRE(direct.has_value());
+    CHECK(direct->num_frames == 0u);
+    const auto info = registry.read_info(path.string());
+    REQUIRE(info.has_value());
+    CHECK(info->num_frames == 0u);
+    CHECK_FALSE(pulp::audio::read_audio_file(path.string()).has_value());
+    CHECK_FALSE(registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
 }
 
 TEST_CASE("a WAV whose block align is smaller than its channels' samples is refused",

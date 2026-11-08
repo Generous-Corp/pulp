@@ -51,6 +51,7 @@ pulp_patch_choc_json_number_exponent("${choc_SOURCE_DIR}")
 pulp_patch_choc_file_watcher("${choc_SOURCE_DIR}")
 pulp_patch_choc_wav_extensible_container_bits("${choc_SOURCE_DIR}")
 pulp_patch_choc_wav_block_align_bounds("${choc_SOURCE_DIR}")
+pulp_patch_choc_wav_bounded_metadata_reads("${choc_SOURCE_DIR}")
 
 # WebGPU (Dawn) — cross-platform GPU abstraction (BSD-3-Clause)
 # Uses eliemichel/WebGPU-distribution for CMake-friendly integration
