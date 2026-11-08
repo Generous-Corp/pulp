@@ -76,26 +76,27 @@ std::optional<DecodedAudio> decode(const std::string& path) {
         std::cerr << "Error: audio file not found: " << path << "\n";
         return std::nullopt;
     }
+    // Preflight the header before any decoder touches the file. A header
+    // that declares more than the in-memory decoder admits is a limit, not
+    // corruption, and the CHOC WAV path has no ceiling of its own: it would
+    // allocate whatever the header declares. The bounded layout read costs a
+    // few hundred bytes and names the ceiling the caller would have hit, so
+    // the caller can reach for `pulp audio inspect` instead of debugging the
+    // file. The ceilings are the format registry's DecodeLimits, which the
+    // registry readers enforce, not the smaller in-memory WavDecodeLimits
+    // that `pulp audio inspect` reports.
+    pulp::audio::LayoutInspectOptions layout_options;
+    layout_options.decode_limits = pulp::audio::as_wav_decode_limits(pulp::audio::DecodeLimits{});
+    const auto layout = pulp::audio::inspect_audio_file_layout(fs::path(path), layout_options);
+    if (layout.decode_limits && layout.decode_limits->exceeds() && layout.stream) {
+        std::cerr << "Error: audio file exceeds the in-memory decode limit: " << path
+                  << " declares " << layout.stream->frames << " frames x "
+                  << layout.stream->channels << " channels; " << layout.decode_limits->describe()
+                  << ". `pulp audio inspect` reports the header without decoding.\n";
+        return std::nullopt;
+    }
     auto file = pulp::audio::read_audio_file(path);
     if (!file) {
-        // A header that declares more than the in-memory decoder admits is a
-        // limit, not corruption; say which limit so the caller can reach for
-        // `pulp audio inspect` instead of debugging the file.
-        // read_audio_file enforces the format registry's DecodeLimits, so
-        // the fact is evaluated against those ceilings, not the smaller
-        // in-memory WavDecodeLimits that `pulp audio inspect` reports.
-        pulp::audio::LayoutInspectOptions layout_options;
-        layout_options.decode_limits =
-            pulp::audio::as_wav_decode_limits(pulp::audio::DecodeLimits{});
-        const auto layout = pulp::audio::inspect_audio_file_layout(fs::path(path), layout_options);
-        if (layout.decode_limits && layout.decode_limits->exceeds() && layout.stream) {
-            std::cerr << "Error: audio file exceeds the in-memory decode limit: " << path
-                      << " declares " << layout.stream->frames << " frames x "
-                      << layout.stream->channels << " channels; "
-                      << layout.decode_limits->describe()
-                      << ". `pulp audio inspect` reports the header without decoding.\n";
-            return std::nullopt;
-        }
         std::cerr << "Error: could not decode audio file (unsupported format "
                      "or corrupt): "
                   << path << "\n";

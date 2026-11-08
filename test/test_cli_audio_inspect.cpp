@@ -10,6 +10,7 @@
 
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <set>
@@ -199,6 +200,42 @@ TEST_CASE("a header past the decode limit is a fact for inspect and a named limi
     CHECK(doc["bytes_read"].getInt64() < 1024);
 
     fs::remove(path);
+
+    // A WAV header past the registry ceiling must be refused before any
+    // decoder runs: the CHOC WAV path has no ceiling and would allocate what
+    // the header declares. Header-only files make the refusal cheap to prove
+    // and a crash (exit 134/138/139) impossible to mistake for a refusal.
+    auto refuse_header_only = [&](const char* name, Bytes header, const char* limit) {
+        INFO(name);
+        const auto header_path = write_bytes(name, header);
+        const auto started = std::chrono::steady_clock::now();
+        const auto run =
+            run_pulp({"audio", "validate", "summarize", header_path.string(), "--json"});
+        const auto elapsed = std::chrono::steady_clock::now() - started;
+        CHECK(run.exit_code == 1);
+        CHECK(run.exit_code != 134);
+        CHECK(run.exit_code != 138);
+        CHECK(run.exit_code != 139);
+        CHECK_THAT(run.stderr_output,
+                   Catch::Matchers::ContainsSubstring("exceeds the in-memory decode limit"));
+        CHECK_THAT(run.stderr_output, Catch::Matchers::ContainsSubstring(limit));
+        CHECK_THAT(run.stderr_output, Catch::Matchers::ContainsSubstring("pulp audio inspect"));
+        CHECK(run.stdout_output.empty());
+        CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() < 1000);
+        fs::remove(header_path);
+    };
+    {
+        // 2^30 + 1 mono 16-bit frames: the data chunk claims 2 GiB the file does not hold.
+        auto over_frames = make_wav(make_format(1u, 1u, 48'000u, 16u), Bytes{});
+        set_u32(over_frames, 40u, static_cast<std::uint32_t>(((1ull << 30u) + 1u) * 2u));
+        set_u32(over_frames, 4u, static_cast<std::uint32_t>(((1ull << 30u) + 1u) * 2u + 36u));
+        refuse_header_only("over-registry-frames.wav", over_frames, "max_frames=1073741824");
+    }
+    {
+        // 65 channels is one past the registry's channel ceiling.
+        auto over_channels = make_wav(make_format(1u, 65u, 48'000u, 16u), Bytes(65u * 2u, 0u));
+        refuse_header_only("over-registry-channels.wav", over_channels, "max_channels=64");
+    }
 
     // `summarize` decodes FLAC through the format registry, whose ceiling is
     // 2^30 frames; a STREAMINFO one frame past it must be named as a limit,
