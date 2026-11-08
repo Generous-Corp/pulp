@@ -265,6 +265,63 @@ class Codemodel:
         return seen
 
 
+# ── ctest command/artifact references ──────────────────────────────────────
+
+
+def _command_path_refs(command: Iterable[Any]) -> Iterable[str]:
+    """Yield absolute paths named by a CTest command.
+
+    CMake-script tests commonly pass generated binaries as a separate
+    ``--forbidden`` argument or as the value of ``-DVAR=``, ``--flag=`` or
+    ``NAME=``. A list-valued assignment may use either CMake's ``;`` or a
+    fixture script's ``|`` separator.
+    """
+    for token in command:
+        if not isinstance(token, str) or not token:
+            continue
+        candidates = [token]
+        if "=" in token:
+            candidates.append(token.rsplit("=", 1)[1])
+        for candidate in candidates:
+            for value in re.split(r"[;|]", candidate):
+                if os.path.isabs(value):
+                    yield str(Path(value).resolve())
+
+
+def _artifact_index(model: Codemodel) -> dict[str, set[str]]:
+    index: dict[str, set[str]] = {}
+    for name in model.targets:
+        for artifact in model.artifacts(name):
+            index.setdefault(str(artifact.resolve()), set()).add(name)
+    return index
+
+
+def _ctest_json(build_dir: Path) -> list[dict[str, Any]]:
+    proc = subprocess.run(
+        ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
+        check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        text=True, encoding="utf-8",
+    )
+    tests = json.loads(proc.stdout).get("tests", [])
+    return tests if isinstance(tests, list) else []
+
+
+def _test_artifact_targets(build_dir: Path, model: Codemodel,
+                           planned: set[str]) -> set[str]:
+    """Return every target artifact referenced by a selected test command."""
+    index = _artifact_index(model)
+    extras: set[str] = set()
+    for test in _ctest_json(build_dir):
+        refs = {
+            owner
+            for path in _command_path_refs(test.get("command") or [])
+            for owner in index.get(path, ())
+        }
+        if refs & planned:
+            extras |= refs
+    return extras
+
+
 # ── plan ───────────────────────────────────────────────────────────────────
 
 
@@ -328,10 +385,23 @@ def compute_plan(repo: Path, build_dir: Path, base: str, config_json: Path,
         return plan
 
     buildable = sum(1 for t in model.targets.values() if t.get("type") in BUILDABLE_TYPES)
-    closure = sorted(
+    closure_set = {
         name for name in model.consumers_closure(owners)
         if model.targets[name].get("type") in BUILDABLE_TYPES
-    )
+    }
+    # A consumer test can invoke independent negative controls, static
+    # archives, SDK probes, or fixtures. Their command artifacts are part of
+    # this build closure even when no CMake dependency edge connects them to
+    # the changed owner.
+    try:
+        closure_set |= {
+            name for name in _test_artifact_targets(build_dir, model, closure_set)
+            if model.targets.get(name, {}).get("type") in BUILDABLE_TYPES
+        }
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        # CTest may not be configured yet during a cold selector probe.
+        pass
+    closure = sorted(closure_set)
     if not closure:
         plan["mode"] = "all"
         plan["reason"] = "owning targets are not buildable: " + ", ".join(sorted(owners))
@@ -344,7 +414,23 @@ def compute_plan(repo: Path, build_dir: Path, base: str, config_json: Path,
     if tier == "likely":
         blocker = likely_tier_blocker(model, plan["owners"], owners)
         if blocker is None:
-            likely = likely_tests(model, measured, set(closure))
+            likely = likely_tests(model, measured, closure_set)
+            if likely:
+                try:
+                    refs = _test_artifact_targets(build_dir, model, owners | likely)
+                    extras = {
+                        name for name in refs
+                        if model.targets.get(name, {}).get("type") in BUILDABLE_TYPES
+                    }
+                    closure_set |= extras
+                    closure = sorted(closure_set)
+                    plan["closure_targets"] = closure
+                    # Keep a likely test and every command artifact it uses
+                    # together; otherwise a negative control or SDK fixture
+                    # can be selected but absent from the build.
+                    likely |= extras - (owners | likely)
+                except (OSError, subprocess.CalledProcessError, ValueError):
+                    pass
             if not likely:
                 blocker = "no test source names or includes a changed file"
     if blocker is None:
@@ -467,13 +553,8 @@ def external_plan(cmd: str, build_dir: Path, base: str) -> dict[str, Any]:
 
 
 def _references(token: Any, artifact_paths: set[str]) -> bool:
-    """A command token names a built artifact, bare or as ``--flag=<path>``."""
-    if not isinstance(token, str):
-        return False
-    candidate = token.rsplit("=", 1)[-1]
-    if not os.path.isabs(candidate):
-        return False
-    return candidate in artifact_paths or str(Path(candidate).resolve()) in artifact_paths
+    """A command token names a planned built artifact."""
+    return any(path in artifact_paths for path in _command_path_refs([token]))
 
 
 def select_tests(build_dir: Path, targets: Iterable[str]) -> list[str]:
@@ -492,8 +573,13 @@ def select_tests(build_dir: Path, targets: Iterable[str]) -> list[str]:
     for test in tests:
         name = test.get("name", "")
         placeholder = NOT_BUILT_PLACEHOLDER.match(name)
-        if placeholder and placeholder.group("target") in wanted:
-            selected.append(name)
+        if placeholder:
+            target = placeholder.group("target")
+            # CTest emits placeholders for targets that were not configured or
+            # built. A name match alone would select utility/no-artifact
+            # registrations and then run a test with no executable.
+            if target in wanted and target in model.targets and any(model.artifacts(target)):
+                selected.append(name)
             continue
         if any(_references(token, artifact_paths) for token in test.get("command") or []):
             selected.append(name)

@@ -23,6 +23,11 @@ namespace pulp::test::audio {
 /// removed; purely additive fields do not require a bump.
 inline constexpr std::int64_t kMetricsArtifactSchemaVersion = 1;
 
+/// Schema id carried in the document's `schema` field. It names the shape
+/// `pulp audio validate summarize --json` prints, and every other emitter of
+/// this artifact (render manifests, failing-scenario artifacts) shares it.
+inline constexpr const char* kMetricsArtifactSchema = "pulp.audio.summarize.v1";
+
 /// Serialize metrics to a JSON string. `scenario` is recorded verbatim as
 /// provenance (which test scenario produced this buffer).
 std::string metrics_to_json(const BufferMetrics& metrics,
