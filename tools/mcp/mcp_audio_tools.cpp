@@ -15,6 +15,7 @@
 #include <cmath>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 namespace fs = std::filesystem;
@@ -245,6 +246,83 @@ std::string handle_audio_scope(const std::string& params_json) {
     }
 
     return json_tool_payload(normalized_json);
+}
+
+std::string handle_audio_file_inspect(const std::string& params_json) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+    }
+    auto arg_error = [](const std::string& msg) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(msg) + "}]}";
+    };
+    const auto path = extract_string(params_json, "path");
+    if (path.empty() || path.front() == '-')
+        return arg_error("Error: path is required and must be a file path");
+
+    // The tool is a thin wrapper: every flag maps to the CLI verb so the JSON
+    // an agent receives here is byte-for-byte the CLI's own report.
+    std::string cmd = shell_quote(source_build_cli_path(root).string()) + " audio inspect " +
+                      shell_quote(path) + " --json";
+    if (extract_bool(params_json, "include_metadata_text", false))
+        cmd += " --include-metadata-text";
+    if (extract_bool(params_json, "absolute_paths", false))
+        cmd += " --absolute-paths";
+
+    auto has = [&](const char* key) {
+        const auto raw = extract_raw(params_json, key);
+        return !raw.empty() && raw != "null";
+    };
+    const bool raw = has("raw_format") || has("raw_channels") || has("raw_rate") ||
+                     has("raw_endian") || has("raw_offset");
+    if (raw) {
+        cmd += " --raw";
+        for (const char* key : {"raw_format", "raw_endian"}) {
+            if (!has(key))
+                continue;
+            const auto value = extract_string(params_json, key);
+            if (value.empty() || value.front() == '-')
+                return arg_error(std::string("Error: ") + key + " must be a name, not an option");
+            cmd += " --" + std::string(std::string_view(key).substr(4)) + " " + shell_quote(value);
+        }
+        for (const char* key : {"raw_channels", "raw_rate", "raw_offset"}) {
+            if (!has(key))
+                continue;
+            const auto text = extract_raw(params_json, key);
+            if (text.empty() ||
+                !std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }))
+                return arg_error(std::string("Error: ") + key + " must be a non-negative integer");
+            cmd += " --" + std::string(std::string_view(key).substr(4)) + " " + text;
+        }
+    }
+
+    std::string temp_error;
+    auto temp = make_private_probe_json_temp(temp_error);
+    if (temp.json_path.empty())
+        return arg_error("Error: " + temp_error);
+    const ProbeJsonTempGuard temp_guard(temp.directory);
+    const auto diagnostics_path = temp.directory / "diagnostics.txt";
+    cmd += " 2> " + shell_quote(diagnostics_path.string());
+    const auto run = exec_with_status(cmd);
+    const auto diagnostics = read_text_file(diagnostics_path);
+    std::error_code remove_ec;
+    fs::remove_all(temp.directory, remove_ec);
+
+    // Exit 2 means "container not recognized" and the report is still the
+    // answer; exit 1 is a usage or read failure with nothing to parse.
+    if (run.status == 1 || run.status < 0 || run.output.empty()) {
+        std::string message = "Error: pulp audio inspect failed.";
+        if (!diagnostics.empty())
+            message += "\n" + diagnostics;
+        if (!run.output.empty())
+            message += "\n" + run.output;
+        return arg_error(message);
+    }
+    std::string normalized;
+    std::string parse_error;
+    if (!normalize_structured_json(run.output, normalized, parse_error))
+        return arg_error("Error: " + parse_error + "\n" + run.output);
+    return json_tool_payload(normalized);
 }
 
 std::string handle_audio_plugin_inspect(const std::string& params_json) {
@@ -569,11 +647,10 @@ std::string handle_audio_compare(const std::string& params_json) {
             return arg_error("Error: threshold must be a finite positive number");
         // Shortest round-trippable form — std::to_string fixes 6 decimals and would
         // silently floor a small threshold (e.g. 1e-4 → "0.000100", 1e-7 → "0.000000").
-        std::array<char, 32> buf{};
-        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), t);
-        if (ec != std::errc())
+        const auto formatted = format_double_arg(t);
+        if (!formatted)
             return arg_error("Error: threshold could not be formatted");
-        flags += " --threshold " + shell_quote(std::string(buf.data(), ptr));
+        flags += " --threshold " + shell_quote(*formatted);
     }
 
     // Always capture the structured report to a temp file and return it — the MCP
@@ -618,6 +695,148 @@ std::string handle_audio_compare(const std::string& params_json) {
         return arg_error(message);
     }
     return json_tool_payload(normalized_json);
+}
+
+} // namespace pulp_mcp
+
+// ── Display-only image verbs ───────────────────────────────────────────────
+// `pulp audio spectrogram` / `pulp audio waveform` wrappers. Both shell to the
+// CLI and return the PNG path plus the parsed pulp.audio.image.v1 sidecar. A
+// nonzero CLI exit is an MCP error carrying the CLI's own message: an image
+// that was not written is not a result.
+
+namespace pulp_mcp {
+
+namespace {
+
+std::string handle_audio_image(const std::string& params_json, const std::string& verb) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+    }
+    auto arg_error = [](const std::string& msg) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(msg) + "}]}";
+    };
+    auto present = [&](const char* key) {
+        const auto raw = extract_raw(params_json, key);
+        return !raw.empty() && raw != "null";
+    };
+
+    const auto file = extract_string(params_json, "file");
+    if (file.empty() || file.front() == '-')
+        return arg_error("Error: file is required and must be an audio file path");
+    const auto png_path = extract_string(params_json, "png_path");
+    if (png_path.empty() || png_path.front() == '-')
+        return arg_error("Error: png_path is required and must be an output path");
+    const auto json_path = extract_string(params_json, "json_path");
+    if (!json_path.empty() && json_path.front() == '-')
+        return arg_error("Error: json_path must be an output path, not an option");
+
+    std::string cmd = shell_quote(source_build_cli_path(root).string()) + " audio " + verb + " " +
+                      shell_quote(file) + " --png " + shell_quote(png_path);
+    if (!json_path.empty())
+        cmd += " --json " + shell_quote(json_path);
+
+    // One table drives validation and forwarding: which flag a key maps to,
+    // how its value is typed, and which verb may use it. Adding an option is
+    // one row, not a fourth copy of the "spectrogram-only" check.
+    enum class Kind { non_negative_int, positive_int, non_negative_seconds, positive_db, name };
+    struct Option {
+        const char* key;
+        const char* flag;
+        Kind kind;
+        bool spectrogram_only;
+    };
+    static constexpr Option kOptions[] = {
+        {"channel", "--channel", Kind::non_negative_int, false},
+        {"width", "--width", Kind::positive_int, false},
+        {"height", "--height", Kind::positive_int, false},
+        {"start", "--start", Kind::non_negative_seconds, false},
+        {"end", "--end", Kind::non_negative_seconds, false},
+        {"fft", "--fft", Kind::positive_int, true},
+        {"hop", "--hop", Kind::positive_int, true},
+        {"db_range", "--db-range", Kind::positive_db, true},
+        {"window", "--window", Kind::name, true},
+        {"scale", "--scale", Kind::name, true},
+    };
+    for (const Option& option : kOptions) {
+        const bool is_name = option.kind == Kind::name;
+        const auto name_value = is_name ? extract_string(params_json, option.key) : std::string();
+        if (is_name ? name_value.empty() : !present(option.key))
+            continue;
+        if (option.spectrogram_only && verb != "spectrogram")
+            return arg_error(std::string("Error: ") + option.key +
+                             " applies only to pulp_audio_spectrogram");
+        switch (option.kind) {
+        case Kind::non_negative_int:
+        case Kind::positive_int: {
+            const int value = extract_int(params_json, option.key, -1);
+            const bool positive = option.kind == Kind::positive_int;
+            if (value < 0 || (positive && value == 0))
+                return arg_error(std::string("Error: ") + option.key + " must be a " +
+                                 (positive ? "positive" : "non-negative") + " integer");
+            cmd += std::string(" ") + option.flag + " " + std::to_string(value);
+            break;
+        }
+        case Kind::non_negative_seconds:
+        case Kind::positive_db: {
+            const double value = extract_double(params_json, option.key, -1.0);
+            const bool positive = option.kind == Kind::positive_db;
+            if (!(positive ? value > 0.0 : value >= 0.0))
+                return arg_error(
+                    std::string("Error: ") + option.key + " must be a " +
+                    (positive ? "positive number of dB" : "non-negative number of seconds"));
+            const auto formatted = format_double_arg(value);
+            if (!formatted)
+                return arg_error(std::string("Error: ") + option.key + " could not be formatted");
+            cmd += std::string(" ") + option.flag + " " + *formatted;
+            break;
+        }
+        case Kind::name:
+            if (name_value.front() == '-')
+                return arg_error(std::string("Error: ") + option.key +
+                                 " must be a name, not an option");
+            cmd += std::string(" ") + option.flag + " " + shell_quote(name_value);
+            break;
+        }
+    }
+    if (extract_bool(params_json, "absolute_paths", false))
+        cmd += " --absolute-paths";
+    cmd += " 2>&1";
+
+    auto result = exec_with_status(cmd);
+    if (result.failed()) {
+        std::string message =
+            "Error: pulp audio " + verb + " exited " + std::to_string(result.status);
+        if (!result.output.empty())
+            message += "\n" + result.output;
+        return arg_error(message);
+    }
+
+    const std::string sidecar_path = json_path.empty() ? png_path + ".json" : json_path;
+    const auto sidecar = read_text_file(sidecar_path);
+    if (sidecar.empty())
+        return arg_error("Error: pulp audio " + verb + " did not write the sidecar " +
+                         sidecar_path + (result.output.empty() ? "" : "\n" + result.output));
+    std::string normalized;
+    std::string parse_error;
+    if (!normalize_structured_json(sidecar, normalized, parse_error))
+        return arg_error("Error: " + parse_error + "\n" + sidecar);
+
+    std::string payload = "{\"png_path\":" + json_string(png_path) +
+                          ",\"sidecar_path\":" + json_string(sidecar_path) +
+                          ",\"sidecar\":" + normalized + "}";
+    return json_tool_payload(payload);
+}
+
+} // namespace
+
+std::string handle_audio_spectrogram(const std::string& params_json) {
+    return handle_audio_image(params_json, "spectrogram");
+}
+
+std::string handle_audio_waveform(const std::string& params_json) {
+    return handle_audio_image(params_json, "waveform");
 }
 
 } // namespace pulp_mcp
