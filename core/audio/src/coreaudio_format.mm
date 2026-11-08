@@ -3,6 +3,7 @@
 
 #include <pulp/audio/format_registry.hpp>
 #include "decode_limits_detail.hpp"
+#include <algorithm>
 #include <limits>
 
 #ifdef __APPLE__
@@ -109,14 +110,26 @@ public:
 
         std::vector<float> interleaved(static_cast<size_t>(totalFrames) * channels);
 
-        AudioBufferList bufferList;
-        bufferList.mNumberBuffers = 1;
-        bufferList.mBuffers[0].mNumberChannels = channels;
-        bufferList.mBuffers[0].mDataByteSize = static_cast<UInt32>(interleaved.size() * sizeof(float));
-        bufferList.mBuffers[0].mData = interleaved.data();
-
-        UInt32 framesToRead = totalFrames;
-        status = ExtAudioFileRead(file, &framesToRead, &bufferList);
+        // ExtAudioFileRead may return fewer frames than asked for (a PCM CAF
+        // read stops at an internal buffer boundary), so read until the
+        // stream ends or the claimed length is filled. Each call asks for at
+        // most kReadChunkFrames, which keeps its byte count well inside UInt32.
+        constexpr UInt32 kReadChunkFrames = 65536;
+        UInt32 framesRead = 0;
+        while (framesRead < totalFrames) {
+            UInt32 chunk = std::min(kReadChunkFrames, totalFrames - framesRead);
+            AudioBufferList bufferList;
+            bufferList.mNumberBuffers = 1;
+            bufferList.mBuffers[0].mNumberChannels = channels;
+            bufferList.mBuffers[0].mDataByteSize =
+                static_cast<UInt32>(static_cast<size_t>(chunk) * channels * sizeof(float));
+            bufferList.mBuffers[0].mData =
+                interleaved.data() + static_cast<size_t>(framesRead) * channels;
+            status = ExtAudioFileRead(file, &chunk, &bufferList);
+            if (status != noErr || chunk == 0)
+                break;
+            framesRead += chunk;
+        }
         ExtAudioFileDispose(file);
 
         if (status != noErr) return std::nullopt;
@@ -126,9 +139,9 @@ public:
         data.sample_rate = static_cast<uint32_t>(srcFormat.mSampleRate);
         data.channels.resize(channels);
         for (auto& ch : data.channels)
-            ch.resize(framesToRead);
+            ch.resize(framesRead);
 
-        for (uint32_t f = 0; f < framesToRead; ++f)
+        for (uint32_t f = 0; f < framesRead; ++f)
             for (uint32_t c = 0; c < channels; ++c)
                 data.channels[c][f] = interleaved[static_cast<size_t>(f) * channels + c];
 
@@ -140,6 +153,18 @@ public:
     }
 
     std::string format_name() const override { return "CoreAudio"; }
+
+    FormatCapabilities capabilities() const override {
+        // ExtAudioFile decodes AAC (lossy) and ALAC (lossless) in M4A, ADTS
+        // and CAF, and PCM in CAF. One report covers them all, so it states
+        // the weakest case: compressed and not lossless.
+        return {.format_name = "CoreAudio",
+                .extensions = {".m4a", ".aac", ".caf", ".alac"},
+                .bit_depths = {16, 20, 24, 32},
+                .float_samples = true,
+                .compressed = true,
+                .lossless = false};
+    }
 };
 
 std::unique_ptr<FormatReader> create_coreaudio_reader() {
