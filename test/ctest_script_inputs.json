@@ -3279,6 +3279,7 @@
   "pulp-test-osc-minblep",
   "pulp-test-osc-parameter-map",
   "pulp-test-osc-render-wav-cli",
+  "pulp-test-panic-button",
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
