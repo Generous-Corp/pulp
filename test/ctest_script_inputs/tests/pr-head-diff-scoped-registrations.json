@@ -11,6 +11,7 @@
    "docs/status/consumption-profiles.json",
    "docs/status/consumption-profiles.schema.json",
    "test/cmake/pr_fast_tests.cmake",
+   "test/ctest_script_inputs",
    "test/fixtures",
    "test/fixtures/perfetto-gpu",
    "test/support",
@@ -49,6 +50,7 @@
    "tools/scripts/process_liveness.py",
    "tools/scripts/release_product_matrix.json",
    "tools/scripts/run_changed_surface_tests.py",
+   "tools/scripts/script_inputs_store.py",
    "tools/scripts/script_test_inputs.py",
    "tools/scripts/test_generated_version_bump_check.py"
   ],
