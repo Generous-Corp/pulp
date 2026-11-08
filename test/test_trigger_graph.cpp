@@ -216,8 +216,13 @@ TEST_CASE("Host ingress binds to the checked trigger epoch and block cursor",
     CHECK(fixture.graph.host_event_trace().empty());
 }
 
-TEST_CASE("Host ingress refuses a frame-window mismatch and retries the staged event",
+TEST_CASE("Host ingress refuses a block whose frames differ from the ingress window",
           "[trigger][g5][host-ingress][negative-control]") {
+    // The ingress window is fixed by begin_host_event_block(). Processing a
+    // shorter block must not project records past that block's end: they would
+    // carry sample_offset >= frames and be delivered early while the cursor
+    // advances by fewer frames. The block is refused and the record stays
+    // staged for a retry with matching frames.
     Fixture fixture{2, 32, true};
     Block block;
     HostEventRecord event;
@@ -235,17 +240,23 @@ TEST_CASE("Host ingress refuses a frame-window mismatch and retries the staged e
     REQUIRE(fixture.graph.host_event_counters(refused) == HostEventResult::Accepted);
     CHECK(refused.refused == 1);
 
-    // The mismatched callback must leave the record staged so the host can
-    // retry the declared eight-frame block without publishing it again.
-    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 8) == HostEventResult::Accepted);
-    REQUIRE(fixture.graph.process_checked(block.out, block.in, 8) == TriggerGraphResult::Accepted);
-    REQUIRE(fixture.graph.host_event_trace().size() == 1);
     pulp::midi::MidiBuffer delivered;
     delivered.reserve(4);
     delivered.set_realtime_capacity_limit(true);
     REQUIRE(fixture.graph.extract_midi(fixture.midi_out, delivered));
+    CHECK(delivered.size() == 0);
+
+    // The refused record is still staged: re-publishing its sequence is a
+    // duplicate, and a matching 8-frame block delivers it at offset 6.
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 8) == HostEventResult::Accepted);
+    CHECK(fixture.graph.publish_host_event(event) == HostEventResult::InvalidSequence);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 8) == TriggerGraphResult::Accepted);
+    CHECK(counters(fixture.graph).cursor == 8);
+    delivered.clear();
+    REQUIRE(fixture.graph.extract_midi(fixture.midi_out, delivered));
     REQUIRE(delivered.size() == 1);
     CHECK(delivered[0].sample_offset == 6);
+    CHECK(delivered[0].is_note_on());
 }
 
 TEST_CASE("Host ingress projection refusal seals the active block",
