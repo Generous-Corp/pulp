@@ -909,6 +909,47 @@ function(pulp_add_libfuzzer_target NAME)
     endif()
 endfunction()
 
+# A Quality Lab pytest file (tools/audio/quality-lab/tests/<TEST_FILE>) as a
+# ctest, registered only when PULP_AUDIO_QUALITY_LAB_GATE is on, where
+# PULP_AUDIO_QUALITY_LAB_PYTHON names an interpreter with numpy, soundfile,
+# quality_lab and pytest. Runs from the lab directory with its PYTHONPATH set;
+# FILTER is a pytest -k expression; ENV adds NAME=value pairs (generator
+# expressions allowed); LABELS extend "audio;quality-lab;dependency-gate".
+#
+#   pulp_add_quality_lab_pytest(<name>
+#       TEST_FILE <file.py>
+#       [FILTER <pytest -k expression>]
+#       [ENV <NAME=value> ...]
+#       [LABELS <label> ...]
+#       [TIMEOUT <seconds>])            default 120
+function(pulp_add_quality_lab_pytest NAME)
+    cmake_parse_arguments(Q "" "TEST_FILE;FILTER;TIMEOUT" "ENV;LABELS" ${ARGN})
+    if(NOT PULP_AUDIO_QUALITY_LAB_GATE)
+        return()
+    endif()
+    if(NOT Q_TEST_FILE)
+        message(FATAL_ERROR "pulp_add_quality_lab_pytest(${NAME}): TEST_FILE is required")
+    endif()
+    if(NOT Q_TIMEOUT)
+        set(Q_TIMEOUT 120)
+    endif()
+    set(_lab_dir "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab")
+    set(_args "${_lab_dir}/tests/${Q_TEST_FILE}" -q)
+    if(Q_FILTER)
+        list(APPEND _args -k "${Q_FILTER}")
+    endif()
+    add_test(NAME ${NAME}
+        COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest ${_args})
+    set(_env "PYTHONPATH=${_lab_dir}" ${Q_ENV})
+    set(_labels audio quality-lab dependency-gate ${Q_LABELS})
+    list(REMOVE_DUPLICATES _labels)
+    set_tests_properties(${NAME} PROPERTIES
+        WORKING_DIRECTORY "${_lab_dir}"
+        ENVIRONMENT "${_env}"
+        LABELS "${_labels}"
+        TIMEOUT ${Q_TIMEOUT})
+endfunction()
+
 # The test directory compiles its shared support sources once (see
 # PulpTestSharedObjects.cmake).
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL "${CMAKE_SOURCE_DIR}/test")
