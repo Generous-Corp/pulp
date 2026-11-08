@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/stft.hpp>
@@ -345,6 +346,48 @@ TEST_CASE("FrequencyAxis mel scale", "[signal][spectrogram]") {
     REQUIRE(pos_1k > 0.0f);
     REQUIRE(pos_10k < 1.0f);
     REQUIRE(pos_1k < pos_10k);
+}
+
+TEST_CASE("FrequencyAxis double mapping honours a configurable floor", "[signal][spectrogram]") {
+    FrequencyAxis axis;
+    axis.configure(2048, 48000.0f, FrequencyScale::logarithmic);
+    // configure() resets the floor to the float mapping's implicit 1 Hz.
+    REQUIRE(axis.low_frequency() == 1.0);
+    REQUIRE(axis.hz_to_display(1.0) == Catch::Approx(0.0).margin(1e-12));
+    REQUIRE(axis.hz_to_display(24000.0) == Catch::Approx(1.0).margin(1e-12));
+    // The float and double mappings agree where both are defined.
+    REQUIRE(static_cast<double>(axis.hz_to_display(1000.0f)) ==
+            Catch::Approx(axis.hz_to_display(1000.0)).epsilon(1e-5));
+
+    axis.set_low_frequency(48000.0 / 2048.0); // first non-DC bin
+    REQUIRE(axis.hz_to_display(48000.0 / 2048.0) == Catch::Approx(0.0).margin(1e-12));
+    REQUIRE(axis.hz_to_display(24000.0) == Catch::Approx(1.0).margin(1e-12));
+    double previous = -1.0;
+    for (double hz = 30.0; hz <= 24000.0; hz *= 1.5) {
+        const double pos = axis.hz_to_display(hz);
+        REQUIRE(pos > previous);
+        REQUIRE(axis.display_to_hz(pos) == Catch::Approx(hz).epsilon(1e-9));
+        previous = pos;
+    }
+    // Below the floor extrapolates negative rather than clamping, so a
+    // renderer can cull it.
+    REQUIRE(axis.hz_to_display(1.0) < 0.0);
+
+    axis.configure(2048, 48000.0f, FrequencyScale::mel);
+    REQUIRE(axis.low_frequency() == 0.0);
+    REQUIRE(axis.hz_to_display(0.0) == Catch::Approx(0.0).margin(1e-12));
+    REQUIRE(FrequencyAxis::hz_to_mel(1000.0) == Catch::Approx(1000.0).epsilon(1e-3));
+    REQUIRE(FrequencyAxis::mel_to_hz(FrequencyAxis::hz_to_mel(4321.0)) ==
+            Catch::Approx(4321.0).epsilon(1e-9));
+
+    axis.configure(2048, 48000.0f, FrequencyScale::linear);
+    REQUIRE(axis.hz_to_display(12000.0) == Catch::Approx(0.5));
+    REQUIRE(axis.display_to_hz(0.25) == Catch::Approx(6000.0));
+}
+
+TEST_CASE("SpectrogramColor compares by value", "[signal][spectrogram]") {
+    REQUIRE(SpectrogramColor{1, 2, 3} == SpectrogramColor{1, 2, 3, 255});
+    REQUIRE_FALSE(SpectrogramColor{1, 2, 3} == SpectrogramColor{1, 2, 4});
 }
 
 TEST_CASE("SpectrogramBuffer push and read", "[signal][spectrogram]") {

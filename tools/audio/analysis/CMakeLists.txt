@@ -16,6 +16,9 @@ add_library(pulp-audio-analysis STATIC
     src/latency_evidence.cpp
     src/pitch_track.cpp
     src/modal_extraction.cpp
+    src/raster_image.cpp
+    src/spectrogram_raster.cpp
+    src/waveform_raster.cpp
 )
 add_library(pulp::audio-analysis ALIAS pulp-audio-analysis)
 

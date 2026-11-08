@@ -122,6 +122,9 @@ add_executable(pulp-cli
     cmd_audio_heritage.cpp
     cmd_audio_sampler_mip.cpp
     cmd_audio_formats.cpp
+    cmd_audio_image_common.cpp
+    cmd_audio_spectrogram.cpp
+    cmd_audio_waveform.cpp
     cmd_audio_inspect.cpp
     cmd_audio_plugin_inspect.cpp
     cmd_audio_validate.cpp
