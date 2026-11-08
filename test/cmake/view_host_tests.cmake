@@ -637,6 +637,23 @@ pulp_add_test_suite(pulp-test-pointer-delivery GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-gestures GROUP pulp-test-group-view-host
     LIBRARIES pulp::view)
+# Input contract of a disabled view: no key/text/gesture/hover-enter/press/
+# drag/double-click, but the release and exit that finish an interaction in
+# progress still arrive (test/test_disabled_input_contract.cpp).
+pulp_add_test_suite(pulp-test-disabled-input-contract GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+# Modifier-key change notifications to the focused view and to the view a
+# pointer drag is captured by (test/test_modifier_keys_changed.cpp).
+pulp_add_test_suite(pulp-test-modifier-keys-changed GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+# Focus cause, :focus-visible and :focus-within, and the descendant-focus
+# notification delivered to every ancestor (test/test_focus_cause.cpp).
+pulp_add_test_suite(pulp-test-focus-cause GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+# Hover re-evaluated after content moves under a stationary pointer
+# (test/test_stationary_hover.cpp).
+pulp_add_test_suite(pulp-test-stationary-hover GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # The Windows editor's input state machine. Deliberately NOT gated on WIN32:
 # win_plugin_input_router.hpp carries no <windows.h> dependency precisely so its
 # re-entrancy and capture rules run on the required macOS gate.

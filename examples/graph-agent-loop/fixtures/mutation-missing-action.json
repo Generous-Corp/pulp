@@ -31,7 +31,7 @@
     {
       "id": "saved-input-replay",
       "kind": "graph.replay",
-      "input": "baseline.pulpgraph"
+      "input": "a9-baseline.pulpgraph"
     }
   ],
   "assertions": [

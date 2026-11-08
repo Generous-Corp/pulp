@@ -60,13 +60,18 @@
     "tools/cli/cli_sdk.cpp",
     "tools/cli/cmd_audio.cpp",
     "tools/cli/cmd_audio_compare.cpp",
+    "tools/cli/cmd_audio_formats.cpp",
     "tools/cli/cmd_audio_heritage.cpp",
+    "tools/cli/cmd_audio_image_common.cpp",
+    "tools/cli/cmd_audio_inspect.cpp",
     "tools/cli/cmd_audio_plugin_common.cpp",
     "tools/cli/cmd_audio_plugin_inspect.cpp",
     "tools/cli/cmd_audio_render.cpp",
     "tools/cli/cmd_audio_render_parse.cpp",
     "tools/cli/cmd_audio_sampler_mip.cpp",
+    "tools/cli/cmd_audio_spectrogram.cpp",
     "tools/cli/cmd_audio_validate.cpp",
+    "tools/cli/cmd_audio_waveform.cpp",
     "tools/cli/cmd_authority.cpp",
     "tools/cli/cmd_bake.cpp",
     "tools/cli/cmd_build.cpp",
@@ -249,6 +254,35 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-audio-file-layout-containers": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_audio_file_layout_containers.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/audio/inspect"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_audio_file_layout_containers.cpp"
+   ],
+   "undeclared_sources": []
+  },
+  "pulp-test-audio-image-raster": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_audio_image_raster.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/audio/images"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/png_rgba_decode_apple.cpp",
+    "test/test_audio_image_raster.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-authoring-capsule-hostile": {
    "data": "declared",
    "detected_sources": [
@@ -353,6 +387,34 @@
    "sources": [
     "test/test_cli_audio_compare.cpp"
    ],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-audio-image": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-audio-inspect": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
@@ -2164,6 +2226,20 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-lv2-host-slot": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-test-lv2-host-instrument"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_lv2_host_slot.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-mac-platform-harness": {
    "data": "declared",
    "detected_sources": [
@@ -2199,6 +2275,7 @@
     "pulp-test-mcp-gpu-probe-fake-cli"
    ],
    "sources": [
+    "test/test_mcp_audio_tools.cpp",
     "test/test_mcp_control_adapter.cpp",
     "test/test_mcp_server.cpp"
    ],
@@ -2682,6 +2759,13 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-voice-template": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-widget-bridge-api-contracts": {
    "data": "declared",
    "detected_sources": [
@@ -2799,6 +2883,9 @@
   "pulp-test-audio-device-manager",
   "pulp-test-audio-doctor",
   "pulp-test-audio-edge-cases",
+  "pulp-test-audio-file-layout",
+  "pulp-test-audio-file-layout-containers",
+  "pulp-test-audio-image-raster",
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
   "pulp-test-audio-reader-idle-wakeups",
@@ -2838,6 +2925,8 @@
   "pulp-test-clap-webview",
   "pulp-test-cli-au-info-plist",
   "pulp-test-cli-audio-compare",
+  "pulp-test-cli-audio-image",
+  "pulp-test-cli-audio-inspect",
   "pulp-test-cli-audio-latency",
   "pulp-test-cli-audio-validate",
   "pulp-test-cli-bake",
@@ -3190,6 +3279,7 @@
   "pulp-test-lv2-adapter",
   "pulp-test-lv2-bundle-discovery-e2e",
   "pulp-test-lv2-host-discovery",
+  "pulp-test-lv2-host-slot",
   "pulp-test-lv2-rt",
   "pulp-test-mac-hover-cursor-live",
   "pulp-test-mac-platform-harness",
@@ -3246,6 +3336,7 @@
   "pulp-test-osc-minblep",
   "pulp-test-osc-parameter-map",
   "pulp-test-osc-render-wav-cli",
+  "pulp-test-panic-button",
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
@@ -3436,6 +3527,7 @@
   "pulp-test-voice-identity",
   "pulp-test-voice-modulation-sources",
   "pulp-test-voice-runtime-facade",
+  "pulp-test-voice-template",
   "pulp-test-vst3-audio-parity",
   "pulp-test-vst3-bundle-entry",
   "pulp-test-vst3-connection",
@@ -3725,6 +3817,21 @@
    "inputs": [
     "test/fixtures/agent-panels/magneto",
     "tools/import-validation/check_agent_panel_invariants.py"
+   ],
+   "kind": "python"
+  },
+  "android-fixture-lane-selftest": {
+   "entry": "tools/ci/test_android_fixture_lane.py",
+   "inputs": [
+    "tools/ci/android-fixture-lane.sh",
+    "tools/ci/test_android_fixture_lane.py"
+   ],
+   "kind": "python"
+  },
+  "android-fixture-marker-selftest": {
+   "entry": "tools/ci/test_android_fixture_marker.py",
+   "inputs": [
+    "tools/ci/test_android_fixture_marker.py"
    ],
    "kind": "python"
   },
@@ -5090,10 +5197,20 @@
    ],
    "kind": "python"
   },
+  "dependency-request-recorder-selftest": {
+   "entry": "tools/ci/test_dependency_request_check.py",
+   "inputs": [
+    "tools/ci/dependency_request_check.py",
+    "tools/ci/dependency_request_recorder.cmake",
+    "tools/ci/test_dependency_request_check.py"
+   ],
+   "kind": "python"
+  },
   "deps-audit-extra-selftest": {
    "entry": "tools/deps/test_audit_extra.py",
    "inputs": [
     "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/deps/audit.py",
     "tools/deps/test_audit_extra.py",
     "tools/packages/test-stubs"
@@ -5105,6 +5222,7 @@
    "inputs": [
     "tools/ci/tart-provision.sh",
     "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/cmake/PulpWclap.cmake",
     "tools/deps/audit.py",
     "tools/deps/test_audit.py",
@@ -5130,6 +5248,7 @@
    "entry": "tools/deps/audit.py",
    "inputs": [
     "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/deps/audit.py",
     "tools/packages/test-stubs"
    ],
@@ -5205,6 +5324,7 @@
     "core/state/src/store.cpp",
     "core/view",
     "core/view/src/view.cpp",
+    "test/cmake/test_installed_sdk_runtime_staging.cmake",
     "test/test_cli_shellout.cpp",
     "test/test_runtime.cpp",
     "test/test_state.cpp",
@@ -10978,8 +11098,10 @@
     "core/events/src/timer.cpp",
     "core/events/src/volume_detector.cpp",
     "core/format/include/pulp/format/audio_workgroup_client.hpp",
+    "core/format/include/pulp/format/editor_host.hpp",
     "core/format/include/pulp/format/graph_runtime_executor.hpp",
     "core/format/include/pulp/format/graph_runtime_worker_pool.hpp",
+    "core/format/include/pulp/format/native_surface_host.hpp",
     "core/format/include/pulp/format/note_name.hpp",
     "core/format/include/pulp/format/plugin_descriptor.hpp",
     "core/format/include/pulp/format/prepare_resources.hpp",
@@ -11809,8 +11931,10 @@
     "core/events/src/timer.cpp",
     "core/events/src/volume_detector.cpp",
     "core/format/include/pulp/format/audio_workgroup_client.hpp",
+    "core/format/include/pulp/format/editor_host.hpp",
     "core/format/include/pulp/format/graph_runtime_executor.hpp",
     "core/format/include/pulp/format/graph_runtime_worker_pool.hpp",
+    "core/format/include/pulp/format/native_surface_host.hpp",
     "core/format/include/pulp/format/note_name.hpp",
     "core/format/include/pulp/format/plugin_descriptor.hpp",
     "core/format/include/pulp/format/prepare_resources.hpp",
@@ -13556,6 +13680,15 @@
     "tools/ci/net-retry.sh",
     "tools/scripts/test_vellum_workflow_dispatch.py",
     "tools/scripts/vellum_trusted_merge.py"
+   ],
+   "kind": "python"
+  },
+  "vendored-lilv-selftest": {
+   "entry": "tools/deps/test_verify_vendored_lilv.py",
+   "inputs": [
+    "external/lilv",
+    "tools/deps/test_verify_vendored_lilv.py",
+    "tools/deps/verify_vendored_lilv.py"
    ],
    "kind": "python"
   },

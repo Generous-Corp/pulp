@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 201,
+  "inventory_version": 207,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,22 +42,22 @@
     }
   ],
   "counts": {
-    "public_headers": 531,
-    "reviewed_headers": 288,
-    "legacy_unreviewed_headers": 243,
+    "public_headers": 534,
+    "reviewed_headers": 293,
+    "legacy_unreviewed_headers": 241,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 119,
-      "legacy_unreviewed": 243,
+      "infrastructure": 124,
+      "legacy_unreviewed": 241,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
-        "public_headers": 117,
-        "reviewed_headers": 24,
-        "legacy_unreviewed_headers": 93,
+        "public_headers": 120,
+        "reviewed_headers": 28,
+        "legacy_unreviewed_headers": 92,
         "unsupported_headers": 0
       },
       "midi": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 281,
-        "reviewed_headers": 158,
-        "legacy_unreviewed_headers": 123,
+        "reviewed_headers": 159,
+        "legacy_unreviewed_headers": 122,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -158,6 +158,24 @@
       "disposition": "infrastructure",
       "capability_keys": [],
       "rationale": "Whole-file audio decoding (read_audio_file with an admission predicate over the opened reader) is host infrastructure consumed by sample, impulse-response and offline-render capabilities; it is not an independently selected generator-facing capability."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/audio_file_layout.hpp",
+      "fingerprint": "sha256:8fd849f594a11af739d14c42370b2fa74460a1e423cde2cab1ebd60c9ab74694",
+      "include": "pulp/audio/audio_file_layout.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Developer-tool byte layout report over audio containers (regions, warnings, decoder verdict) behind `pulp audio inspect`; reads headers only. Not a generator-facing capability."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/audio_file_layout_json.hpp",
+      "fingerprint": "sha256:7c02abb2e23707387db7f67ef4612ee8ee411241e1b16de31908866eea49b1ca",
+      "include": "pulp/audio/audio_file_layout_json.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Versioned JSON serializer for the layout report (pulp.audio.file_inspect.v1), a CLI/MCP developer surface. Not a generator-facing capability."
     },
     {
       "domain": "audio",
@@ -342,7 +360,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/format_registry.hpp",
-      "fingerprint": "sha256:caedada7e925bc78317407961d313052ce4e92c14ec12ca51477e567823ac128",
+      "fingerprint": "sha256:82a04fe0dd2b00f685616f766a47f81ef6c284402ea628df4347b0b43920cf3d",
       "include": "pulp/audio/format_registry.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1040,6 +1058,15 @@
     },
     {
       "domain": "audio",
+      "source": "core/audio/include/pulp/audio/system_audio_codec.hpp",
+      "fingerprint": "sha256:3c3cc0182566ebd1fc4054b0726de8ee995b593c0c95dbdef7268423152fc5c0",
+      "include": "pulp/audio/system_audio_codec.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Audio file encoding through the operating system's codecs (AAC, ALAC and PCM via ExtAudioFile or Media Foundation) is host infrastructure for export and file writing; it is not an independently selected generator-facing capability."
+    },
+    {
+      "domain": "audio",
       "source": "core/audio/include/pulp/audio/system_volume.hpp",
       "fingerprint": "sha256:aae9b56b7d4e49c4fab3a6bc134291f67011957566d5f4b2f95936409ccc2ec2",
       "include": "pulp/audio/system_volume.hpp",
@@ -1111,11 +1138,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/wav_decoder.hpp",
-      "fingerprint": "sha256:f6da1ca1a82383df7793d0ec17a4bafebe351eb4bd987791fff4eea0b6fd6671",
+      "fingerprint": "sha256:78e0bfc06ff17643493ebb343f9440348149324221e525de656a016d855be009",
       "include": "pulp/audio/wav_decoder.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Byte-span RIFF/WAVE inspector and decoder for import surfaces; reviewed when interpret_wav_format exposed the fmt interpretation for the layout report. Not a generator-facing capability."
     },
     {
       "domain": "audio",
@@ -4646,11 +4673,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectrogram.hpp",
-      "fingerprint": "sha256:592fcb82978e0186489600456ab44b71be9a416715b88ea3921265de739a538b",
+      "fingerprint": "sha256:928fb4ed526f927080f952f5290b7508d79ad4cf2e94aa0c433cdb1a9f20f78f",
       "include": "pulp/signal/spectrogram.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Spectrogram display math: colour ramps and bin-to-display frequency axis mapping for the realtime visualization bridge and the offline audio image renderers. It draws spectra that other capabilities compute; it is not a generator-facing DSP transform or a graph contract. The double-precision axis overloads and configurable floor were added for the offline renderers without changing the float API."
     },
     {
       "domain": "signal",

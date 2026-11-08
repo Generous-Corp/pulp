@@ -122,12 +122,67 @@ void dispatch_dom_pointer_path(View& root,
     }
 }
 
+void note_pressed_target(View& root, int pointer_id, const ViewCapture& target) {
+    auto& slots = root.interaction().pressed_targets;
+    for (auto& slot : slots) {
+        if (slot.first == pointer_id) {
+            slot.second = target;
+            return;
+        }
+    }
+    slots.emplace_back(pointer_id, target);
+}
+
+void clear_pressed_target(View& root, int pointer_id) {
+    auto& slots = root.interaction().pressed_targets;
+    slots.erase(std::remove_if(slots.begin(), slots.end(),
+                               [&](const auto& s) { return s.first == pointer_id; }),
+                slots.end());
+}
+
 // Blur every root-local focus holder except `keep`. Focus callbacks may
 // synchronously claim a replacement (IME commit is the common case), so a
 // single snapshot is insufficient. The bounded fallback guarantees hostile
 // callbacks cannot spin forever while still leaving a focus slot latched.
-bool drain_root_focus(View& root, const ViewCapture& protected_target,
-                      bool keep_protected_target) {
+// Deliver one focus change to the view behind `capture`, then tell every
+// ancestor. Each hop re-resolves its view because the hooks are user code and
+// may unmount the tree.
+void deliver_focus_change(View& root, const ViewCapture& capture, bool gained, FocusCause cause) {
+    View* view = capture.live_in(root);
+    if (!view)
+        return;
+    const auto ancestors = capture_path_to_root(view->parent());
+    {
+        DispatchLease lease(*view);
+        view->on_focus_changed(gained, cause);
+        if (capture.live_in(root)) {
+            auto hook = view->on_focus_event;
+            if (hook)
+                hook(gained, cause);
+        }
+    }
+    view = capture.live_in(root);
+    if (!view)
+        return;
+    for (const auto& ancestor_capture : ancestors) {
+        View* ancestor = ancestor_capture.live_in(root);
+        if (!ancestor)
+            continue;
+        View* child = capture.live_in(root);
+        if (!child)
+            return;
+        DispatchLease lease(*ancestor);
+        ancestor->on_descendant_focus_changed(*child, gained, cause);
+        if (ancestor_capture.live_in(root)) {
+            auto hook = ancestor->on_descendant_focus_event;
+            if (hook)
+                hook(*child, gained, cause);
+        }
+    }
+}
+
+bool drain_root_focus(View& root, const ViewCapture& protected_target, bool keep_protected_target,
+                      FocusCause cause) {
     constexpr size_t kMaxReentrantFocusHops = 64;
     for (size_t hop = 0; hop < kMaxReentrantFocusHops; ++hop) {
         View* live_target = protected_target.has_value()
@@ -149,8 +204,7 @@ bool drain_root_focus(View& root, const ViewCapture& protected_target,
         ViewCapture current_capture;
         current_capture.set(current);
         current->release_input_focus();
-        if (View* live_current = current_capture.live_in(root))
-            live_current->on_focus_changed(false);
+        deliver_focus_change(root, current_capture, false, cause);
     }
 
     // Pathological focus callbacks can form a cycle. Do not call the virtual
@@ -215,29 +269,36 @@ bool yield_to_gesture_with_handoff(View& root, View*& drag_target,
 }
 
 bool transfer_input_focus(View& root, View* target) {
+    return transfer_input_focus(root, target, FocusCause::programmatic);
+}
+
+bool transfer_input_focus(View& root, View* target, FocusCause cause) {
     if (target && !still_in_tree(target, &root)) return false;
     ViewCapture target_capture;
     target_capture.set(target);
-    const bool target_focusable = target && target->focusable();
-    if (!drain_root_focus(root, target_capture, target_focusable)) return false;
+    const bool target_focusable = target && target->focusable() && target->effectively_enabled();
+    // A disabled target leaves the current focus alone. An enabled target
+    // that simply cannot take focus still blurs the focused view, as a click
+    // on empty space does.
+    if (target && !target->effectively_enabled())
+        return true;
+    if (!drain_root_focus(root, target_capture, target_focusable, cause))
+        return false;
     if (!target) return false;
     target = target_capture.live_in(root);
     if (!target) return false;
     if (!target_focusable) return true;
     if (root.interaction().focused_input == target) return true;
 
-    {
-        // The gain hook may remove and destroy `target`. Hold its storage for
-        // the call; the capture below decides whether it is still the same
-        // view, still in this tree.
-        DispatchLease lease(*target);
-        target->on_focus_changed(true);
-    }
+    // The gain hook may remove and destroy `target`; the capture decides
+    // whether it is still the same view, still in this tree.
+    deliver_focus_change(root, target_capture, true, cause);
     target = target_capture.live_in(root);
     if (!target) return false;
     // A gain callback may also claim a replacement. The explicit clicked
     // target still wins; blur that replacement before publishing the target.
-    if (!drain_root_focus(root, target_capture, true)) return false;
+    if (!drain_root_focus(root, target_capture, true, cause))
+        return false;
     target = target_capture.live_in(root);
     if (!target) return false;
     target->claim_input_focus();
@@ -249,6 +310,46 @@ View* focused_input_under_root(View& root) {
     return still_in_tree(focused, &root) ? focused : nullptr;
 }
 
+bool deliver_modifier_keys_changed(View& root, Modifiers modifiers) {
+    std::vector<ViewCapture> receivers;
+    {
+        ViewCapture focused;
+        focused.set(focused_input_under_root(root));
+        if (focused.has_value())
+            receivers.push_back(focused);
+    }
+    for (const auto& entry : root.interaction().pressed_targets)
+        receivers.push_back(entry.second);
+
+    bool delivered = false;
+    std::vector<View*> seen;
+    for (const auto& capture : receivers) {
+        // Re-resolve each hop: a handler may unmount a later receiver.
+        View* view = capture.live_in(root);
+        if (!view || std::find(seen.begin(), seen.end(), view) != seen.end())
+            continue;
+        seen.push_back(view);
+        if (!view->effectively_enabled())
+            continue;
+        view->on_modifier_keys_changed(modifiers);
+        delivered = true;
+    }
+    return delivered;
+}
+
+bool deliver_key_event(View& target, const KeyEvent& event) {
+    if (!target.effectively_enabled())
+        return false;
+    return target.on_key_event(event);
+}
+
+bool deliver_text_input(View& target, const TextInputEvent& event) {
+    if (!target.effectively_enabled())
+        return false;
+    target.on_text_input(event);
+    return true;
+}
+
 void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers) {
     deliver_hover_move(root, root_pt, modifiers, PointerAttributes{});
 }
@@ -257,6 +358,10 @@ void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers,
                         const PointerAttributes& pointer) {
     // 1. Hover STATE first, so a handler reading `is_hovered()` during the
     //    dispatch below sees the state this same move established.
+    root.interaction().hover_modifiers = modifiers;
+    // A buttonless move means this pointer's button is up. Dropping its press
+    // record here heals a host that lost the release.
+    clear_pressed_target(root, pointer.pointer_id);
     root.simulate_hover(root_pt);
 
     // 2. Hit-test AFTER the state pass: an `on_hover_move` handler is allowed
@@ -290,6 +395,38 @@ void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers,
     dispatch_dom_pointer_event(root, target, me, /*moving=*/true);
 }
 
+bool reevaluate_stationary_hover(View& root, const HoverDamage& damage) {
+    auto& state = root.interaction();
+    if (!state.hover_pointer_valid)
+        return false;
+    // A held button owns the pointer; hover waits for the release.
+    if (!state.pressed_targets.empty())
+        return false;
+    if (!damage.full && !(damage.has_bounds && damage.bounds.contains(state.hover_pointer)))
+        return false;
+
+    const Point pointer = state.hover_pointer;
+    View* target = hover_target_at(root, pointer);
+    View* current = state.hover_target.live_in(root);
+    if (target != current) {
+        // The view under the pointer changed: run the full hover pass so enter,
+        // exit, the positioned move and the script pointermove all fire.
+        deliver_hover_move(root, pointer, state.hover_modifiers);
+        return true;
+    }
+    if (!target)
+        return false;
+
+    // Same view, but it may have moved under the pointer (a scrolled list row
+    // slides past a still pointer), so the pointer's position inside it moved.
+    const Point local = point_to_local(pointer, target, &root);
+    if (local.x == state.hover_local.x && local.y == state.hover_local.y)
+        return false;
+    state.hover_local = local;
+    target->on_hover_move(local);
+    return true;
+}
+
 void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count,
                         PointerType pointer_type, float pressure) {
@@ -309,6 +446,10 @@ void deliver_mouse_drag(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count,
                         MouseButton button, const PointerAttributes& pointer) {
     if (!still_in_tree(target, &root)) return;
+    // A drag in flight on a view that has since been disabled gets no further
+    // moves; the release that ends the drag is still delivered.
+    if (!target->effectively_enabled())
+        return;
 
     ViewCapture target_capture;
     target_capture.set(target);
@@ -388,12 +529,16 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
                         MouseButton button, const MouseDownHost& host,
                         const PointerAttributes& pointer) {
     if (!still_in_tree(target, &root)) return false;
+    // A disabled view takes no press and no double-click.
+    if (!target->effectively_enabled())
+        return false;
     const auto should_continue = [&] {
         return !host.should_continue || host.should_continue();
     };
 
     ViewCapture target_capture;
     target_capture.set(target);
+    note_pressed_target(root, pointer.pointer_id, target_capture);
     const auto bubble_path = capture_path_to_root(target->parent());
     const Point local = point_to_local(root_pt, target, &root);
 
@@ -471,6 +616,8 @@ void deliver_pointer_terminal(View& root, View* target, Point root_pt,
                               const MouseUpHost& host, MouseButton button,
                               const PointerAttributes& pointer,
                               PointerTerminalKind kind) {
+    // The press is over whether or not the target is still around to be told.
+    clear_pressed_target(root, pointer.pointer_id);
     if (!still_in_tree(target, &root)) return;
 
     const bool cancelled = kind == PointerTerminalKind::cancel;
