@@ -35,6 +35,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <cstring>
 #include <string>
@@ -84,12 +85,12 @@ OSType four_cc(CFStringRef s) {
 /// the run is out of process, the component is also registered with this
 /// process (once) through the factory the plist names, so in-process
 /// AUAudioUnit instantiation finds it without an install.
-const std::string& au_probe_component_id() {
-    static const std::string id = [] {
+std::string register_au_component(const char* bundle_path) {
+    {
         std::string out;
         CFURLRef url = CFURLCreateFromFileSystemRepresentation(
-            nullptr, reinterpret_cast<const UInt8*>(PULP_TEST_HOST_PROBE_AU),
-            (CFIndex)std::strlen(PULP_TEST_HOST_PROBE_AU), true);
+            nullptr, reinterpret_cast<const UInt8*>(bundle_path), (CFIndex)std::strlen(bundle_path),
+            true);
         CFBundleRef bundle = url ? CFBundleCreate(nullptr, url) : nullptr;
         if (url)
             CFRelease(url);
@@ -115,7 +116,10 @@ const std::string& au_probe_component_id() {
             auto factory = (AudioComponentFactoryFunction)CFBundleGetFunctionPointerForName(
                 bundle, factory_name);
             if (!factory ||
-                !AudioComponentRegister(&desc, CFSTR("Pulp: Pulp Host Probe"), version, factory))
+                !AudioComponentRegister(&desc,
+                                        (CFStringRef)CFDictionaryGetValue(entry, CFSTR("name"))
+                                            ?: CFSTR("Pulp probe"),
+                                        version, factory))
                 return out;
         }
         auto code = [](OSType v) {
@@ -124,8 +128,34 @@ const std::string& au_probe_component_id() {
         out = code(desc.componentType) + ":" + code(desc.componentSubType) + ":" +
               code(desc.componentManufacturer);
         return out;
-    }();
-    return id;
+    }
+}
+
+/// The component's id, registered with this process once per bundle unless
+/// the run is out of process.
+const std::string& au_component_id(const char* bundle_path) {
+    static std::map<std::string, std::string> ids;
+    auto it = ids.find(bundle_path);
+    if (it == ids.end())
+        it = ids.emplace(bundle_path, register_au_component(bundle_path)).first;
+    return it->second;
+}
+
+const std::string& au_probe_component_id() {
+    return au_component_id(PULP_TEST_HOST_PROBE_AU);
+}
+
+std::unique_ptr<PluginSlot> load_au(const char* bundle_path) {
+    PluginInfo info;
+    info.format = PluginFormat::AudioUnitV3;
+    info.path = bundle_path;
+    info.unique_id = au_component_id(bundle_path);
+    REQUIRE_FALSE(info.unique_id.empty());
+    pulp::host::AuV3LoadOptions options;
+    options.out_of_process = au_probe_out_of_process();
+    auto slot = pulp::host::load_auv3_plugin(info, options);
+    REQUIRE(slot);
+    return slot;
 }
 #endif
 
@@ -478,3 +508,58 @@ TEST_CASE("Host probe latency change rebuilds SignalGraph latency compensation",
         CHECK_FALSE(graph.plugin_restart_pending());
     }
 }
+
+#ifdef PULP_TEST_HOST_MIDI_PROBE_AU
+TEST_CASE("AUv3 slot returns a MIDI effect's output at its sample offset",
+          "[host][probe][auv3][midi]") {
+    INFO((au_probe_out_of_process() ? "out of process" : "in process"));
+    auto slot = load_au(PULP_TEST_HOST_MIDI_PROBE_AU);
+    REQUIRE(slot->prepare(48000.0, kFrames));
+    Block b;
+    auto note = pulp::midi::MidiEvent::note_on(0, 60, 100);
+    note.sample_offset = 10;
+    b.midi_in.add(note);
+    pulp::midi::MidiEvent off;
+    off.sample_offset = 70;
+    off.message = choc::midi::ShortMessage(0x80, 60, 0);
+    b.midi_in.add(off);
+    b.run(*slot, transport());
+    // The plug-in answers each note an octave up, at the frame it arrived.
+    std::vector<std::pair<int, std::array<std::uint8_t, 3>>> got;
+    for (const auto& e : b.midi_out)
+        got.push_back(
+            {e.sample_offset, {e.message.data()[0], e.message.data()[1], e.message.data()[2]}});
+    REQUIRE(got.size() == 2);
+    CHECK(got[0].first == 10);
+    CHECK(got[0].second == std::array<std::uint8_t, 3>{0x90, 72, 100});
+    CHECK(got[1].first == 70);
+    CHECK(got[1].second == std::array<std::uint8_t, 3>{0x80, 72, 0});
+}
+#endif
+
+#ifdef PULP_TEST_HOST_PROBE_AU
+TEST_CASE("AUv3 slot reports a plug-in that dies out of process", "[host][probe][auv3][oop]") {
+    if (!au_probe_out_of_process())
+        SKIP("needs PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1 and the installed probe component");
+    auto slot = load_au(PULP_TEST_HOST_PROBE_AU);
+    REQUIRE(slot->prepare(48000.0, kFrames));
+    Block b;
+    b.run(*slot, transport());
+    REQUIRE(slot->is_loaded());
+    const auto restarts = slot->restart_request_count();
+    // Command 4 aborts the extension's process from inside process().
+    slot->set_parameter(Probe::kCommand, 4.0f);
+    REQUIRE(pump_until(*slot, [&] {
+        b.run(*slot, transport());
+        return !slot->is_loaded();
+    }));
+    CHECK(slot->restart_request_count() > restarts);
+    // The host keeps running: later blocks pass audio through and are
+    // reported failed, without touching the dead unit.
+    std::fill(b.store[0].begin(), b.store[0].end(), 0.5f);
+    slot->begin_process();
+    b.run(*slot, transport());
+    CHECK(slot->process_status() == PluginSlot::ProcessStatus::failed);
+    CHECK(b.store[4][0] == 0.5f);
+}
+#endif

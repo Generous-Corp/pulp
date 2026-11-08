@@ -1131,9 +1131,10 @@ if((PULP_HAS_VST3 OR PULP_HAS_CLAP) AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN O
     endif()
     # The AU component, hosted through the AUAudioUnit slot.
     if(APPLE AND PULP_HAS_AUSDK)
-        add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_AU)
+        add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_AU PulpHostMidiProbe_AU)
         target_compile_definitions(pulp-test-host-probe-bundles PRIVATE
-            PULP_TEST_HOST_PROBE_AU="${CMAKE_BINARY_DIR}/AU/Pulp Host Probe.component")
+            PULP_TEST_HOST_PROBE_AU="${CMAKE_BINARY_DIR}/AU/Pulp Host Probe.component"
+            PULP_TEST_HOST_MIDI_PROBE_AU="${CMAKE_BINARY_DIR}/AU/Pulp Host MIDI Probe.component")
         target_link_libraries(pulp-test-host-probe-bundles PRIVATE
             "-framework AudioToolbox" "-framework CoreFoundation")
     endif()

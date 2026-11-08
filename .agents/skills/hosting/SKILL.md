@@ -1847,6 +1847,24 @@ Apple's units and the host probe:
   `PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` with the component installed; remove
   it afterwards. Confirm the process boundary by finding the component mapped
   in the `AUHostingService` process with `lsof`.
+- **An out-of-process unit republishes its parameter tree once connected.**
+  KVO on `parameterTree` fires shortly after instantiation, and an edit made
+  on the old tree just before is lost (the new tree carries the remote
+  value). The slot rebuilds on every tree change and replays host edits made
+  since the last tree; the AUDelay tests flaked about one run in three until
+  it did. Apple's own units ignore a tree assigned from outside, so the rebuild
+  test registers an `AUAudioUnit` subclass (`PulpTestTreeUnit`) in process.
+- **Every system callback goes through `PulpHostAuV3Observer`.** It holds the
+  slot pointer under a lock that the destructor's `detach` takes first; blocks
+  and observers retain it, never the slot. A plugin that dies posts
+  `kAudioComponentInstanceInvalidationNotification`; the probe's command 4
+  aborts the extension to test it (opt-in, out of process only).
+- **Apple's AUDelay applies scheduled parameter events at the block start**,
+  in and out of process, so it cannot show sample offsets; DLSMusicDevice
+  starting a note at its MIDI offset can.
+- **A test `.mm` that uses `AVAudioFormat` must import AVFoundation.** With only
+  AudioToolbox the class is just forward-declared, the init returns nil, and
+  the failure shows up as a bus that will not build.
 - **What the probe's AU component cannot report:** it is an `aufx` effect, so
   it receives no MIDI; the AU v2 adapter reads `CallHostTransportState`, which
   has no recording flag; and the AU effect base has one output element, so no

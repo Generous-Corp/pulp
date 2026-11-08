@@ -48,6 +48,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -55,11 +56,21 @@ namespace pulp::host {
 class AuV3Slot;
 }
 
-// Forwards KVO on the unit's `latency` to the slot.
-@interface PulpHostAuV3LatencyObserver : NSObject {
+// Every callback the system makes into the slot goes through this object: KVO
+// on `latency` and `parameterTree`, the parameter tree's automation observer,
+// and the instance-invalidation notification. The blocks and observers retain
+// it, never the slot. The slot detaches it first thing in its destructor;
+// detach() takes the same lock as every forward, so once it returns no
+// callback is running in the slot and none will start.
+@interface PulpHostAuV3Observer : NSObject {
   @public
+    std::recursive_mutex lock;
     pulp::host::AuV3Slot* slot;
+    AUAudioUnit* unit; // Not retained: compared, never messaged.
 }
+- (void)detach;
+- (void)forwardEvents:(NSInteger)count events:(const AUParameterAutomationEvent*)events;
+- (void)invalidated:(NSNotification*)note;
 @end
 
 namespace pulp::host {
@@ -98,6 +109,11 @@ bool wait_for(dispatch_semaphore_t done, std::chrono::milliseconds timeout) {
     return dispatch_semaphore_wait(done, DISPATCH_TIME_NOW) == 0;
 }
 
+// Hand-off between a completion handler and a wait that may time out.
+constexpr int kWaiting = 0;
+constexpr int kDelivered = 1;
+constexpr int kAbandoned = 2;
+
 std::string to_string(NSString* s) {
     return s ? std::string([s UTF8String]) : std::string();
 }
@@ -120,11 +136,12 @@ struct TransportSnapshot {
     bool moved = false;
 };
 
-/// Parameter id and AUParameterAddress, sorted by address for lookup from
-/// observer callbacks.
+/// Parameter id, AUParameterAddress, and the parameter's position in the
+/// retained parameter list.
 struct AddressMapping {
     AUParameterAddress address = 0;
     std::uint32_t id = 0;
+    NSUInteger index = 0;
 };
 
 } // namespace
@@ -133,30 +150,39 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
   public:
     AuV3Slot(PluginInfo info, AUAudioUnit* unit) : info_(std::move(info)), unit_([unit retain]) {
         is_instrument_ = info_.is_instrument;
+        observer_ = [[PulpHostAuV3Observer alloc] init];
+        observer_->slot = this;
+        observer_->unit = unit_;
         build_parameters();
-        latency_observer_ = [[PulpHostAuV3LatencyObserver alloc] init];
-        latency_observer_->slot = this;
-        [unit_ addObserver:latency_observer_
-                forKeyPath:@"latency"
-                   options:NSKeyValueObservingOptionNew
-                   context:nullptr];
+        for (NSString* key in @[ @"latency", @"parameterTree" ])
+            [unit_ addObserver:observer_
+                    forKeyPath:key
+                       options:NSKeyValueObservingOptionNew
+                       context:nullptr];
+        [[NSNotificationCenter defaultCenter]
+            addObserver:observer_
+               selector:@selector(invalidated:)
+                   name:(__bridge NSString*)kAudioComponentInstanceInvalidationNotification
+                 object:nil];
     }
 
     ~AuV3Slot() override {
+        // First: no system callback can reach this object after this line.
+        [observer_ detach];
         close_editor();
         release();
-        if (automation_token_) {
-            [unit_.parameterTree removeParameterObserver:automation_token_];
-            automation_token_ = nullptr;
-        }
-        [unit_ removeObserver:latency_observer_ forKeyPath:@"latency"];
-        latency_observer_->slot = nullptr;
-        [latency_observer_ release];
+        [[NSNotificationCenter defaultCenter] removeObserver:observer_];
+        for (NSString* key in @[ @"latency", @"parameterTree" ])
+            [unit_ removeObserver:observer_ forKeyPath:key];
+        drop_parameter_tree();
+        [observer_ release];
         clear_blocks();
-        // The system's AU v2 bridge delivers a plugin's parameter events on its
-        // own queue, after the plugin posted them. Disposing the unit while
-        // some are still queued crashes that queue, so the last reference is
-        // dropped once it has had time to drain.
+        // The slot's safety does not depend on the following; it is a courtesy
+        // to the system's AU v2 bridge, which delivers a plugin's parameter
+        // events on its own queue after the plugin posts them and crashes that
+        // queue if the unit is disposed while some are still queued. The last
+        // reference to the unit is dropped once the queue has had time to
+        // drain.
         AUAudioUnit* unit = unit_;
         unit_ = nil;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kDisposeDelayNs),
@@ -170,11 +196,36 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
         note_restart_request();
     }
 
+    /// From the tree's automation observer, through the observer object.
+    void parameter_events(NSInteger count, const AUParameterAutomationEvent* events) {
+        for (NSInteger i = 0; i < count; ++i)
+            plugin_parameter_event(events[i]);
+    }
+
+    /// From KVO: the plugin replaced its parameter tree (a sampler loading a
+    /// preset, or the system's AU v2 bridge after a parameter-list change).
+    /// The old tree's parameters and observer are gone with it, so the list
+    /// is rebuilt and the host is asked to re-read parameters().
+    void parameter_tree_changed() {
+        build_parameters();
+        note_restart_request();
+    }
+
+    /// The extension (or the process hosting it) died. The unit is never
+    /// rendered again; the host sees a restart request and is_loaded() false,
+    /// and should load the plugin anew.
+    void extension_invalidated() {
+        if (!invalidated_.exchange(true, std::memory_order_acq_rel)) {
+            runtime::log_error("AUv3: '{}' stopped running (its process exited)", info_.name);
+            note_restart_request();
+        }
+    }
+
     const PluginInfo& info() const override {
         return info_;
     }
     bool is_loaded() const override {
-        return unit_ != nil;
+        return unit_ != nil && !invalidated_.load(std::memory_order_acquire);
     }
 
     void set_preferred_channel_layout(int inputs, int outputs) override {
@@ -231,21 +282,25 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
     }
 
     std::vector<HostParamInfo> parameters() const override {
+        std::lock_guard<std::mutex> lock(mapping_mutex_);
         return params_;
     }
 
     float get_parameter(std::uint32_t id) const override {
+        std::lock_guard<std::mutex> lock(mapping_mutex_);
         AUParameter* p = parameter_for(id);
         return p ? p.value : 0.0f;
     }
 
     void set_parameter(std::uint32_t id, float plain_value) override {
+        std::lock_guard<std::mutex> lock(mapping_mutex_);
         AUParameter* p = parameter_for(id);
         if (!p)
             return;
         // The observer token as originator keeps the host's own edit from
         // coming back as a plugin edit.
         [p setValue:plain_value originator:automation_token_];
+        remember_host_write(p.address, plain_value);
     }
 
     void set_bypass(bool b) override {
@@ -291,6 +346,12 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
             if (![plist isKindOfClass:[NSDictionary class]])
                 return false;
             unit_.fullState = plist;
+            {
+                // The restored state decides the values now; earlier host
+                // edits are not replayed onto a tree it brings.
+                std::lock_guard<std::mutex> lock(mapping_mutex_);
+                host_writes_.clear();
+            }
             note_state_change();
             return true;
         }
@@ -325,8 +386,13 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
         }
         __block NSViewController* controller = nil;
         dispatch_semaphore_t done = dispatch_semaphore_create(0);
+        // A controller that arrives after the wait gave up is released by the
+        // handler itself, so a late answer does not leak.
+        auto handoff = std::make_shared<std::atomic<int>>(kWaiting);
         @try {
             [unit_ requestViewControllerWithCompletionHandler:^(AUViewControllerBase* vc) {
+              if (handoff->exchange(kDelivered) == kAbandoned)
+                  return;
               controller = [vc retain];
               dispatch_semaphore_signal(done);
             }];
@@ -336,7 +402,9 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
             dispatch_release(done);
             return nullptr;
         }
-        const bool arrived = wait_for(done, kEditorTimeout);
+        bool arrived = wait_for(done, kEditorTimeout);
+        if (!arrived && handoff->exchange(kAbandoned) == kDelivered)
+            arrived = wait_for(done, kEditorTimeout); // It landed as we gave up.
         dispatch_release(done);
         if (!arrived || !controller) {
             runtime::log_error("AUv3 editor: '{}' gave no view controller", info_.name);
@@ -408,6 +476,12 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
     void process_request(const detail::SlotProcessRequest& request) override {
         auto& audio = *request.audio;
         const int frames = request.num_samples;
+        if (invalidated_.load(std::memory_order_acquire)) {
+            // A dead extension is never rendered: report the block failed.
+            process_status_.store(ProcessStatus::failed, std::memory_order_release);
+            detail::SlotBusBinder::pass_through(audio, frames);
+            return;
+        }
         if (!prepared_ || bypassed_.load(std::memory_order_relaxed) || frames <= 0) {
             detail::SlotBusBinder::pass_through(audio, frames);
             sample_time_ += std::max(0, frames);
@@ -456,11 +530,19 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
 
     // ── Parameters ──────────────────────────────────────────────────────
 
+    /// (Re)reads the parameter tree: control thread or KVO. The list and
+    /// the tree it came from are retained, so a parameter the host still
+    /// names stays valid even after the plugin replaces the tree; the old
+    /// tree's observer is removed and one is added to the new tree.
     void build_parameters() {
+        std::lock_guard<std::mutex> lock(mapping_mutex_);
+        drop_parameter_tree_locked();
         params_.clear();
         by_id_.clear();
         by_address_.clear();
-        NSArray<AUParameter*>* all = unit_.parameterTree.allParameters;
+        tree_ = [unit_.parameterTree retain];
+        all_parameters_ = [tree_.allParameters retain];
+        NSArray<AUParameter*>* all = all_parameters_;
         bool addresses_fit = true;
         for (AUParameter* p in all)
             if (p.address > 0xFFFFFFFFull)
@@ -471,11 +553,10 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
         for (AUParameter* p in all)
             if (p.displayName)
                 [names addObject:p.displayName];
-        std::uint32_t ordinal = 0;
+        NSUInteger ordinal = 0;
         for (AUParameter* p in all) {
-            const std::uint32_t id =
-                addresses_fit ? static_cast<std::uint32_t>(p.address) : ordinal;
-            ++ordinal;
+            const std::uint32_t id = addresses_fit ? static_cast<std::uint32_t>(p.address)
+                                                   : static_cast<std::uint32_t>(ordinal);
             HostParamInfo h;
             h.id = id;
             h.name = to_string(p.displayName);
@@ -494,40 +575,77 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
             h.flags.rampable = !h.flags.stepped;
             h.flags.modulatable = false;
             params_.push_back(std::move(h));
-            by_id_.push_back({p.address, id});
-            parameters_.push_back(p);
+            by_id_.push_back({p.address, id, ordinal});
+            ++ordinal;
         }
         by_address_ = by_id_;
+        std::sort(by_id_.begin(), by_id_.end(),
+                  [](const AddressMapping& x, const AddressMapping& y) { return x.id < y.id; });
         std::sort(
             by_address_.begin(), by_address_.end(),
-            [](const AddressMapping& a, const AddressMapping& b) { return a.address < b.address; });
+            [](const AddressMapping& x, const AddressMapping& y) { return x.address < y.address; });
 
-        AuV3Slot* self = this;
-        automation_token_ = [unit_.parameterTree
-            tokenByAddingParameterAutomationObserver:^(NSInteger count,
-                                                       const AUParameterAutomationEvent* events) {
-              for (NSInteger i = 0; i < count; ++i)
-                  self->plugin_parameter_event(events[i]);
-            }];
+        // The block holds the observer object, not this slot.
+        PulpHostAuV3Observer* observer = observer_;
+        automation_token_ = [tree_ tokenByAddingParameterAutomationObserver:^(
+                                       NSInteger count, const AUParameterAutomationEvent* events) {
+          [observer forwardEvents:count events:events];
+        }];
+
+        // An out-of-process unit publishes its tree again once its process
+        // is connected, carrying the values it had then; a host edit made on
+        // the old tree just before would be lost. Host edits since the last
+        // tree are replayed onto this one.
+        for (const auto& [address, value] : host_writes_)
+            if (AUParameter* p = [tree_ parameterWithAddress:address])
+                if (p.value != value)
+                    [p setValue:value originator:automation_token_];
+        host_writes_.clear();
     }
 
-    AUParameter* parameter_for(std::uint32_t id) const {
-        for (std::size_t i = 0; i < by_id_.size(); ++i)
-            if (by_id_[i].id == id)
-                return parameters_[i];
-        return nil;
-    }
-
-    bool address_for(std::uint32_t id, AUParameterAddress& address) const noexcept {
-        for (const auto& m : by_id_)
-            if (m.id == id) {
-                address = m.address;
-                return true;
+    /// mapping_mutex_ held.
+    void remember_host_write(AUParameterAddress address, float value) {
+        for (auto& w : host_writes_)
+            if (w.first == address) {
+                w.second = value;
+                return;
             }
-        return false;
+        host_writes_.emplace_back(address, value);
     }
 
+    void drop_parameter_tree() {
+        std::lock_guard<std::mutex> lock(mapping_mutex_);
+        drop_parameter_tree_locked();
+    }
+
+    void drop_parameter_tree_locked() {
+        if (tree_ && automation_token_)
+            [tree_ removeParameterObserver:automation_token_];
+        automation_token_ = nullptr;
+        [all_parameters_ release];
+        all_parameters_ = nil;
+        [tree_ release];
+        tree_ = nil;
+    }
+
+    const AddressMapping* mapping_for_id(std::uint32_t id) const noexcept {
+        const auto it =
+            std::lower_bound(by_id_.begin(), by_id_.end(), id,
+                             [](const AddressMapping& m, std::uint32_t v) { return m.id < v; });
+        return it != by_id_.end() && it->id == id ? &*it : nullptr;
+    }
+
+    /// mapping_mutex_ held.
+    AUParameter* parameter_for(std::uint32_t id) const {
+        const auto* m = mapping_for_id(id);
+        return m && m->index < all_parameters_.count ? all_parameters_[m->index] : nil;
+    }
+
+    /// From the automation observer, through the observer object.
     void plugin_parameter_event(const AUParameterAutomationEvent& event) {
+        std::unique_lock<std::mutex> lock(mapping_mutex_, std::try_to_lock);
+        if (!lock.owns_lock())
+            return; // The tree is being rebuilt; this event belonged to the old one.
         const auto it = std::lower_bound(
             by_address_.begin(), by_address_.end(), event.address,
             [](const AddressMapping& m, AUParameterAddress a) { return m.address < a; });
@@ -683,12 +801,15 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
                                 static_cast<NSInteger>(sysex.data.size()), sysex.data.data());
                 });
         }
-        if (param_block_) {
-            for (const auto& pe : *request.param_events) {
-                AUParameterAddress address = 0;
-                if (address_for(pe.param_id, address))
-                    param_block_(AUEventSampleTimeImmediate + pe.sample_offset, 0, address,
-                                 pe.value);
+        if (param_block_ && !request.param_events->empty()) {
+            // A tree rebuild holds the mapping for a moment; a block that
+            // arrives then drops its automation rather than wait.
+            std::unique_lock<std::mutex> lock(mapping_mutex_, std::try_to_lock);
+            if (lock.owns_lock()) {
+                for (const auto& pe : *request.param_events)
+                    if (const auto* m = mapping_for_id(pe.param_id))
+                        param_block_(AUEventSampleTimeImmediate + pe.sample_offset, 0, m->address,
+                                     pe.value);
             }
         }
     }
@@ -831,12 +952,19 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
 
     PluginInfo info_;
     AUAudioUnit* unit_ = nil;
-    PulpHostAuV3LatencyObserver* latency_observer_ = nil;
+    PulpHostAuV3Observer* observer_ = nil;
+    AUParameterTree* tree_ = nil;
+    NSArray<AUParameter*>* all_parameters_ = nil;
     AUParameterObserverToken automation_token_ = nullptr;
+    // Guards the parameter list against a tree rebuild. Control-thread calls
+    // lock it; the audio thread and observer callbacks only try-lock it.
+    mutable std::mutex mapping_mutex_;
+    // Host edits since the current tree was read (mapping_mutex_ held).
+    std::vector<std::pair<AUParameterAddress, float>> host_writes_;
+    std::atomic<bool> invalidated_{false};
     bool is_instrument_ = false;
 
     std::vector<HostParamInfo> params_;
-    std::vector<AUParameter*> parameters_; // Not retained: the tree owns them.
     std::vector<AddressMapping> by_id_;
     std::vector<AddressMapping> by_address_;
 
@@ -881,19 +1009,28 @@ std::unique_ptr<PluginSlot> load_auv3_plugin(const PluginInfo& requested,
     __block AUAudioUnit* unit = nil;
     __block NSError* failure = nil;
     dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    // A unit that arrives after the wait gave up is released by the handler,
+    // so its process does not stay alive with nobody holding it.
+    auto handoff = std::make_shared<std::atomic<int>>(kWaiting);
     const AudioComponentInstantiationOptions how =
         options.out_of_process ? kAudioComponentInstantiation_LoadOutOfProcess
                                : kAudioComponentInstantiation_LoadInProcess;
     [AUAudioUnit instantiateWithComponentDescription:desc
                                              options:how
                                    completionHandler:^(AUAudioUnit* u, NSError* e) {
+                                     if (handoff->exchange(kDelivered) == kAbandoned)
+                                         return;
                                      unit = [u retain];
                                      failure = [e retain];
                                      dispatch_semaphore_signal(done);
                                    }];
-    const bool arrived = wait_for(done, options.instantiate_timeout);
+    bool arrived = wait_for(done, options.instantiate_timeout);
+    if (!arrived && handoff->exchange(kAbandoned) == kDelivered)
+        arrived = wait_for(done, options.instantiate_timeout); // It landed as we gave up.
     if (!arrived) {
-        // The handler may still run; leave the semaphore and its captures to it.
+        // The handler may still run; it drops what it gets, and its block holds
+        // its own reference to the semaphore.
+        dispatch_release(done);
         runtime::log_error("AUv3 load: '{}' did not instantiate within {} ms", requested.unique_id,
                            options.instantiate_timeout.count());
         return nullptr;
@@ -921,12 +1058,32 @@ std::unique_ptr<PluginSlot> load_auv3_plugin(const PluginInfo& requested,
 
 } // namespace pulp::host
 
-@implementation PulpHostAuV3LatencyObserver
+@implementation PulpHostAuV3Observer
+- (void)detach {
+    std::lock_guard<std::recursive_mutex> guard(lock);
+    slot = nullptr;
+}
 - (void)observeValueForKeyPath:(NSString*)keyPath
                       ofObject:(id)object
                         change:(NSDictionary*)change
                        context:(void*)context {
-    if (slot)
+    std::lock_guard<std::recursive_mutex> guard(lock);
+    if (!slot)
+        return;
+    if ([keyPath isEqualToString:@"parameterTree"])
+        slot->parameter_tree_changed();
+    else
         slot->latency_changed();
+}
+- (void)forwardEvents:(NSInteger)count events:(const AUParameterAutomationEvent*)events {
+    std::lock_guard<std::recursive_mutex> guard(lock);
+    if (!slot)
+        return;
+    slot->parameter_events(count, events);
+}
+- (void)invalidated:(NSNotification*)note {
+    std::lock_guard<std::recursive_mutex> guard(lock);
+    if (slot && note.object == unit)
+        slot->extension_invalidated();
 }
 @end

@@ -208,11 +208,39 @@ applies to it:
   runs out of process; it needs an `NSApplication` that has finished
   launching.
 
+- **A changing parameter list.** A plugin may replace its parameter tree, as a
+  sampler does when it loads a preset. The slot rebuilds `parameters()`,
+  moves its observer to the new tree, and raises a restart request so a graph
+  re-reads the list. An out-of-process unit publishes its tree once more when
+  its process connects; host edits made just before are carried onto the new
+  tree, unless a state restore came in between.
+- **A plugin that dies.** When the plugin's process exits, the system posts
+  `kAudioComponentInstanceInvalidationNotification`. From then on
+  `is_loaded()` is false, each block passes its input through and reports
+  `ProcessStatus::failed`, and the slot raises one restart request. The slot
+  never renders the dead unit again; load the plugin anew to recover.
+- **Bypass and buses.** A bypassed slot sets `shouldBypassEffect` and stops
+  rendering, so the plugin's tail is not rendered while bypassed. Every
+  output bus is rendered each block, even ones the host does not bind, so a
+  16-output instrument costs 16 renders.
+
 The plugin's binary must be registered with the system: an AU v3 app extension
 through its containing app, an AU v2 component by being installed in
 `~/Library/Audio/Plug-Ins/Components` or `/Library/Audio/Plug-Ins/Components`.
 A component registered only inside the host process with
 `AudioComponentRegister` loads in process only.
+
+What the tests cover, and where: Apple's own units (AUDelay, DLSMusicDevice,
+AUPeakLimiter, AUMultiChannelMixer) run out of process in every macOS test
+run, covering audio both ways, host parameter edits, automation, state, MIDI
+into an instrument at its sample offset, latency, per-bus routing, and the
+editor. The host-probe and MIDI-probe fixtures run in process there, covering
+transport, offline mode, the plugin's own edits and gestures, a latency change,
+and MIDI output. The same probe cases, plus a plugin that dies, run out of
+process only when the probe components are installed and
+`PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` is set; CI does not install them. A
+freshly built AU v3 app extension is not tested, because macOS registers one
+only when it is signed with a Developer ID and notarized.
 
 ## Runnable example
 

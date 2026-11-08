@@ -16,11 +16,13 @@
 #include <pulp/host/plugin_slot_auv3.hpp>
 #include <pulp/host/signal_graph.hpp>
 
+#import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
 #import <AudioToolbox/AudioToolbox.h>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -115,6 +117,102 @@ struct Stereo {
 
 } // namespace
 
+// An in-process AU v3 effect that passes audio through and, on request,
+// replaces its parameter tree the way a sampler does on a preset load.
+@interface PulpTestTreeUnit : AUAudioUnit
+- (void)rebuildTreeWithGeneration:(int)generation;
+@end
+
+@implementation PulpTestTreeUnit {
+    AUAudioUnitBusArray* _inputs;
+    AUAudioUnitBusArray* _outputs;
+}
+- (instancetype)initWithComponentDescription:(AudioComponentDescription)desc
+                                     options:(AudioComponentInstantiationOptions)options
+                                       error:(NSError**)error {
+    self = [super initWithComponentDescription:desc options:options error:error];
+    if (!self)
+        return nil;
+    AVAudioFormat* format =
+        [[[AVAudioFormat alloc] initStandardFormatWithSampleRate:48000.0 channels:2] autorelease];
+    AUAudioUnitBus* input_bus = [[[AUAudioUnitBus alloc] initWithFormat:format
+                                                                  error:nil] autorelease];
+    AUAudioUnitBus* output_bus = [[[AUAudioUnitBus alloc] initWithFormat:format
+                                                                   error:nil] autorelease];
+    if (!input_bus || !output_bus)
+        return nil;
+    _inputs = [[AUAudioUnitBusArray alloc] initWithAudioUnit:self
+                                                     busType:AUAudioUnitBusTypeInput
+                                                      busses:@[ input_bus ]];
+    _outputs = [[AUAudioUnitBusArray alloc] initWithAudioUnit:self
+                                                      busType:AUAudioUnitBusTypeOutput
+                                                       busses:@[ output_bus ]];
+    [self rebuildTreeWithGeneration:1];
+    return self;
+}
+- (void)dealloc {
+    [_inputs release];
+    [_outputs release];
+    [super dealloc];
+}
+- (AUAudioUnitBusArray*)inputBusses {
+    return _inputs;
+}
+- (AUAudioUnitBusArray*)outputBusses {
+    return _outputs;
+}
+- (void)rebuildTreeWithGeneration:(int)generation {
+    NSMutableArray* children = [NSMutableArray array];
+    for (int i = 0; i < generation; ++i) {
+        NSString* name = [NSString stringWithFormat:@"Level %d", generation];
+        if (i > 0)
+            name = [NSString stringWithFormat:@"Extra %d", i];
+        [children
+            addObject:[AUParameterTree
+                          createParameterWithIdentifier:[NSString stringWithFormat:@"p%d", i]
+                                                   name:name
+                                                address:(AUParameterAddress)(generation * 100 + i)
+                                                    min:0
+                                                    max:1
+                                                   unit:kAudioUnitParameterUnit_Generic
+                                               unitName:nil
+                                                  flags:kAudioUnitParameterFlag_IsWritable |
+                                                        kAudioUnitParameterFlag_IsReadable
+                                           valueStrings:nil
+                                    dependentParameters:nil]];
+    }
+    self.parameterTree = [AUParameterTree createTreeWithChildren:children];
+}
+- (AUInternalRenderBlock)internalRenderBlock {
+    return ^AUAudioUnitStatus(AudioUnitRenderActionFlags* flags, const AudioTimeStamp* stamp,
+                              AUAudioFrameCount frames, NSInteger bus, AudioBufferList* output,
+                              const AURenderEvent*, AURenderPullInputBlock pull) {
+      if (!pull)
+          return kAudioUnitErr_NoConnection;
+      return pull(flags, stamp, frames, 0, output);
+    };
+}
+@end
+
+namespace {
+
+bool register_tree_unit() {
+    static const bool registered = [] {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'PTtr';
+        desc.componentManufacturer = 'PlHp';
+        [AUAudioUnit registerSubclass:[PulpTestTreeUnit class]
+               asComponentDescription:desc
+                                 name:@"Pulp: Tree Test"
+                              version:1];
+        return true;
+    }();
+    return registered;
+}
+
+} // namespace
+
 TEST_CASE("AUv3 slot runs Apple's AUDelay out of process", "[host][auv3][oop]") {
     auto slot = load("aufx:dely:appl");
     CHECK(runs_out_of_process(*slot));
@@ -137,13 +235,16 @@ TEST_CASE("AUv3 slot runs Apple's AUDelay out of process", "[host][auv3][oop]") 
     }
 
     // All wet with a long delay: the input is held back, so the block is
-    // silent although the input is not.
+    // silent although the input is not. A host edit reaches a unit in
+    // another process asynchronously, so blocks run until it lands.
     slot->set_parameter(mix, 100.0f);
     slot->set_parameter(param_named(*slot, "Delay Time"), 1.0f);
     Stereo wet;
     wet.impulses();
-    wet.run(*slot);
-    wet.run(*slot);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    do {
+        wet.run(*slot);
+    } while (wet.peak() >= 1e-3f && std::chrono::steady_clock::now() < deadline);
     CHECK(wet.peak() < 1e-3f);
     slot->release();
 }
@@ -211,7 +312,7 @@ TEST_CASE("AUv3 slot plays Apple's DLSMusicDevice from host MIDI out of process"
     REQUIRE(slot->prepare(kRate, kFrames));
     Stereo s;
     s.run(*slot);
-    CHECK(s.peak() == 0.0f); // Silent until it is played.
+    CHECK(s.peak() < 1e-6f); // Silent until it is played.
 
     auto note = pulp::midi::MidiEvent::note_on(0, 60, 110);
     note.sample_offset = 16;
@@ -311,4 +412,81 @@ TEST_CASE("AUv3 slot embeds the plugin's own editor from out of process",
     slot->destroy_hosted_editor(std::move(editor));
     CHECK(parent.subviews.count == 0);
     [parent release];
+}
+
+TEST_CASE("AUv3 slot delivers MIDI at its sample offset across the process boundary",
+          "[host][auv3][oop][midi]") {
+    // AUDelay applies scheduled parameter events at the start of the block
+    // (in and out of process alike), so it cannot show an offset; an
+    // instrument starting a note can.
+    auto slot = load("aumu:dls :appl");
+    REQUIRE(slot->prepare(kRate, kFrames));
+    Stereo s;
+    s.run(*slot);
+    auto note = pulp::midi::MidiEvent::note_on(0, 60, 127);
+    note.sample_offset = 128;
+    s.midi_in.add(note);
+    s.run(*slot);
+    float before = 0.0f, after = 0.0f;
+    for (int i = 0; i < 128; ++i)
+        before = std::max(before, std::abs(s.out_l[(std::size_t)i]));
+    for (int i = 128; i < kFrames; ++i)
+        after = std::max(after, std::abs(s.out_l[(std::size_t)i]));
+    CHECK(before < 1e-6f); // Nothing before the note's frame.
+    CHECK(after > 1e-3f);  // The note sounds from its frame on.
+}
+
+TEST_CASE("AUv3 slot follows a plug-in that replaces its parameter tree", "[host][auv3]") {
+    REQUIRE(register_tree_unit());
+    pulp::host::AuV3LoadOptions in_process;
+    in_process.out_of_process = false;
+    PluginInfo info;
+    info.format = PluginFormat::AudioUnitV3;
+    info.unique_id = "aufx:PTtr:PlHp";
+    auto slot = pulp::host::load_auv3_plugin(info, in_process);
+    REQUIRE(slot);
+    auto* unit = (PulpTestTreeUnit*)audio_unit(*slot);
+    REQUIRE([unit isKindOfClass:[PulpTestTreeUnit class]]);
+    REQUIRE(slot->prepare(kRate, kFrames));
+    REQUIRE(slot->parameters().size() == 1);
+    CHECK(slot->parameters()[0].name == "Level 1");
+    slot->set_parameter(100, 0.5f);
+    CHECK(std::abs(slot->get_parameter(100) - 0.5f) < 1e-6f);
+    const auto restarts = slot->restart_request_count();
+
+    // The plug-in replaces its tree, as a sampler does on a preset load; the
+    // old parameter objects are released with it.
+    @autoreleasepool {
+        [unit rebuildTreeWithGeneration:2];
+    }
+    CHECK(slot->restart_request_count() > restarts);
+    const auto params = slot->parameters();
+    REQUIRE(params.size() == 2);
+    CHECK(params[0].name == "Level 2");
+    // The old id is gone, not dangling.
+    CHECK(slot->get_parameter(100) == 0.0f);
+    slot->set_parameter(100, 0.9f);
+
+    // Host edits reach the new tree...
+    slot->set_parameter(200, 0.75f);
+    CHECK(std::abs([unit.parameterTree parameterWithAddress:200].value - 0.75f) < 1e-6f);
+    CHECK(std::abs(slot->get_parameter(200) - 0.75f) < 1e-6f);
+    // ...and the plug-in's edits on it reach the host.
+    [[unit.parameterTree parameterWithAddress:201] setValue:0.25f originator:nullptr];
+    std::array<pulp::host::PluginParameterEdit, 16> edits{};
+    bool saw = false;
+    for (int i = 0; i < 100 && !saw; ++i) {
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        const auto n = slot->drain_parameter_edits(edits);
+        for (std::size_t k = 0; k < n; ++k)
+            saw = saw || (edits[k].id == 201 &&
+                          edits[k].kind == pulp::host::PluginParameterEdit::Kind::value &&
+                          std::abs(edits[k].plain_value - 0.25f) < 1e-6f);
+    }
+    CHECK(saw);
+    // Audio still runs after the rebuild.
+    Stereo s;
+    s.impulses();
+    s.run(*slot);
+    CHECK(std::abs(s.out_l[0] - 0.5f) < 1e-6f);
 }
