@@ -35,7 +35,10 @@ run_remote() {
         return 1
     }
     printf '%s\n' "$output"
-    status=$(printf '%s\n' "$output" | sed -n "s/^${marker}\([0-9][0-9]*\)\r\{0,1\}$/\1/p" | tail -1)
+    # Search $output through here-strings, not `printf | ...` pipes: under
+    # pipefail a reader that stops early (grep -q) leaves printf with SIGPIPE,
+    # and the pipeline fails even though the marker is present.
+    status=$(sed -n "s/^${marker}\([0-9][0-9]*\)\r\{0,1\}$/\1/p" <<<"$output" | tail -1)
     [[ -n "$status" ]] || { echo "missing remote exit marker for $binary" >&2; return 1; }
     [[ "$status" == 0 ]] || { echo "$binary returned $status" >&2; return "$status"; }
     output_has_marker "$output" "$required_marker" || {
