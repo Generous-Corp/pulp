@@ -28,10 +28,113 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 ## simd
 
-Portable block kernels for DSP: elementwise buffer arithmetic, reductions
-(`sum`, `dot`, `sum_squares`, `max_abs`, `maximum`, `minimum`), gain ramps
-(`ramp_mul`) and FIR correlation (`correlate`, `decimate2`), for `float` and
-`double`. `pulp::signal` links this module, so DSP headers can call it without
+Portable block kernels for DSP: elementwise buffer arithmetic (`add`, `sub`,
+`mul`, `div`, `negate`, `fma`, `scale`, `abs`, `clamp`), reductions (`sum`,
+`mean`, `rms`, `dot`, `sum_squares`, `max_abs`, `maximum`, `minimum`,
+`find_maximum` and `find_minimum` with the index), threshold replacement
+(`replace_below`, `replace_above`), gain ramps (`ramp_mul`), sample-format
+conversion (`from_int16`, `from_int32`, `to_int16`, `to_int32`, with a scale),
+stereo `interleave2` / `deinterleave2`, and FIR correlation (`correlate`,
+`decimate2`), for `float` and `double`. The conversions to integer round half to
+even, saturate, and turn NaN into 0 on every backend. A copy with gain is
+`scale`.
+
+Spectral work has its own kernels, for interleaved (`re, im, re, im, ...`, the
+layout of `std::complex<T>`) and split (separate real and imaginary arrays,
+`_split` suffix) buffers: `complex_multiply`, `complex_multiply_conj`
+(`a * conj(b)`), `complex_multiply_accumulate`, `complex_magnitude`,
+`complex_magnitude_squared`, `complex_phase` and `complex_power_spectrum`
+(`scale * |z|^2`). They use the plain product formulas, so unlike
+`std::complex::operator*` they do not recover a NaN from infinity times zero;
+use them on finite spectra. The zero-latency convolver's spectral
+multiply-accumulate runs on them. On every backend an element's result does
+not depend on where it sits in the buffer or on how a long buffer is split
+into calls, so chunked processing gives the same bits as one call (checked by
+`test/test_simd_complex.cpp`). `complex_multiply_conj(z, z)` can leave a
+last-bit imaginary part where the target fuses multiply-add; use
+`complex_magnitude_squared` for `|z|^2`.
+
+`mean` and `rms` accumulate in `double`, also for `float` input, so a long
+buffer keeps its precision: over four million `float` samples near 1.0 the
+measured relative error is 5.8e-9 (mean) and 4.7e-8 (rms), one rounding to
+`float`, where a running `float` sum was 5e-4 off. For `double` the bound is
+about `n * 2^-53`. `find_maximum` and `find_minimum` return the first NaN and
+its index when the buffer holds one, on every backend; `maximum`, `minimum`
+and `max_abs` with a NaN in the buffer are unspecified and differ by backend.
+
+### Vector math and accuracy tiers
+
+`exp`, `log`, `sin`, `cos`, `sincos`, `tanh`, `sqrt` and `wrap_phase` run over
+buffers of `float` or `double`. Each takes a `pulp::simd::Accuracy`, default
+`Accuracy::precise`:
+
+```cpp
+pulp::simd::exp(x, y, n);                               // precise
+pulp::simd::sincos(phase, s, c, n, pulp::simd::Accuracy::fast);
+pulp::simd::log(x, 1e-12f, y, n);                       // ln(max(x, 1e-12))
+pulp::simd::wrap_phase(phase, wrapped, n);              // into [-pi, pi]
+```
+
+- `precise` is within a stated number of units in the last place (ULP) of the
+  true result. Highway uses its `hwy/contrib/math` kernels (Apache-2.0, fetched
+  with Highway itself) and Apple platforms use Accelerate's vForce.
+- `fast` is for `float` and trades accuracy for fewer operations: a lower-degree
+  polynomial in Highway. Accelerate and the scalar backend have one algorithm
+  per function and ignore the argument, and a `double` request runs the
+  `precise` kernel, so a result is never worse than the tier asked for.
+- `log` takes a floor: `ln(max(x, floor))`. A floor at or below zero, or NaN,
+  means the smallest normal number, so the result is always finite for finite
+  input.
+- `sqrt` is correctly rounded on every backend and has no tier; the hardware
+  square root is already the fast path. `wrap_phase` has one implementation.
+- A result does not depend on where an element sits in the buffer, on the
+  buffer length, or on whether the call is in place.
+- `wrap_phase` stays within `[-pi, pi]` (one ulp at the ends) on every
+  backend, including inputs that sit on a half turn, for `abs x` up to 1e4
+  (`float`) and 1e6 (`double`). The test checks every half turn and multiple
+  of pi in that range, not only random points.
+- `precise` `sin`, `cos` and `sincos` meet the bound for `abs x` up to 39000 on
+  every backend, the range Highway documents for its `float` kernels. Past it
+  Highway's `float` kernels degrade (measured within 4 ULP to about 4e6, wrong
+  past about 1e7), while Accelerate and the scalar backend stay accurate over
+  the whole `float` range, and `double` holds to at least 1e8 everywhere. Bring
+  an accumulating phase back with `wrap_phase` before taking its sine.
+
+Measured worst case over random inputs in the stated range, on arm64 macOS
+(Highway NEON, and Accelerate), as checked by the `[simd][math][accuracy]` cases
+in `test/test_simd_math.cpp`. Print the same figures with
+`pulp-test-simd-math "[accuracy-report]"`. Highway states at most 4 ULP for
+each of these kernels on all its targets; only the arm64 NEON target was
+measured here, and the test asserts the bound on whatever machine runs it.
+
+| Function (range) | Tier | float, measured | double, measured | Documented bound |
+|---|---|---|---|---|
+| exp ([-87, 88]) | precise | 1.4 ULP | 1 ULP | 4 ULP |
+| exp (subnormal results: [-103.9, -87.4] float, [-745, -708.5] double) | precise | 0.91 ULP | 1 ULP | 4 ULP |
+| log (1e-30 to 1e30) | precise | 2.2 ULP | 2 ULP | 4 ULP |
+| sin, cos (abs x up to 39000) | precise | 2.2 ULP | 3 ULP | 4 ULP |
+| tanh (abs x up to 10) | precise | 2.4 ULP | 3 ULP | 4 ULP |
+| sqrt | both | exact | exact | correctly rounded |
+| exp ([-87, 88]) | fast | 3.6e-6 relative | as precise | 4e-6 relative |
+| log (floor to float max) | fast | 3.6e-6 relative (1.95e-6 absolute) | as precise | 4.5e-6 relative |
+| sin, cos (abs x up to 1e4) | fast | 1.2e-7, 1.9e-7 absolute | as precise | 2.5e-7 absolute |
+| tanh | fast | 1.6e-6 absolute | as precise | 2.2e-6 absolute |
+| wrap_phase (abs x up to 1e4 float, 1e6 double, half turns included) | one | 1.2e-7 absolute | 8.9e-16 absolute | 3e-7 float, 1e-15 double |
+
+ULP is measured against the C library in double. For `double` that makes the
+figure the distance from libm, which is itself well under one ULP. The `fast`
+sin and cos are accurate near their zeros in absolute terms only; their relative
+error there is not bounded. The `wrap_phase` figure is the distance on the
+circle, because `pi` and `-pi` are the same angle.
+
+Edges. The `precise` tier gives `exp(+large)` = +inf, `exp(-large)` = 0,
+`log(+inf)` = +inf, `sin` and `cos` of an infinity = NaN, and NaN in gives NaN
+out. Accelerate's `double` `cos(0)` is `1 - 1.1e-16`, one ulp below 1, so do
+not test `cos(0) == 1` exactly. The `fast` tier does not define NaN or infinity, saturates `exp` at
+`exp(88)` and `exp(-87.3)`, and needs `log` input between the floor and the
+largest float (so the floor must be a positive normal number, which is the
+default when it is zero or negative).
+ `pulp::signal` links this module, so DSP headers can call it without
 acquiring `pulp::runtime`.
 
 **Link:** `pulp::simd` (also reached through `pulp::signal` and `pulp::runtime`) · **Include prefix:** `<pulp/simd/...>`

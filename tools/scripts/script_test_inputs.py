@@ -1754,6 +1754,11 @@ def main(argv: list[str]) -> int:
                   "its registration in test/cmake/*_tests.cmake:\n"
                   "  pulp_test_data(<suite> PATHS <repo-relative files, dirs or globs>)\n"
                   "then regenerate the list. Undeclared tests can never be skipped by a selector.")
+        stale_note = stale_build_reason(build_dir, root)
+        if stale_note:
+            print("NOTE: this drift may be a stale build tree, not the list. " + stale_note.split("; ")[0]
+                  + ". Reconfigure first (`pulp build --clean`), then re-run --check; a --write from a\n"
+                  "tree older than main silently reverts main's newer entries.")
         print(fix)
         if advisory_here():
             # The enforcement point is the PULL-REQUEST HEAD, where the pr-fast
