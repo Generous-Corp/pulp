@@ -205,25 +205,46 @@ std::vector<float> playback(const SampleSlotBank& bank, std::span<const int> sch
     return cursor == kFrames ? rendered : std::vector<float>{};
 }
 
-bool matches(const std::vector<float>& samples, bool wrong_buffer, bool timing) {
+// The oracle: every sample must equal expected_sample(frame) * scale. Planted
+// controls never change this function; they corrupt the data it is given.
+bool matches(std::span<const float> samples, float scale = 1.0f) {
     if (samples.size() != kFrames)
         return false;
     for (std::size_t frame = 0; frame < kFrames; ++frame) {
-        const std::size_t expected_frame = timing ? (frame + 1) % kFrames : frame;
-        const auto expected = expected_sample(expected_frame);
+        const double expected = static_cast<double>(expected_sample(frame) * scale);
         if (!std::isfinite(samples[frame]) ||
             std::abs(static_cast<double>(samples[frame]) - expected) > 1.0e-5)
             return false;
     }
-    if (wrong_buffer)
-        return false;
     return true;
 }
+
+// Reads a published view the way a consumer would. Returns an empty vector
+// when the bank refuses the view (stale generation or null channel data).
+std::vector<float> read_view(const SampleSlotBank& bank, const PublishedSampleView& view) {
+    if (!view.valid || view.num_frames != kFrames || !bank.slot_view_valid(view))
+        return {};
+    const float* channel = bank.channel_data(view, 0);
+    if (channel == nullptr)
+        return {};
+    return std::vector<float>(channel, channel + kFrames);
+}
+
+// Planted controls exit 0 only after the oracle has rejected the planted
+// defect, and print this marker, which the CTest registration requires.
+int detected(std::string_view control) {
+    std::cout << "G11 planted defect detected: " << control << '\n';
+    return 0;
+}
+
+// Exit code for a planted control the oracle failed to reject.
+constexpr int kUndetected = 42;
 
 int run(std::string_view mode) {
     const bool wrong_buffer = mode == "wrong";
     const bool timing = mode == "timing";
     const bool stale = mode == "stale";
+    const bool planted = wrong_buffer || timing || stale;
     const std::array<int, 4> regular{16, 16, 16, 16};
     const std::array<int, 7> irregular{7, 13, 5, 19, 3, 11, 6};
 
@@ -257,29 +278,60 @@ int run(std::string_view mode) {
         return 7;
 
     auto rendered = playback(irregular_bank, irregular);
-    if (!matches(rendered, wrong_buffer, timing))
-        return (wrong_buffer || timing) ? 42 : 8;
-    if (!matches(playback(regular_bank, regular), false, false))
+    if (!matches(rendered))
+        return 8;
+    if (!matches(playback(regular_bank, regular)))
         return 9;
 
-    const auto old_view = regular_bank.read_published_view();
-    if (stale) {
-        Buffer<float> replacement(1, kFrames);
-        for (std::size_t frame = 0; frame < kFrames; ++frame)
-            replacement.channel(0)[frame] = expected_sample(frame) * 0.5f;
-        if (!regular_bank.publish_from_buffer(replacement.view(), kFrames, kSampleRate,
-                                              old_view.generation) ||
-            regular_bank.slot_view_valid(old_view) ||
-            regular_bank.channel_data(old_view, 0) != nullptr)
-            return 42;
-        return 42;
+    if (timing) {
+        // Planted defect: the rendered stream is shifted by one frame.
+        std::rotate(rendered.begin(), rendered.begin() + 1, rendered.end());
+        return matches(rendered) ? kUndetected : detected("timing");
     }
+
+    const auto old_view = regular_bank.read_published_view();
     if (!regular_bank.slot_view_valid(old_view))
         return 10;
 
+    // Republish a different (half-scale) buffer into the regular bank.
+    constexpr float kReplacementScale = 0.5f;
+    Buffer<float> replacement(1, kFrames);
+    for (std::size_t frame = 0; frame < kFrames; ++frame)
+        replacement.channel(0)[frame] = expected_sample(frame) * kReplacementScale;
+    if (!regular_bank.publish_from_buffer(replacement.view(), kFrames, kSampleRate,
+                                          old_view.generation))
+        return 11;
+    const auto new_view = regular_bank.read_published_view();
+    if (!new_view.valid || new_view.generation == old_view.generation)
+        return 12;
+
+    if (wrong_buffer) {
+        // Planted defect: the consumer reads the replacement buffer where it
+        // expects the recorded take.
+        return matches(read_view(regular_bank, new_view)) ? kUndetected
+                                                          : detected("wrong-buffer");
+    }
+    if (stale) {
+        // Planted defect: the consumer keeps reading through the retired view
+        // after the replacement was published.
+        return matches(read_view(regular_bank, old_view), kReplacementScale)
+                   ? kUndetected
+                   : detected("stale-publication");
+    }
+    if (planted)
+        return 13;
+
+    // Positive path: the new generation carries the replacement and the
+    // retired view is refused.
+    if (!matches(read_view(regular_bank, new_view), kReplacementScale))
+        return 14;
+    if (regular_bank.slot_view_valid(old_view) || regular_bank.channel_data(old_view, 0) != nullptr)
+        return 15;
+
     std::cout << "G11 capture/publication graph passed: 64 frames, regular/irregular blocks, "
                  "immutable generation "
-              << old_view.generation << '\n';
+              << old_view.generation << " retired by generation " << new_view.generation
+              << '\n';
     return 0;
 }
 

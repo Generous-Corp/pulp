@@ -21,9 +21,10 @@ ctest --test-dir build --output-on-failure
 The positive case captures the same 64-frame input under regular and irregular
 block schedules, checks the passthrough capture, publishes an immutable sample
 view, and plays it through a second graph. It also checks invalid preparation,
-idle stop refusal, reset, and generation validity. The three `WILL_FAIL` tests
-are planted controls for a changed expected buffer, a one-frame timing shift,
-and a stale generation view after replacement publication.
+idle stop refusal, reset, republication, and generation validity. The three
+planted controls feed a wrong buffer, a one-frame timing shift, and a stale
+generation view to the same oracle; each passes only when the oracle rejects
+it and prints the `G11 planted defect detected:` marker CTest requires.
 
 This is a bounded offline graph fixture. It does not claim device capture,
 callback file I/O, realtime deadline qualification, graph serialization of

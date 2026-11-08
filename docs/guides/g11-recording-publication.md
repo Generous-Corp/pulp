@@ -23,12 +23,15 @@ The consumer renders 64 known input frames under both a regular 16/16/16/16
 schedule and an irregular 7/13/5/19/3/11/6 schedule. An independent scalar
 sine oracle checks every captured and played sample. The same run checks
 invalid recorder configuration, an idle stop refusal, reset, completed-state
-publication, and generation validity. Three planted controls must fail:
+publication, republication, and generation validity. Three planted controls
+feed a real defect to the same oracle and pass only when it is rejected (each
+prints `G11 planted defect detected: <control>`, which CTest requires):
 
-- `--planted-wrong-buffer` changes the expected sample oracle.
-- `--planted-timing` shifts the expected frame chronology by one sample.
-- `--planted-stale-publication` replaces the slot and verifies the old
-  generation is invalid and returns no channel pointer.
+- `--planted-wrong-buffer` reads the replacement buffer where the recorded take
+  is expected.
+- `--planted-timing` shifts the rendered stream by one frame.
+- `--planted-stale-publication` keeps reading through the retired view after
+  a replacement is published; the bank must refuse it.
 
 The focused CMake registration is isolated in
 `test/cmake/g11_recording_publication_tests.cmake`; the static sample-region

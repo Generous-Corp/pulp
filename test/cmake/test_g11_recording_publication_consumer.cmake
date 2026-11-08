@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 # G-11 installed-SDK consumer gate: install the SDK, then configure, build and
 # ctest examples/g11-recording-publication as an out-of-tree project that only
-# sees the installed package. The positive test and the three WILL_FAIL planted
+# sees the installed package. The positive test and the three marker-checked planted
 # controls live in that project's CMakeLists.txt.
 if(NOT DEFINED PULP_BUILD_DIR OR NOT DEFINED PULP_SOURCE_DIR)
     message(FATAL_ERROR "PULP_BUILD_DIR and PULP_SOURCE_DIR are required")
@@ -45,7 +45,7 @@ _g11_run("ctest" "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}"
 # All four registered tests must have been discovered and run.
 execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}" -C "${_config}" -N
     OUTPUT_VARIABLE _listing)
-if(NOT _listing MATCHES "Total Tests: 4")
+if(NOT _listing MATCHES "Total Tests: 4([^0-9]|$)")
     message(FATAL_ERROR "G-11 consumer expected 4 tests (positive + 3 planted controls):\n${_listing}")
 endif()
 message(STATUS "g11_recording_publication_consumer_verified=true")

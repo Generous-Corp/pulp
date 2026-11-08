@@ -16,5 +16,14 @@ add_test(NAME g11-recording-publication-timing
 add_test(NAME g11-recording-publication-stale
     COMMAND pulp-g11-recording-publication --planted-stale-publication)
 set_tests_properties(g11-recording-publication-positive PROPERTIES LABELS "examples;installed-sdk;graph;g11")
+# Planted controls exit 0 only when the oracle rejects the planted defect, and
+# must print the exact detection marker; a setup failure, crash or usage error
+# therefore fails the test instead of passing it.
 set_tests_properties(g11-recording-publication-wrong-buffer g11-recording-publication-timing
-    g11-recording-publication-stale PROPERTIES LABELS "examples;installed-sdk;graph;g11;negative" WILL_FAIL TRUE)
+    g11-recording-publication-stale PROPERTIES LABELS "examples;installed-sdk;graph;g11;negative")
+set_tests_properties(g11-recording-publication-wrong-buffer PROPERTIES
+    PASS_REGULAR_EXPRESSION "G11 planted defect detected: wrong-buffer")
+set_tests_properties(g11-recording-publication-timing PROPERTIES
+    PASS_REGULAR_EXPRESSION "G11 planted defect detected: timing")
+set_tests_properties(g11-recording-publication-stale PROPERTIES
+    PASS_REGULAR_EXPRESSION "G11 planted defect detected: stale-publication")
