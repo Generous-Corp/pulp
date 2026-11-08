@@ -128,6 +128,11 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
         count = 0;
         if (!active_)
             return HostEventResult::StaleEpoch;
+        // A caller may only have one in-flight projection.  Keep the
+        // destructive queue operation paired with rollback_projection() so a
+        // downstream capacity refusal can retry the same block verbatim.
+        if (projection_backup_valid_)
+            return HostEventResult::Busy;
         const auto end = sample_start_ + frames_;
         std::size_t matching = 0;
         for (std::size_t i = 0; i < size_; ++i) {
@@ -139,6 +144,9 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
         }
         if (matching > out.size())
             return HostEventResult::OutputCapacity;
+        projection_backup_ = records_;
+        projection_backup_size_ = size_;
+        projection_backup_valid_ = true;
         for (std::size_t i = 0; i < size_; ++i) {
             if (records_[i].epoch != epoch_)
                 continue;
@@ -169,11 +177,26 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
         return HostEventResult::Accepted;
     }
 
+    /// Restore the records removed by the most recent successful project().
+    /// The caller must invoke this before end_block() when a downstream
+    /// projection or publication fails.  The original insertion order and
+    /// producer identities are restored exactly for a retry.
+    void rollback_projection() noexcept {
+        if (!projection_backup_valid_)
+            return;
+        records_ = projection_backup_;
+        size_ = projection_backup_size_;
+        projection_backup_valid_ = false;
+    }
+
     /// Finish the current block.  Future records remain staged.
     HostEventResult end_block() noexcept {
         if (!active_)
             return HostEventResult::StaleEpoch;
         active_ = false;
+        // Reaching the block boundary commits a successful projection.  A
+        // refusal path rolls back before sealing, leaving this flag clear.
+        projection_backup_valid_ = false;
         return HostEventResult::Accepted;
     }
 
@@ -183,6 +206,8 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
         frames_ = 0;
         size_ = 0;
         active_ = false;
+        projection_backup_size_ = 0;
+        projection_backup_valid_ = false;
     }
     std::uint64_t epoch() const noexcept {
         return epoch_;
@@ -207,10 +232,13 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
     }
 
     std::array<HostEventRecord, Capacity> records_{};
+    std::array<HostEventRecord, Capacity> projection_backup_{};
     std::uint64_t epoch_ = 0;
     std::uint64_t sample_start_ = 0;
     std::size_t frames_ = 0;
     std::size_t size_ = 0;
+    std::size_t projection_backup_size_ = 0;
+    bool projection_backup_valid_ = false;
     bool active_ = false;
 };
 

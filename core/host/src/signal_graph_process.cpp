@@ -57,7 +57,10 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
 void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                                         const audio::BufferView<const float>& input,
                                         int num_samples, const format::ProcessContext* transport,
-                                        CompiledGraph* cg, bool trigger_admitted) {
+                                        CompiledGraph* cg, bool trigger_admitted,
+                                        HostEventResult* host_event_result) {
+    if (host_event_result != nullptr)
+        *host_event_result = HostEventResult::Accepted;
     // Only the controller entry may advance a typed clock. In particular a
     // copied ExecutionSnapshot cannot render even the current generation.
     if (cg && cg->trigger_state && !trigger_admitted)
@@ -72,6 +75,12 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         if (routed_only_execution_owners_.load(std::memory_order_relaxed) != 0)
             routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
         return;
+    }
+    if (host_event_result != nullptr && cg->trigger_state) {
+        *host_event_result = project_host_events_(*cg, cg->host_event_sample_start,
+                                                  static_cast<std::size_t>(num_samples));
+        if (*host_event_result != HostEventResult::Accepted)
+            return;
     }
     if (cg->spectral)
         cg->spectral->begin_block();
