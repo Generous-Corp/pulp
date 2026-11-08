@@ -73,6 +73,15 @@ shrinks by one.
 
 ## Public-header fingerprint refresh
 
+Change the reviewed fingerprint in `agent_capability_registry.py` only, bump
+`SURFACE_INVENTORY_VERSION`, and let `--write` regenerate
+`docs/status/agent-capability-surface.json`. Hand-editing the hash in the
+surface file as well makes `--write` see no surface change and refuse with
+"surface inventory_version changed without a surface change". Host headers are
+covered only when they appear in `REVIEWED_HOST_HEADERS`, so a new
+`pulp/host/` header outside that list needs no registry row; adding one fails
+with "reviewed public header is missing".
+
 When a SignalGraph or other covered public header changes bytes while its
 consumer capability remains the same, refresh the reviewed SHA-256 in the
 catalog and surface ledger and update any sequencer-exposure rows that name the
