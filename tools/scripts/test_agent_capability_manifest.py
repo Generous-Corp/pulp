@@ -1797,6 +1797,82 @@ def exercise_history_storage() -> int:
     widened["notes"] = "extra"
     expect_problem(problems(widened), "exactly schema, entries and objects")
 
+    # Each structural refusal names its cause.
+    referenced_by = {}
+    for owner, node in stored["objects"].items():
+        for marker_key in json.dumps(node).split('"$ref": "')[1:]:
+            referenced_by.setdefault(marker_key.split('"', 1)[0], owner)
+    concat_owner = next(k for k, node in stored["objects"].items()
+                        if isinstance(node, dict) and set(node) == {"$concat"})
+    merge_owner = next(k for k, node in stored["objects"].items()
+                       if isinstance(node, dict) and set(node) == {"$merge"})
+    dict_object = next(k for k, node in stored["objects"].items()
+                       if isinstance(node, dict) and not any(m.startswith("$") for m in node))
+
+    overlap = copy.deepcopy(stored)
+    chunks = overlap["objects"][merge_owner]["$merge"]
+    chunks.append(chunks[0])
+    expect_problem(problems(overlap), "merge chunks overlap")
+
+    extra_field = copy.deepcopy(stored)
+    owner = referenced_by[key]
+    extra_field["objects"][owner] = json.loads(
+        json.dumps(extra_field["objects"][owner]).replace(
+            '{"$ref": "%s"}' % key, '{"$ref": "%s", "note": 1}' % key))
+    expect_problem(problems(extra_field), "reference has extra fields")
+
+    scalar = copy.deepcopy(stored)
+    scalar["objects"][key] = 5
+    expect_problem(problems(scalar), "reference names a scalar")
+
+    wrong_kind = copy.deepcopy(stored)
+    wrong_kind["objects"][concat_owner]["$concat"][0] = dict_object
+    expect_problem(problems(wrong_kind), "is not a list chunk")
+
+    # Deep nesting is a named problem, never a RecursionError traceback.
+    depth = capability_history._MAX_REFERENCE_DEPTH + 10
+    chain = {"schema": capability_history.HISTORY_SCHEMA, "entries": ["k0"],
+             "objects": {f"k{i}": {"$ref": f"k{i + 1}"} for i in range(depth)}}
+    chain["objects"][f"k{depth}"] = {}
+    expect_problem(problems(chain), "references nest deeper than")
+    nested: Any = {}
+    for _ in range(sys.getrecursionlimit() + 100):
+        nested = [nested]
+    deep = {"schema": capability_history.HISTORY_SCHEMA, "entries": ["k0"],
+            "objects": {"k0": {"manifest": nested, "surface": {}}}}
+    expect_problem(problems(deep), "nests too deeply")
+    checks += 1
+
+    # --write refuses an unreadable stored history with its cause, instead of
+    # starting a fresh one that later fails as "not append-only".
+    assert capability_history.stored_history_problems(None) == []
+    assert capability_history.stored_history_problems(stored) == []
+    assert capability_history.stored_history_problems(legacy) == []
+    expect_problem(capability_history.stored_history_problems(missing),
+                   "references a missing object")
+    expect_problem(capability_history.stored_history_problems({"_invalid": "bad"}),
+                   "is not valid JSON: bad")
+    checks += 1
+
+    # --check compares the file text with its rendering, which catches an edit
+    # that parses back to the honest document (a duplicated object line).
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-history-text-") as temp:
+        copy_path = pathlib.Path(temp) / "contract-history.json"
+        copy_path.write_text(text, encoding="utf-8")
+        assert manifest.history_text_problems(copy_path, stored) == []
+        lines = text.splitlines(keepends=True)
+        index = next(i for i, line in enumerate(lines)
+                     if line.startswith('    "sha256:') and '": ' in line
+                     and line.endswith(",\n"))
+        duplicated = lines[:index + 1] + [lines[index]] + lines[index + 1:]
+        copy_path.write_text("".join(duplicated), encoding="utf-8")
+        assert json.loads(copy_path.read_text(encoding="utf-8")) == stored
+        assert not [problem for problem in problems(stored)
+                    if "canonical" in problem or "object" in problem]
+        expect_problem(manifest.history_text_problems(copy_path, stored),
+                       "is not in its rendered form")
+    checks += 1
+
     reserved = copy.deepcopy(last)
     reserved["manifest"]["coverage"]["$ref"] = "x"
     try:

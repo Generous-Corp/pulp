@@ -47,6 +47,9 @@ HISTORY_SIZE_LIMIT_BYTES = 25 * 1024 * 1024
 _REF, _CONCAT, _MERGE = "$ref", "$concat", "$merge"
 _CHUNK_AVERAGE = 16
 _INLINE_LIMIT = 128
+# Real material nests references about 11 deep. A deeper chain is refused as a
+# format problem rather than left to exhaust Python's recursion limit.
+_MAX_REFERENCE_DEPTH = 64
 
 
 class HistoryFormatError(ValueError):
@@ -163,6 +166,9 @@ class _Decoder:
         if key not in self._resolved:
             if key in self._active:
                 raise HistoryFormatError(f"capability history object {key} refers to itself")
+            if len(self._active) >= _MAX_REFERENCE_DEPTH:
+                raise HistoryFormatError(
+                    f"capability history references nest deeper than {_MAX_REFERENCE_DEPTH}")
             self._active.add(key)
             self._resolved[key] = self.expand(self.objects[key])
             self._active.discard(key)
@@ -211,6 +217,15 @@ def history_entries(history: Any) -> list[dict[str, Any]]:
     Each entry is {"manifest", "surface", "entry_digest"} exactly as schema v1
     stored it inline. Expanded entries share unchanged sub-objects, so callers
     must not mutate them in place. Raises HistoryFormatError."""
+    try:
+        return _history_entries(history)
+    except RecursionError:
+        raise HistoryFormatError("capability history nests too deeply to expand") from None
+
+
+def _history_entries(history: Any) -> list[dict[str, Any]]:
+    if isinstance(history, dict) and "_invalid" in history and len(history) == 1:
+        raise HistoryFormatError(f"capability history is not valid JSON: {history['_invalid']}")
     if not isinstance(history, dict):
         raise HistoryFormatError("capability history must be an object")
     schema = history.get("schema")
@@ -238,6 +253,21 @@ def history_entries(history: Any) -> list[dict[str, Any]]:
     if len(decoder.used) != len(objects):
         raise HistoryFormatError("capability history stores unreferenced objects")
     return entries
+
+
+def stored_history_problems(history: Any) -> list[str]:
+    """Why an existing history file cannot be read, or [] when it can.
+
+    --write must refuse an unreadable history rather than start a fresh one,
+    which would only fail later as "not append-only" and hide the cause.
+    An absent file (None) is the bootstrap case and is not a problem here."""
+    if history is None:
+        return []
+    try:
+        history_entries(history)
+    except HistoryFormatError as error:
+        return [str(error)]
+    return []
 
 
 def _entries_or_none(history: Any) -> list[dict[str, Any]] | None:
@@ -335,9 +365,14 @@ def pending_counters(
 
 
 def history_document(entries: list[dict[str, Any]]) -> dict[str, Any]:
-    """Encode expanded entries in the stored-object layout (schema v2)."""
+    """Encode expanded entries in the stored-object layout (schema v2).
+
+    Raises HistoryFormatError when an entry cannot be encoded."""
     encoder = _Encoder()
-    digests = [encoder.entry(entry) for entry in entries]
+    try:
+        digests = [encoder.entry(entry) for entry in entries]
+    except RecursionError:
+        raise HistoryFormatError("capability history material nests too deeply") from None
     return {"schema": HISTORY_SCHEMA, "entries": digests, "objects": encoder.objects}
 
 
@@ -403,7 +438,11 @@ def history_problems(
     # encoding of its own entries has been edited by hand: an object whose key
     # is not the digest of its content, a moved chunk boundary, or an extra or
     # missing object.
-    if history_document(entries) != history:
+    try:
+        canonical = history_document(entries)
+    except HistoryFormatError as error:
+        return [str(error)]
+    if canonical != history:
         problems.append(
             "capability history is not in canonical stored-object form; "
             "regenerate it with tools/scripts/agent_capability_manifest.py --write"
@@ -540,8 +579,10 @@ def append_only_history_problems(previous: Any, current: Any) -> list[str]:
     the same whichever schema each side is stored in."""
     old_entries = _entries_or_none(previous)
     new_entries = _entries_or_none(current)
-    if old_entries is None or new_entries is None:
+    if old_entries is None:
         return ["protected capability history entries are invalid"]
+    if new_entries is None:
+        return ["capability history entries are invalid; see the history problem above"]
     if new_entries[: len(old_entries)] != old_entries:
         return ["capability history is not append-only relative to the protected base"]
     return []
