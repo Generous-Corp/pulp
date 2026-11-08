@@ -660,6 +660,7 @@
       "pulp/platform/file_dialog.hpp",
       "pulp/platform/gpu_fwd.hpp",
       "pulp/platform/native_handle.hpp",
+      "pulp/platform/objc_unique_class.hpp",
       "pulp/platform/permissions.hpp",
       "pulp/platform/platform.hpp",
       "pulp/platform/popup_menu.hpp",
