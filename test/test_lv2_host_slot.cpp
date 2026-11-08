@@ -800,7 +800,9 @@ struct SlowWork {
                                   LV2_Worker_Respond_Handle handle, std::uint32_t size,
                                   const void* data) {
         started.fetch_add(1);
-        while (!release.load())
+        // Bounded so a host that never releases it fails the test, not CI.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!release.load() && std::chrono::steady_clock::now() < deadline)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         finished.fetch_add(1);
         return respond(handle, size, data);
