@@ -81,6 +81,13 @@ public:
     }
 
     std::string format_name() const override { return "ALAC"; }
+    FormatCapabilities capabilities() const override {
+        return {.format_name = "ALAC",
+                .extensions = {".alac", ".m4a"},
+                .bit_depths = {16},
+                .max_channels = 8,
+                .compressed = true};
+    }
 };
 
 std::unique_ptr<FormatWriter> create_alac_writer() {

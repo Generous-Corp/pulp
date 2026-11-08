@@ -146,8 +146,10 @@ def shipyard_ctest_contract_errors(command: str) -> list[str]:
 
 
 def pulp_test_suite_call(text: str, name: str) -> str:
+    # End the name at whitespace or ")": a word boundary also matches before
+    # the hyphen of a longer suite name such as pulp-test-audio-reader.
     match = re.search(
-        rf"pulp_add_test_suite\(\s*{re.escape(name)}\b.*?\)",
+        rf"pulp_add_test_suite\(\s*{re.escape(name)}(?=[\s)]).*?\)",
         text,
         re.S,
     )
