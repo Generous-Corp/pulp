@@ -1085,6 +1085,15 @@ state_tree:
     ci_test: pulp-test-state-tree-validated
     notes: set_checked, the other *_checked edits and ValidatedTransaction return pulp::runtime::Result values with a TreeEditError code instead of ignoring an invalid edit; a ValidatedTransaction with any refused edit aborts on commit. Property validation is a caller-supplied predicate; JSON-Schema validation and a JavaScript bridge for transactions are not provided.
 
+plugin_hosting:
+  lv2:
+    status: usable
+    ci_test:
+      - pulp-test-lv2-host-slot
+      - pulp-test-lv2-host-discovery
+      - pulp-test-lv2-bundle-discovery-e2e
+    notes: The LV2 PluginSlot reads bundles through the vendored lilv and hosts instruments and effects. The tests host a real fixture bundle on macOS and Linux through PluginSlot and SignalGraph, checking MIDI in and out, time:Position, typed patch:Set parameters, the worker, options, state saved alongside the audio thread, latency, full-sequence handling, and refusal of bundles it cannot host. On Windows the loader and vendored libraries are compiled, but no test hosts an LV2 plugin there.
+
 subsystems:
   runtime: stable
   events: usable
@@ -1112,6 +1121,9 @@ subsystems:
 # Consistency rule enforced by check-docs-consistency.py (warn-mode):
 # every key under limitations: must resolve to a real entry in the matrix.
 limitations:
+  plugin_hosting.lv2:
+    - text: "The LV2 slot hosts instruments and effects through lilv (MIDI in and out, time:Position, patch parameters, worker, state, options, latency) but shows no plugin UI, feeds CV inputs silence, drops SysEx, and offers no state:mapPath or state:makePath, so state that refers to files does not restore."
+      tracked_in: "../guides/hosting.md#lv2-plugins"
   timeline_engine.cli_mcp:
     - text: "The headless render path emits arrangement audio only; it does not instantiate hosted devices or MIDI instruments, and unknown plugin-delay compensation remains null rather than being invented."
       tracked_in: "../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp"

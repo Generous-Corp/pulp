@@ -785,11 +785,15 @@ if(PULP_HAS_LV2)
             LIBRARY_OUTPUT_DIRECTORY "${_pulp_lv2_slot_probe_bundle}")
 
         file(MAKE_DIRECTORY "${_pulp_lv2_slot_probe_bundle}")
+        # LV2 requires a plugin to have a doap:name; the slot refuses one
+        # without it, as it refuses any description lilv cannot verify.
         string(CONCAT _pulp_lv2_slot_probe_ttl [=[
+@prefix doap: <http://usefulinc.com/ns/doap#> .
 @prefix lv2: <http://lv2plug.in/ns/lv2core#> .
 
 <http://example.com/pulp/lv2-slot-probe>
     a lv2:Plugin ;
+    doap:name "Pulp LV2 Slot Probe" ;
     lv2:binary <lv2-slot-probe]=]
     "${CMAKE_SHARED_MODULE_SUFFIX}"
     [=[> ;
@@ -797,26 +801,31 @@ if(PULP_HAS_LV2)
     [
         a lv2:InputPort , lv2:AudioPort ;
         lv2:index 0 ;
+        lv2:symbol "in_l" ;
         lv2:name "Input L"
     ] ,
     [
         a lv2:InputPort , lv2:AudioPort ;
         lv2:index 1 ;
+        lv2:symbol "in_r" ;
         lv2:name "Input R"
     ] ,
     [
         a lv2:OutputPort , lv2:AudioPort ;
         lv2:index 2 ;
+        lv2:symbol "out_l" ;
         lv2:name "Output L"
     ] ,
     [
         a lv2:OutputPort , lv2:AudioPort ;
         lv2:index 3 ;
+        lv2:symbol "out_r" ;
         lv2:name "Output R"
     ] ,
     [
         a lv2:InputPort , lv2:ControlPort ;
         lv2:index 4 ;
+        lv2:symbol "gain" ;
         lv2:name "Probe Gain" ;
         lv2:default 0.5 ;
         lv2:minimum -2.0 ;
@@ -825,6 +834,21 @@ if(PULP_HAS_LV2)
 ]=])
         file(WRITE "${_pulp_lv2_slot_probe_bundle}/plugin.ttl"
             "${_pulp_lv2_slot_probe_ttl}")
+        # Every LV2 host starts from manifest.ttl; the plugin's ports live in
+        # plugin.ttl, which the manifest points at.
+        string(CONCAT _pulp_lv2_slot_probe_manifest [=[
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<http://example.com/pulp/lv2-slot-probe>
+    a lv2:Plugin ;
+    lv2:binary <lv2-slot-probe]=]
+    "${CMAKE_SHARED_MODULE_SUFFIX}"
+    [=[> ;
+    rdfs:seeAlso <plugin.ttl> .
+]=])
+        file(WRITE "${_pulp_lv2_slot_probe_bundle}/manifest.ttl"
+            "${_pulp_lv2_slot_probe_manifest}")
 
         add_dependencies(pulp-test-lv2-host-discovery
             pulp-test-lv2-slot-probe)
@@ -834,6 +858,42 @@ if(PULP_HAS_LV2)
     endif()
 
     catch_discover_tests(pulp-test-lv2-host-discovery)
+
+    # A real LV2 instrument bundle (test/fixtures/lv2_host_instrument) hosted
+    # through the lilv-backed LV2 slot: note input, MIDI out, time:Position,
+    # options, worker, state, patch:Set, latency. Runs wherever LV2 modules
+    # load (macOS and Linux).
+    if(UNIX)
+        set(_pulp_lv2_host_instrument_bundle
+            "${CMAKE_CURRENT_BINARY_DIR}/Lv2HostInstrument.lv2")
+        add_library(pulp-test-lv2-host-instrument MODULE
+            fixtures/lv2_host_instrument/lv2_host_instrument.cpp)
+        target_link_libraries(pulp-test-lv2-host-instrument PRIVATE lv2-headers)
+        set_target_properties(pulp-test-lv2-host-instrument PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "lv2_host_instrument"
+            CXX_VISIBILITY_PRESET hidden
+            LIBRARY_OUTPUT_DIRECTORY "${_pulp_lv2_host_instrument_bundle}")
+        set(LV2_BINARY "lv2_host_instrument${CMAKE_SHARED_MODULE_SUFFIX}")
+        configure_file(fixtures/lv2_host_instrument/manifest.ttl.in
+            "${_pulp_lv2_host_instrument_bundle}/manifest.ttl" @ONLY)
+        configure_file(fixtures/lv2_host_instrument/plugin.ttl
+            "${_pulp_lv2_host_instrument_bundle}/plugin.ttl" COPYONLY)
+        unset(LV2_BINARY)
+
+        add_executable(pulp-test-lv2-host-slot test_lv2_host_slot.cpp
+            harness/rt_allocation_probe.cpp)
+        target_include_directories(pulp-test-lv2-host-slot PRIVATE
+            ${CMAKE_SOURCE_DIR}/core/host/src
+            ${CMAKE_SOURCE_DIR}/test)
+        target_link_libraries(pulp-test-lv2-host-slot PRIVATE
+            pulp::host lv2-headers Catch2::Catch2WithMain)
+        add_dependencies(pulp-test-lv2-host-slot pulp-test-lv2-host-instrument)
+        target_compile_definitions(pulp-test-lv2-host-slot PRIVATE
+            PULP_TEST_LV2_HOST_INSTRUMENT_BUNDLE="${_pulp_lv2_host_instrument_bundle}"
+            PULP_TEST_LV2_MODULE_SUFFIX="${CMAKE_SHARED_MODULE_SUFFIX}")
+        catch_discover_tests(pulp-test-lv2-host-slot)
+    endif()
 
     # End-to-end: build a real LV2 module, let the SAME POST_BUILD path every
     # plugin uses describe it, then read the result back through pulp::host's
