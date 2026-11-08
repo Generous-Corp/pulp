@@ -483,6 +483,9 @@ TEST_CASE("an MP3 whose Xing header declares more frames than the stream deliver
     const auto decoded = registry.read(whole.string(), pulp_fuzz::audio_decoder::fuzz_limits());
     REQUIRE(decoded.has_value());
     CHECK(decoded->num_frames() == 6400u);
+    pulp::audio::DecodeLimits below_claim;
+    below_claim.max_frames = 6399u;
+    CHECK_FALSE(registry.read(whole.string(), below_claim).has_value());
 }
 
 TEST_CASE("an MP3 with no declared length reports the frames the decoder delivers",
