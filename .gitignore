@@ -67,6 +67,7 @@ Thumbs.db
 !/external/cpp-httplib/
 !/external/dr_libs/
 !/external/tweetnacl/
+!/external/lilv/
 
 # Node (for web/WASM builds)
 node_modules/
