@@ -376,34 +376,6 @@ def ogg_rewrite_serial(data: bytes, serial: int) -> bytes:
 # --------------------------------------------------------------------------
 
 
-def mp3_sync_offsets(data: bytes) -> list[int]:
-    """Offsets of MPEG audio frame sync words, skipping any leading ID3v2 tag."""
-    pos = 0
-    if data[:3] == b"ID3":
-        size = ((data[6] & 0x7F) << 21) | ((data[7] & 0x7F) << 14) | ((data[8] & 0x7F) << 7) | (data[9] & 0x7F)
-        pos = 10 + size
-    offsets = []
-    while pos + 4 <= len(data):
-        if data[pos] == 0xFF and (data[pos + 1] & 0xE0) == 0xE0 and (data[pos + 1] & 0x06) != 0:
-            version = (data[pos + 1] >> 3) & 0x3
-            layer = (data[pos + 1] >> 1) & 0x3
-            bitrate_index = data[pos + 2] >> 4
-            rate_index = (data[pos + 2] >> 2) & 0x3
-            padding = (data[pos + 2] >> 1) & 0x1
-            if layer == 0x1 and bitrate_index not in (0, 15) and rate_index != 3:
-                mpeg1 = version == 0x3
-                bitrates = ([0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320] if mpeg1
-                            else [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160])
-                rates = [44100, 48000, 32000] if mpeg1 else ([22050, 24000, 16000] if version == 0x2
-                                                             else [11025, 12000, 8000])
-                frame_bytes = (144 if mpeg1 else 72) * bitrates[bitrate_index] * 1000 // rates[rate_index] + padding
-                offsets.append(pos)
-                pos += frame_bytes
-                continue
-        pos += 1
-    return offsets
-
-
 def apev2_tag(items: list[tuple[bytes, bytes]]) -> bytes:
     body = b""
     for key, value in items:
@@ -755,9 +727,14 @@ def build_mp3_seeds(corpus: Corpus, tmp: str) -> None:
         corpus.add("mp3-id3v2-xing-vbr.mp3", f.read())
     corpus.add("mp3-apev2-footer.mp3",
                cbr + apev2_tag([(b"Title", b"SYNTHETIC TITLE"), (b"Comment", b"APEv2 footer appended by Pulp")]))
-    syncs = mp3_sync_offsets(cbr)
-    cut = syncs[min(3, len(syncs) - 1)] + 17 if syncs else len(cbr) * 2 // 3
-    corpus.add("mp3-truncated-frame.mp3", cbr[:cut])
+    # The CBR seed carries no ID3 tag and every MPEG-1 Layer III frame at
+    # 32 kbit/s and 32 kHz is 144 bytes, so the fourth frame starts at
+    # 3 * 144; the cut lands 17 bytes into it. The sync word is asserted so a
+    # change in LAME's framing fails here rather than producing a seed that
+    # truncates somewhere else.
+    fourth_frame = 3 * 144
+    assert cbr[fourth_frame] == 0xFF and (cbr[fourth_frame + 1] & 0xE0) == 0xE0, "no frame sync at 3 * 144"
+    corpus.add("mp3-truncated-frame.mp3", cbr[:fourth_frame + 17])
 
 
 def build_coreaudio_seeds(corpus: Corpus, tmp: str) -> None:
