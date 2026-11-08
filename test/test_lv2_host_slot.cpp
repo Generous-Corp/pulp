@@ -786,3 +786,70 @@ TEST_CASE("LV2 slot leaves no partial event in a default-size sequence",
     REQUIRE_THAT(slot->get_parameter(kNoteOns), WithinAbs(340.0f, 1e-3f));
     REQUIRE_THAT(slot->get_parameter(kSeenAmount), WithinAbs(2.0f, 1e-6f));
 }
+
+namespace {
+
+/// A plugin-side worker interface whose work() blocks until released, so a
+/// test can destroy the host's worker while a job is running.
+struct SlowWork {
+    static inline std::atomic<int> started{0};
+    static inline std::atomic<int> finished{0};
+    static inline std::atomic<bool> release{false};
+
+    static LV2_Worker_Status work(LV2_Handle, LV2_Worker_Respond_Function respond,
+                                  LV2_Worker_Respond_Handle handle, std::uint32_t size,
+                                  const void* data) {
+        started.fetch_add(1);
+        while (!release.load())
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        finished.fetch_add(1);
+        return respond(handle, size, data);
+    }
+};
+
+} // namespace
+
+TEST_CASE("LV2 worker can be destroyed while a job is in flight", "[host][lv2][worker]") {
+    SlowWork::started = 0;
+    SlowWork::finished = 0;
+    SlowWork::release = false;
+    static const LV2_Worker_Interface iface{&SlowWork::work, nullptr, nullptr};
+    auto worker = std::make_unique<pulp::host::detail::Lv2Worker>();
+    int plugin_instance = 0;
+    worker->start(&iface, &plugin_instance);
+    auto* schedule = worker->schedule_feature();
+    const std::int32_t job = 7;
+    for (int i = 0; i < 5; ++i)
+        REQUIRE(schedule->schedule_work(schedule->handle, sizeof(job), &job) == LV2_WORKER_SUCCESS);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (SlowWork::started.load() == 0 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE(SlowWork::started.load() == 1);
+
+    // Release the running job from another thread once destruction has begun;
+    // the destructor must wait for it and drop the four still queued.
+    std::thread releaser([] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        SlowWork::release = true;
+    });
+    worker.reset();
+    releaser.join();
+    REQUIRE(SlowWork::started.load() == 1);
+    REQUIRE(SlowWork::finished.load() == 1);
+}
+
+TEST_CASE("LV2 slot can be destroyed with worker jobs queued and running",
+          "[host][lv2][slot][lilv][worker]") {
+    const auto begin = std::chrono::steady_clock::now();
+    {
+        auto slot = load();
+        REQUIRE(slot->prepare(kRate, kFrames));
+        Block block;
+        // Thousands of slow jobs (50 us each in the fixture): one is running
+        // and the rest are queued when the slot goes away.
+        block.midi_in.add(midi(0xB0, 21, 50, 0));
+        block.run(*slot);
+    }
+    // Queued jobs are discarded rather than worked, so teardown is quick.
+    REQUIRE(std::chrono::steady_clock::now() - begin < std::chrono::seconds(2));
+}

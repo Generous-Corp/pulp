@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <semaphore>
 #include <thread>
 #include <vector>
@@ -101,10 +102,10 @@ class Lv2Worker {
   public:
     static constexpr std::size_t kRingBytes = 1u << 16;
 
-    Lv2Worker() : requests_(kRingBytes), responses_(kRingBytes) {
+    Lv2Worker() : shared_(std::make_shared<Shared>()) {
         schedule_.handle = this;
         schedule_.schedule_work = &Lv2Worker::schedule_trampoline;
-        audio_scratch_.assign(requests_.capacity(), 0);
+        audio_scratch_.assign(shared_->requests.capacity(), 0);
     }
 
     ~Lv2Worker() {
@@ -125,32 +126,35 @@ class Lv2Worker {
         stop();
         if (!iface || !iface->work)
             return;
-        iface_ = iface;
-        handle_ = handle;
-        running_.store(true, std::memory_order_release);
-        thread_ = std::thread([this] { thread_main(); });
+        shared_->iface = iface;
+        shared_->handle = handle;
+        shared_->running.store(true, std::memory_order_release);
+        // The thread owns a reference to everything it touches, never this
+        // object, so nothing it reads can be freed under it.
+        thread_ = std::thread([shared = shared_] { thread_main(*shared); });
     }
 
     /// Control thread, before cleanup(). Joins the worker thread; queued
     /// requests that were not yet worked are discarded.
     void stop() {
+        auto& s = *shared_;
         if (thread_.joinable()) {
-            running_.store(false, std::memory_order_release);
-            wake_.release();
+            s.running.store(false, std::memory_order_release);
+            s.wake.release();
             thread_.join();
         }
-        iface_ = nullptr;
-        handle_ = nullptr;
+        s.iface = nullptr;
+        s.handle = nullptr;
         std::uint32_t size = 0;
-        while (requests_.read(audio_scratch_, size)) {
+        while (s.requests.read(audio_scratch_, size)) {
         }
-        while (responses_.read(audio_scratch_, size)) {
+        while (s.responses.read(audio_scratch_, size)) {
         }
-        in_flight_.store(0, std::memory_order_relaxed);
+        s.in_flight.store(0, std::memory_order_relaxed);
     }
 
     bool active() const noexcept {
-        return iface_ != nullptr;
+        return shared_->iface != nullptr;
     }
 
     /// Audio thread, before run(). Synchronous for an offline block.
@@ -161,23 +165,37 @@ class Lv2Worker {
     /// Audio thread, after run(): hand every response to work_response(), then
     /// call end_run().
     void deliver_responses() noexcept {
-        if (!iface_)
+        auto& s = *shared_;
+        if (!s.iface)
             return;
         std::uint32_t size = 0;
-        while (responses_.read(audio_scratch_, size)) {
-            if (iface_->work_response)
-                iface_->work_response(handle_, size, audio_scratch_.data());
+        while (s.responses.read(audio_scratch_, size)) {
+            if (s.iface->work_response)
+                s.iface->work_response(s.handle, size, audio_scratch_.data());
         }
-        if (iface_->end_run)
-            iface_->end_run(handle_);
+        if (s.iface->end_run)
+            s.iface->end_run(s.handle);
     }
 
     /// Requests handed to the worker thread that it has not finished.
     std::uint32_t in_flight() const noexcept {
-        return in_flight_.load(std::memory_order_acquire);
+        return shared_->in_flight.load(std::memory_order_acquire);
     }
 
   private:
+    /// What the worker thread and the audio thread share. The thread holds a
+    /// reference, so it can outlive neither its own state nor a restart.
+    struct Shared {
+        Shared() : requests(kRingBytes), responses(kRingBytes) {}
+        const LV2_Worker_Interface* iface = nullptr;
+        LV2_Handle handle = nullptr;
+        Lv2MessageRing requests;
+        Lv2MessageRing responses;
+        std::counting_semaphore<> wake{0};
+        std::atomic<bool> running{false};
+        std::atomic<std::uint32_t> in_flight{0};
+    };
+
     static LV2_Worker_Status schedule_trampoline(LV2_Worker_Schedule_Handle handle,
                                                  std::uint32_t size, const void* data) {
         return static_cast<Lv2Worker*>(handle)->schedule(size, data);
@@ -185,50 +203,45 @@ class Lv2Worker {
 
     static LV2_Worker_Status respond_trampoline(LV2_Worker_Respond_Handle handle,
                                                 std::uint32_t size, const void* data) {
-        auto* self = static_cast<Lv2Worker*>(handle);
-        return self->responses_.write(data, size) ? LV2_WORKER_SUCCESS : LV2_WORKER_ERR_NO_SPACE;
+        auto* shared = static_cast<Shared*>(handle);
+        return shared->responses.write(data, size) ? LV2_WORKER_SUCCESS : LV2_WORKER_ERR_NO_SPACE;
     }
 
     LV2_Worker_Status schedule(std::uint32_t size, const void* data) noexcept {
-        if (!iface_)
+        auto& s = *shared_;
+        if (!s.iface)
             return LV2_WORKER_ERR_UNKNOWN;
-        if (synchronous_ && in_flight_.load(std::memory_order_acquire) == 0)
-            return iface_->work(handle_, &Lv2Worker::respond_trampoline, this, size, data);
+        if (synchronous_ && s.in_flight.load(std::memory_order_acquire) == 0)
+            return s.iface->work(s.handle, &Lv2Worker::respond_trampoline, &s, size, data);
         // Counted before it is published, so the worker thread can never finish
         // a request the count does not include yet.
-        in_flight_.fetch_add(1, std::memory_order_acq_rel);
-        if (!requests_.write(data, size)) {
-            in_flight_.fetch_sub(1, std::memory_order_acq_rel);
+        s.in_flight.fetch_add(1, std::memory_order_acq_rel);
+        if (!s.requests.write(data, size)) {
+            s.in_flight.fetch_sub(1, std::memory_order_acq_rel);
             return LV2_WORKER_ERR_NO_SPACE;
         }
-        wake_.release();
+        s.wake.release();
         return LV2_WORKER_SUCCESS;
     }
 
-    void thread_main() {
-        std::vector<std::uint8_t> scratch(requests_.capacity(), 0);
+    static void thread_main(Shared& s) {
+        std::vector<std::uint8_t> scratch(s.requests.capacity(), 0);
         while (true) {
-            wake_.acquire();
-            if (!running_.load(std::memory_order_acquire))
+            s.wake.acquire();
+            if (!s.running.load(std::memory_order_acquire))
                 return;
             std::uint32_t size = 0;
             // stop() discards what is still queued, so stop between requests.
-            while (running_.load(std::memory_order_acquire) && requests_.read(scratch, size)) {
-                iface_->work(handle_, &Lv2Worker::respond_trampoline, this, size, scratch.data());
-                in_flight_.fetch_sub(1, std::memory_order_acq_rel);
+            while (s.running.load(std::memory_order_acquire) && s.requests.read(scratch, size)) {
+                s.iface->work(s.handle, &Lv2Worker::respond_trampoline, &s, size, scratch.data());
+                s.in_flight.fetch_sub(1, std::memory_order_acq_rel);
             }
         }
     }
 
     LV2_Worker_Schedule schedule_{};
-    const LV2_Worker_Interface* iface_ = nullptr;
-    LV2_Handle handle_ = nullptr;
-    Lv2MessageRing requests_;
-    Lv2MessageRing responses_;
+    std::shared_ptr<Shared> shared_;
     std::vector<std::uint8_t> audio_scratch_;
-    std::counting_semaphore<> wake_{0};
-    std::atomic<bool> running_{false};
-    std::atomic<std::uint32_t> in_flight_{0};
     bool synchronous_ = false;
     std::thread thread_;
 };

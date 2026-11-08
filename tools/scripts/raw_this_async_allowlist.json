@@ -155,11 +155,6 @@
       "path": "core/gpu_audio/src/detail/neural_shadow_worker.cpp",
       "needle": "std::thread([this]",
       "reason": "NeuralShadowWorker destructor and start() call stop(), which joins the shadow thread before any member teardown or restart; the worker is neither copyable nor movable"
-    },
-    {
-      "path": "core/host/src/lv2_worker.hpp",
-      "needle": "std::thread([this]",
-      "reason": "Lv2Worker destructor calls stop(), which signals the worker, joins the thread, and only then clears the interface and rings; start() calls stop() first, and the class is neither copyable nor movable"
     }
   ]
 }
