@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 205,
+  "inventory_version": 206,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -992,6 +992,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/system_audio_codec.hpp",
+      "fingerprint": "sha256:3c3cc0182566ebd1fc4054b0726de8ee995b593c0c95dbdef7268423152fc5c0",
+      "include": "pulp/audio/system_audio_codec.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Audio file encoding through the operating system's codecs (AAC, ALAC and PCM via ExtAudioFile or Media Foundation) is host infrastructure for export and file writing; it is not an independently selected generator-facing capability."
     },
     {
       "domain": "audio",
