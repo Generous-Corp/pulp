@@ -1634,7 +1634,7 @@ def _merge_texts(base: str, ours: str, theirs: str, name: str) -> tuple[bool, st
         commit(ours, "ours")
         merged = subprocess.run(
             ["git", "merge", "--quiet", "--no-edit", "theirs"],
-            cwd=repo, text=True, capture_output=True,
+            cwd=repo, text=True, encoding="utf-8", capture_output=True,
         )
         return merged.returncode == 0, path.read_text(encoding="utf-8")
 
@@ -1806,7 +1806,7 @@ def exercise_independent_branches_merge_cleanly(canonical: dict) -> int:
     #    d) The committed ledger may not carry the derived totals again.
     with_counts = {**base_surface, "counts": surface.surface_counts(base_surface["headers"])}
     assert json_schema_lite.validate(
-        with_counts, json.loads((ROOT / surface.SURFACE_SCHEMA_FILE).read_text()))
+        with_counts, json.loads((ROOT / surface.SURFACE_SCHEMA_FILE).read_text(encoding="utf-8")))
     #    e) The derived totals still describe the ledger.
     totals = surface.surface_counts(both["headers"])
     assert totals["public_headers"] == len(base_surface["headers"]) + 2
