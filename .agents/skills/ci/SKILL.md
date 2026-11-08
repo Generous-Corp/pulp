@@ -83,7 +83,13 @@ on a real PR. Do them in order.
      covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
      surface. New GPU-audio virtual hooks belong at the end of that class;
      inserting one in the middle shifts existing slots even though the SDK
-     remains source-rebuild oriented.
+     remains source-rebuild oriented. The editor-host interfaces (`Editor`,
+     `EditorContext`, `EditorFactory`, `NativeSurfaceHost`) are checked under a
+     stricter FROZEN policy: an appended virtual fails too, because a UI
+     package and a format adapter are separate prebuilt binaries. Don't "fix"
+     the failure by appending at the tail. Ship the capability as a new
+     `query_extension()` id. A `Node-ABI-Break: <Class>` trailer exists for a
+     deliberate break, but on these classes it breaks every prebuilt peer.
 
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
@@ -139,6 +145,18 @@ stops at a failing command even when the script itself starts with
 then prints its report or picks a verdict from the exit code must capture the
 code with `set +e` ... `rc=$?` ... `set -e`, or the step ends at the checker
 with only "exit code 1" in the log. `format-changed-check.yml` hit this.
+
+### `printf "$output" | grep -q` fails under pipefail even when it matches
+
+A reader that stops early (`grep -q`, `head`, `sed q`) closes the pipe while
+the writer still has output, so the writer dies of SIGPIPE and, under
+`set -o pipefail`, the whole pipeline fails. The check then reports the very
+marker it found as missing. It is size- and timing-dependent, so it looks like
+a flake: `android-run-fixtures` failed "omitted pass marker" on a run whose
+fixtures all passed, with `printf: write error: Broken pipe` one line above.
+Search a captured variable with a here-string (`grep -Fq "$m" <<<"$output"`)
+instead of piping `printf` into it. `tools/ci/test_android_fixture_lane.py`
+reproduces the case through a fake `adb` (marker first, then 200k lines).
 
 ## Build emitters always use the governor
 

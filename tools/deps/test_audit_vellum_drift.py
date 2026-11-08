@@ -149,6 +149,16 @@ class GpuRuntimePinTests(unittest.TestCase):
         (self.root / "tools/cmake/PulpGpuRuntime.cmake").write_text("# no pin\n", encoding="utf-8")
         self.assertTrue(audit.gpu_runtime_pin_agreement(self.entry(), self.root))
 
+    def test_a_cmake_pin_without_a_manifest_entry_fails(self) -> None:
+        self.pin()
+        problems = audit.gpu_runtime_pin_agreement([], self.root)
+        self.assertTrue(problems and "has no vellum-gpu-runtime entry" in problems[0])
+
+    def test_no_manifest_entry_and_no_cmake_pin_passes(self) -> None:
+        self.assertEqual(audit.gpu_runtime_pin_agreement([], self.root), [])
+        (self.root / "tools/cmake/PulpGpuRuntime.cmake").write_text("# no pin\n", encoding="utf-8")
+        self.assertEqual(audit.gpu_runtime_pin_agreement([], self.root), [])
+
     def test_the_real_tree_agrees(self) -> None:
         import json
         manifest = json.loads((ROOT / "tools/deps/manifest.json").read_text(encoding="utf-8"))["dependencies"]
@@ -258,6 +268,7 @@ class VellumDriftTests(unittest.TestCase):
                     mock.patch.object(audit, "parse_notice_md", lambda: {"Skia"}), \
                     mock.patch.object(audit, "parse_licensing_md", lambda: {"Skia"}), \
                     mock.patch.object(audit, "read_vellum_pin_source", reader(text)), \
+                    mock.patch.object(audit, "gpu_runtime_pin_agreement", lambda *_a, **_k: []), \
                     mock.patch.object(sys, "argv", ["audit.py", "--strict"]), \
                     contextlib.redirect_stdout(io.StringIO()) as out:
                 self.assertEqual(audit.main(), expected, out.getvalue())

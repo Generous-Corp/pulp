@@ -43,6 +43,34 @@ without an inventory_version increase". Then bump `SURFACE_INVENTORY_VERSION`
 by hand, past any integer an open PR already claims (the loop below), and
 `--write` again.
 
+## Picking the next `SURFACE_INVENTORY_VERSION` on a busy day
+
+When `--status` says `inventory_version` is `assigned`, a new or changed public
+header needs a hand bump, and the integer you pick is the one that collides.
+Check three places before writing it, in this order:
+
+```bash
+git fetch -q origin main
+git show origin/main:tools/scripts/agent_capability_manifest.py | grep '^SURFACE_INVENTORY_VERSION'
+for d in "$(dirname "$(git rev-parse --show-toplevel)")"/pulp-*/; do
+  printf '%s ' "$d"; grep -h '^SURFACE_INVENTORY_VERSION' "$d/tools/scripts/agent_capability_manifest.py" 2>/dev/null || echo
+done | sort -u -k2
+```
+
+The sibling worktrees on the same machine are the open PRs you can see without
+an API call; on 2026-11-07 main held 200 and a sibling branch already held 201,
+so the audio layout report took 202. A same-integer bump on two branches
+auto-merges cleanly and the second one to land fails `--check` on main.
+
+A new header that is not a generator-facing capability takes an
+`infrastructure` row in `agent_capability_registry.py` with the
+`shasum -a 256` of the header bytes and an empty `capability_keys`; it needs
+no `REVIEWED_MINIMAL_TARGETS` entry (that map is for capability-bearing
+headers). A legacy header whose bytes change (`wav_decoder.hpp` gaining
+`interpret_wav_format`) leaves the frozen baseline alone and gets the same
+kind of row; `--write` then reports it as reviewed and the baseline count
+shrinks by one.
+
 ## Public-header fingerprint refresh
 
 When a SignalGraph or other covered public header changes bytes while its
@@ -184,6 +212,15 @@ For a new public header or symbol:
    durable rationale. Never grow the frozen `legacy_unreviewed` baseline.
 4. Leave `SURFACE_INVENTORY_VERSION` and `MANIFEST_REVISION` at the base
    value; the version-at-land bump assigns them (see the top of this skill).
+
+Worked example (2026-11-07): extending `pulp/signal/spectrogram.hpp`
+(FrequencyAxis double overloads) changed the bytes of a header the ledger held
+as frozen `legacy_unreviewed`. The fix was step 3, not a fingerprint refresh:
+add an `infrastructure` row for it in `agent_capability_registry.py` with the
+measured digest and a rationale, pick a `SURFACE_INVENTORY_VERSION` no open PR
+claims (the loop below found 200-202 taken, so 203), then `--write`. Plain
+`--write` keeps refusing with "public header fingerprint changed" until the
+classification exists; that refusal is the gate working, not a tool fault.
 
 For overloaded C++ free functions, keep the public `qualified_name` as the real
 API name and give each overload a distinct binding role. Use private generator

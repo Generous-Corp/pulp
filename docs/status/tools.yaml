@@ -94,6 +94,28 @@ tools:
   availability: always
   skill: audio-harness
   docs: guides/audio-inspector.md
+- name: audio-spectrogram
+  path: tools/cli/cmd_audio_spectrogram.cpp
+  category: audio
+  use_when: Look at a file's spectrum over time as a PNG an agent can read — never to measure or gate.
+  invocation: pulp audio spectrogram <in.wav> --png spec.png [--scale log]
+  inputs: An audio file; long files stream through memory-mapped windows.
+  outputs: A spectrogram PNG and a pulp.audio.image.v1 sidecar (input SHA-256, decoder, range, settings, sample peak).
+  availability: always
+  skill: audio-harness
+  docs: reference/cli.md
+  blind_spots: Display only. Each pixel is a peak-hold over its bins and frames, so a quiet component beside a loud one is hidden by the window's leakage skirt, and the palette floor is the --db-range, not the analyzer floor. For a number use validate doctor; a picture proves nothing about dBc.
+- name: audio-waveform
+  path: tools/cli/cmd_audio_waveform.cpp
+  category: audio
+  use_when: Look at a file's envelope and where it clips, as a PNG — never to measure or gate.
+  invocation: pulp audio waveform <in.wav> --png wave.png [--select a,b]
+  inputs: An audio file; long files stream through memory-mapped windows.
+  outputs: A peak waveform PNG with clip markers and a pulp.audio.image.v1 sidecar reporting the unclamped sample peak.
+  availability: always
+  skill: audio-harness
+  docs: reference/cli.md
+  blind_spots: Display only. Peaks are 8-bit WaveformOverview values, so anything under 1/127 of full scale is flat, and a column folds thousands of samples into one min/max pair. The sidecar's true_peak is a sample peak, not an oversampled inter-sample peak.
 - name: audio-validate
   path: tools/cli/cmd_audio.cpp
   category: audio
