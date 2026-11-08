@@ -3358,6 +3358,7 @@
   "pulp-test-mcp-timeline-tools",
   "pulp-test-meter-source",
   "pulp-test-midi-arpeggiator",
+  "pulp-test-midi-learn-engine",
   "pulp-test-midi-parameter-map-scaling",
   "pulp-test-midi-performance-kernels",
   "pulp-test-midi-routing-ledger",

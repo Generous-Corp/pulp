@@ -447,6 +447,45 @@ auto info = FormatRegistry::instance().read_info("song.mp3");
 // info->duration_seconds, info->num_channels, info->sample_rate
 ```
 
+### Ranged reads from a file, memory or byte source
+
+`AudioReader` decodes only the frames you ask for, and its memory does not grow
+with the file. Open it from a path, from encoded bytes already in memory, or
+from your own `AudioByteSource` (an archive member or a download cache, for
+example). The cost of reaching a frame depends on the format:
+
+| Format | Open | Seek to any frame |
+|--------|------|-------------------|
+| WAV, AIFF | Reads the header | Direct byte offset |
+| FLAC | Reads the header | Seeks within the encoded stream |
+| Ogg Vorbis | Reads the header (a byte source is copied into memory, up to 2 GiB) | Seeks within the encoded stream |
+| MP3 | Reads every frame header once when the file has no Xing or Info header | Forward seeks decode onward; a backward seek decodes from the start of the stream |
+
+```cpp
+#include <pulp/audio/audio_reader.hpp>
+
+auto reader = AudioReader::open_file("long_take.flac");
+if (reader && reader->supports_ranged_read()) {
+    // Two seconds starting one minute in, every channel.
+    const auto rate = reader->info().sample_rate;
+    auto window = reader->read(60ull * rate, 2ull * rate);
+}
+
+// Encoded bytes you already hold; the format is detected from the first bytes.
+auto from_memory = AudioReader::open_memory(bytes);
+```
+
+The reader applies the same `DecodeLimits` as the registry: the header's
+length and channel claims are checked on open, and the allocating `read()`
+refuses a window larger than `max_output_bytes`. Reading into your own planar
+buffers zero-fills frames past the end and returns how many frames were
+decoded. A format with no seekable decoder (AAC, ALAC and CAF on macOS, opened
+from a path) is decoded once on open and `supports_ranged_read()` returns
+false, as does a FLAC or Ogg stream whose header gives no length. Pass
+`AudioReaderFallback::Refuse` to open only readers that seek; such a stream
+then returns `nullptr` without being decoded. An empty stream does not open.
+Opening and reading decode and allocate, so keep both off the audio callback.
+
 To choose a format before writing, ask the registry what each reader and writer
 supports. `reader_capabilities()` and `writer_capabilities()` return one
 `FormatCapabilities` per registered handler: its extensions, integer bit
