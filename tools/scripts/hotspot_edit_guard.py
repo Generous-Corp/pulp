@@ -19,7 +19,9 @@ The change is `merge-base(base, head)..head`, plus uncommitted edits when the
 head is the working tree's HEAD, so it runs before a commit as well as at the
 pre-push hook and on the drift-fast tier. Base resolution: --base,
 PULP_HOTSPOT_GUARD_BASE, origin/$GITHUB_BASE_REF, HEAD^1 in a merge group or
-on a pull request's merge checkout, then origin/main.
+on a pull request's merge checkout, then origin/main. Without that event
+context (a local run) it falls back to origin/main as the clone last fetched
+it, so on a stale clone it judges the branch against an old main; fetch first.
 
 Exit codes: 0 no registered hotspot edited; 1 a registered hotspot was added
 or modified; 2 the registry or the git range could not be read, or no base

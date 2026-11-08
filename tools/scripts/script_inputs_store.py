@@ -164,9 +164,23 @@ def join(files: dict[str, str]) -> dict:
     return doc
 
 
+# Files a desktop or an editor leaves beside the fragments in a working tree
+# (Finder's .DS_Store, vim swap files, backups). Git never tracks them here, so
+# they are not part of the list; `join` still refuses any other stray file.
+_IGNORED_SUFFIXES = ("~", ".swp", ".swo", ".swx", ".bak", ".orig", ".tmp")
+
+
+def _ignored(rel: str) -> bool:
+    return any(part.startswith(".") for part in rel.split("/")) or rel.endswith(_IGNORED_SUFFIXES)
+
+
 def _read_dir(directory: Path) -> dict[str, str]:
-    return {p.relative_to(directory).as_posix(): p.read_text(encoding="utf-8")
-            for p in sorted(directory.rglob("*")) if p.is_file()}
+    files = {}
+    for p in sorted(directory.rglob("*")):
+        rel = p.relative_to(directory).as_posix()
+        if p.is_file() and not _ignored(rel):
+            files[rel] = p.read_text(encoding="utf-8")
+    return files
 
 
 def load_path(path: Path) -> dict | None:

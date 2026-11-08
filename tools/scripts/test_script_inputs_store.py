@@ -138,6 +138,25 @@ class WriteTests(unittest.TestCase):
             self.assertEqual(store.load_path(d), doc)
 
 
+class WorkingTreeLitterTests(unittest.TestCase):
+    def test_desktop_and_editor_litter_is_ignored_but_other_strays_are_not(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "list"
+            doc = sample_doc()
+            store.write_path(d, doc)
+            for rel in (".DS_Store", "tests/.DS_Store", "tests/.alpha.json.swp", "tests/alpha.json~",
+                        "tests/alpha.json.orig", ".idea/workspace.xml"):
+                (d / rel).parent.mkdir(parents=True, exist_ok=True)
+                (d / rel).write_bytes(b"\x00\x01 not json")
+            self.assertEqual(store.load_path(d), doc)
+            self.assertEqual(store.write_path(d, doc), [], "a rewrite must not delete or report litter")
+            self.assertTrue((d / ".DS_Store").exists())
+            # Control: a stray file that is not litter is still refused.
+            (d / "tests" / "notes.txt").write_text("hi\n", encoding="utf-8")
+            with self.assertRaisesRegex(store.StoreError, "unexpected file"):
+                store.load_path(d)
+
+
 class RefTests(unittest.TestCase):
     def test_load_ref_reads_fragments_and_the_older_single_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
