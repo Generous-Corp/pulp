@@ -374,6 +374,18 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-clap-slot-process-fidelity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_clap_slot_process_fidelity.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-cli-audio-compare": {
    "data": "declared",
    "detected_sources": [],
@@ -2077,6 +2089,21 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-host-probe-bundles": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "PulpHostProbe_CLAP",
+    "PulpHostProbe_VST3"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_host_probe_bundles.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-host-regression": {
    "data": "none",
    "inputs": [],
@@ -2747,6 +2774,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-vst3-slot-process-fidelity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_vst3_slot_process_fidelity.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-voice-template": {
    "data": "none",
    "inputs": [],
@@ -2910,6 +2949,7 @@
   "pulp-test-clap-latency-quirk",
   "pulp-test-clap-midi-events",
   "pulp-test-clap-slot-channel-width",
+  "pulp-test-clap-slot-process-fidelity",
   "pulp-test-clap-webview",
   "pulp-test-cli-au-info-plist",
   "pulp-test-cli-audio-compare",
@@ -3231,10 +3271,12 @@
   "pulp-test-headless-surface",
   "pulp-test-host",
   "pulp-test-host-param-surface",
+  "pulp-test-host-probe-bundles",
   "pulp-test-host-regression",
   "pulp-test-host-signal-graph",
   "pulp-test-hosted-editor-container-adopt",
   "pulp-test-hosted-editor-migration",
+  "pulp-test-hosted-slot-process-request",
   "pulp-test-identity",
   "pulp-test-image-codecs-extended",
   "pulp-test-image-decode",
@@ -3526,6 +3568,7 @@
   "pulp-test-vst3-param-display",
   "pulp-test-vst3-plugin-state",
   "pulp-test-vst3-program-list",
+  "pulp-test-vst3-slot-process-fidelity",
   "pulp-test-vst3-state-sync",
   "pulp-test-wam-adapter",
   "pulp-test-wam-wclap",
@@ -7155,6 +7198,14 @@
     "tools/scripts/git_read_memo.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "graph-stall-guard-selftest": {
+   "entry": "tools/graph/test_graph_stall_guard.py",
+   "inputs": [
+    "tools/graph/graph_stall_guard.py",
+    "tools/graph/test_graph_stall_guard.py"
    ],
    "kind": "python"
   },

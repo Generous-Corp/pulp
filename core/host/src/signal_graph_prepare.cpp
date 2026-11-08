@@ -1377,6 +1377,45 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     return prepare_impl_(sample_rate, max_block_size, nullptr);
 }
 
+bool SignalGraph::plugin_restart_pending() const {
+    GraphMutationLock mutation_lock(*this);
+    for (const auto& n : nodes_) {
+        if (n.type != NodeType::Plugin || !n.plugin)
+            continue;
+        const auto meta = prepared_plugin_meta_.find(n.id);
+        if (meta == prepared_plugin_meta_.end())
+            continue;
+        if (n.plugin->restart_request_count() != meta->second.restart_requests)
+            return true;
+    }
+    return false;
+}
+
+bool SignalGraph::apply_plugin_restarts() {
+    double rate = 0.0;
+    int block = 0;
+    {
+        GraphMutationLock mutation_lock(*this);
+        rate = last_plugin_prepare_rate_;
+        block = last_plugin_prepare_block_;
+    }
+    if (!plugin_restart_pending())
+        return true;
+    if (!(rate > 0.0) || block <= 0)
+        return false;
+    return prepare(rate, block);
+}
+
+void SignalGraph::set_hosted_plugin_process_mode(format::ProcessMode mode) {
+    GraphMutationLock mutation_lock(*this);
+    hosted_plugin_process_mode_ = mode;
+}
+
+format::ProcessMode SignalGraph::hosted_plugin_process_mode() const {
+    GraphMutationLock mutation_lock(*this);
+    return hosted_plugin_process_mode_;
+}
+
 NodeId SignalGraph::last_prepare_custom_failure_node() const {
     GraphMutationLock mutation_lock(*this);
     return last_prepare_custom_failure_node_;
@@ -1515,15 +1554,26 @@ bool SignalGraph::prepare_impl_(double sample_rate, int max_block_size,
                 lifecycle_observer->plugin_will_prepare(lifecycle_observer->context,
                                                         n.plugin.get());
             }
+            {
+                auto settings = n.plugin->host_settings();
+                if (settings.process_mode != hosted_plugin_process_mode_) {
+                    settings.process_mode = hosted_plugin_process_mode_;
+                    n.plugin->set_host_settings(settings);
+                }
+            }
             if (!n.plugin->prepare(sample_rate, max_block_size)) {
                 runtime::log_error("SignalGraph: failed to prepare plugin '{}'", n.name);
                 return false;
             }
+            // Read the restart count AFTER prepare: a latency change reported
+            // during activation is already reflected in latency_samples().
             prepared_plugin_meta_[n.id] = PreparedPluginMetadata{
                 n.plugin->parameters(), std::max(0, n.plugin->latency_samples()),
-                n.plugin->wants_transport()};
+                n.plugin->wants_transport(), n.plugin->restart_request_count()};
         }
     }
+    last_plugin_prepare_rate_ = sample_rate;
+    last_plugin_prepare_block_ = max_block_size;
 
     for (const auto& n : nodes_) {
         const auto processor = processor_nodes_.find(n.id);
