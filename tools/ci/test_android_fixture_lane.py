@@ -17,8 +17,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-SCRIPT = HERE / "android-fixture-lane.sh"
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "tools/ci/android-fixture-lane.sh"
 
 # Well past any pipe buffer, so an early-exiting reader leaves the writer with
 # output it can no longer deliver.
