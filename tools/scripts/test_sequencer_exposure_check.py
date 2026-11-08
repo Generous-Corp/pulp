@@ -444,6 +444,40 @@ def main() -> int:
         provenance_errors = validate_git_provenance(valid, root)
         if provenance_errors:
             raise AssertionError("valid provenance failed:\n" + "\n".join(provenance_errors))
+        # The provenance pass must reuse immutable facts instead of spawning one
+        # cat-file/rev-list/log/merge-base process per ledger row.
+        calls: list[tuple[str, ...]] = []
+        real_git = sequencer_exposure_check._git
+
+        def counting_git(repo: Path, *arguments: str, **kwargs):
+            calls.append(arguments)
+            return real_git(repo, *arguments, **kwargs)
+
+        with mock.patch.object(sequencer_exposure_check, "_git", counting_git):
+            if validate_git_provenance(valid, root):
+                raise AssertionError("cached provenance control failed")
+        if len(calls) > 4 or not any(
+            command[:2] == ("cat-file", "--batch-check") for command in calls
+        ):
+            raise AssertionError(f"provenance facts were not batched: {calls}")
+        timeout_errors = validate_git_provenance(valid, root, timeout_seconds=0.0)
+        if not timeout_errors or "git provenance validation timed out" not in timeout_errors[0]:
+            raise AssertionError(f"provenance timeout lacked actionable receipt: {timeout_errors}")
+        release_calls: list[tuple[str, ...]] = []
+        real_git_bytes = sequencer_exposure_check._git_bytes
+
+        def counting_git_bytes(repo: Path, *arguments: str, **kwargs):
+            release_calls.append(arguments)
+            return real_git_bytes(repo, *arguments, **kwargs)
+
+        with mock.patch.object(sequencer_exposure_check, "_git_bytes", counting_git_bytes):
+            if validate_release_evidence(valid, root):
+                raise AssertionError("batched release evidence control failed")
+        if release_calls != [("cat-file", "--batch")]:
+            raise AssertionError(f"release evidence was not batched: {release_calls}")
+        release_timeout = validate_release_evidence(valid, root, timeout_seconds=0.0)
+        if not release_timeout or "release evidence validation timed out" not in release_timeout[0]:
+            raise AssertionError(f"release evidence timeout lacked receipt: {release_timeout}")
         _, _, unavailable_errors = _load_base_transition(root, "missing-base-ref")
         if not any("git history unavailable" in error for error in unavailable_errors):
             raise AssertionError(
