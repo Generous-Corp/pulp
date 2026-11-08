@@ -42,6 +42,7 @@ on:
   pull_request:
     paths:
       - 'core/timeline/**'
+      - 'core/audio/**'
       - 'inspect/include/pulp/inspect/control_protocol.hpp'
       - 'inspect/src/control_protocol*.cpp'
       - 'inspect/src/control_json_*.cpp'

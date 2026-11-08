@@ -209,6 +209,9 @@ endfunction()
 # file is read as packed 24-bit at a 4-byte stride: three of every four bytes,
 # off by one byte, 256x too loud and sign-garbled. dr_wav and libsndfile scale
 # the container value. The patch reads the field and keeps the container width.
+# Consequence: read_audio_file_info().bits_per_sample reports the container
+# width (32 for a 24-valid-bits-in-32 file, as inspect_wav already does),
+# not the valid-bits count.
 function(pulp_patch_choc_wav_extensible_container_bits choc_source_dir)
     set(_pulp_choc_wav_header
         "${choc_source_dir}/choc/audio/choc_AudioFileFormat_WAV.h")

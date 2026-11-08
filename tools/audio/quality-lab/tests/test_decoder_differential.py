@@ -4,8 +4,11 @@ For every lossless seed in the shared audio-decoder fuzz corpus (`.wav`,
 `.flac`, `.aiff`), `pulp-audio-decode-dump` (built with the C++ tests) emits a
 JSON header and raw little-endian float32 interleaved samples. This test
 decodes the same file with `soundfile` (libsndfile) as float32 and requires the
-two byte streams to be identical. A seed that only one side decodes is a
-finding, never a tolerated case.
+two byte streams to be identical. A seed that only one side decodes is an
+acceptance split: it must appear in EXPECTED_ACCEPTANCE_SPLITS with its reason
+(a deliberate Pulp contract, or a difference tracked in an issue), and a split
+not listed there, or a listed split that no longer happens, fails the test.
+The sample comparison itself is never relaxed.
 
 Developer lane only: it skips cleanly when `soundfile` is not importable or
 `PULP_AUDIO_DECODE_DUMP_BIN` does not name an executable, so it can never hold a
