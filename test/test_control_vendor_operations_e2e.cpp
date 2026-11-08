@@ -63,9 +63,9 @@ TEST_CASE("vendor operations reach a live product through the broker, CLI, and M
     REQUIRE(std::filesystem::exists(broker));
     // The broker enrolls this process only as the trusted client copy beside
     // it; a copy overwritten by another target fails here.
-    REQUIRE(pulp::runtime::sha256_file_hex(bin / "tools" / "cli" / "pulp-cpp",
-                                           1024ULL * 1024 * 1024) ==
-            pulp::runtime::sha256_file_hex(executable, 1024ULL * 1024 * 1024));
+    REQUIRE(
+        pulp::runtime::sha256_file_hex(bin / "tools" / "cli" / "pulp-cpp", 1024ULL * 1024 * 1024) ==
+        pulp::runtime::sha256_file_hex(executable, 1024ULL * 1024 * 1024));
     REQUIRE(std::filesystem::exists(built_host));
     const auto host_dir = root.path / "product";
     REQUIRE(std::filesystem::create_directory(host_dir));
