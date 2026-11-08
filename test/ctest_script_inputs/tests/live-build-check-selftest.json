@@ -1,0 +1,10 @@
+{
+ "name": "live-build-check-selftest",
+ "record": {
+  "entry": "tools/scripts/test_live_build_check.py",
+  "inputs": [
+   "tools/scripts/test_live_build_check.py"
+  ],
+  "kind": "python"
+ }
+}

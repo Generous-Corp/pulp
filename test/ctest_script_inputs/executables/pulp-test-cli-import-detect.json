@@ -1,0 +1,17 @@
+{
+ "name": "pulp-test-cli-import-detect",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [
+   "compat.json",
+   "test/fixtures/imports"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_cli_import_detect.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

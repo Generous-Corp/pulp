@@ -1,0 +1,13 @@
+{
+ "name": "linux-runner-lane-contract",
+ "record": {
+  "entry": "tools/ci/test_linux_runner_lane_contract.py",
+  "inputs": [
+   "tools/ci/proxmox-pr-safe-ephemeral-runner-linux.sh",
+   "tools/ci/proxmox-trusted-ephemeral-runner-linux.sh",
+   "tools/ci/pulp-ephemeral-runner.sh",
+   "tools/ci/test_linux_runner_lane_contract.py"
+  ],
+  "kind": "python"
+ }
+}

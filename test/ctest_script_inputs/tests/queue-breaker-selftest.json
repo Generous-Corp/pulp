@@ -1,0 +1,14 @@
+{
+ "name": "queue-breaker-selftest",
+ "record": {
+  "entry": "tools/ci/test_queue_breaker.py",
+  "inputs": [
+   ".github/workflows/build.yml",
+   "tools/ci/merge_queue_fixture.py",
+   "tools/ci/queue_breaker.py",
+   "tools/ci/test_queue_breaker.py",
+   "tools/scripts/resolve_classify_base.py"
+  ],
+  "kind": "python"
+ }
+}

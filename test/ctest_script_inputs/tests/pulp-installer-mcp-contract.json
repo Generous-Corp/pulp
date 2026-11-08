@@ -1,0 +1,12 @@
+{
+ "name": "pulp-installer-mcp-contract",
+ "record": {
+  "entry": "test/test_pulp_installer_mcp_contract.sh",
+  "inputs": [
+   "test/test_pulp_installer_mcp_contract.sh",
+   "tools/install/install.ps1",
+   "tools/install/install.sh"
+  ],
+  "kind": "shell"
+ }
+}

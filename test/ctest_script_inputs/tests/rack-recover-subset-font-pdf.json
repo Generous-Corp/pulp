@@ -1,0 +1,11 @@
+{
+ "name": "rack-recover-subset-font-pdf",
+ "record": {
+  "entry": "tools/rack/test_recover_subset_font_pdf.py",
+  "inputs": [
+   "tools/rack/recover_subset_font_pdf.py",
+   "tools/rack/test_recover_subset_font_pdf.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,16 @@
+{
+ "name": "unregistered-tests-check",
+ "record": {
+  "entry": "tools/scripts/unregistered_tests_check.py",
+  "inputs": [
+   ".github/workflows",
+   "test/cmake",
+   "test/ctest_script_inputs.json",
+   "tools/ci/source_selftests.json",
+   "tools/cmake",
+   "tools/scripts/unregistered_tests_baseline.json",
+   "tools/scripts/unregistered_tests_check.py"
+  ],
+  "kind": "python"
+ }
+}

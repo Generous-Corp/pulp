@@ -1,0 +1,11 @@
+{
+ "name": "gallery-diff-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gallery_visual_diff.py",
+  "inputs": [
+   "tools/scripts/gallery_visual_diff.py",
+   "tools/scripts/test_gallery_visual_diff.py"
+  ],
+  "kind": "python"
+ }
+}

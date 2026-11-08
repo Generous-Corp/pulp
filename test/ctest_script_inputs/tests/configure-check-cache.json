@@ -1,0 +1,10 @@
+{
+ "name": "configure-check-cache",
+ "record": {
+  "entry": "tools/scripts/test_configure_check_cache.py",
+  "inputs": [
+   "tools/scripts/test_configure_check_cache.py"
+  ],
+  "kind": "python"
+ }
+}

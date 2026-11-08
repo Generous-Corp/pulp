@@ -1,0 +1,12 @@
+{
+ "name": "gpu-dpr-pulp-native-adapter-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
+  "inputs": [
+   "test/fixtures/gpu-ux/dpr/dense-text-thin-strokes.ui.js",
+   "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+   "tools/scripts/test_gpu_dpr_pulp_native_adapter.py"
+  ],
+  "kind": "python"
+ }
+}

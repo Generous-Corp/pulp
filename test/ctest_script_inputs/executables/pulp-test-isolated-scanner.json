@@ -1,0 +1,21 @@
+{
+ "name": "pulp-test-isolated-scanner",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-isolated-scanner-crash-helper",
+   "pulp-scan-worker",
+   "pulp-test-fixture-clap-abort",
+   "pulp-test-fixture-clap-probe"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_isolated_scanner.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

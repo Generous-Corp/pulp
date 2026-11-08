@@ -1,0 +1,10 @@
+{
+ "name": "style-dedup-table-sync",
+ "record": {
+  "entry": "tools/scripts/style_dedup_table.py",
+  "inputs": [
+   "tools/scripts/style_dedup_table.py"
+  ],
+  "kind": "python"
+ }
+}

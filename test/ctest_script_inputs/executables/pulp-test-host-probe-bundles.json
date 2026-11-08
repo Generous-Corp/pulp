@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-host-probe-bundles",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "PulpHostProbe_CLAP",
+   "PulpHostProbe_VST3"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_host_probe_bundles.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

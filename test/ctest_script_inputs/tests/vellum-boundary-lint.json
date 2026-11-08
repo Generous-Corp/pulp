@@ -1,0 +1,16 @@
+{
+ "name": "vellum-boundary-lint",
+ "record": {
+  "entry": "tools/scripts/vellum_boundary_lint.py",
+  "inputs": [
+   "core/view",
+   "core/view/audio/src",
+   "core/view/platform",
+   "core/view/src",
+   "tools/import-design/pulp-package.json",
+   "tools/scripts/vellum_boundary_lint.py",
+   "tools/ui-build/pulp-package.json"
+  ],
+  "kind": "python"
+ }
+}

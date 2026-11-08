@@ -1,0 +1,10 @@
+{
+ "name": "import-design-ir-observe-asset-escape",
+ "record": {
+  "entry": "test/test_design_ir_observe_asset_escape.py",
+  "inputs": [
+   "test/test_design_ir_observe_asset_escape.py"
+  ],
+  "kind": "python"
+ }
+}

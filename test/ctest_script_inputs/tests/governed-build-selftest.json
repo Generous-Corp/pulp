@@ -1,0 +1,11 @@
+{
+ "name": "governed-build-selftest",
+ "record": {
+  "entry": "tools/ci/test_governed_build.py",
+  "inputs": [
+   "tools/ci/test_governed_build.py",
+   "tools/scripts/process_liveness.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,13 @@
+{
+ "name": "proxmox-ephemeral-windows-runner-selftest",
+ "record": {
+  "entry": "tools/ci/test_proxmox_ephemeral_runner_windows.py",
+  "inputs": [
+   "tools/ci/proxmox-ephemeral-runner-windows.sh",
+   "tools/ci/proxmox-host-health.sh",
+   "tools/ci/pulp-windows-ephemeral-pool@.service",
+   "tools/ci/test_proxmox_ephemeral_runner_windows.py"
+  ],
+  "kind": "python"
+ }
+}

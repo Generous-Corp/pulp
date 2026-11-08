@@ -1,0 +1,15 @@
+{
+ "name": "claude-md-sync-hook",
+ "record": {
+  "entry": "test/test_claude_md_sync_hook.sh",
+  "inputs": [
+   ".codex/hooks.json",
+   "hooks/hooks.json",
+   "hooks/scripts/claude_md_sync.py",
+   "hooks/scripts/pulp-claude-md-sync-session",
+   "hooks/scripts/pulp_claude_md_sync_install.py",
+   "test/test_claude_md_sync_hook.sh"
+  ],
+  "kind": "shell"
+ }
+}

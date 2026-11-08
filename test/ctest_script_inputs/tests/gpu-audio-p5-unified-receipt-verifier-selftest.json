@@ -1,0 +1,10 @@
+{
+ "name": "gpu-audio-p5-unified-receipt-verifier-selftest",
+ "record": {
+  "entry": "tools/validation/test_verify_gpu_audio_p5_receipt.py",
+  "inputs": [
+   "tools/validation/test_verify_gpu_audio_p5_receipt.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,37 @@
+{
+ "name": "affected-targets-selftest",
+ "record": {
+  "entry": "tools/scripts/test_affected_targets.py",
+  "inputs": [
+   ".github/workflows",
+   "core/host",
+   "core/host/include",
+   "core/runtime",
+   "core/runtime/include/pulp/runtime/log.hpp",
+   "core/view",
+   "core/view/include/pulp/view/widgets.hpp",
+   "core/view/src/widgets.cpp",
+   "docs/status",
+   "test/fixtures",
+   "test/harness/rt_allocation_probe.cpp",
+   "test/support",
+   "test/test_cli_shellout.cpp",
+   "test/test_host.cpp",
+   "test/test_runtime.cpp",
+   "test/test_state.cpp",
+   "test/test_widget_bridge.cpp",
+   "test/test_widgets.cpp",
+   "test/test_widgets_label.cpp",
+   "tools/ci/load_api_exemptions.json",
+   "tools/ci/spawn_none_build_path_reviews.json",
+   "tools/cli",
+   "tools/cli/cmd_build.cpp",
+   "tools/cmake/PulpTestData.cmake",
+   "tools/scripts/changed_surface_inventory.py",
+   "tools/scripts/gate_common.py",
+   "tools/scripts/script_test_inputs.py",
+   "tools/scripts/test_affected_targets.py"
+  ],
+  "kind": "python"
+ }
+}

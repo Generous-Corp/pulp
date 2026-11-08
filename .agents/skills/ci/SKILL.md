@@ -1042,7 +1042,7 @@ the refusal).
 ## Every test file must run somewhere
 
 `unregistered-tests-check` fails when a tracked `tools/**/test_*.py` is invoked by
-no configured ctest (an `entry` in `test/ctest_script_inputs.json`), no
+no configured ctest (an `entry` in `test/ctest_script_inputs/`), no
 source-selftest, and no workflow or CMake file (comments excluded; a directory
 handed whole to pytest or discover counts). A file nothing runs passes forever:
 its assertions never execute, and a local break-confirm is its only evidence.
@@ -1538,9 +1538,9 @@ boundary) → every `pulp-rust-*` test,
 because cargo, not a CMake target, builds that crate, so the projection never
 reaches it and a Rust failure otherwise surfaces only in the merge group; it is
 a required family, so a leg that stops registering those tests fails the step).
-A test is tied to a target when any path its command names is that target's artifact or a bundle directory (`.clap`, `.vst3`, `.app`, ...) holding it, including the value of `-D<VAR>=`, `--flag=` or `NAME=` assignments and `|`/`;` lists (`changed_surface_inventory.command_path_refs`): exact-argument matching alone missed every CMake-script test that takes its binary as `-DCLI=`, so they ran only in the merge group. A test that reads what CMake records about a target rather than an artifact of it (a generated link or flags file, a header boundary) declares the targets with `set_tests_properties(<t> PROPERTIES PULP_SELECT_WITH_TARGETS "a;b")`. On the PR head, a test whose command names an edited file (`-DGUARD=<file>`) or whose `cmake -P` script includes an edited `.cmake` module by name runs first as a merge-only check, because an edit under `tools/cmake/` makes the projection too wide to use. `cmake -E env ... <script>` and `python -m unittest discover -s -p` registrations are declared in `test/ctest_script_inputs.json` like any other script test. Direct edges are added even when
+A test is tied to a target when any path its command names is that target's artifact or a bundle directory (`.clap`, `.vst3`, `.app`, ...) holding it, including the value of `-D<VAR>=`, `--flag=` or `NAME=` assignments and `|`/`;` lists (`changed_surface_inventory.command_path_refs`): exact-argument matching alone missed every CMake-script test that takes its binary as `-DCLI=`, so they ran only in the merge group. A test that reads what CMake records about a target rather than an artifact of it (a generated link or flags file, a header boundary) declares the targets with `set_tests_properties(<t> PROPERTIES PULP_SELECT_WITH_TARGETS "a;b")`. On the PR head, a test whose command names an edited file (`-DGUARD=<file>`) or whose `cmake -P` script includes an edited `.cmake` module by name runs first as a merge-only check, because an edit under `tools/cmake/` makes the projection too wide to use. `cmake -E env ... <script>` and `python -m unittest discover -s -p` registrations are declared in `test/ctest_script_inputs/` like any other script test. Direct edges are added even when
 the projection is too wide or the diff is docs-only: tests whose declared inputs
-(`test/ctest_script_inputs.json`) the diff touches, script tests the gates.sh
+(`test/ctest_script_inputs/`) the diff touches, script tests the gates.sh
 rules select, the tests running a program whose own source changed, and the
 registrations a `test/` CMake hunk reaches (`cmake_registration_impact.py`: the
 touched call's test/target, a touched block, and the readers of any variable a
@@ -1580,7 +1580,7 @@ loader whose dylib changed.
 ### `pulp_test_data` is a static claim; the nightly read audit measures it
 
 A compiled test's `data: declared` / `data: none` in
-`test/ctest_script_inputs.json` comes from scanning its sources, and the
+`test/ctest_script_inputs/` comes from scanning its sources, and the
 selector trusts it to skip the test when nothing declared changed. A path
 assembled at run time, a fixture opened by a helper library, or a file a
 spawned tool reads never shows up in that scan. `read-audit-nightly.yml`
@@ -1646,7 +1646,7 @@ both.
 pre-push hook and `gates.sh` as well as in this job, and
 `script_inputs_precheck.py --base` runs there as a build-free stand-in for the
 `script-test-inputs-drift` ctest: a new script-driven `add_test()` must have a
-`test/ctest_script_inputs.json` entry. It cannot see a stale entry (a script
+`test/ctest_script_inputs/` entry. It cannot see a stale entry (a script
 that gained an import) or a computed test name; those still need the
 configured check. Three PRs on 2026-10-22
 went red here on the encoding lint after the local gates reported clean,
@@ -1759,7 +1759,7 @@ consequences worth knowing before you debug:
   A stale Makefiles `build/` beside a current `build-gate` once made
   `script-test-inputs-drift` print NOT CHECKED mid-log under a green summary,
   and the branch was pushed red three times.
-- When the diff can drift `test/ctest_script_inputs.json` (the list itself, a
+- When the diff can drift `test/ctest_script_inputs/` (the list itself, a
   declared entry/input, a script under a declared input directory, or CMake
   that registers tests) and no current Ninja build exists, `gates.sh`
   configures `build-gate` (configure only, no compile, ~40 s) and runs the
@@ -2332,7 +2332,7 @@ tools/import-design/jsx-runtime` step before CMake configure. Do not fold the
 integration file back into the unit aggregate or remove that install step: the
 former exhausts the aggregate deadline before later tests run, while the latter
 turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
-Before regenerating `test/ctest_script_inputs.json` or
+Before regenerating `test/ctest_script_inputs/` or
 `.shipyard/changed-surface-families.toml`, run that same locked install and
 reconfigure from the gate profile so both materialized-runtime tests remain
 registered. `script_test_inputs.py --write` refuses (exit 2, list unchanged)
@@ -3036,7 +3036,7 @@ Declare the reads next to the registration in `test/cmake/*_tests.cmake`:
 suite's sources (grouped members: only their own sources), so drop the
 `COMPILE_DEFINITIONS PULP_SOURCE_DIR=...` it replaces, and every path must
 match something at configure or configure fails. The generator folds the
-configure evidence into the same `test/ctest_script_inputs.json` under
+configure evidence into the same `test/ctest_script_inputs/` under
 `executables` (`kind: compiled`); regenerate it as for script tests.
 A source that names `PULP_SOURCE_DIR`, `test/fixtures`, or a definition
 pointing into the checkout, with no declaration covering it, marks its
@@ -3108,7 +3108,28 @@ configure output, and stays undeclared there; Linux and Windows build fewer
 tools than macOS, so the same test can be declared on one and undeclared on
 another.
 
-## Script tests declare inputs in `test/ctest_script_inputs.json`
+## Script tests declare inputs in `test/ctest_script_inputs/`
+
+**The list is one fragment file per entry, not one document.**
+`tests/<slug>.json` holds one script test, `executables/<slug>.json` one
+scanned test executable, `meta.json` the schema
+(`tools/scripts/script_inputs_store.py`). The single generated file was the
+most conflicted path in the repository (75 commits on main in one week);
+fragments let two PRs that add different tests merge without a conflict.
+Every reader goes through `script_inputs_store.load()` / `load_ref()`, which
+assemble the combined document and fall back to the old single file at
+revisions that predate the split. A fragment named for the wrong entry, a
+stray file or a conflict marker raises `StoreError`, and the drift check
+fails closed on it (`cause_class=INCONSISTENT_FRAGMENTS`). A conflict in a
+fragment means both PRs changed the SAME test: regenerate, never hand-merge.
+**Never re-create `test/ctest_script_inputs.json`.** `hotspot_edit_guard.py`
+(pre-push, `gates.sh`, and the pr-fast `hotspot-edit-guard` ctest that
+drift-fast runs) refuses any branch that adds or modifies a path registered
+in `tools/scripts/hotspot_edit_guard.json`, and the drift check refuses the
+single file beside the directory (`cause_class=AGGREGATE_REINTRODUCED`). A
+branch cut before the split that edited the old file: merge `origin/main`,
+take main's deletion, then `--write`. Register another aggregate in the
+guard only after its fragments exist, or every legitimate edit is refused.
 
 The build graph cannot see what a Python, Node or shell ctest reads, so the
 affected-test shadow used to count all ~400 of them affected on any script
@@ -3123,11 +3144,11 @@ treadmill. Regenerate with `--write` against a configured build dir and
 commit the file; `--check --full` shows every stale entry.
 A test the generator cannot bound (cmake-driven, no command) has no entry
 and stays fail-closed; do not hand-edit entries to make a test look narrower.
-**Never hand-edit `test/ctest_script_inputs.json`; regenerate it with
+**Never hand-edit `test/ctest_script_inputs/`; regenerate it with
 `--write` against a configured `build-gate`.**
 **Every PR that adds or changes a script-driven test must regenerate the
 list** (`python3 tools/scripts/script_test_inputs.py --build-dir <dir>
---write`, then commit `test/ctest_script_inputs.json`) as its LAST step;
+--write`, then commit `test/ctest_script_inputs/`) as its LAST step;
 the diff-scoped check fails the PR head otherwise and prints that command.
 Run it after every rebase onto main too: main's new script tests are
 advisory drift, but a rebase that touches one of yours is blocking.
@@ -3264,7 +3285,7 @@ re-keys rather than being normalised.
 
 Adding or changing a Python selftest or script drifts three generated files,
 and each one fails a different check on the PR head if it is hand-edited:
-`test/ctest_script_inputs.json` (`script-test-inputs-drift`),
+`test/ctest_script_inputs/` (`script-test-inputs-drift`),
 `tools/ci/source_selftests.json` (`source-selftest-lane-contract`, which also
 compares each entry's TIMEOUT, RESOURCE_LOCK and argv to the registration), and
 the changed-surface script families file `.shipyard/changed-surface-families.toml`
@@ -8733,7 +8754,7 @@ and Forge Rack's `generate.py` plus its registered safety/endings contracts.
 The Rack family is deliberately exact: `patch.py` and provenance/preflight tools
 still select full validation. Top-level `tools/scripts/*.py` and
 `.agents/skills/*/SKILL.md` select through families generated from
-`test/ctest_script_inputs.json` by `changed_surface_script_families.py`, which
+`test/ctest_script_inputs/` by `changed_surface_script_families.py`, which
 also adds the whole-tree drift/lint/sync tests; a script native code, shell or
 CMake names stays full. After regenerating the script-inputs list, regenerate
 the families file with `--build-dir <dir> --write`, or `changed-surface-script-families-drift`

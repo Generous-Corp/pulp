@@ -1,0 +1,11 @@
+{
+ "name": "android-fixture-lane-selftest",
+ "record": {
+  "entry": "tools/ci/test_android_fixture_lane.py",
+  "inputs": [
+   "tools/ci/android-fixture-lane.sh",
+   "tools/ci/test_android_fixture_lane.py"
+  ],
+  "kind": "python"
+ }
+}

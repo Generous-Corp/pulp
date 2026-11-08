@@ -1,0 +1,10 @@
+{
+ "name": "clock-only-temp-key-guard",
+ "record": {
+  "entry": "tools/scripts/clock_only_temp_key_guard.py",
+  "inputs": [
+   "tools/scripts/clock_only_temp_key_guard.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "format-changed-selftest",
+ "record": {
+  "entry": "tools/scripts/test_format_changed.sh",
+  "inputs": [
+   "tools/scripts/test_format_changed.sh"
+  ],
+  "kind": "shell"
+ }
+}

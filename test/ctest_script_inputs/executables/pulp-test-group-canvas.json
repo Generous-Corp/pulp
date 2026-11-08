@@ -1,0 +1,20 @@
+{
+ "name": "pulp-test-group-canvas",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_canvas_fonts.cpp"
+  ],
+  "inputs": [
+   "external/fonts/FunnelDisplay-VariableFont_wght.ttf",
+   "external/fonts/Inter-Regular.ttf",
+   "test/fixtures/fonts/pulp-test-opsz-trak.ttf"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_canvas_fonts.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

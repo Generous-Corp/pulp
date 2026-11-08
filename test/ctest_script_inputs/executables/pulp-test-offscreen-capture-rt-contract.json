@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-offscreen-capture-rt-contract",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_offscreen_capture_rt_contract.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

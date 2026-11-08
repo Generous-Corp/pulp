@@ -1,0 +1,10 @@
+{
+ "name": "gpu-dpr-inconclusive-receipt-selftest",
+ "record": {
+  "entry": "tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py",
+  "inputs": [
+   "tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py"
+  ],
+  "kind": "python"
+ }
+}

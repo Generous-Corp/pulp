@@ -50,8 +50,21 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import script_test_inputs as sti  # noqa: E402
+import script_inputs_store as store  # noqa: E402
 
 SCRIPT = HERE / "script_test_inputs.py"
+
+
+def tree_bytes(path: Path) -> dict[str, bytes]:
+    """Every fragment file's bytes, so a test can assert a write changed nothing."""
+    if path.is_file():
+        return {path.name: path.read_bytes()}
+    return {f.relative_to(path).as_posix(): f.read_bytes() for f in sorted(path.rglob("*")) if f.is_file()}
+
+
+def as_doc(snapshot: dict[str, bytes]) -> dict:
+    """The combined document a `tree_bytes` snapshot of a fragment directory holds."""
+    return store.join({rel: data.decode("utf-8") for rel, data in snapshot.items()})
 
 
 def write(root: Path, rel: str, text: str) -> Path:
@@ -134,7 +147,7 @@ class ProfileIndependenceTests(unittest.TestCase):
         self.assertEqual(len(reason), 1)
         self.assertIn("jsx-runtime npm dependencies", reason[0])
         self.assertIn("npm ci --prefix tools/import-design/jsx-runtime", reason[0])
-        self.assertIn("file=test/ctest_script_inputs.json", reason[0])
+        self.assertIn("file=test/ctest_script_inputs/", reason[0])
         self.assertIn("cause_class=INCOMPLETE_CONFIGURE", reason[0])
         self.assertIn("safe_to_auto_apply=no", reason[0])
         self.assertIn("ctest --test-dir <build-dir>", reason[0])
@@ -638,14 +651,78 @@ class CheckModeTests(unittest.TestCase):
             repo = Repo(Path(tmp))
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
             self.git_repo(repo)
-            committed = json.loads((repo.root / "test/ctest_script_inputs.json").read_text(encoding="utf-8"))
+            committed = store.load_path(repo.root / sti.DEFAULT_LIST)
             committed["tests"].pop("alpha")
-            write(repo.root, "test/ctest_script_inputs.json", json.dumps(committed))
+            store.write_path(repo.root / sti.DEFAULT_LIST, committed)
             write(repo.root, "README.md", "unrelated\n")
             self.g("add", "-A"); self.g("commit", "-q", "-m", "pr deletes a live inventory entry")
             proc = self.run_tool(repo, "--check", "--base", "base-ref")
             self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
             self.assertIn("missing from list: alpha", proc.stdout)
+
+    def test_a_hand_edited_stale_fragment_blocks(self) -> None:
+        """The check judges the assembled fragments exactly as it judged the
+        single file: a fragment edited to stale inputs is drift."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            frag = repo.root / store.fragment_path(store.TESTS_DIR, "alpha")
+            self.assertTrue(frag.is_file(), "--write writes one fragment per test")
+            doc = json.loads(frag.read_text(encoding="utf-8"))
+            doc["record"]["inputs"] = doc["record"]["inputs"][:-1]
+            frag.write_text(store.dumps(doc), encoding="utf-8")
+            proc = self.run_tool(repo, "--check")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("stale entry: alpha", proc.stdout)
+
+    def test_a_deleted_fragment_is_a_missing_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            (repo.root / store.fragment_path(store.TESTS_DIR, "alpha")).unlink()
+            proc = self.run_tool(repo, "--check")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("missing from list: alpha", proc.stdout)
+
+    def test_a_misnamed_or_stray_fragment_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            frag = repo.root / store.fragment_path(store.TESTS_DIR, "alpha")
+            frag.rename(frag.with_name("not-alpha.json"))
+            proc = self.run_tool(repo, "--check")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("cause_class=INCONSISTENT_FRAGMENTS", proc.stderr)
+
+    def test_the_single_file_beside_the_fragments_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            combined = store.load(repo.root)
+            write(repo.root, store.LEGACY_LIST.as_posix(), store.dumps(combined))
+            proc = self.run_tool(repo, "--check")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("cause_class=AGGREGATE_REINTRODUCED", proc.stderr)
+
+    def test_write_touches_only_the_fragment_that_moved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)
+            write(repo.root, "tools/scripts/extra.py", "z = 1\n")
+            write(repo.root, "tools/scripts/alpha_lib.py", "import extra\nDATA = 'docs/status/alpha.yaml'\n")
+            self.g("add", "tools/scripts/extra.py", "tools/scripts/alpha_lib.py")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            dirty = subprocess.run(["git", "-C", str(repo.root), "status", "--porcelain", "--",
+                                    store.FRAGMENT_DIR.as_posix()], capture_output=True, text=True).stdout
+            moved = {line[3:] for line in dirty.splitlines()}
+            doc = store.load(repo.root)
+            reach = {store.fragment_path(store.TESTS_DIR, n) for n, rec in doc["tests"].items()
+                     if "tools/scripts/extra.py" in (rec.get("inputs") or [])}
+            self.assertIn(store.fragment_path(store.TESTS_DIR, "alpha"), moved)
+            # Exactly the entries that now read the new import were rewritten.
+            self.assertEqual(moved, reach)
+            self.assertLess(len(moved), len(doc["tests"]))
 
     def test_merge_group_reports_blocking_drift_as_a_warning_and_exits_0(self) -> None:
         """The pull-request head is the enforcement point; a merge group must
@@ -966,7 +1043,7 @@ class CompiledDataTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
-            lst = json.loads((repo.root / sti.DEFAULT_LIST).read_text(encoding="utf-8"))
+            lst = store.load_path(repo.root / sti.DEFAULT_LIST)
             self.assertEqual(lst["executables"]["pulp-test-a"], {
                 "kind": "compiled", "data": "declared", "inputs": ["test/fixtures/a"],
                 "sources": ["test/test_a.cpp"], "detected_sources": ["test/test_a.cpp"],
@@ -997,26 +1074,26 @@ class CompiledDataTests(unittest.TestCase):
             gone_test = {"entry": "tools/removed.py", "inputs": ["tools/removed.py"], "kind": "python"}
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
             list_path = repo.root / sti.DEFAULT_LIST
-            seeded = json.loads(list_path.read_text(encoding="utf-8"))
+            seeded = store.load_path(list_path)
             seeded["tests"]["pulp-opt-diag-verify"] = diag_test
             seeded["tests"]["pulp-removed-test"] = gone_test
             seeded["executables"]["pulp-opt-diag"] = diag_exe
             seeded["executables_scanned"].append("pulp-opt-diag")
-            list_path.write_text(json.dumps(seeded), encoding="utf-8")
+            store.write_path(list_path, seeded)
 
             # The removed registration cannot be told apart from one this
             # configure merely cannot see, so a plain --write refuses and
             # leaves the list untouched.
-            before = list_path.read_text(encoding="utf-8")
+            before = tree_bytes(list_path)
             proc = self.run_tool(repo, "--write")
             self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
             self.assertIn("refusing to write", proc.stderr)
             self.assertIn("pulp-removed-test", proc.stderr)
-            self.assertEqual(list_path.read_text(encoding="utf-8"), before)
+            self.assertEqual(tree_bytes(list_path), before)
 
             proc = self.run_tool(repo, "--write", "--allow-delete")
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-            lst = json.loads(list_path.read_text(encoding="utf-8"))
+            lst = store.load_path(list_path)
             self.assertEqual(lst["tests"].get("pulp-opt-diag-verify"), diag_test)
             self.assertEqual(lst["executables"].get("pulp-opt-diag"), diag_exe)
             self.assertIn("pulp-opt-diag", lst["executables_scanned"])
@@ -1037,28 +1114,28 @@ class CompiledDataTests(unittest.TestCase):
             repo = Repo(Path(tmp)); compiled_evidence(repo)
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
             list_path = repo.root / sti.DEFAULT_LIST
-            seeded = json.loads(list_path.read_text(encoding="utf-8"))
+            seeded = store.load_path(list_path)
             fixture = {"kind": "compiled", "data": "undeclared", "inputs": [], "sources": [],
                        "detected_sources": [], "undeclared_sources": []}
             seeded["executables"]["Generated Fixture App"] = fixture
             seeded["executable_targets"]["Generated Fixture App"] = "GeneratedFixture_Standalone"
             seeded["executables_scanned"].append("Generated Fixture App")
-            list_path.write_text(json.dumps(seeded, indent=1, sort_keys=True) + "\n", encoding="utf-8")
-            before = list_path.read_text(encoding="utf-8")
+            store.write_path(list_path, seeded)
+            before = tree_bytes(list_path)
 
             proc = self.run_tool(repo, "--write")
             self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
             self.assertIn("Generated Fixture App", proc.stderr)
             self.assertIn("--allow-delete", proc.stderr)
-            self.assertEqual(list_path.read_text(encoding="utf-8"), before)
+            self.assertEqual(tree_bytes(list_path), before)
 
             # Control: with nothing to delete, --write succeeds as before.
             seeded.pop("executables")
-            ok = json.loads(before)
+            ok = as_doc(before)
             ok["executables"].pop("Generated Fixture App")
             ok["executable_targets"].pop("Generated Fixture App")
             ok["executables_scanned"].remove("Generated Fixture App")
-            list_path.write_text(json.dumps(ok, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+            store.write_path(list_path, ok)
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
 
     def test_write_regenerates_a_registered_test_rather_than_carrying_its_old_entry(self) -> None:
@@ -1067,13 +1144,13 @@ class CompiledDataTests(unittest.TestCase):
             write(repo.root, "test/cmake/alpha_tests.cmake", "add_test(NAME alpha COMMAND x)\n")
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
             list_path = repo.root / sti.DEFAULT_LIST
-            fresh = json.loads(list_path.read_text(encoding="utf-8"))["tests"]["alpha"]
-            seeded = json.loads(list_path.read_text(encoding="utf-8"))
+            fresh = store.load_path(list_path)["tests"]["alpha"]
+            seeded = store.load_path(list_path)
             seeded["tests"]["alpha"] = {"entry": "stale.py", "inputs": [], "kind": "python"}
-            list_path.write_text(json.dumps(seeded), encoding="utf-8")
+            store.write_path(list_path, seeded)
             proc = self.run_tool(repo, "--write")
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-            self.assertEqual(json.loads(list_path.read_text(encoding="utf-8"))["tests"]["alpha"], fresh)
+            self.assertEqual(store.load_path(list_path)["tests"]["alpha"], fresh)
             self.assertNotIn("kept", proc.stdout)
 
     def test_write_preserves_a_previously_recorded_executable_after_its_last_dependency_is_removed(self) -> None:
@@ -1082,7 +1159,7 @@ class CompiledDataTests(unittest.TestCase):
             write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
             list_path = repo.root / sti.DEFAULT_LIST
-            before = json.loads(list_path.read_text(encoding="utf-8"))
+            before = store.load_path(list_path)
             self.assertEqual(before["executables"]["pulp-test-d"]["spawns"], "undeclared")
 
             write(repo.root, "test/test_d.cpp", "int value = 1;\n")
@@ -1091,7 +1168,7 @@ class CompiledDataTests(unittest.TestCase):
             self.assertIn("stale compiled entry: pulp-test-d", stale.stdout)
             proc = self.run_tool(repo, "--write")
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-            after = json.loads(list_path.read_text(encoding="utf-8"))
+            after = store.load_path(list_path)
             self.assertEqual(set(after["executables"]), set(before["executables"]))
             self.assertEqual(after["executables"]["pulp-test-d"], {
                 "kind": "compiled", "data": "none", "inputs": [], "sources": [],
@@ -1101,9 +1178,9 @@ class CompiledDataTests(unittest.TestCase):
                     self.assertEqual(after["executables"][name], before["executables"][name])
             self.assertEqual(after["executables_scanned"], before["executables_scanned"])
             self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 0)
-            stable = list_path.read_bytes()
+            stable = tree_bytes(list_path)
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
-            self.assertEqual(list_path.read_bytes(), stable)
+            self.assertEqual(tree_bytes(list_path), stable)
 
             # A new dependency must still replace the clean record and fail
             # the check until regenerated; retaining the name is not a waiver.
@@ -1112,7 +1189,7 @@ class CompiledDataTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
             self.assertIn("stale compiled entry: pulp-test-d", proc.stdout)
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
-            restored = json.loads(list_path.read_text(encoding="utf-8"))
+            restored = store.load_path(list_path)
             self.assertEqual(restored["executables"]["pulp-test-d"],
                              before["executables"]["pulp-test-d"])
 
@@ -1125,7 +1202,7 @@ class CompiledDataTests(unittest.TestCase):
                 source = write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
                 self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
                 list_path = repo.root / sti.DEFAULT_LIST
-                before = list_path.read_bytes()
+                before = tree_bytes(list_path)
                 if missing:
                     source.unlink()
                 else:
@@ -1135,7 +1212,7 @@ class CompiledDataTests(unittest.TestCase):
                         proc = self.run_tool(repo, mode)
                         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
                         self.assertIn("unreadable scan sources: test/test_d.cpp", proc.stderr)
-                        self.assertEqual(list_path.read_bytes(), before)
+                        self.assertEqual(tree_bytes(list_path), before)
                 finally:
                     if not missing:
                         source.chmod(0o600)
@@ -1150,7 +1227,7 @@ class CompiledDataTests(unittest.TestCase):
                 header = write(repo.root, "test/support/runner.hpp", "int run() { return fork(); }\n")
                 self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
                 list_path = repo.root / sti.DEFAULT_LIST
-                before = list_path.read_bytes()
+                before = tree_bytes(list_path)
                 if missing:
                     header.unlink()
                 else:
@@ -1160,14 +1237,14 @@ class CompiledDataTests(unittest.TestCase):
                         proc = self.run_tool(repo, mode)
                         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
                         self.assertIn("unreadable scan sources: test/support/runner.hpp", proc.stderr)
-                        self.assertEqual(list_path.read_bytes(), before)
+                        self.assertEqual(tree_bytes(list_path), before)
                 finally:
                     if not missing:
                         header.chmod(0o600)
                 # An actual readable header with the spawn removed is clean.
                 header.write_text("int run() { return 0; }\n", encoding="utf-8")
                 self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
-                after = json.loads(list_path.read_text(encoding="utf-8"))
+                after = store.load_path(list_path)
                 self.assertIn("pulp-test-d", after["executables"])
                 self.assertEqual(after["executables"]["pulp-test-d"]["data"], "none")
                 self.assertNotIn("spawning_sources", after["executables"]["pulp-test-d"])
@@ -1181,8 +1258,8 @@ class CompiledDataTests(unittest.TestCase):
             header = write(repo.root, "test/support/helper.hpp", "struct Helper {};\n")
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
             list_path = repo.root / sti.DEFAULT_LIST
-            before = list_path.read_bytes()
-            self.assertEqual(json.loads(before)["executables"]["pulp-test-d"]["spawning_sources"],
+            before = tree_bytes(list_path)
+            self.assertEqual(as_doc(before)["executables"]["pulp-test-d"]["spawning_sources"],
                              ["test/test_d.cpp"])
             source.write_text('#include "support/helper.hpp"\nint run() { return 0; }\n', encoding="utf-8")
             header.unlink()
@@ -1190,7 +1267,7 @@ class CompiledDataTests(unittest.TestCase):
                 proc = self.run_tool(repo, mode)
                 self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
                 self.assertIn('unresolved quoted include "support/helper.hpp"', proc.stderr)
-                self.assertEqual(list_path.read_bytes(), before)
+                self.assertEqual(tree_bytes(list_path), before)
             header.write_text("struct Helper {};\n", encoding="utf-8")
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
             self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 0)
@@ -1277,8 +1354,8 @@ class CompiledDataTests(unittest.TestCase):
                 index_path.write_text(json.dumps(index), encoding="utf-8")
                 self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
                 list_path = repo.root / sti.DEFAULT_LIST
-                before = list_path.read_bytes()
-                self.assertEqual(json.loads(before)["executables"]["pulp-test-d"]["sources"],
+                before = tree_bytes(list_path)
+                self.assertEqual(as_doc(before)["executables"]["pulp-test-d"]["sources"],
                                  ["${CMAKE_BINARY_DIR}/generated/editor.cpp"])
                 generated.write_text(f'#include "{generated_header}"\n', encoding="utf-8")
                 if missing:
@@ -1288,12 +1365,12 @@ class CompiledDataTests(unittest.TestCase):
                         proc = self.run_tool(repo, mode)
                         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
                         self.assertIn("unreadable scan sources", proc.stderr)
-                        self.assertEqual(list_path.read_bytes(), before)
+                        self.assertEqual(tree_bytes(list_path), before)
                 else:
                     proc = self.run_tool(repo, "--write")
                     self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-                    after = json.loads(list_path.read_text(encoding="utf-8"))
-                    self.assertEqual(set(after["executables"]), set(json.loads(before)["executables"]))
+                    after = store.load_path(list_path)
+                    self.assertEqual(set(after["executables"]), set(as_doc(before)["executables"]))
                     self.assertEqual(after["executables"]["pulp-test-d"]["data"], "none")
                     proc = self.run_tool(repo, "--check", "--full")
                     self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
@@ -1408,7 +1485,7 @@ class CompiledDataTests(unittest.TestCase):
             self.g("add", "-A"); self.g("commit", "-q", "-m", "declare b")
             proc = self.run_tool(repo, "--check", "--base", "base-ref")
             self.assertEqual(proc.returncode, 0, proc.stdout)
-            lst = json.loads((repo.root / sti.DEFAULT_LIST).read_text(encoding="utf-8"))
+            lst = store.load_path(repo.root / sti.DEFAULT_LIST)
             self.assertEqual(lst["executables"]["pulp-test-b"]["data"], "declared")
 
     def test_a_change_that_adds_a_spawn_owns_the_new_entry(self) -> None:
@@ -1509,18 +1586,18 @@ class GateProfileTests(unittest.TestCase):
             source = write(repo.root, "test/test_d.cpp", "pid_t child = fork();\n")
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
             list_path = repo.root / sti.DEFAULT_LIST
-            before = list_path.read_bytes()
+            before = tree_bytes(list_path)
             source.unlink()
             self.cache(repo, CMAKE_BUILD_TYPE="Debug")
             proc = self.run_tool(repo, "--check", "--full")
             self.assertEqual(proc.returncode, sti.SKIP_EXIT, proc.stdout + proc.stderr)
             self.assertIn("SKIPPED the compiled entries", proc.stdout)
-            self.assertEqual(list_path.read_bytes(), before)
+            self.assertEqual(tree_bytes(list_path), before)
             proc = self.run_tool(repo, "--write")
             self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
             self.assertIn("cause_class=INCOMPLETE_CONFIGURE", proc.stderr)
             self.assertNotIn("cannot refresh compiled entries", proc.stderr)
-            self.assertEqual(list_path.read_bytes(), before)
+            self.assertEqual(tree_bytes(list_path), before)
             write(repo.root, "tools/scripts/test_alpha.py", "import newmod\n")
             write(repo.root, "tools/scripts/newmod.py", "")
             proc = self.run_tool(repo, "--check", "--full")

@@ -1,0 +1,14 @@
+{
+ "name": "wasm-skia-slice-invariants",
+ "record": {
+  "entry": "tools/scripts/verify_wasm_skia_slice.py",
+  "inputs": [
+   "external/skia-build",
+   "tools/deps/manifest.json",
+   "tools/scripts/fetch_skia_for_release.py",
+   "tools/scripts/process_liveness.py",
+   "tools/scripts/verify_wasm_skia_slice.py"
+  ],
+  "kind": "python"
+ }
+}
