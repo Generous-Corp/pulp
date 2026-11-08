@@ -348,6 +348,13 @@ Traps when extending the checks:
   "General Public License (GPL) Version 3", never "GNU General Public License".
 - **A dep's license lives in `LICENSE` files, not source headers**, which only
   reference the nearest LICENSE.
+- **A new `external/<dir>` is invisible to git until `.gitignore` says so.**
+  `/external/*/` is ignored, with one `!/external/<dir>/` exception per
+  vendored tree. Without it `git status` shows nothing, the build passes
+  locally, and the push ships without the sources. One directory may hold
+  several deps (`external/lilv` holds lilv, serd, sord, sratom, and zix): give
+  each its own manifest, DEPENDENCIES, NOTICE, and licensing row, and record
+  each release-tarball SHA-256 in the directory's README.
 - **`external/` before the FetchContent cache.** `external/<dep>` is what the
   build compiles; the cache accumulates every ref ever fetched, so a stale
   cache dir can shadow the real tree and get the audit verifying a version the
