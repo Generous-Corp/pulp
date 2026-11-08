@@ -48,6 +48,7 @@ enum class ControlManifestError : std::uint8_t {
     RegistryMismatch,
     EndpointMismatch,
     UnsafeAcknowledgementMismatch,
+    InvalidVendorOperations,
 };
 
 enum class ControlDenialReason : std::uint8_t {
@@ -75,6 +76,10 @@ struct ControlManifest {
     bool endpoint_included = false;
     bool unsafe_runtime_eval_acknowledged = false;
     std::vector<InspectorCapability> capabilities;
+    /// Exact bytes of the target's `dev.pulp.control/vendor-operations@1`
+    /// declaration, or empty when the target declares no vendor operations.
+    /// The manifest digest, and therefore consent, covers these bytes.
+    std::string vendor_operations;
 };
 
 struct ControlManifestDiagnostics {

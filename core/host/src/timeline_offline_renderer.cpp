@@ -76,6 +76,18 @@ TimelineOfflineRenderResult render_timeline_offline(
     if (total_frames > config.max_output_frames)
         return fail(Code::InvalidLimits);
 
+    // ---- Hosted plugins render in the bounce's process mode ----
+    // Applied when the binding prepares the graph below; the caller's setting
+    // comes back on every return path.
+    struct HostedModeScope {
+        SignalGraph& graph;
+        format::ProcessMode previous;
+        ~HostedModeScope() {
+            graph.set_hosted_plugin_process_mode(previous);
+        }
+    } hosted_mode{graph, graph.hosted_plugin_process_mode()};
+    graph.set_hosted_plugin_process_mode(config.hosted_plugin_mode);
+
     // ---- Bind ----
     TimelineGraphBindingConfig binding_config;
     binding_config.audio_channels = static_cast<std::uint32_t>(config.output_channels);

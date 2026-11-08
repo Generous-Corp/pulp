@@ -35,6 +35,7 @@
 // overlap is never supported.
 
 #include <cstddef>
+#include <cstdint>
 
 // Kernel signatures, declared once per backend below.
 //
@@ -47,6 +48,8 @@
 //   sum(x, n)                  sum of x[i]                     (0 when n == 0)
 //   maximum(x, n)              largest x[i]                    (0 when n == 0)
 //   minimum(x, n)              smallest x[i]                   (0 when n == 0)
+//                              With a NaN in the buffer, maximum, minimum and
+//                              max_abs are unspecified and differ by backend.
 //   abs(a, dst, n)             dst[i] = |a[i]|                 (dst == a ok)
 //   clamp(a, lo, hi, dst, n)   dst[i] = clamp(a[i], lo, hi)    (dst == a ok)
 //   dot(a, b, n)               sum of a[i] * b[i]              (0 when n == 0)
@@ -54,6 +57,42 @@
 //   max_abs(x, n)              largest |x[i]|                  (0 when n == 0)
 //   ramp_mul(x, start, step, dst, n)
 //                              dst[i] = x[i] * (start + i * step) (dst == x ok)
+//   sub(a, b, dst, n)          dst[i] = a[i] - b[i]            (dst == a or b ok)
+//   div(a, b, dst, n)          dst[i] = a[i] / b[i]            (dst == a or b ok)
+//   negate(a, dst, n)          dst[i] = -a[i]                  (dst == a ok)
+//   mean(x, n)                 arithmetic mean of x[i]         (0 when n == 0)
+//   rms(x, n)                  sqrt(mean of x[i] * x[i])       (0 when n == 0)
+//                              Both accumulate in double, also for float, so
+//                              a long float buffer keeps float precision: the
+//                              error is at most about n * 2^-53 of the mean of
+//                              |x| (or x^2) plus one rounding to T.
+//   find_maximum(x, n, &i)     largest x[i]; *i is the lowest index holding it
+//   find_minimum(x, n, &i)     smallest x[i]; *i is the lowest index holding it
+//                              Both return 0 and set *i = 0 when n == 0. If any
+//                              x[i] is NaN, both return the first NaN and set
+//                              *i to its index, on every backend.
+//   replace_below(a, threshold, value, dst, n)
+//                              dst[i] = a[i] < threshold ? value : a[i]   (dst == a ok)
+//   replace_above(a, threshold, value, dst, n)
+//                              dst[i] = a[i] > threshold ? value : a[i]   (dst == a ok)
+//                              A NaN input is never replaced.
+//   from_int16(src, s, dst, n) dst[i] = T(src[i]) * s     (fixed-point to float)
+//   from_int32(src, s, dst, n) dst[i] = T(src[i]) * s
+//   to_int16(src, s, dst, n)   dst[i] = int16(round_half_even(src[i] * s)),
+//                              saturated to [-32768, 32767]; NaN becomes 0.
+//   to_int32(src, s, dst, n)   same for int32. A float source saturates at
+//                              2147483520, the largest float below 2^31.
+//                              Use s = 32768 (int16) or 2147483648 (int32) to
+//                              convert full-scale float audio, and the
+//                              reciprocal for the way back.
+//   interleave2(l, r, dst, frames)
+//                              dst[2i] = l[i], dst[2i + 1] = r[i]
+//   deinterleave2(src, l, r, frames)
+//                              l[i] = src[2i], r[i] = src[2i + 1]
+//                              Interleave/deinterleave buffers must not overlap.
+//
+//   A copy with gain is scale(): dst[i] = a[i] * s.
+//
 //   correlate(x, h, y, n_out, taps)
 //                              y[i] = sum_{k < taps} x[i + k] * h[k]
 //                              x holds n_out + taps - 1 samples. A FIR filter
@@ -82,7 +121,145 @@
     T max_abs(const T* data, std::size_t count) noexcept;                                          \
     void ramp_mul(const T* x, T start, T step, T* dst, std::size_t count) noexcept;                \
     void correlate(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept;    \
-    void decimate2(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept;
+    void decimate2(const T* x, const T* h, T* y, std::size_t n_out, std::size_t taps) noexcept;    \
+    void sub(const T* a, const T* b, T* dst, std::size_t count) noexcept;                          \
+    void div(const T* a, const T* b, T* dst, std::size_t count) noexcept;                          \
+    void negate(const T* a, T* dst, std::size_t count) noexcept;                                   \
+    T mean(const T* data, std::size_t count) noexcept;                                             \
+    T rms(const T* data, std::size_t count) noexcept;                                              \
+    T find_maximum(const T* data, std::size_t count, std::size_t* index) noexcept;                 \
+    T find_minimum(const T* data, std::size_t count, std::size_t* index) noexcept;                 \
+    void replace_below(const T* a, T threshold, T value, T* dst, std::size_t count) noexcept;      \
+    void replace_above(const T* a, T threshold, T value, T* dst, std::size_t count) noexcept;      \
+    void from_int16(const std::int16_t* src, T scale, T* dst, std::size_t count) noexcept;         \
+    void from_int32(const std::int32_t* src, T scale, T* dst, std::size_t count) noexcept;         \
+    void to_int16(const T* src, T scale, std::int16_t* dst, std::size_t count) noexcept;           \
+    void to_int32(const T* src, T scale, std::int32_t* dst, std::size_t count) noexcept;           \
+    void interleave2(const T* left, const T* right, T* dst, std::size_t frames) noexcept;          \
+    void deinterleave2(const T* src, T* left, T* right, std::size_t frames) noexcept;
+
+// Complex kernels. `count` is the number of complex values. An interleaved
+// buffer holds re, im, re, im, ... (2 * count scalars; the layout of
+// std::complex<T> and of an FFT's packed output); a split buffer is two arrays
+// of `count` scalars. Real outputs (magnitude, phase, power) are `count`
+// scalars.
+//
+//   complex_multiply(a, b, dst, n)              dst = a * b
+//   complex_multiply_conj(a, b, dst, n)         dst = a * conj(b)
+//   complex_multiply_accumulate(a, b, acc, n)   acc += a * b
+//   complex_magnitude(z, dst, n)                dst[i] = sqrt(re^2 + im^2)
+//   complex_magnitude_squared(z, dst, n)        dst[i] = re^2 + im^2
+//   complex_phase(z, dst, n)                    dst[i] = atan2(im, re), in [-pi, pi]
+//   complex_power_spectrum(z, scale, dst, n)    dst[i] = scale * (re^2 + im^2)
+//
+// Each has a `_split` form taking separate real and imaginary arrays for every
+// complex operand, e.g. complex_multiply_split(a_re, a_im, b_re, b_im,
+// dst_re, dst_im, n). For the multiply family dst (or acc) may equal an input
+// exactly, never partially. Magnitude, phase and power outputs must not overlap
+// their input.
+//
+// The products are the plain formulas (ar*br - ai*bi, ar*bi + ai*br): unlike
+// std::complex::operator*, they do not branch to recover a NaN from an
+// infinity times zero, so they are for finite spectra. Magnitude does not
+// guard against overflow of re^2 + im^2. Phase of (0, 0) is 0; phase at a
+// signed-zero boundary (such as (-0, +0)) is not pinned across backends.
+// complex_multiply_conj(z, z) may leave a last-bit imaginary part where the
+// target fuses multiply-add; use complex_magnitude_squared for |z|^2.
+//
+// On a given backend an element's result does not depend on where it sits in
+// the buffer or how a long buffer is split into calls, so a caller that works
+// in chunks (as the zero-latency convolver's spectral multiply-accumulate
+// does) gets the same bits as one whole-buffer call.
+
+#define PULP_SIMD_DECLARE_COMPLEX_KERNELS(T)                                                       \
+    void complex_multiply(const T* a, const T* b, T* dst, std::size_t count) noexcept;             \
+    void complex_multiply_conj(const T* a, const T* b, T* dst, std::size_t count) noexcept;        \
+    void complex_multiply_accumulate(const T* a, const T* b, T* acc, std::size_t count) noexcept;  \
+    void complex_magnitude(const T* z, T* dst, std::size_t count) noexcept;                        \
+    void complex_magnitude_squared(const T* z, T* dst, std::size_t count) noexcept;                \
+    void complex_phase(const T* z, T* dst, std::size_t count) noexcept;                            \
+    void complex_power_spectrum(const T* z, T scale, T* dst, std::size_t count) noexcept;          \
+    void complex_multiply_split(const T* a_re, const T* a_im, const T* b_re, const T* b_im,        \
+                                T* dst_re, T* dst_im, std::size_t count) noexcept;                 \
+    void complex_multiply_conj_split(const T* a_re, const T* a_im, const T* b_re, const T* b_im,   \
+                                     T* dst_re, T* dst_im, std::size_t count) noexcept;            \
+    void complex_multiply_accumulate_split(const T* a_re, const T* a_im, const T* b_re,            \
+                                           const T* b_im, T* acc_re, T* acc_im,                    \
+                                           std::size_t count) noexcept;                            \
+    void complex_magnitude_split(const T* re, const T* im, T* dst, std::size_t count) noexcept;    \
+    void complex_magnitude_squared_split(const T* re, const T* im, T* dst,                         \
+                                         std::size_t count) noexcept;                              \
+    void complex_phase_split(const T* re, const T* im, T* dst, std::size_t count) noexcept;        \
+    void complex_power_spectrum_split(const T* re, const T* im, T scale, T* dst,                   \
+                                      std::size_t count) noexcept;
+
+/// How close a vector math result must be to the true value.
+///
+///   precise   within a few units in the last place (ULP) of the true result
+///             over the documented input range, for float and double.
+///   fast      float only, a cheaper algorithm accurate to about five decimal
+///             digits (the measured bound is stated per function in
+///             docs/reference/modules.md).
+///             Double precision has no cheaper tier, so `fast` on double runs
+///             the `precise` kernel.
+///
+/// A backend may be more accurate than the tier it was asked for (the scalar
+/// backend and Accelerate have a single algorithm and ignore the argument);
+/// the stated bound is always an upper limit. Results do not depend on where
+/// an element falls in the buffer or on the buffer's alignment.
+namespace pulp::simd {
+enum class Accuracy { precise, fast };
+} // namespace pulp::simd
+
+// Vector math over buffers, for float and double.
+//
+//   exp(x, dst, n, acc)         dst[i] = e^x[i]
+//   log(x, floor, dst, n, acc)  dst[i] = ln(max(x[i], floor)); a floor at or
+//                               below zero (or NaN) means the smallest normal
+//                               number, so the argument is never zero, negative
+//                               or subnormal, so the result is finite for every finite x
+//   sin(x, dst, n, acc)         dst[i] = sin(x[i]), x in radians. The precise
+//                               float bound holds for |x| <= 39000 on every
+//                               backend; past that Highway's float kernel
+//                               degrades (measured within 4 ULP to about 4e6,
+//                               wrong past about 1e7) while Accelerate and the
+//                               scalar backend stay accurate. Double holds to
+//                               at least 1e8. Wrap an accumulating phase with
+//                               wrap_phase first.
+//   cos(x, dst, n, acc)         dst[i] = cos(x[i]), same range as sin
+//   sincos(x, s, c, n, acc)     s[i] = sin(x[i]) and c[i] = cos(x[i]) from one
+//                               argument reduction
+//   tanh(x, dst, n, acc)        dst[i] = tanh(x[i])
+//   sqrt(x, dst, n)             dst[i] = sqrt(x[i]), correctly rounded on every
+//                               backend (the hardware square root is already
+//                               the fast path, so there is no cheaper tier)
+//   wrap_phase(x, dst, n)       dst[i] = x[i] - 2*pi*round(x[i] / 2*pi), the
+//                               phase brought into [-pi, pi] (to within one
+//                               ulp at the ends) on every backend, including
+//                               inputs on a half turn, for |x| up to 1e4
+//                               (float) and 1e6 (double)
+//
+// The accuracy argument defaults to Accuracy::precise. dst may equal x exactly
+// (sincos: s or c may equal x). NaN in gives NaN out for the precise tier; the
+// fast tier does not define NaN. The measured error of every function and tier
+// is stated below the kernels' list in docs/reference/modules.md and checked by
+// the "[simd][accuracy]" cases in test/test_simd_math.cpp.
+
+#define PULP_SIMD_DECLARE_MATH_KERNELS(T)                                                          \
+    void exp(const T* x, T* dst, std::size_t count,                                                \
+             ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;          \
+    void log(const T* x, T floor, T* dst, std::size_t count,                                       \
+             ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;          \
+    void sin(const T* x, T* dst, std::size_t count,                                                \
+             ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;          \
+    void cos(const T* x, T* dst, std::size_t count,                                                \
+             ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;          \
+    void sincos(const T* x, T* sin_out, T* cos_out, std::size_t count,                             \
+                ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;       \
+    void tanh(const T* x, T* dst, std::size_t count,                                               \
+              ::pulp::simd::Accuracy accuracy = ::pulp::simd::Accuracy::precise) noexcept;         \
+    void sqrt(const T* x, T* dst, std::size_t count) noexcept;                                     \
+    void wrap_phase(const T* x, T* dst, std::size_t count) noexcept;
 
 namespace pulp::simd {
 
@@ -91,12 +268,20 @@ namespace backend {
 namespace scalar {
 PULP_SIMD_DECLARE_KERNELS(float)
 PULP_SIMD_DECLARE_KERNELS(double)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(float)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(double)
+PULP_SIMD_DECLARE_MATH_KERNELS(float)
+PULP_SIMD_DECLARE_MATH_KERNELS(double)
 } // namespace scalar
 
 #if defined(PULP_SIMD_HAS_HIGHWAY)
 namespace highway {
 PULP_SIMD_DECLARE_KERNELS(float)
 PULP_SIMD_DECLARE_KERNELS(double)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(float)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(double)
+PULP_SIMD_DECLARE_MATH_KERNELS(float)
+PULP_SIMD_DECLARE_MATH_KERNELS(double)
 } // namespace highway
 #endif
 
@@ -104,6 +289,10 @@ PULP_SIMD_DECLARE_KERNELS(double)
 namespace accelerate {
 PULP_SIMD_DECLARE_KERNELS(float)
 PULP_SIMD_DECLARE_KERNELS(double)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(float)
+PULP_SIMD_DECLARE_COMPLEX_KERNELS(double)
+PULP_SIMD_DECLARE_MATH_KERNELS(float)
+PULP_SIMD_DECLARE_MATH_KERNELS(double)
 } // namespace accelerate
 #endif
 
@@ -121,6 +310,10 @@ PULP_SIMD_DECLARE_KERNELS(double)
 namespace pulp::simd::backend::inline_scalar {
 PULP_SIMD_SCALAR_DEFINE(inline, float)
 PULP_SIMD_SCALAR_DEFINE(inline, double)
+PULP_SIMD_SCALAR_DEFINE_COMPLEX(inline, float)
+PULP_SIMD_SCALAR_DEFINE_COMPLEX(inline, double)
+PULP_SIMD_SCALAR_DEFINE_MATH(inline, float, = ::pulp::simd::Accuracy::precise)
+PULP_SIMD_SCALAR_DEFINE_MATH(inline, double, = ::pulp::simd::Accuracy::precise)
 } // namespace pulp::simd::backend::inline_scalar
 #endif
 
@@ -145,19 +338,56 @@ using active_backend::abs;
 using active_backend::add;
 using active_backend::add_scaled;
 using active_backend::clamp;
+using active_backend::complex_magnitude;
+using active_backend::complex_magnitude_split;
+using active_backend::complex_magnitude_squared;
+using active_backend::complex_magnitude_squared_split;
+using active_backend::complex_multiply;
+using active_backend::complex_multiply_accumulate;
+using active_backend::complex_multiply_accumulate_split;
+using active_backend::complex_multiply_conj;
+using active_backend::complex_multiply_conj_split;
+using active_backend::complex_multiply_split;
+using active_backend::complex_phase;
+using active_backend::complex_phase_split;
+using active_backend::complex_power_spectrum;
+using active_backend::complex_power_spectrum_split;
 using active_backend::correlate;
+using active_backend::cos;
 using active_backend::decimate2;
+using active_backend::deinterleave2;
+using active_backend::div;
 using active_backend::dot;
+using active_backend::exp;
+using active_backend::find_maximum;
+using active_backend::find_minimum;
 using active_backend::fma;
+using active_backend::from_int16;
+using active_backend::from_int32;
+using active_backend::interleave2;
+using active_backend::log;
 using active_backend::max_abs;
 using active_backend::maximum;
+using active_backend::mean;
 using active_backend::minimum;
 using active_backend::mul;
+using active_backend::negate;
 using active_backend::ramp_mul;
+using active_backend::replace_above;
+using active_backend::replace_below;
+using active_backend::rms;
 using active_backend::scale;
 using active_backend::set;
+using active_backend::sin;
+using active_backend::sincos;
+using active_backend::sqrt;
+using active_backend::sub;
 using active_backend::sum;
 using active_backend::sum_squares;
+using active_backend::tanh;
+using active_backend::to_int16;
+using active_backend::to_int32;
+using active_backend::wrap_phase;
 
 #if defined(PULP_SIMD_HAS_HIGHWAY)
 /// Number of float lanes on the dispatched Highway target.
@@ -180,4 +410,6 @@ inline constexpr std::size_t double_lanes() noexcept {
 
 } // namespace pulp::simd
 
+#undef PULP_SIMD_DECLARE_MATH_KERNELS
+#undef PULP_SIMD_DECLARE_COMPLEX_KERNELS
 #undef PULP_SIMD_DECLARE_KERNELS

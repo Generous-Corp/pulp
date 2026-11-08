@@ -8,6 +8,13 @@ If the worktree is superseded, merged, or archived, follow its recorded
 successor/disposition instead of resuming it. If no status is recorded,
 classify the worktree before editing.
 
+## Choosing a UI stack
+
+The default UI is Vellum on Skia/Dawn. RmlUi (an opt-in Vellum component) and a
+bring-your-own native surface are alternatives for stated reasons only, never
+an agent's own pick. Read `CLAUDE.md` "Choosing a UI stack" and the `rmlui`
+skill before writing or choosing an editor's UI technology.
+
 ## Decisions contract (read before touching fleet/CI config)
 
 Settled build-system, CI, and release-automation decisions are recorded in

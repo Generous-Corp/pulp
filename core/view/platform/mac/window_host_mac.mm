@@ -316,7 +316,8 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
                                    ? _dragTargetCapture.live_in(*root)
                                    : nullptr;
                 if (!root || !target ||
-                    !pulp::view::transfer_input_focus(*root, target)) {
+                    !pulp::view::transfer_input_focus(*root, target,
+                                                      pulp::view::FocusCause::pointer)) {
                     _dragTargetCapture.reset();
                     _focusedView = root
                                        ? pulp::view::focused_input_under_root(*root)
@@ -801,7 +802,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
     gke.is_repeat = event.isARepeat;
 
     if (auto* fv = [self liveFocusedView]) {
-        if (fv->on_key_event(gke)) {
+        if (pulp::view::deliver_key_event(*fv, gke)) {
             [self startAnimationTimerIfNeeded];
             [self setNeedsDisplay:YES];
             return YES;
@@ -874,7 +875,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
                 ke.modifiers = mods;
                 ke.is_down = true;
                 ke.is_repeat = event.isARepeat;
-                if (fv->on_key_event(ke)) {
+                if (pulp::view::deliver_key_event(*fv, ke)) {
                     [self startAnimationTimerIfNeeded];
                     [self setNeedsDisplay:YES];
                     return;
@@ -891,32 +892,14 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
             else
                 next = pulp::view::View::focus_next(*self.rootView, old);
             if (next && next != old) {
-                pulp::view::ViewCapture next_capture;
-                next_capture.set(next);
-                if (old) {
-                    old->release_input_focus();
-                    old->on_focus_changed(false);
-                }
-                auto* liveRoot = self.rootView;
-                if (!liveRoot) {
-                    _focusedView = nullptr;
-                    [self setNeedsDisplay:YES];
-                    return;
-                }
-                next = next_capture.live_in(*liveRoot);
-                if (!next) {
-                    _focusedView = nullptr;
-                    [self setNeedsDisplay:YES];
-                    return;
-                }
-                _focusedView = next;
-                _focusedView->on_focus_changed(true);
-                liveRoot = self.rootView;
-                _focusedView = liveRoot
-                                   ? next_capture.live_in(*liveRoot)
-                                   : nullptr;
-                if (_focusedView)
-                    _focusedView->claim_input_focus();
+                // The same transfer a click uses: the previous holder blurs,
+                // the new one gains, and each side's ancestors are told, with
+                // the cause recorded as keyboard.
+                if (auto* liveRoot = self.rootView)
+                    pulp::view::transfer_input_focus(*liveRoot, next,
+                                                     pulp::view::FocusCause::keyboard);
+                _focusedView =
+                    self.rootView ? pulp::view::focused_input_under_root(*self.rootView) : nullptr;
             }
             [self setNeedsDisplay:YES];
             return;
@@ -991,7 +974,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
                 ke.modifiers = mods;
                 ke.is_down = true;
                 ke.is_repeat = event.isARepeat;
-                fv->on_key_event(ke);
+                pulp::view::deliver_key_event(*fv, ke);
                 [self startAnimationTimerIfNeeded];
                 [self setNeedsDisplay:YES];
             }
@@ -1007,6 +990,18 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
     }
 }
 
+// A modifier key went down or up with no other key. Tell the focused view and
+// any view a pointer press is captured by, so Shift pressed mid-drag takes
+// effect without the pointer moving.
+- (void)flagsChanged:(NSEvent*)event {
+    if (self.rootView) {
+        if (pulp::view::deliver_modifier_keys_changed(*self.rootView,
+                                                      modifiers_from_ns_flags(event.modifierFlags)))
+            [self setNeedsDisplay:YES];
+    }
+    [super flagsChanged:event];
+}
+
 // Symmetric key-up so released keys reach handlers that need both edges — most
 // importantly musical-typing note-off (without this, computer-keyboard notes
 // stick). Routes the global-key hook (is_down=false) then the focused view.
@@ -1019,7 +1014,8 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
             ke.is_down = false;
             if (self.rootView && self.rootView->on_global_key)
                 self.rootView->on_global_key(ke);
-            if (auto* fv = [self liveFocusedView]) fv->on_key_event(ke);
+            if (auto* fv = [self liveFocusedView])
+                pulp::view::deliver_key_event(*fv, ke);
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {
             std::cerr << "MacWindowHost keyUp error: " << e.what() << "\n";
@@ -1094,6 +1090,9 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
 - (void)refreshHoverCursor {
     if (!self.rootView || !_hoverCursor.has_pointer()) return;
     if (_pointerOverNativeChild) return;
+    // The frame may have slid a different view under a pointer that did not
+    // move; bring hover state in line before resolving the cursor.
+    pulp::view::reevaluate_stationary_hover(*self.rootView);
     auto style = [self resolveHoverCursorAt:_hoverCursor.pointer()];
     if (!style) return;
     if (auto changed = _hoverCursor.poll_resolved(*style))

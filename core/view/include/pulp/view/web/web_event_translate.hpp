@@ -398,6 +398,13 @@ public:
 
     bool handle_key(const BrowserKeyEvent& event) {
         const KeyEvent ke = translate_key(event);
+        // A bare modifier key going down or up changes the held-modifier set;
+        // auto-repeat does not. Report the change before ordinary key routing.
+        if (!event.is_repeat &&
+            (event.key == "Shift" || event.key == "Control" || event.key == "Alt" ||
+             event.key == "Meta") &&
+            deliver_modifier_keys_changed(root_, ke.modifiers))
+            mark_dirty();
         // Escape runs the shared dismissal policy before focused-view
         // delivery, matching every other host: a modal, an open ComboBox
         // dropdown, then the generalized overlay slot. Without it a popover
@@ -409,13 +416,13 @@ public:
             return true;
         }
         View* target = focus_target_ ? focus_target_ : &root_;
-        bool handled = target->on_key_event(ke);
+        bool handled = pulp::view::deliver_key_event(*target, ke);
 
         const std::string text = text_for_key(event);
         if (!text.empty() && focus_target_) {
             TextInputEvent te;
             te.text = text;
-            focus_target_->on_text_input(te);
+            pulp::view::deliver_text_input(*focus_target_, te);
             handled = true;
         }
         if (handled) mark_dirty();
@@ -436,7 +443,7 @@ public:
         if (text.empty() || !focus_target_) return false;
         TextInputEvent te;
         te.text = text;
-        focus_target_->on_text_input(te);
+        pulp::view::deliver_text_input(*focus_target_, te);
         mark_dirty();
         return true;
     }
@@ -467,17 +474,10 @@ private:
         if (on_dirty_) on_dirty_();
     }
 
-    void set_focus(View* target) {
+    void set_focus(View* target, FocusCause cause = FocusCause::pointer) {
         if (focus_target_ == target) return;
-        if (focus_target_) {
-            focus_target_->on_focus_changed(false);
-            focus_target_->release_input_focus();
-        }
-        focus_target_ = target;
-        if (focus_target_) {
-            focus_target_->on_focus_changed(true);
-            focus_target_->claim_input_focus();
-        }
+        transfer_input_focus(root_, target, cause);
+        focus_target_ = focused_input_under_root(root_);
     }
 
     bool pointer_down(const MouseEvent& me, int raw_pointer_id) {

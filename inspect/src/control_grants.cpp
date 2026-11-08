@@ -1,4 +1,5 @@
 #include <pulp/inspect/control_grants.hpp>
+#include <pulp/inspect/control_vendor_operations.hpp>
 
 #include <pulp/runtime/crypto.hpp>
 
@@ -210,6 +211,17 @@ ControlGrantResult ControlGrantStore::issue(
         impl_->audit_denial(request, control_grant_status_id(result.status));
         return result;
     }
+    // A scoped grant names only well-formed vendor ids and carries at least
+    // one vendor tier, so the scope can never be attached to nothing.
+    if (!request.vendor_operations.empty() &&
+        (request.vendor_operations.size() > kControlVendorOperationsMaximumCount ||
+         !std::ranges::all_of(request.vendor_operations,
+                              [](const auto& id) { return is_control_vendor_operation_id(id); }) ||
+         !std::ranges::any_of(request.capabilities, capability_is_vendor_tier))) {
+        result.status = ControlGrantStatus::InvalidRequest;
+        impl_->audit_denial(request, control_grant_status_id(result.status));
+        return result;
+    }
     if (request.ttl <= std::chrono::milliseconds::zero() ||
         request.ttl > impl_->config.maximum_ttl) {
         result.status = ControlGrantStatus::InvalidRequest;
@@ -257,6 +269,7 @@ ControlGrantResult ControlGrantStore::issue(
         .instance_id = registration->instance_id,
         .publication_id = registration->publication_id,
         .capabilities = std::move(request.capabilities),
+        .vendor_operations = std::move(request.vendor_operations),
         .consent_decision_id = std::move(consent.decision_id),
         .expires_at = now + ttl,
     };
@@ -576,6 +589,13 @@ std::vector<ControlGrant> ControlGrantStore::sweep_expired() {
     expired.insert(expired.end(), std::make_move_iterator(removed.begin()),
                    std::make_move_iterator(removed.end()));
     return expired;
+}
+
+bool ControlGrant::permits_vendor_operation(std::string_view operation_id,
+                                            InspectorCapability capability) const {
+    if (!capability_is_vendor_tier(capability) || vendor_operations.empty())
+        return true;
+    return std::ranges::find(vendor_operations, operation_id) != vendor_operations.end();
 }
 
 } // namespace pulp::inspect
