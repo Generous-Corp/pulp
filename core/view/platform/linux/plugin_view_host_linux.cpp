@@ -25,6 +25,7 @@
 #include <pulp/view/plugin_frame_renderer.hpp>  // shared with the Windows host
 #include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
 #include <pulp/view/host_frame_pump.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/drag_drop.hpp>
 
@@ -45,6 +46,7 @@
 #endif
 
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -113,7 +115,8 @@ public:
         // back the XdndSelection property the source writes; StructureNotify +
         // Exposure keep the existing repaint/reparent behavior.
         XSelectInput(display_, child_,
-                     ExposureMask | StructureNotifyMask | PropertyChangeMask);
+                     ExposureMask | StructureNotifyMask | PropertyChangeMask | ButtonPressMask |
+                         ButtonReleaseMask | PointerMotionMask | EnterWindowMask | LeaveWindowMask);
         gc_ = XCreateGC(display_, child_, 0, nullptr);
         init_xdnd();
         XFlush(display_);
@@ -137,6 +140,11 @@ public:
     ~X11PluginViewHost() override {
         frame_pump_.suspend();
         root_.set_frame_clock(nullptr);
+        if (display_ && pointer_grabbed_) {
+            XUngrabPointer(display_, CurrentTime);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+        }
         root_.set_plugin_view_host(nullptr);
 #ifdef PULP_HAS_SKIA
         // Publish the teardown before the surfaces die, so a consumer holding
@@ -180,6 +188,13 @@ public:
 
     void detach() override {
         if (!display_ || !child_) return;
+        if (pointer_grabbed_) {
+            XUngrabPointer(display_, CurrentTime);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+        }
+        pointer_capture_.reset();
+        pointer_button_ = MouseButton::none;
         XUnmapWindow(display_, child_);
         Window root_win = RootWindow(display_, screen_);
         XReparentWindow(display_, child_, root_win, 0, 0);
@@ -202,6 +217,9 @@ public:
     }
 
     void advance_frame(double timestamp_seconds) override {
+        PULP_TRACE_SCOPE_NAMED_ARGS("render", "linux_host_frame", "attached",
+                                    attached_.load(std::memory_order_acquire), "continuous",
+                                    continuous_frames_, "needs_repaint", needs_repaint_);
         // Timer callbacks can already be queued when a CLAP/VST3 editor is
         // removed. Check attachment at dispatch time so no detached tree is
         // walked or painted.
@@ -394,25 +412,168 @@ public:
             XEvent ev;
             XNextEvent(display_, &ev);
             switch (ev.type) {
-                case ClientMessage:
-                    handle_client_message(ev.xclient);
-                    break;
-                case SelectionNotify:
-                    handle_selection_notify(ev.xselection);
-                    break;
-                case ConfigureNotify:
-                    if (ev.xconfigure.window == child_ &&
-                        !resize_echo_.is_stale(ev.xconfigure.serial)) {
-                        configured_w = static_cast<uint32_t>(ev.xconfigure.width);
-                        configured_h = static_cast<uint32_t>(ev.xconfigure.height);
-                    }
-                    break;
-                default:
-                    break;
+            case ButtonPress:
+                handle_pointer_press(ev.xbutton);
+                break;
+            case ButtonRelease:
+                handle_pointer_release(ev.xbutton);
+                break;
+            case MotionNotify:
+                handle_pointer_motion(ev.xmotion);
+                break;
+            case EnterNotify:
+                handle_pointer_hover(ev.xcrossing.x, ev.xcrossing.y, ev.xcrossing.state);
+                break;
+            case LeaveNotify:
+                // Keep the capture alive during a drag that leaves the child;
+                // the next motion/release still belongs to this editor. A
+                // non-drag leave only clears the hover state.
+                if (!pointer_capture_.has_value())
+                    deliver_hover_move(root_, {-1.0f, -1.0f}, 0);
+                break;
+            case ClientMessage:
+                handle_client_message(ev.xclient);
+                break;
+            case SelectionNotify:
+                handle_selection_notify(ev.xselection);
+                break;
+            case ConfigureNotify:
+                if (ev.xconfigure.window == child_ &&
+                    !resize_echo_.is_stale(ev.xconfigure.serial)) {
+                    configured_w = static_cast<uint32_t>(ev.xconfigure.width);
+                    configured_h = static_cast<uint32_t>(ev.xconfigure.height);
+                }
+                break;
+            default:
+                break;
             }
         }
         return configured_w != 0 && configured_h != 0 &&
                handle_configure(configured_w, configured_h);
+    }
+
+    static uint16_t pointer_modifiers(unsigned state) {
+        uint16_t modifiers = kModNone;
+        if (state & ShiftMask)
+            modifiers |= kModShift;
+        if (state & ControlMask)
+            modifiers |= kModCtrl;
+        if (state & Mod1Mask)
+            modifiers |= kModAlt;
+        if (state & Mod4Mask)
+            modifiers |= kModMeta;
+        return modifiers;
+    }
+
+    Point pointer_point(int x, int y) const {
+        const float scale = scale_ > 0.0f ? scale_ : 1.0f;
+        return window_to_root_point({static_cast<float>(x) / scale, static_cast<float>(y) / scale});
+    }
+
+    static MouseButton pointer_button(unsigned button) {
+        switch (button) {
+        case Button1:
+            return MouseButton::left;
+        case Button2:
+            return MouseButton::middle;
+        case Button3:
+            return MouseButton::right;
+        default:
+            return MouseButton::none;
+        }
+    }
+
+    void handle_pointer_hover(int x, int y, unsigned state) {
+        deliver_hover_move(root_, pointer_point(x, y), pointer_modifiers(state));
+    }
+
+    void handle_pointer_press(const XButtonEvent& event) {
+        // X11 wheel steps arrive as synthetic button presses, not as a
+        // press/release gesture. Route them through the shared wheel path and
+        // never leave a stale pointer capture behind.
+        if (event.button == Button4 || event.button == Button5) {
+            WheelHost wheel_host;
+            deliver_mouse_wheel(root_, pointer_point(event.x, event.y), 0.0f,
+                                event.button == Button4 ? -1.0f : 1.0f,
+                                pointer_modifiers(event.state), wheel_host);
+            return;
+        }
+        const auto button = pointer_button(event.button);
+        if (button == MouseButton::none)
+            return;
+        const Point point = pointer_point(event.x, event.y);
+        auto* target = root_.hit_test(point);
+        pointer_capture_.reset();
+        pointer_button_ = button;
+        if (!target || !transfer_input_focus(root_, target)) {
+            pointer_button_ = MouseButton::none;
+            return;
+        }
+        pointer_capture_.set(target);
+        // A nested DAW editor wrapper may own the pointer immediately after a
+        // press. Grab it from the child once the view tree accepts the target
+        // so motion/release remain in this editor while the pointer leaves the
+        // child during a drag.
+        if (display_ &&
+            XGrabPointer(display_, child_, True,
+                         ButtonPressMask | ButtonReleaseMask | PointerMotionMask, GrabModeAsync,
+                         GrabModeAsync, None, None, event.time) == GrabSuccess) {
+            pointer_grabbed_ = true;
+        }
+        if (!deliver_mouse_down(root_, pointer_capture_.live_in(root_), point,
+                                pointer_modifiers(event.state), 1, true, button))
+            pointer_capture_.reset();
+        if (!pointer_capture_.has_value() && pointer_grabbed_) {
+            XUngrabPointer(display_, event.time);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+            pointer_button_ = MouseButton::none;
+        }
+    }
+
+    void handle_pointer_motion(const XMotionEvent& event) {
+        const Point point = pointer_point(event.x, event.y);
+        const auto modifiers = pointer_modifiers(event.state);
+        if (auto* target = pointer_capture_.live_in(root_)) {
+            deliver_mouse_drag(root_, target, point, modifiers, 1, pointer_button_,
+                               PointerAttributes{});
+            return;
+        }
+        deliver_hover_move(root_, point, modifiers);
+    }
+
+    void handle_pointer_release(const XButtonEvent& event) {
+        const auto button = pointer_button(event.button);
+        if (button == MouseButton::none)
+            return;
+        auto* target = pointer_capture_.live_in(root_);
+        if (!target) {
+            pointer_capture_.reset();
+            pointer_button_ = MouseButton::none;
+            if (display_ && pointer_grabbed_) {
+                XUngrabPointer(display_, event.time);
+                XFlush(display_);
+                pointer_grabbed_ = false;
+            }
+            return;
+        }
+        MouseUpHost host;
+        if (button == MouseButton::left) {
+            host.fire_click = [](const std::function<void()>& click_handler, const std::string&,
+                                 uint16_t) {
+                if (click_handler)
+                    click_handler();
+            };
+        }
+        deliver_mouse_up(root_, target, pointer_point(event.x, event.y),
+                         pointer_modifiers(event.state), 1, host, button, PointerAttributes{});
+        pointer_capture_.reset();
+        pointer_button_ = MouseButton::none;
+        if (display_ && pointer_grabbed_) {
+            XUngrabPointer(display_, event.time);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+        }
     }
 
     // Mirror set_size()'s surface sizing for a size the host already applied
@@ -470,6 +631,9 @@ private:
     bool needs_repaint_ = true;
     bool continuous_frames_ = false;
     bool in_frame_tick_ = false;
+    ViewCapture pointer_capture_;
+    MouseButton pointer_button_ = MouseButton::none;
+    bool pointer_grabbed_ = false;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
     X11ResizeEcho resize_echo_;
     float design_viewport_w_ = 0.0f;
