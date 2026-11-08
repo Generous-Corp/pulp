@@ -6,13 +6,34 @@
 
 namespace pulp::graph {
 
+/// The payload lane represented by a bounded runtime edge observation.
+/// Audio samples use peak/rms; control samples use value/value_end; event
+/// samples use payload_count plus the first event's status and offset.
+enum class GraphRuntimeProbeKind : std::uint8_t {
+    Audio = 0,
+    Control = 1,
+    Event = 2,
+};
+
 struct GraphRuntimeProbeSample {
+    GraphRuntimeProbeKind kind = GraphRuntimeProbeKind::Audio;
     std::uint64_t sequence = 0;
     std::uint64_t timestamp_samples = 0;
     std::uint32_t edge_index = 0;
     std::uint32_t frames = 0;
     float peak = 0.0f;
     float rms = 0.0f;
+    // Control lane: selected edge's mapped/slewed contribution at block
+    // start/end, before destination mixing and bounds. Event lane: number of
+    // events delivered on this edge and first event metadata.
+    float value = 0.0f;
+    float value_end = 0.0f;
+    std::uint32_t payload_id = 0;
+    std::uint32_t payload_count = 0;
+    std::uint32_t payload_status = 0;
+    std::int32_t payload_offset = 0;
+    // Event lane: source-buffer drops observed before the destination copy.
+    std::uint32_t payload_dropped = 0;
 };
 
 // Single producer / single consumer bounded ring. An unattached probe is a
