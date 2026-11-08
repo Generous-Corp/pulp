@@ -147,7 +147,9 @@ def shipyard_ctest_contract_errors(command: str) -> list[str]:
 
 def pulp_test_suite_call(text: str, name: str) -> str:
     match = re.search(
-        rf"pulp_add_test_suite\(\s*{re.escape(name)}\b.*?\)",
+        # The name must end here: \b would accept a hyphenated longer name
+        # such as pulp-test-audio-decoder-corpus for pulp-test-audio.
+        rf"pulp_add_test_suite\(\s*{re.escape(name)}(?![\w-]).*?\)",
         text,
         re.S,
     )
@@ -162,7 +164,7 @@ def catch_test_suite_call(text: str, name: str, test_spec: str) -> str:
     # pulp_add_test_suite() call when the suite is a grouped member; both
     # carry the spec as TEST_SPEC.
     calls = re.findall(
-        rf"(?:catch_discover_tests|pulp_add_test_suite)\(\s*{re.escape(name)}\b.*?\)",
+        rf"(?:catch_discover_tests|pulp_add_test_suite)\(\s*{re.escape(name)}(?![\w-]).*?\)",
         text,
         re.S,
     )
