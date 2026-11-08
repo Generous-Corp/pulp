@@ -242,7 +242,24 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     {'include': 'pulp/midi/sysex_chunk_assembler.hpp', 'fingerprint': 'sha256:01c367d4c8c832ec83ca837901b08da9b4a8195a3caa8d06cc37f03113bc6c08', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Joins driver receive buffers of one long SysEx message for the Windows multimedia backend; not a generator-facing capability.'},
 
     {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
+    {'include': 'pulp/audio/wav_decoder.hpp', 'fingerprint': 'sha256:78e0bfc06ff17643493ebb343f9440348149324221e525de656a016d855be009', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Byte-span RIFF/WAVE inspector and decoder for import surfaces; reviewed when interpret_wav_format exposed the fmt interpretation for the layout report. Not a generator-facing capability.'},
+    {'include': 'pulp/audio/audio_file_layout.hpp', 'fingerprint': 'sha256:8fd849f594a11af739d14c42370b2fa74460a1e423cde2cab1ebd60c9ab74694', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Developer-tool byte layout report over audio containers (regions, warnings, decoder verdict) behind `pulp audio inspect`; reads headers only. Not a generator-facing capability.'},
+    {'include': 'pulp/audio/audio_file_layout_json.hpp', 'fingerprint': 'sha256:7c02abb2e23707387db7f67ef4612ee8ee411241e1b16de31908866eea49b1ca', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Versioned JSON serializer for the layout report (pulp.audio.file_inspect.v1), a CLI/MCP developer surface. Not a generator-facing capability.'},
 
+    {
+        "include": "pulp/signal/spectrogram.hpp",
+        "fingerprint": "sha256:928fb4ed526f927080f952f5290b7508d79ad4cf2e94aa0c433cdb1a9f20f78f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Spectrogram display math: colour ramps and bin-to-display frequency "
+            "axis mapping for the realtime visualization bridge and the offline "
+            "audio image renderers. It draws spectra that other capabilities "
+            "compute; it is not a generator-facing DSP transform or a graph "
+            "contract. The double-precision axis overloads and configurable floor "
+            "were added for the offline renderers without changing the float API."
+        ),
+    },
     {
         "include": "pulp/signal/spectral_frame_codec.hpp",
         "fingerprint": "sha256:43e9fbdc2c1acf08d70523589b8cf25d4a4e98ea531898bfc2978aa5eec72a37",
@@ -278,7 +295,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/audio/format_registry.hpp",
-        "fingerprint": "sha256:caedada7e925bc78317407961d313052ce4e92c14ec12ca51477e567823ac128",
+        "fingerprint": "sha256:82a04fe0dd2b00f685616f766a47f81ef6c284402ea628df4347b0b43920cf3d",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

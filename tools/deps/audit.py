@@ -1176,6 +1176,8 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, 
     return ("mismatch" if problems else "match"), problems
 
 
+# The CMake file configure reads the gpu-runtime pin from.
+GPU_RUNTIME_PIN_FILE = "tools/cmake/PulpGpuRuntime.cmake"
 GPU_RUNTIME_COMMIT_RE = re.compile(r'set\(\s*PULP_GPU_RUNTIME_COMMIT\s+"([0-9a-f]{40})"\s*\)')
 GPU_RUNTIME_VERSION_RE = re.compile(r'set\(\s*PULP_GPU_RUNTIME_VERSION\s+"([0-9]+\.[0-9]+\.[0-9]+)"\s*\)')
 
@@ -1189,6 +1191,15 @@ def gpu_runtime_pin_agreement(manifest: list[dict], root: Path = ROOT) -> list[s
     """
     entry = next((dep for dep in manifest if dep.get("name") == GPU_RUNTIME_ENTRY), None)
     if entry is None:
+        # Nothing to agree with is only fine while nothing is pinned.
+        try:
+            pinning = GPU_RUNTIME_COMMIT_RE.search(
+                (root / GPU_RUNTIME_PIN_FILE).read_text(encoding="utf-8"))
+        except OSError:
+            pinning = None
+        if pinning:
+            return [f"{GPU_RUNTIME_PIN_FILE} fetches gpu-runtime at {pinning.group(1)}, but the "
+                    f"manifest has no {GPU_RUNTIME_ENTRY} entry"]
         return []
     sources = entry.get("source_files") or []
     if len(sources) != 1:
