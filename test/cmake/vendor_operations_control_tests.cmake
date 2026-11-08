@@ -47,9 +47,11 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
                 "$<TARGET_FILE_DIR:${_e2e}>/pulp-mcp"
         COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:${_e2e}>"
                 "$<TARGET_FILE_DIR:${_e2e}>/pulp-control-broker"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${_e2e}>/../tools/cli"
+        # Inside this test's own directory, never a shared ../tools/cli that
+        # another control e2e target would overwrite.
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${_e2e}>/tools/cli"
         COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:${_e2e}>"
-                "$<TARGET_FILE_DIR:${_e2e}>/../tools/cli/pulp-cpp"
+                "$<TARGET_FILE_DIR:${_e2e}>/tools/cli/pulp-cpp"
         VERBATIM)
     pulp_scaled_test_timeout(_pulp_vendor_e2e_timeout 180)
     catch_discover_tests(${_e2e}
