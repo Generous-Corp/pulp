@@ -170,6 +170,16 @@
             "subcommands": []
           },
           {
+            "name": "formats",
+            "arguments": [
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
             "name": "sampler-mip build",
             "arguments": [
               {
@@ -277,6 +287,53 @@
             "subcommands": []
           },
           {
+            "name": "inspect",
+            "arguments": [
+              {
+                "name": "file",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--include-metadata-text",
+                "kind": "flag"
+              },
+              {
+                "name": "--absolute-paths",
+                "kind": "flag"
+              },
+              {
+                "name": "--raw",
+                "kind": "flag"
+              },
+              {
+                "name": "--format",
+                "kind": "option"
+              },
+              {
+                "name": "--channels",
+                "kind": "option"
+              },
+              {
+                "name": "--rate",
+                "kind": "option"
+              },
+              {
+                "name": "--endian",
+                "kind": "option"
+              },
+              {
+                "name": "--offset",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
             "name": "scope",
             "arguments": [
               {
@@ -323,10 +380,144 @@
             "subcommands": []
           },
           {
+            "name": "spectrogram",
+            "arguments": [
+              {
+                "name": "file",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--png",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--fft",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--hop",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--window",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--scale",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--db-range",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--start",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--end",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--channel",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--width",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--height",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--absolute-paths",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "waveform",
+            "arguments": [
+              {
+                "name": "file",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--png",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--select",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--start",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--end",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--channel",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--width",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--height",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--absolute-paths",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
             "name": "validate summarize",
             "arguments": [
               {
                 "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--absolute-paths",
                 "kind": "flag"
               }
             ],
@@ -4860,6 +5051,10 @@
         "disposition": "excluded"
       },
       {
+        "name": "pulp_audio_file_inspect",
+        "disposition": "excluded"
+      },
+      {
         "name": "pulp_audio_model_activate",
         "disposition": "excluded"
       },
@@ -4889,6 +5084,14 @@
       },
       {
         "name": "pulp_audio_scope",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_spectrogram",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_waveform",
         "disposition": "excluded"
       },
       {
