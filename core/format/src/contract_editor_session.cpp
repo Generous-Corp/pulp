@@ -1,6 +1,7 @@
 #include <pulp/format/contract_editor_session.hpp>
 
 #include <pulp/format/detail/main_thread_timer.hpp>
+#include <pulp/format/native_surface_host.hpp>
 
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
@@ -39,11 +40,20 @@ class ContractEditorSession::Context final : public EditorContext {
     EditorHostKind host_kind() const override {
         return kind_;
     }
+    void* query_extension(std::string_view id) override {
+        if (id == native_surface_extension_id)
+            return as_extension(native_surface_);
+        return nullptr;
+    }
+    NativeSurfaceHostState& native_surface() {
+        return native_surface_;
+    }
 
   private:
     ParamPort& port_;
     EditorHostKind kind_;
     HostHooks hooks_;
+    NativeSurfaceHostState native_surface_;
     std::atomic<bool> owner_gone_{false};
 };
 
@@ -248,6 +258,9 @@ bool ContractEditorSession::set_size(std::uint32_t width, std::uint32_t height) 
 bool ContractEditorSession::set_scale(double scale) {
     if (!editor_ || !(scale > 0.0))
         return false;
+    // The host's word on scale holds whether or not the editor takes the size.
+    if (context_)
+        context_->native_surface().set_backing_scale(scale);
     // The editor keeps the scale in its size, so a later set_size() carries it.
     EditorSize size = this->size();
     size.scale = scale;
@@ -299,8 +312,15 @@ void ContractEditorSession::focus_changed(bool focused) {
 }
 
 void ContractEditorSession::visibility_changed(bool visible) {
+    if (context_)
+        context_->native_surface().set_visibility(visible ? NativeSurfaceVisibility::visible
+                                                          : NativeSurfaceVisibility::hidden);
     if (editor_)
         editor_->visibility_changed(visible);
+}
+
+NativeSurfaceHostState* ContractEditorSession::native_surface_host() {
+    return context_ ? &context_->native_surface() : nullptr;
 }
 
 } // namespace pulp::format
