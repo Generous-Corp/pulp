@@ -245,6 +245,29 @@ TEST_CASE("Host ingress projection refusal seals the active block",
     CHECK(fixture.graph.process_checked(block.out, block.in, 1) == TriggerGraphResult::Accepted);
 }
 
+TEST_CASE("Host ingress refuses a frame-count mismatch before projection",
+          "[trigger][g5][host-ingress]") {
+    Fixture fixture{2, 32, true};
+    Block block;
+    HostEventRecord event;
+    event.epoch = 1;
+    event.absolute_sample = 3;
+    event.producer_sequence = 1;
+    event.producer = fixture.producer;
+    event.midi = pulp::midi::MidiEvent::note_on(1, 60, 100);
+
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 4) == HostEventResult::Accepted);
+    REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 2) ==
+          TriggerGraphResult::ProcessingFailure);
+
+    // The mismatch seals the block without consuming the staged record, so
+    // the host can retry the exact block once its buffer size is corrected.
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 4) == HostEventResult::Accepted);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 4) == TriggerGraphResult::Accepted);
+    CHECK(fixture.graph.host_event_trace().size() == 1);
+}
+
 TEST_CASE("Host ingress preflights MPE fanout and retries without tracker mutation",
           "[trigger][g5][host-ingress][mpe][negative-control]") {
     Fixture fixture{2, 8, true};
