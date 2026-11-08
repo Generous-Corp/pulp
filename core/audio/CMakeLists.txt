@@ -105,6 +105,18 @@ if(APPLE)
     target_sources(pulp-audio PRIVATE src/coreaudio_format.mm)
 endif()
 
+# System codec writer (system_audio_codec.hpp): ExtAudioFile on Apple, Media
+# Foundation on Windows, refused elsewhere. Uses only operating-system codecs.
+target_sources(pulp-audio PRIVATE src/system_audio_codec.cpp)
+if(APPLE)
+    target_sources(pulp-audio PRIVATE src/system_audio_codec_apple.mm)
+elseif(WIN32)
+    target_sources(pulp-audio PRIVATE src/system_audio_codec_win.cpp)
+    target_link_libraries(pulp-audio PRIVATE mfplat mfreadwrite mfuuid)
+else()
+    target_sources(pulp-audio PRIVATE src/system_audio_codec_stub.cpp)
+endif()
+
 # Optional codec writers — conditionally compiled when packages are installed.
 # Install via: pulp add libflac, pulp add lame --accept-license LGPL-2.0, etc.
 if(TARGET FLAC)
