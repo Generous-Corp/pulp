@@ -43,7 +43,14 @@
     {
       "path": "test/test_vst3_slot_process_fidelity.cpp",
       "needles": [
-        "VST3 latency restart reaches SignalGraph latency compensation"
+        "VST3 latency restart reaches SignalGraph latency compensation",
+        "VST3 transport delivery follows the host setting from the next block"
+      ]
+    },
+    {
+      "path": "core/host/src/plugin_slot_process_request.hpp",
+      "needles": [
+        "std::atomic<bool> deliver_transport_"
       ]
     }
   ],
