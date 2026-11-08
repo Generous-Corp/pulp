@@ -50,6 +50,9 @@ EXPECTED_ACCEPTANCE_SPLITS: dict[str, tuple[bool, bool, str]] = {
     "wav-data-size-zero.wav": (
         False, True, "the registry refuses a zero-frame WAV; tracked in Generous-Corp/pulp "
         "issue 11788"),
+    "wav-block-align-smaller-than-frame.wav": (
+        False, True, "nBlockAlign smaller than channels x sample width; the registry refuses a "
+        "frame layout the header contradicts, libsndfile derives the stride"),
     "wav-duplicate-fmt.wav": (
         True, False, "two fmt chunks: the registry decodes by the last one, libsndfile refuses; "
         "tracked in Generous-Corp/pulp issue 11788"),

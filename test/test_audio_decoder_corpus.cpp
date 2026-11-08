@@ -219,6 +219,7 @@ const std::set<std::string>& seeds_that_may_refuse() {
         "wav-w64-pcm16-mono.wav",
         "mp3-xing-declares-more-than-stream.mp3",
         "mp3-id3v2-scan-counts-undecodable-frame.mp3",
+        "wav-block-align-smaller-than-frame.wav",
     };
     return seeds;
 }
@@ -288,6 +289,9 @@ const std::vector<ExpectedWavSplit>& expected_wav_splits() {
         {"wav-rf64-ds64.wav", true, false},
         {"wav-riff-size-lying-small.wav", true, false},
         {"wav-fmt-after-data.wav", false, true},
+        // nBlockAlign smaller than channels x sample width: the registry
+        // refuses a frame layout the header contradicts, dr_wav derives it.
+        {"wav-block-align-smaller-than-frame.wav", false, true},
     };
     return splits;
 }
@@ -495,6 +499,17 @@ TEST_CASE("an MP3 with no declared length reports the frames the decoder deliver
     REQUIRE(data.has_value());
     CHECK(data->num_frames() == 3456u);
     CHECK(info->num_frames == data->num_frames());
+}
+
+TEST_CASE("a WAV whose block align is smaller than its channels' samples is refused",
+          "[fuzz][audio][wav]") {
+    // libFuzzer reproducer: two 8-bit channels declared with nBlockAlign 1,
+    // which once walked the reader off the end of its raw block.
+    const auto path = corpus_dir() / "wav-block-align-smaller-than-frame.wav";
+    REQUIRE(fs::exists(path));
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    CHECK_FALSE(registry.read_info(path.string()).has_value());
+    CHECK_FALSE(registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
 }
 
 TEST_CASE("a comment header with a negative string length is refused without allocating",

@@ -229,3 +229,36 @@ function(pulp_patch_choc_wav_extensible_container_bits choc_source_dir)
     file(WRITE "${_pulp_choc_wav_header}" "${_pulp_choc_wav}")
     message(STATUS "Pulp: applied CHOC WAV extensible container-width patch")
 endfunction()
+
+# A WAV fmt chunk carries both nBlockAlign (the frame stride) and the channel
+# count and sample width that imply it. CHOC trusts a non-zero nBlockAlign
+# and only derives it when it is zero, so a header declaring two 8-bit
+# channels with a block of one byte makes the reader step through the data
+# one byte per frame while copying two samples per frame: the last frame of
+# each 2048-byte raw block reads past the stack buffer (an AddressSanitizer
+# stack-buffer-overflow found by the audio decoder fuzz target). A block
+# smaller than its channels' samples cannot be laid out, so the patch refuses
+# it; a larger block (padding) stays legal.
+function(pulp_patch_choc_wav_block_align_bounds choc_source_dir)
+    set(_pulp_choc_wav_header
+        "${choc_source_dir}/choc/audio/choc_AudioFileFormat_WAV.h")
+    if(NOT EXISTS "${_pulp_choc_wav_header}")
+        message(FATAL_ERROR
+            "Pulp: CHOC WAV header not found for the block-align patch: ${_pulp_choc_wav_header}")
+    endif()
+
+    file(READ "${_pulp_choc_wav_header}" _pulp_choc_wav)
+    _pulp_choc_apply_patch(_pulp_choc_wav "WAV block-align bounds"
+"            if (frameStride == 0)
+                frameStride = properties.numChannels * (bitsPerSample / 8u);
+
+            sampleStride = bitsPerSample / 8u;"
+"            sampleStride = bitsPerSample / 8u;
+
+            if (frameStride == 0)
+                frameStride = properties.numChannels * sampleStride;
+            else if (frameStride < properties.numChannels * sampleStride)
+                throwFormatException(); // a block smaller than its channels' samples cannot be laid out")
+    file(WRITE "${_pulp_choc_wav_header}" "${_pulp_choc_wav}")
+    message(STATUS "Pulp: applied CHOC WAV block-align bounds patch")
+endfunction()
