@@ -54,7 +54,7 @@ from agent_capability_transaction import recover_transaction, write_transaction
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
 MANIFEST_REVISION = 91
-SURFACE_INVENTORY_VERSION = 204
+SURFACE_INVENTORY_VERSION = 205
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
 )
@@ -771,6 +771,17 @@ def rendered(root: pathlib.Path | None = None) -> str:
     return json.dumps(document(root), indent=2, ensure_ascii=False) + "\n"
 
 
+def render_history(history: dict[str, Any]) -> str:
+    """Render append-only history without repeating indentation overhead.
+
+    Each entry carries a complete manifest and public-surface snapshot. The
+    history is machine-validated JSON, and compact rendering keeps the
+    generated blob below GitHub's 100 MiB object limit without dropping any
+    provenance or changing its parsed representation.
+    """
+    return json.dumps(history, ensure_ascii=False, separators=(",", ":")) + "\n"
+
+
 def _counter_problems(
     old_history: Any, entries: list[dict[str, Any]], previous: Any,
     previous_surface: Any, doc: dict[str, Any], surface_document: dict[str, Any],
@@ -986,7 +997,7 @@ def main() -> int:
             {
                 snapshot: output,
                 surface_snapshot: surface_output,
-                history_path: json.dumps(history, indent=2, ensure_ascii=False) + "\n",
+                history_path: render_history(history),
                 fixture: compile_fixture(),
             },
             transaction_path,

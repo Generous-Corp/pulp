@@ -99,6 +99,12 @@ Maintain three related artifacts:
   append-only evolution history checked against the protected Git tip. Shallow
   GitHub Actions checkouts fetch the immutable event base SHA when necessary.
 
+The append-only history is generated as compact JSON. Keep every parsed entry
+and its provenance, but avoid repeating indentation across the full snapshots:
+the artifact must stay below GitHub's 100 MiB blob limit. After a regeneration,
+verify the parsed entries are unchanged and check the byte count with
+`wc -c tools/agent-capabilities/contract-history.json`.
+
 The consumer manifest, its schema, and the handoff schema install into the SDK.
 Official release packaging stamps `agent-capability-handoff.json` only after
 installation; it binds the exact SDK source SHA and platform to the installed
