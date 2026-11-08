@@ -2337,12 +2337,14 @@
    "data": "none",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [],
+   "runtime_targets": [
+    "pulp-test-objc-unique-fixture"
+   ],
    "sources": [],
    "spawning_sources": [
     "test/test_platform_objc_unique_class.mm"
    ],
-   "spawns": "undeclared",
+   "spawns": "declared",
    "undeclared_sources": []
   },
   "pulp-test-plugin-manager-panel": {
