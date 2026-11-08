@@ -139,7 +139,7 @@ class GitHelperTests(unittest.TestCase):
             self.assertEqual(gc.repo_root(), pathlib.Path("/repo/path"))
         run.assert_called_once_with(
             ["git", "rev-parse", "--show-toplevel"],
-            check=True, capture_output=True, text=True,
+            timeout=10.0, check=True, capture_output=True, text=True,
         )
 
     def test_git_diff_names_splits_lines_and_drops_blanks(self) -> None:
