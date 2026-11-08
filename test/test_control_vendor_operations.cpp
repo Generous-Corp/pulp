@@ -719,3 +719,71 @@ TEST_CASE("vendor tables are retained only for accepted registrations and are re
     // The live fixture registration keeps its own table through eviction.
     CHECK(fixture.broker.vendor_operations(fixture.registration.manifest_digest));
 }
+
+TEST_CASE("deeply nested vendor declarations are refused before parsing",
+          "[inspect][control][vendor][security]") {
+    // About 128 KiB of '[' passes the size and printable-ASCII checks. Parsing
+    // it recursively would exhaust the stack, so it must be refused first.
+    const std::string brackets(131000, '[');
+    ControlVendorOperationsDiagnostics diagnostics;
+    CHECK_FALSE(parse_control_vendor_operations(brackets, kBundleId, &diagnostics));
+    CHECK(diagnostics.code == ControlVendorOperationsError::Limit);
+    CHECK(control_vendor_operations_error_id(diagnostics.code) == "vendor-operations.limit");
+
+    // Nesting hidden inside an otherwise valid declaration, and brackets inside
+    // a string do not count.
+    std::string nested;
+    for (int i = 0; i < 4000; ++i)
+        nested += R"({"a":)";
+    nested += "1";
+    nested += std::string(4000, '}');
+    CHECK_FALSE(parse_control_vendor_operations(
+        replace_once(std::string(kDeclaration), R"("maxLength": 32})",
+                     R"("maxLength": 32, "default": )" + nested + "}"),
+        kBundleId, &diagnostics));
+    CHECK(diagnostics.code == ControlVendorOperationsError::Limit);
+    CHECK(parse_control_vendor_operations(replace_once(std::string(kDeclaration),
+                                                       R"("Count the presets in one bank.")",
+                                                       "\"" + std::string(400, '[') + "\""),
+                                          kBundleId));
+
+    std::string error;
+    CHECK_FALSE(validate_control_vendor_schema(std::string(131000, '{'), error));
+    CHECK(error.find("nests deeper") != std::string::npos);
+
+    // The deepest schema the checker allows still fits under the bound.
+    std::string schema = R"({"type":"string","maxLength":4})";
+    for (int level = 0; level < 15; ++level)
+        schema =
+            R"({"type":"object","additionalProperties":false,"properties":{"x":)" + schema + "}}";
+    INFO(error);
+    CHECK(validate_control_vendor_schema(schema, error));
+    CHECK_FALSE(validate_control_vendor_schema(
+        R"({"type":"object","additionalProperties":false,"properties":{"x":{"type":"array","maxItems":1e300,"items":{"type":"boolean"}}}})",
+        error));
+}
+
+TEST_CASE("the broker refuses a deeply nested declaration at registration",
+          "[inspect][control][vendor][broker][security]") {
+    VendorBrokerFixture fixture;
+    auto manifest = vendor_manifest(std::string(131000, '['));
+    const auto refused = fixture.broker.register_instance(
+        fixture.host,
+        ControlRegistrationRequest{ControlHostTier::Standalone, "session-deep", "instance-deep",
+                                   "publication-deep", std::move(manifest), std::string(64, 'e')});
+    CHECK(refused.status == ControlIdentityStatus::InvalidRequest);
+    CHECK_FALSE(refused.registration);
+    // The serialized manifest carrying the same declaration is refused too.
+    auto serialized = vendor_manifest();
+    const auto json = serialize_control_manifest(serialized);
+    ControlManifestDiagnostics diagnostics;
+    auto deep = json;
+    const auto at = deep.find("\"vendor_operations\": \"");
+    REQUIRE(at != std::string::npos);
+    const auto value_start = at + std::string_view("\"vendor_operations\": \"").size();
+    const auto value_end = deep.find("\"\n", value_start);
+    REQUIRE(value_end != std::string::npos);
+    deep.replace(value_start, value_end - value_start, std::string(131000, '['));
+    CHECK_FALSE(parse_control_manifest(deep, &diagnostics));
+    CHECK(diagnostics.code == ControlManifestError::InvalidVendorOperations);
+}

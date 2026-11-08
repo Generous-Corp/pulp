@@ -44,12 +44,52 @@ bool printable_document(std::string_view document) {
     });
 }
 
+// The deepest a valid declaration nests: root, operations array, operation,
+// then a schema of kMaximumSchemaDepth levels where each level adds at most two
+// JSON containers (properties then property, or oneOf then branch), plus enum
+// arrays. Anything deeper is refused before the recursive parser runs.
+constexpr std::size_t kMaximumDeclarationJsonDepth = 3 + 2 * kMaximumSchemaDepth + 4;
+
+/// Non-recursive, string-aware nesting check. choc's parser recurses once per
+/// container, so an unbounded `[[[[...` declaration would exhaust the stack;
+/// this bounds the depth first, in constant stack.
+bool json_depth_within(std::string_view json, std::size_t maximum) {
+    std::size_t depth = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (const char c : json) {
+        if (in_string) {
+            if (escaped)
+                escaped = false;
+            else if (c == '\\')
+                escaped = true;
+            else if (c == '"')
+                in_string = false;
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+        } else if (c == '[' || c == '{') {
+            if (++depth > maximum)
+                return false;
+        } else if ((c == ']' || c == '}') && depth > 0) {
+            --depth;
+        }
+    }
+    return true;
+}
+
+// Integers outside +/-2^53 are not exact in a double, and casting one beyond
+// int64 range is undefined, so they are not integers for these bounds.
+constexpr double kMaximumExactInteger = 9007199254740992.0;
+
 bool is_integer(const choc::value::ValueView& value) {
     if (value.isInt32() || value.isInt64())
         return true;
     if (value.isFloat64()) {
         const auto number = value.getFloat64();
-        return std::isfinite(number) && std::floor(number) == number;
+        return std::isfinite(number) && std::floor(number) == number &&
+               std::abs(number) <= kMaximumExactInteger;
     }
     return false;
 }
@@ -447,6 +487,11 @@ bool ControlVendorOperationTable::declares_tier(ControlVendorTier tier) const {
 }
 
 bool validate_control_vendor_schema(std::string_view schema_json, std::string& error, bool root) {
+    if (!json_depth_within(schema_json, kMaximumDeclarationJsonDepth)) {
+        error = "schema nests deeper than " + std::to_string(kMaximumDeclarationJsonDepth) +
+                " JSON levels";
+        return false;
+    }
     try {
         const auto schema = choc::json::parse(schema_json);
         SchemaChecker checker;
@@ -478,6 +523,11 @@ parse_control_vendor_operations(std::string_view document, std::string_view bund
     if (!printable_document(document))
         return fail(ControlVendorOperationsError::Encoding,
                     "vendor operation declaration must be printable ASCII");
+
+    if (!json_depth_within(document, kMaximumDeclarationJsonDepth))
+        return fail(ControlVendorOperationsError::Limit,
+                    "vendor operation declaration nests deeper than " +
+                        std::to_string(kMaximumDeclarationJsonDepth) + " JSON levels");
 
     choc::value::Value root;
     try {
