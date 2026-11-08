@@ -39,7 +39,10 @@ from agent_capability_history import (
     history_problems,
     pending_counters,
     protected_base_problems,
+    HistoryFormatError,
+    rendered_history,
     state_is_recorded,
+    stored_history_problems,
     updated_history_entries,
 )
 from agent_capability_registry import (
@@ -966,21 +969,30 @@ def main() -> int:
             if problems:
                 return _print_problems(problems)
         history = _load_optional_json(history_path)
-        entries = updated_history_entries(
-            history,
-            previous,
-            previous_surface,
-            doc,
-            surface_document,
-            initial_bootstrap=initial_bootstrap,
-            migrate_unpublished=args.migrate_unpublished_v1,
-        )
-        if not args.migrate_unpublished_v1:
-            problems.extend(_counter_problems(
-                history, entries, previous, previous_surface, doc, surface_document))
-        if problems:
-            return _print_problems(problems)
-        history = history_document(entries)
+        # A bootstrap or unpublished migration replaces the history outright;
+        # any other write must be able to read the history it appends to.
+        if not (initial_bootstrap or args.migrate_unpublished_v1):
+            problems.extend(stored_history_problems(history))
+            if problems:
+                return _print_problems(problems)
+        try:
+            entries = updated_history_entries(
+                history,
+                previous,
+                previous_surface,
+                doc,
+                surface_document,
+                initial_bootstrap=initial_bootstrap,
+                migrate_unpublished=args.migrate_unpublished_v1,
+            )
+            if not args.migrate_unpublished_v1:
+                problems.extend(_counter_problems(
+                    history, entries, previous, previous_surface, doc, surface_document))
+            if problems:
+                return _print_problems(problems)
+            history = history_document(entries)
+        except HistoryFormatError as error:
+            return _print_problems([str(error)])
         problems = history_problems(history, doc, surface_document)
         problems.extend(
             protected_base_problems(
@@ -993,7 +1005,7 @@ def main() -> int:
             {
                 snapshot: output,
                 surface_snapshot: surface_output,
-                history_path: json.dumps(history, indent=2, ensure_ascii=False) + "\n",
+                history_path: rendered_history(history),
                 fixture: compile_fixture(),
             },
             transaction_path,
@@ -1028,6 +1040,8 @@ def main() -> int:
             if (root / ".git").exists() else None
         )
         history_issues = history_problems(history, doc, surface_document)
+        if not history_issues:
+            history_issues.extend(history_text_problems(history_path, history))
         if isinstance(history, dict):
             history_issues.extend(
                 protected_base_problems(
@@ -1142,9 +1156,25 @@ def _load_optional_json(path: pathlib.Path) -> Any:
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text())
-    except json.JSONDecodeError as error:
-        return {"_invalid": str(error)}
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, RecursionError) as error:
+        return {"_invalid": str(error) or type(error).__name__}
+
+
+def history_text_problems(path: pathlib.Path, history: Any) -> list[str]:
+    """The history file must be byte-for-byte its own rendering.
+
+    Parsing alone cannot see a duplicated key or reformatted whitespace that
+    reads back as the honest document; only the text comparison does."""
+    if not path.exists() or not isinstance(history, dict):
+        return []
+    try:
+        expected = rendered_history(history)
+    except (KeyError, TypeError) as error:
+        return [f"{HISTORY_FILE} cannot be rendered: {error}"]
+    if path.read_text(encoding="utf-8") != expected:
+        return [f"{HISTORY_FILE} is not in its rendered form; rerun --write"]
+    return []
 
 
 

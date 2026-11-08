@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import pathlib
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
@@ -24,13 +26,271 @@ from agent_capability_evolution import (
     surface_evolution_problems,
 )
 
-HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
+HISTORY_SCHEMA = "pulp.agent-capability-history.v2"
+# The original layout repeated every entry's whole material inline. It is still
+# read (a protected base may hold it, and --write converts it), never written.
+LEGACY_HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
 HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
+# GitHub refuses any pushed file over 100 MB. The guard sits far below that so
+# growth is noticed years before a push can fail.
+HISTORY_SIZE_LIMIT_BYTES = 25 * 1024 * 1024
+
+# Stored-object layout (schema v2). Every entry's material is kept in full, but
+# a JSON object or array that recurs across entries is stored once in
+# "objects", keyed by the canonical digest of its fully expanded value, and
+# referenced as {"$ref": key}. Long arrays and objects are split into chunks at
+# content-defined boundaries, {"$concat": [keys]} and {"$merge": [keys]}, so a
+# one-row change stores one new chunk rather than the whole array again. The
+# digest of an entry's expanded material is its entry_digest, which is also the
+# key of its root object.
+_REF, _CONCAT, _MERGE = "$ref", "$concat", "$merge"
+_CHUNK_AVERAGE = 16
+_INLINE_LIMIT = 128
+# Real material nests references about 11 deep. A deeper chain is refused as a
+# format problem rather than left to exhaust Python's recursion limit.
+_MAX_REFERENCE_DEPTH = 64
+
+
+class HistoryFormatError(ValueError):
+    """The history document cannot be expanded into entries."""
 
 
 def _deduplicate(problems: list[str]) -> list[str]:
     return list(dict.fromkeys(problems))
+
+
+class _Encoder:
+    """Deterministically encodes expanded entries into the stored-object layout.
+
+    The output is a pure function of the entries, so decoding a stored history
+    and encoding it again must reproduce the stored document exactly."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, Any] = {}
+        # id() memo; the value pins the object so the id cannot be reused.
+        self._canonical: dict[int, tuple[Any, str]] = {}
+
+    def canonical(self, value: Any) -> str:
+        """The same text surface.canonical_digest hashes, built bottom-up."""
+        if isinstance(value, dict):
+            cached = self._canonical.get(id(value))
+            if cached is not None:
+                return cached[1]
+            for key in value:
+                if not isinstance(key, str):
+                    raise HistoryFormatError("history material has a non-string key")
+                if key.startswith("$"):
+                    raise HistoryFormatError(
+                        f"history material key {key!r} uses the reserved '$' prefix")
+            text = "{" + ",".join(
+                json.dumps(key) + ":" + self.canonical(value[key])
+                for key in sorted(value)
+            ) + "}"
+        elif isinstance(value, list):
+            cached = self._canonical.get(id(value))
+            if cached is not None:
+                return cached[1]
+            text = "[" + ",".join(self.canonical(item) for item in value) + "]"
+        else:
+            return json.dumps(value, ensure_ascii=True)
+        self._canonical[id(value)] = (value, text)
+        return text
+
+    def digest(self, value: Any) -> str:
+        return "sha256:" + hashlib.sha256(
+            self.canonical(value).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _boundary(text: str) -> bool:
+        return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:8], 16) \
+            % _CHUNK_AVERAGE == 0
+
+    def _store(self, value: Any, build: Callable[[], Any]) -> str:
+        key = self.digest(value)
+        if key not in self.objects:
+            self.objects[key] = build()
+        return key
+
+    def _chunks(self, items: list[Any], boundary_text: Callable[[Any], str]) -> list[list[Any]]:
+        chunks: list[list[Any]] = [[]]
+        for item in items:
+            chunks[-1].append(item)
+            if self._boundary(boundary_text(item)):
+                chunks.append([])
+        return [chunk for chunk in chunks if chunk]
+
+    def node(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            if len(value) > 2 * _CHUNK_AVERAGE:
+                # Boundaries follow keys, so editing a value never moves them.
+                return {_MERGE: [
+                    self._store(
+                        {key: value[key] for key in chunk},
+                        lambda chunk=chunk: {key: self.child(value[key]) for key in chunk},
+                    )
+                    for chunk in self._chunks(sorted(value), json.dumps)
+                ]}
+            return {key: self.child(item) for key, item in value.items()}
+        if isinstance(value, list):
+            if len(value) > 2 * _CHUNK_AVERAGE:
+                return {_CONCAT: [
+                    self._store(chunk, lambda chunk=chunk: [self.child(item) for item in chunk])
+                    for chunk in self._chunks(value, self.canonical)
+                ]}
+            return [self.child(item) for item in value]
+        return value
+
+    def child(self, value: Any) -> Any:
+        if isinstance(value, (dict, list)) and len(self.canonical(value)) >= _INLINE_LIMIT:
+            return {_REF: self._store(value, lambda: self.node(value))}
+        return self.node(value)
+
+    def entry(self, entry: Any) -> str:
+        if not isinstance(entry, dict) or set(entry) != {"entry_digest", "manifest", "surface"}:
+            raise HistoryFormatError("history entry fields are not exact")
+        material = {"manifest": entry["manifest"], "surface": entry["surface"]}
+        return self._store(material, lambda: self.node(material))
+
+
+class _Decoder:
+    def __init__(self, objects: dict[str, Any]) -> None:
+        self.objects = objects
+        self.used: set[str] = set()
+        self._resolved: dict[str, Any] = {}
+        self._active: set[str] = set()
+
+    def resolve(self, key: Any, kind: type | None = None) -> Any:
+        if not isinstance(key, str) or key not in self.objects:
+            raise HistoryFormatError(f"capability history references a missing object {key!r}")
+        if key not in self._resolved:
+            if key in self._active:
+                raise HistoryFormatError(f"capability history object {key} refers to itself")
+            if len(self._active) >= _MAX_REFERENCE_DEPTH:
+                raise HistoryFormatError(
+                    f"capability history references nest deeper than {_MAX_REFERENCE_DEPTH}")
+            self._active.add(key)
+            self._resolved[key] = self.expand(self.objects[key])
+            self._active.discard(key)
+            self.used.add(key)
+        value = self._resolved[key]
+        if kind is not None and not isinstance(value, kind):
+            raise HistoryFormatError(
+                f"capability history object {key} is not a {kind.__name__} chunk")
+        return value
+
+    def expand(self, node: Any) -> Any:
+        if isinstance(node, list):
+            return [self.expand(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        reserved = [key for key in node if key.startswith("$")]
+        if not reserved:
+            return {key: self.expand(item) for key, item in node.items()}
+        if len(node) != 1:
+            raise HistoryFormatError("capability history reference has extra fields")
+        marker, keys = next(iter(node.items()))
+        if marker == _REF:
+            value = self.resolve(keys)
+            if not isinstance(value, (dict, list)):
+                raise HistoryFormatError("capability history reference names a scalar")
+            return value
+        if marker not in {_CONCAT, _MERGE} or not isinstance(keys, list) or not keys:
+            raise HistoryFormatError(f"capability history has an unknown marker {marker!r}")
+        if marker == _CONCAT:
+            joined: list[Any] = []
+            for key in keys:
+                joined.extend(self.resolve(key, list))
+            return joined
+        merged: dict[str, Any] = {}
+        for key in keys:
+            part = self.resolve(key, dict)
+            if set(part) & set(merged):
+                raise HistoryFormatError("capability history merge chunks overlap")
+            merged.update(part)
+        return merged
+
+
+def history_entries(history: Any) -> list[dict[str, Any]]:
+    """Every recorded entry, fully expanded, from either schema.
+
+    Each entry is {"manifest", "surface", "entry_digest"} exactly as schema v1
+    stored it inline. Expanded entries share unchanged sub-objects, so callers
+    must not mutate them in place. Raises HistoryFormatError."""
+    try:
+        return _history_entries(history)
+    except RecursionError:
+        raise HistoryFormatError("capability history nests too deeply to expand") from None
+
+
+def _history_entries(history: Any) -> list[dict[str, Any]]:
+    if isinstance(history, dict) and "_invalid" in history and len(history) == 1:
+        raise HistoryFormatError(f"capability history is not valid JSON: {history['_invalid']}")
+    if not isinstance(history, dict):
+        raise HistoryFormatError("capability history must be an object")
+    schema = history.get("schema")
+    if schema == LEGACY_HISTORY_SCHEMA:
+        entries = history.get("entries")
+        if not isinstance(entries, list):
+            raise HistoryFormatError("capability history entries are invalid")
+        return entries
+    if schema != HISTORY_SCHEMA:
+        raise HistoryFormatError(f"capability history schema must be {HISTORY_SCHEMA}")
+    if set(history) != {"schema", "entries", "objects"}:
+        raise HistoryFormatError(
+            "capability history fields must be exactly schema, entries and objects")
+    digests, objects = history.get("entries"), history.get("objects")
+    if not isinstance(digests, list) or not isinstance(objects, dict):
+        raise HistoryFormatError("capability history entries or objects are invalid")
+    decoder = _Decoder(objects)
+    entries = []
+    for digest in digests:
+        material = decoder.resolve(digest, dict)
+        if set(material) != {"manifest", "surface"}:
+            raise HistoryFormatError(
+                f"capability history entry {digest} material fields are not exact")
+        entries.append({**material, "entry_digest": digest})
+    if len(decoder.used) != len(objects):
+        raise HistoryFormatError("capability history stores unreferenced objects")
+    return entries
+
+
+def stored_history_problems(history: Any) -> list[str]:
+    """Why an existing history file cannot be read, or [] when it can.
+
+    --write must refuse an unreadable history rather than start a fresh one,
+    which would only fail later as "not append-only" and hide the cause.
+    An absent file (None) is the bootstrap case and is not a problem here."""
+    if history is None:
+        return []
+    try:
+        history_entries(history)
+    except HistoryFormatError as error:
+        return [str(error)]
+    return []
+
+
+def _entries_or_none(history: Any) -> list[dict[str, Any]] | None:
+    try:
+        return history_entries(history)
+    except HistoryFormatError:
+        return None
+
+
+def rendered_history(history: dict[str, Any]) -> str:
+    """The checked-in text: one entry digest and one stored object per line."""
+    lines = ["{", f'  "schema": {json.dumps(history["schema"])},', '  "entries": [']
+    digests = history["entries"]
+    lines += [f"    {json.dumps(d)}{',' if i + 1 < len(digests) else ''}"
+              for i, d in enumerate(digests)]
+    lines += ["  ],", '  "objects": {']
+    keys = sorted(history["objects"])
+    for index, key in enumerate(keys):
+        body = json.dumps(history["objects"][key], ensure_ascii=False,
+                          separators=(",", ":"), sort_keys=True)
+        lines.append(f"    {json.dumps(key)}: {body}{',' if index + 1 < len(keys) else ''}")
+    lines += ["  }", "}"]
+    return "\n".join(lines) + "\n"
 
 
 def history_entry(
@@ -83,8 +343,8 @@ def pending_counters(
     pending: a branch changed it and left the counter for the version-at-land
     bump to assign. A snapshot whose counter moved past the last state, or
     whose material equals it, is assigned."""
-    entries = history.get("entries") if isinstance(history, dict) else None
-    if (not isinstance(entries, list) or not entries
+    entries = _entries_or_none(history)
+    if (not entries
             or not isinstance(manifest_document, dict)
             or not isinstance(surface_document, dict)):
         return False, False
@@ -105,7 +365,15 @@ def pending_counters(
 
 
 def history_document(entries: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"schema": HISTORY_SCHEMA, "entries": copy.deepcopy(entries)}
+    """Encode expanded entries in the stored-object layout (schema v2).
+
+    Raises HistoryFormatError when an entry cannot be encoded."""
+    encoder = _Encoder()
+    try:
+        digests = [encoder.entry(entry) for entry in entries]
+    except RecursionError:
+        raise HistoryFormatError("capability history material nests too deeply") from None
+    return {"schema": HISTORY_SCHEMA, "entries": digests, "objects": encoder.objects}
 
 
 def updated_history_entries(
@@ -137,11 +405,8 @@ def updated_history_entries(
     """
     if initial_bootstrap or migrate_unpublished:
         return [history_entry(current_manifest, current_surface)]
-    entries = (
-        copy.deepcopy(history.get("entries", []))
-        if isinstance(history, dict) and history.get("schema") == HISTORY_SCHEMA
-        else []
-    )
+    # Either schema is accepted here: a v1 history is converted, never lost.
+    entries = list(_entries_or_none(history) or [])
     if isinstance(previous_manifest, dict) and isinstance(previous_surface, dict):
         _record_if_assigned(entries, previous_manifest, previous_surface)
     _record_if_assigned(entries, current_manifest, current_surface)
@@ -163,8 +428,8 @@ def state_is_recorded(
     history: Any, manifest_document: Any, surface_document: Any
 ) -> bool:
     """Whether the history's last entry is exactly this state."""
-    entries = history.get("entries") if isinstance(history, dict) else None
-    if not isinstance(entries, list) or not entries:
+    entries = _entries_or_none(history)
+    if not entries:
         return False
     try:
         return entries[-1] == history_entry(manifest_document, surface_document)
@@ -183,8 +448,8 @@ def counters_that_can_stay(
     False only for a mixed base, one side pending and the other an unrecorded
     hand bump; that side still needs a bump until the next version-at-land
     assignment records the state."""
-    entries = history.get("entries") if isinstance(history, dict) else None
-    if (not isinstance(entries, list) or not entries
+    entries = _entries_or_none(history)
+    if (not entries
             or not isinstance(manifest_document, dict)
             or not isinstance(surface_document, dict)):
         return False, False
@@ -206,16 +471,37 @@ def history_problems(
     current_manifest: dict[str, Any],
     current_surface: dict[str, Any],
 ) -> list[str]:
-    if not isinstance(history, dict):
-        return ["capability history must be an object"]
-    if set(history) != {"schema", "entries"}:
-        return ["capability history fields must be exactly schema and entries"]
-    if history.get("schema") != HISTORY_SCHEMA:
-        return [f"capability history schema must be {HISTORY_SCHEMA}"]
-    entries = history.get("entries")
-    if not isinstance(entries, list) or not entries:
+    if isinstance(history, dict) and history.get("schema") == LEGACY_HISTORY_SCHEMA:
+        return [
+            f"capability history uses the retired {LEGACY_HISTORY_SCHEMA} layout; "
+            "run tools/scripts/agent_capability_manifest.py --write to convert it"
+        ]
+    try:
+        entries = history_entries(history)
+    except HistoryFormatError as error:
+        return [str(error)]
+    if not entries:
         return ["capability history must contain at least one entry"]
     problems: list[str] = []
+    # Encoding is deterministic, so a stored document that is not exactly the
+    # encoding of its own entries has been edited by hand: an object whose key
+    # is not the digest of its content, a moved chunk boundary, or an extra or
+    # missing object.
+    try:
+        canonical = history_document(entries)
+    except HistoryFormatError as error:
+        return [str(error)]
+    if canonical != history:
+        problems.append(
+            "capability history is not in canonical stored-object form; "
+            "regenerate it with tools/scripts/agent_capability_manifest.py --write"
+        )
+    size = len(rendered_history(history).encode("utf-8"))
+    if size > HISTORY_SIZE_LIMIT_BYTES:
+        problems.append(
+            f"capability history renders to {size} bytes, over the "
+            f"{HISTORY_SIZE_LIMIT_BYTES}-byte guard (GitHub refuses files over 100 MB)"
+        )
     previous: dict[str, Any] | None = None
     for index, entry in enumerate(entries):
         where = f"capability history entries[{index}]"
@@ -336,10 +622,16 @@ def protected_base_problems(
     return _deduplicate(problems)
 
 def append_only_history_problems(previous: Any, current: Any) -> list[str]:
-    old_entries = previous.get("entries") if isinstance(previous, dict) else None
-    new_entries = current.get("entries") if isinstance(current, dict) else None
-    if not isinstance(old_entries, list) or not isinstance(new_entries, list):
+    """Every protected entry is still recorded, unchanged and in order.
+
+    Entries are compared fully expanded (material and digest), so the check is
+    the same whichever schema each side is stored in."""
+    old_entries = _entries_or_none(previous)
+    new_entries = _entries_or_none(current)
+    if old_entries is None:
         return ["protected capability history entries are invalid"]
+    if new_entries is None:
+        return ["capability history entries are invalid; see the history problem above"]
     if new_entries[: len(old_entries)] != old_entries:
         return ["capability history is not append-only relative to the protected base"]
     return []
