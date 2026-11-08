@@ -591,3 +591,8 @@ Linux-only failure does not block the macOS landing.
 A consumer that locks a renderer milestone can also refuse a closure exported
 against a different Skia archive, so the Pulp side must be on the new milestone
 before a downstream re-export.
+
+The Skia and V8 fetchers download through the shared `tools/scripts/download_retry.py`
+policy (6 attempts, 5-60s jittered backoff, 5xx/timeouts only; 4xx and sha256
+mismatches fail at once). A test that copies `fetch_skia_for_release.py` into a
+scratch tree must copy `download_retry.py` beside it.

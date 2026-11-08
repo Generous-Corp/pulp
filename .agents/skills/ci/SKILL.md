@@ -13276,3 +13276,12 @@ submodules cold (about 10 minutes) and a bootstrap step with a 10-minute limit
 dies. Main's Linux build leg saves both paths, and `drift-fast` and
 `read-audit-nightly` restore them. The path list is part of the cache version,
 so keep it identical across the save and every restore.
+
+**Downloads in CI go through `tools/scripts/download_retry.py`.** A GitHub or
+CDN 503/504 on a pinned-asset fetch used to fail the ~40-minute required
+`macos` gate. The helper makes 6 attempts with 5-60s jittered exponential
+backoff, retries only 5xx/408/425/429, timeouts and connection resets, and
+fails at once on other 4xx. Workflows call `python3
+tools/scripts/download_retry.py URL DEST` instead of a bare `curl -fsSL`; keep
+the sha256 check after it. A script copied into a temp tree must copy the
+helper too.
