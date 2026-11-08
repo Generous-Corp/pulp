@@ -439,6 +439,19 @@ void apply_pointer(MouseEvent& e, const View::SimulatedPointer& p) {
 
 }  // namespace
 
+bool View::focus_within() const {
+    const RootInteractionState* state = const_cast<View*>(this)->existing_interaction();
+    const View* focused = state ? state->focused_input : nullptr;
+    for (const View* v = focused; v != nullptr; v = v->parent_)
+        if (v == this)
+            return true;
+    return false;
+}
+
+bool View::simulate_modifier_keys(Modifiers modifiers) {
+    return deliver_modifier_keys_changed(*this, modifiers);
+}
+
 void View::simulate_click(Point root_pos) {
     simulate_click(root_pos, SimulatedPointer{});
 }
@@ -655,6 +668,9 @@ void View::simulate_drag(Point start, Point end, int steps,
 }
 
 static void collect_focusable(View& root, std::vector<View*>& out) {
+    // A disabled view and its subtree are not in the tab order.
+    if (!root.enabled())
+        return;
     if (root.focusable()) out.push_back(&root);
     for (size_t i = 0; i < root.child_count(); ++i)
         collect_focusable(*root.child_at(i), out);
@@ -1392,7 +1408,8 @@ std::vector<View*> View::sorted_children_by_z_index() const {
 }
 
 View* View::hit_test(Point local_point) {
-    if (!visible_ || !enabled_ || !hit_testable_) return nullptr;
+    if (!visible_ || hit_test_blocked_by_disabled() || !hit_testable_)
+        return nullptr;
     if (!parent_ && !inverse_scale_transform(local_point)) return nullptr;
 
     // React Native pointerEvents:
@@ -2250,6 +2267,10 @@ bool View::has_pointer_capture(int pointer_id) const {
 
 void View::set_hovered(bool h) {
     if (hovered_ == h) return;
+    // A disabled view never gains hover. Losing it is always allowed, so a
+    // view disabled while hovered still receives its pointer-exit.
+    if (h && !effectively_enabled())
+        return;
     hovered_ = h;
     if (h) {
         on_mouse_enter();
@@ -2647,6 +2668,18 @@ void View::simulate_hover(Point root_pos) {
     for (auto it = hover_path.rbegin(); it != hover_path.rend(); ++it)
         (*it)->set_hovered(true);
 
+    // Remember what this pass established, so a later frame can tell whether
+    // the content under a stationary pointer has changed. A point outside the
+    // surface (hosts pass one on pointer exit) means no pointer.
+    {
+        RootInteractionState& state = interaction();
+        state.hover_pointer = root_pos;
+        state.hover_pointer_valid = local_bounds().contains(root_pos);
+        state.hover_target.set(target);
+        if (!target)
+            state.hover_target.reset();
+    }
+
     if (pulp::view::motion::input_recording_enabled()) {
         const std::string id = target ? target->id() : std::string();
         std::vector<std::pair<std::string, double>> coords;
@@ -2659,14 +2692,12 @@ void View::simulate_hover(Point root_pos) {
         // sub-region of itself the pointer is over (e.g. the
         // inspector ToolStrip's per-button tooltip, which set_hovered() alone
         // can't drive because on_mouse_enter carries no coordinate). Convert
-        // the root-space point into the target's local space by subtracting
-        // its accumulated bounds origin up the parent chain.
-        float ox = 0.0f, oy = 0.0f;
-        for (View* v = target; v; v = v->parent()) {
-            ox += v->bounds().x;
-            oy += v->bounds().y;
-        }
-        target->on_hover_move(Point{root_pos.x - ox, root_pos.y - oy});
+        // the root-space point with the same scale- and scroll-aware walk the
+        // press and move verbs use, so a row inside a scrolled list sees where
+        // the pointer is in the row, not in the unscrolled content.
+        const Point local = point_to_local(root_pos, target, this);
+        interaction().hover_local = local;
+        target->on_hover_move(local);
     }
 }
 
