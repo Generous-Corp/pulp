@@ -286,6 +286,13 @@ pulp_add_test_suite(pulp-test-external-binding GROUP pulp-test-group-cap-state
 pulp_add_test_suite(pulp-test-midi-learn-decode GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 
+# MidiLearnEngine: mapping table publication, routing of every source kind,
+# relative encoders, takeover, the learn flow, real-time safety and a
+# UI-versus-audio-thread hammer.
+pulp_add_test_suite(pulp-test-midi-learn-engine
+    SOURCES test_midi_learn_engine.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::state)
+
 # Cross-version parameter-ordering guard (host-facing ID + index stability).
 pulp_add_test_suite(pulp-test-param-ordering GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
