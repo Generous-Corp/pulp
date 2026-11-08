@@ -1649,7 +1649,10 @@
       "pulp/audio/analysis/audio_spectrum.hpp",
       "pulp/audio/analysis/latency_evidence.hpp",
       "pulp/audio/analysis/modal_extraction.hpp",
-      "pulp/audio/analysis/pitch_track.hpp"
+      "pulp/audio/analysis/pitch_track.hpp",
+      "pulp/audio/analysis/raster_image.hpp",
+      "pulp/audio/analysis/spectrogram_raster.hpp",
+      "pulp/audio/analysis/waveform_raster.hpp"
     ],
     "tools/cli/gpu_health/include": [
       "pulp_tooling/gpu_health/health_provider.hpp",

@@ -122,6 +122,7 @@ if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
         fixtures/mcp_gpu_probe_fake_cli.cpp)
     add_executable(pulp-test-mcp-server
         test_mcp_server.cpp
+        test_mcp_audio_tools.cpp
         test_mcp_control_adapter.cpp)
     target_link_libraries(pulp-test-mcp-server PRIVATE
         pulp-mcp-core
