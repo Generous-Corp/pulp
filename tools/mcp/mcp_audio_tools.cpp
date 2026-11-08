@@ -687,7 +687,8 @@ std::string handle_audio_image(const std::string& params_json, const std::string
         if (is_name ? name_value.empty() : !present(option.key))
             continue;
         if (option.spectrogram_only && verb != "spectrogram")
-            return arg_error(std::string("Error: ") + option.key + " applies only to pulp_audio_spectrogram");
+            return arg_error(std::string("Error: ") + option.key +
+                             " applies only to pulp_audio_spectrogram");
         switch (option.kind) {
         case Kind::non_negative_int:
         case Kind::positive_int: {
@@ -704,8 +705,9 @@ std::string handle_audio_image(const std::string& params_json, const std::string
             const double value = extract_double(params_json, option.key, -1.0);
             const bool positive = option.kind == Kind::positive_db;
             if (!(positive ? value > 0.0 : value >= 0.0))
-                return arg_error(std::string("Error: ") + option.key + " must be a " +
-                                 (positive ? "positive number of dB" : "non-negative number of seconds"));
+                return arg_error(
+                    std::string("Error: ") + option.key + " must be a " +
+                    (positive ? "positive number of dB" : "non-negative number of seconds"));
             const auto formatted = format_double_arg(value);
             if (!formatted)
                 return arg_error(std::string("Error: ") + option.key + " could not be formatted");
@@ -714,7 +716,8 @@ std::string handle_audio_image(const std::string& params_json, const std::string
         }
         case Kind::name:
             if (name_value.front() == '-')
-                return arg_error(std::string("Error: ") + option.key + " must be a name, not an option");
+                return arg_error(std::string("Error: ") + option.key +
+                                 " must be a name, not an option");
             cmd += std::string(" ") + option.flag + " " + shell_quote(name_value);
             break;
         }
