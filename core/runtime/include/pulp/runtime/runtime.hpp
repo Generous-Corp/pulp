@@ -37,7 +37,10 @@
 #include <pulp/runtime/activity_channel.hpp>
 #include <pulp/runtime/alive_token.hpp>
 #include <pulp/runtime/background_job.hpp>
+#include <pulp/runtime/cancel.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/fixed_function.hpp>
+#include <pulp/runtime/log_sink.hpp>
 #include <pulp/runtime/node_abi.hpp>
 #include <pulp/runtime/scope_guard.hpp>
 #include <pulp/runtime/spsc_queue.hpp>

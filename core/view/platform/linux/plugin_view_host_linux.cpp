@@ -24,6 +24,8 @@
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/plugin_frame_renderer.hpp>  // shared with the Windows host
 #include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
+#include <pulp/view/host_frame_pump.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/drag_drop.hpp>
 
@@ -44,6 +46,7 @@
 #endif
 
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -71,6 +74,9 @@ class X11PluginViewHost : public PluginViewHost {
 public:
     X11PluginViewHost(View& root, const Options& options)
         : root_(root), size_(options.size), options_(options) {
+        // The editor tree owns no clock of its own. The embedding adapter's
+        // UI-thread callback advances this host's clock below.
+        root_.set_frame_clock(&frame_clock_);
 #ifdef PULP_HAS_SKIA
         // This host builds its surface in the constructor (unlike Windows,
         // which must wait for reparenting), but the window between here and
@@ -109,7 +115,8 @@ public:
         // back the XdndSelection property the source writes; StructureNotify +
         // Exposure keep the existing repaint/reparent behavior.
         XSelectInput(display_, child_,
-                     ExposureMask | StructureNotifyMask | PropertyChangeMask);
+                     ExposureMask | StructureNotifyMask | PropertyChangeMask | ButtonPressMask |
+                         ButtonReleaseMask | PointerMotionMask | EnterWindowMask | LeaveWindowMask);
         gc_ = XCreateGC(display_, child_, 0, nullptr);
         init_xdnd();
         XFlush(display_);
@@ -131,6 +138,13 @@ public:
     }
 
     ~X11PluginViewHost() override {
+        frame_pump_.suspend();
+        root_.set_frame_clock(nullptr);
+        if (display_ && pointer_grabbed_) {
+            XUngrabPointer(display_, CurrentTime);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+        }
         root_.set_plugin_view_host(nullptr);
 #ifdef PULP_HAS_SKIA
         // Publish the teardown before the surfaces die, so a consumer holding
@@ -162,41 +176,104 @@ public:
         XMapWindow(display_, child_);
         XFlush(display_);
         attached_.store(true, std::memory_order_release);
+        frame_pump_.suspend();
+        continuous_frames_ = false;
+        needs_repaint_ = true;
         repaint();
     }
 
-    bool is_attached() const noexcept {
+    bool is_attached() const noexcept override {
         return attached_.load(std::memory_order_acquire);
     }
 
     void detach() override {
         if (!display_ || !child_) return;
+        if (pointer_grabbed_) {
+            XUngrabPointer(display_, CurrentTime);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+        }
+        pointer_capture_.reset();
+        pointer_button_ = MouseButton::none;
         XUnmapWindow(display_, child_);
         Window root_win = RootWindow(display_, screen_);
         XReparentWindow(display_, child_, root_win, 0, 0);
         XFlush(display_);
         attached_.store(false, std::memory_order_release);
+        frame_pump_.suspend();
+        continuous_frames_ = false;
+        needs_repaint_ = true;
     }
 
     void repaint() override {
+        needs_repaint_ = true;
         // Service drag-and-drop on our own X connection. The standalone host
         // repaints ~each frame, so this is the steady-state XDND pump; a
         // DAW-embedded driver can also call pump_x_events() directly.
-        drain_x_events();
-        paint_now();
+        if (drain_x_events())
+            needs_repaint_ = true;
+        if (!in_frame_tick_)
+            paint_now();
+    }
+
+    void advance_frame(double timestamp_seconds) override {
+        PULP_TRACE_SCOPE_NAMED_ARGS("render", "linux_host_frame", "attached",
+                                    attached_.load(std::memory_order_acquire), "continuous",
+                                    continuous_frames_, "needs_repaint", needs_repaint_);
+        // Timer callbacks can already be queued when a CLAP/VST3 editor is
+        // removed. Check attachment at dispatch time so no detached tree is
+        // walked or painted.
+        if (!attached_.load(std::memory_order_acquire)) {
+            frame_pump_.suspend();
+            continuous_frames_ = false;
+            return;
+        }
+
+        // Keep the X11 connection responsive on the same UI thread as the
+        // adapter callback. A skipped frame is recorded by HostFramePump so a
+        // later animation starts with one nominal frame rather than idle time.
+        in_frame_tick_ = true;
+        if (drain_x_events())
+            needs_repaint_ = true;
+        if (!should_dispatch_host_frame(frame_pump_, needs_repaint_, continuous_frames_,
+                                        static_cast<bool>(idle_callback_))) {
+            in_frame_tick_ = false;
+            return;
+        }
+
+        // Scripted UI polling belongs to the adapter-owned callback cadence,
+        // not to a renderer worker. Run it once before sampling damage so a
+        // poll-triggered repaint is included in this tick.
+        if (idle_callback_)
+            idle_callback_();
+        const bool dirty = needs_repaint_;
+        needs_repaint_ = false;
+        const auto tick =
+            begin_host_frame(&root_, frame_clock_, frame_pump_, timestamp_seconds, dirty);
+        if (tick.should_render) {
+            advance_host_frame(&root_, frame_clock_, tick.dt);
+            in_frame_tick_ = false;
+            paint_now(/*run_idle_callback=*/false);
+        } else {
+            in_frame_tick_ = false;
+        }
+        // A subscriber/animation may have started or stopped during advance.
+        // Re-evaluate after the tick so the next callback is gated correctly.
+        continuous_frames_ =
+            frame_clock_.has_active_subscribers() || needs_continuous_frames(&root_);
     }
 
     // The paint half of repaint(), without the event pump, so the pump itself
     // can repaint after a host-driven resize.
-    void paint_now() {
+    void paint_now(bool run_idle_callback = true) {
 #ifdef PULP_HAS_SKIA
         if (gpu_surface_ && skia_surface_) {
-            render_frame_gpu(nullptr, nullptr, nullptr);
+            render_frame_gpu(nullptr, nullptr, nullptr, run_idle_callback);
             return;
         }
         // No GPU: present a raster frame into the live window if attached.
         if (display_ && child_ && attached_.load(std::memory_order_acquire)) {
-            present_raster();
+            present_raster(run_idle_callback);
         }
 #endif
     }
@@ -335,25 +412,168 @@ public:
             XEvent ev;
             XNextEvent(display_, &ev);
             switch (ev.type) {
-                case ClientMessage:
-                    handle_client_message(ev.xclient);
-                    break;
-                case SelectionNotify:
-                    handle_selection_notify(ev.xselection);
-                    break;
-                case ConfigureNotify:
-                    if (ev.xconfigure.window == child_ &&
-                        !resize_echo_.is_stale(ev.xconfigure.serial)) {
-                        configured_w = static_cast<uint32_t>(ev.xconfigure.width);
-                        configured_h = static_cast<uint32_t>(ev.xconfigure.height);
-                    }
-                    break;
-                default:
-                    break;
+            case ButtonPress:
+                handle_pointer_press(ev.xbutton);
+                break;
+            case ButtonRelease:
+                handle_pointer_release(ev.xbutton);
+                break;
+            case MotionNotify:
+                handle_pointer_motion(ev.xmotion);
+                break;
+            case EnterNotify:
+                handle_pointer_hover(ev.xcrossing.x, ev.xcrossing.y, ev.xcrossing.state);
+                break;
+            case LeaveNotify:
+                // Keep the capture alive during a drag that leaves the child;
+                // the next motion/release still belongs to this editor. A
+                // non-drag leave only clears the hover state.
+                if (!pointer_capture_.has_value())
+                    deliver_hover_move(root_, {-1.0f, -1.0f}, 0);
+                break;
+            case ClientMessage:
+                handle_client_message(ev.xclient);
+                break;
+            case SelectionNotify:
+                handle_selection_notify(ev.xselection);
+                break;
+            case ConfigureNotify:
+                if (ev.xconfigure.window == child_ &&
+                    !resize_echo_.is_stale(ev.xconfigure.serial)) {
+                    configured_w = static_cast<uint32_t>(ev.xconfigure.width);
+                    configured_h = static_cast<uint32_t>(ev.xconfigure.height);
+                }
+                break;
+            default:
+                break;
             }
         }
         return configured_w != 0 && configured_h != 0 &&
                handle_configure(configured_w, configured_h);
+    }
+
+    static uint16_t pointer_modifiers(unsigned state) {
+        uint16_t modifiers = kModNone;
+        if (state & ShiftMask)
+            modifiers |= kModShift;
+        if (state & ControlMask)
+            modifiers |= kModCtrl;
+        if (state & Mod1Mask)
+            modifiers |= kModAlt;
+        if (state & Mod4Mask)
+            modifiers |= kModMeta;
+        return modifiers;
+    }
+
+    Point pointer_point(int x, int y) const {
+        const float scale = scale_ > 0.0f ? scale_ : 1.0f;
+        return window_to_root_point({static_cast<float>(x) / scale, static_cast<float>(y) / scale});
+    }
+
+    static MouseButton pointer_button(unsigned button) {
+        switch (button) {
+        case Button1:
+            return MouseButton::left;
+        case Button2:
+            return MouseButton::middle;
+        case Button3:
+            return MouseButton::right;
+        default:
+            return MouseButton::none;
+        }
+    }
+
+    void handle_pointer_hover(int x, int y, unsigned state) {
+        deliver_hover_move(root_, pointer_point(x, y), pointer_modifiers(state));
+    }
+
+    void handle_pointer_press(const XButtonEvent& event) {
+        // X11 wheel steps arrive as synthetic button presses, not as a
+        // press/release gesture. Route them through the shared wheel path and
+        // never leave a stale pointer capture behind.
+        if (event.button == Button4 || event.button == Button5) {
+            WheelHost wheel_host;
+            deliver_mouse_wheel(root_, pointer_point(event.x, event.y), 0.0f,
+                                event.button == Button4 ? -1.0f : 1.0f,
+                                pointer_modifiers(event.state), wheel_host);
+            return;
+        }
+        const auto button = pointer_button(event.button);
+        if (button == MouseButton::none)
+            return;
+        const Point point = pointer_point(event.x, event.y);
+        auto* target = root_.hit_test(point);
+        pointer_capture_.reset();
+        pointer_button_ = button;
+        if (!target || !transfer_input_focus(root_, target)) {
+            pointer_button_ = MouseButton::none;
+            return;
+        }
+        pointer_capture_.set(target);
+        // A nested DAW editor wrapper may own the pointer immediately after a
+        // press. Grab it from the child once the view tree accepts the target
+        // so motion/release remain in this editor while the pointer leaves the
+        // child during a drag.
+        if (display_ &&
+            XGrabPointer(display_, child_, True,
+                         ButtonPressMask | ButtonReleaseMask | PointerMotionMask, GrabModeAsync,
+                         GrabModeAsync, None, None, event.time) == GrabSuccess) {
+            pointer_grabbed_ = true;
+        }
+        if (!deliver_mouse_down(root_, pointer_capture_.live_in(root_), point,
+                                pointer_modifiers(event.state), 1, true, button))
+            pointer_capture_.reset();
+        if (!pointer_capture_.has_value() && pointer_grabbed_) {
+            XUngrabPointer(display_, event.time);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+            pointer_button_ = MouseButton::none;
+        }
+    }
+
+    void handle_pointer_motion(const XMotionEvent& event) {
+        const Point point = pointer_point(event.x, event.y);
+        const auto modifiers = pointer_modifiers(event.state);
+        if (auto* target = pointer_capture_.live_in(root_)) {
+            deliver_mouse_drag(root_, target, point, modifiers, 1, pointer_button_,
+                               PointerAttributes{});
+            return;
+        }
+        deliver_hover_move(root_, point, modifiers);
+    }
+
+    void handle_pointer_release(const XButtonEvent& event) {
+        const auto button = pointer_button(event.button);
+        if (button == MouseButton::none)
+            return;
+        auto* target = pointer_capture_.live_in(root_);
+        if (!target) {
+            pointer_capture_.reset();
+            pointer_button_ = MouseButton::none;
+            if (display_ && pointer_grabbed_) {
+                XUngrabPointer(display_, event.time);
+                XFlush(display_);
+                pointer_grabbed_ = false;
+            }
+            return;
+        }
+        MouseUpHost host;
+        if (button == MouseButton::left) {
+            host.fire_click = [](const std::function<void()>& click_handler, const std::string&,
+                                 uint16_t) {
+                if (click_handler)
+                    click_handler();
+            };
+        }
+        deliver_mouse_up(root_, target, pointer_point(event.x, event.y),
+                         pointer_modifiers(event.state), 1, host, button, PointerAttributes{});
+        pointer_capture_.reset();
+        pointer_button_ = MouseButton::none;
+        if (display_ && pointer_grabbed_) {
+            XUngrabPointer(display_, event.time);
+            XFlush(display_);
+            pointer_grabbed_ = false;
+        }
     }
 
     // Mirror set_size()'s surface sizing for a size the host already applied
@@ -406,6 +626,14 @@ private:
     GC gc_ = nullptr;
     std::atomic<bool> attached_{false};
     std::function<void()> idle_callback_;
+    FrameClock frame_clock_;
+    HostFramePump frame_pump_;
+    bool needs_repaint_ = true;
+    bool continuous_frames_ = false;
+    bool in_frame_tick_ = false;
+    ViewCapture pointer_capture_;
+    MouseButton pointer_button_ = MouseButton::none;
+    bool pointer_grabbed_ = false;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
     X11ResizeEcho resize_echo_;
     float design_viewport_w_ = 0.0f;
@@ -936,10 +1164,15 @@ private:
             &x11_handle_, geometry, options_.present_policy,
             options_.enable_gpu_timing, env && env[0] == '1', "X11PluginViewHost");
 
+        // Snapshot validity before moving the owning pointers.  `ok()` checks
+        // both surfaces; after the moves the temporary is necessarily empty,
+        // which used to turn every successful GPU initialization into a false
+        // CPU-fallback report.
+        const bool surfaces_ok = surfaces.ok();
         partial_repaint_enabled_ = surfaces.partial_repaint;
         gpu_surface_ = std::move(surfaces.gpu);
         skia_surface_ = std::move(surfaces.skia);
-        if (!surfaces.ok()) {
+        if (!surfaces_ok) {
             publish_gpu_surface(nullptr, GpuSurfaceState::unavailable);
             return;
         }
@@ -966,14 +1199,15 @@ private:
         paint_plugin_scene(canvas, root_, frame_geometry(), clip);
     }
 
-    bool render_frame_gpu(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h) {
+    bool render_frame_gpu(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h,
+                          bool run_idle_callback = true) {
         if (!gpu_surface_ || !skia_surface_) return false;
 
         PluginFrameRenderer::Request request;
         request.root = &root_;
         request.geometry = frame_geometry();
         request.partial_repaint = partial_repaint_enabled_;
-        request.idle = idle_callback_;
+        request.idle = run_idle_callback ? idle_callback_ : std::function<void()>{};
         request.capture = cap;
         request.capture_width = cap_w;
         request.capture_height = cap_h;
@@ -1009,20 +1243,22 @@ private:
     // units — the raster fallback / headless capture is crisp on HiDPI and
     // matches the GPU surface's pixel resolution. out_w/out_h get the pixel
     // dims. Empty on failure.
-    std::vector<uint8_t> raster_render(uint32_t* out_w, uint32_t* out_h) {
-        if (idle_callback_) idle_callback_();
+    std::vector<uint8_t> raster_render(uint32_t* out_w, uint32_t* out_h,
+                                       bool run_idle_callback = true) {
+        if (run_idle_callback && idle_callback_)
+            idle_callback_();
         return raster_plugin_scene_rgba(root_, frame_geometry(), out_w, out_h);
     }
 
     // Live CPU present: raster the scene, convert RGBA -> the X visual's pixel
     // format (assume 32-bit BGRX TrueColor, the common case), and XPutImage.
-    void present_raster() {
+    void present_raster(bool run_idle_callback = true) {
         // Same contract as the GPU path: consume the damage for this frame and
         // put it back on any path that does not reach XPutImage, so a failed
         // raster frame does not silently retire a region nobody presented.
         const PendingDamage::Snapshot consumed = damage_.take();
         uint32_t w = 0, h = 0;
-        auto rgba = raster_render(&w, &h);
+        auto rgba = raster_render(&w, &h, run_idle_callback);
         if (rgba.empty()) {
             damage_.restore(consumed);
             return;

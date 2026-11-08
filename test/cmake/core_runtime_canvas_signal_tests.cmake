@@ -1168,6 +1168,11 @@ pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav GROUP pulp-te
 pulp_add_test_suite(pulp-test-standalone-transport-midi GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
+# The plug-in's state kept across launches next to the device selection:
+# restore at startup, save on quit and after a quiet period, and a clean start
+# when the saved blob is missing or unusable. Runs against a fake audio system.
+pulp_add_test_suite(pulp-test-standalone-state GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone pulp::audio)
 pulp_add_test_suite(pulp-test-standalone-musical-typing GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone)
 # Sparkle updater policy and menu wiring; pure values plus a process probe that
@@ -1264,6 +1269,16 @@ pulp_add_test_suite(pulp-test-permissions GROUP pulp-test-group-core-platform
 
 # Environment API tests
 pulp_add_test_suite(pulp-test-environment GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
+
+# FixedFunction and the allocation-free BackgroundTaskLane handler. The probe
+# replaces global operator new, so this stays its own executable.
+pulp_add_test_suite(pulp-test-fixed-function
+    SOURCES test_fixed_function.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::runtime pulp::format)
+
+# Special directory resolution (pure per-OS layouts plus the host)
+pulp_add_test_suite(pulp-test-special-dir GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)
 
 # Runtime tests
