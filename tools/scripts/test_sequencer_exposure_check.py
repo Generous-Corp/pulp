@@ -44,6 +44,7 @@ from sequencer_exposure_check import (
     _configured_provenance_timeout,
 )
 import sequencer_exposure_check
+import gate_common
 
 
 SHA_A = "1" * 40
@@ -494,6 +495,14 @@ def main() -> int:
             timed_git = sequencer_exposure_check._git(root, "log", "-1")
         if timed_git.returncode != 124 or "timed out" not in timed_git.stderr:
             raise AssertionError(f"generic git timeout lacked bounded receipt: {timed_git}")
+        with mock.patch.object(
+            gate_common.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["git"], 0.01),
+        ):
+            timed_comparison = gate_common.resolve_git_comparison(root, "HEAD", "HEAD")
+        if timed_comparison.status != "history_unavailable":
+            raise AssertionError(f"shared git timeout escaped as {timed_comparison}")
         _, _, unavailable_errors = _load_base_transition(root, "missing-base-ref")
         if not any("git history unavailable" in error for error in unavailable_errors):
             raise AssertionError(

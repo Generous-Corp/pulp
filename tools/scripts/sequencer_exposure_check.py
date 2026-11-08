@@ -20,6 +20,7 @@ from gate_common import (
     git_comparison_receipt,
     read_git_path,
     resolve_git_comparison,
+    set_git_probe_deadline,
     dependabot_uses_only_diff,
 )
 
@@ -2206,6 +2207,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     global _GIT_DEADLINE
     _GIT_DEADLINE = time.monotonic() + PROVENANCE_TOTAL_TIMEOUT_SECONDS
+    set_git_probe_deadline(_GIT_DEADLINE)
     repo_root = args.repo_root.resolve()
     schema_path = args.schema or repo_root / "docs/status/sequencer-exposure.schema.json"
     document, origins, load_errors = load_ledger_from_worktree(
