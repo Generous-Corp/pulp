@@ -373,3 +373,91 @@ TEST_CASE("a declared length the stream does not deliver is refused, an undeclar
         }
     }
 }
+
+TEST_CASE("an MP3 whose Xing header declares more frames than the stream delivers is refused",
+          "[fuzz][audio][mp3]") {
+    // Found by the fuzzer as an info/decode disagreement (6400 declared, a
+    // few dozen decoded); this seed is the Xing VBR seed cut at 80%.
+    const auto path = corpus_dir() / "mp3-xing-declares-more-than-stream.mp3";
+    REQUIRE(fs::exists(path));
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto info = registry.read_info(path.string());
+    REQUIRE(info.has_value());
+    CHECK(info->num_frames == 6400u);
+    CHECK_FALSE(registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
+    // The untouched seed still declares and delivers the same count.
+    const auto whole = corpus_dir() / "mp3-id3v2-xing-vbr.mp3";
+    const auto decoded = registry.read(whole.string(), pulp_fuzz::audio_decoder::fuzz_limits());
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->num_frames() == 6400u);
+}
+
+TEST_CASE("a comment header with a negative string length is refused without allocating",
+          "[fuzz][audio][ogg]") {
+    // libFuzzer reproducer: the vendor-string length is a negative 32-bit
+    // value, which once became a negative-sized setup allocation.
+    const auto path = corpus_dir() / "ogg-vendor-length-negative.ogg";
+    REQUIRE(fs::exists(path));
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto started = std::chrono::steady_clock::now();
+    CHECK_FALSE(registry.read_info(path.string()).has_value());
+    CHECK_FALSE(registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
+}
+
+TEST_CASE("read_audio_file applies the default decode ceilings to a declared header",
+          "[fuzz][audio][wav]") {
+    // Header-only WAVs: the data chunk declares the size, the file holds none
+    // of it. Without the ceiling the declared size was allocated.
+    auto header_only = [](uint16_t channels, uint32_t data_size) {
+        std::vector<uint8_t> out;
+        auto put32 = [&](uint32_t v) {
+            for (int i = 0; i < 4; ++i)
+                out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+        };
+        auto put16 = [&](uint16_t v) {
+            out.push_back(static_cast<uint8_t>(v));
+            out.push_back(static_cast<uint8_t>(v >> 8));
+        };
+        auto tag = [&](const char* t) { out.insert(out.end(), t, t + 4); };
+        tag("RIFF");
+        put32(36u + data_size);
+        tag("WAVE");
+        tag("fmt ");
+        put32(16u);
+        put16(1u);
+        put16(channels);
+        put32(44100u);
+        put32(44100u * 2u * channels);
+        put16(static_cast<uint16_t>(2u * channels));
+        put16(16u);
+        tag("data");
+        put32(data_size);
+        return out;
+    };
+    TempDir dir;
+    auto write = [&](const char* name, const std::vector<uint8_t>& bytes) {
+        const auto path = dir.path / name;
+        std::ofstream output(path, std::ios::binary);
+        REQUIRE(output.good());
+        output.write(reinterpret_cast<const char*>(bytes.data()),
+                     static_cast<std::streamsize>(bytes.size()));
+        return path.string();
+    };
+    // 2^30 + 1 mono frames: just past the default max_frames.
+    const auto frames_path =
+        write("too-many-frames.wav", header_only(1u, static_cast<uint32_t>((1ull << 31) + 2u)));
+    // 65 channels: past the default max_channels.
+    const auto channels_path = write("too-many-channels.wav", header_only(65u, 65u * 2u * 8u));
+
+    const auto started = std::chrono::steady_clock::now();
+    CHECK_FALSE(pulp::audio::read_audio_file(frames_path).has_value());
+    CHECK_FALSE(pulp::audio::read_audio_file(channels_path).has_value());
+    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
+
+    // Under the ceiling: the corpus seed that declares 100,000,001 frames
+    // still decodes through the same overload.
+    const auto seed = corpus_dir() / "wav-declares-100000001-frames.wav";
+    REQUIRE(fs::exists(seed));
+    CHECK(pulp::audio::read_audio_file(seed.string()).has_value());
+}

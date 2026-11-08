@@ -1,4 +1,5 @@
 #include <pulp/audio/audio_file.hpp>
+#include "decode_limits_detail.hpp"
 #include <cmath>
 #include <algorithm>
 #include <filesystem>
@@ -140,7 +141,13 @@ std::optional<AudioFileInfo> read_audio_file_info(const std::string& path) {
 }
 
 std::optional<AudioFileData> read_audio_file(const std::string& path) {
-    return read_audio_file(path, [](const AudioFileInfo&) { return true; });
+    // The header's frame and channel counts size the allocation below, so a
+    // direct caller gets the same default ceilings the registry applies; a
+    // WAV declaring 2^30+1 frames is refused here instead of allocating.
+    return read_audio_file(path, [](const AudioFileInfo& info) {
+        return detail::within_decode_limits("WAV", info.num_frames, info.num_channels,
+                                            DecodeLimits{});
+    });
 }
 
 std::optional<AudioFileData>
