@@ -5288,6 +5288,7 @@
     "core/state/src/store.cpp",
     "core/view",
     "core/view/src/view.cpp",
+    "test/cmake/test_installed_sdk_runtime_staging.cmake",
     "test/test_cli_shellout.cpp",
     "test/test_runtime.cpp",
     "test/test_state.cpp",
