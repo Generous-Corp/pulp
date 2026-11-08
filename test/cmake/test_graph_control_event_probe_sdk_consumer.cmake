@@ -25,7 +25,12 @@ file(COPY "${PULP_SOURCE_DIR}/examples/graph-control-event-probe/CMakeLists.txt"
      "${PULP_SOURCE_DIR}/examples/graph-control-event-probe/main.cpp" DESTINATION "${_source}")
 execute_process(COMMAND "${CMAKE_COMMAND}" -S "${_source}" -B "${_build}" -G Ninja
     "-DCMAKE_BUILD_TYPE=${PULP_PARENT_BUILD_TYPE}"
+    "-DCMAKE_CXX_COMPILER=${PULP_PARENT_CXX_COMPILER}"
+    "-DCMAKE_CXX_FLAGS=${PULP_PARENT_CXX_FLAGS}"
+    "-DCMAKE_EXE_LINKER_FLAGS=${PULP_PARENT_EXE_LINKER_FLAGS}"
     "-DCMAKE_PREFIX_PATH=${_prefix}" "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
+    "-DCMAKE_OSX_ARCHITECTURES=${PULP_PARENT_OSX_ARCHITECTURES}"
+    "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}"
     RESULT_VARIABLE _configure)
 if(NOT _configure EQUAL 0)
     message(FATAL_ERROR "SDK consumer configure failed")
