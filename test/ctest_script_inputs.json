@@ -61,13 +61,16 @@
     "tools/cli/cmd_audio.cpp",
     "tools/cli/cmd_audio_compare.cpp",
     "tools/cli/cmd_audio_heritage.cpp",
+    "tools/cli/cmd_audio_image_common.cpp",
     "tools/cli/cmd_audio_inspect.cpp",
     "tools/cli/cmd_audio_plugin_common.cpp",
     "tools/cli/cmd_audio_plugin_inspect.cpp",
     "tools/cli/cmd_audio_render.cpp",
     "tools/cli/cmd_audio_render_parse.cpp",
     "tools/cli/cmd_audio_sampler_mip.cpp",
+    "tools/cli/cmd_audio_spectrogram.cpp",
     "tools/cli/cmd_audio_validate.cpp",
+    "tools/cli/cmd_audio_waveform.cpp",
     "tools/cli/cmd_authority.cpp",
     "tools/cli/cmd_bake.cpp",
     "tools/cli/cmd_build.cpp",
@@ -262,13 +265,6 @@
    ],
    "undeclared_sources": []
   },
-  "pulp-test-audio-file-layout": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "sources": [],
-   "undeclared_sources": []
-  },
   "pulp-test-audio-file-layout-containers": {
    "data": "declared",
    "detected_sources": [
@@ -280,6 +276,21 @@
    "kind": "compiled",
    "sources": [
     "test/test_audio_file_layout_containers.cpp"
+   ],
+   "undeclared_sources": []
+  },
+  "pulp-test-audio-image-raster": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_audio_image_raster.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/audio/images"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/png_rgba_decode_apple.cpp",
+    "test/test_audio_image_raster.cpp"
    ],
    "undeclared_sources": []
   },
@@ -387,6 +398,20 @@
    "sources": [
     "test/test_cli_audio_compare.cpp"
    ],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-audio-image": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
@@ -2235,6 +2260,7 @@
     "pulp-test-mcp-gpu-probe-fake-cli"
    ],
    "sources": [
+    "test/test_mcp_audio_tools.cpp",
     "test/test_mcp_control_adapter.cpp",
     "test/test_mcp_server.cpp"
    ],
@@ -2846,6 +2872,7 @@
   "pulp-test-audio-edge-cases",
   "pulp-test-audio-file-layout",
   "pulp-test-audio-file-layout-containers",
+  "pulp-test-audio-image-raster",
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
   "pulp-test-audio-reader-idle-wakeups",
@@ -2885,6 +2912,7 @@
   "pulp-test-clap-webview",
   "pulp-test-cli-au-info-plist",
   "pulp-test-cli-audio-compare",
+  "pulp-test-cli-audio-image",
   "pulp-test-cli-audio-inspect",
   "pulp-test-cli-audio-latency",
   "pulp-test-cli-audio-validate",
@@ -3293,6 +3321,7 @@
   "pulp-test-osc-minblep",
   "pulp-test-osc-parameter-map",
   "pulp-test-osc-render-wav-cli",
+  "pulp-test-panic-button",
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
@@ -3773,6 +3802,14 @@
    "inputs": [
     "test/fixtures/agent-panels/magneto",
     "tools/import-validation/check_agent_panel_invariants.py"
+   ],
+   "kind": "python"
+  },
+  "android-fixture-lane-selftest": {
+   "entry": "tools/ci/test_android_fixture_lane.py",
+   "inputs": [
+    "tools/ci/android-fixture-lane.sh",
+    "tools/ci/test_android_fixture_lane.py"
    ],
    "kind": "python"
   },
