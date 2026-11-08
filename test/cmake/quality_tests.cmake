@@ -416,6 +416,10 @@ if(Python3_Interpreter_FOUND)
 
     add_test(NAME ci-python-selector-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_find_python311.py")
+    # The dependency request recorder and its checker: what a configure is
+    # seen to request, and that an empty log never reads as "nothing needed".
+    add_test(NAME dependency-request-recorder-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_dependency_request_check.py")
     if(UNIX)
         add_test(NAME ci-cause-notices-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_ci_cause_notices.py")
