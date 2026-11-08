@@ -278,19 +278,14 @@ def _entries_or_none(history: Any) -> list[dict[str, Any]] | None:
 
 
 def rendered_history(history: dict[str, Any]) -> str:
-    """The checked-in text: one entry digest and one stored object per line."""
-    lines = ["{", f'  "schema": {json.dumps(history["schema"])},', '  "entries": [']
-    digests = history["entries"]
-    lines += [f"    {json.dumps(d)}{',' if i + 1 < len(digests) else ''}"
-              for i, d in enumerate(digests)]
-    lines += ["  ],", '  "objects": {']
-    keys = sorted(history["objects"])
-    for index, key in enumerate(keys):
-        body = json.dumps(history["objects"][key], ensure_ascii=False,
-                          separators=(",", ":"), sort_keys=True)
-        lines.append(f"    {json.dumps(key)}: {body}{',' if index + 1 < len(keys) else ''}")
-    lines += ["  }", "}"]
-    return "\n".join(lines) + "\n"
+    """The checked-in text in the compact canonical JSON representation.
+
+    The manifest writer uses the same serialization for the generated history
+    file. Keeping this helper byte-identical lets storage tests validate the
+    checked-in representation without reintroducing the multi-megabyte pretty
+    JSON form that the compact-history change replaced.
+    """
+    return json.dumps(history, ensure_ascii=False, separators=(",", ":")) + "\n"
 
 
 def history_entry(

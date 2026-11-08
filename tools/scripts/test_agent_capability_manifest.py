@@ -1859,18 +1859,15 @@ def exercise_history_storage() -> int:
                    "is not valid JSON: bad")
     checks += 1
 
-    # --check compares the file text with its rendering, which catches an edit
-    # that parses back to the honest document (a duplicated object line).
+    # --check compares the file text with its compact rendering, which catches
+    # an edit that parses back to the honest document (reformatted whitespace).
     with tempfile.TemporaryDirectory(prefix="pulp-agent-history-text-") as temp:
         copy_path = pathlib.Path(temp) / "contract-history.json"
         copy_path.write_text(text, encoding="utf-8")
         assert manifest.history_text_problems(copy_path, stored) == []
-        lines = text.splitlines(keepends=True)
-        index = next(i for i, line in enumerate(lines)
-                     if line.startswith('    "sha256:') and '": ' in line
-                     and line.endswith(",\n"))
-        duplicated = lines[:index + 1] + [lines[index]] + lines[index + 1:]
-        copy_path.write_text("".join(duplicated), encoding="utf-8")
+        reformatted = text.replace(',"entries"', ', "entries"', 1)
+        assert reformatted != text
+        copy_path.write_text(reformatted, encoding="utf-8")
         assert json.loads(copy_path.read_text(encoding="utf-8")) == stored
         assert not [problem for problem in problems(stored)
                     if "canonical" in problem or "object" in problem]

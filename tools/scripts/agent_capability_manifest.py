@@ -39,6 +39,7 @@ from agent_capability_history import (
     history_problems,
     pending_counters,
     protected_base_problems,
+    rendered_history,
     updated_history_entries,
 )
 from agent_capability_registry import (
@@ -1032,6 +1033,8 @@ def main() -> int:
             if (root / ".git").exists() else None
         )
         history_issues = history_problems(history, doc, surface_document)
+        if not history_issues:
+            history_issues.extend(history_text_problems(history_path, history))
         if isinstance(history, dict):
             history_issues.extend(
                 protected_base_problems(
@@ -1149,6 +1152,19 @@ def _load_optional_json(path: pathlib.Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         return {"_invalid": str(error)}
+
+
+def history_text_problems(path: pathlib.Path, history: Any) -> list[str]:
+    """The history file must be byte-for-byte its compact rendering."""
+    if not path.exists() or not isinstance(history, dict):
+        return []
+    try:
+        expected = rendered_history(history)
+    except (KeyError, TypeError) as error:
+        return [f"{HISTORY_FILE} cannot be rendered: {error}"]
+    if path.read_text(encoding="utf-8") != expected:
+        return [f"{HISTORY_FILE} is not in its rendered form; rerun --write"]
+    return []
 
 
 
