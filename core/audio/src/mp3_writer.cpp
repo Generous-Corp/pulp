@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <pulp/audio/format_registry.hpp>
+#include "format_capabilities_detail.hpp"
 #include <lame/lame.h>
 #include <vector>
 #include <fstream>
@@ -75,6 +76,17 @@ public:
     }
 
     std::string format_name() const override { return "MP3"; }
+    FormatCapabilities capabilities() const override {
+        return {.format_name = "MP3",
+                .extensions = {".mp3"},
+                .sample_rates = detail::mp3_sample_rates(),
+                .max_channels = 2,
+                .compressed = true,
+                .lossless = false,
+                .quality_options = {
+                    {"bitrate_mode", "Variable or constant bitrate", "vbr"},
+                    {"encoder_quality", "LAME algorithm quality, 0 (best) to 9 (fastest)", "2"}}};
+    }
 };
 
 std::unique_ptr<FormatWriter> create_mp3_writer() {

@@ -2418,6 +2418,11 @@ commands:
             kind: flag
       - name: read-bundle
         summary: Pretty-print a previously emitted excerpt bundle
+      - name: formats
+        summary: List the audio file readers and writers this build registers, with extensions, bit depths, sample rates, channel limits and encoder settings
+        args:
+          - name: --json
+            kind: flag
       - name: sampler-mip build
         summary: Build and atomically publish a self-verified 140 dB streamed-sampler mip sidecar with hash-addressed payloads
         args:
