@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 537,
-    "reviewed_headers": 297,
+    "public_headers": 539,
+    "reviewed_headers": 299,
     "legacy_unreviewed_headers": 240,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 128,
+      "infrastructure": 130,
       "legacy_unreviewed": 240,
       "unsupported_capability": 2
     },
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 284,
-        "reviewed_headers": 162,
+        "public_headers": 286,
+        "reviewed_headers": 164,
         "legacy_unreviewed_headers": 122,
         "unsupported_headers": 2
       },
@@ -4705,6 +4705,24 @@
       "disposition": "infrastructure",
       "capability_keys": [],
       "rationale": "Spectrogram display math: colour ramps and bin-to-display frequency axis mapping for the realtime visualization bridge and the offline audio image renderers. It draws spectra that other capabilities compute; it is not a generator-facing DSP transform or a graph contract. The double-precision axis overloads and configurable floor were added for the offline renderers without changing the float API."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectrum_analyzer.hpp",
+      "fingerprint": "sha256:f9b372d037fc8a698cd4e7d36805422a3bf2037aeaeb2e600ceb6892e6350f58",
+      "include": "pulp/signal/spectrum_analyzer.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Display-side spectrum analysis behind SpectrumView: a lock-free sample tap for the audio thread plus UI-thread windowed FFT, level modes and time-based release; analysis for drawing, not a generator capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/spectrum_bin_mapping.hpp",
+      "fingerprint": "sha256:1e4977f44a6ea834278ee0a9d505e9dca3d0af8c82acc792fab9361b7e00e235",
+      "include": "pulp/signal/spectrum_bin_mapping.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Maps FFT magnitude bins onto the columns of a log-frequency display (parabolic interpolation, fractional-edge aggregation); shared by SpectrumView and EqCurveView, with no generator capability claim."
     },
     {
       "domain": "signal",
