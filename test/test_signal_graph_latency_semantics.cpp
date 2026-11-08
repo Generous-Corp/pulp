@@ -4,6 +4,7 @@
 // takes effect only through a re-prepare. Every rendering case runs on both the
 // legacy reference walk and the routed executor.
 
+#include <pulp/host/graph_rt_report.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -168,6 +169,52 @@ TEST_CASE("Intentional 500 ms echo on a wet branch never delays the dry path",
         // Dry impulse at 0, echo at exactly 500 ms: nothing was compensated.
         const auto rendered = render_impulse(graph, kEcho + kBlock);
         CHECK(nonzero_positions(rendered) == std::vector<std::size_t>{0, kEcho});
+    }
+}
+
+TEST_CASE("Transport-only custom nodes report intentional delay in prepared metadata",
+          "[host][graph][pdc][latency-semantics][rt-report]") {
+    constexpr int kDelay = 192;
+    for (const bool routed : {false, true}) {
+        CAPTURE(routed);
+        CustomNodeType transport_only;
+        transport_only.type_id = "pulp.test.transport-only-intentional-delay";
+        transport_only.version = 1;
+        transport_only.num_input_ports = 1;
+        transport_only.num_output_ports = 1;
+        transport_only.default_name = "Transport-only";
+        transport_only.process_transport = [](pulp::audio::BufferView<float>& out,
+                                              const pulp::audio::BufferView<const float>& in,
+                                              int frames,
+                                              const pulp::format::ProcessContext&) {
+            std::copy(in.channel_ptr(0), in.channel_ptr(0) + frames, out.channel_ptr(0));
+        };
+        transport_only.intentional_delay_samples = [](double) { return kDelay; };
+
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(transport_only));
+        const auto input = graph.add_input_node(1, "Input");
+        const auto node = graph.add_custom_node(transport_only.type_id, "Transport-only");
+        const auto output = graph.add_output_node(1, "Output");
+        REQUIRE(graph.connect(input, 0, node, 0));
+        REQUIRE(graph.connect(node, 0, output, 0));
+        configure(graph, routed);
+        REQUIRE(graph.prepare(kSampleRate, kBlock));
+
+        const auto snapshot = graph.prepared_latency_snapshot();
+        REQUIRE(snapshot.has_value());
+        const auto node_latency = snapshot->node(node);
+        REQUIRE(node_latency.has_value());
+        CHECK(node_latency->intentional_delay_samples == kDelay);
+        CHECK(node_latency->artifact_latency_samples == 0);
+
+        const auto report = pulp::host::build_graph_rt_report(graph);
+        CHECK(report.total_intentional_delay_samples == kDelay);
+        const auto reported = std::find_if(
+            report.nodes.begin(), report.nodes.end(),
+            [node](const auto& entry) { return entry.node_id == node; });
+        REQUIRE(reported != report.nodes.end());
+        CHECK(reported->intentional_delay_samples == kDelay);
     }
 }
 

@@ -717,43 +717,6 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 } else if (type->process_events) {
                     cg->custom_event_processors[n.id] = type->process_events;
                 }
-                // A registered type with no live callback is transparent on the
-                // live graph, so it must not add latency there. Baked-only
-                // callbacks capture their latency separately during lowering.
-                // Evaluated once here, off the audio thread, at the graph's own
-                // rate, and clamped into the declared range — the value is not
-                // knowable at registration, so this is where it gets checked.
-                const bool has_live_callback = cg->custom_processors.contains(n.id) ||
-                                               cg->custom_event_processors.contains(n.id);
-                if (has_live_callback &&
-                    (type->latency_samples_for_block || type->latency_samples)) {
-                    const int latency =
-                        type->latency_samples_for_block
-                            ? type->latency_samples_for_block(sample_rate, max_block_size)
-                            : type->latency_samples(sample_rate);
-                    cg->custom_latency_samples[n.id] =
-                        std::clamp(latency, 0, CustomNodeType::kMaxLatencySamples);
-                }
-                // Intentional delay is reported, never compensated: it does not
-                // touch custom_latency_samples, so neither PDC pass sees it.
-                if (has_live_callback && type->intentional_delay_samples) {
-                    cg->custom_intentional_delay_samples[n.id] =
-                        std::clamp(type->intentional_delay_samples(sample_rate), 0,
-                                   CustomNodeType::kMaxLatencySamples);
-                }
-                // Per-port artifact latency: the node reports the maximum, and
-                // the binding equalises the other ports up to it.
-                if (has_live_callback && type->output_port_latency_samples) {
-                    std::vector<int> ports(static_cast<std::size_t>(n.num_output_ports), 0);
-                    for (int port = 0; port < n.num_output_ports; ++port)
-                        ports[static_cast<std::size_t>(port)] =
-                            std::clamp(type->output_port_latency_samples(sample_rate, port), 0,
-                                       CustomNodeType::kMaxLatencySamples);
-                    const int node_latency =
-                        ports.empty() ? 0 : *std::max_element(ports.begin(), ports.end());
-                    cg->custom_latency_samples[n.id] = node_latency;
-                    cg->custom_output_port_latency_samples[n.id] = std::move(ports);
-                }
                 // Bake-layer param injection: if the type declared baked_params
                 // and a param-aware process, bind a closure that captures the
                 // instance shared_ptr by value (keepalive, same guarantee as the
@@ -789,6 +752,47 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 } else if (type->process_transport) {
                     cg->custom_transport_processors[n.id] = type->process_transport;
                     n.transport_sensitive = true;
+                }
+                // A registered type with no live callback is transparent on the
+                // live graph, so it must not add latency there. Baked-only
+                // callbacks capture their latency separately during lowering.
+                // Evaluated once here, off the audio thread, at the graph's own
+                // rate, and clamped into the declared range — the value is not
+                // knowable at registration, so this is where it gets checked.
+                // Transport binding is resolved above so transport-only nodes
+                // participate in the same prepared latency metadata as the
+                // plain and event callback variants.
+                const bool has_live_callback = cg->custom_processors.contains(n.id) ||
+                                               cg->custom_event_processors.contains(n.id) ||
+                                               cg->custom_transport_processors.contains(n.id);
+                if (has_live_callback &&
+                    (type->latency_samples_for_block || type->latency_samples)) {
+                    const int latency =
+                        type->latency_samples_for_block
+                            ? type->latency_samples_for_block(sample_rate, max_block_size)
+                            : type->latency_samples(sample_rate);
+                    cg->custom_latency_samples[n.id] =
+                        std::clamp(latency, 0, CustomNodeType::kMaxLatencySamples);
+                }
+                // Intentional delay is reported, never compensated: it does not
+                // touch custom_latency_samples, so neither PDC pass sees it.
+                if (has_live_callback && type->intentional_delay_samples) {
+                    cg->custom_intentional_delay_samples[n.id] =
+                        std::clamp(type->intentional_delay_samples(sample_rate), 0,
+                                   CustomNodeType::kMaxLatencySamples);
+                }
+                // Per-port artifact latency: the node reports the maximum, and
+                // the binding equalises the other ports up to it.
+                if (has_live_callback && type->output_port_latency_samples) {
+                    std::vector<int> ports(static_cast<std::size_t>(n.num_output_ports), 0);
+                    for (int port = 0; port < n.num_output_ports; ++port)
+                        ports[static_cast<std::size_t>(port)] =
+                            std::clamp(type->output_port_latency_samples(sample_rate, port), 0,
+                                       CustomNodeType::kMaxLatencySamples);
+                    const int node_latency =
+                        ports.empty() ? 0 : *std::max_element(ports.begin(), ports.end());
+                    cg->custom_latency_samples[n.id] = node_latency;
+                    cg->custom_output_port_latency_samples[n.id] = std::move(ports);
                 }
                 // Equalise per-port artifact latency inside the binding, after
                 // every live callback variant has been resolved. One equaliser
