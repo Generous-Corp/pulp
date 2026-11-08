@@ -259,22 +259,29 @@ SamplerStreamingRuntime::stage_streamed_file(std::string_view path) {
         return staged;
     }
 
-    std::shared_ptr<audio::MemoryMappedAudioReader> retained_base;
-    auto base = audio::make_memory_mapped_frame_reader(
-        path, false, false, std::numeric_limits<std::uint64_t>::max(), &retained_base);
-    if (!base.valid || retained_base == nullptr) {
+    // Open ranged-only: a source that would need the decode-once fallback is
+    // reported and refused without being decoded, so a rejection costs a
+    // header read rather than a whole-file decode on the control thread.
+    auto retained_base = std::make_shared<audio::MemoryMappedAudioReader>();
+    if (!retained_base->open(path, std::numeric_limits<std::size_t>::max(), true)) {
         result.status = PulpSamplerLoadStatus::OpenFailed;
         return staged;
     }
-    result.channels = base.channels;
-    result.sample_rate = base.sample_rate;
-    result.total_frames = base.total_frames;
-    copy_fixed_name(result.codec_name, retained_base->info().format);
-    result.codec_capability = base.supports_ranged_read
+    const auto& probed = retained_base->info();
+    result.channels = probed.num_channels;
+    result.sample_rate = probed.sample_rate;
+    result.total_frames = probed.num_frames;
+    copy_fixed_name(result.codec_name, probed.format);
+    result.codec_capability = retained_base->supports_ranged_read()
                                   ? PulpSamplerCodecCapability::Ranged
                                   : PulpSamplerCodecCapability::DecodeOnceFallback;
-    if (!base.supports_ranged_read) {
+    if (!retained_base->supports_ranged_read()) {
         result.status = PulpSamplerLoadStatus::DecodeOnceFallbackRejected;
+        return staged;
+    }
+    auto base = audio::make_retained_memory_mapped_frame_reader(retained_base);
+    if (!base.valid) {
+        result.status = PulpSamplerLoadStatus::OpenFailed;
         return staged;
     }
     if (base.channels == 0 || base.channels > kMaximumChannels) {
@@ -286,8 +293,8 @@ SamplerStreamingRuntime::stage_streamed_file(std::string_view path) {
         return staged;
     }
     // Rebind the retained snapshot to strict ranged-only reads after capability
-    // inspection. The permissive probe must never leak its decode-once fallback
-    // into an admitted streaming source or copy a large source twice.
+    // inspection, so a later ranged decode failure is reported instead of
+    // falling back to a whole-file decode, without copying the source twice.
     base = audio::make_retained_memory_mapped_frame_reader(
         retained_base, true, has_sidecar);
     if (!base.valid || retained_base == nullptr) {

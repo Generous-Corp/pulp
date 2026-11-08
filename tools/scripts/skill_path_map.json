@@ -691,6 +691,13 @@
         "test/cmake/release_artifact_*"
       ]
     },
+    "rmlui": {
+      "paths": [
+        "core/view/include/pulp/view/rmlui_*.hpp",
+        "test/test_rmlui_*.cpp",
+        "test/editor_host_slice/rmlui_*.cpp"
+      ]
+    },
     "render-toolchain-update": {
       "paths": [
         "tools/deps/manifest.json",
