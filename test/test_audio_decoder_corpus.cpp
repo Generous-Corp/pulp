@@ -196,6 +196,8 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
         {"ogg-page-bad-crc.ogg", E{false, {}, {}, ""}},
         {"ogg-truncated-page.ogg", E{false, {}, {}, ""}},
         {"ogg-vendor-length-negative.ogg", E{false, {}, {}, "negative vendor-string length"}},
+        {"ogg-comment-length-int-max.ogg",
+         E{false, {}, {}, "comment-string length near INT_MAX; len + 1 overflowed the allocator"}},
         {"wav-block-align-smaller-than-frame.wav",
          E{false, true, true,
            "nBlockAlign smaller than channels x sample width: the registry refuses the layout, "
@@ -514,17 +516,23 @@ TEST_CASE("a WAV whose block align is smaller than its channels' samples is refu
     CHECK_FALSE(registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
 }
 
-TEST_CASE("a comment header with a negative string length is refused without allocating",
+TEST_CASE("a comment header with an impossible string length is refused without allocating",
           "[fuzz][audio][ogg]") {
-    // libFuzzer reproducer: the vendor-string length is a negative 32-bit
-    // value, which once became a negative-sized setup allocation.
-    const auto path = corpus_dir() / "ogg-vendor-length-negative.ogg";
-    REQUIRE(fs::exists(path));
+    // libFuzzer reproducers: a negative vendor-string length, which once
+    // became a negative-sized setup allocation, and a comment-string length
+    // near INT_MAX, where len + 1 wrapped negative, slipped past the arena
+    // check and the byte loop wrote past the arena.
     auto& registry = pulp::audio::FormatRegistry::instance();
-    const auto started = std::chrono::steady_clock::now();
-    CHECK_FALSE(registry.read_info(path.string()).has_value());
-    CHECK_FALSE(registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
-    CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
+    for (const char* name : {"ogg-vendor-length-negative.ogg", "ogg-comment-length-int-max.ogg"}) {
+        const auto path = corpus_dir() / name;
+        INFO(name);
+        REQUIRE(fs::exists(path));
+        const auto started = std::chrono::steady_clock::now();
+        CHECK_FALSE(registry.read_info(path.string()).has_value());
+        CHECK_FALSE(
+            registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
+        CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
+    }
 }
 
 TEST_CASE("read_audio_file applies the default decode ceilings to a declared header",
