@@ -270,6 +270,11 @@ pulp_add_test_suite(pulp-test-binding GROUP pulp-test-group-cap-state
 pulp_add_test_suite(pulp-test-external-binding GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 
+# MIDI controller decoding, relative encoders, learn classification, takeover
+# (pure functions; no audio or StateStore).
+pulp_add_test_suite(pulp-test-midi-learn-decode GROUP pulp-test-group-cap-state
+    LIBRARIES pulp::state)
+
 # Cross-version parameter-ordering guard (host-facing ID + index stability).
 pulp_add_test_suite(pulp-test-param-ordering GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)

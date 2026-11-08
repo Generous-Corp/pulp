@@ -98,54 +98,11 @@ endforeach()
 # reaches every target the define reaches. The carriers are collected once
 # every target exists.
 set(_pulp_gpu_runtime_carriers_file "${CMAKE_BINARY_DIR}/gpu-runtime-carriers.txt")
-function(_pulp_gpu_runtime_collect_carriers dir out_var)
-    get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
-    get_property(_subdirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
-    foreach(_sub IN LISTS _subdirs)
-        _pulp_gpu_runtime_collect_carriers("${_sub}" _sub_targets)
-        list(APPEND _targets ${_sub_targets})
-    endforeach()
-    set(${out_var} "${_targets}" PARENT_SCOPE)
-endfunction()
+include(${CMAKE_CURRENT_LIST_DIR}/GpuRuntimeCarriers.cmake)
 # Deferred calls expand their arguments when they run, so the path is built
 # here rather than passed in.
 function(_pulp_gpu_runtime_write_carriers)
-    _pulp_gpu_runtime_collect_carriers("${CMAKE_SOURCE_DIR}" _targets)
-    set(_lines "")
-    foreach(_target IN LISTS _targets)
-        # A target-local PULP_BENCHMARK, in a build whose global PULP_BENCHMARK
-        # is off, is a compile-only benchmark rot check.
-        if(NOT PULP_BENCHMARK)
-            get_target_property(_local_defs ${_target} COMPILE_DEFINITIONS)
-            if(_local_defs AND "PULP_BENCHMARK" IN_LIST _local_defs)
-                get_target_property(_type ${_target} TYPE)
-                set(_grb FALSE)
-                if("GPU_RUNTIME_BENCHMARK=1" IN_LIST _local_defs)
-                    set(_grb TRUE)
-                endif()
-                string(APPEND _lines "benchmark-only ${_target} ${_type} ${_grb}\n")
-            endif()
-        endif()
-        set(_carries FALSE)
-        set(_links FALSE)
-        foreach(_prop COMPILE_DEFINITIONS INTERFACE_COMPILE_DEFINITIONS)
-            get_target_property(_defs ${_target} ${_prop})
-            if(_defs AND "${_defs}" MATCHES "PULP_GPU_RUNTIME")
-                set(_carries TRUE)
-            endif()
-        endforeach()
-        if(NOT _carries)
-            continue()
-        endif()
-        foreach(_prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
-            get_target_property(_libs ${_target} ${_prop})
-            if(_libs AND "VellumGpuRuntime::DeviceApi" IN_LIST _libs)
-                set(_links TRUE)
-            endif()
-        endforeach()
-        string(APPEND _lines "${_target} ${_links}\n")
-    endforeach()
-    file(WRITE "${CMAKE_BINARY_DIR}/gpu-runtime-carriers.txt" "${_lines}")
+    pulp_gpu_runtime_write_carriers("${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/gpu-runtime-carriers.txt")
 endfunction()
 cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
     CALL _pulp_gpu_runtime_write_carriers)
@@ -187,6 +144,16 @@ add_test(NAME gpu-runtime-prefix-record
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/gpu-runtime-prefix-record
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_record.cmake)
 set_tests_properties(gpu-runtime-prefix-record PROPERTIES LABELS "render;gpu-device" TIMEOUT 20)
+# The carrier collector and check, driven through a fixture project that plants
+# each shape they must refuse.
+add_test(NAME gpu-runtime-carrier-cases
+    COMMAND ${CMAKE_COMMAND}
+        -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/gpu_runtime_carriers
+        -DCHECK=${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_mode.cmake
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/gpu-runtime-carrier-cases
+        "-DGENERATOR=${CMAKE_GENERATOR}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_carrier_cases.cmake)
+set_tests_properties(gpu-runtime-carrier-cases PROPERTIES LABELS "render;gpu-device" TIMEOUT 180)
 add_test(NAME gpu-runtime-benchmark-flavour
     COMMAND ${CMAKE_COMMAND}
         -DMODULE=${CMAKE_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake
