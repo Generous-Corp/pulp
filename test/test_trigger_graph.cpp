@@ -248,8 +248,7 @@ TEST_CASE("Host ingress refuses a block whose frames differ from the ingress win
     // duplicate, and a matching 8-frame block delivers it at offset 6.
     REQUIRE(fixture.graph.begin_host_event_block(1, 0, 8) == HostEventResult::Accepted);
     CHECK(fixture.graph.publish_host_event(event) == HostEventResult::InvalidSequence);
-    REQUIRE(fixture.graph.process_checked(block.out, block.in, 8) ==
-            TriggerGraphResult::Accepted);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 8) == TriggerGraphResult::Accepted);
     CHECK(counters(fixture.graph).cursor == 8);
     delivered.clear();
     REQUIRE(fixture.graph.extract_midi(fixture.midi_out, delivered));
