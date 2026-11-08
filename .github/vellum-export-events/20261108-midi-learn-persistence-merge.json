@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261108-midi-learn-persistence-merge",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-08T07:15:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/state/include/pulp/state/midi_decode.hpp",
+    "core/state/include/pulp/state/midi_learn_engine.hpp",
+    "core/state/include/pulp/state/midi_learn_persistence.hpp",
+    "core/state/include/pulp/state/midi_learn_undo.hpp",
+    "core/state/include/pulp/state/midi_map_scale.hpp",
+    "core/state/include/pulp/state/midi_mapping.hpp",
+    "core/state/src/midi_learn_persistence.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "MIDI Learn engine, mapping persistence and undo, plus equality operators added to two decode types. None is included by any file in the exported closure, so the next re-export does not carry them."
+}
