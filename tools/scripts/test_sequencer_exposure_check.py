@@ -41,6 +41,7 @@ from sequencer_exposure_check import (
     validate_tombstone_provenance,
     validate_transition,
     sequencer_paths_after_dependabot_exemption,
+    _configured_provenance_timeout,
 )
 import sequencer_exposure_check
 
@@ -478,6 +479,21 @@ def main() -> int:
         release_timeout = validate_release_evidence(valid, root, timeout_seconds=0.0)
         if not release_timeout or "release evidence validation timed out" not in release_timeout[0]:
             raise AssertionError(f"release evidence timeout lacked receipt: {release_timeout}")
+        with mock.patch.dict(
+            sequencer_exposure_check.os.environ,
+            {"PULP_SEQUENCER_PROVENANCE_TIMEOUT_SECONDS": "abc"},
+        ):
+            configured, config_error = _configured_provenance_timeout()
+        if configured != 120.0 or not config_error or "positive number" not in config_error:
+            raise AssertionError(f"malformed timeout was not fail-closed: {configured}, {config_error}")
+        with mock.patch.object(
+            sequencer_exposure_check.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["git"], 0.01),
+        ):
+            timed_git = sequencer_exposure_check._git(root, "log", "-1")
+        if timed_git.returncode != 124 or "timed out" not in timed_git.stderr:
+            raise AssertionError(f"generic git timeout lacked bounded receipt: {timed_git}")
         _, _, unavailable_errors = _load_base_transition(root, "missing-base-ref")
         if not any("git history unavailable" in error for error in unavailable_errors):
             raise AssertionError(

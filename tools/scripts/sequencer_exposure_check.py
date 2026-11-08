@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import math
 import os
 import re
 import subprocess
@@ -1035,9 +1036,30 @@ def _release_snapshot(
 
 
 PROVENANCE_COMMAND_TIMEOUT_SECONDS = 10.0
-PROVENANCE_TOTAL_TIMEOUT_SECONDS = float(
-    os.environ.get("PULP_SEQUENCER_PROVENANCE_TIMEOUT_SECONDS", "120")
+PROVENANCE_DEFAULT_TIMEOUT_SECONDS = 120.0
+
+
+def _configured_provenance_timeout() -> tuple[float, str | None]:
+    raw = os.environ.get("PULP_SEQUENCER_PROVENANCE_TIMEOUT_SECONDS", "120")
+    try:
+        value = float(raw)
+    except ValueError:
+        return PROVENANCE_DEFAULT_TIMEOUT_SECONDS, (
+            "invalid PULP_SEQUENCER_PROVENANCE_TIMEOUT_SECONDS={!r}; "
+            "using the 120s safety limit; receipt=set a positive number"
+        ).format(raw)
+    if not math.isfinite(value) or value <= 0:
+        return PROVENANCE_DEFAULT_TIMEOUT_SECONDS, (
+            "invalid PULP_SEQUENCER_PROVENANCE_TIMEOUT_SECONDS={!r}; "
+            "using the 120s safety limit; receipt=set a positive number"
+        ).format(raw)
+    return value, None
+
+
+PROVENANCE_TOTAL_TIMEOUT_SECONDS, PROVENANCE_TIMEOUT_CONFIGURATION_ERROR = (
+    _configured_provenance_timeout()
 )
+_GIT_DEADLINE: float | None = None
 
 
 class _ProvenanceTimeout(RuntimeError):
@@ -1620,6 +1642,15 @@ def _git(
     input_text: str | None = None,
     timeout_seconds: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    timeout = timeout_seconds or PROVENANCE_COMMAND_TIMEOUT_SECONDS
+    if _GIT_DEADLINE is not None:
+        remaining = _GIT_DEADLINE - time.monotonic()
+        if remaining <= 0:
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(repo_root), *arguments], 124,
+                stdout="", stderr="git validation timed out at the run deadline",
+            )
+        timeout = min(timeout, remaining)
     try:
         return subprocess.run(
             ["git", "-C", str(repo_root), *arguments],
@@ -1629,14 +1660,14 @@ def _git(
             input=input_text,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=timeout_seconds,
+            timeout=timeout,
         )
-    except subprocess.TimeoutExpired as timeout:
-        elapsed = timeout_seconds if timeout_seconds is not None else "unknown"
+    except subprocess.TimeoutExpired as expired:
+        elapsed = timeout_seconds if timeout_seconds is not None else "configured"
         return subprocess.CompletedProcess(
             ["git", "-C", str(repo_root), *arguments],
             124,
-            stdout=timeout.stdout or "",
+            stdout=expired.stdout or "",
             stderr=f"git command timed out after {elapsed}s",
         )
 
@@ -1647,6 +1678,15 @@ def _git_bytes(
     input_bytes: bytes = b"",
     timeout_seconds: float | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
+    timeout = timeout_seconds or PROVENANCE_COMMAND_TIMEOUT_SECONDS
+    if _GIT_DEADLINE is not None:
+        remaining = _GIT_DEADLINE - time.monotonic()
+        if remaining <= 0:
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(repo_root), *arguments], 124,
+                stdout=b"", stderr=b"git validation timed out at the run deadline",
+            )
+        timeout = min(timeout, remaining)
     try:
         return subprocess.run(
             ["git", "-C", str(repo_root), *arguments],
@@ -1654,14 +1694,14 @@ def _git_bytes(
             input=input_bytes,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=timeout_seconds,
+            timeout=timeout,
         )
-    except subprocess.TimeoutExpired as timeout:
-        elapsed = timeout_seconds if timeout_seconds is not None else "unknown"
+    except subprocess.TimeoutExpired as expired:
+        elapsed = timeout_seconds if timeout_seconds is not None else "configured"
         return subprocess.CompletedProcess(
             ["git", "-C", str(repo_root), *arguments],
             124,
-            stdout=timeout.stdout or b"",
+            stdout=expired.stdout or b"",
             stderr=f"git command timed out after {elapsed}s".encode(),
         )
 
@@ -2164,6 +2204,8 @@ def main(argv: list[str] | None = None) -> int:
         help="require pending-row dependencies to resolve to a ledger row or tombstone",
     )
     args = parser.parse_args(argv)
+    global _GIT_DEADLINE
+    _GIT_DEADLINE = time.monotonic() + PROVENANCE_TOTAL_TIMEOUT_SECONDS
     repo_root = args.repo_root.resolve()
     schema_path = args.schema or repo_root / "docs/status/sequencer-exposure.schema.json"
     document, origins, load_errors = load_ledger_from_worktree(
@@ -2180,6 +2222,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"sequencer exposure check: cannot read {schema_path}: {error}", file=sys.stderr)
         return 1
     errors = validate_document(document, repo_root)
+    if PROVENANCE_TIMEOUT_CONFIGURATION_ERROR:
+        errors.append(PROVENANCE_TIMEOUT_CONFIGURATION_ERROR)
     if args.strict_dependencies:
         errors.extend(validate_dependency_references(document))
     errors.extend(validate_schema_contract(schema))
