@@ -62,6 +62,10 @@ struct MetalSurfaceOptions {
     DrawableSizing sizing = DrawableSizing::automatic;
     /// 2 or 3; Core Animation's own limits.
     std::uint32_t maximum_drawable_count = 3;
+    /// The `id<MTLDevice>` to use, retained by the surface, for a client whose
+    /// renderer was built on a device before the surface existed. Null: the
+    /// system default device.
+    void* device = nullptr;
 };
 
 /// One consistent reading of the surface's size. Written only on the main
