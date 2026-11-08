@@ -558,3 +558,25 @@ TEST_CASE("AUv3 slot never drops automation while the host reads and writes para
     reader.join();
     CHECK(g_tree_unit_parameter_events.load() == kBlocks);
 }
+
+TEST_CASE("AUv3 slot lets a restored state win over a host edit not yet rendered",
+          "[host][auv3][oop][state]") {
+    for (const bool out_of_process : {true, false}) {
+        INFO((out_of_process ? "out of process" : "in process"));
+        auto slot = load("aufx:dely:appl", out_of_process);
+        REQUIRE(slot->prepare(kRate, kFrames));
+        const auto time = param_named(*slot, "Delay Time");
+        slot->set_parameter(time, 0.5f);
+        Stereo s;
+        s.run(*slot);
+        REQUIRE(settles_to(*slot, time, 0.5f));
+        const auto saved = slot->save_state();
+        // A host edit queued for the next block, then a restore before that
+        // block renders: the restored state is the newer decision.
+        slot->set_parameter(time, 1.5f);
+        REQUIRE(slot->restore_state(saved));
+        for (int b = 0; b < 4; ++b)
+            s.run(*slot);
+        CHECK(settles_to(*slot, time, 0.5f));
+    }
+}

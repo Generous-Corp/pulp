@@ -314,6 +314,7 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
         [unit_ deallocateRenderResources];
         clear_blocks();
         clear_context_blocks();
+        free_retired_mappings();
     }
 
     std::vector<HostParamInfo> parameters() const override {
@@ -351,7 +352,9 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
                 // which reaches a unit in another process with the render
                 // request itself; the parameter write below is asynchronous
                 // there. mapping_mutex_ makes this the queue's one producer.
-                if (attempt == 0 && !host_edits_.try_push(HostEdit{m->address, plain_value}))
+                if (attempt == 0 &&
+                    !host_edits_.try_push(HostEdit{m->address, plain_value,
+                                                   edit_epoch_.load(std::memory_order_relaxed)}))
                     edits_dropped_.fetch_add(1, std::memory_order_relaxed);
             }
             // The observer token as originator keeps the host's own edit from
@@ -407,10 +410,13 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
             if (![plist isKindOfClass:[NSDictionary class]])
                 return false;
             {
-                // The restored state decides the values now; earlier host
-                // edits are not replayed onto a tree it brings.
+                // The restored state decides the values now. Earlier host
+                // edits are not replayed onto a tree it brings, and those still
+                // queued for the next block are dropped there: the audio
+                // thread owns the queue, so a new epoch marks them stale.
                 std::lock_guard<std::mutex> lock(mapping_mutex_);
                 host_writes_.clear();
+                edit_epoch_.fetch_add(1, std::memory_order_release);
             }
             unit_.fullState = plist;
             // A state may bring a different parameter list; settle on it
@@ -675,7 +681,8 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
         for (const auto& [address, value] : host_writes_) {
             if (AUParameter* p = [tree_ parameterWithAddress:address]) {
                 [p setValue:value originator:automation_token_];
-                if (!host_edits_.try_push(HostEdit{address, value}))
+                if (!host_edits_.try_push(
+                        HostEdit{address, value, edit_epoch_.load(std::memory_order_relaxed)}))
                     edits_dropped_.fetch_add(1, std::memory_order_relaxed);
             }
         }
@@ -705,6 +712,18 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
         all_parameters_ = nil;
         [tree_ release];
         tree_ = nil;
+    }
+
+    /// Frees every mapping but the current one. Called from release(), when
+    /// the audio thread no longer renders; the observer lock shuts out the
+    /// callbacks, the only other readers.
+    void free_retired_mappings() {
+        std::lock_guard<std::recursive_mutex> callbacks(observer_->lock);
+        std::lock_guard<std::mutex> lock(mapping_mutex_);
+        const ParameterMapping* current = mapping_.load(std::memory_order_acquire);
+        std::erase_if(mappings_, [&](const std::unique_ptr<ParameterMapping>& m) {
+            return m.get() != current;
+        });
     }
 
     const ParameterMapping& mapping() const noexcept {
@@ -935,8 +954,10 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
             // Host edits first, at the block's start; automation in the block
             // then overrides them at its own frames.
             HostEdit edit;
+            const auto epoch = edit_epoch_.load(std::memory_order_acquire);
             while (host_edits_.try_pop(edit))
-                param_block_(AUEventSampleTimeImmediate, 0, edit.address, edit.value);
+                if (edit.epoch == epoch)
+                    param_block_(AUEventSampleTimeImmediate, 0, edit.address, edit.value);
             // The published mapping, read without a lock.
             const auto& map = mapping();
             for (const auto& pe : *request.param_events)
@@ -1098,7 +1119,11 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
     struct HostEdit {
         AUParameterAddress address = 0;
         float value = 0.0f;
+        std::uint32_t epoch = 0; // edit_epoch_ when queued.
     };
+    // Bumped by restore_state() (under mapping_mutex_, as every producer of
+    // host_edits_ holds it); the audio thread drops edits from an older epoch.
+    std::atomic<std::uint32_t> edit_epoch_{0};
     runtime::SpscQueue<HostEdit, 1024> host_edits_;
     std::atomic<std::uint64_t> edits_dropped_{0};
     std::atomic<bool> invalidated_{false};
