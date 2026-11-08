@@ -110,6 +110,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          set +e
           # An empty private Skia cache: the GPU configure has to download
           # Skia, and with the network cut it must fail saying so.
           empty="$RUNNER_TEMP/empty-skia-cache"
