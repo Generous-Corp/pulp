@@ -569,11 +569,10 @@ std::string handle_audio_compare(const std::string& params_json) {
             return arg_error("Error: threshold must be a finite positive number");
         // Shortest round-trippable form — std::to_string fixes 6 decimals and would
         // silently floor a small threshold (e.g. 1e-4 → "0.000100", 1e-7 → "0.000000").
-        std::array<char, 32> buf{};
-        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), t);
-        if (ec != std::errc())
+        const auto formatted = format_double_arg(t);
+        if (!formatted)
             return arg_error("Error: threshold could not be formatted");
-        flags += " --threshold " + shell_quote(std::string(buf.data(), ptr));
+        flags += " --threshold " + shell_quote(*formatted);
     }
 
     // Always capture the structured report to a temp file and return it — the MCP
@@ -660,46 +659,65 @@ std::string handle_audio_image(const std::string& params_json, const std::string
     if (!json_path.empty())
         cmd += " --json " + shell_quote(json_path);
 
-    for (const char* key : {"channel", "width", "height", "fft", "hop"}) {
-        if (!present(key))
+    // One table drives validation and forwarding: which flag a key maps to,
+    // how its value is typed, and which verb may use it. Adding an option is
+    // one row, not a fourth copy of the "spectrogram-only" check.
+    enum class Kind { non_negative_int, positive_int, non_negative_seconds, positive_db, name };
+    struct Option {
+        const char* key;
+        const char* flag;
+        Kind kind;
+        bool spectrogram_only;
+    };
+    static constexpr Option kOptions[] = {
+        {"channel", "--channel", Kind::non_negative_int, false},
+        {"width", "--width", Kind::positive_int, false},
+        {"height", "--height", Kind::positive_int, false},
+        {"start", "--start", Kind::non_negative_seconds, false},
+        {"end", "--end", Kind::non_negative_seconds, false},
+        {"fft", "--fft", Kind::positive_int, true},
+        {"hop", "--hop", Kind::positive_int, true},
+        {"db_range", "--db-range", Kind::positive_db, true},
+        {"window", "--window", Kind::name, true},
+        {"scale", "--scale", Kind::name, true},
+    };
+    for (const Option& option : kOptions) {
+        const bool is_name = option.kind == Kind::name;
+        const auto name_value = is_name ? extract_string(params_json, option.key) : std::string();
+        if (is_name ? name_value.empty() : !present(option.key))
             continue;
-        if (verb != "spectrogram" && (std::string(key) == "fft" || std::string(key) == "hop"))
-            return arg_error(std::string("Error: ") + key +
-                             " applies only to pulp_audio_spectrogram");
-        const int value = extract_int(params_json, key, -1);
-        const bool positive = std::string(key) != "channel";
-        if (value < 0 || (positive && value == 0))
-            return arg_error(std::string("Error: ") + key + " must be a " +
-                             (positive ? "positive" : "non-negative") + " integer");
-        cmd += std::string(" --") + key + " " + std::to_string(value);
-    }
-    for (const char* key : {"start", "end"}) {
-        if (!present(key))
-            continue;
-        const double value = extract_double(params_json, key, -1.0);
-        if (!(value >= 0.0))
-            return arg_error(std::string("Error: ") + key +
-                             " must be a non-negative number of seconds");
-        cmd += std::string(" --") + key + " " + std::to_string(value);
-    }
-    if (present("db_range")) {
-        if (verb != "spectrogram")
-            return arg_error("Error: db_range applies only to pulp_audio_spectrogram");
-        const double value = extract_double(params_json, "db_range", -1.0);
-        if (!(value > 0.0))
-            return arg_error("Error: db_range must be a positive number of dB");
-        cmd += " --db-range " + std::to_string(value);
-    }
-    for (const char* key : {"window", "scale"}) {
-        const auto value = extract_string(params_json, key);
-        if (value.empty())
-            continue;
-        if (verb != "spectrogram")
-            return arg_error(std::string("Error: ") + key +
-                             " applies only to pulp_audio_spectrogram");
-        if (value.front() == '-')
-            return arg_error(std::string("Error: ") + key + " must be a name, not an option");
-        cmd += std::string(" --") + key + " " + shell_quote(value);
+        if (option.spectrogram_only && verb != "spectrogram")
+            return arg_error(std::string("Error: ") + option.key + " applies only to pulp_audio_spectrogram");
+        switch (option.kind) {
+        case Kind::non_negative_int:
+        case Kind::positive_int: {
+            const int value = extract_int(params_json, option.key, -1);
+            const bool positive = option.kind == Kind::positive_int;
+            if (value < 0 || (positive && value == 0))
+                return arg_error(std::string("Error: ") + option.key + " must be a " +
+                                 (positive ? "positive" : "non-negative") + " integer");
+            cmd += std::string(" ") + option.flag + " " + std::to_string(value);
+            break;
+        }
+        case Kind::non_negative_seconds:
+        case Kind::positive_db: {
+            const double value = extract_double(params_json, option.key, -1.0);
+            const bool positive = option.kind == Kind::positive_db;
+            if (!(positive ? value > 0.0 : value >= 0.0))
+                return arg_error(std::string("Error: ") + option.key + " must be a " +
+                                 (positive ? "positive number of dB" : "non-negative number of seconds"));
+            const auto formatted = format_double_arg(value);
+            if (!formatted)
+                return arg_error(std::string("Error: ") + option.key + " could not be formatted");
+            cmd += std::string(" ") + option.flag + " " + *formatted;
+            break;
+        }
+        case Kind::name:
+            if (name_value.front() == '-')
+                return arg_error(std::string("Error: ") + option.key + " must be a name, not an option");
+            cmd += std::string(" ") + option.flag + " " + shell_quote(name_value);
+            break;
+        }
     }
     if (extract_bool(params_json, "absolute_paths", false))
         cmd += " --absolute-paths";
