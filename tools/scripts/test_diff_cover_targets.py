@@ -493,7 +493,8 @@ class TestArtifactClosure(Fixture):
         env = {**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"}
         cmd = [sys.executable, str(HELPER), "artifacts", "--build-dir", str(b),
                "--plan", str(plan), "--receipt", str(receipt), "--regex", "sdk staging"]
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                encoding="utf-8", env=env)
         self.assertEqual(result.returncode, 3, result.stderr)
         report = json.loads(receipt.read_text(encoding="utf-8"))
         self.assertEqual(report["status"], "blocked")
@@ -502,7 +503,8 @@ class TestArtifactClosure(Fixture):
 
         archive.parent.mkdir(parents=True, exist_ok=True)
         archive.write_bytes(b"fixture")
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                encoding="utf-8", env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["status"], "ok")
 
