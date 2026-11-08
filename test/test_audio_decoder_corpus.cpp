@@ -218,6 +218,7 @@ const std::set<std::string>& seeds_that_may_refuse() {
         // and the RIFF reader refuses the GUID envelope by design.
         "wav-w64-pcm16-mono.wav",
         "mp3-xing-declares-more-than-stream.mp3",
+        "mp3-id3v2-scan-counts-undecodable-frame.mp3",
     };
     return seeds;
 }
@@ -478,6 +479,22 @@ TEST_CASE("an MP3 whose Xing header declares more frames than the stream deliver
     const auto decoded = registry.read(whole.string(), pulp_fuzz::audio_decoder::fuzz_limits());
     REQUIRE(decoded.has_value());
     CHECK(decoded->num_frames() == 6400u);
+}
+
+TEST_CASE("an MP3 with no declared length reports the frames the decoder delivers",
+          "[fuzz][audio][mp3]") {
+    // libFuzzer reproducer: the Xing frame is damaged, so nothing is
+    // declared; dr_mp3's header scan counts four frames while the decoder
+    // delivers three. read_info once reported the scan.
+    const auto path = corpus_dir() / "mp3-id3v2-scan-counts-undecodable-frame.mp3";
+    REQUIRE(fs::exists(path));
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto info = registry.read_info(path.string());
+    const auto data = registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits());
+    REQUIRE(info.has_value());
+    REQUIRE(data.has_value());
+    CHECK(data->num_frames() == 3456u);
+    CHECK(info->num_frames == data->num_frames());
 }
 
 TEST_CASE("a comment header with a negative string length is refused without allocating",

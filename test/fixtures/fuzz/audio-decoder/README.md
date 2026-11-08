@@ -125,6 +125,7 @@ path or timestamp (the m4a `mvhd`/`tkhd`/`mdhd` times are zeroed).
 | `mp3-apev2-footer.mp3` | 1146 | derived | Valid with trailer: the CBR base plus an APEv2 tag (header, two UTF-8 items, footer) built in Python. |
 | `mp3-truncated-frame.mp3` | 449 | derived | Malformed: cut 17 bytes into the fourth frame. |
 | `mp3-xing-declares-more-than-stream.mp3` | 1776 | derived | Malformed: the Xing VBR seed cut at 80% of its length, so the Xing header still declares 6400 PCM frames while the stream delivers 2351. Reproduces a libFuzzer finding whose artifact was not written. |
+| `mp3-id3v2-scan-counts-undecodable-frame.mp3` | 1777 | fuzzer | Malformed: libFuzzer reproducer mutated from the Xing VBR seed; the Xing frame is damaged so nothing is declared, dr_mp3's header scan counts 4 MP3 frames (4608 PCM) and the decoder delivers 3 (3456). Not produced by the generator script. |
 
 ### CoreAudio-only formats
 
@@ -171,6 +172,7 @@ differential tests exist to surface.
 | `mp3-apev2-footer.mp3` | 0.2865 s, treats the APE tag bytes as audio with no complaint | same |
 | `mp3-truncated-frame.mp3` | 0.11225 s, "invalid new backstep -1" | 0.11225 s, no complaint |
 | `mp3-xing-declares-more-than-stream.mp3` | 0.200 s (trusts the Xing count), no complaint | estimated 0.252 s |
+| `mp3-id3v2-scan-counts-undecodable-frame.mp3` | 0.1786 s, no complaint | estimated 0.252 s |
 | `m4a-aac-lc-mono.m4a`, `m4a-alac-stereo.m4a` | decode clean | decode clean |
 | `m4a-aac-mdat-size1.m4a` | decodes to PCM byte-identical with the base | opens and reports the same duration, but `afconvert` output diverges from the base decode after 6900 bytes |
 | `m4a-aac-co64.m4a` | byte-identical with the base | byte-identical with the base |

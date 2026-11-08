@@ -194,6 +194,22 @@ public:
 // ── MP3 Reader (via dr_mp3) ─────────────────────────────────────────────
 
 class Mp3Reader : public FormatReader {
+    // Frames the decoder delivers, found by decoding into a scratch buffer
+    // and discarding the samples. Leaves the stream positioned at its end.
+    static uint64_t decoded_frame_count(drmp3& mp3) {
+        std::vector<float> scratch(static_cast<size_t>(detail::kDecodeChunkFrames) *
+                                   std::max<uint32_t>(mp3.channels, 1u));
+        uint64_t frames = 0;
+        for (;;) {
+            const uint64_t got =
+                drmp3_read_pcm_frames_f32(&mp3, detail::kDecodeChunkFrames, scratch.data());
+            if (got == 0)
+                break;
+            frames += got;
+        }
+        return frames;
+    }
+
 public:
     std::optional<AudioFileInfo> read_info(const std::string& path) override {
         drmp3 mp3;
@@ -203,7 +219,14 @@ public:
         AudioFileInfo info;
         info.sample_rate = mp3.sampleRate;
         info.num_channels = mp3.channels;
-        info.num_frames = drmp3_get_pcm_frame_count(&mp3);
+        // With a Xing/Info header the count is the header's, net of the
+        // encoder delay and padding, which is what read() checks the decode
+        // against. Without one the stream declares nothing, and dr_mp3's
+        // header scan can count a frame the decoder then rejects, so the
+        // count is taken by decoding: it is then the count read() delivers.
+        info.num_frames = mp3.totalPCMFrameCount != DRMP3_UINT64_MAX
+                              ? drmp3_get_pcm_frame_count(&mp3)
+                              : decoded_frame_count(mp3);
         info.bits_per_sample = 16;  // MP3 is always decoded to 16-bit equivalent
         info.format = "MP3";
         info.duration_seconds = static_cast<double>(info.num_frames) / info.sample_rate;
