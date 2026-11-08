@@ -218,6 +218,67 @@ View::focus_next(root, current_focus);
 View::focus_prev(root, current_focus);
 ```
 
+## Input Events
+
+### Disabled views
+
+`View::set_enabled(false)` disables a view and everything inside it. A disabled
+view receives no key, text, gesture, hover-enter, press, move, drag or
+double-click. It still receives the pointer-up and the pointer-exit that
+finish an interaction already under way, so disabling a control while the user
+is dragging it ends the drag with exactly one release and leaves nothing stuck
+pressed. A gesture recognizer in flight on the view is cancelled once. The
+cursor over a disabled view is the default cursor.
+
+The delivery functions in `pulp/view/pointer_dispatch.hpp` enforce this, so a
+host that routes pointer and key events through them gets it without extra
+checks. Use `View::effectively_enabled()` to ask whether a view and all of its
+ancestors are enabled.
+
+### Modifier-key changes
+
+`View::on_modifier_keys_changed(Modifiers)` fires when a modifier key (Shift,
+Ctrl, Alt, Meta or Cmd) goes down or up on its own. The argument is the full
+set of modifiers now held. It reaches the focused view and every view a pointer
+press is currently captured by, each at most once, so a knob can switch to fine
+adjustment when Shift is pressed after the drag began, with no pointer
+movement. Disabled views are skipped.
+
+Hosts report the change with `deliver_modifier_keys_changed` in
+`pulp/view/pointer_dispatch.hpp`. The macOS standalone and plug-in hosts do so
+from `flagsChanged:`, the Windows plug-in host from the modifier virtual keys,
+and the browser host from `keydown` and `keyup` of Shift, Control, Alt and
+Meta. In tests, call `root.simulate_modifier_keys(kModShift)`.
+
+### Focus cause and focus-within
+
+Every focus change carries a `FocusCause`: `pointer` (a press focused the
+view), `keyboard` (Tab or another key moved focus) or `programmatic` (code moved
+it). Override `on_focus_changed(bool gained, FocusCause cause)` to read it; the
+one-argument `on_focus_changed(bool)` still works and is what the two-argument
+version calls by default. `View::focus_visible()` is true only for keyboard and
+programmatic focus, so a click does not draw a focus ring.
+
+`on_descendant_focus_changed(View& child, bool gained, FocusCause cause)` is
+called on every ancestor of the view whose focus changed, nearest first, after
+that view's own callback. `View::focus_within()` answers whether a view or any
+descendant holds focus. Use `transfer_input_focus(root, view, cause)` from
+`pointer_dispatch.hpp` to move focus with a cause.
+
+In a scripted UI, native focus changes become `focus`, `blur`, `focusin` and
+`focusout` events, keep `document.activeElement` current, and drive the CSS
+`:focus`, `:focus-visible` and `:focus-within` selectors.
+
+### Hover under a stationary pointer
+
+Scrolling, an animation or a list reorder can slide a different view under a
+pointer that has not moved. Call `reevaluate_stationary_hover(root)` from
+`pointer_dispatch.hpp` once per presented frame. If the view under the pointer
+changed, the old view sees its pointer-exit and the new view its enter and
+positioned move. If the same view moved under the pointer, it gets a positioned
+move only. Pass a `HoverDamage` region to skip the work when the frame repainted
+somewhere other than the pointer. It does nothing while a button is held.
+
 ## Accessibility
 
 Every widget has an access role, label, and value for screen readers:
