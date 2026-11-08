@@ -246,9 +246,18 @@ TEST_CASE("every audio decoder seed satisfies the shared oracle through the regi
             continue;
         }
         ++exercised;
-        (void)pulp_fuzz::audio_decoder::check_registry(
+        const auto outcome = pulp_fuzz::audio_decoder::check_registry(
             file.string(), limits,
             [&](const OracleFailure& failure) { failures.push_back(describe(failure)); });
+        if (seeds_that_must_decode().count(name)) {
+            if (!outcome.info_ok || !outcome.decode_ok)
+                failures.push_back(name + ": valid seed, read_info " +
+                                   (outcome.info_ok ? "ok" : "refused") + ", read " +
+                                   (outcome.decode_ok ? "ok" : "refused"));
+        } else if (!seeds_that_may_refuse().count(name)) {
+            failures.push_back(name + ": not classified in seeds_that_must_decode or "
+                                      "seeds_that_may_refuse");
+        }
     }
 
 #if defined(__APPLE__)
