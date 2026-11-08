@@ -342,7 +342,8 @@ TEST_CASE("The system codec writer's advertised limits match what it accepts and
         REQUIRE(std::find(it->sample_rates.begin(), it->sample_rates.end(), refused) ==
                 it->sample_rates.end());
         TempFile file(".m4a");
-        REQUIRE_FALSE(FormatRegistry::instance().write(file.path.string(), stereo_tone(refused, 4096)));
+        REQUIRE_FALSE(
+            FormatRegistry::instance().write(file.path.string(), stereo_tone(refused, 4096)));
     }
 }
 
