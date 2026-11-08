@@ -592,7 +592,8 @@
       "name": "graph-stall-guard-selftest",
       "argv": [
         "{repo}/tools/graph/test_graph_stall_guard.py"
-      ]
+      ],
+      "timeout": 120.0
     },
     {
       "name": "embed-wgsl-selftest",
