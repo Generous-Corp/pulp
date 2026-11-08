@@ -60,6 +60,8 @@ class FakeProcessor : public Vst::AudioEffect {
     std::vector<Vst::Event> events;
     std::vector<std::vector<uint8>> sysex;
     std::vector<ParamPoint> params;
+    bool had_param_changes = false;
+    int32 param_change_count = 0;
     uint32 latency = 0;
 
     // Emitted on the next process().
@@ -118,6 +120,9 @@ class FakeProcessor : public Vst::AudioEffect {
             }
         }
         params.clear();
+        had_param_changes = data.inputParameterChanges != nullptr;
+        param_change_count =
+            had_param_changes ? data.inputParameterChanges->getParameterCount() : 0;
         if (data.inputParameterChanges) {
             for (int32 i = 0; i < data.inputParameterChanges->getParameterCount(); ++i) {
                 auto* q = data.inputParameterChanges->getParameterData(i);
@@ -485,6 +490,49 @@ TEST_CASE("VST3 plug-in receives notes and poly pressure and sysex and mapped co
     REQUIRE(program_param);
     CHECK(program_param->value == 1.0); // program 7 of a 7-step list
     CHECK(params.size() == 3);          // CC 1 is unmapped and dropped
+}
+
+TEST_CASE("VST3 input parameter changes do not carry over to the next block",
+          "[host][vst3][params]") {
+    Rig rig;
+    REQUIRE(rig.slot->prepare(48000.0, 64));
+    Buses b;
+    // Block 1: a mapped controller, a pitch bend, a host edit, and an
+    // automation event.
+    pulp::midi::MidiEvent volume;
+    volume.sample_offset = 3;
+    volume.message = choc::midi::ShortMessage(0xB0, 7, 127);
+    b.midi_in.add(volume);
+    pulp::midi::MidiEvent bend;
+    bend.sample_offset = 4;
+    bend.message = choc::midi::ShortMessage(0xE0, 0x7F, 0x7F);
+    b.midi_in.add(bend);
+    rig.slot->set_parameter(kProgram, 0.5f);
+    b.params.push(pulp::host::ParameterEvent{kGain, 6, 0.25f, 0});
+    b.run(*rig.slot);
+    REQUIRE(rig.processor->had_param_changes);
+    REQUIRE(find_param(rig.processor->params, kGain) != nullptr);
+    REQUIRE(find_param(rig.processor->params, kBend) != nullptr);
+    REQUIRE(find_param(rig.processor->params, kProgram) != nullptr);
+
+    // Block 2 carries nothing: the plug-in sees no parameter changes, not
+    // last block's points.
+    b.midi_in.clear();
+    b.params.clear();
+    b.run(*rig.slot);
+    CHECK_FALSE(rig.processor->had_param_changes);
+    CHECK(rig.processor->param_change_count == 0);
+    CHECK(rig.processor->params.empty());
+
+    // Block 3 repeats only the controller: exactly one point, not block 1's
+    // points again.
+    b.midi_in.add(volume);
+    b.run(*rig.slot);
+    REQUIRE(rig.processor->had_param_changes);
+    CHECK(rig.processor->param_change_count == 1);
+    REQUIRE(rig.processor->params.size() == 1);
+    CHECK(rig.processor->params[0].id == kGain);
+    CHECK(rig.processor->params[0].offset == 3);
 }
 
 TEST_CASE("VST3 plug-in MIDI output comes back as MIDI 1.0", "[host][vst3][midi]") {
