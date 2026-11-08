@@ -170,6 +170,16 @@
             "subcommands": []
           },
           {
+            "name": "formats",
+            "arguments": [
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
             "name": "sampler-mip build",
             "arguments": [
               {

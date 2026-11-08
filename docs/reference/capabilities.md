@@ -13,10 +13,11 @@ See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence 
 The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
 
 <!-- generated:start id=limitations -->
-### Known limitations (21 items across 16 capabilities)
+### Known limitations (22 items across 17 capabilities)
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
+| `plugin_hosting.lv2` | The LV2 slot hosts instruments and effects through lilv (MIDI in and out, time:Position, patch parameters, worker, state, options, latency) but shows no plugin UI, feeds CV inputs silence, drops SysEx, and offers no state:mapPath or state:makePath, so state that refers to files does not restore. | [link](../guides/hosting.md#lv2-plugins) |
 | `timeline_engine.cli_mcp` | The headless render path emits arrangement audio only; it does not instantiate hosted devices or MIDI instruments, and unknown plugin-delay compensation remains null rather than being invented. | [link](../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp) |
 | `timeline_engine.dawproject_import` | DAWproject import is a bounded linear subset: nested groups, warps, seconds-timed lanes, and unsupported timeline constructs fail the import rather than being dropped. | [link](../guides/timeline-sdk.md#optional-dawproject-importer) |
 | `timeline_engine.dawproject_export` | DAWproject export is a bounded writer, not Tier-1 support: it emits flat tracks, beats-timed clips, inline notes, referenced audio, and a single tempo and meter. Markers, clip gain and fades, embedded media, mixer state, automation, devices, take lanes, and freeze are declared lost in the capability table and refused unless the caller accepts each concept by name. A neutral channel is emitted so a receiving DAW can register the track; that is not an export of the document's authored mixer state, which is still reported as dropped. | [link](../guides/timeline-sdk.md#optional-dawproject-exporter) |
