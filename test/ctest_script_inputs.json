@@ -5151,6 +5151,7 @@
    "entry": "tools/deps/test_audit_extra.py",
    "inputs": [
     "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/deps/audit.py",
     "tools/deps/test_audit_extra.py",
     "tools/packages/test-stubs"
@@ -5162,6 +5163,7 @@
    "inputs": [
     "tools/ci/tart-provision.sh",
     "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/cmake/PulpWclap.cmake",
     "tools/deps/audit.py",
     "tools/deps/test_audit.py",
@@ -5187,6 +5189,7 @@
    "entry": "tools/deps/audit.py",
    "inputs": [
     "tools/ci/tart-provision.sh",
+    "tools/cmake/PulpGpuRuntime.cmake",
     "tools/deps/audit.py",
     "tools/packages/test-stubs"
    ],
@@ -11035,8 +11038,10 @@
     "core/events/src/timer.cpp",
     "core/events/src/volume_detector.cpp",
     "core/format/include/pulp/format/audio_workgroup_client.hpp",
+    "core/format/include/pulp/format/editor_host.hpp",
     "core/format/include/pulp/format/graph_runtime_executor.hpp",
     "core/format/include/pulp/format/graph_runtime_worker_pool.hpp",
+    "core/format/include/pulp/format/native_surface_host.hpp",
     "core/format/include/pulp/format/note_name.hpp",
     "core/format/include/pulp/format/plugin_descriptor.hpp",
     "core/format/include/pulp/format/prepare_resources.hpp",
@@ -11866,8 +11871,10 @@
     "core/events/src/timer.cpp",
     "core/events/src/volume_detector.cpp",
     "core/format/include/pulp/format/audio_workgroup_client.hpp",
+    "core/format/include/pulp/format/editor_host.hpp",
     "core/format/include/pulp/format/graph_runtime_executor.hpp",
     "core/format/include/pulp/format/graph_runtime_worker_pool.hpp",
+    "core/format/include/pulp/format/native_surface_host.hpp",
     "core/format/include/pulp/format/note_name.hpp",
     "core/format/include/pulp/format/plugin_descriptor.hpp",
     "core/format/include/pulp/format/prepare_resources.hpp",
