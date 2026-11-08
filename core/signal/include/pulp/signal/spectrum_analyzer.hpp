@@ -368,7 +368,7 @@ class SpectrumAnalyzer {
     int filled_ = 0;
     int write_pos_ = 0;
     int since_frame_ = 0;
-    double pending_dt_ = 0.0;       // time from updates that analysed no frame
+    double pending_dt_ = 0.0; // time from updates that analysed no frame
     std::uint64_t skipped_frames_ = 0;
     std::uint64_t frames_total_ = 0;
 };
