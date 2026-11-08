@@ -883,6 +883,16 @@ while main is red. Every such call carries
 logs. Every other use needs Daniel's explicit OK first: rebasing or refreshing a
 queued PR, reordering or dequeuing any other PR, or making room ahead of the fix.
 
+## A cancelled `workflow-lint` job: read the step timings before raising the timeout
+
+The lint job's 10-minute `timeout-minutes` cancels the job (conclusion
+`cancelled`, later steps `skipped`), so the step that happened to be running
+looks guilty. It was not: the release-pipeline step needs ~75s and
+`test_generated_version_bump_check.py` needs 350-460s. Read per-step durations
+(`ghapp api repos/<o>/<r>/actions/runs/<id>/jobs`, `steps[].started_at` and
+`completed_at`) from a green run beside the cancelled one before choosing a
+fix. That suite now runs as its own `generated-version-bump-contract` job.
+
 ## Wait on a blocking waiter, not a poll loop
 
 For an unattended pull request, use `shipyard wait pr <PR> --state merged`
