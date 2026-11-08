@@ -2170,3 +2170,42 @@ TEST_CASE("ThemeEditor wraps swatches when the row is full",
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 4);
     REQUIRE(has_text(canvas, "Theme Editor"));
 }
+
+TEST_CASE("EqCurveView analyzer overlay maps bins through SpectrumBinMapping", "[view][spectrum]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 640, 240});
+    eq.set_sample_rate(48000.0f);
+
+    // A narrow peak between two bins of a 2048-point spectrum.
+    std::vector<float> bins(1025, -90.0f);
+    const double vertex = 1000.0 / (48000.0 / 2048.0);
+    for (int k = 0; k < 1025; ++k)
+        bins[static_cast<std::size_t>(k)] =
+            std::max(-90.0f, -3.0f - 6.0f * static_cast<float>((k - vertex) * (k - vertex)));
+    eq.set_spectrum(bins.data(), bins.size());
+
+    RecordingCanvas with_overlay;
+    eq.paint(with_overlay);
+    CHECK(eq.analyzer_animating());
+    eq.set_analyzer_enabled(false);
+    RecordingCanvas without_overlay;
+    eq.paint(without_overlay);
+    eq.set_analyzer_enabled(true);
+    // The overlay's top stroke is a polyline of many segments.
+    CHECK(with_overlay.count(DrawCommand::Type::stroke_line) >
+          without_overlay.count(DrawCommand::Type::stroke_line) + 100);
+
+    // A bin count that changes between frames (FFT-size change) repaints cleanly.
+    std::vector<float> bigger(4097, -60.0f);
+    eq.set_spectrum(bigger.data(), bigger.size());
+    RecordingCanvas again;
+    eq.paint(again);
+    CHECK(again.count(DrawCommand::Type::stroke_line) >
+          without_overlay.count(DrawCommand::Type::stroke_line) + 100);
+
+    // A degenerate one-bin spectrum draws a floor line, not garbage.
+    float single = -20.0f;
+    eq.set_spectrum(&single, 1);
+    RecordingCanvas degenerate;
+    eq.paint(degenerate);
+}
