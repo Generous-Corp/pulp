@@ -72,6 +72,12 @@ std::unique_ptr<FormatWriter> create_aac_writer();
 std::unique_ptr<FormatWriter> create_alac_writer();
 #endif
 
+std::unique_ptr<FormatWriter> create_system_audio_writer();
+
+#ifdef _WIN32
+std::unique_ptr<FormatReader> create_media_foundation_reader();
+#endif
+
 // ── WAV Reader/Writer (via CHOC) ────────────────────────────────────────
 
 class WavReader : public FormatReader {
@@ -329,6 +335,14 @@ FormatRegistry::FormatRegistry() {
 #ifdef PULP_HAS_ALAC
     register_writer(create_alac_writer());
 #endif
+
+#ifdef _WIN32
+    register_reader(create_media_foundation_reader());
+#endif
+
+    // Registered last so an installed optional encoder keeps its extensions.
+    // Null (and skipped) where the platform has no system codec.
+    register_writer(create_system_audio_writer());
 }
 
 void FormatRegistry::register_reader(std::unique_ptr<FormatReader> reader) {
