@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 70 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 71 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
@@ -63,6 +63,7 @@ for its complete, authoritative guidance.
 | `pulp-vellum-change-routing` | Route repository-qualified changes across Pulp and Vellum using Pulp's exact ownership projection. |
 | `pulp-web-demo` | Generate and maintain browser demos of Pulp audio plugins (both web ABIs — WAM and WCLAP) from one declarative config, so every demo mounts the SAME shared player and the two ABIs stay in lockstep. |
 | `render-toolchain-update` | Update Pulp's pinned Skia, Dawn, and optional V8 prebuilts as one milestone-matched render-toolchain release. |
+| `rmlui` | Where RmlUi fits in Pulp, and when not to use it. |
 | `screenshot` | Capture faithful PNGs of Pulp view trees / imported UIs headlessly. |
 | `screenshot-sync` | Keep a plugin/demo repo's screenshots in sync with its UX. |
 | `sdf-text` | Work with Pulp's SDF / MSDF / PSDF glyph atlases — building, sampling via SkSL, and the shared text-layout helpers. |
