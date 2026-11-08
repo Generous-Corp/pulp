@@ -38,6 +38,14 @@ add_test(NAME evidence-archive-selftest
         "${CMAKE_SOURCE_DIR}/tools/ci/test_evidence_archive.py")
 set_tests_properties(evidence-archive-selftest PROPERTIES TIMEOUT 60)
 
+# The Android fixture lane decides pass or fail from device output; this drives
+# the real script through a fake adb, including a runner that prints its pass
+# marker before a large output (the SIGPIPE-under-pipefail case).
+add_test(NAME android-fixture-lane-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_android_fixture_lane.py")
+set_tests_properties(android-fixture-lane-selftest PROPERTIES TIMEOUT 120)
+
 # W17 toolchain tests are source-only and belong to the same required lane.
 add_test(NAME toolchain-test_generate-selftest
     COMMAND ${Python3_EXECUTABLE}
