@@ -1125,7 +1125,6 @@ if [ -f "$CAPABILITY_CONTRACT" ]; then
         echo "" >&2
         echo "  Counters are assigned at land: leave MANIFEST_REVISION and" >&2
         echo "  SURFACE_INVENTORY_VERSION at the base value and rerun --write." >&2
-        echo "  Branches never bump a counter now (the history records the base state)." >&2
         echo "  For a branch that already hand-bumped, re-derive instead:" >&2
         echo "    PULP_AGENT_CAPABILITY_BASE_REF=$capability_base \\" >&2
         echo "      python3 tools/scripts/agent_capability_rederive.py" >&2
