@@ -13,10 +13,11 @@ See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence 
 The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
 
 <!-- generated:start id=limitations -->
-### Known limitations (23 items across 18 capabilities)
+### Known limitations (24 items across 19 capabilities)
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
+| `plugin_hosting.lv2` | The LV2 slot hosts instruments and effects through lilv (MIDI in and out, time:Position, patch parameters, worker, state, options, latency) but shows no plugin UI, feeds CV inputs silence, drops SysEx, and offers no state:mapPath or state:makePath, so state that refers to files does not restore. | [link](../guides/hosting.md#lv2-plugins) |
 | `timeline_engine.cli_mcp` | The headless render path emits arrangement audio only; it does not instantiate hosted devices or MIDI instruments, and unknown plugin-delay compensation remains null rather than being invented. | [link](../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp) |
 | `timeline_engine.dawproject_import` | DAWproject import is a bounded linear subset: nested groups, warps, seconds-timed lanes, and unsupported timeline constructs fail the import rather than being dropped. | [link](../guides/timeline-sdk.md#optional-dawproject-importer) |
 | `timeline_engine.dawproject_export` | DAWproject export is a bounded writer, not Tier-1 support: it emits flat tracks, beats-timed clips, inline notes, referenced audio, and a single tempo and meter. Markers, clip gain and fades, embedded media, mixer state, automation, devices, take lanes, and freeze are declared lost in the capability table and refused unless the caller accepts each concept by name. A neutral channel is emitted so a receiving DAW can register the track; that is not an export of the document's authored mixer state, which is still reported as dropped. | [link](../guides/timeline-sdk.md#optional-dawproject-exporter) |
@@ -675,6 +676,21 @@ capabilities and may not form self-references or cycles.
 history. Normal `--check` validates every recorded transition and compares its
 prefix plus the current manifest and ledger directly with the protected Git tip
 (fetching the immutable GitHub base SHA in shallow CI checkouts).
+
+The history keeps the full manifest and surface material of every entry, but
+stores each repeated piece only once. Any JSON object or array that appears in
+more than one entry is kept a single time under `objects`, keyed by the SHA-256
+digest of its content, and entries refer to it by that digest. Long arrays and
+objects are split into chunks, so a change to one row stores one new chunk
+instead of the whole array again. `entries` lists each entry's digest, which is
+the digest of its complete material. `--check` expands every entry and
+re-verifies its digest, re-runs every recorded transition, re-encodes the
+expanded entries and requires the result to equal the stored file exactly (so a
+hand edit to any stored object is caught), and compares the expanded entries
+with the protected base's, whichever layout that base uses. It also fails if the
+file would exceed 25 MB, far below GitHub's 100 MB per-file limit. The earlier
+layout, which repeated every entry in full and reached 104 MB, is still accepted
+as a protected base and as `--write` input, and `--write` converts it.
 Editing generator source, current snapshots, and local history together cannot
 bypass a published tombstone, key-reuse prohibition, version increase, or
 deprecation-window rule.

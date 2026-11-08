@@ -2214,6 +2214,20 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-lv2-host-slot": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-test-lv2-host-instrument"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_lv2_host_slot.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-mac-platform-harness": {
    "data": "declared",
    "detected_sources": [
@@ -3252,6 +3266,7 @@
   "pulp-test-lv2-adapter",
   "pulp-test-lv2-bundle-discovery-e2e",
   "pulp-test-lv2-host-discovery",
+  "pulp-test-lv2-host-slot",
   "pulp-test-lv2-rt",
   "pulp-test-mac-hover-cursor-live",
   "pulp-test-mac-platform-harness",
@@ -3797,6 +3812,13 @@
    "inputs": [
     "tools/ci/android-fixture-lane.sh",
     "tools/ci/test_android_fixture_lane.py"
+   ],
+   "kind": "python"
+  },
+  "android-fixture-marker-selftest": {
+   "entry": "tools/ci/test_android_fixture_marker.py",
+   "inputs": [
+    "tools/ci/test_android_fixture_marker.py"
    ],
    "kind": "python"
   },
@@ -13644,6 +13666,15 @@
     "tools/ci/net-retry.sh",
     "tools/scripts/test_vellum_workflow_dispatch.py",
     "tools/scripts/vellum_trusted_merge.py"
+   ],
+   "kind": "python"
+  },
+  "vendored-lilv-selftest": {
+   "entry": "tools/deps/test_verify_vendored_lilv.py",
+   "inputs": [
+    "external/lilv",
+    "tools/deps/test_verify_vendored_lilv.py",
+    "tools/deps/verify_vendored_lilv.py"
    ],
    "kind": "python"
   },
