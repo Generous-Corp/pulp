@@ -305,6 +305,13 @@ int run(std::string_view mode) {
     if (!new_view.valid || new_view.generation == old_view.generation)
         return 12;
 
+    // Until the audio side acknowledges the new generation, the retired view
+    // stays readable and still carries the original, immutable take.
+    if (!matches(read_view(regular_bank, old_view)))
+        return 14;
+    if (!regular_bank.acknowledge_audio_generation(new_view.generation))
+        return 15;
+
     if (wrong_buffer) {
         // Planted defect: the consumer reads the replacement buffer where it
         // expects the recorded take.
@@ -313,7 +320,7 @@ int run(std::string_view mode) {
     }
     if (stale) {
         // Planted defect: the consumer keeps reading through the retired view
-        // after the replacement was published.
+        // after the replacement was published and acknowledged.
         return matches(read_view(regular_bank, old_view), kReplacementScale)
                    ? kUndetected
                    : detected("stale-publication");
@@ -321,12 +328,12 @@ int run(std::string_view mode) {
     if (planted)
         return 13;
 
-    // Positive path: the new generation carries the replacement and the
-    // retired view is refused.
+    // Positive path: the new generation carries the replacement and, once
+    // acknowledged, the retired view is refused.
     if (!matches(read_view(regular_bank, new_view), kReplacementScale))
-        return 14;
+        return 16;
     if (regular_bank.slot_view_valid(old_view) || regular_bank.channel_data(old_view, 0) != nullptr)
-        return 15;
+        return 17;
 
     std::cout << "G11 capture/publication graph passed: 64 frames, regular/irregular blocks, "
                  "immutable generation "
