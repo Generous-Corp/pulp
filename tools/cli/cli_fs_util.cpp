@@ -40,4 +40,8 @@ fs::path temporary_archive_root() {
             std::to_string(seq.fetch_add(1)));
 }
 
+std::string display_input_name(const std::string& path, bool absolute_paths) {
+    return absolute_paths ? path : fs::path(path).filename().string();
+}
+
 }  // namespace pulp::cli::fsutil

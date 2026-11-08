@@ -122,6 +122,7 @@ if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
         fixtures/mcp_gpu_probe_fake_cli.cpp)
     add_executable(pulp-test-mcp-server
         test_mcp_server.cpp
+        test_mcp_audio_tools.cpp
         test_mcp_control_adapter.cpp)
     target_link_libraries(pulp-test-mcp-server PRIVATE
         pulp-mcp-core
@@ -270,6 +271,11 @@ pulp_add_test_suite(pulp-test-binding GROUP pulp-test-group-cap-state
 pulp_add_test_suite(pulp-test-external-binding GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 
+# MIDI controller decoding, relative encoders, learn classification, takeover
+# (pure functions; no audio or StateStore).
+pulp_add_test_suite(pulp-test-midi-learn-decode GROUP pulp-test-group-cap-state
+    LIBRARIES pulp::state)
+
 # Cross-version parameter-ordering guard (host-facing ID + index stability).
 pulp_add_test_suite(pulp-test-param-ordering GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
@@ -298,6 +304,8 @@ pulp_add_test_suite(pulp-test-format-hardening GROUP pulp-test-group-cap-format
 # Processor-level MIDI panic: request, service, voice reset, MIDI-out emission
 pulp_add_test_suite(pulp-test-midi-panic-processor GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format pulp::midi)
+# Stock panic button: availability, hiding, click -> request -> next block
+pulp_add_test_suite(pulp-test-panic-button LIBRARIES pulp::format pulp::midi pulp::view)
 
 # Editor parameter-write provenance: host automation interleaved with editor
 # edits during an open gesture, exact begin/value/end ordering, one normalized
