@@ -7,6 +7,7 @@
 name = "script-readers-c303e190e07d"
 paths = [
   "tools/scripts/action_pin_lint.py",
+  "tools/scripts/audio_inspect_crosscheck.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -7815,6 +7816,7 @@ name = "script-surface-whole-tree"
 paths = [
   ".agents/skills/*/SKILL.md",
   "tools/scripts/action_pin_lint.py",
+  "tools/scripts/audio_inspect_crosscheck.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
@@ -8412,6 +8414,7 @@ name = "script-surface-environment-bound"
 paths = [
   ".agents/skills/*/SKILL.md",
   "tools/scripts/action_pin_lint.py",
+  "tools/scripts/audio_inspect_crosscheck.py",
   "tools/scripts/build_speed_proxies.py",
   "tools/scripts/build_speed_scorecard.py",
   "tools/scripts/build_time_report.py",
