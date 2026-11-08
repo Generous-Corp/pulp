@@ -23,6 +23,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -78,11 +79,16 @@ std::vector<uint8_t> read_bytes(const fs::path& path) {
     return std::vector<uint8_t>(std::istreambuf_iterator<char>(input), {});
 }
 
-// A canonical little-endian PCM WAV holding `codes` as mono samples at the
-// given integer depth (8-bit written unsigned, as the format requires).
-std::vector<uint8_t> make_pcm_wav(uint16_t bits, const std::vector<int32_t>& codes) {
+// A canonical little-endian PCM WAV at 44.1 kHz: `codes` are interleaved
+// integer samples at the given depth (8-bit written unsigned, as the format
+// requires). `declared_data_size` lets the data chunk claim more than the
+// file holds, for header-only fixtures; by default it is the real size.
+std::vector<uint8_t> make_pcm_wav(uint16_t channels, uint16_t bits,
+                                  const std::vector<int32_t>& codes,
+                                  std::optional<uint32_t> declared_data_size = std::nullopt) {
     const uint16_t bytes_per_sample = bits / 8;
-    const uint32_t data_size = static_cast<uint32_t>(codes.size()) * bytes_per_sample;
+    const uint32_t actual_size = static_cast<uint32_t>(codes.size()) * bytes_per_sample;
+    const uint32_t data_size = declared_data_size.value_or(actual_size);
     std::vector<uint8_t> out;
     auto put32 = [&](uint32_t v) {
         for (int i = 0; i < 4; ++i)
@@ -93,17 +99,17 @@ std::vector<uint8_t> make_pcm_wav(uint16_t bits, const std::vector<int32_t>& cod
         out.push_back(static_cast<uint8_t>(v >> 8));
     };
     auto tag = [&](const char* t) { out.insert(out.end(), t, t + 4); };
-    const uint32_t pad = data_size & 1u; // RIFF chunks are word aligned
+    const uint32_t pad = actual_size & 1u; // RIFF chunks are word aligned
     tag("RIFF");
     put32(36u + data_size + pad);
     tag("WAVE");
     tag("fmt ");
     put32(16u);
     put16(1u); // PCM
-    put16(1u); // mono
+    put16(channels);
     put32(44100u);
-    put32(44100u * bytes_per_sample);
-    put16(bytes_per_sample);
+    put32(44100u * bytes_per_sample * channels);
+    put16(static_cast<uint16_t>(bytes_per_sample * channels));
     put16(bits);
     tag("data");
     put32(data_size);
@@ -469,20 +475,15 @@ TEST_CASE("integer PCM WAV extremes decode by 2^(bits-1) on both WAV paths", "[f
         {24, {-8388608, 0, 8388607}, {-1.0f, 0.0f, 8388607.0f / 8388608.0f}},
     };
 
-    TempDir dir;
+    pulp::test::ScopedTempDir dir("pulp-audio-decoder-corpus");
     auto& registry = pulp::audio::FormatRegistry::instance();
     for (const auto& depth : depths) {
         INFO("bits = " << depth.bits);
-        const auto bytes = make_pcm_wav(depth.bits, depth.codes);
-        const auto path = dir.path / ("pcm" + std::to_string(depth.bits) + ".wav");
-        {
-            std::ofstream output(path, std::ios::binary);
-            REQUIRE(output.good());
-            output.write(reinterpret_cast<const char*>(bytes.data()),
-                         static_cast<std::streamsize>(bytes.size()));
-        }
+        const auto bytes = make_pcm_wav(1u, depth.bits, depth.codes);
+        const auto path =
+            write_file(dir.path / ("pcm" + std::to_string(depth.bits) + ".wav"), bytes);
 
-        const auto registry_data = registry.read(path.string());
+        const auto registry_data = registry.read(path);
         REQUIRE(registry_data.has_value());
         REQUIRE(registry_data->num_channels() == 1u);
         REQUIRE(registry_data->num_frames() == depth.codes.size());
@@ -612,46 +613,16 @@ TEST_CASE("read_audio_file applies the default decode ceilings to a declared hea
           "[fuzz][audio][wav]") {
     // Header-only WAVs: the data chunk declares the size, the file holds none
     // of it. Without the ceiling the declared size was allocated.
-    auto header_only = [](uint16_t channels, uint32_t data_size) {
-        std::vector<uint8_t> out;
-        auto put32 = [&](uint32_t v) {
-            for (int i = 0; i < 4; ++i)
-                out.push_back(static_cast<uint8_t>(v >> (8 * i)));
-        };
-        auto put16 = [&](uint16_t v) {
-            out.push_back(static_cast<uint8_t>(v));
-            out.push_back(static_cast<uint8_t>(v >> 8));
-        };
-        auto tag = [&](const char* t) { out.insert(out.end(), t, t + 4); };
-        tag("RIFF");
-        put32(36u + data_size);
-        tag("WAVE");
-        tag("fmt ");
-        put32(16u);
-        put16(1u);
-        put16(channels);
-        put32(44100u);
-        put32(44100u * 2u * channels);
-        put16(static_cast<uint16_t>(2u * channels));
-        put16(16u);
-        tag("data");
-        put32(data_size);
-        return out;
-    };
-    TempDir dir;
+    pulp::test::ScopedTempDir dir("pulp-audio-decoder-corpus");
     auto write = [&](const char* name, const std::vector<uint8_t>& bytes) {
-        const auto path = dir.path / name;
-        std::ofstream output(path, std::ios::binary);
-        REQUIRE(output.good());
-        output.write(reinterpret_cast<const char*>(bytes.data()),
-                     static_cast<std::streamsize>(bytes.size()));
-        return path.string();
+        return write_file(dir.path / name, bytes);
     };
     // 2^30 + 1 mono frames: just past the default max_frames.
-    const auto frames_path =
-        write("too-many-frames.wav", header_only(1u, static_cast<uint32_t>((1ull << 31) + 2u)));
+    const auto frames_path = write(
+        "too-many-frames.wav", make_pcm_wav(1u, 16u, {}, static_cast<uint32_t>((1ull << 31) + 2u)));
     // 65 channels: past the default max_channels.
-    const auto channels_path = write("too-many-channels.wav", header_only(65u, 65u * 2u * 8u));
+    const auto channels_path =
+        write("too-many-channels.wav", make_pcm_wav(65u, 16u, {}, 65u * 2u * 8u));
 
     const auto started = std::chrono::steady_clock::now();
     CHECK_FALSE(pulp::audio::read_audio_file(frames_path).has_value());

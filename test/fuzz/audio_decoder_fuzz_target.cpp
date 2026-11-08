@@ -14,6 +14,7 @@
 // The oracle shared with the Catch2 lane decides what a finding is; here a
 // finding traps so libFuzzer records the input.
 
+#include "../support/unique_temp_dir.hpp"
 #include "audio_decoder_fuzz_oracle.hpp"
 
 #include <array>
@@ -27,38 +28,12 @@
 #include <string>
 #include <string_view>
 
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
-
 namespace {
 
 namespace fs = std::filesystem;
 
-struct ScratchDir {
-    fs::path path;
-
-    ScratchDir() {
-#ifdef _WIN32
-        const auto pid = static_cast<long long>(_getpid());
-#else
-        const auto pid = static_cast<long long>(getpid());
-#endif
-        path = fs::temp_directory_path() / ("pulp-audio-decoder-fuzz-" + std::to_string(pid));
-        std::error_code ec;
-        fs::create_directories(path, ec);
-    }
-
-    ~ScratchDir() {
-        std::error_code ec;
-        fs::remove_all(path, ec);
-    }
-};
-
-const ScratchDir& scratch_dir() {
-    static const ScratchDir dir;
+const pulp::test::ScopedTempDir& scratch_dir() {
+    static const pulp::test::ScopedTempDir dir("pulp-audio-decoder-fuzz");
     return dir;
 }
 

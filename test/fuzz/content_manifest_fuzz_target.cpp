@@ -20,38 +20,21 @@
 #include <string>
 #include <string_view>
 
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
+#include "../support/unique_temp_dir.hpp"
 
 namespace {
 
 namespace fs = std::filesystem;
 
 struct ScratchDirs {
-    fs::path pack;
-    fs::path data_root;
+    pulp::test::ScopedTempDir base{"pulp-content-manifest-fuzz"};
+    fs::path pack = base.path / "pack";
+    fs::path data_root = base.path / "data";
 
     ScratchDirs() {
-#ifdef _WIN32
-        const auto pid = static_cast<long long>(_getpid());
-#else
-        const auto pid = static_cast<long long>(getpid());
-#endif
-        const auto base =
-            fs::temp_directory_path() / ("pulp-content-manifest-fuzz-" + std::to_string(pid));
-        pack = base / "pack";
-        data_root = base / "data";
         std::error_code ec;
         fs::create_directories(pack, ec);
         fs::create_directories(data_root, ec);
-    }
-
-    ~ScratchDirs() {
-        std::error_code ec;
-        fs::remove_all(pack.parent_path(), ec);
     }
 };
 

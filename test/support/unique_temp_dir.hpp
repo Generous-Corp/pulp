@@ -71,6 +71,20 @@ make_unique_temp_dir(std::string_view prefix,
     throw std::runtime_error("make_unique_temp_dir: no free name under " + parent.string());
 }
 
+// A directory from make_unique_temp_dir that is removed, with everything in
+// it, when this goes out of scope. Not copyable: one owner removes it.
+struct ScopedTempDir {
+    std::filesystem::path path;
+
+    explicit ScopedTempDir(std::string_view prefix) : path(make_unique_temp_dir(prefix)) {}
+    ScopedTempDir(const ScopedTempDir&) = delete;
+    ScopedTempDir& operator=(const ScopedTempDir&) = delete;
+    ~ScopedTempDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+};
+
 // A temp FILE path no other process or call is handed:
 // <temp>/<prefix>-<pid>-<serial><suffix>. Nothing is created. A process id is
 // reused only after its owner exits, so a same-named file can only be a
