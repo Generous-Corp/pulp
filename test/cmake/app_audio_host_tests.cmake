@@ -403,7 +403,7 @@ if(PULP_AUDIO_QUALITY_LAB_GATE)
                 "test_reference_comparison_has_a_working_negative_control")
         endif()
         pulp_add_quality_lab_pytest(sampler-quality-lab-${_pulp_sampler_aql_case}
-            TEST_FILE test_sampler_interpolation_reference.py
+            TEST_FILE tools/audio/quality-lab/tests/test_sampler_interpolation_reference.py
             FILTER "${_pulp_sampler_aql_expression}"
             ENV "PULP_SAMPLER_RENDER_WAV=$<TARGET_FILE:pulp-sampler-render-wav>"
                 PULP_SAMPLER_AQL_REQUIRED=1
@@ -416,14 +416,14 @@ if(PULP_AUDIO_QUALITY_LAB_GATE)
             set(_pulp_sampler_heritage_expression "negative_control")
         endif()
         pulp_add_quality_lab_pytest(sampler-heritage-quality-lab-${_pulp_sampler_heritage_case}
-            TEST_FILE test_sampler_heritage_reference.py
+            TEST_FILE tools/audio/quality-lab/tests/test_sampler_heritage_reference.py
             FILTER "${_pulp_sampler_heritage_expression}"
             ENV "PULP_SAMPLER_HERITAGE_RENDER_WAV=$<TARGET_FILE:pulp-sampler-heritage-render-wav>"
                 PULP_SAMPLER_AQL_REQUIRED=1
             LABELS sampler heritage)
     endforeach()
     pulp_add_quality_lab_pytest(quality-lab-reference-free
-        TEST_FILE test_reference_free.py)
+        TEST_FILE tools/audio/quality-lab/tests/test_reference_free.py)
 endif()
 if(PULP_HAS_VST3)
     # The VST3 sibling of the CLAP null above: same deterministic Processor,

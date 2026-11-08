@@ -76,7 +76,7 @@ target_link_libraries(pulp-audio-decode-dump PRIVATE pulp::audio)
 # and pytest are known to exist; PULP_AUDIO_DECODE_DUMP_REQUIRED turns its
 # developer-lane skips into failures so a missing dependency cannot pass.
 pulp_add_quality_lab_pytest(quality-lab-decoder-differential
-    TEST_FILE test_decoder_differential.py
+    TEST_FILE tools/audio/quality-lab/tests/test_decoder_differential.py
     ENV "PULP_AUDIO_DECODE_DUMP_BIN=$<TARGET_FILE:pulp-audio-decode-dump>"
         PULP_AUDIO_DECODE_DUMP_REQUIRED=1
     LABELS fuzz
