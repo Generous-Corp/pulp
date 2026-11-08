@@ -256,3 +256,25 @@ TEST_CASE("SpectrumAnalyzer push is wait-free under a concurrent consumer", "[si
     for (float v : a.bins_db())
         CHECK(std::isfinite(v));
 }
+
+TEST_CASE("SpectrumAnalyzer does not decay on updates without a new frame", "[signal][spectrum]") {
+    SpectrumAnalyzer a;
+    SpectrumAnalyzerConfig c; // default fft 2048, overlap 0.5, default release
+    a.configure(c);
+    const double sr = 48000.0;
+    const auto tone = sine(1000.0, sr, 800 * 240); // 1/60 s of audio per update
+    std::vector<float> prev;
+    double worst = 0.0;
+    for (int i = 0; i < 240; ++i) {
+        a.push_samples(tone.data() + 800 * i, 800);
+        a.update(1.0 / 60.0);
+        const auto bins = a.bins_db();
+        if (i >= 120 && !prev.empty())
+            for (std::size_t k = 0; k < bins.size(); ++k)
+                // Skip bins at the numerical floor, where float noise jitters.
+                if (bins[k] > -90.0f)
+                    worst = std::max(worst, std::abs(static_cast<double>(bins[k] - prev[k])));
+        prev.assign(bins.begin(), bins.end());
+    }
+    CHECK(worst < 0.1);
+}

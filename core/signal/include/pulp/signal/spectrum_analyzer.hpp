@@ -153,7 +153,20 @@ class SpectrumAnalyzer {
         dt_seconds = std::isfinite(dt_seconds) ? std::clamp(dt_seconds, 0.0, 1.0) : 0.0;
         std::fill(fresh_.begin(), fresh_.end(), 0.0);
         int frames = 0;
-        drain(frames);
+        int consumed = 0;
+        drain(frames, consumed);
+
+        // An update that received audio but completed no new frame (the hop is
+        // longer than a display frame) has nothing to compare the held levels
+        // against, so it must not decay them. Carry its time forward and apply
+        // it with the next analysed frame. An update that received no audio at
+        // all is a stalled or silent source and still decays.
+        if (frames == 0 && consumed > 0) {
+            pending_dt_ = std::min(pending_dt_ + dt_seconds, 1.0);
+            return 0;
+        }
+        dt_seconds = std::min(dt_seconds + pending_dt_, 1.0);
+        pending_dt_ = 0.0;
 
         const bool peak = config_.level_mode == SpectrumLevelMode::peak;
         // Frame-rate-independent release: the same decay per second whether
@@ -219,6 +232,7 @@ class SpectrumAnalyzer {
     /// Forget all levels and queued audio (UI thread).
     void clear() {
         std::fill(display_db_.begin(), display_db_.end(), config_.floor_db);
+        pending_dt_ = 0.0;
         reset_stream();
     }
 
@@ -242,7 +256,7 @@ class SpectrumAnalyzer {
     }
 
     // Pull queued audio, skipping stale backlog, and analyse every full hop.
-    void drain(int& frames) {
+    void drain(int& frames, int& consumed) {
         const int n = config_.fft_size;
         int ready = index_.num_ready();
         if (ready <= 0)
@@ -265,6 +279,7 @@ class SpectrumAnalyzer {
         consume(ring_.data() + s1, n1, frames);
         consume(ring_.data() + s2, n2, frames);
         index_.finish_read(n1 + n2);
+        consumed = n1 + n2;
     }
 
     void consume(const float* data, int count, int& frames) {
@@ -353,6 +368,7 @@ class SpectrumAnalyzer {
     int filled_ = 0;
     int write_pos_ = 0;
     int since_frame_ = 0;
+    double pending_dt_ = 0.0;       // time from updates that analysed no frame
     std::uint64_t skipped_frames_ = 0;
     std::uint64_t frames_total_ = 0;
 };
