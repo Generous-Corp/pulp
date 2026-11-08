@@ -4046,6 +4046,32 @@ The install path is `tools/cli/local_sdk_install.cpp`, which has the command
 runners; `configure_arguments()` in the profile file is pure and should stay
 that way, taking the resolved path rather than fetching it.
 
+## `pulp audio inspect` exit codes and the MCP wrapper's reading of them
+
+`pulp audio inspect` is a fact verb, so its exit codes are not pass/fail:
+`0` a report was written, `1` bad arguments or an unreadable file (nothing on
+stdout), `2` the leading bytes match no container it knows (the JSON report is
+still on stdout with `container: "unknown"`). `pulp_audio_file_inspect` in
+`tools/mcp/mcp_audio_tools.cpp` therefore treats exit 2 as success-with-report
+and only exit 1 (or no output) as an error. If you add a new nonzero exit,
+update that branch or the MCP tool will swallow a report as an error, or an
+error as a report. `handle_audio_plugin_inspect` is the wrong template here:
+it treats every nonzero exit as failure, which is right for a verb that proves
+something and wrong for one that describes.
+
+The `--raw` group refuses a partial description on purpose (every one of
+`--format --channels --rate --endian --offset` or exit 1 naming the missing
+flags). The MCP tool maps `raw_*` fields one-to-one and forwards them even when
+incomplete so the CLI's refusal, not a second copy of the rule, is what the
+agent sees. Keep it that way: one validator.
+
+`--include-metadata-text` and `--absolute-paths` are opt-in redaction
+reversals. Default output must never carry a path component or free text from
+the file; `test_cli_audio_inspect.cpp` asserts both against a bext description
+and the temp dir, and `test_audio_file_layout.cpp` asserts the report layer.
+A new text-bearing region goes through `Builder::text` (the single policy
+point) rather than a fresh `if (include_text)`.
+
 ## A capability answer that varies by argument needs its absence asserted too
 
 `pulp seq capabilities` carries the built-in device catalog on its

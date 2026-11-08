@@ -615,6 +615,17 @@ per-ABI entry point for it.** Go through the plugin's own state:
   Keep that shared manifest aligned with `core/audio/CMakeLists.txt` so native
   and browser builds cannot silently diverge.
 
+  The portable list is `wav_decoder.cpp` alone. The layout report
+  (`core/audio/src/audio_file_layout*.cpp`, behind `pulp audio inspect`) sits in
+  `pulp-audio` only and is deliberately NOT portable: it opens files with
+  positional reads and pulls in the AIFF, FLAC, Ogg, MP3 and MP4 walkers.
+  `wav_decoder.hpp` exposes `interpret_wav_format` for it, which runs dr_wav
+  over a synthetic header built from a `fmt ` payload and a data size; that
+  function IS portable (no I/O, no allocation beyond a small vector) and is the
+  only seam the report may take from the decoder. Do not make `decode_wav` or
+  `inspect_wav` call back into the report, or the wasm lane grows five
+  container parsers it has no file to run them on.
+
 - The timebase, timeline, and playback engines are part of both production DSP
   builds. `PulpWam.cmake` and `PulpWclap.cmake` own their curated source lists,
   compile them with `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and must stay in

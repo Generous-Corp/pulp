@@ -42,6 +42,7 @@
 #include <pulp_tooling/gpu_probe/probe_result.hpp>
 
 #include "support/fixture_root.hpp"
+#include "support/wav_fixture_builders.hpp"
 
 namespace {
 
@@ -1531,6 +1532,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
     const auto expected = {
         "pulp_audio_compare",
         "pulp_audio_excerpt_find",
+        "pulp_audio_file_inspect",
         "pulp_audio_model_activate",
         "pulp_audio_model_list",
         "pulp_audio_model_status",
@@ -1806,6 +1808,74 @@ TEST_CASE("MCP audio probe JSON reports missing project roots", "[mcp][tools][au
     require_contains(response, R"JSON("id":54)JSON");
     require_contains(response, "Error: not in a Pulp project");
     REQUIRE(response.find("Unknown tool") == std::string::npos);
+}
+
+TEST_CASE("MCP audio file inspect validates its path before shelling out",
+          "[mcp][tools][audio][inspect]") {
+    ScopedCurrentPath cwd(repo_root_path());
+    auto missing = handle_request(tool_call("57", "pulp_audio_file_inspect", R"JSON({})JSON"));
+    require_contains(missing, R"JSON("id":57)JSON");
+    require_contains(missing, "Error: path is required");
+    auto option =
+        handle_request(tool_call("58", "pulp_audio_file_inspect", R"JSON({"path":"--json"})JSON"));
+    require_contains(option, "Error: path is required and must be a file path");
+    auto bad_raw = handle_request(tool_call("59", "pulp_audio_file_inspect",
+                                            R"JSON({"path":"a.pcm","raw_channels":"two"})JSON"));
+    require_contains(bad_raw, "raw_channels must be a non-negative integer");
+}
+
+TEST_CASE("MCP audio file inspect returns exactly the CLI's JSON document",
+          "[mcp][tools][audio][inspect]") {
+    // The tool is a wrapper over `pulp audio inspect --json`; an agent must
+    // see the same document either way, so both are parsed and compared.
+    CliProjectRoot project(built_cli());
+    ScopedCurrentPath cwd(project.path());
+    const auto wav = project.path() / "fixture.wav";
+    {
+        // 44-byte PCM header plus two 16-bit frames and a bext chunk with text.
+        using namespace pulp_test::wav;
+        Bytes bext(602u, 0u);
+        const std::string description = "MCP parity description";
+        std::copy(description.begin(), description.end(), bext.begin());
+        Bytes data;
+        append_sample(data, std::int16_t{0});
+        append_sample(data, std::int16_t{1000});
+        const auto bytes =
+            make_wav_with_chunks(make_format(1u, 1u, 48'000u, 16u), data, {{"bext", bext}});
+        std::ofstream out(wav, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
+    }
+
+    auto compare = [&](const std::string& cli_flags, const std::string& tool_args) {
+        const auto cli = exec_with_status(shell_quote(built_cli().string()) + " audio inspect " +
+                                          shell_quote(wav.string()) + " --json" + cli_flags);
+        REQUIRE(cli.status == 0);
+        const auto expected = choc::json::parse(cli.output);
+        const auto response = handle_request(tool_call("60", "pulp_audio_file_inspect", tool_args));
+        const auto parsed = choc::json::parse(response);
+        REQUIRE(parsed["result"].hasObjectMember("structuredContent"));
+        // Deep-copy: a view into `parsed` would dangle once the lambda returns.
+        choc::value::Value actual(parsed["result"]["structuredContent"]);
+        CHECK(choc::json::toString(actual, true) == choc::json::toString(expected, true));
+        return actual;
+    };
+    const auto redacted = compare("", "{\"path\":" + json_string(wav.string()) + "}");
+    CHECK(redacted["schema"].getString() == "pulp.audio.file_inspect.v1");
+    CHECK(redacted["input"]["name"].getString() == "fixture.wav");
+    CHECK_FALSE(redacted["metadata"].hasObjectMember("text"));
+    const auto full = compare(" --include-metadata-text --absolute-paths",
+                              "{\"path\":" + json_string(wav.string()) +
+                                  ",\"include_metadata_text\":true,\"absolute_paths\":true}");
+    CHECK(full["input"]["name"].getString() == wav.string());
+    CHECK(full["metadata"].hasObjectMember("text"));
+
+    // A tool error from the CLI (exit 1) surfaces as an error, not a document.
+    const auto broken = handle_request(
+        tool_call("61", "pulp_audio_file_inspect",
+                  "{\"path\":" + json_string(wav.string()) + ",\"raw_format\":\"s16\"}"));
+    require_contains(broken, "Error: pulp audio inspect failed.");
+    require_contains(broken, "--raw requires every one of");
 }
 
 TEST_CASE("MCP audio scope validates parameters before shelling out",

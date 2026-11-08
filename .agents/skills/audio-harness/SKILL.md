@@ -824,6 +824,29 @@ pulp audio validate compare before.wav after.wav [--mode null|spectral] [--toler
 pulp audio validate assert audio-run/assertions.json
 ```
 
+`validate summarize --json` is `pulp.audio.summarize.v1`: the document carries
+a `schema` string next to the older `schema_version` integer, and its
+`scenario` field is the input's **basename**, not the path you passed (pass
+`--absolute-paths` to get the path back). A script that matched `scenario`
+against a full path broke the day this landed; match on the basename or ask
+for absolute paths. The same document shape is what `pulp audio render
+--manifest` and the failing-scenario artifacts write, so all three share the
+one schema id. When `summarize` refuses a file because its header declares
+more than the format registry's decode ceiling (2^30 frames, 4 GiB of float
+output), stderr names the limit and points at `pulp audio inspect`, which
+reads the header without decoding; "could not decode" on a big file is a
+limit, not corruption.
+
+`pulp audio inspect <file>` is the header-only companion: regions with
+offsets, parsed fields, spec-violation warnings, the in-memory decoder's
+verdict and the decode ceilings as a fact, from a bounded read (a sparse 2 GiB
+WAV costs under 1 KB of reads). Lossy containers (Ogg, MP3, MP4) report
+`facts_confidence: container_only`: the frame count is the codec's claim
+(Xing frames x samples-per-frame, `stts` deltas) and includes encoder priming
+and padding, so it is NOT the number of audible frames. The MP3 `frames` region
+carries `encoder_delay` / `encoder_padding` from the LAME tag when present; a
+priming-trim policy has to read those, not the frame count.
+
 `assertions.json` schema: `{"schema_version":1,"assertions":[{...}]}` where each
 entry has a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`,
 `frequency_near`), a `file` (relative to the JSON), and the check's named

@@ -110,7 +110,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 | UI rendering + interaction | `pulp_screenshot` (render demo/script UI fixtures to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
 | Development Inspector | `pulp_control_profiles` provides static in-process profile metadata. `pulp_inspect_profiles` is a compatibility alias until Pulp 0.800.0 on 2026-10-01. `pulp_trace_start` and `pulp_trace_stop` use canonical capability control. Legacy discovery/capability/doctor, raw inspect, and Motion wrappers are not exposed. |
 | Capability control | Generated `pulp_control_*` tools provide typed exact-instance operations, broker-owned grants/consent, progress, cancellation, subscriptions, resources, and ACL-checked artifact reads. See [Capability control over MCP](capability-control-mcp.md). |
-| Audio model / WAV-first excerpt-find / live probe/scope JSON / display-only spectrogram + waveform PNGs / third-party plugin inspection + offline render / advisory before-after compare | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_spectrogram`, `pulp_audio_waveform`, `pulp_audio_plugin_inspect`, `pulp_audio_render`, `pulp_audio_compare` |
+| Audio model / WAV-first excerpt-find / live probe/scope JSON / display-only spectrogram + waveform PNGs / byte-layout file inspection / third-party plugin inspection + offline render / advisory before-after compare | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_spectrogram`, `pulp_audio_waveform`, `pulp_audio_file_inspect`, `pulp_audio_plugin_inspect`, `pulp_audio_render`, `pulp_audio_compare` |
 | Timeline project editing, history, rendering + interchange | `pulp_timeline_project_open`, `pulp_timeline_command_apply`, `pulp_timeline_diff`, `pulp_timeline_undo`, `pulp_timeline_redo`, `pulp_timeline_validate`, `pulp_timeline_explain`, `pulp_timeline_render`, `pulp_timeline_export`, `pulp_timeline_import` |
 | Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
 | Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |
@@ -161,6 +161,13 @@ measurements instead of scalar probe counters. Live target mode may open the
 standalone audio device; `input_wav` mode is speakerless/offline and can also
 write a PNG trace artifact for review. Both modes return `pulp.audio.scope.v1`
 structured JSON.
+
+Use `pulp_audio_file_inspect` to learn what an audio file's bytes declare before
+decoding or measuring it: container, header fields, region offsets, warnings for
+specification violations, and whether the in-memory decoder would accept it. It
+returns the same `pulp.audio.file_inspect.v1` document as `pulp audio inspect
+--json`, reads only headers (a multi-gigabyte file is as cheap as a 44-byte
+one), and omits metadata text and absolute paths unless asked.
 
 Use `pulp_audio_spectrogram` and `pulp_audio_waveform` when an agent needs to
 *look* at a file: each renders a display-only PNG through the CLI verb of the

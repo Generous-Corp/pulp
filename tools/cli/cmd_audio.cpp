@@ -27,6 +27,7 @@
 #include "cmd_audio_plugin_inspect.hpp"
 #include "cmd_audio_png.hpp"
 #include "cmd_audio_render.hpp"
+#include "cmd_audio_inspect.hpp"
 #include "cmd_audio_sampler_mip.hpp"
 #include "cmd_audio_spectrogram.hpp"
 #include "cmd_audio_validate.hpp"
@@ -57,6 +58,9 @@ static void print_audio_usage() {
            "--scale linear|log|mel --db-range 90 --start s --end s --channel n --json <sidecar>]\n";
     std::cout << "  pulp audio waveform <file> --png <out.png> [--start s --end s --channel n "
                  "--width px --height px --select a,b --json <sidecar>]\n";
+    std::cout
+        << "  pulp audio inspect <file> [--json] [--include-metadata-text] [--absolute-paths] "
+           "[--raw --format <fmt> --channels <n> --rate <hz> --endian <le|be> --offset <n>]\n";
     std::cout << "  pulp audio heritage <validate|canonicalize|inspect|render> ...\n";
 }
 
@@ -499,6 +503,9 @@ int cmd_audio(const std::vector<std::string>& args) {
     }
     if (args[0] == "waveform") {
         return cmd_audio_waveform({args.begin() + 1, args.end()});
+    }
+    if (args[0] == "inspect") {
+        return cmd_audio_inspect({args.begin() + 1, args.end()});
     }
 
     if (args[0] == "heritage") {

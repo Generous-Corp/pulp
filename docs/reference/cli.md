@@ -2107,6 +2107,8 @@ pulp audio model activate <model-id> [--json]   # Activate an installed model
 pulp audio excerpt-find --text "warm analog pad" --input /path/to/wavs [options]
 pulp audio read-bundle <path-to-bundle> [--json]
 pulp audio sampler-mip build <source.wav|source.aiff> [--levels 1|2] [--json]
+pulp audio inspect <file> [--json] [--include-metadata-text] [--absolute-paths]
+pulp audio inspect <file> --raw --format <s8|u8|s16|s24|s32|f32|f64> --channels <n> --rate <hz> --endian <little|big> --offset <bytes> [--json]
 pulp audio heritage validate PROFILE [--json]
 pulp audio heritage canonicalize PROFILE --out FILE
 pulp audio heritage inspect PROFILE [--json]
@@ -2115,7 +2117,7 @@ pulp audio scope [target] --window 2048 --trigger rising-zero --channel 0 [--jso
 pulp audio scope --input-wav tone.wav --window 2048 [--json scope.json] [--png scope.png]
 pulp audio spectrogram <file> --png <out.png> [--fft 2048 --hop 512 --window hann --scale linear|log|mel --db-range 90 --start s --end s --channel n --width px --height px --json <sidecar> --absolute-paths]
 pulp audio waveform <file> --png <out.png> [--start s --end s --channel n --width px --height px --select a,b --json <sidecar> --absolute-paths]
-pulp audio validate summarize <file.wav> [--json]
+pulp audio validate summarize <file.wav> [--json] [--absolute-paths]
 pulp audio validate doctor <file.wav> [--thd] [--response f1,f2,...] [--fundamental <hz>]
 pulp audio validate compare <a.wav> <b.wav> [--mode null|spectral] [--tolerance <dbfs>]
 pulp audio validate assert <audio-run-dir-or-assertions.json>
@@ -2155,9 +2157,10 @@ same mistake as reading it as a pass.
 | `heritage inspect` | Print the neutral profile ID, schema, digest, declared host rate, typed block counts, active mechanisms, stateful seeds, capabilities, prepared latency, profile clock/live source-consumption ratio, resident exemption and 4x streamed-admission bound, and clean-path-assistance policy; `--json` emits a stable object and identifies runtime note pitch as an external multiplier |
 | `heritage render` | Deterministically render a built-in analytic or exact-rate mono WAV fixture through checked voice plans and the typed bus, writing Float32 WAV plus a canonical evidence report. Record-commit blocks run as a separately reported verified transaction rather than being silently composed across a rate boundary |
 | `scope` | Capture `pulp.audio.scope.v1` JSON from a live standalone target or a speakerless offline WAV; offline mode can also write a PNG trace artifact |
+| `inspect` | Report a file's byte layout without decoding it: regions with offsets and sizes, parsed header fields, stream facts, specification-violation warnings, and the in-memory decoder's verdict; `--json` emits `pulp.audio.file_inspect.v1`. Reads only headers, so a multi-gigabyte file costs the same as a 44-byte one |
 | `spectrogram` | Display-only spectrogram PNG of an audio file (STFT over memory-mapped windows, linear/log/mel axis, fixed palette, burned-in footer) with a `pulp.audio.image.v1` sidecar. Exit `2` when there is nothing to render |
 | `waveform` | Display-only peak waveform PNG from `WaveformOverview` levels with red clip markers at or above full scale, plus the same sidecar. Exit `2` when there is nothing to render |
-| `validate summarize` | Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/dominant pitch); `--json` for machine output |
+| `validate summarize` | Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/dominant pitch); `--json` emits `pulp.audio.summarize.v1` with the input named by basename unless `--absolute-paths` |
 | `validate doctor` | Offline Audio Doctor over a WAV: THD/THD+N (`--thd`) and/or spectrum magnitude at checkpoints (`--response`); writes a JSON curve artifact |
 | `validate compare` | Sample-residual (null) verdict between two WAVs; exits nonzero past tolerance. `--mode spectral` currently applies a looser default tolerance to the same residual (a true spectral-distance metric is a later slice) |
 | `validate assert` | Re-check a stored `assertions.json` (or an `audio-run/` dir holding one); exits nonzero on any failing assertion |
@@ -2266,6 +2269,69 @@ reports its new, larger latency. It is correctly compensated; it just got slower
 `--latency-expect` pins the value the plugin is *supposed* to have, so that drift
 fails too. It never masks a real mismatch: if the audio and the report already
 disagree, that is what you are told.
+
+`pulp audio inspect` reports what a file's bytes say, not what they sound
+like. It never decodes samples: it reads the container envelope, every region
+header and the small payloads whose fields it parses, then seeks past
+everything else, so the cost is a handful of reads regardless of file size.
+Default output is a compact table; `--json` emits a versioned document.
+
+Containers: WAV in RIFF, RF64/BW64 and Sony Wave64 envelopes (fully walked);
+AIFF and AIFF-C (fully walked, facts from the same parser the AIFF reader
+uses); FLAC (STREAMINFO plus the metadata-block list and the first frame
+header); Ogg (pages, codec identification header, chained streams), MP3
+(ID3v2, first frame, Xing/Info/VBRI and LAME delay/padding, ID3v1 and APEv2
+tails) and MP4/M4A (box tree, sample description, `esds`, `stts`, `stco`/`co64`,
+64-bit `mdat`) with `facts_confidence: container_only`, because a bounded read
+cannot verify a lossy stream's length or priming against its audio.
+
+Flags:
+
+| Flag | Effect |
+|------|--------|
+| `--json` | Emit `pulp.audio.file_inspect.v1` instead of the table |
+| `--include-metadata-text` | Lift free text (bext strings, LIST-INFO, iXML/axml, Vorbis comments, ID3 text frames, iTunes tags) into `metadata.text`. Off by default so a report can travel; `metadata.present[]` always lists which metadata regions exist |
+| `--absolute-paths` | Report `input.name` as the path given instead of its basename |
+| `--raw` | Treat the file as headerless PCM. Requires every one of `--format`, `--channels`, `--rate`, `--endian`, `--offset`; nothing is guessed from content. The report adds `truncated_tail_bytes` when the payload is not a whole number of frames |
+
+Exit codes: `0` a report was written; `1` bad arguments, an unreadable file, or
+a raw description that cannot apply (offset past end of file); `2` the leading
+bytes match no container the inspector knows (the JSON report is still written
+with `container: "unknown"`).
+
+JSON fields:
+
+| Field | Meaning |
+|-------|---------|
+| `schema` | `pulp.audio.file_inspect.v1` |
+| `input.name`, `input.size` | Basename (or full path with `--absolute-paths`) and byte size |
+| `container` | `wav`, `aiff`, `aifc`, `flac`, `ogg`, `mp3`, `mp4`, `raw` or `unknown` |
+| `container_detail` | Envelope or brand: `RIFF`, `RF64`, `BW64`, `W64`, `FORM`, `fLaC`, `OggS`, `mpeg`, `ftyp:<brand>` |
+| `profile` | WAV header family: `pcm44`, `bwf`, `float`, `extensible`, `rf64`, `w64`; `null` for other containers or compressed WAV tags |
+| `conformance` | `standard` when `warnings` is empty, else `violations`. Valid BWF, float and RF64 files are standard |
+| `facts_confidence` | `parsed` (the structure was walked) or `container_only` (identity plus the codec's own first-page or first-frame claims) |
+| `bytes_read` | Bytes the inspector requested from the file |
+| `stream` | `sample_rate`, `channels`, `bits_per_sample` (container width), `valid_bits`, `frames` (0 when not stated), `duration_seconds`, `encoding`, `bytes_per_frame`; `null` when the header gives no stream |
+| `decode` | `decodable` and `reason`: whether Pulp's in-memory decoder would accept the layout, by the same rules it applies; `null` for containers without one |
+| `exceeds_decode_limits` | `exceeded`, `exceeded_by[]` (`max_frames`, `max_channels`, `max_output_bytes`), the `limits` in force and the `output_bytes` the declared stream would need. A fact, not an error |
+| `regions[]` | In file order: `offset`, `declared_size` (payload the header claims), `actual_size` (payload present), `id`, `kind` (`envelope`, `fmt`, `data`, `metadata`, `padding`, `unknown`), `fields` (what the specification defines for that region) and an optional `note` |
+| `regions_truncated` | The walk stopped at its region cap |
+| `warnings[]` | `kind`, `offset`, `detail`. Kinds are specification violations only: `envelope_size_mismatch`, `missing_pad_byte`, `duplicate_fmt`, `fmt_after_data`, `truncated_data`, `sentinel_size_without_ds64`, `chunk_overlap`, `chunk_past_eof`, `extensible_mask_channel_mismatch`, `valid_bits_above_container` |
+| `metadata.present[]` | `id`, `offset`, `size` of every metadata region, always |
+| `metadata.text[]` | `region`, `key`, `text`; present only with `--include-metadata-text` |
+| `truncated_tail_bytes` | Raw mode only: bytes after the last whole frame |
+| `error` | Present when the inspector could not proceed (unreadable file, raw offset past end) |
+
+The byte-span report behind the verb is `pulp::audio::inspect_audio_file_layout`
+in `core/audio/include/pulp/audio/audio_file_layout.hpp`, testable without the
+CLI; the file-backed overload adds positional reads on top of it.
+
+`pulp audio validate summarize --json` prints `pulp.audio.summarize.v1`: the
+`schema`, `schema_version`, `scenario` (the input's basename unless
+`--absolute-paths`), `sample_rate`, `frames`, `num_channels` and per-channel
+`channels[]` metrics. When a WAV declares more than the in-memory decoder
+admits, `summarize` names the limit on stderr instead of calling the file
+corrupt, and points at `inspect` for the header facts.
 
 #### Spectrogram and waveform images (`audio spectrogram`, `audio waveform`)
 
