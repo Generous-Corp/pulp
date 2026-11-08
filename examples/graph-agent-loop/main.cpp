@@ -462,7 +462,8 @@ ActionPlan parse_action_plan(const std::string& text) {
     const auto& replay = *std::find_if(plan.steps.begin(), plan.steps.end(), [](const auto& step) {
         return step.id == "saved-input-replay";
     });
-    require(replay.kind == "graph.replay" && replay.input == "baseline.pulpgraph", "action-replay");
+    require(replay.kind == "graph.replay" && replay.input == "a9-baseline.pulpgraph",
+            "action-replay");
     plan.replay_input = replay.input;
     const auto& validate =
         *std::find_if(plan.steps.begin(), plan.steps.end(),

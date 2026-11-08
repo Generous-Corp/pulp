@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 201,
+  "inventory_version": 203,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,22 +42,22 @@
     }
   ],
   "counts": {
-    "public_headers": 532,
-    "reviewed_headers": 291,
-    "legacy_unreviewed_headers": 241,
+    "public_headers": 534,
+    "reviewed_headers": 294,
+    "legacy_unreviewed_headers": 240,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 122,
-      "legacy_unreviewed": 241,
+      "infrastructure": 125,
+      "legacy_unreviewed": 240,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
-        "public_headers": 118,
-        "reviewed_headers": 27,
-        "legacy_unreviewed_headers": 91,
+        "public_headers": 120,
+        "reviewed_headers": 30,
+        "legacy_unreviewed_headers": 90,
         "unsupported_headers": 0
       },
       "midi": {
@@ -161,6 +161,24 @@
     },
     {
       "domain": "audio",
+      "source": "core/audio/include/pulp/audio/audio_file_layout.hpp",
+      "fingerprint": "sha256:8fd849f594a11af739d14c42370b2fa74460a1e423cde2cab1ebd60c9ab74694",
+      "include": "pulp/audio/audio_file_layout.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Developer-tool byte layout report over audio containers (regions, warnings, decoder verdict) behind `pulp audio inspect`; reads headers only. Not a generator-facing capability."
+    },
+    {
+      "domain": "audio",
+      "source": "core/audio/include/pulp/audio/audio_file_layout_json.hpp",
+      "fingerprint": "sha256:7c02abb2e23707387db7f67ef4612ee8ee411241e1b16de31908866eea49b1ca",
+      "include": "pulp/audio/audio_file_layout_json.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Versioned JSON serializer for the layout report (pulp.audio.file_inspect.v1), a CLI/MCP developer surface. Not a generator-facing capability."
+    },
+    {
+      "domain": "audio",
       "source": "core/audio/include/pulp/audio/audio_focus.hpp",
       "fingerprint": "sha256:50180461d91f1e615d6a3390ddb865a5858a658b1e5022dee7ebe042406b0874",
       "include": "pulp/audio/audio_focus.hpp",
@@ -207,7 +225,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/audio_reader.hpp",
-      "fingerprint": "sha256:de0e49f8b8fcfbf633e2b169c683bb85a306778f4b923a2682a620464eff32f7",
+      "fingerprint": "sha256:33c68086a43d7c58391f312a37d363aa1401f8cc9ce2e288baf4382f7bd680ac",
       "include": "pulp/audio/audio_reader.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -351,7 +369,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/format_registry.hpp",
-      "fingerprint": "sha256:caedada7e925bc78317407961d313052ce4e92c14ec12ca51477e567823ac128",
+      "fingerprint": "sha256:82a04fe0dd2b00f685616f766a47f81ef6c284402ea628df4347b0b43920cf3d",
       "include": "pulp/audio/format_registry.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1120,11 +1138,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/wav_decoder.hpp",
-      "fingerprint": "sha256:f6da1ca1a82383df7793d0ec17a4bafebe351eb4bd987791fff4eea0b6fd6671",
+      "fingerprint": "sha256:78e0bfc06ff17643493ebb343f9440348149324221e525de656a016d855be009",
       "include": "pulp/audio/wav_decoder.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Byte-span RIFF/WAVE inspector and decoder for import surfaces; reviewed when interpret_wav_format exposed the fmt interpretation for the layout report. Not a generator-facing capability."
     },
     {
       "domain": "audio",

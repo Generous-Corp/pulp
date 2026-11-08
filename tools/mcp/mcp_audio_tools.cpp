@@ -15,6 +15,7 @@
 #include <cmath>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 namespace fs = std::filesystem;
@@ -245,6 +246,83 @@ std::string handle_audio_scope(const std::string& params_json) {
     }
 
     return json_tool_payload(normalized_json);
+}
+
+std::string handle_audio_file_inspect(const std::string& params_json) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+    }
+    auto arg_error = [](const std::string& msg) {
+        return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(msg) + "}]}";
+    };
+    const auto path = extract_string(params_json, "path");
+    if (path.empty() || path.front() == '-')
+        return arg_error("Error: path is required and must be a file path");
+
+    // The tool is a thin wrapper: every flag maps to the CLI verb so the JSON
+    // an agent receives here is byte-for-byte the CLI's own report.
+    std::string cmd = shell_quote(source_build_cli_path(root).string()) + " audio inspect " +
+                      shell_quote(path) + " --json";
+    if (extract_bool(params_json, "include_metadata_text", false))
+        cmd += " --include-metadata-text";
+    if (extract_bool(params_json, "absolute_paths", false))
+        cmd += " --absolute-paths";
+
+    auto has = [&](const char* key) {
+        const auto raw = extract_raw(params_json, key);
+        return !raw.empty() && raw != "null";
+    };
+    const bool raw = has("raw_format") || has("raw_channels") || has("raw_rate") ||
+                     has("raw_endian") || has("raw_offset");
+    if (raw) {
+        cmd += " --raw";
+        for (const char* key : {"raw_format", "raw_endian"}) {
+            if (!has(key))
+                continue;
+            const auto value = extract_string(params_json, key);
+            if (value.empty() || value.front() == '-')
+                return arg_error(std::string("Error: ") + key + " must be a name, not an option");
+            cmd += " --" + std::string(std::string_view(key).substr(4)) + " " + shell_quote(value);
+        }
+        for (const char* key : {"raw_channels", "raw_rate", "raw_offset"}) {
+            if (!has(key))
+                continue;
+            const auto text = extract_raw(params_json, key);
+            if (text.empty() ||
+                !std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }))
+                return arg_error(std::string("Error: ") + key + " must be a non-negative integer");
+            cmd += " --" + std::string(std::string_view(key).substr(4)) + " " + text;
+        }
+    }
+
+    std::string temp_error;
+    auto temp = make_private_probe_json_temp(temp_error);
+    if (temp.json_path.empty())
+        return arg_error("Error: " + temp_error);
+    const ProbeJsonTempGuard temp_guard(temp.directory);
+    const auto diagnostics_path = temp.directory / "diagnostics.txt";
+    cmd += " 2> " + shell_quote(diagnostics_path.string());
+    const auto run = exec_with_status(cmd);
+    const auto diagnostics = read_text_file(diagnostics_path);
+    std::error_code remove_ec;
+    fs::remove_all(temp.directory, remove_ec);
+
+    // Exit 2 means "container not recognized" and the report is still the
+    // answer; exit 1 is a usage or read failure with nothing to parse.
+    if (run.status == 1 || run.status < 0 || run.output.empty()) {
+        std::string message = "Error: pulp audio inspect failed.";
+        if (!diagnostics.empty())
+            message += "\n" + diagnostics;
+        if (!run.output.empty())
+            message += "\n" + run.output;
+        return arg_error(message);
+    }
+    std::string normalized;
+    std::string parse_error;
+    if (!normalize_structured_json(run.output, normalized, parse_error))
+        return arg_error("Error: " + parse_error + "\n" + run.output);
+    return json_tool_payload(normalized);
 }
 
 std::string handle_audio_plugin_inspect(const std::string& params_json) {

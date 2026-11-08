@@ -29,6 +29,12 @@ target_sources(pulp-audio PRIVATE
     src/stb_vorbis_impl.c
     src/ogg_reader.cpp
     src/aiff_reader.cpp
+    src/audio_file_layout.cpp
+    src/audio_file_layout_aiff.cpp
+    src/audio_file_layout_flac_ogg.cpp
+    src/audio_file_layout_json.cpp
+    src/audio_file_layout_mpeg.cpp
+    src/audio_file_layout_wav.cpp
     src/system_volume.cpp
     src/channel_set.cpp
     src/offline_processor.cpp

@@ -55,6 +55,11 @@ pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
 pulp_add_test_suite(pulp-test-audio-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
+# Format capability reports: each reader and writer describes the bit depths,
+# rates, channel limits and encoder settings its codec actually has.
+pulp_add_test_suite(pulp-test-audio-format-capabilities GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
 # DecodeLimits contract for the codec-backed readers (FLAC, MP3, OGG Vorbis).
 # A container header is an untrusted size claim: the reader must refuse it
 # before allocating output, and bound an unknown-length stream as it decodes.
@@ -273,6 +278,11 @@ pulp_add_test_suite(pulp-test-param-json GROUP pulp-test-group-cap-state
 pulp_add_test_suite(pulp-test-binding GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 pulp_add_test_suite(pulp-test-external-binding GROUP pulp-test-group-cap-state
+    LIBRARIES pulp::state)
+
+# MIDI controller decoding, relative encoders, learn classification, takeover
+# (pure functions; no audio or StateStore).
+pulp_add_test_suite(pulp-test-midi-learn-decode GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 
 # Cross-version parameter-ordering guard (host-facing ID + index stability).
