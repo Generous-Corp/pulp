@@ -16,6 +16,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <type_traits>
 
 namespace pulp::simd::detail {
 
@@ -127,6 +130,298 @@ inline void decimate2_impl(const T* x, const T* h, T* y, std::size_t n_out,
         y[i] = dot_impl(x + 2 * i, h, taps);
 }
 
+template <typename T> inline void sub_impl(const T* a, const T* b, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = a[i] - b[i];
+}
+
+template <typename T> inline void div_impl(const T* a, const T* b, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = a[i] / b[i];
+}
+
+template <typename T> inline void negate_impl(const T* a, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = -a[i];
+}
+
+/// mean() and rms() accumulate in double for float buffers (and in double for
+/// double buffers), so a long float buffer does not lose digits to a running
+/// float sum: the error is at most about n * 2^-53 of the mean of |x| (or of
+/// x^2), plus the final rounding to T.
+template <typename T> using wide_accumulator_t = std::conditional_t<sizeof(T) < 8, double, T>;
+
+template <typename T> inline T mean_impl(const T* x, std::size_t n) noexcept {
+    using W = wide_accumulator_t<T>;
+    if (n == 0)
+        return T(0);
+    W acc = 0;
+    for (std::size_t i = 0; i < n; ++i)
+        acc += static_cast<W>(x[i]);
+    return static_cast<T>(acc / static_cast<W>(n));
+}
+
+template <typename T> inline T rms_impl(const T* x, std::size_t n) noexcept {
+    using W = wide_accumulator_t<T>;
+    if (n == 0)
+        return T(0);
+    W acc = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        const W v = static_cast<W>(x[i]);
+        acc += v * v;
+    }
+    return static_cast<T>(std::sqrt(acc / static_cast<W>(n)));
+}
+
+/// Lowest index whose element equals `value`; 0 when none does.
+template <typename T>
+inline std::size_t first_index_of(const T* x, std::size_t n, T value) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        if (x[i] == value)
+            return i;
+    return 0;
+}
+
+/// Lowest index holding a NaN, or n when there is none. find_maximum and
+/// find_minimum return that NaN and its index on every backend.
+template <typename T> inline std::size_t first_nan_index(const T* x, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        if (x[i] != x[i])
+            return i;
+    return n;
+}
+
+template <typename T>
+inline T find_maximum_impl(const T* x, std::size_t n, std::size_t* index) noexcept {
+    const std::size_t nan_at = first_nan_index(x, n);
+    if (nan_at < n) {
+        *index = nan_at;
+        return x[nan_at];
+    }
+    T best = n == 0 ? T(0) : x[0];
+    std::size_t at = 0;
+    for (std::size_t i = 1; i < n; ++i) {
+        if (x[i] > best) {
+            best = x[i];
+            at = i;
+        }
+    }
+    *index = at;
+    return best;
+}
+
+template <typename T>
+inline T find_minimum_impl(const T* x, std::size_t n, std::size_t* index) noexcept {
+    const std::size_t nan_at = first_nan_index(x, n);
+    if (nan_at < n) {
+        *index = nan_at;
+        return x[nan_at];
+    }
+    T best = n == 0 ? T(0) : x[0];
+    std::size_t at = 0;
+    for (std::size_t i = 1; i < n; ++i) {
+        if (x[i] < best) {
+            best = x[i];
+            at = i;
+        }
+    }
+    *index = at;
+    return best;
+}
+
+template <typename T>
+inline void replace_below_impl(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = a[i] < threshold ? value : a[i];
+}
+
+template <typename T>
+inline void replace_above_impl(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = a[i] > threshold ? value : a[i];
+}
+
+template <typename T, typename I>
+inline void from_int_impl(const I* src, T scale, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = static_cast<T>(src[i]) * scale;
+}
+
+/// Largest value of T that converts to I without overflow: the float just
+/// below 2^31 for float -> int32, the integer limit otherwise.
+template <typename T, typename I> inline constexpr T int_upper_bound() noexcept {
+    if constexpr (sizeof(I) == 4 && sizeof(T) == 4)
+        return T(2147483520.0);
+    else
+        return static_cast<T>(std::numeric_limits<I>::max());
+}
+
+template <typename T, typename I>
+inline void to_int_impl(const T* src, T scale, I* dst, std::size_t n) noexcept {
+    constexpr T lo = static_cast<T>(std::numeric_limits<I>::min());
+    constexpr T hi = int_upper_bound<T, I>();
+    for (std::size_t i = 0; i < n; ++i) {
+        T v = src[i] * scale;
+        if (v != v) {
+            dst[i] = 0;
+            continue;
+        }
+        v = v < lo ? lo : (v > hi ? hi : v);
+        dst[i] = static_cast<I>(std::nearbyint(v));
+    }
+}
+
+template <typename T>
+inline void interleave2_impl(const T* l, const T* r, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        dst[2 * i] = l[i];
+        dst[2 * i + 1] = r[i];
+    }
+}
+
+template <typename T>
+inline void deinterleave2_impl(const T* src, T* l, T* r, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        l[i] = src[2 * i];
+        r[i] = src[2 * i + 1];
+    }
+}
+
+// ── complex kernels ──────────────────────────────────────────────────────────
+// Every complex kernel is written once over strided real/imaginary pointers:
+// an interleaved buffer is (z, z + 1, stride 2), split buffers are
+// (re, im, stride 1). Results are formed from the inputs of an element before
+// any output of that element is written, so dst may equal a source exactly.
+
+template <typename T>
+inline void complex_multiply_impl(const T* ar, const T* ai, std::size_t sa, const T* br,
+                                  const T* bi, std::size_t sb, T* dr, T* di, std::size_t sd,
+                                  std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T xr = ar[i * sa], xi = ai[i * sa], yr = br[i * sb], yi = bi[i * sb];
+        dr[i * sd] = xr * yr - xi * yi;
+        di[i * sd] = xr * yi + xi * yr;
+    }
+}
+
+template <typename T>
+inline void complex_multiply_conj_impl(const T* ar, const T* ai, std::size_t sa, const T* br,
+                                       const T* bi, std::size_t sb, T* dr, T* di, std::size_t sd,
+                                       std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T xr = ar[i * sa], xi = ai[i * sa], yr = br[i * sb], yi = bi[i * sb];
+        dr[i * sd] = xr * yr + xi * yi;
+        di[i * sd] = xi * yr - xr * yi;
+    }
+}
+
+template <typename T>
+inline void complex_multiply_accumulate_impl(const T* ar, const T* ai, std::size_t sa, const T* br,
+                                             const T* bi, std::size_t sb, T* cr, T* ci,
+                                             std::size_t sc, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T xr = ar[i * sa], xi = ai[i * sa], yr = br[i * sb], yi = bi[i * sb];
+        cr[i * sc] += xr * yr - xi * yi;
+        ci[i * sc] += xr * yi + xi * yr;
+    }
+}
+
+template <typename T>
+inline void complex_magnitude_squared_impl(const T* re, const T* im, std::size_t s, T scale, T* dst,
+                                           std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T x = re[i * s], y = im[i * s];
+        dst[i] = (x * x + y * y) * scale;
+    }
+}
+
+template <typename T>
+inline void complex_magnitude_impl(const T* re, const T* im, std::size_t s, T* dst,
+                                   std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T x = re[i * s], y = im[i * s];
+        dst[i] = std::sqrt(x * x + y * y);
+    }
+}
+
+template <typename T>
+inline void complex_phase_impl(const T* re, const T* im, std::size_t s, T* dst,
+                               std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::atan2(im[i * s], re[i * s]);
+}
+
+// ── vector math ──────────────────────────────────────────────────────────────
+
+/// The floor actually applied by log(): a request at or below zero (or NaN)
+/// means "the smallest normal number", so the argument is never zero,
+/// subnormal or negative.
+template <typename T> inline T effective_log_floor(T floor) noexcept {
+    constexpr T kMin = std::numeric_limits<T>::min();
+    return floor > kMin ? floor : kMin;
+}
+
+template <typename T> inline void exp_impl(const T* x, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::exp(x[i]);
+}
+
+template <typename T> inline void log_impl(const T* x, T floor, T* dst, std::size_t n) noexcept {
+    const T f = effective_log_floor(floor);
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::log(x[i] < f ? f : x[i]);
+}
+
+template <typename T> inline void sin_impl(const T* x, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::sin(x[i]);
+}
+
+template <typename T> inline void cos_impl(const T* x, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::cos(x[i]);
+}
+
+template <typename T> inline void sincos_impl(const T* x, T* s, T* c, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i) {
+        const T v = x[i];
+        s[i] = std::sin(v);
+        c[i] = std::cos(v);
+    }
+}
+
+template <typename T> inline void tanh_impl(const T* x, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::tanh(x[i]);
+}
+
+template <typename T> inline void sqrt_impl(const T* x, T* dst, std::size_t n) noexcept {
+    for (std::size_t i = 0; i < n; ++i)
+        dst[i] = std::sqrt(x[i]);
+}
+
+/// x - 2*pi*round(x / 2*pi), formed in double with 2*pi as a double-double so
+/// the subtraction of the multiple is exact to the last bit of the result.
+/// The multiple k comes from a rounded quotient, so when x is within rounding
+/// of a half turn k can be one off and leave r just outside [-pi, pi]; one
+/// compare steps k back and redoes the subtraction.
+template <typename T> inline void wrap_phase_impl(const T* x, T* dst, std::size_t n) noexcept {
+    constexpr double kInvTwoPi = 0.15915494309189535;
+    constexpr double kTwoPiHi = 6.283185307179586;
+    constexpr double kTwoPiLo = 2.4492935982947064e-16;
+    constexpr double kPi = 3.141592653589793;
+    for (std::size_t i = 0; i < n; ++i) {
+        const double v = static_cast<double>(x[i]);
+        double k = std::nearbyint(v * kInvTwoPi);
+        double r = std::fma(-k, kTwoPiLo, std::fma(-k, kTwoPiHi, v));
+        if (r > kPi || r < -kPi) {
+            k += r > 0 ? 1.0 : -1.0;
+            r = std::fma(-k, kTwoPiLo, std::fma(-k, kTwoPiHi, v));
+        }
+        dst[i] = static_cast<T>(r);
+    }
+}
+
 } // namespace pulp::simd::detail
 
 // Defines every kernel overload for element type T in the current namespace.
@@ -181,7 +476,157 @@ inline void decimate2_impl(const T* x, const T* h, T* y, std::size_t n_out,
                         std::size_t taps) noexcept {                                               \
         ::pulp::simd::detail::correlate_impl(x, h, y, n_out, taps);                                \
     }                                                                                              \
+    SPEC void sub(const T* a, const T* b, T* dst, std::size_t n) noexcept {                        \
+        ::pulp::simd::detail::sub_impl(a, b, dst, n);                                              \
+    }                                                                                              \
+    SPEC void div(const T* a, const T* b, T* dst, std::size_t n) noexcept {                        \
+        ::pulp::simd::detail::div_impl(a, b, dst, n);                                              \
+    }                                                                                              \
+    SPEC void negate(const T* a, T* dst, std::size_t n) noexcept {                                 \
+        ::pulp::simd::detail::negate_impl(a, dst, n);                                              \
+    }                                                                                              \
+    SPEC T mean(const T* x, std::size_t n) noexcept {                                              \
+        return ::pulp::simd::detail::mean_impl(x, n);                                              \
+    }                                                                                              \
+    SPEC T rms(const T* x, std::size_t n) noexcept {                                               \
+        return ::pulp::simd::detail::rms_impl(x, n);                                               \
+    }                                                                                              \
+    SPEC T find_maximum(const T* x, std::size_t n, std::size_t* index) noexcept {                  \
+        return ::pulp::simd::detail::find_maximum_impl(x, n, index);                               \
+    }                                                                                              \
+    SPEC T find_minimum(const T* x, std::size_t n, std::size_t* index) noexcept {                  \
+        return ::pulp::simd::detail::find_minimum_impl(x, n, index);                               \
+    }                                                                                              \
+    SPEC void replace_below(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {    \
+        ::pulp::simd::detail::replace_below_impl(a, threshold, value, dst, n);                     \
+    }                                                                                              \
+    SPEC void replace_above(const T* a, T threshold, T value, T* dst, std::size_t n) noexcept {    \
+        ::pulp::simd::detail::replace_above_impl(a, threshold, value, dst, n);                     \
+    }                                                                                              \
+    SPEC void from_int16(const std::int16_t* src, T scale, T* dst, std::size_t n) noexcept {       \
+        ::pulp::simd::detail::from_int_impl(src, scale, dst, n);                                   \
+    }                                                                                              \
+    SPEC void from_int32(const std::int32_t* src, T scale, T* dst, std::size_t n) noexcept {       \
+        ::pulp::simd::detail::from_int_impl(src, scale, dst, n);                                   \
+    }                                                                                              \
+    SPEC void to_int16(const T* src, T scale, std::int16_t* dst, std::size_t n) noexcept {         \
+        ::pulp::simd::detail::to_int_impl(src, scale, dst, n);                                     \
+    }                                                                                              \
+    SPEC void to_int32(const T* src, T scale, std::int32_t* dst, std::size_t n) noexcept {         \
+        ::pulp::simd::detail::to_int_impl(src, scale, dst, n);                                     \
+    }                                                                                              \
+    SPEC void interleave2(const T* l, const T* r, T* dst, std::size_t n) noexcept {                \
+        ::pulp::simd::detail::interleave2_impl(l, r, dst, n);                                      \
+    }                                                                                              \
+    SPEC void deinterleave2(const T* src, T* l, T* r, std::size_t n) noexcept {                    \
+        ::pulp::simd::detail::deinterleave2_impl(src, l, r, n);                                    \
+    }                                                                                              \
     SPEC void decimate2(const T* x, const T* h, T* y, std::size_t n_out,                           \
                         std::size_t taps) noexcept {                                               \
         ::pulp::simd::detail::decimate2_impl(x, h, y, n_out, taps);                                \
+    }
+
+// Complex kernels: interleaved (re, im, re, im, ...) and split layouts.
+#define PULP_SIMD_SCALAR_DEFINE_COMPLEX(SPEC, T)                                                   \
+    SPEC void complex_multiply(const T* a, const T* b, T* dst, std::size_t n) noexcept {           \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
+        ::pulp::simd::detail::complex_multiply_impl(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n); \
+    }                                                                                              \
+    SPEC void complex_multiply_conj(const T* a, const T* b, T* dst, std::size_t n) noexcept {      \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
+        ::pulp::simd::detail::complex_multiply_conj_impl(a, a + 1, 2, b, b + 1, 2, dst, dst + 1,   \
+                                                         2, n);                                    \
+    }                                                                                              \
+    SPEC void complex_multiply_accumulate(const T* a, const T* b, T* acc,                          \
+                                          std::size_t n) noexcept {                                \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
+        ::pulp::simd::detail::complex_multiply_accumulate_impl(a, a + 1, 2, b, b + 1, 2, acc,      \
+                                                               acc + 1, 2, n);                     \
+    }                                                                                              \
+    SPEC void complex_magnitude(const T* z, T* dst, std::size_t n) noexcept {                      \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
+        ::pulp::simd::detail::complex_magnitude_impl(z, z + 1, 2, dst, n);                         \
+    }                                                                                              \
+    SPEC void complex_magnitude_squared(const T* z, T* dst, std::size_t n) noexcept {              \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
+        ::pulp::simd::detail::complex_magnitude_squared_impl(z, z + 1, 2, T(1), dst, n);           \
+    }                                                                                              \
+    SPEC void complex_phase(const T* z, T* dst, std::size_t n) noexcept {                          \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
+        ::pulp::simd::detail::complex_phase_impl(z, z + 1, 2, dst, n);                             \
+    }                                                                                              \
+    SPEC void complex_power_spectrum(const T* z, T scale, T* dst, std::size_t n) noexcept {        \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
+        ::pulp::simd::detail::complex_magnitude_squared_impl(z, z + 1, 2, scale, dst, n);          \
+    }                                                                                              \
+    SPEC void complex_multiply_split(const T* a_re, const T* a_im, const T* b_re, const T* b_im,   \
+                                     T* dst_re, T* dst_im, std::size_t n) noexcept {               \
+        ::pulp::simd::detail::complex_multiply_impl(a_re, a_im, 1, b_re, b_im, 1, dst_re, dst_im,  \
+                                                    1, n);                                         \
+    }                                                                                              \
+    SPEC void complex_multiply_conj_split(const T* a_re, const T* a_im, const T* b_re,             \
+                                          const T* b_im, T* dst_re, T* dst_im,                     \
+                                          std::size_t n) noexcept {                                \
+        ::pulp::simd::detail::complex_multiply_conj_impl(a_re, a_im, 1, b_re, b_im, 1, dst_re,     \
+                                                         dst_im, 1, n);                            \
+    }                                                                                              \
+    SPEC void complex_multiply_accumulate_split(const T* a_re, const T* a_im, const T* b_re,       \
+                                                const T* b_im, T* acc_re, T* acc_im,               \
+                                                std::size_t n) noexcept {                          \
+        ::pulp::simd::detail::complex_multiply_accumulate_impl(a_re, a_im, 1, b_re, b_im, 1,       \
+                                                               acc_re, acc_im, 1, n);              \
+    }                                                                                              \
+    SPEC void complex_magnitude_split(const T* re, const T* im, T* dst, std::size_t n) noexcept {  \
+        ::pulp::simd::detail::complex_magnitude_impl(re, im, 1, dst, n);                           \
+    }                                                                                              \
+    SPEC void complex_magnitude_squared_split(const T* re, const T* im, T* dst,                    \
+                                              std::size_t n) noexcept {                            \
+        ::pulp::simd::detail::complex_magnitude_squared_impl(re, im, 1, T(1), dst, n);             \
+    }                                                                                              \
+    SPEC void complex_phase_split(const T* re, const T* im, T* dst, std::size_t n) noexcept {      \
+        ::pulp::simd::detail::complex_phase_impl(re, im, 1, dst, n);                               \
+    }                                                                                              \
+    SPEC void complex_power_spectrum_split(const T* re, const T* im, T scale, T* dst,              \
+                                           std::size_t n) noexcept {                               \
+        ::pulp::simd::detail::complex_magnitude_squared_impl(re, im, 1, scale, dst, n);            \
+    }
+
+// Vector math. The Accuracy argument is accepted and ignored by this backend:
+// the C library functions are already at least as accurate as either tier.
+// DEFAULT is `= ::pulp::simd::Accuracy::precise` for the header fallback, which
+// has no other declaration, and empty for the compiled backend, whose
+// declarations in <pulp/simd/simd.hpp> already carry the default.
+#define PULP_SIMD_SCALAR_DEFINE_MATH(SPEC, T, DEFAULT)                                             \
+    SPEC void exp(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy DEFAULT) noexcept {    \
+        ::pulp::simd::detail::exp_impl(x, dst, n);                                                 \
+    }                                                                                              \
+    SPEC void log(const T* x, T floor, T* dst, std::size_t n,                                      \
+                  ::pulp::simd::Accuracy DEFAULT) noexcept {                                       \
+        ::pulp::simd::detail::log_impl(x, floor, dst, n);                                          \
+    }                                                                                              \
+    SPEC void sin(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy DEFAULT) noexcept {    \
+        ::pulp::simd::detail::sin_impl(x, dst, n);                                                 \
+    }                                                                                              \
+    SPEC void cos(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy DEFAULT) noexcept {    \
+        ::pulp::simd::detail::cos_impl(x, dst, n);                                                 \
+    }                                                                                              \
+    SPEC void sincos(const T* x, T* sin_out, T* cos_out, std::size_t n,                            \
+                     ::pulp::simd::Accuracy DEFAULT) noexcept {                                    \
+        ::pulp::simd::detail::sincos_impl(x, sin_out, cos_out, n);                                 \
+    }                                                                                              \
+    SPEC void tanh(const T* x, T* dst, std::size_t n, ::pulp::simd::Accuracy DEFAULT) noexcept {   \
+        ::pulp::simd::detail::tanh_impl(x, dst, n);                                                \
+    }                                                                                              \
+    SPEC void sqrt(const T* x, T* dst, std::size_t n) noexcept {                                   \
+        ::pulp::simd::detail::sqrt_impl(x, dst, n);                                                \
+    }                                                                                              \
+    SPEC void wrap_phase(const T* x, T* dst, std::size_t n) noexcept {                             \
+        ::pulp::simd::detail::wrap_phase_impl(x, dst, n);                                          \
     }

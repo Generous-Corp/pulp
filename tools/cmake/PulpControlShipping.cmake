@@ -35,6 +35,10 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     graph.sample-region.read
     graph.sample-region.edit
     graph.modulation-route.edit
+    vendor.read
+    vendor.gesture
+    vendor.render
+    vendor.destructive
     unavailable)
 
 set(_PULP_CONTROL_CAPABILITIES
@@ -65,6 +69,10 @@ set(_PULP_CONTROL_CAPABILITIES
     dev.pulp.graph/sample-region.read@1
     dev.pulp.graph/sample-region.edit@1
     dev.pulp.graph/modulation-route.edit@1
+    dev.pulp.vendor/read@1
+    dev.pulp.vendor/gesture@1
+    dev.pulp.vendor/render@1
+    dev.pulp.vendor/destructive@1
     dev.pulp.unavailable/operation@1)
 
 # Registry presence pre-stages schema/client compatibility but is not permission
@@ -76,7 +84,7 @@ set(_PULP_CONTROL_UNWIRED_CAPABILITIES)
 # Installed copies of this helper cannot reach back into the source tree. The
 # truth checker pins this value to control_registry_digest.inc.
 set(_PULP_CONTROL_REGISTRY_DIGEST_V1
-    "d98850681408945533dff4b647ddf0309f500cdbafc13f4af983ba4674410e8e")
+    "acf2b27d74b0c8b2af83c9d13400438d66e65aa4fd3332397969b7b31ec0949b")
 
 function(_pulp_cache_control_declarations target profile capabilities eval_ack)
     # A target's declarations are configure-time truth, not sticky user
@@ -86,6 +94,113 @@ function(_pulp_cache_control_declarations target profile capabilities eval_ack)
     set(PULP_${target}_CONTROL_CAPABILITIES "${capabilities}" CACHE INTERNAL "" FORCE)
     set(PULP_${target}_CONTROL_UNSAFE_RUNTIME_EVAL_ACKNOWLEDGED
         "${eval_ack}" CACHE INTERNAL "" FORCE)
+endfunction()
+
+# Records the target's vendor operation declaration (an absolute path, or empty)
+# and the sources that bind its handlers. Those sources build only into the
+# controlled Standalone and its broker-launched host, never into other formats.
+# FORCE keeps removal effective in an existing build tree, like the other
+# control declarations.
+function(_pulp_cache_control_vendor_operations target declaration)
+    set(_sources "")
+    foreach(_source IN LISTS ARGN)
+        if(NOT IS_ABSOLUTE "${_source}")
+            set(_source "${CMAKE_CURRENT_SOURCE_DIR}/${_source}")
+        endif()
+        cmake_path(NORMAL_PATH _source)
+        list(APPEND _sources "${_source}")
+    endforeach()
+    set(PULP_${target}_CONTROL_VENDOR_SOURCES "${_sources}" CACHE INTERNAL "" FORCE)
+    set(_path "")
+    if(declaration)
+        if(IS_ABSOLUTE "${declaration}")
+            set(_path "${declaration}")
+        else()
+            set(_path "${CMAKE_CURRENT_SOURCE_DIR}/${declaration}")
+        endif()
+        cmake_path(NORMAL_PATH _path)
+    endif()
+    set(PULP_${target}_CONTROL_VENDOR_OPERATIONS "${_path}" CACHE INTERNAL "" FORCE)
+endfunction()
+
+# Reads the declaration and returns its manifest member, or empty. The exact
+# bytes are embedded as one JSON string so CMake and the broker produce the
+# same canonical manifest; the broker performs the complete validation.
+function(_pulp_control_vendor_operations_member output target control_caps)
+    set(_path "${PULP_${target}_CONTROL_VENDOR_OPERATIONS}")
+    set(_vendor_caps
+        dev.pulp.vendor/read@1 dev.pulp.vendor/gesture@1
+        dev.pulp.vendor/render@1 dev.pulp.vendor/destructive@1)
+    if(NOT _path)
+        foreach(_cap IN LISTS _vendor_caps)
+            if(_cap IN_LIST control_caps)
+                message(FATAL_ERROR
+                    "pulp_add_plugin(${target}): '${_cap}' requires a CONTROL_VENDOR_OPERATIONS declaration")
+            endif()
+        endforeach()
+        set(${output} "" PARENT_SCOPE)
+        return()
+    endif()
+    if(NOT EXISTS "${_path}" OR IS_DIRECTORY "${_path}")
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTROL_VENDOR_OPERATIONS file '${_path}' does not exist")
+    endif()
+    file(SIZE "${_path}" _size)
+    if(_size EQUAL 0 OR _size GREATER 131072)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTROL_VENDOR_OPERATIONS must be 1 to 131072 bytes")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_path}")
+    file(READ "${_path}" _document)
+    string(REGEX MATCH "[^\t\r\n -~]" _foreign "${_document}")
+    if(NOT _foreign STREQUAL "")
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTROL_VENDOR_OPERATIONS must be printable ASCII")
+    endif()
+    # The manifest is written with file(GENERATE), which would evaluate a
+    # generator expression and silently change the bytes the digest covers.
+    string(FIND "${_document}" "$<" _generator_expression)
+    if(NOT _generator_expression EQUAL -1)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTROL_VENDOR_OPERATIONS must not contain '$<'")
+    endif()
+    # Tiers and descriptions are read as JSON, so text inside a description
+    # can never satisfy or defeat the tier check. The broker re-validates the
+    # whole declaration; these checks only make mistakes fail at configure.
+    string(JSON _count ERROR_VARIABLE _json_error LENGTH "${_document}" operations)
+    if(_json_error OR NOT _count GREATER 0)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTROL_VENDOR_OPERATIONS must be a JSON object with a non-empty 'operations' array")
+    endif()
+    set(_used_tiers "")
+    math(EXPR _last "${_count} - 1")
+    foreach(_index RANGE ${_last})
+        string(JSON _tier ERROR_VARIABLE _tier_error GET "${_document}" operations ${_index} tier)
+        string(JSON _description ERROR_VARIABLE _description_error
+            GET "${_document}" operations ${_index} description)
+        string(LENGTH "${_description}" _description_length)
+        if(_description_error OR _description_length GREATER 512 OR
+           NOT _description MATCHES "^[ -~]+$")
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): vendor operation ${_index} needs a description of one line of 1 to 512 printable ASCII characters")
+        endif()
+        if(NOT _tier_error)
+            list(APPEND _used_tiers "${_tier}")
+        endif()
+    endforeach()
+    foreach(_tier read gesture render destructive)
+        set(_cap "dev.pulp.vendor/${_tier}@1")
+        if(_tier IN_LIST _used_tiers AND NOT _cap IN_LIST control_caps)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): a '${_tier}' vendor operation requires '${_cap}' in CONTROL_CAPABILITIES")
+        endif()
+        if(NOT _tier IN_LIST _used_tiers AND _cap IN_LIST control_caps)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): '${_cap}' is declared without a '${_tier}' vendor operation")
+        endif()
+    endforeach()
+    _pulp_control_json_escape(_escaped "${_document}")
+    set(${output} ",\n  \"vendor_operations\": \"${_escaped}\"" PARENT_SCOPE)
 endfunction()
 
 function(_pulp_control_capability_projection output_contract input)
@@ -160,7 +275,8 @@ function(_pulp_configure_control_shipping target bundle_id product_name)
 
     set(_controller_caps
         ui.input trace.control trace.session.control state.write test.input
-        authoring.tweaks runtime.reload runtime.eval sequencer.transport.loop.write)
+        authoring.tweaks runtime.reload runtime.eval sequencer.transport.loop.write
+        vendor.gesture vendor.destructive)
     foreach(_control_cap IN LISTS _control_caps)
         list(FIND _PULP_CONTROL_CAPABILITIES "${_control_cap}" _cap_index)
         list(GET _PULP_INSPECTOR_SHIPPING_CAPABILITIES ${_cap_index} _cap)
@@ -224,6 +340,8 @@ function(_pulp_configure_control_shipping target bundle_id product_name)
         string(APPEND _json_control_caps "\"${_control_cap}\"")
     endforeach()
 
+    _pulp_control_vendor_operations_member(_json_vendor_operations ${target} "${_control_caps}")
+
     set(_manifest_dir "${CMAKE_BINARY_DIR}/pulp-inspector-manifests")
     if(PULP_${target}_INSPECTOR_MANIFEST_DIRECTORY)
         set(_manifest_dir "${PULP_${target}_INSPECTOR_MANIFEST_DIRECTORY}")
@@ -244,7 +362,7 @@ function(_pulp_configure_control_shipping target bundle_id product_name)
     _pulp_control_json_escape(_json_build_id
         "${PULP_${target}_CONTROL_BUILD_ID}")
     set(_manifest_content
-        "{\n  \"schema\": \"dev.pulp.control/artifact-manifest@1\",\n  \"schema_version\": 1,\n  \"profile\": \"${_profile}\",\n  \"target\": \"${_json_target}\",\n  \"product_name\": \"${_json_product_name}\",\n  \"bundle_id\": \"${_json_bundle_id}\",\n  \"build_id\": \"${_json_build_id}\",\n  \"registry_digest\": \"${_control_registry_digest}\",\n  \"endpoint_included\": ${_shipping},\n  \"unsafe_runtime_eval_acknowledged\": ${_runtime_eval},\n  \"permission_terms\": [\"implemented\", \"built\", \"host_available\", \"activated\", \"policy_eligible\", \"client_granted\", \"session_live\"],\n  \"capabilities\": [${_json_control_caps}]\n}\n")
+        "{\n  \"schema\": \"dev.pulp.control/artifact-manifest@1\",\n  \"schema_version\": 1,\n  \"profile\": \"${_profile}\",\n  \"target\": \"${_json_target}\",\n  \"product_name\": \"${_json_product_name}\",\n  \"bundle_id\": \"${_json_bundle_id}\",\n  \"build_id\": \"${_json_build_id}\",\n  \"registry_digest\": \"${_control_registry_digest}\",\n  \"endpoint_included\": ${_shipping},\n  \"unsafe_runtime_eval_acknowledged\": ${_runtime_eval},\n  \"permission_terms\": [\"implemented\", \"built\", \"host_available\", \"activated\", \"policy_eligible\", \"client_granted\", \"session_live\"],\n  \"capabilities\": [${_json_control_caps}]${_json_vendor_operations}\n}\n")
     file(GENERATE OUTPUT "${_manifest}" CONTENT "${_manifest_content}")
     string(SHA256 _manifest_digest "${_manifest_content}")
     set(PULP_${target}_INSPECTOR_MANIFEST "${_manifest}" CACHE INTERNAL "")
