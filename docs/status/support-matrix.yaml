@@ -1085,6 +1085,15 @@ state_tree:
     ci_test: pulp-test-state-tree-validated
     notes: set_checked, the other *_checked edits and ValidatedTransaction return pulp::runtime::Result values with a TreeEditError code instead of ignoring an invalid edit; a ValidatedTransaction with any refused edit aborts on commit. Property validation is a caller-supplied predicate; JSON-Schema validation and a JavaScript bridge for transactions are not provided.
 
+plugin_hosting:
+  lv2:
+    status: usable
+    ci_test:
+      - pulp-test-lv2-host-slot
+      - pulp-test-lv2-host-discovery
+      - pulp-test-lv2-bundle-discovery-e2e
+    notes: The LV2 PluginSlot reads bundles through the vendored lilv and hosts instruments and effects. The tests host a real fixture bundle on macOS and Linux through PluginSlot and SignalGraph, checking MIDI in and out, time:Position, typed patch:Set parameters, the worker, options, state saved alongside the audio thread, latency, full-sequence handling, and refusal of bundles it cannot host. On Windows the loader and vendored libraries are compiled, but no test hosts an LV2 plugin there.
+
 subsystems:
   runtime: stable
   events: usable
@@ -1114,7 +1123,7 @@ subsystems:
 # every key under limitations: must resolve to a real entry in the matrix.
 limitations:
   subsystems.host:
-    - text: "Host transport, offline render mode, 64-bit processing, every declared audio bus, the full MIDI map, plugin parameter feedback, and restart requests are implemented by the CLAP and VST3 slots. The AU and LV2 slots accept the same calls but still run realtime with a single main bus, see no host transport, and report no parameter edits or restart requests."
+    - text: "Host transport, offline render mode, 64-bit processing, every declared audio bus, the full MIDI map, plugin parameter feedback, and restart requests are implemented by the CLAP and VST3 slots. The AU slot accepts the same calls but still runs realtime with a single main bus, sees no host transport, and reports no parameter edits or restart requests."
       tracked_in: "../guides/hosting.md#limits"
     - text: "A hosted plugin's process mode is fixed when it is prepared. A block whose ProcessContext says offline still runs in the mode the plugin was prepared in; SignalGraph::set_hosted_plugin_process_mode() takes effect at the next prepare()."
       tracked_in: "../guides/hosting.md#process-mode-and-precision"
@@ -1122,6 +1131,9 @@ limitations:
       tracked_in: "../guides/hosting.md#restart-requests-and-latency-changes"
     - text: "VST3 plug-ins learn only the host name (IHostApplication has no vendor or version). VST3 controllers, channel pressure, pitch bend, and program change reach a plug-in only through its IMidiMapping; unmapped ones are dropped, and VST3 note expression is not sent. CLAP plugins receive MIDI 1.0 or CLAP note events, never the MIDI 2.0 dialect."
       tracked_in: "../guides/hosting.md#midi"
+  plugin_hosting.lv2:
+    - text: "The LV2 slot hosts instruments and effects through lilv (MIDI in and out, time:Position, patch parameters, worker, state, options, latency) but shows no plugin UI, feeds CV inputs silence, drops SysEx, and offers no state:mapPath or state:makePath, so state that refers to files does not restore."
+      tracked_in: "../guides/hosting.md#lv2-plugins"
   timeline_engine.cli_mcp:
     - text: "The headless render path emits arrangement audio only; it does not instantiate hosted devices or MIDI instruments, and unknown plugin-delay compensation remains null rather than being invented."
       tracked_in: "../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp"

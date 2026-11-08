@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from typing import Any
 
 import agent_capability_manifest as manifest
 import agent_capability_history as capability_history
@@ -619,7 +620,8 @@ def exercise_evolution(canonical: dict) -> int:
         initial_bootstrap=False,
         migrate_unpublished=False,
     )
-    assert unmoved == published["entries"], "a fingerprint-only refresh appended"
+    published_entries = capability_history.history_entries(published)
+    assert unmoved == published_entries, "a fingerprint-only refresh appended"
     checks += 1
 
     bumped_surface = copy.deepcopy(refreshed_surface)
@@ -633,7 +635,7 @@ def exercise_evolution(canonical: dict) -> int:
         initial_bootstrap=False,
         migrate_unpublished=False,
     )
-    assert moved == published["entries"] + [
+    assert moved == published_entries + [
         capability_history.history_entry(canonical, base_surface)
     ], "a counter move did not append the prior state"
     checks += 1
@@ -650,7 +652,7 @@ def exercise_evolution(canonical: dict) -> int:
         migrate_unpublished=False,
     )
     assert revised[-1] == capability_history.history_entry(canonical, base_surface)
-    assert len(revised) == len(published["entries"]) + 1
+    assert len(revised) == len(published_entries) + 1
     checks += 1
 
     with tempfile.TemporaryDirectory(prefix="pulp-agent-transaction-") as temp:
@@ -1034,8 +1036,13 @@ def exercise_evolution(canonical: dict) -> int:
     )
     checks += 1
 
-    rewritten = copy.deepcopy(history)
-    rewritten["entries"][0]["entry_digest"] = "sha256:" + "0" * 64
+    # A rewritten earlier entry is refused even when the rewrite is itself a
+    # well-formed history: append-only compares the expanded material.
+    rewritten_entry = copy.deepcopy(capability_history.history_entries(history)[0])
+    rewritten_entry["manifest"]["capabilities"][0]["summary"] += " (rewritten)"
+    rewritten_entry["entry_digest"] = surface.canonical_digest(
+        {"manifest": rewritten_entry["manifest"], "surface": rewritten_entry["surface"]})
+    rewritten = capability_history.history_document([rewritten_entry])
     expect_problem(
         manifest.append_only_history_problems(history, rewritten),
         "not append-only",
@@ -1537,7 +1544,8 @@ def exercise_counters_assigned_at_land(canonical: dict) -> int:
     entries = capability_history.updated_history_entries(
         history, changed, surface_doc, assigned, surface_doc,
         initial_bootstrap=False, migrate_unpublished=False)
-    assert entries == history["entries"], "a pending previous state was appended"
+    assert entries == capability_history.history_entries(history), \
+        "a pending previous state was appended"
     entries = capability_history.updated_history_entries(
         capability_history.history_document([]), published, surface_doc, changed, surface_doc,
         initial_bootstrap=False, migrate_unpublished=False)
@@ -1666,6 +1674,217 @@ def exercise_release_guard_wiring() -> int:
     return checks + 1
 
 
+def exercise_history_storage() -> int:
+    """The stored-object layout keeps every entry's full material, verifiably.
+
+    Covers the checked-in file itself, lossless conversion from the original
+    inline layout, refusal of hand edits, and the size guard that keeps the
+    file far below GitHub's 100 MB push limit."""
+    checks = 0
+    history_path = ROOT / capability_history.HISTORY_FILE
+    text = history_path.read_text(encoding="utf-8")
+    stored = json.loads(text)
+    assert stored["schema"] == capability_history.HISTORY_SCHEMA, stored["schema"]
+
+    # The checked-in file is the exact rendering of the exact encoding of its
+    # own entries, and every entry digest is the canonical digest of the full
+    # material it expands to.
+    entries = capability_history.history_entries(stored)
+    assert len(entries) == len(stored["entries"]) >= 1
+    for entry in entries:
+        assert set(entry) == {"manifest", "surface", "entry_digest"}, set(entry)
+        assert entry["entry_digest"] == surface.canonical_digest(
+            {"manifest": entry["manifest"], "surface": entry["surface"]})
+    assert capability_history.history_document(entries) == stored
+    assert capability_history.rendered_history(stored) == text
+    checks += 1
+
+    # Size guard: the file stays far below GitHub's per-file limit.
+    size = len(text.encode("utf-8"))
+    assert size <= capability_history.HISTORY_SIZE_LIMIT_BYTES, (
+        f"{capability_history.HISTORY_FILE} is {size} bytes, over the "
+        f"{capability_history.HISTORY_SIZE_LIMIT_BYTES}-byte guard")
+    limit = capability_history.HISTORY_SIZE_LIMIT_BYTES
+    try:
+        capability_history.HISTORY_SIZE_LIMIT_BYTES = size - 1
+        expect_problem(
+            capability_history.history_problems(
+                stored, entries[-1]["manifest"], entries[-1]["surface"]),
+            "-byte guard",
+        )
+    finally:
+        capability_history.HISTORY_SIZE_LIMIT_BYTES = limit
+    checks += 1
+
+    # Conversion from the inline layout is lossless in both directions, and the
+    # inline layout is still accepted as a protected base and as --write input.
+    legacy = {"schema": capability_history.LEGACY_HISTORY_SCHEMA,
+              "entries": copy.deepcopy(entries)}
+    assert capability_history.history_entries(legacy) == entries
+    assert capability_history.history_document(legacy["entries"]) == stored
+    assert not capability_history.append_only_history_problems(legacy, stored)
+    assert not capability_history.append_only_history_problems(stored, stored)
+    last = entries[-1]
+    assert capability_history.updated_history_entries(
+        legacy, last["manifest"], last["surface"], last["manifest"], last["surface"],
+        initial_bootstrap=False, migrate_unpublished=False) == entries
+    expect_problem(
+        capability_history.history_problems(legacy, last["manifest"], last["surface"]),
+        "retired pulp.agent-capability-history.v1 layout",
+    )
+    checks += 1
+
+    # Append-only still holds across layouts: dropping or reordering an entry
+    # is refused, appending one is not.
+    if len(entries) >= 2:
+        expect_problem(
+            capability_history.append_only_history_problems(
+                legacy, capability_history.history_document(entries[1:])),
+            "not append-only")
+        swapped = [entries[1], entries[0], *entries[2:]]
+        expect_problem(
+            capability_history.append_only_history_problems(
+                stored, capability_history.history_document(swapped)),
+            "not append-only")
+    grown_surface = copy.deepcopy(last["surface"])
+    grown_surface["inventory_version"] += 1
+    grown_surface["headers"][0]["fingerprint"] = "sha256:" + "c" * 64
+    grown_entries = [*entries, capability_history.history_entry(
+        last["manifest"], grown_surface)]
+    grown = capability_history.history_document(grown_entries)
+    assert not capability_history.append_only_history_problems(stored, grown)
+    assert not capability_history.append_only_history_problems(legacy, grown)
+    checks += 1
+
+    # A one-header change stores a few small chunks, not the whole surface
+    # again (the inline layout grew by the full material, ~0.75 MB).
+    growth = (len(capability_history.rendered_history(grown).encode("utf-8"))
+              - size)
+    assert 0 < growth < 32 * 1024, growth
+    checks += 1
+
+    # Hand edits are refused. Each mutation keeps valid JSON.
+    def problems(document: Any) -> list[str]:
+        return capability_history.history_problems(
+            document, last["manifest"], last["surface"])
+
+    assert not [problem for problem in problems(stored)
+                if "canonical" in problem or "object" in problem], problems(stored)
+    key = next(k for k, node in stored["objects"].items()
+               if isinstance(node, dict) and "fingerprint" in node)
+    edited = copy.deepcopy(stored)
+    edited["objects"][key]["fingerprint"] = "sha256:" + "d" * 64
+    expect_problem(problems(edited), "not in canonical stored-object form")
+    assert capability_history.append_only_history_problems(stored, edited)
+
+    extra = copy.deepcopy(stored)
+    extra["objects"]["sha256:" + "e" * 64] = {"unreferenced": True}
+    expect_problem(problems(extra), "unreferenced objects")
+
+    missing = copy.deepcopy(stored)
+    del missing["objects"][key]
+    expect_problem(problems(missing), "references a missing object")
+
+    cyclic = copy.deepcopy(stored)
+    cyclic["objects"][key] = {"$ref": key}
+    expect_problem(problems(cyclic), "refers to itself")
+
+    unknown = copy.deepcopy(stored)
+    unknown["objects"][key] = {"$include": key}
+    expect_problem(problems(unknown), "unknown marker")
+
+    widened = copy.deepcopy(stored)
+    widened["notes"] = "extra"
+    expect_problem(problems(widened), "exactly schema, entries and objects")
+
+    # Each structural refusal names its cause.
+    referenced_by = {}
+    for owner, node in stored["objects"].items():
+        for marker_key in json.dumps(node).split('"$ref": "')[1:]:
+            referenced_by.setdefault(marker_key.split('"', 1)[0], owner)
+    concat_owner = next(k for k, node in stored["objects"].items()
+                        if isinstance(node, dict) and set(node) == {"$concat"})
+    merge_owner = next(k for k, node in stored["objects"].items()
+                       if isinstance(node, dict) and set(node) == {"$merge"})
+    dict_object = next(k for k, node in stored["objects"].items()
+                       if isinstance(node, dict) and not any(m.startswith("$") for m in node))
+
+    overlap = copy.deepcopy(stored)
+    chunks = overlap["objects"][merge_owner]["$merge"]
+    chunks.append(chunks[0])
+    expect_problem(problems(overlap), "merge chunks overlap")
+
+    extra_field = copy.deepcopy(stored)
+    owner = referenced_by[key]
+    extra_field["objects"][owner] = json.loads(
+        json.dumps(extra_field["objects"][owner]).replace(
+            '{"$ref": "%s"}' % key, '{"$ref": "%s", "note": 1}' % key))
+    expect_problem(problems(extra_field), "reference has extra fields")
+
+    scalar = copy.deepcopy(stored)
+    scalar["objects"][key] = 5
+    expect_problem(problems(scalar), "reference names a scalar")
+
+    wrong_kind = copy.deepcopy(stored)
+    wrong_kind["objects"][concat_owner]["$concat"][0] = dict_object
+    expect_problem(problems(wrong_kind), "is not a list chunk")
+
+    # Deep nesting is a named problem, never a RecursionError traceback.
+    depth = capability_history._MAX_REFERENCE_DEPTH + 10
+    chain = {"schema": capability_history.HISTORY_SCHEMA, "entries": ["k0"],
+             "objects": {f"k{i}": {"$ref": f"k{i + 1}"} for i in range(depth)}}
+    chain["objects"][f"k{depth}"] = {}
+    expect_problem(problems(chain), "references nest deeper than")
+    nested: Any = {}
+    for _ in range(sys.getrecursionlimit() + 100):
+        nested = [nested]
+    deep = {"schema": capability_history.HISTORY_SCHEMA, "entries": ["k0"],
+            "objects": {"k0": {"manifest": nested, "surface": {}}}}
+    expect_problem(problems(deep), "nests too deeply")
+    checks += 1
+
+    # --write refuses an unreadable stored history with its cause, instead of
+    # starting a fresh one that later fails as "not append-only".
+    assert capability_history.stored_history_problems(None) == []
+    assert capability_history.stored_history_problems(stored) == []
+    assert capability_history.stored_history_problems(legacy) == []
+    expect_problem(capability_history.stored_history_problems(missing),
+                   "references a missing object")
+    expect_problem(capability_history.stored_history_problems({"_invalid": "bad"}),
+                   "is not valid JSON: bad")
+    checks += 1
+
+    # --check compares the file text with its rendering, which catches an edit
+    # that parses back to the honest document (a duplicated object line).
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-history-text-") as temp:
+        copy_path = pathlib.Path(temp) / "contract-history.json"
+        copy_path.write_text(text, encoding="utf-8")
+        assert manifest.history_text_problems(copy_path, stored) == []
+        lines = text.splitlines(keepends=True)
+        index = next(i for i, line in enumerate(lines)
+                     if line.startswith('    "sha256:') and '": ' in line
+                     and line.endswith(",\n"))
+        duplicated = lines[:index + 1] + [lines[index]] + lines[index + 1:]
+        copy_path.write_text("".join(duplicated), encoding="utf-8")
+        assert json.loads(copy_path.read_text(encoding="utf-8")) == stored
+        assert not [problem for problem in problems(stored)
+                    if "canonical" in problem or "object" in problem]
+        expect_problem(manifest.history_text_problems(copy_path, stored),
+                       "is not in its rendered form")
+    checks += 1
+
+    reserved = copy.deepcopy(last)
+    reserved["manifest"]["coverage"]["$ref"] = "x"
+    try:
+        capability_history.history_document([reserved])
+    except capability_history.HistoryFormatError as error:
+        assert "reserved '$' prefix" in str(error), error
+    else:
+        raise AssertionError("material with a '$' key was encoded")
+    checks += 1
+    return checks
+
+
 def main() -> int:
     result = run("--json")
     assert result.returncode == 0, result.stderr
@@ -1684,6 +1903,7 @@ def main() -> int:
     checks += exercise_compatibility(canonical)
     checks += exercise_base_drift()
     checks += exercise_counters_assigned_at_land(canonical)
+    checks += exercise_history_storage()
     checks += exercise_release_guard_wiring()
     checks += exercise_authority_navigation()
     print(f"agent-capabilities: {checks} negative/evolution/surface/compatibility checks passed")
