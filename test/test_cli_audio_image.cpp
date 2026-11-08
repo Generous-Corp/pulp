@@ -8,6 +8,9 @@
 // key set and path redaction, float input above full scale, and a synthetic
 // 70-minute WAV that `decode_wav` refuses but the ranged reader renders.
 
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+
 #include "test_cli_shellout_helpers.hpp"
 
 #include <pulp/audio/audio_file.hpp>
