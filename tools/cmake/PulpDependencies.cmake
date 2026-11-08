@@ -212,6 +212,12 @@ unset(_pulp_declare_wgpu)
 # offline builds that intend a CG-only fallback). Desktop only (Android/iOS
 # Skia comes from their own build scripts / bundled libs).
 option(PULP_SKIA_AUTOFETCH "Auto-fetch pinned Skia into a shared cache when missing" ON)
+# Skia (and the Dawn archive in its slice) is provisioned by a script, not by
+# find_package() or FetchContent, so tell the dependency request recorder
+# (tools/ci/dependency_request_recorder.cmake) when this configure asks for it.
+if(PULP_ENABLE_GPU AND COMMAND dependency_request_recorder_note)
+    dependency_request_recorder_note(PULP_PROVISION Skia)
+endif()
 if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         AND NOT DEFINED ENV{SKIA_DIR} AND NOT ANDROID
         AND NOT (CMAKE_SYSTEM_NAME STREQUAL "iOS"))

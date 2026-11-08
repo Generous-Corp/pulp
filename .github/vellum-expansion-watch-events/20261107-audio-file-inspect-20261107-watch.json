@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261107-audio-file-inspect-20261107-watch",
+  "created_at": "2026-11-07T22:33:51Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Adds pulp audio inspect, a header-only byte-layout report verb for audio files, with its MCP wrapper pulp_audio_file_inspect, a schema id for validate summarize JSON, tests, fixtures and docs. The watched family is touched only through the Claude plugin guide's MCP tool table, the CLI reference, the CLI/MCP tooling inventories and skill notes; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-audio-file-layout",
+    "ctest --test-dir build -R pulp-test-cli-audio-inspect",
+    "ctest --test-dir build -R pulp-test-mcp-server",
+    "ctest --test-dir build -R pulp-test-wav-memory-decoder",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
