@@ -3696,6 +3696,7 @@
     "tools/scripts/agent_capability_evolution.py",
     "tools/scripts/agent_capability_history.py",
     "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/agent_capability_rederive.py",
     "tools/scripts/agent_capability_registry.py",
     "tools/scripts/agent_capability_registry_types.py",
     "tools/scripts/agent_capability_surface.py",
