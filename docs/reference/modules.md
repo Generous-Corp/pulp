@@ -447,6 +447,26 @@ auto info = FormatRegistry::instance().read_info("song.mp3");
 // info->duration_seconds, info->num_channels, info->sample_rate
 ```
 
+To choose a format before writing, ask the registry what each reader and writer
+supports. `reader_capabilities()` and `writer_capabilities()` return one
+`FormatCapabilities` per registered handler: its extensions, integer bit
+depths, whether it handles float samples, allowed sample rates, channel limit,
+whether the stream is compressed or lossy, and the encoder settings `write()`
+applies. An empty list means the format does not restrict that value. The
+registry write path uses each encoder setting at the value reported; none can
+be chosen per call yet.
+
+```cpp
+for (const auto& caps : FormatRegistry::instance().writer_capabilities()) {
+    // caps.format_name, caps.extensions, caps.bit_depths, caps.sample_rates,
+    // caps.max_channels, caps.compressed, caps.lossless, caps.quality_options
+}
+```
+
+`pulp audio formats` prints the same table for the current build, and
+`pulp audio formats --json` emits it as JSON with `readers` and `writers`
+arrays; the CLI reference lists every field.
+
 For an already-resident RIFF/WAVE byte span, `inspect_wav()` and `decode_wav()`
 in `wav_decoder.hpp` provide a no-file-I/O, no-exceptions path with caller-set
 frame, channel, and decoded-byte ceilings. RF64, W64, and RIFX containers are
@@ -519,18 +539,55 @@ therefore counts it twice.
 
 | Format | Read | Write | Backend |
 |--------|:----:|:-----:|---------|
-| AAC | macOS | ✓* | Read through ExtAudioFile on macOS; optional FDK AAC adds writing (`pulp add fdk-aac --accept-license FDK-AAC`) |
-| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian) |
-| ALAC | macOS | ✓* | Read through ExtAudioFile on macOS; optional Apple ALAC adds writing (`pulp add alac`) |
-| CAF | macOS | — | Read through ExtAudioFile on macOS |
+| AAC | macOS, Windows | macOS, Windows, ✓* | Read through ExtAudioFile on macOS and Media Foundation on Windows. Written by the system codec writer (M4A or ADTS on macOS, M4A at 44.1 or 48 kHz on Windows) or optional FDK AAC (`pulp add fdk-aac --accept-license FDK-AAC`). FDK AAC writes an ADTS stream for both `.aac` and `.m4a`, so a `.m4a` it writes is not an MPEG-4 file and some players refuse it |
+| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian); the system codec writer adds 24- and 32-bit AIFF on macOS |
+| ALAC | macOS | macOS, ✓* | Read through ExtAudioFile on macOS. Written by the system codec writer on macOS or optional Apple ALAC (`pulp add alac`) |
+| CAF | macOS | macOS | Read and written through ExtAudioFile on macOS (AAC, ALAC or PCM inside) |
 | FLAC | ✓ | ✓* | dr_flac / libflac (`pulp add libflac`) |
 | MP3 | ✓ | ✓* | dr_mp3 / LAME (`pulp add lame --accept-license LGPL-2.0`) |
 | OGG Vorbis | ✓ | — | stb_vorbis |
 | WAV | ✓ | ✓ | CHOC + bounded in-memory decoder + StreamingWriter |
+| WMA | Windows | — | Read through Media Foundation on Windows |
 
 *\*Write via optional `pulp add` packages. Those packages do not add portable
 AAC/ALAC readers. Permissive (libflac, ALAC) packages install freely; copyleft
 (LAME, fdk-aac) packages require `--accept-license`.*
+
+#### Writing through the system codecs
+
+`write_system_audio_file()` in `system_audio_codec.hpp` encodes through the
+operating system's own codecs, so it links no third-party encoder and adds no
+license terms. Choose the container and encoding, plus the bit depth for ALAC
+or integer PCM, float PCM for CAF, or an AAC bitrate:
+
+```cpp
+#include <pulp/audio/system_audio_codec.hpp>
+
+SystemAudioWriteOptions options;
+options.container = SystemAudioContainer::M4A;
+options.encoding = SystemAudioEncoding::ALAC;
+options.bit_depth = 24;
+if (system_audio_can_write(options.container, options.encoding))
+    write_system_audio_file("take.m4a", data, options);
+```
+
+| Container | macOS | Windows |
+|-----------|-------|---------|
+| M4A | AAC, ALAC | AAC (44.1 or 48 kHz; mono or stereo) |
+| ADTS (`.aac`) | AAC | — |
+| CAF | AAC, ALAC, PCM (integer or float) | — |
+| AIFF | PCM (16, 24 or 32-bit integer) | — |
+
+Other platforms refuse every write. `FormatRegistry::write()` uses this
+writer for `.m4a`, `.aac`, `.alac` and `.caf` when no installed optional
+encoder claims the extension first, so an FDK AAC install keeps `.m4a` and
+`.aac`. Through the registry, `.m4a` and `.aac` write AAC at the codec's
+default bitrate, `.alac` writes 16-bit ALAC in M4A, and `.caf` writes 32-bit
+float PCM. The file is encoded beside its destination and renamed into place
+only on success, so a refused write leaves an existing file untouched; the
+failing stage is logged. An AAC bitrate is rounded to the nearest one the
+encoder accepts. No metadata or channel layout is written. Encoding allocates
+and performs file I/O, so keep it off the audio callback.
 
 ### Sampler, looper, and analysis primitives
 

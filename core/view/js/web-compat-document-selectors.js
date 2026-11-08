@@ -302,6 +302,15 @@ function _matchesPseudoClass(el, pseudo) {
     if (lower === "checked")  return !!el._checked;
     if (lower === "hover")    return !!el._isHovered;
     if (lower === "focus")    return !!el._hasFocus;
+    // :focus-visible matches a focused element that got focus from the
+    // keyboard or from code, never from a pointer press.
+    if (lower === "focus-visible") return !!el._hasFocus && !!el._focusVisible;
+    // :focus-within matches the focused element and every ancestor of it.
+    if (lower === "focus-within") {
+        var focused = (typeof document !== "undefined") ? document.activeElement : null;
+        return !!focused && (focused === el ||
+            (typeof el.contains === "function" && el.contains(focused)));
+    }
     if (lower === "active")   return !!el._isActive;
 
     // DOM-position pseudo-classes. Need a parent to compute the index.
