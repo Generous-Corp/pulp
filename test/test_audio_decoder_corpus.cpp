@@ -235,10 +235,11 @@ TEST_CASE("every audio decoder seed satisfies the shared oracle through the regi
     std::vector<std::string> unclaimed;
     for (const auto& file : files) {
         const auto ext = lower_extension(file);
+        const auto name = file.filename().string();
         if (registry.find_reader(ext) == nullptr) {
             // CoreAudio-only seeds have no reader off Apple; on Apple every
             // committed seed must reach a reader.
-            unclaimed.push_back(file.filename().string());
+            unclaimed.push_back(name);
             continue;
         }
         ++exercised;
@@ -452,7 +453,9 @@ TEST_CASE("a declared length the stream does not deliver is refused, an undeclar
         const auto info = registry.read_info(path.string());
         REQUIRE(info.has_value());
         CHECK(info->num_frames == 0u);
-        if (const auto data = registry.read(path.string(), limits)) {
+        const auto data = registry.read(path.string(), limits);
+        CHECK(data.has_value() == expected.decodes);
+        if (data) {
             CHECK(data->sample_rate == info->sample_rate);
             CHECK(data->num_channels() == info->num_channels);
         }
