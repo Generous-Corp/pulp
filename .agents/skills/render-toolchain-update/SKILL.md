@@ -299,6 +299,14 @@ retain those fields in the PR/landing evidence.
 
 ## Common traps
 
+- **Skia and its Dawn archive are invisible to CMake's dependency provider.**
+  They come from `fetch_skia_for_release.py`, not from `find_package()` or
+  FetchContent, so `PulpDependencies.cmake` and `PulpSkiaDawnProvider.cmake`
+  call `dependency_request_recorder_note(PULP_PROVISION Skia|Dawn)` where the
+  configure asks for them. If you move or rename the Skia acquisition, move
+  that note with it. Otherwise the `Dependency requests` workflow's GPU control
+  stops seeing Skia, and its Pulp-only "no Skia" result can no longer be
+  trusted.
 - **A Skia bump can move the ICU Pulp ships.** Skia's `libskunicode_icu.a`
   carries ICU code and data (`icudt<NN>_dat`; `icuver.res` names the exact
   version, 78.2 for `chrome/m153` and `chrome/m157`). When the symbol or version changes, update
