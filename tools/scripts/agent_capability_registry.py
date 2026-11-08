@@ -244,6 +244,20 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
 
     {
+        "include": "pulp/signal/spectrogram.hpp",
+        "fingerprint": "sha256:928fb4ed526f927080f952f5290b7508d79ad4cf2e94aa0c433cdb1a9f20f78f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Spectrogram display math: colour ramps and bin-to-display frequency "
+            "axis mapping for the realtime visualization bridge and the offline "
+            "audio image renderers. It draws spectra that other capabilities "
+            "compute; it is not a generator-facing DSP transform or a graph "
+            "contract. The double-precision axis overloads and configurable floor "
+            "were added for the offline renderers without changing the float API."
+        ),
+    },
+    {
         "include": "pulp/signal/spectral_frame_codec.hpp",
         "fingerprint": "sha256:43e9fbdc2c1acf08d70523589b8cf25d4a4e98ea531898bfc2978aa5eec72a37",
         "disposition": "infrastructure",
