@@ -426,6 +426,11 @@ pass it through `pulp::audio::confine_restored_path(path, root)`
 returns the path only when it resolves inside the directory the plugin is
 allowed to read from, and skip the file (with a log line) otherwise.
 
+## MIDI Learn
+
+Mapping hardware controllers to parameters, including learn-by-moving, is covered
+in [MIDI Learn](midi-learn.md).
+
 ## Thread Model
 
 | Thread | Can Read | Can Write | Mechanism |

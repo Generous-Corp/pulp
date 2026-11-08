@@ -8348,6 +8348,7 @@ tests = [
   "gpu-probe-acceptance-verifier-selftest",
   "gpu-probe-historical-v1-acceptance",
   "gpu-probe-terminal-recorder-selftest",
+  "graph-stall-guard-selftest",
   "graphql-filtered-count-guard",
   "host-lane-probe-requires-plugins",
   "host-lane-probe-unloadable-bundle-is-setup-error",

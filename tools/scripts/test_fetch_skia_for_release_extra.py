@@ -768,6 +768,23 @@ class DownloadFallbackSource(unittest.TestCase):
             self._run(fake)
         self.assertEqual(fake.urls().count(_GH_RELEASE), 2)
 
+    def test_only_401_and_403_drop_the_token(self) -> None:
+        # A 404 or 5xx says nothing about the token, so the lookup must not be
+        # repeated anonymously: every metadata request keeps the token.
+        for code, expected_calls in ((404, 1), (503, skia._DOWNLOAD_ATTEMPTS)):
+            with self.subTest(code=code):
+                os.environ["GITHUB_TOKEN"] = "job-token"
+                fake = _FakeGitHub({_GH_URL: [_http_error(404)],
+                                    _GH_RELEASE: [_http_error(code)]})
+                with self.assertRaises(skia.AssetDownloadError):
+                    self._run(fake)
+                lookups = [c for c in fake.calls
+                           if not isinstance(c, str) and c.full_url == _GH_RELEASE]
+                self.assertEqual(len(lookups), expected_calls)
+                for request in lookups:
+                    self.assertEqual(request.unredirected_hdrs.get("Authorization"),
+                                     "Bearer job-token")
+
     def test_an_exhausted_rate_limit_is_named_with_its_reset_time(self) -> None:
         limited = _http_error(403)
         limited.headers["X-RateLimit-Remaining"] = "0"

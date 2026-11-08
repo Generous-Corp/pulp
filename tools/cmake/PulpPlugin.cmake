@@ -95,8 +95,8 @@ function(pulp_add_plugin target)
     _pulp_resolve_consumer_targets()
     cmake_parse_arguments(PLUGIN
         "ACCEPTS_MIDI;NATIVE_UI;NO_EDITOR;LITE_EDITOR;GPU_UI;FULL_EDITOR;AAX_HEADLESS;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
-        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
-        "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
+        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;CONTROL_VENDOR_OPERATIONS;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
+        "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES;CONTROL_VENDOR_SOURCES"
         ${ARGN}
     )
     if("PRODUCES_MIDI" IN_LIST PLUGIN_UNPARSED_ARGUMENTS)
@@ -269,6 +269,15 @@ function(pulp_add_plugin target)
             "pulp_add_plugin(${target}): SHIP_INSPECTOR and INSPECTOR_CAPABILITIES were removed; use CONTROL_PROFILE and CONTROL_CAPABILITIES")
     endif()
 
+    if(PLUGIN_CONTROL_VENDOR_SOURCES AND NOT PLUGIN_CONTROL_VENDOR_OPERATIONS)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTROL_VENDOR_SOURCES requires CONTROL_VENDOR_OPERATIONS")
+    endif()
+    if(PLUGIN_CONTROL_VENDOR_OPERATIONS AND NOT PLUGIN_CONTROL_CAPABILITIES)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): CONTROL_VENDOR_OPERATIONS requires CONTROL_CAPABILITIES naming its dev.pulp.vendor tiers")
+    endif()
+
     if(PLUGIN_CONTROL_CAPABILITIES AND NOT PLUGIN_CONTROL_PROFILE)
         message(FATAL_ERROR
             "pulp_add_plugin(${target}): CONTROL_CAPABILITIES requires an explicit CONTROL_PROFILE")
@@ -303,7 +312,11 @@ function(pulp_add_plugin target)
                 dev.pulp.telemetry/subscribe@1
                 dev.pulp.runtime/evaluate@1
                 dev.pulp.sequencer/transport.loop.read@1
-                dev.pulp.sequencer/transport.loop.write@1)
+                dev.pulp.sequencer/transport.loop.write@1
+                dev.pulp.vendor/read@1
+                dev.pulp.vendor/gesture@1
+                dev.pulp.vendor/render@1
+                dev.pulp.vendor/destructive@1)
         else()
             set(_pulp_standalone_control_capabilities
                 dev.pulp.instance/read@1
@@ -355,6 +368,8 @@ function(pulp_add_plugin target)
         "${_pulp_control_profile}"
         "${_pulp_control_capabilities}"
         "${_pulp_control_eval_ack}")
+    _pulp_cache_control_vendor_operations(${target} "${PLUGIN_CONTROL_VENDOR_OPERATIONS}"
+        "${PLUGIN_CONTROL_VENDOR_SOURCES}")
     _pulp_configure_control_shipping(
         ${target} "${PLUGIN_BUNDLE_ID}" "${PLUGIN_PLUGIN_NAME}")
 

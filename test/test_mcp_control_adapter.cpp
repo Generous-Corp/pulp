@@ -51,7 +51,11 @@ struct FakeState {
     bool block_request = false;
     bool request_started = false;
     bool cancellation_seen = false;
+    bool vendor_operations = false;
 };
+
+constexpr std::string_view kFakeVendorOperations =
+    R"([{"capability":"dev.pulp.vendor/read@1","description":"Count presets","id":"dev.com.acme/presets.count@1","input_schema":{"additionalProperties":false,"properties":{"bank":{"maxLength":32,"type":"string"}},"type":"object"},"output_schema":{"additionalProperties":false,"properties":{"count":{"type":"integer"}},"required":["count"],"type":"object"},"tier":"read","version":1},{"capability":"dev.pulp.vendor/render@1","description":"Render a phrase","id":"dev.com.acme/notes.play@1","input_schema":{"additionalProperties":false,"properties":{},"type":"object"},"output_schema":{"additionalProperties":false,"properties":{"count":{"type":"integer"}},"required":["count"],"type":"object"},"tier":"render","version":1}])";
 
 class FakeTransport final : public ControlClientTransport {
   public:
@@ -95,6 +99,8 @@ class FakeTransport final : public ControlClientTransport {
             const auto revoked = state_->revoke_during_call;
             const auto detail = request->operation_id == "dev.pulp.trace/session-control@1"
                                     ? R"({"active":true,"compiled_in":true,"ok":true})"
+                                : request->operation_id.starts_with("dev.com.acme/")
+                                    ? R"({"count":3})"
                                     : R"({"generation":1,"parameters":[]})";
             return encoded_response(ControlEnvelope{
                 .payload = ControlReceiptEnvelope{
@@ -185,6 +191,13 @@ class FakeSession final : public ControlMcpSession {
             if (state_->inventory_empty_until_launch && !state_->installed_host_launched)
                 return {.status_id = "completed",
                         .data_json = R"({"schema":"pulp.control.instances.v1","instances":[]})"};
+            if (state_->vendor_operations)
+                return {
+                    .status_id = "completed",
+                    .data_json =
+                        std::string(
+                            R"({"schema":"pulp.control.instances.v1","instances":[{"instance_id":"instance-1","plugin_id":"com.acme.synth","profile":"developer-local","publication_id":"publication-1","registration_id":"registration-1","session_id":"session-1","vendor_operations":)") +
+                        std::string(kFakeVendorOperations) + "}]}"};
             return {
                 .status_id = "completed",
                 .data_json =
@@ -340,6 +353,72 @@ TEST_CASE("sequencer transport loop operations reach the generic MCP catalog",
     CHECK(write_operation->capability == InspectorCapability::SequencerTransportWrite);
     CHECK(capability_is_grantable(InspectorCapability::SequencerTransportRead));
     CHECK(capability_is_grantable(InspectorCapability::SequencerTransportWrite));
+}
+
+TEST_CASE("control MCP calls only vendor operations the exact instance declares",
+          "[mcp][control][vendor]") {
+    auto state = std::make_shared<FakeState>();
+    state->vendor_operations = true;
+    ControlMcpAdapter adapter(factory(state));
+    REQUIRE(adapter.owns_tool("pulp_control_vendor_call"));
+    REQUIRE(adapter.tools_json_fragment().find("\"name\":\"pulp_control_vendor_call\"") !=
+            std::string::npos);
+
+    // Discovery passes plugin-authored descriptions through as data, exactly
+    // as the broker reported them; the adapter neither rewrites nor executes them.
+    const auto instances = adapter.call_tool("pulp_control_instances", "{}");
+    REQUIRE(instances.find("\"isError\":true") == std::string::npos);
+    const auto parsed = choc::json::parse(instances);
+    const auto listed = parsed["structuredContent"]["instances"][0]["vendor_operations"];
+    REQUIRE(listed.size() == 2);
+    CHECK(listed[0]["description"].getString() == "Count presets");
+    CHECK(listed[1]["description"].getString() == "Render a phrase");
+
+    // A Pulp-reserved or malformed id never reaches the broker.
+    for (const auto* id : {"dev.pulp.state/read@1", "dev.com.acme/presets.count", "com.acme/x@1"}) {
+        INFO(id);
+        const auto rejected =
+            adapter.call_tool("pulp_control_vendor_call",
+                              std::string(R"({"instance_id":"instance-1","operation_id":")") + id +
+                                  R"(","input":{}})");
+        REQUIRE(rejected.find("invalid-arguments") != std::string::npos);
+    }
+    REQUIRE_FALSE(state->request.has_value());
+
+    const auto undeclared = adapter.call_tool(
+        "pulp_control_vendor_call",
+        R"({"instance_id":"instance-1","operation_id":"dev.com.acme/presets.delete@1","input":{}})");
+    REQUIRE(undeclared.find("unknown-operation") != std::string::npos);
+
+    const auto invalid_input = adapter.call_tool(
+        "pulp_control_vendor_call",
+        R"({"instance_id":"instance-1","operation_id":"dev.com.acme/presets.count@1","input":{"bank":7}})");
+    REQUIRE(invalid_input.find("invalid-arguments") != std::string::npos);
+    REQUIRE_FALSE(state->request.has_value());
+
+    const auto completed = adapter.call_tool(
+        "pulp_control_vendor_call",
+        R"({"instance_id":"instance-1","operation_id":"dev.com.acme/presets.count@1","input":{"bank":"factory"}})");
+    INFO(completed);
+    REQUIRE(completed.find("\"isError\":true") == std::string::npos);
+    auto compact = completed;
+    std::erase(compact, ' ');
+    REQUIRE(compact.find(R"("result":{"count":3})") != std::string::npos);
+    REQUIRE(state->request.has_value());
+    REQUIRE(state->request->operation_id == "dev.com.acme/presets.count@1");
+    REQUIRE(state->request->operation_version == 1);
+    REQUIRE(state->request->params_json.find("factory") != std::string::npos);
+    // A read-tier operation rides the read-only profile grant.
+    REQUIRE(state->grant_authorities == std::vector<std::string>{"profile:inspect-readonly"});
+
+    // A render-tier operation is outside every profile, so the adapter asks
+    // for a single-operation grant the broker decides on.
+    state->grant_authorities.clear();
+    (void)adapter.call_tool(
+        "pulp_control_vendor_call",
+        R"({"instance_id":"instance-1","operation_id":"dev.com.acme/notes.play@1","input":{}})");
+    REQUIRE(state->grant_authorities ==
+            std::vector<std::string>{"operation:dev.com.acme/notes.play@1"});
 }
 
 TEST_CASE("control MCP inventory bootstraps the broker-owned installed host",

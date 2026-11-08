@@ -2704,6 +2704,16 @@ The job's second configure is the control: GPU on, with
 `PULP_SKIA_AUTOFETCH=OFF` so it skips the download. It must show Skia and
 WebGPU. A forbidden-list pass without a green control proves nothing.
 
+The Pulp-only configure runs under `tools/ci/run_without_network.sh` (a fresh
+network namespace on Linux, `sandbox-exec` on macOS), so a download path that
+makes no note fails instead of passing unseen. Two controls go with it:
+`--probe` must see github.com blocked inside and reachable outside, and a GPU
+configure against an empty `PULP_SKIA_CACHE_ROOT` must fail at the Skia
+download. Be precise about what this proves. The configure downloads
+nothing, but the bootstrap step before it (`setup.sh --deps-only`) still primes
+the shared caches with the network on, so it is not proof that a dependency
+was never fetched on the runner.
+
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
 Making a skip visible is safe. Removing the skip is not, and the two must not
@@ -7189,6 +7199,14 @@ pre-push hook applies the same rule there (`tools/scripts/refresh_push_check.py`
 - The GitHub lookup shares one 5 s budget and fails open: `lookup: failed:*` in
   the log, never a blocked push. A failing check that could not be confirmed as
   non-required counts as justification, so the check errs toward silence.
+  That makes a broken second (required-ness) query silent too: while
+  `REQUIRED_QUERY` was missing a closing brace, every PR with any failing
+  check logged `lookup: partial:exit:1` and `allowed:failing-required-check`
+  (82 of 96 pure refreshes on m3 in one week). Before reading
+  `allowed:failing-required-check` as a real justification, check that the
+  same log also has `lookup: ok` lines; the fake `gh` in
+  `test_refresh_push_check.py` now rejects an unbalanced query the way GitHub
+  does.
 
 Read the log to measure the habit: pure refreshes with `gate_in_flight: true`
 are the avoidable cancellations; all lines are the control population.

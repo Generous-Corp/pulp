@@ -1187,7 +1187,9 @@ class Vst3Slot final : public detail::RequestDrivenSlot {
     int preferred_out_ = -1;
 
     // Pre-sized event/parameter buffers (setMaxSize / setMaxParameters at
-    // prepare) so the process callback does not heap-allocate.
+    // prepare). Events never allocate in process(); a parameter queue can
+    // grow once past its 5 reserved points (see the realtime note in
+    // plugin_slot_process_request.hpp).
     Vst::EventList in_events_;
     Vst::EventList out_events_;
     Vst::ParameterChanges in_param_changes_;

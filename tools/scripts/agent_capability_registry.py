@@ -181,6 +181,28 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/signal/spectrum_analyzer.hpp",
+        "fingerprint": "sha256:f9b372d037fc8a698cd4e7d36805422a3bf2037aeaeb2e600ceb6892e6350f58",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Display-side spectrum analysis behind SpectrumView: a lock-free sample "
+            "tap for the audio thread plus UI-thread windowed FFT, level modes and "
+            "time-based release; analysis for drawing, not a generator capability."
+        ),
+    },
+    {
+        "include": "pulp/signal/spectrum_bin_mapping.hpp",
+        "fingerprint": "sha256:1e4977f44a6ea834278ee0a9d505e9dca3d0af8c82acc792fab9361b7e00e235",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Maps FFT magnitude bins onto the columns of a log-frequency display "
+            "(parabolic interpolation, fractional-edge aggregation); shared by "
+            "SpectrumView and EqCurveView, with no generator capability claim."
+        ),
+    },
+    {
         'include': 'pulp/host/plugin_identity.hpp',
         'fingerprint': 'sha256:f5d1fe9c5e8038b5cbb564170a8cb23fe7abb79b0c6009f5f6ec8b0d8b578060',
         'disposition': 'infrastructure',
@@ -303,6 +325,40 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "infrastructure that sample, impulse-response and offline-render "
             "capabilities consume; it is not an independently selected "
             "generator-facing capability in the installed contract."
+        ),
+    },
+    {
+        "include": "pulp/audio/mmap_reader.hpp",
+        "fingerprint": "sha256:e690b373b06a9a9b87d68702f1c6b31e1bfc2f6c8df565194c325bc38cf71478",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Memory-mapped, snapshot-backed ranged audio file reading is host "
+            "infrastructure that sample streaming consumes; it is not an "
+            "independently selected generator-facing capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/streaming_sample_source_file.hpp",
+        "fingerprint": "sha256:2e0b805a65e4e5c0197bb41c9c196214e67dd064b7e07d394bacbf2472ac8f90",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Binding a memory-mapped file to a StreamingSampleSource frame reader "
+            "is host infrastructure for sampler playback; it is not an "
+            "independently selected generator-facing capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/audio_reader.hpp",
+        "fingerprint": "sha256:33c68086a43d7c58391f312a37d363aa1401f8cc9ce2e288baf4382f7bd680ac",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Ranged audio file decoding (AudioReader over a path, memory or byte "
+            "source, bounded by DecodeLimits) is host infrastructure that sample "
+            "streaming and file playback consume; it is not an independently "
+            "selected generator-facing capability."
         ),
     },
     {
@@ -1761,7 +1817,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/zero_latency_convolver.hpp",
-        "fingerprint": "sha256:f2ffe01d98618d870a3e7c7dee8e935948a3333090f01094d8bb0dd601a0861e",
+        "fingerprint": "sha256:8b48ec3c8df0ff7f8cac45f71468f29bf045452815393b2987253cf76e939db9",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1886,7 +1942,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/svf.hpp",
-        "fingerprint": "sha256:9d3b9632299a64a68d78b62fb79fd264860d62b7b4d10269323cc25a94c5c87e",
+        "fingerprint": "sha256:30e4e76d67700ee5e97934e2d5f1f8879ca82306b443990e3baae1c5d2e4c494",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1894,6 +1950,42 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "pure design() for its coefficients, and a register-resident block path. A "
             "bounded DSP primitive documented in the signal guide; it makes no installed "
             "agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/korg35_filter.hpp",
+        "fingerprint": "sha256:d6466500fb59e0612c1363b84787ec3ff4faf884e54d563a330cba87320d8e7f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Two-pole lowpass/highpass Sallen-Key-family filter with a saturating feedback path solved in zero-delay form; a change of mode restarts it from rest. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/diode_ladder_filter.hpp",
+        "fingerprint": "sha256:381d92d35bce20345ed8fd1e9c4e938eb618de103733560e82932dfb07ce5a33",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Four-stage diode-coupled ladder lowpass with zero-delay feedback, a saturating resonance path and a bracketed Newton solve exposed as solve_loop(). A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/antiderivative_iir.hpp",
+        "fingerprint": "sha256:5a32e2c25423ddd8ba30551f059c6e7822b4abbf854375f75460e227ee8734a3",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Antiderivative antialiasing for static nonlinearities with an IIR kernel designed in partial-fraction form, tanh and hard-clip curve traits, and the Saturator adaa_iir policy built on it. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/audio/slice_point_analyzer.hpp",
+        "fingerprint": "sha256:8df0af8bf567877dcb9c4c24c61a4f6892b4f669db50b737d14cc2c5096df09f",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Off-real-time slice-point analysis that merges detected or supplied onsets with beat-grid, silence, manual and loop markers, with an option to run onset detection first. Background analysis plumbing documented in the signal guide; it makes no installed agent capability claim of its own."
         ),
     },
     {
