@@ -2219,6 +2219,7 @@
     "pulp-test-mcp-gpu-probe-fake-cli"
    ],
    "sources": [
+    "test/test_mcp_audio_tools.cpp",
     "test/test_mcp_control_adapter.cpp",
     "test/test_mcp_server.cpp"
    ],
