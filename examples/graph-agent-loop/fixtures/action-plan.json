@@ -13,7 +13,7 @@
     {"id": "validate-replay", "kind": "graph.validate", "load_plugins": false},
     {"id": "render-probe", "kind": "graph.render", "edge_probe": true},
     {"id": "bounded-edit", "kind": "graph.edit", "target": "stage.gain", "value": 0.25},
-    {"id": "saved-input-replay", "kind": "graph.replay", "input": "baseline.pulpgraph"}
+    {"id": "saved-input-replay", "kind": "graph.replay", "input": "a9-baseline.pulpgraph"}
   ],
   "assertions": [
     {"id": "semantic_fingerprint", "relation": "baseline == replay; edit preserves topology"}

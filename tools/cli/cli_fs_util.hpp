@@ -9,6 +9,7 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
 
 namespace pulp::cli::fsutil {
 
@@ -37,6 +38,11 @@ bool path_is_within(const fs::path& path, const fs::path& root);
 // This is a name-shape check only — see `path_is_within` for the containment
 // check callers pair it with once the entry is joined onto a real root.
 bool safe_archive_rel(const fs::path& rel);
+
+// The name a report gives its input: the basename by default, so a document
+// attached to a shared artifact carries no local path, or the path exactly as
+// given when the caller asked for absolute paths.
+std::string display_input_name(const std::string& path, bool absolute_paths);
 
 // True when `path` names one of the CLI's package archive containers.
 bool is_package_archive_path(const fs::path& path);

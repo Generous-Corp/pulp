@@ -154,7 +154,7 @@ INITIAL_POLICY: dict[str, dict[str, set[str]]] = {
             "pulp_audio_model_activate", "pulp_audio_model_list",
             "pulp_audio_model_status", "pulp_audio_plugin_inspect",
             "pulp_audio_probe_json", "pulp_audio_read_bundle",
-            "pulp_audio_render", "pulp_audio_scope", "pulp_inspect_audio",
+            "pulp_audio_file_inspect", "pulp_audio_render", "pulp_audio_scope", "pulp_inspect_audio",
         },
     },
     "plugin_registrations": {
