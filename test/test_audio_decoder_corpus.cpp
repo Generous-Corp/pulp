@@ -62,17 +62,6 @@ std::vector<fs::path> corpus_files() {
     return files;
 }
 
-// The extensions each fuzzable format may carry; a corpus missing any one of
-// these formats is a mis-pathed or half-populated corpus, not a passing one.
-const std::map<std::string, std::set<std::string>>& fuzzable_formats() {
-    static const std::map<std::string, std::set<std::string>> formats = {
-        {"wav", {".wav", ".wave"}}, {"aiff", {".aiff", ".aif", ".aifc"}},
-        {"flac", {".flac"}},        {"mp3", {".mp3"}},
-        {"ogg", {".ogg", ".oga"}},
-    };
-    return formats;
-}
-
 std::vector<uint8_t> read_bytes(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
     REQUIRE(input.good());
@@ -267,79 +256,6 @@ TEST_CASE("audio decoder corpus holds a seed for every fuzzable format", "[fuzz]
         INFO("format without a seed: " << format.name);
         CHECK(found);
     }
-}
-
-// What each committed seed must do, so "both refused" cannot read as
-// agreement for a seed that is supposed to decode. Valid seeds (per the
-// corpus README) must decode through the registry; malformed seeds may be
-// refused or decoded, and the oracle judges whatever comes back. A seed in
-// neither list fails the case until it is classified here.
-const std::set<std::string>& seeds_that_must_decode() {
-    static const std::set<std::string> seeds = {
-        "caf-pcm16-mono.caf",
-        "flac-fixed-blocksize-mono.flac",
-        "flac-seektable-padding.flac",
-        "m4a-aac-lc-mono.m4a",
-        "m4a-alac-stereo.m4a",
-        "mp3-cbr-mono.mp3",
-        "mp3-id3v2-xing-vbr.mp3",
-        "ogg-vorbis-mono.ogg",
-        "aifc-none-pcm16-mono.aifc",
-        "aiff-comm-after-ssnd.aiff",
-        "aiff-pcm16-mono.aiff",
-        "flac-variable-blocksize-verbatim.flac",
-        "m4a-aac-co64.m4a",
-        "m4a-aac-mdat-size1.m4a",
-        "ogg-chained-two-streams.ogg",
-        "wav-bwf-bext-before-data.wav",
-        "wav-extensible-pcm24in32-stereo.wav",
-        "wav-float32-mono-fmt18.wav",
-        "wav-float64-mono.wav",
-        "wav-list-info-heavy.wav",
-        "wav-pcm16-mono-canonical44.wav",
-        "wav-pcm24-stereo.wav",
-        "wav-pcm32-stereo.wav",
-        "wav-pcm8-stereo.wav",
-        "wav-rf64-ds64.wav",
-    };
-    return seeds;
-}
-const std::set<std::string>& seeds_that_may_refuse() {
-    static const std::set<std::string> seeds = {
-        "aiff-ssnd-past-eof.aiff",
-        "flac-streaminfo-huge-total-samples.flac",
-        "flac-truncated-midframe.flac",
-        "mp3-truncated-frame.mp3",
-        "ogg-page-bad-crc.ogg",
-        "ogg-truncated-page.ogg",
-        "ogg-vendor-length-negative.ogg",
-        "wav-data-past-eof.wav",
-        "wav-data-size-ffffffff-no-ds64.wav",
-        "wav-declares-100000001-frames.wav",
-        "wav-duplicate-fmt.wav",
-        "wav-fmt-after-data.wav",
-        "wav-odd-chunk-eof-no-pad.wav",
-        "wav-overlapping-chunks.wav",
-        "wav-riff-header-only.wav",
-        "wav-riff-size-lying-small.wav",
-        // Valid per the README (CBR base plus an APEv2 tag), refused by
-        // dr_mp3's trailing-tag handling; tracked in Generous-Corp/pulp
-        // issue 11788.
-        "mp3-apev2-footer.mp3",
-        // Valid AIFF-C with little-endian ("sowt") PCM, which the AIFF reader
-        // does not support; tracked in Generous-Corp/pulp issue 11788.
-        "aifc-sowt-pcm16-stereo.aifc",
-        // Valid zero-frame WAV, which read_audio_file refuses as empty; tracked
-        // in Generous-Corp/pulp issue 11788.
-        "wav-data-size-zero.wav",
-        // Valid Sony Wave64 under a .wav name; Pulp registers no Wave64 reader
-        // and the RIFF reader refuses the GUID envelope by design.
-        "wav-w64-pcm16-mono.wav",
-        "mp3-xing-declares-more-than-stream.mp3",
-        "mp3-id3v2-scan-counts-undecodable-frame.mp3",
-        "wav-block-align-smaller-than-frame.wav",
-    };
-    return seeds;
 }
 
 TEST_CASE("every audio decoder seed satisfies the shared oracle through the registry",
@@ -559,7 +475,9 @@ TEST_CASE("an MP3 whose Xing header declares more frames than the stream deliver
     REQUIRE(info.has_value());
     CHECK(info->num_frames == 6400u);
     CHECK_FALSE(registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
-    // The untouched seed still declares and delivers the same count.
+    // The untouched seed still declares and delivers the same count, and a
+    // ceiling below its declared count refuses it at the pre-check, before
+    // any frame is decoded.
     const auto whole = corpus_dir() / "mp3-id3v2-xing-vbr.mp3";
     const auto decoded = registry.read(whole.string(), pulp_fuzz::audio_decoder::fuzz_limits());
     REQUIRE(decoded.has_value());

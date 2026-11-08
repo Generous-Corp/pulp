@@ -37,9 +37,6 @@ const pulp::test::ScopedTempDir& scratch_dir() {
     return dir;
 }
 
-// The fuzzable set, indexed by the selector byte modulo its size.
-constexpr std::array<std::string_view, 5> kExtensions = {".wav", ".aiff", ".flac", ".mp3", ".ogg"};
-
 bool starts_with(const uint8_t* data, size_t size, std::string_view magic, size_t offset = 0) {
     return size >= offset + magic.size() &&
            std::memcmp(data + offset, magic.data(), magic.size()) == 0;
