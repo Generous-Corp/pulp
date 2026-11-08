@@ -124,10 +124,12 @@ def test_cpp_decoders_match_libsndfile_bit_exactly():
 
     findings: list[str] = []
     compared = 0
+    outcomes: dict[str, tuple[bool, bool]] = {}  # seed -> (pulp decoded, libsndfile decoded)
     for seed in seeds:
         code, header, payload = _run_dump(binary, seed)
         reference = _soundfile_decode(sf, seed)
         pulp_decoded = code == 0
+        outcomes[seed.name] = (pulp_decoded, reference is not None)
         if code not in (0, DUMP_REFUSED):
             findings.append(f"{seed.name}: dump exited {code}")
             continue
@@ -162,12 +164,10 @@ def test_cpp_decoders_match_libsndfile_bit_exactly():
         compared += 1
 
     for name, (pulp_decodes, sf_decodes, _reason) in EXPECTED_ACCEPTANCE_SPLITS.items():
-        seed = CORPUS_DIR / name
-        if not seed.is_file():
+        observed = outcomes.get(name)
+        if observed is None:
             findings.append(f"{name}: listed in EXPECTED_ACCEPTANCE_SPLITS but absent from the corpus")
-            continue
-        code, _header, _payload = _run_dump(binary, seed)
-        if (code == 0) != pulp_decodes or (_soundfile_decode(sf, seed) is not None) != sf_decodes:
+        elif observed != (pulp_decodes, sf_decodes):
             findings.append(f"{name}: EXPECTED_ACCEPTANCE_SPLITS row is stale; the split no longer happens")
 
     assert not findings, "\n".join(findings)
