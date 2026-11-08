@@ -39,6 +39,7 @@ from agent_capability_history import (
     history_problems,
     pending_counters,
     protected_base_problems,
+    rendered_history,
     updated_history_entries,
 )
 from agent_capability_registry import (
@@ -986,7 +987,7 @@ def main() -> int:
             {
                 snapshot: output,
                 surface_snapshot: surface_output,
-                history_path: json.dumps(history, indent=2, ensure_ascii=False) + "\n",
+                history_path: rendered_history(history),
                 fixture: compile_fixture(),
             },
             transaction_path,
@@ -1021,6 +1022,10 @@ def main() -> int:
             if (root / ".git").exists() else None
         )
         history_issues = history_problems(history, doc, surface_document)
+        if (not history_issues and history_path.exists()
+                and history_path.read_text(encoding="utf-8") != rendered_history(history)):
+            history_issues.append(
+                f"{HISTORY_FILE} is not in its rendered form; rerun --write")
         if isinstance(history, dict):
             history_issues.extend(
                 protected_base_problems(

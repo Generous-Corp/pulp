@@ -673,6 +673,21 @@ capabilities and may not form self-references or cycles.
 history. Normal `--check` validates every recorded transition and compares its
 prefix plus the current manifest and ledger directly with the protected Git tip
 (fetching the immutable GitHub base SHA in shallow CI checkouts).
+
+The history keeps the full manifest and surface material of every entry, but
+stores each repeated piece only once. Any JSON object or array that appears in
+more than one entry is kept a single time under `objects`, keyed by the SHA-256
+digest of its content, and entries refer to it by that digest. Long arrays and
+objects are split into chunks, so a change to one row stores one new chunk
+instead of the whole array again. `entries` lists each entry's digest, which is
+the digest of its complete material. `--check` expands every entry and
+re-verifies its digest, re-runs every recorded transition, re-encodes the
+expanded entries and requires the result to equal the stored file exactly (so a
+hand edit to any stored object is caught), and compares the expanded entries
+with the protected base's, whichever layout that base uses. It also fails if the
+file would exceed 25 MB, far below GitHub's 100 MB per-file limit. The earlier
+layout, which repeated every entry in full and reached 104 MB, is still accepted
+as a protected base and as `--write` input, and `--write` converts it.
 Editing generator source, current snapshots, and local history together cannot
 bypass a published tombstone, key-reuse prohibition, version increase, or
 deprecation-window rule.
