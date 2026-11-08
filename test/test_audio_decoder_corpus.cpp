@@ -118,13 +118,124 @@ std::vector<uint8_t> make_pcm_wav(uint16_t bits, const std::vector<int32_t>& cod
     return out;
 }
 
-struct TempDir {
-    fs::path path = pulp::test::make_unique_temp_dir("pulp-audio-decoder-corpus");
-    ~TempDir() {
-        std::error_code ec;
-        fs::remove_all(path, ec);
-    }
+std::string write_file(const fs::path& path, const std::vector<uint8_t>& bytes) {
+    std::ofstream output(path, std::ios::binary);
+    REQUIRE(output.good());
+    output.write(reinterpret_cast<const char*>(bytes.data()),
+                 static_cast<std::streamsize>(bytes.size()));
+    return path.string();
+}
+
+// What each committed seed must do, one row per seed, so "both refused"
+// cannot read as agreement for a seed that is supposed to decode and so
+// the WAV differential reads its expected splits from the same table.
+//   must_decode        valid per the corpus README: read_info and read succeed
+//                      through the registry; false means it may be refused
+//   span_decodes       WAV seeds only: decode_wav's outcome WHEN it differs
+//                      from the registry's (a listed split); empty means the
+//                      two WAV paths agree on accepting or refusing
+//   libsndfile_decodes mirror of the lab differential's table (checked there)
+//   reason             why a refusal or split is expected
+// A seed in the corpus without a row fails the replay until it is classified.
+struct SeedExpectation {
+    bool must_decode;
+    std::optional<bool> span_decodes;
+    std::optional<bool> libsndfile_decodes;
+    const char* reason;
 };
+const std::map<std::string, SeedExpectation>& seed_expectations() {
+    using E = SeedExpectation;
+    static const std::map<std::string, SeedExpectation> rows = {
+        // valid seeds
+        {"aifc-none-pcm16-mono.aifc", E{true, {}, {}, ""}},
+        {"aiff-comm-after-ssnd.aiff", E{true, {}, {}, ""}},
+        {"aiff-pcm16-mono.aiff", E{true, {}, {}, ""}},
+        {"caf-pcm16-mono.caf", E{true, {}, {}, ""}},
+        {"flac-fixed-blocksize-mono.flac", E{true, {}, {}, ""}},
+        {"flac-seektable-padding.flac", E{true, {}, {}, ""}},
+        {"flac-variable-blocksize-verbatim.flac", E{true, {}, {}, ""}},
+        {"m4a-aac-co64.m4a", E{true, {}, {}, ""}},
+        {"m4a-aac-lc-mono.m4a", E{true, {}, {}, ""}},
+        {"m4a-aac-mdat-size1.m4a", E{true, {}, {}, ""}},
+        {"m4a-alac-stereo.m4a", E{true, {}, {}, ""}},
+        {"mp3-cbr-mono.mp3", E{true, {}, {}, ""}},
+        {"mp3-id3v2-xing-vbr.mp3", E{true, {}, {}, ""}},
+        {"ogg-chained-two-streams.ogg", E{true, {}, {}, ""}},
+        {"ogg-vorbis-mono.ogg", E{true, {}, {}, ""}},
+        {"wav-bwf-bext-before-data.wav", E{true, {}, {}, ""}},
+        {"wav-extensible-pcm24in32-stereo.wav", E{true, {}, {}, ""}},
+        {"wav-float32-mono-fmt18.wav", E{true, {}, {}, ""}},
+        {"wav-float64-mono.wav", E{true, {}, {}, ""}},
+        {"wav-list-info-heavy.wav", E{true, {}, {}, ""}},
+        {"wav-pcm16-mono-canonical44.wav", E{true, {}, {}, ""}},
+        {"wav-pcm24-stereo.wav", E{true, {}, {}, ""}},
+        {"wav-pcm32-stereo.wav", E{true, {}, {}, ""}},
+        {"wav-pcm8-stereo.wav", E{true, {}, {}, ""}},
+        {"wav-rf64-ds64.wav",
+         E{true, false, {}, "RF64 envelope: the registry (CHOC) reads it, decode_wav does not"}},
+        // valid per the README, refused by Pulp for a stated reason
+        {"mp3-apev2-footer.mp3", E{false,
+                                   {},
+                                   {},
+                                   "dr_mp3 fails to initialise behind a well-formed APEv2 tag; "
+                                   "Generous-Corp/pulp issue 11788"}},
+        {"aifc-sowt-pcm16-stereo.aifc",
+         E{false,
+           {},
+           true,
+           "AIFF-C sowt (little-endian PCM) is not supported by the AIFF reader; issue 11788"}},
+        {"wav-data-size-zero.wav",
+         E{false, {}, true, "a zero-frame WAV is refused as empty; issue 11788"}},
+        {"wav-w64-pcm16-mono.wav",
+         E{false, {}, true, "Sony Wave64 envelope; Pulp registers no Wave64 reader"}},
+        // malformed seeds: refused or decoded, the oracle judges what comes back
+        {"aiff-ssnd-past-eof.aiff",
+         E{false, {}, true, "SSND runs past the end of the file; Pulp refuses truncated streams"}},
+        {"flac-streaminfo-huge-total-samples.flac", E{false, {}, {}, ""}},
+        {"flac-truncated-midframe.flac", E{false, {}, {}, "declared 800 frames, stream holds 384"}},
+        {"mp3-truncated-frame.mp3", E{false, {}, {}, ""}},
+        {"mp3-xing-declares-more-than-stream.mp3",
+         E{false, {}, {}, "Xing declares 6400 frames, stream delivers 2351"}},
+        {"mp3-id3v2-scan-counts-undecodable-frame.mp3",
+         E{false, {}, {}, "no declared length; header scan counts a frame the decoder rejects"}},
+        {"ogg-page-bad-crc.ogg", E{false, {}, {}, ""}},
+        {"ogg-truncated-page.ogg", E{false, {}, {}, ""}},
+        {"ogg-vendor-length-negative.ogg", E{false, {}, {}, "negative vendor-string length"}},
+        {"wav-block-align-smaller-than-frame.wav",
+         E{false, true, true,
+           "nBlockAlign smaller than channels x sample width: the registry refuses the layout, "
+           "dr_wav and libsndfile derive the stride"}},
+        {"wav-data-past-eof.wav",
+         E{false,
+           false,
+           {},
+           "data chunk runs past EOF: CHOC decodes what is there, dr_wav refuses"}},
+        {"wav-data-size-ffffffff-no-ds64.wav",
+         E{false, false, {}, "RF64 sentinel without ds64: CHOC decodes, dr_wav refuses"}},
+        {"wav-declares-100000001-frames.wav",
+         E{false,
+           false,
+           {},
+           "declared frames exceed the data: CHOC decodes what is there, dr_wav refuses"}},
+        {"wav-duplicate-fmt.wav",
+         E{false,
+           {},
+           false,
+           "two fmt chunks: Pulp decodes by the last one, libsndfile refuses; issue 11788"}},
+        {"wav-fmt-after-data.wav",
+         E{false, true, {}, "fmt after data: CHOC refuses, dr_wav decodes"}},
+        {"wav-odd-chunk-eof-no-pad.wav",
+         E{false,
+           false,
+           {},
+           "odd chunk at EOF without its pad byte: CHOC decodes, dr_wav refuses"}},
+        {"wav-overlapping-chunks.wav", E{false, {}, {}, ""}},
+        {"wav-riff-header-only.wav", E{false, {}, {}, ""}},
+        {"wav-riff-size-lying-small.wav",
+         E{false, false, {}, "RIFF size smaller than the chunks: CHOC decodes, dr_wav refuses"}},
+    };
+    return rows;
+}
 
 std::string describe(const OracleFailure& failure) {
     return fs::path(failure.path).filename().string() + ": " + failure.field + ": " +
@@ -142,11 +253,12 @@ TEST_CASE("audio decoder corpus holds a seed for every fuzzable format", "[fuzz]
     for (const auto& file : files)
         present.insert(lower_extension(file));
 
-    for (const auto& [format, extensions] : fuzzable_formats()) {
-        const bool found =
-            std::any_of(extensions.begin(), extensions.end(),
-                        [&](const std::string& ext) { return present.count(ext) > 0; });
-        INFO("format without a seed: " << format);
+    for (const auto& format : pulp_fuzz::audio_decoder::kFuzzableFormats) {
+        const bool found = std::any_of(
+            format.extensions.begin(), format.extensions.end(), [&](std::string_view ext) {
+                return !ext.empty() && present.count(std::string(ext)) > 0;
+            });
+        INFO("format without a seed: " << format.name);
         CHECK(found);
     }
 }
@@ -248,14 +360,13 @@ TEST_CASE("every audio decoder seed satisfies the shared oracle through the regi
         const auto outcome = pulp_fuzz::audio_decoder::check_registry(
             file.string(), limits,
             [&](const OracleFailure& failure) { failures.push_back(describe(failure)); });
-        if (seeds_that_must_decode().count(name)) {
-            if (!outcome.info_ok || !outcome.decode_ok)
-                failures.push_back(name + ": valid seed, read_info " +
-                                   (outcome.info_ok ? "ok" : "refused") + ", read " +
-                                   (outcome.decode_ok ? "ok" : "refused"));
-        } else if (!seeds_that_may_refuse().count(name)) {
-            failures.push_back(name + ": not classified in seeds_that_must_decode or "
-                                      "seeds_that_may_refuse");
+        const auto row = seed_expectations().find(name);
+        if (row == seed_expectations().end()) {
+            failures.push_back(name + ": no row in seed_expectations()");
+        } else if (row->second.must_decode && (!outcome.info_ok || !outcome.decode_ok)) {
+            failures.push_back(name + ": valid seed, read_info " +
+                               (outcome.info_ok ? "ok" : "refused") + ", read " +
+                               (outcome.decode_ok ? "ok" : "refused"));
         }
     }
 
@@ -266,41 +377,6 @@ TEST_CASE("every audio decoder seed satisfies the shared oracle through the regi
     REQUIRE(exercised > 0);
     for (const auto& failure : failures)
         FAIL_CHECK(failure);
-}
-
-// Seeds where exactly one WAV path decodes, by design or by a tracked
-// difference (Generous-Corp/pulp issue 11788): the registry's CHOC reader is
-// lenient about chunk extents and knows RF64, the byte-span dr_wav decoder is
-// strict about the declared RIFF extent and refuses RF64. Each row is
-// (registry decodes, decode_wav decodes). A split not listed here is a
-// finding, and so is a row whose split no longer happens; the sample
-// comparison itself is never relaxed.
-struct ExpectedWavSplit {
-    const char* seed;
-    bool registry_decodes;
-    bool span_decodes;
-};
-const std::vector<ExpectedWavSplit>& expected_wav_splits() {
-    static const std::vector<ExpectedWavSplit> splits = {
-        {"wav-data-past-eof.wav", true, false},
-        {"wav-data-size-ffffffff-no-ds64.wav", true, false},
-        {"wav-declares-100000001-frames.wav", true, false},
-        {"wav-odd-chunk-eof-no-pad.wav", true, false},
-        {"wav-rf64-ds64.wav", true, false},
-        {"wav-riff-size-lying-small.wav", true, false},
-        {"wav-fmt-after-data.wav", false, true},
-        // nBlockAlign smaller than channels x sample width: the registry
-        // refuses a frame layout the header contradicts, dr_wav derives it.
-        {"wav-block-align-smaller-than-frame.wav", false, true},
-    };
-    return splits;
-}
-
-const ExpectedWavSplit* find_expected_wav_split(const std::string& name) {
-    for (const auto& split : expected_wav_splits())
-        if (name == split.seed)
-            return &split;
-    return nullptr;
 }
 
 TEST_CASE("WAV seeds decode identically through the registry and the byte-span decoder",
@@ -329,9 +405,11 @@ TEST_CASE("WAV seeds decode identically through the registry and the byte-span d
         const auto span_data = pulp::audio::decode_wav(bytes, span_limits);
 
         if (registry_data.has_value() != span_data.has_value()) {
-            const auto* expected = find_expected_wav_split(name);
-            if (expected != nullptr && expected->registry_decodes == registry_data.has_value() &&
-                expected->span_decodes == span_data.has_value()) {
+            // A listed split: the row names decode_wav's outcome where it
+            // differs from the registry's.
+            const auto row = seed_expectations().find(name);
+            if (row != seed_expectations().end() && row->second.span_decodes.has_value() &&
+                *row->second.span_decodes == span_data.has_value()) {
                 splits_seen.insert(name);
                 continue;
             }
@@ -369,9 +447,11 @@ TEST_CASE("WAV seeds decode identically through the registry and the byte-span d
         }
     }
     // A listed split that no longer happens is stale and must be removed.
-    for (const auto& split : expected_wav_splits()) {
-        INFO("expected split no longer observed: " << split.seed);
-        CHECK(splits_seen.count(split.seed) == 1);
+    for (const auto& [name, row] : seed_expectations()) {
+        if (!row.span_decodes.has_value())
+            continue;
+        INFO("expected split no longer observed: " << name);
+        CHECK(splits_seen.count(name) == 1);
     }
     // At least one seed must be well formed, or the differential measured nothing.
     REQUIRE(both_decoded > 0);

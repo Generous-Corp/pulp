@@ -124,7 +124,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     const uint8_t* payload = data;
     size_t payload_size = size;
     if (extension.empty()) {
-        extension = kExtensions[data[0] % kExtensions.size()];
+        extension = pulp_fuzz::audio_decoder::kFuzzableFormats
+                        [data[0] % pulp_fuzz::audio_decoder::kFuzzableFormats.size()]
+                            .extensions[0];
         payload = data + 1;
         payload_size = size - 1;
     }

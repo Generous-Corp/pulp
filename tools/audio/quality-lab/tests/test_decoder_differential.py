@@ -37,8 +37,11 @@ DUMP_REFUSED = 2
 # Seeds where one decoder accepts and the other refuses BY DESIGN: libsndfile is
 # lenient on malformed files that Pulp refuses by contract, or reads a container
 # Pulp registers no reader for. Each row is (pulp_decodes, libsndfile_decodes,
-# reason). A split not listed here is a finding; the sample comparison itself is
-# never relaxed.
+# reason), the same columns the C++ replay's seed_expectations() carries as
+# must_decode / libsndfile_decodes / reason (test/test_audio_decoder_corpus.cpp),
+# so the two tables diff against each other. A split not listed here is a
+# finding, so is a listed split that no longer happens, and the sample
+# comparison itself is never relaxed.
 EXPECTED_ACCEPTANCE_SPLITS: dict[str, tuple[bool, bool, str]] = {
     "aiff-ssnd-past-eof.aiff": (
         False, True, "the SSND chunk runs past the end of the file; Pulp refuses truncated streams"),

@@ -13,18 +13,38 @@
 //   - decoded output never exceeds the limits (bytes = frames x channels x 4).
 // A format whose info is an estimate is not special-cased here: a
 // disagreement is reported, and whoever owns the reader decides.
+//
+// This header deliberately shares nothing with core/audio/src's
+// decode_limits_detail.hpp: an oracle that reused the code under test would
+// agree with its bugs.
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/format_registry.hpp>
 
+#include <array>
 #include <cstdint>
 #include <functional>
-#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
 
 namespace pulp_fuzz::audio_decoder {
+
+// The container formats the fuzz target routes inputs to and the corpus
+// replay requires a seed for, with the extensions each may carry; the first
+// extension is the one the fuzz target writes. CoreAudio's extensions are
+// absent on purpose: that reader is covered by the replay alone.
+struct FuzzableFormat {
+    std::string_view name;
+    std::array<std::string_view, 3> extensions; // unused slots are empty
+};
+inline constexpr std::array<FuzzableFormat, 5> kFuzzableFormats = {{
+    {"wav", {".wav", ".wave", {}}},
+    {"aiff", {".aiff", ".aif", ".aifc"}},
+    {"flac", {".flac", {}, {}}},
+    {"mp3", {".mp3", {}, {}}},
+    {"ogg", {".ogg", ".oga", {}}},
+}};
 
 struct OracleFailure {
     std::string path;   // the file under test
@@ -93,23 +113,12 @@ inline bool check_decoded_shape(const std::string& path, const pulp::audio::Audi
                    std::to_string(limits.max_frames));
         ok = false;
     }
-    // Overflow-safe product: frames x channels x sizeof(float).
-    const auto max64 = std::numeric_limits<std::uint64_t>::max();
-    const std::uint64_t f64 = frames;
-    const std::uint64_t c64 = channels;
-    std::uint64_t bytes = 0;
-    bool overflow = f64 > max64 / c64;
-    if (!overflow) {
-        const auto samples = f64 * c64;
-        overflow = samples > max64 / sizeof(float);
-        if (!overflow)
-            bytes = samples * sizeof(float);
-    }
-    if (overflow || (limits.max_output_bytes != 0u && bytes > limits.max_output_bytes)) {
+    // The buffers are already in memory, so the product cannot overflow.
+    const std::uint64_t bytes = static_cast<std::uint64_t>(frames) * channels * sizeof(float);
+    if (limits.max_output_bytes != 0u && bytes > limits.max_output_bytes) {
         report(fail, path, "limits.max_output_bytes",
-               (overflow ? std::string("output size overflows 64 bits")
-                         : std::to_string(bytes) + " bytes decoded") +
-                   ", ceiling " + std::to_string(limits.max_output_bytes));
+               std::to_string(bytes) + " bytes decoded, ceiling " +
+                   std::to_string(limits.max_output_bytes));
         ok = false;
     }
     return ok;
