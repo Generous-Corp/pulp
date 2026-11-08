@@ -29,6 +29,10 @@ python3 tools/graph/graph_stall_guard.py \
   --now 2026-11-08T10:00:00Z
 ```
 
+The checked-in `agent-status.example.json` deliberately describes a blocked
+lane, so running the command against it exits 1. Replace it with a current
+coordinator snapshot when checking a live lane.
+
 The command prints a JSON verdict and writes an actionable `BLOCKED <lane>:`
 line to stderr for every failed lane. Exit 0 means all lanes have current,
 hash-matched evidence (or are explicitly complete); exit 1 means the snapshot

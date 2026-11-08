@@ -93,7 +93,13 @@ def receipt_path(root: Path, value: Any) -> Path:
     path = Path(value)
     if path.is_absolute() or ".." in path.parts:
         raise ManifestError("receipt_path must stay below the manifest directory")
-    return (root / path).resolve()
+    root = root.resolve()
+    resolved = (root / path).resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ManifestError("receipt_path must stay below the manifest directory") from exc
+    return resolved
 
 
 def check_pr(lane: dict[str, Any], findings: list[str]) -> None:

@@ -101,6 +101,22 @@ class GuardTest(unittest.TestCase):
         self.assertEqual(result["verdict"], "BLOCKED")
         self.assertIn("receipt does not exist: missing.json", result["lanes"][0]["reasons"])
 
+    def test_receipt_symlink_cannot_escape_manifest_directory(self):
+        outside = self.root.parent / "outside-receipt.json"
+        outside.write_text('{"result":"outside"}\n', encoding="utf-8")
+        try:
+            (self.root / "escaped.json").symlink_to(outside)
+            result = self.run_guard(
+                manifest([lane(receipt_path="escaped.json", receipt_sha256="0" * 64)])
+            )
+            self.assertEqual(result["verdict"], "BLOCKED")
+            self.assertIn(
+                "receipt_path must stay below the manifest directory",
+                result["lanes"][0]["reasons"],
+            )
+        finally:
+            outside.unlink(missing_ok=True)
+
     def test_pr_linkage_requires_complete_canonical_head(self):
         value = manifest(
             [
