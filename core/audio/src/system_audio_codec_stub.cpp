@@ -8,6 +8,10 @@ bool system_backend_can_write(SystemAudioContainer, SystemAudioEncoding) {
     return false;
 }
 
+std::vector<std::uint32_t> system_backend_aac_sample_rates() {
+    return {};
+}
+
 bool system_backend_write(const std::string&, const AudioFileData&,
                           const SystemAudioWriteOptions&) {
     return false;

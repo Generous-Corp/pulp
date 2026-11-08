@@ -286,6 +286,10 @@ bool system_backend_can_write(SystemAudioContainer container, SystemAudioEncodin
     return container == SystemAudioContainer::M4A && encoding == SystemAudioEncoding::AAC;
 }
 
+std::vector<std::uint32_t> system_backend_aac_sample_rates() {
+    return {44100, 48000};
+}
+
 bool system_backend_write(const std::string& path, const AudioFileData& data,
                           const SystemAudioWriteOptions& options) {
     const auto channels = static_cast<UINT32>(data.num_channels());

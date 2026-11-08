@@ -152,6 +152,30 @@ bool apply_bitrate(ExtAudioFileRef file, std::uint32_t bitrate) {
 
 } // namespace
 
+std::vector<std::uint32_t> system_backend_aac_sample_rates() {
+    // Ask AudioToolbox which rates its AAC-LC encoder takes, rather than
+    // keeping a copy of the list here.
+    UInt32 format = kAudioFormatMPEG4AAC;
+    UInt32 size = 0;
+    if (AudioFormatGetPropertyInfo(kAudioFormatProperty_AvailableEncodeSampleRates, sizeof(format),
+                                   &format, &size) != noErr ||
+        size < sizeof(AudioValueRange))
+        return {};
+    std::vector<AudioValueRange> ranges(size / sizeof(AudioValueRange));
+    if (AudioFormatGetProperty(kAudioFormatProperty_AvailableEncodeSampleRates, sizeof(format),
+                               &format, &size, ranges.data()) != noErr)
+        return {};
+    std::vector<std::uint32_t> rates;
+    for (const auto& range : ranges) {
+        // Each entry is a single rate; a span would mean "any rate within".
+        if (range.mMinimum > 0.0 && range.mMinimum == range.mMaximum)
+            rates.push_back(static_cast<std::uint32_t>(range.mMinimum));
+    }
+    std::sort(rates.begin(), rates.end());
+    rates.erase(std::unique(rates.begin(), rates.end()), rates.end());
+    return rates;
+}
+
 bool system_backend_can_write(SystemAudioContainer container, SystemAudioEncoding encoding) {
     switch (container) {
     case SystemAudioContainer::M4A:

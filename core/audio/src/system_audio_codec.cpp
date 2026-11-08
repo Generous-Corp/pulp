@@ -82,14 +82,14 @@ class SystemAudioWriter : public FormatWriter {
             caps.bit_depths = {16};
         SystemAudioWriteOptions caf;
         caps.float_samples = options_for_extension(".caf", caf);
+        // AAC is the narrowest case among the extensions this writer routes:
+        // its encoder takes only the rates the platform reports, while ALAC
+        // and CAF accept more. The list comes from the codec itself.
+        caps.sample_rates = detail::system_backend_aac_sample_rates();
 #ifdef _WIN32
-        caps.sample_rates = {44100, 48000};
         caps.max_channels = 2;
 #elif defined(__APPLE__)
-        // AAC-LC is the narrowest case: it refuses rates above 48 kHz and the
-        // ones between the listed steps, while ALAC and CAF accept more. The
-        // channel limit holds for every extension this writer routes.
-        caps.sample_rates = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000};
+        // The channel limit holds for every extension this writer routes.
         caps.max_channels = 8;
 #endif
         caps.compressed = true;

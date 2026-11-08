@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #include <iterator>
 #include <numbers>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -44,9 +46,15 @@ AudioFileData stereo_tone(std::uint32_t rate, std::uint32_t frames) {
 struct TempFile {
     fs::path path;
     explicit TempFile(const std::string& extension) {
+        // CTest runs each case as its own process, in parallel, so a name
+        // must be unique across processes: a per-process counter alone gave
+        // two cases the same file, and one removed the other's.
+        static const auto process_tag =
+            std::to_string(std::random_device{}()) + "_" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
         static std::atomic<int> counter{0};
-        path = fs::temp_directory_path() /
-               ("pulp_system_codec_" + std::to_string(counter.fetch_add(1)) + extension);
+        path = fs::temp_directory_path() / ("pulp_system_codec_" + process_tag + "_" +
+                                            std::to_string(counter.fetch_add(1)) + extension);
         fs::remove(path);
     }
     ~TempFile() {
@@ -254,19 +262,34 @@ TEST_CASE("FormatRegistry writes .m4a, .aac, .alac and .caf through the system c
 
 TEST_CASE("A refused system codec write leaves the existing file untouched",
           "[audio][system-codec]") {
+    // Arbitrary binary content, so a truncation, partial overwrite or
+    // re-encode of the old file would all show as a difference.
+    std::vector<char> previous(4099);
+    for (std::size_t i = 0; i < previous.size(); ++i)
+        previous[i] = static_cast<char>((i * 131u + 7u) & 0xFFu);
     TempFile file(".m4a");
     {
-        std::ofstream previous(file.path, std::ios::binary);
-        previous << "previous take";
+        std::ofstream out(file.path, std::ios::binary);
+        out.write(previous.data(), static_cast<std::streamsize>(previous.size()));
     }
+    const auto read_back = [&] {
+        std::ifstream in(file.path, std::ios::binary);
+        return std::vector<char>((std::istreambuf_iterator<char>(in)),
+                                 std::istreambuf_iterator<char>());
+    };
+
     // AAC-LC does not accept 192 kHz, so the encoder refuses after the
-    // container would have been created.
+    // container would have been created; a 12-bit ALAC request is refused
+    // before any file is touched.
     REQUIRE_FALSE(write_system_audio_file(file.path.string(), stereo_tone(192000, 4096),
                                           SystemAudioWriteOptions{}));
-    std::ifstream kept(file.path, std::ios::binary);
-    const std::string contents((std::istreambuf_iterator<char>(kept)),
-                               std::istreambuf_iterator<char>());
-    REQUIRE(contents == "previous take");
+    REQUIRE(read_back() == previous);
+    SystemAudioWriteOptions odd_depth;
+    odd_depth.encoding = SystemAudioEncoding::ALAC;
+    odd_depth.bit_depth = 12;
+    REQUIRE_FALSE(write_system_audio_file(file.path.string(), stereo_tone(48000, 4096), odd_depth));
+    REQUIRE(read_back() == previous);
+
     // No partial file is left beside it.
     for (const auto& entry : fs::directory_iterator(file.path.parent_path()))
         REQUIRE(entry.path().filename().string().find(file.path.stem().string() +
@@ -275,7 +298,8 @@ TEST_CASE("A refused system codec write leaves the existing file untouched",
     // A successful write replaces it.
     REQUIRE(write_system_audio_file(file.path.string(), stereo_tone(48000, 4096),
                                     SystemAudioWriteOptions{}));
-    REQUIRE(fs::file_size(file.path) > contents.size());
+    REQUIRE(read_back() != previous);
+    REQUIRE(FormatRegistry::instance().read(file.path.string()));
 }
 
 TEST_CASE("System codec rounds an AAC bitrate to one the encoder accepts",
