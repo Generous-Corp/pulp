@@ -1233,6 +1233,8 @@
       "pulp/state/listener_token.hpp",
       "pulp/state/midi_decode.hpp",
       "pulp/state/midi_learn.hpp",
+      "pulp/state/midi_learn_engine.hpp",
+      "pulp/state/midi_map_scale.hpp",
       "pulp/state/midi_parameter_map.hpp",
       "pulp/state/midi_source.hpp",
       "pulp/state/modulation_lane.hpp",
