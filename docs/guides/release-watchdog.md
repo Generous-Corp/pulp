@@ -336,6 +336,11 @@ being rejected as unexpected. Executes three checks:
    runner labels are declared in `.github/actionlint.yaml`; changing that file
    also triggers this workflow so the declaration cannot drift silently.
 
+The workflow-lint contract suites run in the same job, except the version-bump
+fast-path suite (`test_generated_version_bump_check.py`), which takes 6-8
+minutes and runs as its own `generated-version-bump-contract` job so neither
+job's timeout can cancel the other.
+
 Failure means the PR cannot merge until fixed. Running locally:
 
 ```bash

@@ -495,7 +495,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:efd42bc9f295ada0331fe6d088b9f2bb705be458ea73d915f19e204db02ffb8b',
+                header_fingerprint='sha256:bbeaeaa29cd94a75d114dff10c916cd95310b2a85c31a80c5b558c264b112131',
             ),
             binding(
                 role='graph_sample_region',
@@ -503,7 +503,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:efd42bc9f295ada0331fe6d088b9f2bb705be458ea73d915f19e204db02ffb8b',
+                header_fingerprint='sha256:bbeaeaa29cd94a75d114dff10c916cd95310b2a85c31a80c5b558c264b112131',
             ),
             binding(
                 role='graph_sample_regions',
@@ -511,7 +511,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:efd42bc9f295ada0331fe6d088b9f2bb705be458ea73d915f19e204db02ffb8b',
+                header_fingerprint='sha256:bbeaeaa29cd94a75d114dff10c916cd95310b2a85c31a80c5b558c264b112131',
             ),
             binding(
                 role='SampleRegionCandidate',
