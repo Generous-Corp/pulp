@@ -305,6 +305,74 @@ TEST_CASE("The system codec writer reports its capabilities", "[audio][system-co
     REQUIRE(it->quality_options.size() == 1);
 }
 
+TEST_CASE("The system codec writer's advertised limits match what it accepts and refuses",
+          "[audio][system-codec]") {
+    const auto writers = FormatRegistry::instance().writer_capabilities();
+    const auto it = std::find_if(writers.begin(), writers.end(), [](const FormatCapabilities& c) {
+        return c.format_name == "System codec";
+    });
+    REQUIRE(it != writers.end());
+    REQUIRE_FALSE(it->sample_rates.empty());
+    REQUIRE(it->max_channels == 8);
+
+    // Every advertised rate is written by every extension the entry covers.
+    for (const auto& extension : it->extensions) {
+        for (std::uint32_t rate : it->sample_rates) {
+            INFO(extension << " at " << rate);
+            TempFile file(extension);
+            REQUIRE(FormatRegistry::instance().write(file.path.string(), stereo_tone(rate, 4096)));
+        }
+        // The most channels advertised are written, and one more is refused.
+        for (std::uint32_t count : {it->max_channels, it->max_channels + 1}) {
+            INFO(extension << " with " << count << " channels");
+            AudioFileData data = stereo_tone(48000, 4096);
+            data.channels.resize(count, data.channels.front());
+            TempFile file(extension);
+            const bool wrote = FormatRegistry::instance().write(file.path.string(), data);
+            if (count <= it->max_channels)
+                REQUIRE(wrote);
+            else if (extension == ".m4a" || extension == ".aac")
+                REQUIRE_FALSE(wrote);
+        }
+    }
+
+    // The entry states the weakest case, so a rate AAC refuses is not advertised.
+    for (std::uint32_t refused : {64000u, 96000u, 192000u}) {
+        INFO(refused);
+        REQUIRE(std::find(it->sample_rates.begin(), it->sample_rates.end(), refused) ==
+                it->sample_rates.end());
+        TempFile file(".m4a");
+        REQUIRE_FALSE(FormatRegistry::instance().write(file.path.string(), stereo_tone(refused, 4096)));
+    }
+}
+
+TEST_CASE("The CoreAudio reader reads rates and channel counts the AAC writer refuses",
+          "[audio][system-codec]") {
+    // The reader decodes whatever the file holds, so its report leaves rates
+    // and channels unrestricted rather than stating the AAC writer's limits.
+    const auto readers = FormatRegistry::instance().reader_capabilities();
+    const auto it = std::find_if(readers.begin(), readers.end(), [](const FormatCapabilities& c) {
+        return c.format_name == "CoreAudio";
+    });
+    REQUIRE(it != readers.end());
+    REQUIRE(it->sample_rates.empty());
+    REQUIRE(it->max_channels == 0);
+
+    TempFile alac(".alac");
+    REQUIRE(FormatRegistry::instance().write(alac.path.string(), stereo_tone(96000, 4096)));
+    const auto high = FormatRegistry::instance().read(alac.path.string());
+    REQUIRE(high);
+    REQUIRE(high->sample_rate == 96000);
+
+    AudioFileData wide = stereo_tone(48000, 4096);
+    wide.channels.resize(9, wide.channels.front());
+    TempFile caf(".caf");
+    REQUIRE(FormatRegistry::instance().write(caf.path.string(), wide));
+    const auto many = FormatRegistry::instance().read(caf.path.string());
+    REQUIRE(many);
+    REQUIRE(many->num_channels() == 9);
+}
+
 #elif defined(_WIN32)
 
 TEST_CASE("System codec writes AAC in M4A that Media Foundation reads back",

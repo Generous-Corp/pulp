@@ -85,6 +85,12 @@ class SystemAudioWriter : public FormatWriter {
 #ifdef _WIN32
         caps.sample_rates = {44100, 48000};
         caps.max_channels = 2;
+#elif defined(__APPLE__)
+        // AAC-LC is the narrowest case: it refuses rates above 48 kHz and the
+        // ones between the listed steps, while ALAC and CAF accept more. The
+        // channel limit holds for every extension this writer routes.
+        caps.sample_rates = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000};
+        caps.max_channels = 8;
 #endif
         caps.compressed = true;
         caps.lossless = false;
