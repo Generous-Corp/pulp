@@ -8,10 +8,14 @@
 /// RT-safe pull) — the audio thread never decodes or allocates.
 ///
 /// The returned callback retains one MemoryMappedAudioReader and delegates each
-/// request to read_frames(). Seek-readable formats such as WAV therefore decode
-/// only the requested range. Formats without a ranged decoder use the reader's
-/// explicit decode-once fallback; callers can inspect supports_ranged_read before
-/// admitting a source under a strict streaming-memory policy.
+/// request to read_frames(). Seek-readable formats (WAV, uncompressed AIFF,
+/// FLAC, MP3 and Ogg Vorbis) therefore decode only the requested range, with
+/// the per-format seek cost described in audio_reader.hpp: a backward MP3 seek
+/// decodes from the start of the stream. Formats without a ranged decoder use
+/// the reader's explicit decode-once fallback; callers can inspect
+/// supports_ranged_read before admitting a source under a strict
+/// streaming-memory policy, and a strict open refuses such a source without
+/// decoding it.
 
 #include <algorithm>
 #include <array>
@@ -144,7 +148,9 @@ inline FileFrameReader make_memory_mapped_frame_reader(
     auto mapped = std::make_shared<MemoryMappedAudioReader>();
     const auto mapped_limit = static_cast<std::size_t>(
         std::min<std::uint64_t>(maximum_mapped_bytes, std::numeric_limits<std::size_t>::max()));
-    if (!mapped->open(path, mapped_limit))
+    // Ranged-only callers open without the decode-once fallback, so a stream
+    // that cannot be seeked is refused before it is decoded.
+    if (!mapped->open(path, mapped_limit, require_ranged_read))
         return {};
     auto retained = mapped;
     auto result = make_retained_memory_mapped_frame_reader(

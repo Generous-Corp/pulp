@@ -1379,6 +1379,26 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-control-vendor-operations-e2e": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli",
+    "pulp-control-vendor-product-fixture",
+    "pulp-mcp"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "inspect/src/control_broker_daemon.cpp",
+    "test/support/control_sample_region_e2e.hpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": [],
+   "unmatched_programs": [
+    "pulp-control-broker"
+   ]
+  },
   "pulp-test-coreaudio-input-only": {
    "data": "declared",
    "detected_sources": [
@@ -2437,6 +2457,20 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-platform-objc-unique-class": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-test-objc-unique-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_platform_objc_unique_class.mm"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-plugin-manager-panel": {
    "data": "none",
    "inputs": [],
@@ -3049,6 +3083,7 @@
   "pulp-test-control-timeline-document-session",
   "pulp-test-control-trusted-host-e2e",
   "pulp-test-control-trusted-host-inventory",
+  "pulp-test-control-vendor-operations-e2e",
   "pulp-test-convolver-bg-swap",
   "pulp-test-coreaudio-default-follow",
   "pulp-test-coreaudio-input-only",
@@ -3324,6 +3359,7 @@
   "pulp-test-mcp-timeline-tools",
   "pulp-test-meter-source",
   "pulp-test-midi-arpeggiator",
+  "pulp-test-midi-learn-engine",
   "pulp-test-midi-parameter-map-scaling",
   "pulp-test-midi-performance-kernels",
   "pulp-test-midi-routing-ledger",
@@ -3369,6 +3405,7 @@
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
+  "pulp-test-platform-objc-unique-class",
   "pulp-test-playback-audio-renderer",
   "pulp-test-playback-automation-cursor",
   "pulp-test-playback-capture-engine",
@@ -3438,6 +3475,7 @@
   "pulp-test-signal-additive-bank",
   "pulp-test-signal-analysis-frontends",
   "pulp-test-signal-blit-oscillator-no-exceptions",
+  "pulp-test-signal-breakpoint-sustain",
   "pulp-test-signal-chorus-family",
   "pulp-test-signal-comb-filter",
   "pulp-test-signal-cyclic-stretch",
@@ -3482,8 +3520,10 @@
   "pulp-test-signal-vocoder",
   "pulp-test-signal-zero-latency-convolver",
   "pulp-test-simd",
+  "pulp-test-simd-complex",
   "pulp-test-simd-header-fallback",
   "pulp-test-simd-lanes-portable",
+  "pulp-test-simd-math",
   "pulp-test-simd-parity",
   "pulp-test-simd-signal-link",
   "pulp-test-six-band-eq",
@@ -3511,6 +3551,7 @@
   "pulp-test-super-convolver-dsp",
   "pulp-test-super-convolver-web-cpu",
   "pulp-test-super-convolver-web-gpu",
+  "pulp-test-superflux-onset",
   "pulp-test-svg-path-range-orientation-1899",
   "pulp-test-svg-primitives-1926",
   "pulp-test-synthesiser",
@@ -7198,6 +7239,14 @@
     "tools/scripts/git_read_memo.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "graph-stall-guard-selftest": {
+   "entry": "tools/graph/test_graph_stall_guard.py",
+   "inputs": [
+    "tools/graph/graph_stall_guard.py",
+    "tools/graph/test_graph_stall_guard.py"
    ],
    "kind": "python"
   },

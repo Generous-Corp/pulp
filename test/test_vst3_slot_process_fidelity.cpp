@@ -349,6 +349,40 @@ TEST_CASE("VST3 plug-in without a host transport sees a free-running clock and n
     CHECK((c.state & Vst::ProcessContext::kTimeSigValid) == 0);
 }
 
+TEST_CASE("VST3 transport delivery follows the host setting from the next block",
+          "[host][vst3][transport]") {
+    Rig rig;
+    REQUIRE(rig.slot->prepare(48000.0, 64));
+    REQUIRE(rig.slot->wants_transport());
+    fmt::ProcessContext ctx;
+    ctx.is_playing = true;
+    ctx.tempo_bpm = 96.0;
+    ctx.time_sig_numerator = 3;
+    ctx.time_sig_denominator = 4;
+    Buses b;
+    b.run(*rig.slot, ctx);
+    REQUIRE(rig.processor->had_context);
+    CHECK((rig.processor->context.state & Vst::ProcessContext::kTempoValid) != 0);
+    CHECK(rig.processor->context.tempo == 96.0);
+
+    // Off, with no re-prepare: the next block gets the free-running clock.
+    auto settings = rig.slot->host_settings();
+    settings.deliver_transport = false;
+    REQUIRE(rig.slot->set_host_settings(settings));
+    CHECK_FALSE(rig.slot->wants_transport());
+    b.run(*rig.slot, ctx);
+    CHECK((rig.processor->context.state & Vst::ProcessContext::kTempoValid) == 0);
+    CHECK((rig.processor->context.state & Vst::ProcessContext::kTimeSigValid) == 0);
+
+    // And back on.
+    settings.deliver_transport = true;
+    REQUIRE(rig.slot->set_host_settings(settings));
+    CHECK(rig.slot->wants_transport());
+    b.run(*rig.slot, ctx);
+    CHECK((rig.processor->context.state & Vst::ProcessContext::kTempoValid) != 0);
+    CHECK(rig.processor->context.tempo == 96.0);
+}
+
 TEST_CASE("VST3 plug-in receives the host transport", "[host][vst3][transport]") {
     Rig rig;
     REQUIRE(rig.slot->prepare(48000.0, 64));

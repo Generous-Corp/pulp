@@ -75,6 +75,69 @@ knob->set_label("Gain");
 knob->on_change = [&](float v) { gain_binding.set_normalized(v); };
 ```
 
+## SpectrumView
+
+`SpectrumView` draws a spectrum on a log-frequency axis. It can analyse audio
+itself, so a plug-in only forwards its samples.
+
+```cpp
+// UI thread, once.
+spectrum.set_analysis_enabled(true);
+spectrum.set_sample_rate(sample_rate);
+spectrum.set_fft_size(4096);
+spectrum.set_window(SpectrumView::WindowType::blackman_harris);
+spectrum.set_level_mode(SpectrumView::LevelMode::peak);
+spectrum.set_frequency_range(20.0f, 20000.0f);
+spectrum.set_range(-90.0f, 0.0f);          // dB range
+spectrum.set_release_time(0.3f);           // seconds, frame-rate independent
+spectrum.set_style(SpectrumView::Style::filled);
+
+// Audio thread, every block: mono samples (mix or pick a channel first).
+spectrum.push_samples(mono, frames);
+```
+
+Options: window (Hann, Blackman-Harris, flat-top, rectangular and others from
+`WindowFunction`), FFT size (64 to 16384, rounded up to a power of two),
+overlap (0 to 0.9375), level mode, frequency range, dB range, release time and
+display type (bars, line, filled).
+
+Level modes, calibrated so a full-scale sine reads as noted:
+
+| Mode | Reads | Full-scale sine |
+|------|-------|-----------------|
+| `peak` | peak amplitude per bin | 0 dB |
+| `rms` | RMS amplitude per bin | -3.01 dB |
+| `power_db` | power, bins sum to the mean square | -3.01 dB total |
+| `psd` | power per Hz | -3.01 dB integrated over frequency |
+
+Thread rules:
+
+| Method | Thread |
+|--------|--------|
+| `push_samples()` | Audio. Wait-free, allocation-free, takes no lock. Drops samples (counted in `overflow_count()`) when the UI has stalled for several frames. |
+| `set_analysis_enabled()`, the setters, `update_analysis()`, `paint()`, getters | UI. Setters, including FFT size and window, are safe while audio is running. |
+
+The view must outlive any audio callback that can still call `push_samples()`.
+
+How a column reads the spectrum: a column narrower than one FFT bin (low
+frequencies) evaluates a parabola through the three nearest bins in dB at the
+column's exact fractional bin position, falling back to linear interpolation on
+ramps and valleys. A column wider than a bin (high frequencies) combines the
+bins it covers with fractional edges: loudest for `peak`, summed power for
+`power_db`, mean power for `rms` and `psd`. This is
+`pulp::signal::SpectrumBinMapping`, which `EqCurveView`'s analyzer overlay
+uses too, so both draw the same spectrum.
+
+Release is computed from elapsed time, so the fall looks identical at 30 or
+144 Hz. If the UI stalls, only the newest few FFT frames are analysed and the
+older audio is skipped (`skipped_frame_count()`), instead of replaying the
+backlog.
+
+`set_spectrum()` and `set_bins()` still work for callers that compute their own
+dB bins. They draw one bin per column on a linear axis, leave windowing,
+calibration and release to the caller, and are soft-deprecated in favour of the
+built-in analysis. When analysis is enabled it takes precedence.
+
 ## Theming
 
 Themes are structured data (design tokens), not code. Each view can have a theme; color resolution walks up the parent chain.

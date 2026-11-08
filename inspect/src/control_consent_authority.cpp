@@ -1,6 +1,7 @@
 #include <pulp/inspect/control_consent_authority.hpp>
 
 #include <pulp/inspect/capabilities.hpp>
+#include <pulp/inspect/control_vendor_operations.hpp>
 #include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
@@ -50,6 +51,14 @@ std::string canonical_request(const ControlGrantConsentRequest& request) {
     append_framed(value, std::to_string(request.grant.ttl.count()));
     for (const auto capability : request.grant.capabilities)
         append_framed(value, capability_id(capability));
+    // A scoped grant's exact vendor ids are part of what was approved. Framed
+    // only when present, so every other decision keeps its existing bytes.
+    if (!request.grant.vendor_operations.empty()) {
+        append_framed(value, "vendor-operations");
+        append_framed(value, std::to_string(request.grant.vendor_operations.size()));
+        for (const auto& operation : request.grant.vendor_operations)
+            append_framed(value, operation);
+    }
     return value;
 }
 
@@ -108,22 +117,23 @@ ControlConsentPrompt make_prompt(const ControlGrantConsentRequest& request) {
             prompt.requested_operations_display.append(", ");
         prompt.requested_operations_display.append(capability_contract_id(capability));
     }
+    const bool includes_vendor =
+        std::ranges::any_of(request.grant.capabilities, capability_is_vendor_tier);
     const bool includes_gpu_health =
         std::ranges::find(request.grant.capabilities, InspectorCapability::GpuHealthRead) !=
         request.grant.capabilities.end();
     const bool gpu_health_only = request.grant.capabilities.size() == 1 && includes_gpu_health;
     const auto duration = grant_duration_display(request.grant.ttl);
     const auto capability_count = request.grant.capabilities.size();
-    prompt.primary_message = gpu_health_only
-                                 ? "Read GPU startup health once for " + prompt.plugin_display
-                                 : "Allow " +
-                                       std::to_string(capability_count) + " requested " +
-                                       (capability_count == 1 ? "capability" : "capabilities") +
-                                       " for up to " + duration + " for " +
-                                       prompt.plugin_display +
-                                       (includes_gpu_health
-                                            ? ". GPU startup health can be read once"
-                                            : "");
+    prompt.primary_message =
+        gpu_health_only ? "Read GPU startup health once for " + prompt.plugin_display
+                        : "Allow " + std::to_string(capability_count) + " requested " +
+                              (capability_count == 1 ? "capability" : "capabilities") +
+                              " for up to " + duration + " for " + prompt.plugin_display +
+                              (includes_gpu_health ? ". GPU startup health can be read once" : "") +
+                              (includes_vendor ? ". Includes operations defined by the plugin; "
+                                                 "their risk tier is the plugin's own declaration"
+                                               : "");
     prompt.approve_label =
         gpu_health_only ? "Allow GPU Health Once" : "Allow for " + duration;
     prompt.technical_details_display =
@@ -133,6 +143,9 @@ ControlConsentPrompt make_prompt(const ControlGrantConsentRequest& request) {
         "\nInstance: " + prompt.instance_display + "\nBuild: " + prompt.build_display +
         "\nArtifact sha256: " + prompt.artifact_digest_display +
         "\nGrant selector: " + prompt.selector_display;
+    for (const auto& operation : request.grant.vendor_operations)
+        prompt.technical_details_display +=
+            "\nPlugin-defined operation: " + safe_display_token(operation);
     return prompt;
 }
 

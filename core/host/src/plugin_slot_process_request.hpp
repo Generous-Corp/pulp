@@ -18,8 +18,13 @@
 //   - decode_short_midi() / for_each_midi_in_time_order() give every backend
 //     the same view of the host's MIDI stream.
 //
-// Realtime contract: everything reached from process() is allocation-free and
-// lock-free (try_lock at most). All allocation happens in prepare-time calls.
+// Realtime contract: everything reached from process() is lock-free (try_lock
+// at most), and all buffers are sized in prepare-time calls. One limit: the
+// VST3 SDK's parameter queues hold 5 points per parameter and max(parameter
+// count, 16) parameters as prepared. A block with more points for one
+// parameter, or more distinct parameters, grows a queue on the audio thread
+// once, to that block's peak; the queues are cleared, not freed, each block,
+// so growth is bounded but not zero.
 
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
@@ -614,15 +619,18 @@ class RequestDrivenSlot : public PluginSlot {
                  midi::MidiBuffer& midi_out, const ParameterEventQueue& param_events,
                  int num_samples, const format::ProcessContext& transport) final {
         run(audio, midi_in, midi_out, param_events, num_samples,
-            settings_.deliver_transport ? &transport : nullptr);
+            deliver_transport_.load(std::memory_order_relaxed) ? &transport : nullptr);
     }
 
     bool wants_transport() const override {
-        return settings_.deliver_transport;
+        return deliver_transport_.load(std::memory_order_relaxed);
     }
 
     bool set_host_settings(const PluginHostSettings& settings) override {
         settings_ = settings;
+        // The audio thread reads this setting live, so it gets its own atomic;
+        // the rest of settings_ is read only at prepare().
+        deliver_transport_.store(settings.deliver_transport, std::memory_order_relaxed);
         return true;
     }
     PluginHostSettings host_settings() const override {
@@ -686,6 +694,7 @@ class RequestDrivenSlot : public PluginSlot {
     }
 
     PluginHostSettings settings_;
+    std::atomic<bool> deliver_transport_{PluginHostSettings{}.deliver_transport};
     format::ProcessMode prepared_mode_ = format::ProcessMode::Realtime;
     ParameterEditInbox edits_;
     std::atomic<std::uint64_t> restart_requests_{0};

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-simd-kernel-breadth-20261106",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T03:28:06Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/simd/include/pulp/simd/scalar_kernels.hpp",
+    "core/simd/include/pulp/simd/simd.hpp",
+    "core/simd/src/accelerate.cpp",
+    "core/simd/src/highway.cpp",
+    "core/simd/src/scalar.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Additive, source-compatible growth of the shared pulp::simd module: new buffer kernels, complex spectral kernels, and vector math with two accuracy tiers on the scalar, Highway and Accelerate backends. No existing signature changes, and Highway's header-only contrib/math is already part of the Highway dependency the module links."
+}
