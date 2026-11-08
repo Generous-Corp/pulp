@@ -1154,6 +1154,8 @@
       "pulp/signal/spectral_mask_processor.hpp",
       "pulp/signal/spectral_morph.hpp",
       "pulp/signal/spectrogram.hpp",
+      "pulp/signal/spectrum_analyzer.hpp",
+      "pulp/signal/spectrum_bin_mapping.hpp",
       "pulp/signal/spectrum_trace.hpp",
       "pulp/signal/square_osc_bank.hpp",
       "pulp/signal/stage_sequencer.hpp",
