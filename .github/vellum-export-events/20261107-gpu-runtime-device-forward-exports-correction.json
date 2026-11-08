@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-gpu-runtime-device-forward-exports-correction",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T18:30:00Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "supersedes": [
+    "20261106-gpu-runtime-device-forward-exports"
+  ],
+  "paths": [
+    "core/platform/include/pulp/platform/gpu_fwd.hpp",
+    "core/render/include/pulp/render/bench/perf_counters.hpp",
+    "core/render/include/pulp/render/gpu_compute.hpp",
+    "core/render/include/pulp/render/gpu_diagnostics.hpp",
+    "core/render/include/pulp/render/gpu_proc_installer.hpp",
+    "core/render/include/pulp/render/gpu_render_time.hpp",
+    "core/render/include/pulp/render/gpu_startup_report.hpp",
+    "core/render/include/pulp/render/gpu_surface.hpp",
+    "core/render/src/gpu_runtime_hooks.cpp",
+    "core/render/src/render_observer_private.hpp",
+    "core/view/include/pulp/view/plugin_view_host.hpp",
+    "core/view/include/pulp/view/scripted_editor_session.hpp",
+    "core/view/include/pulp/view/scripted_ui.hpp",
+    "core/view/include/pulp/view/widget_bridge.hpp",
+    "core/view/include/pulp/view/window_host.hpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Corrects 20261106-gpu-runtime-device-forward-exports, whose rationale said these changes stay inert in Vellum's mirror as long as Vellum never defines PULP_GPU_RUNTIME for mirrored sources. That holds only until the next re-export. Each path gains a PULP_GPU_RUNTIME forwarding branch with its original body kept under #else, or takes its forward declarations from pulp/platform/gpu_fwd.hpp; gpu_runtime_hooks.cpp and gpu_fwd.hpp are new. Before the next re-export Vellum keeps today's blobs. The re-export carries these bytes together with gpu_fwd.hpp, and its closures carry PULP_GPU_RUNTIME=1 from pulp-platform's interface, so Vellum's mirror then compiles the forwarding branch against its in-tree gpu-runtime (vellum#212, vellum#216). The inheritance decision is unchanged: vellum_inherits stays true."
+}

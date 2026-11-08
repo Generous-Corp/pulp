@@ -2527809,7 +2527809,7 @@
       },
       "surface": {
         "schema": "pulp.agent-capability-surface.v1",
-        "inventory_version": 201,
+        "inventory_version": 200,
         "headers": [
           {
             "include": "pulp/audio/analyzer_provider.hpp",
@@ -2527833,8 +2527833,8 @@
           },
           {
             "include": "pulp/audio/audio_device_manager.hpp",
-            "fingerprint": "sha256:9d1b63aef909a1cfe643e3d67e295dae20f2c8d788952ae7b7bfbb0f174547c3",
-            "disposition": "legacy_unreviewed"
+            "fingerprint": "sha256:f6a0109662da123a56a199f8581b5a3d8160b1c44701a283ecb4665c5eabdb6b",
+            "disposition": "infrastructure"
           },
           {
             "include": "pulp/audio/audio_file.hpp",
@@ -2528030,6 +2528030,11 @@
             "include": "pulp/audio/onset_detector.hpp",
             "fingerprint": "sha256:d0cac999018c626de8cbd2165150788c1d3be62777cc639d550d7f80f9f56560",
             "disposition": "capability_entrypoint"
+          },
+          {
+            "include": "pulp/audio/pcm_capabilities.hpp",
+            "fingerprint": "sha256:d52260fa3447b8c4b48ca1a52e2113cf9c6a3b37b73f2ec0e7ebd43da78d6ed3",
+            "disposition": "infrastructure"
           },
           {
             "include": "pulp/audio/planar_audio_ring_buffer.hpp",
@@ -2528403,7 +2528408,7 @@
           },
           {
             "include": "pulp/host/custom_node_type.hpp",
-            "fingerprint": "sha256:8cc51fc538c6415fd580a4d4bf4a45e3a6570435b7649581b3516f1074dd4df7",
+            "fingerprint": "sha256:8a75edf4f7f08fede5f6607b1e52f21c427fb787d58d8eb933f7c7699ce2e068",
             "disposition": "capability_entrypoint"
           },
           {
@@ -2528463,7 +2528468,7 @@
           },
           {
             "include": "pulp/host/signal_graph_runtime.hpp",
-            "fingerprint": "sha256:efd42bc9f295ada0331fe6d088b9f2bb705be458ea73d915f19e204db02ffb8b",
+            "fingerprint": "sha256:5e5f2547ae4675e5641c608d81a497aefa4b17fa120adbf991a9f96dc7380416",
             "disposition": "capability_entrypoint"
           },
           {
@@ -2528538,8 +2528543,8 @@
           },
           {
             "include": "pulp/midi/keyboard_state.hpp",
-            "fingerprint": "sha256:bec4e61084cecc823ee01cd0abb9b1a679d483d68bee499f319f142c07c6b76b",
-            "disposition": "legacy_unreviewed"
+            "fingerprint": "sha256:34651c7b16a73f0fcc14469e5652039d8350319f4907febad08db449fea8cc34",
+            "disposition": "infrastructure"
           },
           {
             "include": "pulp/midi/latch.hpp",
@@ -2528592,6 +2528597,11 @@
             "disposition": "legacy_unreviewed"
           },
           {
+            "include": "pulp/midi/mock_midi_system.hpp",
+            "fingerprint": "sha256:45e2079efb6edb3f45f592dfd85b59e8b41c3499dfaf29d00135ffda83ef297c",
+            "disposition": "infrastructure"
+          },
+          {
             "include": "pulp/midi/monotonic_timestamp.hpp",
             "fingerprint": "sha256:1008341155436ccd7b672cde9b1d7f2c0f948a95e05a81e5c055f37f7d86faa1",
             "disposition": "legacy_unreviewed"
@@ -2528602,13 +2528612,18 @@
             "disposition": "capability_support"
           },
           {
+            "include": "pulp/midi/mpe_config_messages.hpp",
+            "fingerprint": "sha256:f08204a4069ba5246daaee14bd9da3373a7a5c6cd50eeee7f4f709780f6ae1b7",
+            "disposition": "infrastructure"
+          },
+          {
             "include": "pulp/midi/mpe_synth_voice.hpp",
             "fingerprint": "sha256:2426bb49591fb4510aaab4a70931899c4928793f34b23935f14b6af19c918db4",
             "disposition": "capability_support"
           },
           {
             "include": "pulp/midi/mpe_voice_tracker.hpp",
-            "fingerprint": "sha256:aca221889b5e62dd37fe9890c1d8009f7d8479a0b83f4a49986bde3fa2a6dbdc",
+            "fingerprint": "sha256:c90be261b57145983c90b269c2d4512b9d3211f492032dbc55885c197cfb6299",
             "disposition": "capability_entrypoint"
           },
           {
@@ -2528634,6 +2528649,11 @@
           {
             "include": "pulp/midi/panic.hpp",
             "fingerprint": "sha256:5de1b463081d7a2bb4c01c83886bc2b341d54b492c43259dace4a944b67e5495",
+            "disposition": "infrastructure"
+          },
+          {
+            "include": "pulp/midi/port_change_watcher.hpp",
+            "fingerprint": "sha256:dd44aa22142690a6a679adcce7dbdc386128fa381381268ba3c813d0d95398a0",
             "disposition": "infrastructure"
           },
           {
@@ -2528680,6 +2528700,11 @@
             "include": "pulp/midi/sysex_accumulator.hpp",
             "fingerprint": "sha256:d4820481a0bf30553f2990f096cb1684ab4f1762d85df08b38c21d0d63823623",
             "disposition": "legacy_unreviewed"
+          },
+          {
+            "include": "pulp/midi/sysex_chunk_assembler.hpp",
+            "fingerprint": "sha256:01c367d4c8c832ec83ca837901b08da9b4a8195a3caa8d06cc37f03113bc6c08",
+            "disposition": "infrastructure"
           },
           {
             "include": "pulp/midi/tuning.hpp",
@@ -2530444,7 +2530469,7 @@
         ],
         "tombstones": []
       },
-      "entry_digest": "sha256:289d846949d9fb2a8b942d2ed4bc6f7bf3315e1050a24ec55880205bc8d4e6f1"
+      "entry_digest": "sha256:56df293be9e145118b196409c5eea2084463eeef2562ec1db7b105b547f0bfe8"
     }
   ]
 }

@@ -589,3 +589,8 @@ pulp_add_test_suite(pulp-test-graph-identity
 pulp_add_test_suite(pulp-test-voice-identity
     SOURCES test_voice_identity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
+
+# G-4 public voice-bank binding schema, atomic persistence, and refusal controls.
+pulp_add_test_suite(pulp-test-voice-template
+    SOURCES test_voice_template.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)

@@ -340,6 +340,13 @@ are append-only:
 virtual declarations against the PR base. A middle insert, removal, reorder, or
 signature change fails; appending at the tail passes.
 
+The editor-host interfaces (`Editor`, `EditorContext` and `EditorFactory` in
+`editor_host.hpp`, and the `NativeSurfaceHost` extension) are held to a
+stricter rule: their virtual set is frozen. A UI package and a format adapter
+are separate binaries, so even an appended virtual breaks a prebuilt peer. The
+same gate fails any change to those classes. New host capabilities ship as new
+`EditorContext::query_extension()` ids instead.
+
 ## Optional Capabilities
 
 New optional node behavior should prefer additive capability bits over new

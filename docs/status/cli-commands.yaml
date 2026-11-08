@@ -2476,6 +2476,40 @@ commands:
             kind: option
           - name: --block-size
             kind: option
+      - name: inspect
+        summary: "Report an audio file's byte layout without decoding it: regions with offsets and sizes, parsed header fields, stream facts, specification-violation warnings, and the in-memory decoder's verdict; bounded reads only"
+        args:
+          - name: file
+            kind: positional
+            required: true
+            description: Audio file (WAV/RF64/W64, AIFF/AIFC, FLAC, Ogg, MP3, MP4/M4A, or raw PCM with --raw)
+          - name: --json
+            kind: flag
+            description: Emit pulp.audio.file_inspect.v1 JSON
+          - name: --include-metadata-text
+            kind: flag
+            description: Lift free text from metadata regions into metadata.text (off by default)
+          - name: --absolute-paths
+            kind: flag
+            description: Report input.name as the path given instead of its basename
+          - name: --raw
+            kind: flag
+            description: "Treat the file as headerless PCM; requires --format, --channels, --rate, --endian and --offset"
+          - name: --format
+            kind: option
+            description: "Raw PCM sample format: s8, u8, s16, s24, s32, f32, f64"
+          - name: --channels
+            kind: option
+            description: Raw PCM channel count
+          - name: --rate
+            kind: option
+            description: Raw PCM sample rate in Hz
+          - name: --endian
+            kind: option
+            description: "Raw PCM byte order: little or big"
+          - name: --offset
+            kind: option
+            description: Byte offset where raw PCM sample data begins
       - name: scope
         summary: Capture Audio Scope JSON from a live standalone target or speakerless offline WAV input; offline mode can also emit a PNG trace artifact.
         args:
@@ -2504,10 +2538,13 @@ commands:
             kind: option
             required: false
       - name: validate summarize
-        summary: Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/pitch); --json emits machine output
+        summary: "Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/pitch); --json emits pulp.audio.summarize.v1 with the input named by basename unless --absolute-paths"
         args:
           - name: --json
             kind: flag
+          - name: --absolute-paths
+            kind: flag
+            description: Report the input path as given instead of its basename
       - name: validate doctor
         summary: Offline Audio Doctor over a WAV — THD/THD+N (--thd) and/or spectrum magnitude at checkpoints (--response f1,f2,...); writes a JSON curve artifact
         args:
