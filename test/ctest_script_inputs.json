@@ -3762,6 +3762,14 @@
    ],
    "kind": "python"
   },
+  "android-fixture-lane-selftest": {
+   "entry": "tools/ci/test_android_fixture_lane.py",
+   "inputs": [
+    "tools/ci/android-fixture-lane.sh",
+    "tools/ci/test_android_fixture_lane.py"
+   ],
+   "kind": "python"
+  },
   "android-jni-exports-selftest": {
    "entry": "tools/scripts/test_check_android_jni_exports.py",
    "inputs": [
@@ -11024,8 +11032,10 @@
     "core/events/src/timer.cpp",
     "core/events/src/volume_detector.cpp",
     "core/format/include/pulp/format/audio_workgroup_client.hpp",
+    "core/format/include/pulp/format/editor_host.hpp",
     "core/format/include/pulp/format/graph_runtime_executor.hpp",
     "core/format/include/pulp/format/graph_runtime_worker_pool.hpp",
+    "core/format/include/pulp/format/native_surface_host.hpp",
     "core/format/include/pulp/format/note_name.hpp",
     "core/format/include/pulp/format/plugin_descriptor.hpp",
     "core/format/include/pulp/format/prepare_resources.hpp",
@@ -11855,8 +11865,10 @@
     "core/events/src/timer.cpp",
     "core/events/src/volume_detector.cpp",
     "core/format/include/pulp/format/audio_workgroup_client.hpp",
+    "core/format/include/pulp/format/editor_host.hpp",
     "core/format/include/pulp/format/graph_runtime_executor.hpp",
     "core/format/include/pulp/format/graph_runtime_worker_pool.hpp",
+    "core/format/include/pulp/format/native_surface_host.hpp",
     "core/format/include/pulp/format/note_name.hpp",
     "core/format/include/pulp/format/plugin_descriptor.hpp",
     "core/format/include/pulp/format/prepare_resources.hpp",
