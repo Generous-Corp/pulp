@@ -189,7 +189,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/plugin_slot.hpp',
-        'fingerprint': 'sha256:b36cbc93f6fcad7b30941c958f17b5d72821d96bdc0a5e7b0e957aa13aae4f7b',
+        'fingerprint': 'sha256:69927dee51b495256394c0561f8e31be2abac5cf73dbd462a310565d637a92bb',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema.',
