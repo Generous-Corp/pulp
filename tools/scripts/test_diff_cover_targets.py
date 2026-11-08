@@ -454,6 +454,59 @@ class TestSelectionTests(Fixture):
                          ["pulp-test-state_NOT_BUILT-0123abc"])
 
 
+class TestArtifactClosure(Fixture):
+    """The pre-CTest guard catches install-script artifacts before execution."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        TARGETS["negative-control-archive"] = (
+            "STATIC_LIBRARY", "test", [], [], "test/libnegative-control.a")
+        shutil.rmtree(self.build)
+        write_codemodel(self.build, self.root)
+
+    def tearDown(self) -> None:
+        TARGETS.pop("negative-control-archive", None)
+        super().tearDown()
+
+    def test_missing_install_artifact_is_receipted_and_clears_after_build(self) -> None:
+        b = self.build
+        archive = b / "test/libnegative-control.a"
+        (b / "cmake_install.cmake").write_text(
+            f'file(INSTALL DESTINATION "lib" TYPE STATIC_LIBRARY FILES "{archive}")\n',
+            encoding="utf-8")
+        ctest_json = {"tests": [{
+            "name": "sdk staging",
+            "command": [
+                "/usr/bin/cmake", f"-DPULP_BUILD_DIR={b}",
+                str(self.root / "test/cmake/test_installed_sdk_runtime_staging.cmake"),
+            ],
+        }]}
+        shim_dir = self.root / "shim"
+        shim_dir.mkdir()
+        ctest = shim_dir / "ctest"
+        ctest.write_text("#!/bin/sh\ncat <<'JSON'\n" + json.dumps(ctest_json) + "\nJSON\n",
+                         encoding="utf-8")
+        ctest.chmod(0o755)
+        plan = self.root / "plan.json"
+        plan.write_text(json.dumps({"targets": ["pulp-test-state"]}), encoding="utf-8")
+        receipt = self.root / "receipt.json"
+        env = {**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"}
+        cmd = [sys.executable, str(HELPER), "artifacts", "--build-dir", str(b),
+               "--plan", str(plan), "--receipt", str(receipt), "--regex", "sdk staging"]
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        report = json.loads(receipt.read_text(encoding="utf-8"))
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(report["missing_targets"], ["negative-control-archive"])
+        self.assertEqual(report["missing"][0]["path"], str(archive.resolve()))
+
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        archive.write_bytes(b"fixture")
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["status"], "ok")
+
+
 class ShellWiringTests(unittest.TestCase):
     """The real local_diff_cover.sh skips a diff with nothing to measure."""
 
