@@ -1010,6 +1010,11 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ci/test_build_dir_lock.py")
         set_tests_properties(checkout-location-guard-selftest build-dir-lock-selftest
             PROPERTIES TIMEOUT 120)
+        # Pass-marker detection in the Android fixture lane must survive large
+        # runner output under pipefail.
+        add_test(NAME android-fixture-marker-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_android_fixture_marker.py")
+        set_tests_properties(android-fixture-marker-selftest PROPERTIES TIMEOUT 120)
         add_test(NAME pulp-worktree-creation-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_pulp_worktree_creation.py")
         set_tests_properties(pulp-worktree-creation-selftest PROPERTIES TIMEOUT 120)
