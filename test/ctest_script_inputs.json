@@ -2106,6 +2106,7 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
+    "PulpHostMidiProbe_AU",
     "PulpHostProbe_AU",
     "PulpHostProbe_CLAP",
     "PulpHostProbe_VST3"
