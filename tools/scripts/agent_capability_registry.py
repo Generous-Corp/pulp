@@ -181,6 +181,28 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/signal/spectrum_analyzer.hpp",
+        "fingerprint": "sha256:f9b372d037fc8a698cd4e7d36805422a3bf2037aeaeb2e600ceb6892e6350f58",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Display-side spectrum analysis behind SpectrumView: a lock-free sample "
+            "tap for the audio thread plus UI-thread windowed FFT, level modes and "
+            "time-based release; analysis for drawing, not a generator capability."
+        ),
+    },
+    {
+        "include": "pulp/signal/spectrum_bin_mapping.hpp",
+        "fingerprint": "sha256:1e4977f44a6ea834278ee0a9d505e9dca3d0af8c82acc792fab9361b7e00e235",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Maps FFT magnitude bins onto the columns of a log-frequency display "
+            "(parabolic interpolation, fractional-edge aggregation); shared by "
+            "SpectrumView and EqCurveView, with no generator capability claim."
+        ),
+    },
+    {
         'include': 'pulp/host/plugin_identity.hpp',
         'fingerprint': 'sha256:f5d1fe9c5e8038b5cbb564170a8cb23fe7abb79b0c6009f5f6ec8b0d8b578060',
         'disposition': 'infrastructure',
@@ -303,6 +325,40 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "infrastructure that sample, impulse-response and offline-render "
             "capabilities consume; it is not an independently selected "
             "generator-facing capability in the installed contract."
+        ),
+    },
+    {
+        "include": "pulp/audio/mmap_reader.hpp",
+        "fingerprint": "sha256:e690b373b06a9a9b87d68702f1c6b31e1bfc2f6c8df565194c325bc38cf71478",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Memory-mapped, snapshot-backed ranged audio file reading is host "
+            "infrastructure that sample streaming consumes; it is not an "
+            "independently selected generator-facing capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/streaming_sample_source_file.hpp",
+        "fingerprint": "sha256:2e0b805a65e4e5c0197bb41c9c196214e67dd064b7e07d394bacbf2472ac8f90",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Binding a memory-mapped file to a StreamingSampleSource frame reader "
+            "is host infrastructure for sampler playback; it is not an "
+            "independently selected generator-facing capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/audio_reader.hpp",
+        "fingerprint": "sha256:33c68086a43d7c58391f312a37d363aa1401f8cc9ce2e288baf4382f7bd680ac",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Ranged audio file decoding (AudioReader over a path, memory or byte "
+            "source, bounded by DecodeLimits) is host infrastructure that sample "
+            "streaming and file playback consume; it is not an independently "
+            "selected generator-facing capability."
         ),
     },
     {

@@ -1705,6 +1705,20 @@ rules:
 - **Thread rules doc.** `docs/reference/host-thread-rules.md` is the
   canonical reference.
 
+## Slot settings and parameter queues on the audio thread
+
+- `PluginHostSettings::deliver_transport` is the one setting the audio thread
+  reads live: `RequestDrivenSlot` mirrors it in an atomic written by
+  `set_host_settings()`. Any other setting a future change reads from
+  `process()` needs the same treatment; the plain `settings_` copy is for
+  `prepare()`.
+- VST3 parameter queues are bounded, not allocation-free. The SDK reserves 5
+  points per queue and `setMaxParameters()` preallocates max(parameter count,
+  16) queues; more points for one parameter in a block, or more distinct
+  parameters, grows a vector on the audio thread once. Clear
+  `in_param_changes_` every block (it is, at the top of `process_request()`)
+  so the growth stops at the busiest block.
+
 ## Hosted plugin editors
 
 `EditorAttachment::create(slot, window)` embeds a hosted plugin's own GUI.
