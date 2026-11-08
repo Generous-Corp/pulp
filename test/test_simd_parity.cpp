@@ -568,6 +568,10 @@ TEMPLATE_TEST_CASE("pulp::simd empty ranges and zero-tap filters", "[simd][parit
         k.replace_above(x, T(0), T(1), y, 0);
         k.interleave2(x, x, y, 0);
         k.deinterleave2(x, y, y, 0);
+        // Null buffers with a zero length (an empty std::vector's data()).
+        T* none = nullptr;
+        k.interleave2(none, none, none, 0);
+        k.deinterleave2(none, none, none, 0);
         std::int16_t s16[4] = {7, 7, 7, 7};
         std::int32_t s32[4] = {7, 7, 7, 7};
         k.to_int16(x, T(1), s16, 0);

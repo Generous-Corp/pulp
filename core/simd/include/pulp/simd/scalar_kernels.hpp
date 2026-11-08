@@ -529,27 +529,41 @@ template <typename T> inline void wrap_phase_impl(const T* x, T* dst, std::size_
 // Complex kernels: interleaved (re, im, re, im, ...) and split layouts.
 #define PULP_SIMD_SCALAR_DEFINE_COMPLEX(SPEC, T)                                                   \
     SPEC void complex_multiply(const T* a, const T* b, T* dst, std::size_t n) noexcept {           \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
         ::pulp::simd::detail::complex_multiply_impl(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n); \
     }                                                                                              \
     SPEC void complex_multiply_conj(const T* a, const T* b, T* dst, std::size_t n) noexcept {      \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
         ::pulp::simd::detail::complex_multiply_conj_impl(a, a + 1, 2, b, b + 1, 2, dst, dst + 1,   \
                                                          2, n);                                    \
     }                                                                                              \
     SPEC void complex_multiply_accumulate(const T* a, const T* b, T* acc,                          \
                                           std::size_t n) noexcept {                                \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
         ::pulp::simd::detail::complex_multiply_accumulate_impl(a, a + 1, 2, b, b + 1, 2, acc,      \
                                                                acc + 1, 2, n);                     \
     }                                                                                              \
     SPEC void complex_magnitude(const T* z, T* dst, std::size_t n) noexcept {                      \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
         ::pulp::simd::detail::complex_magnitude_impl(z, z + 1, 2, dst, n);                         \
     }                                                                                              \
     SPEC void complex_magnitude_squared(const T* z, T* dst, std::size_t n) noexcept {              \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
         ::pulp::simd::detail::complex_magnitude_squared_impl(z, z + 1, 2, T(1), dst, n);           \
     }                                                                                              \
     SPEC void complex_phase(const T* z, T* dst, std::size_t n) noexcept {                          \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
         ::pulp::simd::detail::complex_phase_impl(z, z + 1, 2, dst, n);                             \
     }                                                                                              \
     SPEC void complex_power_spectrum(const T* z, T scale, T* dst, std::size_t n) noexcept {        \
+        if (n == 0)                                                                                \
+            return; /* z + 1 on an empty (null) buffer is undefined */                             \
         ::pulp::simd::detail::complex_magnitude_squared_impl(z, z + 1, 2, scale, dst, n);          \
     }                                                                                              \
     SPEC void complex_multiply_split(const T* a_re, const T* a_im, const T* b_re, const T* b_im,   \

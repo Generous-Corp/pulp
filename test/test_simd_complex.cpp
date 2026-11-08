@@ -412,6 +412,24 @@ TEMPLATE_TEST_CASE("pulp::simd complex kernels leave empty ranges alone", "[simd
         k.magnitude_squared_split(x, x, y, 0);
         k.phase_split(x, x, y, 0);
         k.power_spectrum_split(x, x, T(2), y, 0);
+        // An empty std::vector's data() is null: a zero-length call on null
+        // buffers must not form an offset pointer (UBSan pointer-overflow).
+        const T* cn = nullptr;
+        T* n0 = nullptr;
+        k.multiply(cn, cn, n0, 0);
+        k.multiply_conj(cn, cn, n0, 0);
+        k.multiply_accumulate(cn, cn, n0, 0);
+        k.magnitude(cn, n0, 0);
+        k.magnitude_squared(cn, n0, 0);
+        k.phase(cn, n0, 0);
+        k.power_spectrum(cn, T(2), n0, 0);
+        k.multiply_split(cn, cn, cn, cn, n0, n0, 0);
+        k.multiply_conj_split(cn, cn, cn, cn, n0, n0, 0);
+        k.multiply_accumulate_split(cn, cn, cn, cn, n0, n0, 0);
+        k.magnitude_split(cn, cn, n0, 0);
+        k.magnitude_squared_split(cn, cn, n0, 0);
+        k.phase_split(cn, cn, n0, 0);
+        k.power_spectrum_split(cn, cn, T(2), n0, 0);
         for (int i = 0; i < 4; ++i) {
             CHECK(y[i] == canary);
             CHECK(w[i] == canary);

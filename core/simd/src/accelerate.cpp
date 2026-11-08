@@ -532,12 +532,12 @@ inline void power_strided(const float* re, const float* im, std::size_t s, float
         vDSP_vsmul(dst, 1, &scale, dst, 1, len(n));
 }
 
+// vDSP_zvabs finishes the last elements on a different path from the body on
+// some machines (seen on the CI runners, not on every Apple CPU), so a result
+// would depend on its position; the plain loop uses one formula throughout.
 inline void mag_strided(const float* re, const float* im, std::size_t s, float* dst,
                         std::size_t n) noexcept {
-    if (n == 0)
-        return;
-    const auto a = as_split(re, im);
-    vDSP_zvabs(&a, static_cast<vDSP_Stride>(s), dst, 1, len(n));
+    detail::complex_magnitude_impl(re, im, s, dst, n);
 }
 
 inline void phase_strided(const float* re, const float* im, std::size_t s, float* dst,
@@ -551,25 +551,39 @@ inline void phase_strided(const float* re, const float* im, std::size_t s, float
 } // namespace
 
 void complex_multiply(const float* a, const float* b, float* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     cmul_strided(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n, false);
 }
 void complex_multiply_conj(const float* a, const float* b, float* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     cmul_strided(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n, true);
 }
 void complex_multiply_accumulate(const float* a, const float* b, float* acc,
                                  std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     cmac_strided(a, a + 1, 2, b, b + 1, 2, acc, acc + 1, 2, n);
 }
 void complex_magnitude(const float* z, float* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     mag_strided(z, z + 1, 2, dst, n);
 }
 void complex_magnitude_squared(const float* z, float* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     power_strided(z, z + 1, 2, float(1), dst, n);
 }
 void complex_phase(const float* z, float* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     phase_strided(z, z + 1, 2, dst, n);
 }
 void complex_power_spectrum(const float* z, float scale, float* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     power_strided(z, z + 1, 2, scale, dst, n);
 }
 void complex_multiply_split(const float* a_re, const float* a_im, const float* b_re,
@@ -667,25 +681,39 @@ inline void phase_strided(const double* re, const double* im, std::size_t s, dou
 } // namespace
 
 void complex_multiply(const double* a, const double* b, double* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     cmul_strided(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n, false);
 }
 void complex_multiply_conj(const double* a, const double* b, double* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     cmul_strided(a, a + 1, 2, b, b + 1, 2, dst, dst + 1, 2, n, true);
 }
 void complex_multiply_accumulate(const double* a, const double* b, double* acc,
                                  std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     cmac_strided(a, a + 1, 2, b, b + 1, 2, acc, acc + 1, 2, n);
 }
 void complex_magnitude(const double* z, double* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     mag_strided(z, z + 1, 2, dst, n);
 }
 void complex_magnitude_squared(const double* z, double* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     power_strided(z, z + 1, 2, double(1), dst, n);
 }
 void complex_phase(const double* z, double* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     phase_strided(z, z + 1, 2, dst, n);
 }
 void complex_power_spectrum(const double* z, double scale, double* dst, std::size_t n) noexcept {
+    if (n == 0)
+        return; // z + 1 on an empty (null) buffer is undefined
     power_strided(z, z + 1, 2, scale, dst, n);
 }
 void complex_multiply_split(const double* a_re, const double* a_im, const double* b_re,
