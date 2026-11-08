@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 203,
+  "inventory_version": 205,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 534,
-    "reviewed_headers": 294,
-    "legacy_unreviewed_headers": 240,
+    "reviewed_headers": 295,
+    "legacy_unreviewed_headers": 239,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 121,
       "capability_support": 46,
-      "infrastructure": 125,
-      "legacy_unreviewed": 240,
+      "infrastructure": 126,
+      "legacy_unreviewed": 239,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 281,
-        "reviewed_headers": 158,
-        "legacy_unreviewed_headers": 123,
+        "reviewed_headers": 159,
+        "legacy_unreviewed_headers": 122,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -4673,11 +4673,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectrogram.hpp",
-      "fingerprint": "sha256:592fcb82978e0186489600456ab44b71be9a416715b88ea3921265de739a538b",
+      "fingerprint": "sha256:928fb4ed526f927080f952f5290b7508d79ad4cf2e94aa0c433cdb1a9f20f78f",
       "include": "pulp/signal/spectrogram.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Spectrogram display math: colour ramps and bin-to-display frequency axis mapping for the realtime visualization bridge and the offline audio image renderers. It draws spectra that other capabilities compute; it is not a generator-facing DSP transform or a graph contract. The double-precision axis overloads and configurable floor were added for the offline renderers without changing the float API."
     },
     {
       "domain": "signal",
