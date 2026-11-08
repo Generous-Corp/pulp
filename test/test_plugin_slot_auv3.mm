@@ -580,3 +580,20 @@ TEST_CASE("AUv3 slot lets a restored state win over a host edit not yet rendered
         CHECK(settles_to(*slot, time, 0.5f));
     }
 }
+
+TEST_CASE("AUv3 slot counts host edits that did not fit the next-block queue", "[host][auv3]") {
+    auto slot = load("aufx:dely:appl", false);
+    REQUIRE(slot->prepare(kRate, kFrames));
+    const auto time = param_named(*slot, "Delay Time");
+    const auto before = slot->dropped_parameter_edit_count();
+    // 1100 edits with no block in between: the queue holds 1024.
+    for (int i = 0; i < 1100; ++i)
+        slot->set_parameter(time, 0.5f + 0.001f * (float)(i % 100));
+    CHECK(slot->dropped_parameter_edit_count() - before == 1100 - 1024);
+    // A block drains the queue; later edits fit again.
+    Stereo s;
+    s.run(*slot);
+    const auto after_drain = slot->dropped_parameter_edit_count();
+    slot->set_parameter(time, 0.75f);
+    CHECK(slot->dropped_parameter_edit_count() == after_drain);
+}

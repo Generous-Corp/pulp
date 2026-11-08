@@ -219,7 +219,11 @@ applies to it:
 - **Host edits reach the audio at the next block.** `set_parameter()` writes
   the parameter and also queues the value for the next block, which delivers
   it through `scheduleParameterBlock` with the render request, so the audio
-  follows a host edit at the next block in or out of process. A read straight
+  follows a host edit at the next block in or out of process. That queue
+  holds 1024 edits between blocks; an edit that does not fit still reaches
+  the plugin through its parameter write, and is counted in
+  `dropped_parameter_edit_count()` with the plugin edits the slot could not
+  hand on. A read straight
   after a write may briefly show the previous value out of process, while the
   remote unit confirms it.
 - **A plugin that dies.** When the plugin's process exits, the system posts

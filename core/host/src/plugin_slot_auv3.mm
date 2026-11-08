@@ -535,6 +535,14 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
         visitor.visit_audio_unit_v3(*this, ext);
     }
 
+    /// The plugin's edits that the inbox dropped, plus host edits that did not
+    /// fit the next-block queue. A dropped host edit still reached the plugin
+    /// through its parameter write; only the block-accurate delivery was lost.
+    std::uint64_t dropped_parameter_edit_count() const noexcept override {
+        return RequestDrivenSlot::dropped_parameter_edit_count() +
+               edits_dropped_.load(std::memory_order_relaxed);
+    }
+
     void begin_process() noexcept override {
         process_status_.store(ProcessStatus::ok, std::memory_order_release);
     }
