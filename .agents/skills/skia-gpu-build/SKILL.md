@@ -292,7 +292,10 @@ shipping artifact.
   https://api.github.com/...`. Before any of that, a valid cached generation
   under `--cache-root` is used with no network at all
   (`OK: immutable Skia cache generation ready`), so only cold hosts download. The API path uses `GITHUB_TOKEN` or `GH_TOKEN` when
-  set and works without one. The pinned sha256 check applies to either source. A
+  set and works without one. The macOS gate's sandboxed configure has no token,
+  so there the fallback is anonymous and shares GitHub's limit of 60 API
+  requests per hour per IP; an exhausted limit is reported as `GitHub API rate
+  limit reached` with its reset time. The pinned sha256 check applies to either source. A
   failure that survives both names both sources, so read it literally: a 404 from
   both means the pin names a missing or revoked asset. An `OSError` is never
   retried or sent to the second source because it is usually a full disk rather

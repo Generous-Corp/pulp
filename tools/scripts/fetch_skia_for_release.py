@@ -748,7 +748,10 @@ def download_via_github_api(url: str, zip_path: Path, *, sleep=None) -> str:
                 _api_request(release_url, "application/vnd.github+json", token),
                 meta_path, sleep=sleep)
         except urllib.error.HTTPError as err:
-            if not token or err.code != 401:
+            # 401: a stale token. 403: a job token without access to this
+            # repository, or one whose own budget is spent. The asset is
+            # public, so one anonymous retry is strictly better than failing.
+            if not token or err.code not in (401, 403):
                 raise
             token = None
             download_release_asset(
@@ -757,7 +760,13 @@ def download_via_github_api(url: str, zip_path: Path, *, sleep=None) -> str:
         release = json.loads(meta_path.read_text(encoding="utf-8"))
     finally:
         meta_path.unlink(missing_ok=True)
-    asset_ids = [asset.get("id") for asset in release.get("assets", [])
+    if not isinstance(release, dict):
+        raise AssetDownloadError(
+            f"release lookup for {tag!r} returned {type(release).__name__}, not an object")
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        raise AssetDownloadError(f"release lookup for {tag!r} returned no asset list")
+    asset_ids = [asset.get("id") for asset in assets
                  if isinstance(asset, dict) and asset.get("name") == name]
     if len(asset_ids) != 1 or not isinstance(asset_ids[0], int):
         raise AssetDownloadError(f"release {tag!r} has no single asset named {name!r}")
@@ -765,6 +774,32 @@ def download_via_github_api(url: str, zip_path: Path, *, sleep=None) -> str:
     download_release_asset(_api_request(asset_url, "application/octet-stream", token),
                            zip_path, sleep=sleep)
     return asset_url
+
+
+def _describe_api_error(error: BaseException) -> str:
+    """Name a GitHub API rate limit instead of reporting a bare 403/429."""
+    if not isinstance(error, urllib.error.HTTPError) or error.code not in (403, 429):
+        return str(error)
+    headers = error.headers
+    if headers is None:
+        return str(error)
+    remaining = headers.get("X-RateLimit-Remaining")
+    retry_after = headers.get("Retry-After")
+    if str(remaining).strip() != "0" and retry_after is None:
+        return str(error)
+    reset = headers.get("X-RateLimit-Reset")
+    if reset is not None:
+        try:
+            when = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(str(reset).strip())))
+        except (ValueError, OverflowError, OSError):
+            when = str(reset)
+        detail = f"resets at {when}"
+    elif retry_after is not None:
+        detail = f"retry after {str(retry_after).strip()}s"
+    else:
+        detail = "no reset time given"
+    return (f"GitHub API rate limit reached (HTTP {error.code}; {detail}); "
+            "an anonymous caller gets 60 requests per hour per IP")
 
 
 def download_with_fallback(url: str, zip_path: Path, *, sleep=None) -> str:
@@ -794,7 +829,7 @@ def download_with_fallback(url: str, zip_path: Path, *, sleep=None) -> str:
         raise AssetDownloadError(
             "every Skia asset source failed: "
             f"release download URL {url}: {primary}; "
-            f"GitHub API asset endpoint: {fallback_error}"
+            f"GitHub API asset endpoint: {_describe_api_error(fallback_error)}"
         ) from fallback_error
 
 

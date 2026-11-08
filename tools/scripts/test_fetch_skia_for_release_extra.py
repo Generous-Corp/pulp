@@ -749,6 +749,60 @@ class DownloadFallbackSource(unittest.TestCase):
         self.assertEqual(source, _GH_ASSET)
         self.assertIsNone(fake.calls[-1].get_header("Authorization"))
 
+    def test_a_forbidden_token_retries_anonymously_once(self) -> None:
+        os.environ["GITHUB_TOKEN"] = "job-token-without-access"
+        fake = _FakeGitHub({_GH_URL: [_http_error(404)],
+                            _GH_RELEASE: [_http_error(403), _release_json()],
+                            _GH_ASSET: [self.payload]})
+        source, _ = self._run(fake)
+        self.assertEqual(source, _GH_ASSET)
+        self.assertEqual(fake.urls().count(_GH_RELEASE), 2)
+        self.assertIsNone(fake.calls[-1].get_header("Authorization"))
+
+    def test_a_second_refusal_is_not_retried_again(self) -> None:
+        os.environ["GITHUB_TOKEN"] = "job-token"
+        fake = _FakeGitHub({_GH_URL: [_http_error(404)],
+                            _GH_RELEASE: [_http_error(403)]})
+        with self.assertRaises(skia.AssetDownloadError):
+            self._run(fake)
+        self.assertEqual(fake.urls().count(_GH_RELEASE), 2)
+
+    def test_an_exhausted_rate_limit_is_named_with_its_reset_time(self) -> None:
+        limited = _http_error(403)
+        limited.headers["X-RateLimit-Remaining"] = "0"
+        limited.headers["X-RateLimit-Reset"] = "1794142800"
+        fake = _FakeGitHub({_GH_URL: [_http_error(504)], _GH_RELEASE: [limited]})
+        with self.assertRaises(skia.AssetDownloadError) as raised:
+            self._run(fake)
+        message = str(raised.exception)
+        self.assertIn("GitHub API rate limit reached", message)
+        self.assertIn("resets at 2026-11-08T13:00:00Z", message)
+        self.assertIn(_GH_URL, message)
+
+    def test_a_429_with_retry_after_is_named_as_a_rate_limit(self) -> None:
+        fake = _FakeGitHub({_GH_URL: [_http_error(404)],
+                            _GH_RELEASE: [_http_error(429, retry_after="17")]})
+        with self.assertRaises(skia.AssetDownloadError) as raised:
+            self._run(fake)
+        self.assertIn("GitHub API rate limit reached (HTTP 429; retry after 17s)",
+                      str(raised.exception))
+
+    def test_a_plain_403_is_not_called_a_rate_limit(self) -> None:
+        fake = _FakeGitHub({_GH_URL: [_http_error(404)], _GH_RELEASE: [_http_error(403)]})
+        with self.assertRaises(skia.AssetDownloadError) as raised:
+            self._run(fake)
+        self.assertNotIn("rate limit", str(raised.exception))
+        self.assertIn("HTTP Error 403", str(raised.exception))
+
+    def test_a_malformed_release_reply_is_a_named_failure(self) -> None:
+        for body in (b"[]", b"42", b'"text"', b'{"assets": {"id": 42}}', b"{}"):
+            with self.subTest(body=body):
+                fake = _FakeGitHub({_GH_URL: [_http_error(404)], _GH_RELEASE: [body]})
+                with self.assertRaises(skia.AssetDownloadError) as raised:
+                    self._run(fake)
+                self.assertIn(_GH_URL, str(raised.exception))
+                self.assertIn("release lookup", str(raised.exception))
+
     def test_a_non_github_url_has_no_fallback(self) -> None:
         fake = _FakeGitHub({"https://example.invalid/skia.zip": [_http_error(504)]})
         with mock.patch.object(skia.urllib.request, "urlopen", side_effect=fake), \
