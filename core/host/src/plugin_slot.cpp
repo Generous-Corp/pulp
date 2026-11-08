@@ -10,7 +10,30 @@
 #include <pulp/runtime/log.hpp>
 #include <choc/text/choc_JSON.h>
 
+#include <mutex>
+
 namespace pulp::host {
+
+namespace {
+std::mutex& host_identity_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+PluginHostIdentity& host_identity_storage() {
+    static PluginHostIdentity identity;
+    return identity;
+}
+} // namespace
+
+void set_plugin_host_identity(PluginHostIdentity identity) {
+    std::lock_guard<std::mutex> lock(host_identity_mutex());
+    host_identity_storage() = std::move(identity);
+}
+
+PluginHostIdentity plugin_host_identity() {
+    std::lock_guard<std::mutex> lock(host_identity_mutex());
+    return host_identity_storage();
+}
 
 #if PULP_HOST_HAS_CLAP
 std::unique_ptr<PluginSlot> load_clap_plugin(const PluginInfo& info);

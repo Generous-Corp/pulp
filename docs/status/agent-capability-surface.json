@@ -1253,7 +1253,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/plugin_slot.hpp",
-      "fingerprint": "sha256:9285bdcc1d97c35e6c8f2871d92eb938322d58d2817e9ed53a624340857df0e9",
+      "fingerprint": "sha256:b36cbc93f6fcad7b30941c958f17b5d72821d96bdc0a5e7b0e957aa13aae4f7b",
       "include": "pulp/host/plugin_slot.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1344,7 +1344,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:36e5f763511909ccda39502aef83c53f812b39b1cb9d602b8bd37f55870cdc30",
+      "fingerprint": "sha256:01afea93d3b0351da04a34fce7d924dddad2bdb769662f1c35dff632e1878b39",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
