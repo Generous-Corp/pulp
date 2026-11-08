@@ -315,8 +315,7 @@ int run(std::string_view mode) {
     if (wrong_buffer) {
         // Planted defect: the consumer reads the replacement buffer where it
         // expects the recorded take.
-        return matches(read_view(regular_bank, new_view)) ? kUndetected
-                                                          : detected("wrong-buffer");
+        return matches(read_view(regular_bank, new_view)) ? kUndetected : detected("wrong-buffer");
     }
     if (stale) {
         // Planted defect: the consumer keeps reading through the retired view
@@ -337,8 +336,7 @@ int run(std::string_view mode) {
 
     std::cout << "G11 capture/publication graph passed: 64 frames, regular/irregular blocks, "
                  "immutable generation "
-              << old_view.generation << " retired by generation " << new_view.generation
-              << '\n';
+              << old_view.generation << " retired by generation " << new_view.generation << '\n';
     return 0;
 }
 
