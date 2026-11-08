@@ -60,14 +60,18 @@
     "tools/cli/cli_sdk.cpp",
     "tools/cli/cmd_audio.cpp",
     "tools/cli/cmd_audio_compare.cpp",
+    "tools/cli/cmd_audio_formats.cpp",
     "tools/cli/cmd_audio_heritage.cpp",
+    "tools/cli/cmd_audio_image_common.cpp",
     "tools/cli/cmd_audio_inspect.cpp",
     "tools/cli/cmd_audio_plugin_common.cpp",
     "tools/cli/cmd_audio_plugin_inspect.cpp",
     "tools/cli/cmd_audio_render.cpp",
     "tools/cli/cmd_audio_render_parse.cpp",
     "tools/cli/cmd_audio_sampler_mip.cpp",
+    "tools/cli/cmd_audio_spectrogram.cpp",
     "tools/cli/cmd_audio_validate.cpp",
+    "tools/cli/cmd_audio_waveform.cpp",
     "tools/cli/cmd_authority.cpp",
     "tools/cli/cmd_bake.cpp",
     "tools/cli/cmd_build.cpp",
@@ -250,13 +254,6 @@
    "spawns": "none",
    "undeclared_sources": []
   },
-  "pulp-test-audio-file-layout": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "sources": [],
-   "undeclared_sources": []
-  },
   "pulp-test-audio-file-layout-containers": {
    "data": "declared",
    "detected_sources": [
@@ -268,6 +265,21 @@
    "kind": "compiled",
    "sources": [
     "test/test_audio_file_layout_containers.cpp"
+   ],
+   "undeclared_sources": []
+  },
+  "pulp-test-audio-image-raster": {
+   "data": "declared",
+   "detected_sources": [
+    "test/test_audio_image_raster.cpp"
+   ],
+   "inputs": [
+    "test/fixtures/audio/images"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/png_rgba_decode_apple.cpp",
+    "test/test_audio_image_raster.cpp"
    ],
    "undeclared_sources": []
   },
@@ -362,6 +374,18 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-clap-slot-process-fidelity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_clap_slot_process_fidelity.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-cli-audio-compare": {
    "data": "declared",
    "detected_sources": [],
@@ -375,6 +399,20 @@
    "sources": [
     "test/test_cli_audio_compare.cpp"
    ],
+   "spawning_sources": [
+    "test/test_cli_shellout_helpers.hpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
+  "pulp-test-cli-audio-image": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli"
+   ],
+   "sources": [],
    "spawning_sources": [
     "test/test_cli_shellout_helpers.hpp"
    ],
@@ -1341,6 +1379,26 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-control-vendor-operations-e2e": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-cli",
+    "pulp-control-vendor-product-fixture",
+    "pulp-mcp"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "inspect/src/control_broker_daemon.cpp",
+    "test/support/control_sample_region_e2e.hpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": [],
+   "unmatched_programs": [
+    "pulp-control-broker"
+   ]
+  },
   "pulp-test-coreaudio-input-only": {
    "data": "declared",
    "detected_sources": [
@@ -2051,6 +2109,21 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-host-probe-bundles": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "PulpHostProbe_CLAP",
+    "PulpHostProbe_VST3"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_host_probe_bundles.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-host-regression": {
    "data": "none",
    "inputs": [],
@@ -2188,6 +2261,20 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-lv2-host-slot": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-test-lv2-host-instrument"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_lv2_host_slot.cpp"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-mac-platform-harness": {
    "data": "declared",
    "detected_sources": [
@@ -2223,6 +2310,7 @@
     "pulp-test-mcp-gpu-probe-fake-cli"
    ],
    "sources": [
+    "test/test_mcp_audio_tools.cpp",
     "test/test_mcp_control_adapter.cpp",
     "test/test_mcp_server.cpp"
    ],
@@ -2706,6 +2794,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-vst3-slot-process-fidelity": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_vst3_slot_process_fidelity.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-voice-template": {
    "data": "none",
    "inputs": [],
@@ -2832,6 +2932,7 @@
   "pulp-test-audio-edge-cases",
   "pulp-test-audio-file-layout",
   "pulp-test-audio-file-layout-containers",
+  "pulp-test-audio-image-raster",
   "pulp-test-audio-matrix",
   "pulp-test-audio-probe",
   "pulp-test-audio-reader-idle-wakeups",
@@ -2868,9 +2969,11 @@
   "pulp-test-clap-latency-quirk",
   "pulp-test-clap-midi-events",
   "pulp-test-clap-slot-channel-width",
+  "pulp-test-clap-slot-process-fidelity",
   "pulp-test-clap-webview",
   "pulp-test-cli-au-info-plist",
   "pulp-test-cli-audio-compare",
+  "pulp-test-cli-audio-image",
   "pulp-test-cli-audio-inspect",
   "pulp-test-cli-audio-latency",
   "pulp-test-cli-audio-validate",
@@ -2966,6 +3069,7 @@
   "pulp-test-control-timeline-document-session",
   "pulp-test-control-trusted-host-e2e",
   "pulp-test-control-trusted-host-inventory",
+  "pulp-test-control-vendor-operations-e2e",
   "pulp-test-convolver-bg-swap",
   "pulp-test-coreaudio-default-follow",
   "pulp-test-coreaudio-input-only",
@@ -3188,10 +3292,12 @@
   "pulp-test-headless-surface",
   "pulp-test-host",
   "pulp-test-host-param-surface",
+  "pulp-test-host-probe-bundles",
   "pulp-test-host-regression",
   "pulp-test-host-signal-graph",
   "pulp-test-hosted-editor-container-adopt",
   "pulp-test-hosted-editor-migration",
+  "pulp-test-hosted-slot-process-request",
   "pulp-test-identity",
   "pulp-test-image-codecs-extended",
   "pulp-test-image-decode",
@@ -3223,6 +3329,7 @@
   "pulp-test-lv2-adapter",
   "pulp-test-lv2-bundle-discovery-e2e",
   "pulp-test-lv2-host-discovery",
+  "pulp-test-lv2-host-slot",
   "pulp-test-lv2-rt",
   "pulp-test-mac-hover-cursor-live",
   "pulp-test-mac-platform-harness",
@@ -3279,6 +3386,7 @@
   "pulp-test-osc-minblep",
   "pulp-test-osc-parameter-map",
   "pulp-test-osc-render-wav-cli",
+  "pulp-test-panic-button",
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
@@ -3351,6 +3459,7 @@
   "pulp-test-signal-additive-bank",
   "pulp-test-signal-analysis-frontends",
   "pulp-test-signal-blit-oscillator-no-exceptions",
+  "pulp-test-signal-breakpoint-sustain",
   "pulp-test-signal-chorus-family",
   "pulp-test-signal-comb-filter",
   "pulp-test-signal-cyclic-stretch",
@@ -3395,8 +3504,10 @@
   "pulp-test-signal-vocoder",
   "pulp-test-signal-zero-latency-convolver",
   "pulp-test-simd",
+  "pulp-test-simd-complex",
   "pulp-test-simd-header-fallback",
   "pulp-test-simd-lanes-portable",
+  "pulp-test-simd-math",
   "pulp-test-simd-parity",
   "pulp-test-simd-signal-link",
   "pulp-test-six-band-eq",
@@ -3424,6 +3535,7 @@
   "pulp-test-super-convolver-dsp",
   "pulp-test-super-convolver-web-cpu",
   "pulp-test-super-convolver-web-gpu",
+  "pulp-test-superflux-onset",
   "pulp-test-svg-path-range-orientation-1899",
   "pulp-test-svg-primitives-1926",
   "pulp-test-synthesiser",
@@ -3481,6 +3593,7 @@
   "pulp-test-vst3-param-display",
   "pulp-test-vst3-plugin-state",
   "pulp-test-vst3-program-list",
+  "pulp-test-vst3-slot-process-fidelity",
   "pulp-test-vst3-state-sync",
   "pulp-test-wam-adapter",
   "pulp-test-wam-wclap",
@@ -3759,6 +3872,21 @@
    "inputs": [
     "test/fixtures/agent-panels/magneto",
     "tools/import-validation/check_agent_panel_invariants.py"
+   ],
+   "kind": "python"
+  },
+  "android-fixture-lane-selftest": {
+   "entry": "tools/ci/test_android_fixture_lane.py",
+   "inputs": [
+    "tools/ci/android-fixture-lane.sh",
+    "tools/ci/test_android_fixture_lane.py"
+   ],
+   "kind": "python"
+  },
+  "android-fixture-marker-selftest": {
+   "entry": "tools/ci/test_android_fixture_marker.py",
+   "inputs": [
+    "tools/ci/test_android_fixture_marker.py"
    ],
    "kind": "python"
   },
@@ -5251,6 +5379,7 @@
     "core/state/src/store.cpp",
     "core/view",
     "core/view/src/view.cpp",
+    "test/cmake/test_installed_sdk_runtime_staging.cmake",
     "test/test_cli_shellout.cpp",
     "test/test_runtime.cpp",
     "test/test_state.cpp",
@@ -7094,6 +7223,14 @@
     "tools/scripts/git_read_memo.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "graph-stall-guard-selftest": {
+   "entry": "tools/graph/test_graph_stall_guard.py",
+   "inputs": [
+    "tools/graph/graph_stall_guard.py",
+    "tools/graph/test_graph_stall_guard.py"
    ],
    "kind": "python"
   },
@@ -11024,8 +11161,10 @@
     "core/events/src/timer.cpp",
     "core/events/src/volume_detector.cpp",
     "core/format/include/pulp/format/audio_workgroup_client.hpp",
+    "core/format/include/pulp/format/editor_host.hpp",
     "core/format/include/pulp/format/graph_runtime_executor.hpp",
     "core/format/include/pulp/format/graph_runtime_worker_pool.hpp",
+    "core/format/include/pulp/format/native_surface_host.hpp",
     "core/format/include/pulp/format/note_name.hpp",
     "core/format/include/pulp/format/plugin_descriptor.hpp",
     "core/format/include/pulp/format/prepare_resources.hpp",
@@ -11855,8 +11994,10 @@
     "core/events/src/timer.cpp",
     "core/events/src/volume_detector.cpp",
     "core/format/include/pulp/format/audio_workgroup_client.hpp",
+    "core/format/include/pulp/format/editor_host.hpp",
     "core/format/include/pulp/format/graph_runtime_executor.hpp",
     "core/format/include/pulp/format/graph_runtime_worker_pool.hpp",
+    "core/format/include/pulp/format/native_surface_host.hpp",
     "core/format/include/pulp/format/note_name.hpp",
     "core/format/include/pulp/format/plugin_descriptor.hpp",
     "core/format/include/pulp/format/prepare_resources.hpp",
@@ -13602,6 +13743,15 @@
     "tools/ci/net-retry.sh",
     "tools/scripts/test_vellum_workflow_dispatch.py",
     "tools/scripts/vellum_trusted_merge.py"
+   ],
+   "kind": "python"
+  },
+  "vendored-lilv-selftest": {
+   "entry": "tools/deps/test_verify_vendored_lilv.py",
+   "inputs": [
+    "external/lilv",
+    "tools/deps/test_verify_vendored_lilv.py",
+    "tools/deps/verify_vendored_lilv.py"
    ],
    "kind": "python"
   },

@@ -28,10 +28,11 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 from typing import Any
+
+from .external_tools import resolve_env_binary
 
 VISQOL_ENV = "PULP_VISQOL_BIN"
 # ViSQOL's audio mode is defined at 48 kHz, and its own WAV reader
@@ -45,13 +46,7 @@ AQUATK_ENV = "PULP_AQUATK_BIN"
 
 
 def _resolve(env_var: str) -> tuple[str | None, str]:
-    path = os.environ.get(env_var, "").strip()
-    if not path:
-        return None, f"{env_var} not set (opt-in perceptual model; skipping)"
-    resolved = shutil.which(path) or (path if os.path.exists(path) else None)
-    if not resolved:
-        return None, f"{env_var}={path} not found on disk/PATH; skipping"
-    return resolved, ""
+    return resolve_env_binary(env_var, "perceptual model")
 
 
 _VERSION_TRIPLE = re.compile(r"\b\d+\.\d+\.\d+\b")

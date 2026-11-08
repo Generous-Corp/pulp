@@ -48,6 +48,7 @@ class StateStore;
 namespace pulp::format {
 
 class ContractEditorSession;
+class NativeSurfaceHostState;
 
 /// The contract sessions one adapter instance opened that a host still holds.
 ///
@@ -184,7 +185,15 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     /// Offer a key. Forward when not attached.
     KeyDisposition offer_key(const EditorKeyEvent& event);
     void focus_changed(bool focused);
+    /// Tell the editor its window was shown or hidden, and record it in the
+    /// native-surface extension.
     void visibility_changed(bool visible);
+
+    /// The `dev.pulp.native_surface/1` state this session offers its editor,
+    /// for an adapter that knows the window's display or refresh rate. Null
+    /// after `invalidate()` or `close_for_owner()`. `set_scale()` and
+    /// `visibility_changed()` already feed it.
+    NativeSurfaceHostState* native_surface_host();
 
   private:
     friend class ContractSessionRegistry;
