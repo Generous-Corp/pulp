@@ -49,6 +49,19 @@ void write_file(const fs::path& path, const std::string& body) {
     out << body;
 }
 
+// LV2 bundles are found through manifest.ttl, which names the plugin, its
+// binary, and the files that describe it.
+void write_manifest(const fs::path& bundle, const std::string& uri, const std::string& binary,
+                    const std::vector<std::string>& see_also) {
+    std::string body = "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n"
+                       "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n<" +
+                       uri + ">\n    a lv2:Plugin ;\n    lv2:binary <" + binary + ">";
+    for (const auto& file : see_also)
+        body += " ;\n    rdfs:seeAlso <" + file + ">";
+    body += " .\n";
+    write_file(bundle / "manifest.ttl", body);
+}
+
 #if defined(PULP_TEST_LV2_SLOT_PROBE_BUNDLE) && defined(PULP_TEST_LV2_SLOT_PROBE_BINARY)
 
 const pulp::host::HostParamInfo* find_param(
@@ -157,6 +170,7 @@ TEST_CASE("LV2 host discovery parses audio and control port roles",
     const auto bundle = scratch.path / "Probe.lv2";
     fs::create_directories(bundle);
 
+    write_manifest(bundle, "http://example.com/pulp/probe", "probe.so", {"plugin.ttl"});
     write_file(bundle / "plugin.ttl", R"TTL(
 @prefix lv2: <http://lv2plug.in/ns/lv2core#> .
 
@@ -166,16 +180,19 @@ TEST_CASE("LV2 host discovery parses audio and control port roles",
     [
         a lv2:InputPort , lv2:AudioPort ;
         lv2:index 0 ;
+        lv2:symbol "in_l" ;
         lv2:name "Input L"
     ] ,
     [
         a lv2:OutputPort , lv2:AudioPort ;
         lv2:index 1 ;
+        lv2:symbol "out_l" ;
         lv2:name "Output L"
     ] ,
     [
         a lv2:InputPort , lv2:ControlPort ;
         lv2:index 2 ;
+        lv2:symbol "gain" ;
         lv2:name "Gain" ;
         lv2:default 0.75 ;
         lv2:minimum -1.0 ;
@@ -184,6 +201,7 @@ TEST_CASE("LV2 host discovery parses audio and control port roles",
     [
         a lv2:OutputPort , lv2:ControlPort ;
         lv2:index 3 ;
+        lv2:symbol "meter" ;
         lv2:name "Meter" ;
         lv2:default 0.0 ;
         lv2:minimum 0.0 ;
@@ -222,22 +240,24 @@ TEST_CASE("LV2 host discovery parses audio and control port roles",
     REQUIRE(roles[3].name == "Meter");
 }
 
-TEST_CASE("LV2 host discovery resolves shared objects from bundle roots",
-          "[host][lv2][issue-493]") {
+TEST_CASE("LV2 host discovery resolves the binary the manifest names", "[host][lv2][issue-493]") {
     ScratchDir scratch("binary");
     const auto bundle = scratch.path / "Binary.lv2";
     fs::create_directories(bundle);
     write_file(bundle / "README.txt", "not loadable");
+    write_file(bundle / "decoy.so", "a module the manifest does not name");
 
+    // No manifest: an LV2 host sees no plugin, so there is no binary.
     REQUIRE(pulp::host::detail::resolve_lv2_binary(bundle.string()).empty());
 
     const auto so = bundle / "pulp-probe.so";
     write_file(so, "not a real shared library");
-    REQUIRE(pulp::host::detail::resolve_lv2_binary(bundle.string()) == so.string());
+    write_manifest(bundle, "http://example.com/pulp/binary", "pulp-probe.so", {});
+    REQUIRE(fs::canonical(pulp::host::detail::resolve_lv2_binary(bundle.string())) ==
+            fs::canonical(so));
 }
 
-TEST_CASE("LV2 host discovery tolerates sparse bundles and dylib modules",
-          "[host][lv2]") {
+TEST_CASE("LV2 host discovery merges descriptions split across files", "[host][lv2]") {
     ScratchDir scratch("sparse");
     const auto missing = scratch.path / "Missing.lv2";
 
@@ -246,7 +266,10 @@ TEST_CASE("LV2 host discovery tolerates sparse bundles and dylib modules",
 
     const auto bundle = scratch.path / "Sparse.lv2";
     fs::create_directories(bundle);
+    // Not referenced by the manifest, so never read.
     write_file(bundle / "broken.ttl", "[");
+    write_manifest(bundle, "http://example.com/pulp/sparse", "sparse.dylib",
+                   {"metadata.ttl", "ports.ttl"});
     write_file(bundle / "metadata.ttl", R"TTL(
 @prefix lv2: <http://lv2plug.in/ns/lv2core#> .
 
@@ -255,7 +278,8 @@ TEST_CASE("LV2 host discovery tolerates sparse bundles and dylib modules",
     lv2:port
     [
         a lv2:InputPort , lv2:ControlPort ;
-        lv2:index 8 ;
+        lv2:index 0 ;
+        lv2:symbol "bare" ;
         lv2:name "Bare Control"
     ] .
 )TTL");
@@ -266,7 +290,8 @@ TEST_CASE("LV2 host discovery tolerates sparse bundles and dylib modules",
     lv2:port
     [
         a lv2:OutputPort , lv2:AudioPort ;
-        lv2:index 3 ;
+        lv2:index 1 ;
+        lv2:symbol "out" ;
         lv2:name "Out"
     ] .
 )TTL");
@@ -277,24 +302,25 @@ TEST_CASE("LV2 host discovery tolerates sparse bundles and dylib modules",
     const auto roles = pulp::host::detail::discover_lv2_ports(bundle.string());
     REQUIRE(roles.size() == 2);
 
-    const auto control = std::find_if(roles.begin(), roles.end(),
-                                      [](const auto& role) { return role.index == 8; });
+    const auto control =
+        std::find_if(roles.begin(), roles.end(), [](const auto& role) { return role.index == 0; });
     REQUIRE(control != roles.end());
     REQUIRE(control->is_control);
     REQUIRE(control->is_input);
     REQUIRE(control->name == "Bare Control");
+    REQUIRE(control->symbol == "bare");
     REQUIRE_THAT(control->default_value, WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(control->min_value, WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(control->max_value, WithinAbs(1.0f, 1e-6f));
 
-    const auto audio = std::find_if(roles.begin(), roles.end(),
-                                    [](const auto& role) { return role.index == 3; });
+    const auto audio =
+        std::find_if(roles.begin(), roles.end(), [](const auto& role) { return role.index == 1; });
     REQUIRE(audio != roles.end());
     REQUIRE(audio->is_audio);
     REQUIRE_FALSE(audio->is_input);
 
-    REQUIRE(pulp::host::detail::resolve_lv2_binary(bundle.string())
-            == module.string());
+    REQUIRE(fs::canonical(pulp::host::detail::resolve_lv2_binary(bundle.string())) ==
+            fs::canonical(module));
 }
 
 TEST_CASE("LV2 PluginSlot load fails cleanly for invalid bundles",

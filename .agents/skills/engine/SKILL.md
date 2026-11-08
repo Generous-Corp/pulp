@@ -91,6 +91,25 @@ exhaustive for React 18 dev. Add new files to `core/view/CMakeLists.txt`'s
 `core/view/src/widget_bridge.cpp` (`embed_js.cmake` only embeds the
 constants; the bridge constructor evaluates them).
 
+### Native focus changes reach script through `__dispatch__`, once
+
+The bridge constructor installs a focus observer on the root view. Every focus
+change under the root arrives in script as a bridge `focus` or `blur` event on
+the element that gained or lost focus, carrying `cause` (`pointer`, `keyboard`
+or `programmatic`) and `focusVisible`. `__pulpApplyNativeFocus__` in
+`web-compat-element-events.js` turns it into the DOM `focus`, `focusin`,
+`blur` and `focusout` events, updates `document.activeElement`, and keeps the
+element state that `:focus`, `:focus-visible` and `:focus-within` read.
+
+Two consequences when editing this code:
+
+* `focus()` and `blur()` dispatch the DOM events themselves only when no native
+  change happened. If they dispatched unconditionally, a native focus would
+  deliver every event twice.
+* The `focus`, `focusin`, `blur` and `focusout` branches of the native event
+  registration deliberately do nothing. Registering a second dispatcher there
+  would also double every event.
+
 ### Canvas2D surface coverage
 
 `web-compat-canvas.js` exposes `CanvasRenderingContext2D.prototype`

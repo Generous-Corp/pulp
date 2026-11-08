@@ -495,7 +495,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:34c50953762f71aace568a27ea116b4cdfe78e64ac0a4281e7c9329fa5a35e9d',
+                header_fingerprint='sha256:c40206f60bceedb87411df86bd56a92f8e13ad90f2d294a9ec4e39c059c20c91',
             ),
             binding(
                 role='graph_sample_region',
@@ -503,7 +503,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:34c50953762f71aace568a27ea116b4cdfe78e64ac0a4281e7c9329fa5a35e9d',
+                header_fingerprint='sha256:c40206f60bceedb87411df86bd56a92f8e13ad90f2d294a9ec4e39c059c20c91',
             ),
             binding(
                 role='graph_sample_regions',
@@ -511,7 +511,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:34c50953762f71aace568a27ea116b4cdfe78e64ac0a4281e7c9329fa5a35e9d',
+                header_fingerprint='sha256:c40206f60bceedb87411df86bd56a92f8e13ad90f2d294a9ec4e39c059c20c91',
             ),
             binding(
                 role='SampleRegionCandidate',
@@ -691,10 +691,10 @@ EXPORTS = [
         bindings=[
             binding(role="chroma", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
                     qualified_name="pulp::signal::ChromaFrontEndT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:6ebbd05760a83309228a7c7ac5d0ae7e2460529b20e1866295821012f96a56ec"),
+                    header_fingerprint="sha256:1c61b8a488617ee1cde8fd1d8092c0b1533bf55cbce5102d55ae153d40aaeca0"),
             binding(role="onset_novelty", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
                     qualified_name="pulp::signal::OnsetNoveltyFrontEndT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:6ebbd05760a83309228a7c7ac5d0ae7e2460529b20e1866295821012f96a56ec"),
+                    header_fingerprint="sha256:1c61b8a488617ee1cde8fd1d8092c0b1533bf55cbce5102d55ae153d40aaeca0"),
         ],
         _link_probes=[
             {"role": "chroma", "binding": "pulp::signal::ChromaFrontEndT<float>",
@@ -822,7 +822,7 @@ EXPORTS = [
                     header_fingerprint="sha256:da89147c18e3c0479bf02294273bc7ec8ff76bc83cc7e198e645b14fe100a298"),
             binding(role="breakpoint", kind="cpp_type", include="pulp/signal/breakpoint_envelope.hpp",
                     qualified_name="pulp::signal::BreakpointEnvelopeT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:c70262f82754eff2117acabf88d55e8ccc86d0e783d6cea6e04d6af6a671a9f7"),
+                    header_fingerprint="sha256:4f37c4c188e7094d8bf615144d0735a629d26a974f394f40e380a69d82a74c06"),
             binding(role="rise_fall", kind="cpp_type", include="pulp/signal/rise_fall_generator.hpp",
                     qualified_name="pulp::signal::RiseFallGeneratorT<float>", target="Pulp::signal",
                     header_fingerprint="sha256:67185305462aff7fef2f089d00f0bf6eeaa5708436e3f042fca6b8271c4b3fa3"),
