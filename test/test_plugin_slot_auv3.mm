@@ -22,9 +22,11 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <string>
+#include <thread>
 #include <vector>
 
 using pulp::host::PluginFormat;
@@ -70,6 +72,19 @@ bool runs_out_of_process(const PluginSlot& slot) {
     REQUIRE(unit != nil);
     if ([unit respondsToSelector:@selector(isLoadedInProcess)])
         return ![unit isLoadedInProcess];
+    return true;
+}
+
+/// Out of process, a parameter read converges on the last write
+/// asynchronously: the remote unit's acknowledgement of an earlier write can
+/// briefly overwrite the local value. Wait (bounded) for `expected`.
+bool settles_to(const PluginSlot& slot, std::uint32_t id, float expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::abs(slot.get_parameter(id) - expected) >= 1e-4f) {
+        if (std::chrono::steady_clock::now() >= deadline)
+            return false;
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    }
     return true;
 }
 
@@ -122,6 +137,9 @@ struct Stereo {
 @interface PulpTestTreeUnit : AUAudioUnit
 - (void)rebuildTreeWithGeneration:(int)generation;
 @end
+
+// Parameter events the test unit has received through its render block.
+static std::atomic<int> g_tree_unit_parameter_events{0};
 
 @implementation PulpTestTreeUnit {
     AUAudioUnitBusArray* _inputs;
@@ -186,7 +204,11 @@ struct Stereo {
 - (AUInternalRenderBlock)internalRenderBlock {
     return ^AUAudioUnitStatus(AudioUnitRenderActionFlags* flags, const AudioTimeStamp* stamp,
                               AUAudioFrameCount frames, NSInteger bus, AudioBufferList* output,
-                              const AURenderEvent*, AURenderPullInputBlock pull) {
+                              const AURenderEvent* events, AURenderPullInputBlock pull) {
+      for (const AURenderEvent* e = events; e; e = e->head.next)
+          if (e->head.eventType == AURenderEventParameter ||
+              e->head.eventType == AURenderEventParameterRamp)
+              g_tree_unit_parameter_events.fetch_add(1);
       if (!pull)
           return kAudioUnitErr_NoConnection;
       return pull(flags, stamp, frames, 0, output);
@@ -221,13 +243,23 @@ TEST_CASE("AUv3 slot runs Apple's AUDelay out of process", "[host][auv3][oop]") 
     REQUIRE(slot->prepare(kRate, kFrames));
 
     // All dry: the plugin's output is its input, so audio crossed the process
-    // boundary both ways, sample for sample.
+    // boundary both ways, sample for sample. The edit reaches the other
+    // process asynchronously, so blocks run until it has landed.
     const auto mix = param_named(*slot, "Dry/Wet");
     slot->set_parameter(mix, 0.0f);
     Stereo s;
     s.impulses();
-    s.run(*slot);
-    s.run(*slot);
+    auto dry = [&] {
+        for (int i = 0; i < kFrames; ++i)
+            if (std::abs(s.out_l[(std::size_t)i] - s.in_l[(std::size_t)i]) >= 1e-4f)
+                return false;
+        return true;
+    };
+    const auto dry_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    do {
+        s.run(*slot);
+        s.run(*slot); // A block more, so the delay line holds no wet signal.
+    } while (!dry() && std::chrono::steady_clock::now() < dry_deadline);
     for (int i = 0; i < kFrames; ++i) {
         INFO("frame " << i);
         REQUIRE(std::abs(s.out_l[(std::size_t)i] - s.in_l[(std::size_t)i]) < 1e-4f);
@@ -276,15 +308,15 @@ TEST_CASE("AUv3 slot saves and restores plugin state out of process", "[host][au
     const auto saved = slot->save_state();
     REQUIRE_FALSE(saved.empty());
     slot->set_parameter(time, 1.5f);
-    REQUIRE(std::abs(slot->get_parameter(time) - 1.5f) < 1e-4f);
+    REQUIRE(settles_to(*slot, time, 1.5f));
     REQUIRE(slot->restore_state(saved));
-    CHECK(std::abs(slot->get_parameter(time) - 0.5f) < 1e-4f);
+    CHECK(settles_to(*slot, time, 0.5f));
     CHECK(slot->state_change_count() >= 1);
 
     // The same state restores into a fresh instance in another process.
     auto other = load("aufx:dely:appl");
     REQUIRE(other->restore_state(saved));
-    CHECK(std::abs(other->get_parameter(time) - 0.5f) < 1e-4f);
+    CHECK(settles_to(*other, time, 0.5f));
     const std::vector<std::uint8_t> junk{1, 2, 3};
     CHECK_FALSE(other->restore_state(junk));
 }
@@ -489,4 +521,40 @@ TEST_CASE("AUv3 slot follows a plug-in that replaces its parameter tree", "[host
     s.impulses();
     s.run(*slot);
     CHECK(std::abs(s.out_l[0] - 0.5f) < 1e-6f);
+}
+
+TEST_CASE("AUv3 slot never drops automation while the host reads and writes parameters",
+          "[host][auv3]") {
+    REQUIRE(register_tree_unit());
+    pulp::host::AuV3LoadOptions in_process;
+    in_process.out_of_process = false;
+    PluginInfo info;
+    info.format = PluginFormat::AudioUnitV3;
+    info.unique_id = "aufx:PTtr:PlHp";
+    auto slot = pulp::host::load_auv3_plugin(info, in_process);
+    REQUIRE(slot);
+    REQUIRE(slot->prepare(kRate, kFrames));
+    Stereo s;
+    s.run(*slot);
+    // A control thread reads the parameter and the list as fast as it can
+    // while every block carries one automation event. The audio thread reads
+    // the published mapping without a lock, so none is dropped. (Host writes
+    // also travel as render events, so this thread only reads.)
+    constexpr int kBlocks = 2000;
+    g_tree_unit_parameter_events = 0;
+    std::atomic<bool> stop{false};
+    std::thread reader([&] {
+        while (!stop.load()) {
+            (void)slot->get_parameter(100);
+            (void)slot->parameters();
+        }
+    });
+    for (int b = 0; b < kBlocks; ++b) {
+        s.params.push(pulp::host::ParameterEvent{100, b % kFrames, 0.5f, 0});
+        s.run(*slot);
+        s.params.clear();
+    }
+    stop.store(true);
+    reader.join();
+    CHECK(g_tree_unit_parameter_events.load() == kBlocks);
 }

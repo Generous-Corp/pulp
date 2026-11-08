@@ -35,6 +35,7 @@
 #include <pulp/host/hosted_editor_container.hpp>
 #include <pulp/host/native_handle_visitor.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/spsc_queue.hpp>
 
 #include "plugin_slot_process_request.hpp"
 
@@ -45,11 +46,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace pulp::host {
@@ -144,6 +147,27 @@ struct AddressMapping {
     NSUInteger index = 0;
 };
 
+/// One published parameter list: built on a control thread, then only read.
+/// The audio thread and observer callbacks reach it through an atomic
+/// pointer, so they never contend with a rebuild.
+struct ParameterMapping {
+    std::vector<AddressMapping> by_id;      // Sorted by id.
+    std::vector<AddressMapping> by_address; // Sorted by address.
+
+    const AddressMapping* find_id(std::uint32_t id) const noexcept {
+        const auto it =
+            std::lower_bound(by_id.begin(), by_id.end(), id,
+                             [](const AddressMapping& m, std::uint32_t v) { return m.id < v; });
+        return it != by_id.end() && it->id == id ? &*it : nullptr;
+    }
+    const AddressMapping* find_address(AUParameterAddress address) const noexcept {
+        const auto it = std::lower_bound(
+            by_address.begin(), by_address.end(), address,
+            [](const AddressMapping& m, AUParameterAddress a) { return m.address < a; });
+        return it != by_address.end() && it->address == address ? &*it : nullptr;
+    }
+};
+
 } // namespace
 
 class AuV3Slot final : public detail::RequestDrivenSlot {
@@ -202,23 +226,27 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
             plugin_parameter_event(events[i]);
     }
 
-    /// From KVO: the plugin replaced its parameter tree (a sampler loading a
-    /// preset, or the system's AU v2 bridge after a parameter-list change).
-    /// The old tree's parameters and observer are gone with it, so the list
-    /// is rebuilt and the host is asked to re-read parameters().
+    /// From KVO: the plugin published a parameter tree (a sampler loading a
+    /// preset, or the system's AU v2 bridge after a stream-format or
+    /// parameter-list change). prepare() and restore_state() also reconcile
+    /// synchronously, so a host edit made after either is never raced by a
+    /// republish already in flight.
     void parameter_tree_changed() {
-        build_parameters();
-        note_restart_request();
+        reconcile_parameter_tree();
     }
 
     /// The extension (or the process hosting it) died. The unit is never
     /// rendered again; the host sees a restart request and is_loaded() false,
     /// and should load the plugin anew.
     void extension_invalidated() {
-        if (!invalidated_.exchange(true, std::memory_order_acq_rel)) {
-            runtime::log_error("AUv3: '{}' stopped running (its process exited)", info_.name);
-            note_restart_request();
-        }
+        bool first = false;
+        if (!invalidation_seen_.compare_exchange_strong(first, true, std::memory_order_acq_rel))
+            return;
+        // The restart request is raised before the slot reports itself dead,
+        // so a host that sees is_loaded() false also sees the request.
+        note_restart_request();
+        invalidated_.store(true, std::memory_order_release);
+        runtime::log_error("AUv3: '{}' stopped running (its process exited)", info_.name);
     }
 
     const PluginInfo& info() const override {
@@ -247,6 +275,7 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
             unit_.maximumFramesToRender = static_cast<AUAudioFrameCount>(max_block_size);
             if (!configure_buses(sample_rate))
                 return false;
+            const auto formats_set = std::chrono::steady_clock::now();
             install_context_blocks();
             if (![unit_ allocateRenderResourcesAndReturnError:&error]) {
                 runtime::log_error("AUv3: allocateRenderResources failed for '{}': {}", info_.name,
@@ -254,6 +283,12 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
                 clear_context_blocks();
                 return false;
             }
+            // Setting a bus format makes a unit republish its parameter tree,
+            // about 2 ms later and on another thread; a warm allocation can
+            // return sooner. A host edit or save that follows prepare() must
+            // see the tree the unit ends with, so prepare() waits for it to
+            // settle (bounded) and adopts it.
+            settle_parameter_tree(formats_set);
             render_ = [unit_.renderBlock copy];
             midi_block_ = [unit_.scheduleMIDIEventBlock copy];
             param_block_ = [unit_.scheduleParameterBlock copy];
@@ -286,21 +321,47 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
         return params_;
     }
 
+    // The lock covers finding the parameter only; the message to it (a round
+    // trip to another process when out of process) is sent after unlocking.
     float get_parameter(std::uint32_t id) const override {
-        std::lock_guard<std::mutex> lock(mapping_mutex_);
-        AUParameter* p = parameter_for(id);
-        return p ? p.value : 0.0f;
+        AUParameter* p = retained_parameter(id);
+        const float value = p ? p.value : 0.0f;
+        [p release];
+        return value;
     }
 
     void set_parameter(std::uint32_t id, float plain_value) override {
-        std::lock_guard<std::mutex> lock(mapping_mutex_);
-        AUParameter* p = parameter_for(id);
-        if (!p)
-            return;
-        // The observer token as originator keeps the host's own edit from
-        // coming back as a plugin edit.
-        [p setValue:plain_value originator:automation_token_];
-        remember_host_write(p.address, plain_value);
+        // The write is recorded before it is sent, so a tree published while
+        // it is in flight replays it; and if the tree changed during the
+        // call, the write is sent again to the parameter of the new tree.
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            AUParameterObserverToken token = nullptr;
+            std::uint64_t generation = 0;
+            AUParameter* p = nil;
+            {
+                std::lock_guard<std::mutex> lock(mapping_mutex_);
+                const auto* m = mapping().find_id(id);
+                if (!m || m->index >= all_parameters_.count)
+                    return;
+                p = [all_parameters_[m->index] retain];
+                token = automation_token_;
+                generation = tree_generation_;
+                remember_host_write(m->address, plain_value);
+                // The next block also schedules it through the render path,
+                // which reaches a unit in another process with the render
+                // request itself; the parameter write below is asynchronous
+                // there. mapping_mutex_ makes this the queue's one producer.
+                if (attempt == 0 && !host_edits_.try_push(HostEdit{m->address, plain_value}))
+                    edits_dropped_.fetch_add(1, std::memory_order_relaxed);
+            }
+            // The observer token as originator keeps the host's own edit from
+            // coming back as a plugin edit.
+            [p setValue:plain_value originator:token];
+            [p release];
+            std::lock_guard<std::mutex> lock(mapping_mutex_);
+            if (generation == tree_generation_)
+                return;
+        }
     }
 
     void set_bypass(bool b) override {
@@ -345,13 +406,16 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
                                                                    error:&error];
             if (![plist isKindOfClass:[NSDictionary class]])
                 return false;
-            unit_.fullState = plist;
             {
                 // The restored state decides the values now; earlier host
                 // edits are not replayed onto a tree it brings.
                 std::lock_guard<std::mutex> lock(mapping_mutex_);
                 host_writes_.clear();
             }
+            unit_.fullState = plist;
+            // A state may bring a different parameter list; settle on it
+            // before the caller reads values.
+            reconcile_parameter_tree();
             note_state_change();
             return true;
         }
@@ -527,6 +591,10 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
   private:
     static constexpr std::chrono::milliseconds kEditorTimeout{5000};
     static constexpr std::int64_t kDisposeDelayNs = 500 * NSEC_PER_MSEC;
+    // A republish follows a format change by about 2 ms (AUDelay,
+    // AUPeakLimiter); prepare() waits for 25 ms of quiet, at most 250 ms.
+    static constexpr std::chrono::milliseconds kRepublishQuiet{25};
+    static constexpr std::chrono::milliseconds kRepublishLimit{250};
 
     // ── Parameters ──────────────────────────────────────────────────────
 
@@ -538,9 +606,11 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
         std::lock_guard<std::mutex> lock(mapping_mutex_);
         drop_parameter_tree_locked();
         params_.clear();
-        by_id_.clear();
-        by_address_.clear();
+        auto mapping = std::make_unique<ParameterMapping>();
+        auto& by_id = mapping->by_id;
+        auto& by_address = mapping->by_address;
         tree_ = [unit_.parameterTree retain];
+        ++tree_generation_;
         all_parameters_ = [tree_.allParameters retain];
         NSArray<AUParameter*>* all = all_parameters_;
         bool addresses_fit = true;
@@ -575,15 +645,19 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
             h.flags.rampable = !h.flags.stepped;
             h.flags.modulatable = false;
             params_.push_back(std::move(h));
-            by_id_.push_back({p.address, id, ordinal});
+            by_id.push_back({p.address, id, ordinal});
             ++ordinal;
         }
-        by_address_ = by_id_;
-        std::sort(by_id_.begin(), by_id_.end(),
+        by_address = by_id;
+        std::sort(by_id.begin(), by_id.end(),
                   [](const AddressMapping& x, const AddressMapping& y) { return x.id < y.id; });
         std::sort(
-            by_address_.begin(), by_address_.end(),
+            by_address.begin(), by_address.end(),
             [](const AddressMapping& x, const AddressMapping& y) { return x.address < y.address; });
+        // Published, never freed while the slot lives: a reader on another
+        // thread may still hold the previous one. Rebuilds are rare.
+        mapping_.store(mapping.get(), std::memory_order_release);
+        mappings_.push_back(std::move(mapping));
 
         // The block holds the observer object, not this slot.
         PulpHostAuV3Observer* observer = observer_;
@@ -592,14 +666,19 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
           [observer forwardEvents:count events:events];
         }];
 
-        // An out-of-process unit publishes its tree again once its process
-        // is connected, carrying the values it had then; a host edit made on
-        // the old tree just before would be lost. Host edits since the last
-        // tree are replayed onto this one.
-        for (const auto& [address, value] : host_writes_)
-            if (AUParameter* p = [tree_ parameterWithAddress:address])
-                if (p.value != value)
-                    [p setValue:value originator:automation_token_];
+        // An out-of-process unit publishes its tree again after a format
+        // change; a host edit that went to the old tree in that window never
+        // reached the unit. Host edits since the last tree are replayed onto
+        // this one, always: the new proxy can already show the edited value
+        // locally while the unit itself never received it. The next block
+        // also delivers them through the render path.
+        for (const auto& [address, value] : host_writes_) {
+            if (AUParameter* p = [tree_ parameterWithAddress:address]) {
+                [p setValue:value originator:automation_token_];
+                if (!host_edits_.try_push(HostEdit{address, value}))
+                    edits_dropped_.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
         host_writes_.clear();
     }
 
@@ -628,31 +707,82 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
         tree_ = nil;
     }
 
-    const AddressMapping* mapping_for_id(std::uint32_t id) const noexcept {
-        const auto it =
-            std::lower_bound(by_id_.begin(), by_id_.end(), id,
-                             [](const AddressMapping& m, std::uint32_t v) { return m.id < v; });
-        return it != by_id_.end() && it->id == id ? &*it : nullptr;
+    const ParameterMapping& mapping() const noexcept {
+        return *mapping_.load(std::memory_order_acquire);
     }
 
-    /// mapping_mutex_ held.
-    AUParameter* parameter_for(std::uint32_t id) const {
-        const auto* m = mapping_for_id(id);
-        return m && m->index < all_parameters_.count ? all_parameters_[m->index] : nil;
+    /// The parameter for `id`, retained (the caller releases it), and the
+    /// current observer token. Control thread.
+    AUParameter* retained_parameter(std::uint32_t id,
+                                    AUParameterObserverToken* token = nullptr) const {
+        std::lock_guard<std::mutex> lock(mapping_mutex_);
+        const auto* m = mapping().find_id(id);
+        if (!m || m->index >= all_parameters_.count)
+            return nil;
+        if (token)
+            *token = automation_token_;
+        return [all_parameters_[m->index] retain];
+    }
+
+    void settle_parameter_tree(std::chrono::steady_clock::time_point since) {
+        using namespace std::chrono;
+        const auto quiet_until = since + kRepublishQuiet;
+        const auto give_up = since + kRepublishLimit;
+        auto last_change = steady_clock::now();
+        std::uint64_t seen = current_tree_generation();
+        reconcile_parameter_tree();
+        while (true) {
+            const auto now = steady_clock::now();
+            if (now >= give_up || (now >= quiet_until && now - last_change >= kRepublishQuiet))
+                break;
+            std::this_thread::sleep_for(milliseconds(2));
+            reconcile_parameter_tree();
+            const auto generation = current_tree_generation();
+            if (generation != seen) {
+                seen = generation;
+                last_change = steady_clock::now();
+            }
+        }
+    }
+
+    std::uint64_t current_tree_generation() const {
+        std::lock_guard<std::mutex> lock(mapping_mutex_);
+        return tree_generation_;
+    }
+
+    /// Settles on the unit's current parameter tree. A republished tree is
+    /// always adopted: the objects of the old one are disconnected, and a
+    /// write to them never reaches the unit. Host edits made on the old tree
+    /// are replayed onto the new one (build_parameters()). The host is asked
+    /// to re-read parameters() only when the parameter set itself changed.
+    void reconcile_parameter_tree() {
+        @autoreleasepool {
+            bool same_set = false;
+            {
+                std::lock_guard<std::mutex> lock(mapping_mutex_);
+                AUParameterTree* current = unit_.parameterTree;
+                if (current == tree_)
+                    return;
+                NSArray<AUParameter*>* incoming = current.allParameters;
+                if (incoming.count == all_parameters_.count) {
+                    same_set = true;
+                    for (AUParameter* p in incoming)
+                        same_set = same_set && mapping().find_address(p.address) != nullptr;
+                }
+            }
+            build_parameters();
+            if (!same_set)
+                note_restart_request();
+        }
     }
 
     /// From the automation observer, through the observer object.
     void plugin_parameter_event(const AUParameterAutomationEvent& event) {
-        std::unique_lock<std::mutex> lock(mapping_mutex_, std::try_to_lock);
-        if (!lock.owns_lock())
-            return; // The tree is being rebuilt; this event belonged to the old one.
-        const auto it = std::lower_bound(
-            by_address_.begin(), by_address_.end(), event.address,
-            [](const AddressMapping& m, AUParameterAddress a) { return m.address < a; });
-        if (it == by_address_.end() || it->address != event.address)
+        const auto* m = mapping().find_address(event.address);
+        if (!m)
             return;
         PluginParameterEdit edit;
-        edit.id = it->id;
+        edit.id = m->id;
         switch (event.eventType) {
         case AUParameterAutomationEventTypeTouch:
             edit.kind = PluginParameterEdit::Kind::begin_gesture;
@@ -801,16 +931,18 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
                                 static_cast<NSInteger>(sysex.data.size()), sysex.data.data());
                 });
         }
-        if (param_block_ && !request.param_events->empty()) {
-            // A tree rebuild holds the mapping for a moment; a block that
-            // arrives then drops its automation rather than wait.
-            std::unique_lock<std::mutex> lock(mapping_mutex_, std::try_to_lock);
-            if (lock.owns_lock()) {
-                for (const auto& pe : *request.param_events)
-                    if (const auto* m = mapping_for_id(pe.param_id))
-                        param_block_(AUEventSampleTimeImmediate + pe.sample_offset, 0, m->address,
-                                     pe.value);
-            }
+        if (param_block_) {
+            // Host edits first, at the block's start; automation in the block
+            // then overrides them at its own frames.
+            HostEdit edit;
+            while (host_edits_.try_pop(edit))
+                param_block_(AUEventSampleTimeImmediate, 0, edit.address, edit.value);
+            // The published mapping, read without a lock.
+            const auto& map = mapping();
+            for (const auto& pe : *request.param_events)
+                if (const auto* m = map.find_id(pe.param_id))
+                    param_block_(AUEventSampleTimeImmediate + pe.sample_offset, 0, m->address,
+                                 pe.value);
         }
     }
 
@@ -956,17 +1088,27 @@ class AuV3Slot final : public detail::RequestDrivenSlot {
     AUParameterTree* tree_ = nil;
     NSArray<AUParameter*>* all_parameters_ = nil;
     AUParameterObserverToken automation_token_ = nullptr;
-    // Guards the parameter list against a tree rebuild. Control-thread calls
-    // lock it; the audio thread and observer callbacks only try-lock it.
+    // Guards the tree, the retained parameter list, params_, and host_writes_
+    // on control threads. The audio thread and observer callbacks never take
+    // it; they read mapping_.
     mutable std::mutex mapping_mutex_;
     // Host edits since the current tree was read (mapping_mutex_ held).
     std::vector<std::pair<AUParameterAddress, float>> host_writes_;
+    std::uint64_t tree_generation_ = 0; // mapping_mutex_ held.
+    struct HostEdit {
+        AUParameterAddress address = 0;
+        float value = 0.0f;
+    };
+    runtime::SpscQueue<HostEdit, 1024> host_edits_;
+    std::atomic<std::uint64_t> edits_dropped_{0};
     std::atomic<bool> invalidated_{false};
+    std::atomic<bool> invalidation_seen_{false};
     bool is_instrument_ = false;
 
     std::vector<HostParamInfo> params_;
-    std::vector<AddressMapping> by_id_;
-    std::vector<AddressMapping> by_address_;
+    ParameterMapping empty_mapping_;
+    std::atomic<const ParameterMapping*> mapping_{&empty_mapping_};
+    std::vector<std::unique_ptr<ParameterMapping>> mappings_;
 
     AURenderBlock render_ = nil;
     AUScheduleMIDIEventBlock midi_block_ = nil;

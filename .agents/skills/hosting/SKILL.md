@@ -1847,13 +1847,21 @@ Apple's units and the host probe:
   `PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` with the component installed; remove
   it afterwards. Confirm the process boundary by finding the component mapped
   in the `AUHostingService` process with `lsof`.
-- **An out-of-process unit republishes its parameter tree once connected.**
-  KVO on `parameterTree` fires shortly after instantiation, and an edit made
-  on the old tree just before is lost (the new tree carries the remote
-  value). The slot rebuilds on every tree change and replays host edits made
-  since the last tree; the AUDelay tests flaked about one run in three until
-  it did. Apple's own units ignore a tree assigned from outside, so the rebuild
-  test registers an `AUAudioUnit` subclass (`PulpTestTreeUnit`) in process.
+- **A unit republishes its parameter tree after a bus format change.** About
+  2 ms after `setFormat:` (AUDelay, AUPeakLimiter; not DLSMusicDevice or the
+  mixer), and only if the host has already read `parameterTree`. A warm
+  out-of-process allocation returns in about 2 ms, so the republish can land
+  after `prepare()`. The old tree's objects are then disconnected: writes to
+  them never reach the unit, though a new proxy can show the written value
+  locally. So `prepare()` settles (25 ms quiet, 250 ms cap), every tree change
+  is adopted, host writes since the last tree are replayed unconditionally,
+  and `set_parameter()` also queues the value for the next block's
+  `scheduleParameterBlock`. Keeping a same-address tree's old objects made
+  every AUDelay run fail; replaying only differing values left 1 in 60.
+- **The audio thread reads a published `ParameterMapping` through an atomic
+  pointer**, never `mapping_mutex_`; old mappings are kept until the slot
+  dies. A try-lock there dropped 91 of 2000 automation events while a control
+  thread read parameters (the "never drops automation" test).
 - **Every system callback goes through `PulpHostAuV3Observer`.** It holds the
   slot pointer under a lock that the destructor's `detach` takes first; blocks
   and observers retain it, never the slot. A plugin that dies posts

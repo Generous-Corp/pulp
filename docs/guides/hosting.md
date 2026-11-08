@@ -211,9 +211,17 @@ applies to it:
 - **A changing parameter list.** A plugin may replace its parameter tree, as a
   sampler does when it loads a preset. The slot rebuilds `parameters()`,
   moves its observer to the new tree, and raises a restart request so a graph
-  re-reads the list. An out-of-process unit publishes its tree once more when
-  its process connects; host edits made just before are carried onto the new
-  tree, unless a state restore came in between.
+  re-reads the list. A unit also republishes its tree a couple of
+  milliseconds after a bus format changes, so `prepare()` waits (25 ms of
+  quiet, at most 250 ms) for the tree to settle before it returns. Host edits
+  made on a tree that was then replaced are sent again to the new one, unless
+  a state restore came in between.
+- **Host edits reach the audio at the next block.** `set_parameter()` writes
+  the parameter and also queues the value for the next block, which delivers
+  it through `scheduleParameterBlock` with the render request, so the audio
+  follows a host edit at the next block in or out of process. A read straight
+  after a write may briefly show the previous value out of process, while the
+  remote unit confirms it.
 - **A plugin that dies.** When the plugin's process exits, the system posts
   `kAudioComponentInstanceInvalidationNotification`. From then on
   `is_loaded()` is false, each block passes its input through and reports
