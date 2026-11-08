@@ -226,6 +226,34 @@ note-expression events into Pulp's MPE sidecar.
   `setParamNormalized()`. Older blobs without a processor-owned payload still
   load and call `deserialize_plugin_state()` with empty bytes.
 
+### Factory Presets (Program List)
+
+A plug-in that ships factory presets shows them in the host's own preset menu.
+The adapter reads the preset files from the bundle's `Contents/Resources/Presets`
+folder (the same folder the Audio Unit adapters use), sorted by name, and
+publishes them as one program list called "Factory Presets" on the root unit.
+
+- **Choosing a preset:** the host writes the "Program" parameter, whose steps
+  map one-to-one onto the presets. The adapter then sets every parameter the
+  preset file names, tells the host to re-read parameter values, and leaves any
+  parameter the preset does not name alone.
+- **Automation and the audio thread:** the preset values are read once when the
+  plug-in is created, so a program change that arrives during playback never
+  touches the disk. The block that carries the change already renders with the
+  new values.
+- **Saved with the session:** the current program is stored with the rest of the
+  plug-in state. After a session is restored, a host that sends the stored
+  program value again changes nothing, so edits saved with the session are not
+  overwritten by the preset. Only choosing a different program applies a preset.
+  On a new instance with nothing restored, choosing any program, including the
+  first, applies it.
+- **Read-only:** `setUnitProgramData` can select a preset but refuses to replace
+  one with host-supplied data.
+- **No presets, no list:** a plug-in without a `Presets` folder publishes no
+  program list and no "Program" parameter, so its parameter list is unchanged.
+- **Pitch names:** if the processor names notes (`note_names()`), each program
+  reports them as program pitch names.
+
 ### Multi-Bus / Sidechain
 
 Audio buses from `descriptor().input_buses` and `descriptor().output_buses` are added during `initialize()`:
@@ -532,16 +560,46 @@ each event into the realtime `ParameterEventQueue` and also updates
 capacity are dropped from the sparse queue and counted as overflow, while the
 latest value still reaches `StateStore` for block-rate reads.
 
+### MIDI Output
+
+A processor whose descriptor sets `produces_midi` reports one MIDI output named
+"MIDI Out" through `AUAudioUnit.MIDIOutputNames`. Hosts install their MIDI
+output block only for a unit that reports an output there, so a MIDI-producing
+plug-in needs this to have its MIDI delivered. Events the processor writes to
+`midi_out` during `process()` are sent to that block on cable 0 with their
+sample offsets. A processor that does not set `produces_midi` reports no MIDI
+outputs, and a bypassed effect emits no MIDI.
+
 ### Multi-Bus / Sidechain
 
-AU v3 exposes descriptor input bus 0 as the main input and descriptor input bus
-1 as an optional sidechain `AUAudioUnitBus` when it has a positive channel
-count. The render block pulls input bus 1 separately, publishes it through
-`Processor::set_sidechain()`, and includes it as the sidechain bus in
-`ProcessBuffers`.
+AU v3 builds its input and output bus arrays from the descriptor's bus lists:
 
-Additional input buses and secondary output buses are not exposed through the
-AUv3 adapter surface yet; the adapter creates one main output bus.
+- **Inputs:** descriptor input bus 0 is the main input, bus 1 is the optional
+  sidechain, and every further input bus with a positive channel count is an
+  auxiliary input. The render block pulls each one by its host bus number. The
+  main input and sidechain still reach `Processor::set_sidechain()`, and every
+  bus appears in `ProcessBuffers` at its descriptor index.
+- **Outputs:** descriptor output bus 0 is the main output. Every further output
+  bus with a positive channel count is an auxiliary output the host can route
+  on its own. A host renders each output bus in a separate call; the adapter
+  runs `process()` once for the first call at a time stamp and copies the
+  other buses out of that one render. A processor that overrides
+  `process(ProcessBuffers&)` writes every output bus; one that only implements
+  the simple callback leaves the auxiliary outputs silent.
+- **Limit:** at most eight buses per direction are exposed. A bus with no
+  channels is not exposed, and a request for an output bus the processor does
+  not declare gets silence.
+
+**Format negotiation.** Hosts change a bus format through the bus object. The
+adapter accepts a float, non-interleaved format at a positive sample rate when
+the processor supports some bus layout in which that bus carries the proposed
+channel count. By default a bus accepts mono or stereo and the buses keep the
+declared bus counts. A descriptor with `supported_bus_layouts`, or a processor
+that overrides `is_bus_layout_supported()`, narrows or widens that. Anything
+else is refused, including interleaved, double-precision, and more than eight
+channels. When render resources are allocated the adapter adopts the channel
+counts the host settled on, so a processor sees `prepare()` and `process()` at
+the negotiated widths.
 
 ---
 
@@ -777,6 +835,55 @@ Configuration options:
 | `input_channels` | 0 | Number of input channels (0 = no input) |
 
 The standalone host manages `AudioSystem`, `AudioDevice`, `MidiSystem`, and `MidiInput` instances. MIDI is buffered with a mutex between the MIDI callback and the audio callback.
+
+### What your standalone app saves
+
+A standalone app remembers two things between launches, both in one settings
+file named `settings.json` inside a folder named after your plug-in:
+
+| Platform | Settings folder |
+|---|---|
+| macOS | `~/Library/Preferences/<Plug-in name>/` |
+| Windows | `%APPDATA%\<Plug-in name>\` |
+| Linux | `~/.config/<Plug-in name>/` |
+
+- **Audio and MIDI choices:** the audio device, MIDI input, sample rate,
+  buffer size, channel counts, and the built-in transport (tempo, time
+  signature, playing and recording). They are saved when you change them in the
+  Settings tab.
+- **The plug-in's own state:** every parameter value, plus anything the
+  plug-in saves itself through `serialize_plugin_state()` (a loaded sample, a
+  wavetable, a preset name). This is the same data a DAW stores when it saves a
+  project.
+
+**When the state is saved.** The app saves it when you quit, and also a moment
+after you stop changing things: 1.5 seconds of quiet by default, set with
+`state_save_debounce_ms`. While you keep turning a knob the save waits, but a
+change that has been going on for ten seconds is saved anyway. Output meters and
+other read-only values do not count as changes, so an idle app never rewrites
+the file. If you quit without changing anything, the file is left alone.
+
+**When the state is restored.** The app puts the saved state back when it
+starts, before the editor opens, so the first thing you see is how you left it.
+
+**If the saved state cannot be used.** A first launch has nothing saved and
+starts with the plug-in's defaults. A saved state that is damaged, was written
+by a newer version of the app, or that the plug-in refuses to load is ignored:
+the app logs a warning and starts with the defaults. The old text stays in the
+file until the next save replaces it.
+
+**Limits and switches.**
+
+- States larger than 8 MiB are not saved, and the app logs a warning.
+- Set `persist_plugin_state = false` to keep remembering the audio and MIDI
+  choices but start the plug-in fresh every time.
+- Set `persist_settings = false` to remember nothing.
+- A headless or screenshot launch neither reads nor writes the saved state, so
+  automated captures always start from the defaults and never change what you
+  saved.
+- If your app runs its own event loop instead of a built-in editor, call
+  `StandaloneApp::service_state_persistence()` from it a few times a second to
+  get the quiet-period save. Saving on quit does not depend on it.
 
 ---
 
