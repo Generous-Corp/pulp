@@ -2307,10 +2307,13 @@ Spectrogram flags: `--fft <n>` (power of two, at least 16; default 2048),
 `audio_spectrum.hpp`, so a full-scale sine reads 0 dBFS at its bin through any
 of them), `--scale linear|log|mel` (default `linear`; `mel` is the HTK
 convention `2595 log10(1 + f/700)`, which librosa calls `htk=True`), and
-`--db-range <dB>` (dynamic range shown below 0 dBFS; default 90). Each image
-column holds the peak over the STFT frames it covers; a trailing partial frame
-is dropped rather than zero-padded. A range shorter than one FFT exits `2`
-with the fix in the message.
+`--db-range <dB>` (dynamic range shown below 0 dBFS; default 90). The axis
+and palette are core's spectrogram display math (`pulp::signal::FrequencyAxis`
+with the first non-DC bin as the log floor, and the `inferno` `ColorMapper`
+ramp, which is monotone in luminance). Each image column holds the peak over
+the STFT frames it covers; a trailing partial frame is dropped rather than
+zero-padded. A range shorter than one FFT exits `2` with the fix in the
+message.
 
 Waveform flags: `--select <start>,<end>` shades a selection in seconds; both
 ends must lie inside the rendered range. Peaks
@@ -2333,10 +2336,10 @@ Sidecar (`schema: "pulp.audio.image.v1"`), one object per image:
 | `input.sha256` | SHA-256 of the input bytes, so the image can be matched back to its file |
 | `input.sample_rate`, `input.channels`, `input.frames`, `input.bits_per_sample` | Header facts from the reader |
 | `decoder.name` | The registry reader that decoded the file (`WAV`, `AIFF`, `FLAC`, `MP3`, `OGG`, `CoreAudio`, ...) |
-| `decoder.platform` | Present only for platform decoders (`CoreAudio`), because their output can differ across OS releases |
+| `decoder.platform` | The OS the file was decoded on (`macos`, `linux`, `windows`, ...). Always present, because a platform decoder's output can differ across OS releases and a reader should not have to know which names are platform decoders |
 | `time_range.start_seconds`, `end_seconds`, `start_frame`, `end_frame`, `frames`, `duration_seconds` | The rendered range after clamping |
 | `channel` | The channel index rendered |
-| `settings` | Spectrogram: `fft`, `hop`, `window`, `scale`, `db_range`, `db_ceiling`, `mel_convention`, `column_reduction`, `stft_frames`, `bins`, `plot_width`, `plot_height`. Waveform: `samples_per_peak`, `peaks`, `plot_width`, `plot_height`, `clip_marker`, and `selection_seconds` when `--select` was given |
+| `settings` | Spectrogram: `fft`, `hop`, `window`, `scale`, `db_range`, `db_ceiling`, `mel_convention`, `palette`, `column_reduction`, `stft_frames`, `bins`, `plot_width`, `plot_height`. Waveform: `samples_per_peak`, `peaks`, `plot_width`, `plot_height`, `clip_marker`, and `selection_seconds` when `--select` was given |
 | `image.png`, `image.width`, `image.height` | Output basename (or full path) and final pixel size including axes and footer |
 | `true_peak.method` | `sample_peak`: the maximum absolute sample value over the rendered range of the rendered channel only, not an oversampled inter-sample peak |
 | `true_peak.linear`, `true_peak.dbfs` | That peak, unclamped (float above full scale reports above 1.0 / above 0 dBFS) |
