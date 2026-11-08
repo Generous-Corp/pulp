@@ -185,8 +185,7 @@ TEST_CASE("Transport-only custom nodes report intentional delay in prepared meta
         transport_only.default_name = "Transport-only";
         transport_only.process_transport = [](pulp::audio::BufferView<float>& out,
                                               const pulp::audio::BufferView<const float>& in,
-                                              int frames,
-                                              const pulp::format::ProcessContext&) {
+                                              int frames, const pulp::format::ProcessContext&) {
             std::copy(in.channel_ptr(0), in.channel_ptr(0) + frames, out.channel_ptr(0));
         };
         transport_only.intentional_delay_samples = [](double) { return kDelay; };
@@ -210,9 +209,9 @@ TEST_CASE("Transport-only custom nodes report intentional delay in prepared meta
 
         const auto report = pulp::host::build_graph_rt_report(graph);
         CHECK(report.total_intentional_delay_samples == kDelay);
-        const auto reported = std::find_if(
-            report.nodes.begin(), report.nodes.end(),
-            [node](const auto& entry) { return entry.node_id == node; });
+        const auto reported =
+            std::find_if(report.nodes.begin(), report.nodes.end(),
+                         [node](const auto& entry) { return entry.node_id == node; });
         REQUIRE(reported != report.nodes.end());
         CHECK(reported->intentional_delay_samples == kDelay);
     }
