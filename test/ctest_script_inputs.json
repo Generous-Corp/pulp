@@ -250,6 +250,18 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-audio-decoder-corpus": {
+   "data": "declared",
+   "detected_sources": [],
+   "inputs": [
+    "test/fixtures/fuzz/audio-decoder"
+   ],
+   "kind": "compiled",
+   "sources": [
+    "test/test_audio_decoder_corpus.cpp"
+   ],
+   "undeclared_sources": []
+  },
   "pulp-test-audio-file-layout": {
    "data": "none",
    "inputs": [],
@@ -2763,6 +2775,7 @@
   "Pulp Editor UI View Control",
   "Pulp Test (dev) Plugin",
   "Pulp UI Script Fixture",
+  "pulp-audio-decode-dump",
   "pulp-browser-capture-launcher-fixture",
   "pulp-child-process-input-fixture",
   "pulp-cli-run-fixture",
@@ -2827,6 +2840,7 @@
   "pulp-test-au-v2-param-display",
   "pulp-test-audio",
   "pulp-test-audio-contracts",
+  "pulp-test-audio-decoder-corpus",
   "pulp-test-audio-device-manager",
   "pulp-test-audio-doctor",
   "pulp-test-audio-edge-cases",
