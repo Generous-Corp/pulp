@@ -73,8 +73,10 @@
         }
       ],
       "patches": [
-        "tools/deps/patches/dr_libs/0001-dr_mp3-64-bit-xing-frame-count.patch"
-      ]
+        "tools/deps/patches/dr_libs/0001-dr_mp3-64-bit-xing-frame-count.patch",
+        "tools/deps/patches/dr_libs/0002-stb_vorbis-reject-negative-header-string-lengths.patch"
+      ],
+      "note": "stb_vorbis.c (nothings/stb v1.22, public domain) is vendored in the same directory; its header string and comment-count lengths are rejected when negative so a hostile comment header cannot request a negative-sized setup allocation."
     },
     {
       "name": "pugixml",

@@ -114,6 +114,7 @@ path or timestamp (the m4a `mvhd`/`tkhd`/`mdhd` times are zeroed).
 | `ogg-chained-two-streams.ogg` | 8432 | derived | Valid chained stream: the mono base followed by a stereo 0.15 s stream whose serial is rewritten to 0x5EED0002 with every page CRC recomputed. |
 | `ogg-truncated-page.ogg` | 3613 | derived | Malformed: cut one third of the way into the audio page's body; the EOS page never completes. |
 | `ogg-page-bad-crc.ogg` | 4008 | derived | Malformed: one byte of the audio page's CRC XORed with 0xA5. |
+| `ogg-vendor-length-negative.ogg` | 2405 | fuzzer | Malformed: libFuzzer reproducer whose comment header declares a negative vendor-string length; stb_vorbis once requested a negative-sized setup allocation for it. Not produced by the generator script. |
 
 ### MP3
 
@@ -163,6 +164,7 @@ differential tests exist to surface.
 | `ogg-chained-two-streams.ogg` | reports the second stream only (0.15 s) and a non-monotonic timestamp warning at the chain boundary | reports the first stream (0.2 s) |
 | `ogg-truncated-page.ogg` | "End of file", refuses to open | opens, reports 0 s |
 | `ogg-page-bad-crc.ogg` | "CRC mismatch!" twice, then end of file | opens, reports 0.2 s |
+| `ogg-vendor-length-negative.ogg` | "End of file", refuses to open | AudioFileOpenURL fails |
 | `mp3-cbr-mono.mp3` | 32 kHz mono, 0.252 s (encoder delay and padding included) | agree |
 | `mp3-id3v2-xing-vbr.mp3` | tag parsed cleanly, 0.2 s (Xing gapless info honoured) | 0.252 s (gapless info ignored) |
 | `mp3-apev2-footer.mp3` | 0.2865 s, treats the APE tag bytes as audio with no complaint | same |

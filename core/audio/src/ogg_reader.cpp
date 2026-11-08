@@ -3,7 +3,10 @@
 
 #include <pulp/audio/format_registry.hpp>
 #include "decode_limits_detail.hpp"
+#include <algorithm>
 #include <cstdint>
+#include <filesystem>
+#include <string>
 #include <vector>
 
 // stb_vorbis C implementation
@@ -12,12 +15,43 @@
 #undef STB_VORBIS_HEADER_ONLY
 
 namespace pulp::audio {
+namespace {
+
+// Setup memory stb_vorbis may take while reading the headers, sized from the
+// file. The header lengths (vendor string, comment count, codebook sizes) are
+// untrusted 32-bit fields; with an arena the decoder fails with
+// VORBIS_outofmem when one exceeds it, instead of asking malloc for gigabytes
+// it then touches. Real streams need tens of kilobytes; the floor keeps a tiny
+// file's legitimate setup inside the arena and the ceiling bounds the worst
+// claim a large file can make.
+constexpr std::size_t kSetupArenaFloor = 1u << 20;
+constexpr std::size_t kSetupArenaCeiling = 64u << 20;
+
+std::vector<char> setup_arena_for(const std::string& path) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    const std::size_t bytes =
+        ec ? kSetupArenaFloor
+           : static_cast<std::size_t>(std::min<std::uintmax_t>(size, kSetupArenaCeiling / 32u)) *
+                 32u;
+    return std::vector<char>(std::clamp(bytes, kSetupArenaFloor, kSetupArenaCeiling));
+}
+
+stb_vorbis* open_bounded(const std::string& path, std::vector<char>& arena) {
+    stb_vorbis_alloc alloc;
+    alloc.alloc_buffer = arena.data();
+    alloc.alloc_buffer_length_in_bytes = static_cast<int>(arena.size());
+    int error = 0;
+    return stb_vorbis_open_filename(path.c_str(), &error, &alloc);
+}
+
+} // namespace
 
 class OggReader : public FormatReader {
 public:
     std::optional<AudioFileInfo> read_info(const std::string& path) override {
-        int error = 0;
-        stb_vorbis* v = stb_vorbis_open_filename(path.c_str(), &error, nullptr);
+        auto arena = setup_arena_for(path);
+        stb_vorbis* v = open_bounded(path, arena);
         if (!v) return std::nullopt;
 
         stb_vorbis_info info = stb_vorbis_get_info(v);
@@ -41,8 +75,8 @@ public:
 
     std::optional<AudioFileData> read(const std::string& path,
                                       const DecodeLimits& limits) override {
-        int error = 0;
-        stb_vorbis* v = stb_vorbis_open_filename(path.c_str(), &error, nullptr);
+        auto arena = setup_arena_for(path);
+        stb_vorbis* v = open_bounded(path, arena);
         if (!v)
             return std::nullopt;
 

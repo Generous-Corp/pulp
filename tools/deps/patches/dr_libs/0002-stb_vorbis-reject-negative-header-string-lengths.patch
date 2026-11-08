@@ -1,0 +1,28 @@
+diff --git a/external/dr_libs/stb_vorbis.c b/external/dr_libs/stb_vorbis.c
+index 2adc627688..432670ba53 100644
+--- a/external/dr_libs/stb_vorbis.c
++++ b/external/dr_libs/stb_vorbis.c
+@@ -3650,6 +3650,7 @@ static int start_decoder(vorb *f)
+    if (!vorbis_validate(header))                    return error(f, VORBIS_invalid_setup);
+    //file vendor
+    len = get32_packet(f);
++   if (len < 0)                                     return error(f, VORBIS_invalid_setup);
+    f->vendor = (char*)setup_malloc(f, sizeof(char) * (len+1));
+    if (f->vendor == NULL)                           return error(f, VORBIS_outofmem);
+    for(i=0; i < len; ++i) {
+@@ -3658,6 +3659,7 @@ static int start_decoder(vorb *f)
+    f->vendor[len] = (char)'\0';
+    //user comments
+    f->comment_list_length = get32_packet(f);
++   if (f->comment_list_length < 0)                  return error(f, VORBIS_invalid_setup);
+    f->comment_list = NULL;
+    if (f->comment_list_length > 0)
+    {
+@@ -3667,6 +3669,7 @@ static int start_decoder(vorb *f)
+ 
+    for(i=0; i < f->comment_list_length; ++i) {
+       len = get32_packet(f);
++      if (len < 0)                                  return error(f, VORBIS_invalid_setup);
+       f->comment_list[i] = (char*)setup_malloc(f, sizeof(char) * (len+1));
+       if (f->comment_list[i] == NULL)               return error(f, VORBIS_outofmem);
+ 

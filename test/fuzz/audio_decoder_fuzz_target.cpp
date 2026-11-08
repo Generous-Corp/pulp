@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -100,11 +101,17 @@ bool write_input(const fs::path& path, const uint8_t* data, size_t size) {
     return output.good();
 }
 
+// abort() rather than __builtin_trap(): libFuzzer handles SIGABRT and writes
+// the crash-* reproducer, while the trap is SIGTRAP on arm64 and ends the
+// process with no artifact. Static destructors do not run either way, so the
+// scratch directory is removed here first.
 void trap_on_failure(const pulp_fuzz::audio_decoder::OracleFailure& failure) {
     std::fprintf(stderr, "audio decoder oracle: %s: %s: %s\n", failure.path.c_str(),
                  failure.field.c_str(), failure.detail.c_str());
     std::fflush(stderr);
-    __builtin_trap();
+    std::error_code ec;
+    fs::remove_all(scratch_dir().path, ec);
+    std::abort();
 }
 
 } // namespace
@@ -128,5 +135,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     (void)pulp_fuzz::audio_decoder::check_registry(
         path.string(), pulp_fuzz::audio_decoder::fuzz_limits(), trap_on_failure);
+    std::error_code ec;
+    fs::remove(path, ec);
     return 0;
 }
