@@ -110,6 +110,7 @@ cmake -S examples/<dir> -B build/<dir> -DPulp_DIR=<sdk>/lib/cmake/Pulp
 | `graph-named-bus-cookbook` | Named buses through the format layer (**SDK project**) | Configure as an SDK project, then run `pulp-graph-named-bus-cookbook` |
 | `graph-spatial-cookbook` | Fixed left and right placement of a mono signal (**SDK project**) | Configure as an SDK project, then run `pulp-graph-spatial-cookbook` |
 | `g11-tuning-cookbook` | Asking the public tuning provider for a note's frequency (**SDK project**) | Configure as an SDK project, then run `pulp-graph-tuning-cookbook` |
+| `g11-recording-publication` | Capturing graph input and atomically publishing an immutable sample (**SDK project**) | Configure as an SDK project, then run `pulp-g11-recording-publication` |
 | `timeline-phase1` | Three arrangements: decoded audio, a step pattern, multitrack with automation | `pulp build --examples --target pulp-timeline-audio-player` |
 | `timeline-session` | Launch session, DAW-style project and project session, all headless | `pulp build --examples --target pulp-timeline-daw-project` |
 | `timeline-plugin-proof` | Loadable plugin that owns a timeline document and a piano roll editor | `pulp build --examples --target TimelinePluginProof_CLAP` |
@@ -147,6 +148,7 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `g5-host-event-consumer` | Public host event boundary from an external program (**SDK project**) | `ctest -R g5-host-event-public-consumer` | `test/consumers/g5-host-event-consumer` |
 | `g5-trigger-admission-consumer` | Graph planner admits trigger edges in a release build (**SDK project**) | `ctest -R trigger-admission-public-consumer` | `test/consumers/g5-trigger-admission-consumer` |
 | `g5-trigger-runtime-consumer` | Graph-produced onsets render through a typed trigger edge (**SDK project**) | `ctest -R trigger-runtime-public-consumer` | `test/consumers/g5-trigger-runtime-consumer` |
+| `g4-voice-bank-consumer` | Voice-bank persistence save/load/edit/undo/redo and binding refusal from an installed SDK (**SDK project**) | `ctest -R cmake-g4-voice-bank-sdk-consumer` | `test/consumers/g4-voice-bank-consumer` |
 | `g6-voice-contract-consumer` | Existing MIDI voice allocation state (**SDK project**) | `ctest -R cmake-g6-voice-contract-sdk-consumer` | `test/consumers/g6-voice-contract-consumer` |
 | `g7-latency-pdc-consumer` | Public latency reporting on a graph (**SDK project**) | Configure as an SDK project | `test/consumers/g7-latency-pdc-consumer` |
 | `spectral-frame-codec-consumer` | Spectral frame codec from an installed SDK (**SDK project**) | `ctest -R cmake-spectral-frame-codec-consumer` | `test/consumers/spectral-frame-codec-consumer` |

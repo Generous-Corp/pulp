@@ -563,7 +563,10 @@ class EditorContext {
     /// and a host that does not know one returns null.
     ///
     /// The GPU device is not reached this way: an editor acquires it from the
-    /// shared GPU runtime with a role tag.
+    /// shared GPU runtime with a role tag. The one exception is an editor that
+    /// brings its own renderer into a native surface
+    /// (`dev.pulp.native_surface/1`, `native_surface_host.hpp`): it owns its
+    /// device and never uses the shared runtime as well.
     virtual void* query_extension(std::string_view /*id*/) {
         return nullptr;
     }

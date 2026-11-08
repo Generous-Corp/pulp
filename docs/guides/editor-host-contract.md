@@ -45,7 +45,30 @@ instead: the id is a stable, versioned string naming an interface, the host
 returns a pointer to it (owned by the host, valid while the context lives) or
 null when it does not offer it, and the default returns null. The GPU device is
 not one of these: an editor acquires it from the shared GPU runtime with a
-role tag.
+role tag. `tools/scripts/node_abi_gate.py` holds `Editor`, `EditorContext` and
+`EditorFactory` frozen.
+
+### Native surfaces
+
+`dev.pulp.native_surface/1` (`pulp/format/native_surface_host.hpp`) is for an
+editor that brings its own renderer and presents into a native layer. Look it
+up with `native_surface_host(context)`. It reports what the host knows about the
+editor's window: the display, the backing scale the host set, a nominal refresh
+rate, and whether the host shows or hid the window. Each field reads as unknown
+until the host says otherwise, and an observer hears every change on the main
+thread. `ContractEditorSession` offers it to every editor, fed from `set_scale()`
+and `visibility_changed()`; an adapter that knows the display publishes it
+through `ContractEditorSession::native_surface_host()`.
+
+Two rules come with it:
+
+- **The editor owns its GPU device.** This is the one exception to the
+  shared-runtime rule above, and such an editor never uses the shared runtime
+  as well.
+- **A render thread presents, nothing more.** It may acquire and present its own
+  drawables, but it never calls the context, the extension, or
+  `ParamPort::begin` / `set` / `end`. The editor stops it before `detach()` or
+  `invalidate()` returns.
 
 ## Threading
 

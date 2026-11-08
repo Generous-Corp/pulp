@@ -28,6 +28,12 @@ target_sources(pulp-audio PRIVATE
     src/stb_vorbis_impl.c
     src/ogg_reader.cpp
     src/aiff_reader.cpp
+    src/audio_file_layout.cpp
+    src/audio_file_layout_aiff.cpp
+    src/audio_file_layout_flac_ogg.cpp
+    src/audio_file_layout_json.cpp
+    src/audio_file_layout_mpeg.cpp
+    src/audio_file_layout_wav.cpp
     src/system_volume.cpp
     src/channel_set.cpp
     src/offline_processor.cpp
@@ -96,6 +102,18 @@ target_sources(pulp-audio PRIVATE
 # CoreAudioFormat reader (macOS only — AAC, ALAC, CAF via ExtAudioFile)
 if(APPLE)
     target_sources(pulp-audio PRIVATE src/coreaudio_format.mm)
+endif()
+
+# System codec writer (system_audio_codec.hpp): ExtAudioFile on Apple, Media
+# Foundation on Windows, refused elsewhere. Uses only operating-system codecs.
+target_sources(pulp-audio PRIVATE src/system_audio_codec.cpp)
+if(APPLE)
+    target_sources(pulp-audio PRIVATE src/system_audio_codec_apple.mm)
+elseif(WIN32)
+    target_sources(pulp-audio PRIVATE src/system_audio_codec_win.cpp)
+    target_link_libraries(pulp-audio PRIVATE mfplat mfreadwrite mfuuid)
+else()
+    target_sources(pulp-audio PRIVATE src/system_audio_codec_stub.cpp)
 endif()
 
 # Optional codec writers — conditionally compiled when packages are installed.

@@ -416,6 +416,12 @@ class Vst3Slot final : public detail::RequestDrivenSlot {
     void process_request(const detail::SlotProcessRequest& request) override {
         auto& audio = *request.audio;
         const int num_samples = request.num_samples;
+        // Every block starts with an empty input queue: addParameterData()
+        // reuses a parameter's queue and appends to it, so without this a
+        // mapped controller or host edit is resent, and its points grow, in
+        // every later block. Cleared before the early returns too, so no path
+        // leaves points behind.
+        in_param_changes_.clearQueue();
         if (!active_ || !processor_ || bypassed_.load(std::memory_order_relaxed)) {
             detail::SlotBusBinder::pass_through(audio, num_samples);
             if (active_ && processor_)

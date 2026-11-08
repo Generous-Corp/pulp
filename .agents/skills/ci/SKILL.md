@@ -83,7 +83,13 @@ on a real PR. Do them in order.
      covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
      surface. New GPU-audio virtual hooks belong at the end of that class;
      inserting one in the middle shifts existing slots even though the SDK
-     remains source-rebuild oriented.
+     remains source-rebuild oriented. The editor-host interfaces (`Editor`,
+     `EditorContext`, `EditorFactory`, `NativeSurfaceHost`) are checked under a
+     stricter FROZEN policy: an appended virtual fails too, because a UI
+     package and a format adapter are separate prebuilt binaries. Don't "fix"
+     the failure by appending at the tail. Ship the capability as a new
+     `query_extension()` id. A `Node-ABI-Break: <Class>` trailer exists for a
+     deliberate break, but on these classes it breaks every prebuilt peer.
 
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
@@ -139,6 +145,18 @@ stops at a failing command even when the script itself starts with
 then prints its report or picks a verdict from the exit code must capture the
 code with `set +e` ... `rc=$?` ... `set -e`, or the step ends at the checker
 with only "exit code 1" in the log. `format-changed-check.yml` hit this.
+
+### `printf "$output" | grep -q` fails under pipefail even when it matches
+
+A reader that stops early (`grep -q`, `head`, `sed q`) closes the pipe while
+the writer still has output, so the writer dies of SIGPIPE and, under
+`set -o pipefail`, the whole pipeline fails. The check then reports the very
+marker it found as missing. It is size- and timing-dependent, so it looks like
+a flake: `android-run-fixtures` failed "omitted pass marker" on a run whose
+fixtures all passed, with `printf: write error: Broken pipe` one line above.
+Search a captured variable with a here-string (`grep -Fq "$m" <<<"$output"`)
+instead of piping `printf` into it. `tools/ci/test_android_fixture_lane.py`
+reproduces the case through a fake `adb` (marker first, then 200k lines).
 
 ## Build emitters always use the governor
 
@@ -882,6 +900,16 @@ while main is red. Every such call carries
 `GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix`, which the queue-removal guard
 logs. Every other use needs Daniel's explicit OK first: rebasing or refreshing a
 queued PR, reordering or dequeuing any other PR, or making room ahead of the fix.
+
+## A cancelled `workflow-lint` job: read the step timings before raising the timeout
+
+The lint job's 10-minute `timeout-minutes` cancels the job (conclusion
+`cancelled`, later steps `skipped`), so the step that happened to be running
+looks guilty. It was not: the release-pipeline step needs ~75s and
+`test_generated_version_bump_check.py` needs 350-460s. Read per-step durations
+(`ghapp api repos/<o>/<r>/actions/runs/<id>/jobs`, `steps[].started_at` and
+`completed_at`) from a green run beside the cancelled one before choosing a
+fix. That suite now runs as its own `generated-version-bump-contract` job.
 
 ## Wait on a blocking waiter, not a poll loop
 
@@ -2312,6 +2340,11 @@ when it would delete a checked-in test or executable your configure does not
 produce, such as the generated-name "Pulp UI Script Fixture" executable. Fix
 the configure; pass `--allow-delete` only when the registration really was
 removed.
+After merging main, reconfigure the build tree before any `--write` of
+`consumption_census.py` or `script_test_inputs.py`: both read facts only a configure
+rewrites, and a stale tree silently reverts main's newer entries. The census
+refuses (exit 2) when its facts file predates a tracked CMake input, and
+`--check` drift output names the stale tree.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
@@ -2645,6 +2678,31 @@ commit was dispatched. It publishes
   its tag name forever; the workflow refuses to rebuild a commit that already
   has one, because a second build on a newer runner image is different bytes.
   Downstream identity is the attested manifest, not a rebuild.
+
+### Proving a configure never asked for a dependency
+
+`.github/workflows/dependency-requests.yml` checks that a Pulp-only configure
+(GPU off) requests no UI stack: no Skia, Dawn, wgpu-native, Vellum, RmlUi, Lua
+or FreeType. Don't replace it with a download log. A shared FetchContent cache
+satisfies a request without downloading anything, so "nothing was downloaded"
+reads the same whether a dependency was unneeded or already cached.
+`tools/ci/dependency_request_recorder.cmake`, injected with
+`CMAKE_PROJECT_TOP_LEVEL_INCLUDES`, logs what was REQUESTED instead.
+
+Three things it cannot see on its own:
+
+- **CMake skips the provider for a `FETCHCONTENT_SOURCE_DIR_<NAME>` override**,
+  which is exactly how `setup.sh` wires in the shared source cache. An
+  end-of-configure pass records those, but only for dependencies that were
+  actually populated.
+- **Script provisioning and `file(DOWNLOAD)`** are logged only where the
+  project calls `dependency_request_recorder_note()`. Skia and Dawn do.
+- **An empty log is exit 2, not a pass.** Every real configure requests
+  something, so an empty log means the recorder never ran.
+
+The job's second configure is the control: GPU on, with
+`PULP_SKIA_AUTOFETCH=OFF` so it skips the download. It must show Skia and
+WebGPU. A forbidden-list pass without a green control proves nothing.
 
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 

@@ -186,6 +186,135 @@ def vellum_trust_responses(
 
 
 class FreezeUnitTests(unittest.TestCase):
+    def _http_error(self, code):
+        import io
+
+        return freeze.urllib.error.HTTPError(
+            "https://api.github.com/repos/Generous-Corp/vellum/contents/x",
+            code, "x", {}, io.BytesIO(b"{}"),
+        )
+
+    def _fake_response(self, document):
+        import io
+
+        response = io.BytesIO(json.dumps(document).encode())
+        response.__enter__ = lambda self_: self_
+        response.__exit__ = lambda *a: None
+        return response
+
+    def test_public_read_retries_403_with_fallback_token_only(self):
+        url = "https://api.github.com/repos/Generous-Corp/vellum/contents/x"
+        seen = []
+
+        def urlopen(request, timeout=0):
+            seen.append(request.get_header("Authorization"))
+            if len(seen) == 1:
+                raise self._http_error(403)
+            return self._fake_response({"sha": "abc"})
+
+        with mock.patch.object(freeze.urllib.request, "urlopen", urlopen):
+            value = freeze._public_github_json(url, "app-token", "run-token")
+        self.assertEqual(value, {"sha": "abc"})
+        self.assertEqual(seen, ["Bearer app-token", "Bearer run-token"])
+
+    def test_public_read_without_fallback_token_is_anonymous(self):
+        url = "https://api.github.com/repos/Generous-Corp/vellum/contents/x"
+        seen = []
+
+        def urlopen(request, timeout=0):
+            seen.append(request.get_header("Authorization"))
+            if len(seen) == 1:
+                raise self._http_error(403)
+            return self._fake_response({"sha": "abc"})
+
+        with mock.patch.object(freeze.urllib.request, "urlopen", urlopen):
+            freeze._public_github_json(url, "app-token", None)
+        self.assertEqual(seen, ["Bearer app-token", None])
+
+    def test_public_read_retries_429(self):
+        url = "https://api.github.com/repos/Generous-Corp/vellum/contents/x"
+        seen = []
+
+        def urlopen(request, timeout=0):
+            seen.append(1)
+            if len(seen) == 1:
+                raise self._http_error(429)
+            return self._fake_response({"sha": "abc"})
+
+        with mock.patch.object(freeze.urllib.request, "urlopen", urlopen):
+            freeze._public_github_json(url, "app-token", "run-token")
+        self.assertEqual(len(seen), 2)
+
+    def test_empty_token_is_not_anonymous_by_default(self):
+        seen = []
+
+        def urlopen(request, timeout=0):
+            seen.append(request.get_header("Authorization"))
+            return self._fake_response({})
+
+        with mock.patch.object(freeze.urllib.request, "urlopen", urlopen):
+            freeze._github_json("https://api.github.com/x", "")
+        self.assertEqual(seen, ["Bearer "])
+
+    def test_public_read_does_not_retry_other_errors(self):
+        url = "https://api.github.com/repos/Generous-Corp/vellum/contents/x"
+        calls = []
+
+        def urlopen(request, timeout=0):
+            calls.append(1)
+            raise self._http_error(404)
+
+        with mock.patch.object(freeze.urllib.request, "urlopen", urlopen):
+            with self.assertRaises(freeze.FreezeError):
+                freeze._public_github_json(url, "app-token", "run-token")
+        self.assertEqual(len(calls), 1)
+
+    def test_public_read_fails_closed_when_fallback_also_refused(self):
+        url = "https://api.github.com/repos/Generous-Corp/vellum/contents/x"
+
+        def urlopen(request, timeout=0):
+            raise self._http_error(403)
+
+        with mock.patch.object(freeze.urllib.request, "urlopen", urlopen):
+            with self.assertRaisesRegex(freeze.FreezeError, "403"):
+                freeze._public_github_json(url, "app-token", "run-token")
+
+    def test_http_403_prints_body_and_diagnostic_headers_without_token(self):
+        import email.message
+        import io
+
+        headers = email.message.Message()
+        headers["x-ratelimit-remaining"] = "0"
+        headers["x-ratelimit-resource"] = "core"
+        headers["retry-after"] = "60"
+        headers["x-github-request-id"] = "ABCD:1234"
+        headers["x-github-sso"] = "required; url=https://example.invalid/sso"
+        headers["set-cookie"] = "must-not-print"
+        error = freeze.urllib.error.HTTPError(
+            "https://api.github.com/repos/Generous-Corp/vellum/contents/x",
+            403,
+            "Forbidden",
+            headers,
+            io.BytesIO(b"Not allowed by IP allow list; token=secret-token"),
+        )
+        with mock.patch.object(
+            freeze.urllib.request, "urlopen", side_effect=error
+        ), self.assertRaises(freeze.FreezeError) as raised:
+            freeze._github_json(
+                "https://api.github.com/repos/Generous-Corp/vellum/contents/x",
+                "secret-token",
+            )
+        message = str(raised.exception)
+        self.assertIn("HTTP Error 403", message)
+        self.assertIn("IP allow list", message)
+        self.assertIn("x-ratelimit-remaining=0", message)
+        self.assertIn("x-ratelimit-resource=core", message)
+        self.assertIn("retry-after=60", message)
+        self.assertIn("x-github-sso=required", message)
+        self.assertIn("x-github-request-id=ABCD:1234", message)
+        self.assertNotIn("secret-token", message)
+        self.assertNotIn("must-not-print", message)
+
     def test_private_api_failure_names_endpoint_without_query_or_token(self):
         error = freeze.urllib.error.HTTPError(
             "https://api.github.com/repos/Generous-Corp/vellum/commits/deadbeef",
@@ -585,6 +714,36 @@ class FreezeUnitTests(unittest.TestCase):
                 freeze.verify_framework_backports(
                     [("backport.json", event)], "redacted-test-token"
                 )
+
+    def _trust(self, repo_patch=None):
+        responses = vellum_trust_responses()
+        key = "https://api.github.com/repos/Generous-Corp/vellum"
+        responses[key] = {**responses[key], **(repo_patch or {})}
+        with mock.patch.object(
+            freeze, "_github_json", side_effect=lambda url, _token: responses[url]
+        ):
+            freeze._verify_vellum_trust(
+                commit="b" * 40,
+                authority_ref="refs/tags/authority/native-design-kernel-v1",
+                token="redacted-test-token",
+                app_jwt="redacted-app-jwt",
+            )
+
+    def test_vellum_trust_accepts_public_and_private_repository(self):
+        self._trust({"private": False})
+        self._trust({"private": True})
+
+    def test_vellum_trust_still_refuses_wrong_repository_identity(self):
+        for patch in (
+            {"id": freeze.EXPECTED_FRAMEWORK_REPOSITORY_ID + 1},
+            {"full_name": "Generous-Corp/other"},
+            {"archived": True},
+            {"private": None},
+        ):
+            with self.subTest(patch=patch), self.assertRaisesRegex(
+                freeze.FreezeError, "identity or state differs"
+            ):
+                self._trust(patch)
 
     def test_vellum_trust_requires_exact_app_jwt_identity(self):
         responses = vellum_trust_responses()
