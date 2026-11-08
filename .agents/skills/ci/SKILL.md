@@ -2652,6 +2652,31 @@ commit was dispatched. It publishes
   has one, because a second build on a newer runner image is different bytes.
   Downstream identity is the attested manifest, not a rebuild.
 
+### Proving a configure never asked for a dependency
+
+`.github/workflows/dependency-requests.yml` checks that a Pulp-only configure
+(GPU off) requests no UI stack: no Skia, Dawn, wgpu-native, Vellum, RmlUi, Lua
+or FreeType. Don't replace it with a download log. A shared FetchContent cache
+satisfies a request without downloading anything, so "nothing was downloaded"
+reads the same whether a dependency was unneeded or already cached.
+`tools/ci/dependency_request_recorder.cmake`, injected with
+`CMAKE_PROJECT_TOP_LEVEL_INCLUDES`, logs what was REQUESTED instead.
+
+Three things it cannot see on its own:
+
+- **CMake skips the provider for a `FETCHCONTENT_SOURCE_DIR_<NAME>` override**,
+  which is exactly how `setup.sh` wires in the shared source cache. An
+  end-of-configure pass records those, but only for dependencies that were
+  actually populated.
+- **Script provisioning and `file(DOWNLOAD)`** are logged only where the
+  project calls `dependency_request_recorder_note()`. Skia and Dawn do.
+- **An empty log is exit 2, not a pass.** Every real configure requests
+  something, so an empty log means the recorder never ran.
+
+The job's second configure is the control: GPU on, with
+`PULP_SKIA_AUTOFETCH=OFF` so it skips the download. It must show Skia and
+WebGPU. A forbidden-list pass without a green control proves nothing.
+
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
 Making a skip visible is safe. Removing the skip is not, and the two must not
