@@ -31,6 +31,7 @@ std::string metrics_to_json(const BufferMetrics& metrics,
     }
 
     auto root = choc::value::createObject("AudioMetricsArtifact");
+    root.setMember("schema", std::string(kMetricsArtifactSchema));
     root.setMember("schema_version", kMetricsArtifactSchemaVersion);
     root.setMember("scenario", std::string(scenario));
     root.setMember("sample_rate", metrics.sample_rate);
