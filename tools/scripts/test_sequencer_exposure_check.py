@@ -41,8 +41,10 @@ from sequencer_exposure_check import (
     validate_tombstone_provenance,
     validate_transition,
     sequencer_paths_after_dependabot_exemption,
+    _configured_provenance_timeout,
 )
 import sequencer_exposure_check
+import gate_common
 
 
 SHA_A = "1" * 40
@@ -444,6 +446,63 @@ def main() -> int:
         provenance_errors = validate_git_provenance(valid, root)
         if provenance_errors:
             raise AssertionError("valid provenance failed:\n" + "\n".join(provenance_errors))
+        # The provenance pass must reuse immutable facts instead of spawning one
+        # cat-file/rev-list/log/merge-base process per ledger row.
+        calls: list[tuple[str, ...]] = []
+        real_git = sequencer_exposure_check._git
+
+        def counting_git(repo: Path, *arguments: str, **kwargs):
+            calls.append(arguments)
+            return real_git(repo, *arguments, **kwargs)
+
+        with mock.patch.object(sequencer_exposure_check, "_git", counting_git):
+            if validate_git_provenance(valid, root):
+                raise AssertionError("cached provenance control failed")
+        if len(calls) > 4 or not any(
+            command[:2] == ("cat-file", "--batch-check") for command in calls
+        ):
+            raise AssertionError(f"provenance facts were not batched: {calls}")
+        timeout_errors = validate_git_provenance(valid, root, timeout_seconds=0.0)
+        if not timeout_errors or "git provenance validation timed out" not in timeout_errors[0]:
+            raise AssertionError(f"provenance timeout lacked actionable receipt: {timeout_errors}")
+        release_calls: list[tuple[str, ...]] = []
+        real_git_bytes = sequencer_exposure_check._git_bytes
+
+        def counting_git_bytes(repo: Path, *arguments: str, **kwargs):
+            release_calls.append(arguments)
+            return real_git_bytes(repo, *arguments, **kwargs)
+
+        with mock.patch.object(sequencer_exposure_check, "_git_bytes", counting_git_bytes):
+            if validate_release_evidence(valid, root):
+                raise AssertionError("batched release evidence control failed")
+        if release_calls != [("cat-file", "--batch")]:
+            raise AssertionError(f"release evidence was not batched: {release_calls}")
+        release_timeout = validate_release_evidence(valid, root, timeout_seconds=0.0)
+        if not release_timeout or "release evidence validation timed out" not in release_timeout[0]:
+            raise AssertionError(f"release evidence timeout lacked receipt: {release_timeout}")
+        with mock.patch.dict(
+            sequencer_exposure_check.os.environ,
+            {"PULP_SEQUENCER_PROVENANCE_TIMEOUT_SECONDS": "abc"},
+        ):
+            configured, config_error = _configured_provenance_timeout()
+        if configured != 120.0 or not config_error or "positive number" not in config_error:
+            raise AssertionError(f"malformed timeout was not fail-closed: {configured}, {config_error}")
+        with mock.patch.object(
+            sequencer_exposure_check.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["git"], 0.01),
+        ):
+            timed_git = sequencer_exposure_check._git(root, "log", "-1")
+        if timed_git.returncode != 124 or "timed out" not in timed_git.stderr:
+            raise AssertionError(f"generic git timeout lacked bounded receipt: {timed_git}")
+        with mock.patch.object(
+            gate_common.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["git"], 0.01),
+        ):
+            timed_comparison = gate_common.resolve_git_comparison(root, "HEAD", "HEAD")
+        if timed_comparison.status != "history_unavailable":
+            raise AssertionError(f"shared git timeout escaped as {timed_comparison}")
         _, _, unavailable_errors = _load_base_transition(root, "missing-base-ref")
         if not any("git history unavailable" in error for error in unavailable_errors):
             raise AssertionError(
@@ -484,12 +543,37 @@ def main() -> int:
                 "tombstone provenance escaped frozen head: " +
                 "\n".join(frozen_tombstone_errors)
             )
+        # A fresh checkout must prove each squash row against the FETCH_HEAD
+        # produced by its own pull-ref fetch.  The ref is mutable, so caching
+        # its first value would make the second row fail (or validate against
+        # the wrong accepted head).
+        git(root, "checkout", "-q", "main")
+        git(root, "checkout", "-q", "-b", "squash-source-two")
+        write(root, "squash-two.txt", "content-stable second squash")
+        git(root, "add", "squash-two.txt")
+        git(root, "commit", "-q", "-m", "fixture second squash source")
+        squash_source_two = git(root, "rev-parse", "HEAD")
+        git(root, "checkout", "-q", "main")
+        git(root, "merge", "-q", "--squash", "squash-source-two")
+        git(root, "commit", "-q", "-m", "fixture second squash result (#104)")
+        squash_merge_two = git(root, "rev-parse", "HEAD")
+        squash_valid_two = copy.deepcopy(squash_valid)
+        second_row = copy.deepcopy(squash_valid["rows"][0])
+        second_row["owned_paths"] = ["squash-two.txt"]
+        second_row["release"] = {
+            "pr": 104,
+            "accepted_head": squash_source_two,
+            "merge_sha": squash_merge_two,
+            "integration_mode": "squash",
+        }
+        squash_valid_two["rows"] = [squash_valid["rows"][0], second_row]
         remote = root.parent / f"{root.name}-remote.git"
         fresh = root.parent / f"{root.name}-fresh"
         subprocess.run(
             ["git", "clone", "-q", "--bare", str(root), str(remote)], check=True
         )
         git(remote, "update-ref", "refs/pull/103/head", squash_source)
+        git(remote, "update-ref", "refs/pull/104/head", squash_source_two)
         subprocess.run(
             [
                 "git", "clone", "-q", "--no-local", "--single-branch",
@@ -505,10 +589,11 @@ def main() -> int:
         )
         if missing_before_fetch.returncode == 0:
             raise AssertionError("fresh-clone control unexpectedly contained squash PR head")
-        provenance_errors = validate_git_provenance(squash_valid, fresh)
+        provenance_errors = validate_git_provenance(squash_valid_two, fresh)
         if provenance_errors:
             raise AssertionError(
-                "fresh-clone squash fetch proof failed:\n" + "\n".join(provenance_errors)
+                "fresh-clone multi-row squash fetch proof failed:\n"
+                + "\n".join(provenance_errors)
             )
         shutil.rmtree(fresh)
         shutil.rmtree(remote)
