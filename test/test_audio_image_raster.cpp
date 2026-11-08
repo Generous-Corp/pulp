@@ -26,7 +26,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <numbers>
+#include <span>
 #include <string>
 #include <vector>
 
