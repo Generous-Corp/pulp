@@ -28,6 +28,9 @@ TEST_CASE("G4 voice identity is stable across equivalent authored values") {
     REQUIRE(b.valid);
     CHECK(a.encoding == b.encoding);
     CHECK(a.sha256 == b.sha256);
+    // Frozen G-4 v1 vector: compatibility callers without the new binding
+    // schema continue to emit the original wire bytes and digest.
+    CHECK(a.sha256 == "bb28f8d48558ed7ced64d0c46f808b19483e7368aa4b5d9495e0e9de82117418");
     CHECK(a.encoding.front() == 0x01);
 }
 

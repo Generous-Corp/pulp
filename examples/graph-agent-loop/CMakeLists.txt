@@ -19,22 +19,20 @@ add_test(NAME graph-agent-loop-consumer
 # work starts, proving that a caller cannot opt the action plan into network or
 # ambient-plugin execution, or silently omit a required action.
 foreach(mutation IN ITEMS network-allowed plugin-allowed missing-action)
-    add_test(NAME graph-agent-loop-mutation-${mutation}
-             COMMAND pulp-graph-agent-loop
-                     "${CMAKE_CURRENT_BINARY_DIR}/mutation-${mutation}"
-                     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mutation-${mutation}.json")
-    set_tests_properties(graph-agent-loop-mutation-${mutation} PROPERTIES
-        WILL_FAIL TRUE)
     if(mutation STREQUAL "network-allowed")
-        set_tests_properties(graph-agent-loop-mutation-${mutation} PROPERTIES
-            PASS_REGULAR_EXPRESSION "rule=plan-network-allow")
+        set(expected_rule "rule=plan-network-allow")
     elseif(mutation STREQUAL "plugin-allowed")
-        set_tests_properties(graph-agent-loop-mutation-${mutation} PROPERTIES
-            PASS_REGULAR_EXPRESSION "rule=plan-plugin-allow")
+        set(expected_rule "rule=plan-plugin-allow")
     else()
-        set_tests_properties(graph-agent-loop-mutation-${mutation} PROPERTIES
-            PASS_REGULAR_EXPRESSION "rule=action-catalog")
+        set(expected_rule "rule=action-catalog")
     endif()
+    add_test(NAME graph-agent-loop-mutation-${mutation}
+             COMMAND ${CMAKE_COMMAND}
+                     -DGRAPH_AGENT_LOOP_EXECUTABLE=$<TARGET_FILE:pulp-graph-agent-loop>
+                     -DGRAPH_AGENT_LOOP_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/mutation-${mutation}
+                     -DGRAPH_AGENT_LOOP_PLAN=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mutation-${mutation}.json
+                     -DGRAPH_AGENT_LOOP_RULE=${expected_rule}
+                     -P ${CMAKE_CURRENT_SOURCE_DIR}/assert-denial.cmake)
 endforeach()
 
 
