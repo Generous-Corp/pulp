@@ -216,6 +216,39 @@ TEST_CASE("Host ingress binds to the checked trigger epoch and block cursor",
     CHECK(fixture.graph.host_event_trace().empty());
 }
 
+TEST_CASE("Host ingress refuses a frame-window mismatch and retries the staged event",
+          "[trigger][g5][host-ingress][negative-control]") {
+    Fixture fixture{2, 32, true};
+    Block block;
+    HostEventRecord event;
+    event.epoch = 1;
+    event.absolute_sample = 6;
+    event.producer_sequence = 1;
+    event.producer = fixture.producer;
+    event.midi = pulp::midi::MidiEvent::note_on(1, 60, 100);
+
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 8) == HostEventResult::Accepted);
+    REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 4) ==
+          TriggerGraphResult::ProcessingFailure);
+    SignalGraph::HostEventIngressCounters refused;
+    REQUIRE(fixture.graph.host_event_counters(refused) == HostEventResult::Accepted);
+    CHECK(refused.refused == 1);
+
+    // The mismatched callback must leave the record staged so the host can
+    // retry the declared eight-frame block without publishing it again.
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 8) == HostEventResult::Accepted);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 8) ==
+            TriggerGraphResult::Accepted);
+    REQUIRE(fixture.graph.host_event_trace().size() == 1);
+    pulp::midi::MidiBuffer delivered;
+    delivered.reserve(4);
+    delivered.set_realtime_capacity_limit(true);
+    REQUIRE(fixture.graph.extract_midi(fixture.midi_out, delivered));
+    REQUIRE(delivered.size() == 1);
+    CHECK(delivered[0].sample_offset == 6);
+}
+
 TEST_CASE("Host ingress projection refusal seals the active block",
           "[trigger][g5][host-ingress][negative-control]") {
     // This generation deliberately has no admitted MidiInput destination. A

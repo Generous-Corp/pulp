@@ -829,6 +829,8 @@ HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph, std::uin
         return refuse(HostEventResult::StaleEpoch);
     if (graph.host_event_projection == nullptr)
         return refuse(HostEventResult::StaleEpoch);
+    if (trigger_controller_->host_ingress.frames() != frames)
+        return refuse(HostEventResult::OutOfRange);
     if (graph.host_event_midi_input == 0 && trigger_controller_->host_ingress.pending() == 0) {
         const auto end_result = trigger_controller_->host_ingress.end_block();
         if (end_result != HostEventResult::Accepted)
