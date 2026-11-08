@@ -392,9 +392,9 @@ struct ControlInstalledHost::State : std::enable_shared_from_this<State> {
             std::shared_ptr<ControllerExecutionToken> controller_live;
             bool controller_expired = false;
             std::string ended_controller_principal;
-            if (const auto* operation =
-                    resolve_control_operation(request.operation_id, request.operation_version);
-                operation && capability_requires_controller_lease(operation->capability)) {
+            // The admitted capability is the broker's authority binding, so a
+            // vendor operation needs the lease exactly when its tier does.
+            if (capability_requires_controller_lease(plan.capability)) {
                 std::lock_guard controller_lock(state->controller_mutex);
                 controller_live = state->controller_live;
                 ended_controller_principal = state->controller_principal;
