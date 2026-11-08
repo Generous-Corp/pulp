@@ -104,8 +104,8 @@ std::unique_ptr<pulp::format::Processor> create_synth() {
 }
 
 std::string declaration(std::string_view vendor) {
-    const auto path = std::filesystem::path(__FILE__).parent_path().parent_path() / "tools" /
-                      "cmake" / "control_agent_toolkit_operations.json.in";
+    const auto path = std::filesystem::path(PULP_SOURCE_DIR) / "tools" / "cmake" /
+                      "control_agent_toolkit_operations.json.in";
     std::ifstream stream(path);
     REQUIRE(stream);
     std::string text{std::istreambuf_iterator<char>(stream), {}};

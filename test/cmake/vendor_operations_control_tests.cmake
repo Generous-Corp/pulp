@@ -4,6 +4,13 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_
    TARGET pulp::inspect-agent-toolkit AND NOT TARGET AgentToolkitSynth)
     add_subdirectory("${CMAKE_SOURCE_DIR}/examples/agent-toolkit-synth"
         "${CMAKE_BINARY_DIR}/test/agent-toolkit-synth")
+    # The broker-launched host is built as a file named `host`, a name test
+    # sources use as an ordinary word, so the test-input scanner would read it
+    # as a program those tests spawn. Install renames the host to `host` under
+    # its own directory either way; only this build-tree copy gets a distinct
+    # name.
+    set_target_properties(AgentToolkitSynth_ControlHost PROPERTIES
+        OUTPUT_NAME agent-toolkit-synth-control-host)
 endif()
 
 # A real controlled Standalone product that declares vendor operations, driven
