@@ -22,7 +22,10 @@ on a shared machine is noisy and a flaky perf gate is worse than none.
 - **Kernels** in ns/element at N = 64 and 512: the scalar loop shapes
   (`sum`, `sum_squares`, `max_abs`, `dot`, `ramp_mul`, per-output
   `correlate`) and every compiled `pulp::simd` backend (`scalar-backend`,
-  `highway`, `accelerate` on Apple) for the same kernels plus `decimate2`.
+  `highway`, `accelerate` on Apple) for the same kernels plus `decimate2`, and
+  for `div`, `to_int16`, `interleave2`, `complex_multiply_accumulate`,
+  `complex_magnitude`, `complex_phase`, `wrap_phase` and the vector math
+  functions `exp`, `log`, `sin` and `tanh` in both accuracy tiers.
 - **Multiple convolution instances**: 1, 4, 8, 16 and 32 independent stereo
   convolvers, each with four 96,000-tap IRs, processed serially in one aggregate
   callback at the same block sizes. These rows report callback p50/p95/p99/max,

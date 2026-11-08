@@ -592,6 +592,10 @@ pulp_add_test_suite(pulp-test-control-inspector-client GROUP pulp-test-group-con
     LIBRARIES pulp::inspect-client
     LABELS "inspect;control;client;trace")
 
+pulp_add_test_suite(pulp-test-control-vendor-operations GROUP pulp-test-group-control-executors
+    LIBRARIES pulp::inspect-runtime pulp::inspect-control
+    LABELS "inspect;control;vendor;broker;executor")
+
 pulp_add_test_suite(pulp-test-control-main-thread-executor GROUP pulp-test-group-control-executors
     LIBRARIES pulp::inspect-runtime pulp::inspect-control
     LABELS "inspect;control;main-thread;executor")

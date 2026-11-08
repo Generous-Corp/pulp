@@ -901,6 +901,16 @@ while main is red. Every such call carries
 logs. Every other use needs Daniel's explicit OK first: rebasing or refreshing a
 queued PR, reordering or dequeuing any other PR, or making room ahead of the fix.
 
+## A cancelled `workflow-lint` job: read the step timings before raising the timeout
+
+The lint job's 10-minute `timeout-minutes` cancels the job (conclusion
+`cancelled`, later steps `skipped`), so the step that happened to be running
+looks guilty. It was not: the release-pipeline step needs ~75s and
+`test_generated_version_bump_check.py` needs 350-460s. Read per-step durations
+(`ghapp api repos/<o>/<r>/actions/runs/<id>/jobs`, `steps[].started_at` and
+`completed_at`) from a green run beside the cancelled one before choosing a
+fix. That suite now runs as its own `generated-version-bump-contract` job.
+
 ## Wait on a blocking waiter, not a poll loop
 
 For an unattended pull request, use `shipyard wait pr <PR> --state merged`
@@ -2330,6 +2340,11 @@ when it would delete a checked-in test or executable your configure does not
 produce, such as the generated-name "Pulp UI Script Fixture" executable. Fix
 the configure; pass `--allow-delete` only when the registration really was
 removed.
+After merging main, reconfigure the build tree before any `--write` of
+`consumption_census.py` or `script_test_inputs.py`: both read facts only a configure
+rewrites, and a stale tree silently reverts main's newer entries. The census
+refuses (exit 2) when its facts file predates a tracked CMake input, and
+`--check` drift output names the stale tree.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
@@ -7174,6 +7189,14 @@ pre-push hook applies the same rule there (`tools/scripts/refresh_push_check.py`
 - The GitHub lookup shares one 5 s budget and fails open: `lookup: failed:*` in
   the log, never a blocked push. A failing check that could not be confirmed as
   non-required counts as justification, so the check errs toward silence.
+  That makes a broken second (required-ness) query silent too: while
+  `REQUIRED_QUERY` was missing a closing brace, every PR with any failing
+  check logged `lookup: partial:exit:1` and `allowed:failing-required-check`
+  (82 of 96 pure refreshes on m3 in one week). Before reading
+  `allowed:failing-required-check` as a real justification, check that the
+  same log also has `lookup: ok` lines; the fake `gh` in
+  `test_refresh_push_check.py` now rejects an unbalanced query the way GitHub
+  does.
 
 Read the log to measure the habit: pure refreshes with `gate_in_flight: true`
 are the avoidable cancellations; all lines are the control population.

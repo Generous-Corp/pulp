@@ -50,6 +50,16 @@ pulp_add_test_suite(pulp-test-offline-tracing
 pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
+# System codec writer: AAC, ALAC and PCM written through ExtAudioFile (Apple)
+# or Media Foundation (Windows) read back as the source signal.
+pulp_add_test_suite(pulp-test-system-audio-codec GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
+# Format capability reports: each reader and writer describes the bit depths,
+# rates, channel limits and encoder settings its codec actually has.
+pulp_add_test_suite(pulp-test-audio-format-capabilities GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
 # DecodeLimits contract for the codec-backed readers (FLAC, MP3, OGG Vorbis).
 # A container header is an untrusted size claim: the reader must refuse it
 # before allocating output, and bound an unknown-length stream as it decodes.
@@ -428,6 +438,17 @@ if(PULP_HAS_CLAP)
     target_include_directories(pulp-test-clap-slot-channel-width
         PRIVATE ${PULP_ROOT_DIR}/core/host/src)
     catch_discover_tests(pulp-test-clap-slot-channel-width)
+
+    # What a hosted CLAP plugin sees from the CLAP slot: host identity and
+    # extensions, transport, offline render mode, every declared audio port,
+    # note/MIDI/sysex both ways, parameter feedback, and restart requests
+    # reaching SignalGraph latency compensation. Fake plugin, no bundle.
+    add_executable(pulp-test-clap-slot-process-fidelity test_clap_slot_process_fidelity.cpp)
+    target_link_libraries(pulp-test-clap-slot-process-fidelity
+        PRIVATE pulp::host clap Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-clap-slot-process-fidelity
+        PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    catch_discover_tests(pulp-test-clap-slot-process-fidelity)
 
     # The CLAP adapter opening a processor's editor through the editor-host
     # contract, built the way a UI-package plug-in is: no PULP_CLAP_GUI, and
