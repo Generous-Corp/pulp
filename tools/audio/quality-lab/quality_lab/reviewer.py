@@ -16,23 +16,16 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
-import shutil
 import subprocess
 from typing import Any
+
+from .external_tools import resolve_env_command
 
 REVIEWER_ENV = "PULP_QLAB_REVIEWER_CMD"
 
 
 def _resolve(env_var: str) -> tuple[list[str] | None, str]:
-    cmd = os.environ.get(env_var, "").strip()
-    if not cmd:
-        return None, f"{env_var} not set (opt-in advisory reviewer; skipping)"
-    parts = shlex.split(cmd)
-    binary = shutil.which(parts[0]) or (parts[0] if os.path.exists(parts[0]) else None)
-    if not binary:
-        return None, f"{env_var} provider {parts[0]!r} not found on disk/PATH; skipping"
-    return [binary, *parts[1:]], ""
+    return resolve_env_command(env_var, "advisory reviewer")
 
 
 def _clamp01(v: Any) -> float | None:
