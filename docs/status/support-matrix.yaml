@@ -294,6 +294,24 @@ audio_io:
       to ALSA. JACK-gated enumeration/open smoke coverage exists, but broader
       hotplug and device-manager policy remain pending.
 
+audio_file_codecs:
+  extaudiofile:
+    status: usable
+    platform: macos
+    ci_test: pulp-test-system-audio-codec
+    notes: >-
+      write_system_audio_file() and FormatRegistry write AAC (M4A, ADTS),
+      ALAC (M4A, CAF), PCM in CAF (integer or float) and 16/24/32-bit AIFF
+      through ExtAudioFile; the platform reader decodes AAC, ALAC and CAF.
+      Round trips are tested on macOS. No third-party encoder is linked.
+  media_foundation:
+    status: experimental
+    platform: windows
+    notes: >-
+      write_system_audio_file() writes AAC in M4A through the Media Foundation
+      sink writer, and a Media Foundation reader decodes .m4a, .aac and .wma
+      through FormatRegistry. Only the Windows CI build leg compiles it, when
+      that leg runs; the round-trip test has not yet run on a Windows host.
 midi_io:
   coremidi:
     status: usable
@@ -1189,6 +1207,10 @@ limitations:
     # no stale stub limitation remains.
   audio_io.jack:
     - text: "Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending."
+  audio_file_codecs.extaudiofile:
+    - text: "Through FormatRegistry, .m4a and .aac use the codec's default AAC bitrate and .alac writes 16-bit ALAC; other settings need write_system_audio_file(). Multichannel AAC beyond stereo has no channel-layout control, and no metadata is written."
+  audio_file_codecs.media_foundation:
+    - text: "Writes AAC in M4A only, mono or stereo at 44.1 or 48 kHz, at one of four bitrates (96, 128, 160 or 192 kbps); no ALAC, CAF or AIFF writing. Only the Windows CI build leg compiles it, and the round-trip test has not yet run on a Windows host."
   midi_io.coremidi:
     - text: "MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback."
   midi_io.win32_midi:

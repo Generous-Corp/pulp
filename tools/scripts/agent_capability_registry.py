@@ -328,6 +328,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/audio/system_audio_codec.hpp",
+        "fingerprint": "sha256:3c3cc0182566ebd1fc4054b0726de8ee995b593c0c95dbdef7268423152fc5c0",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Audio file encoding through the operating system's codecs (AAC, ALAC "
+            "and PCM via ExtAudioFile or Media Foundation) is host infrastructure "
+            "for export and file writing; it is not an independently selected "
+            "generator-facing capability."
+        ),
+    },
+    {
         "include": "pulp/audio/audio_file.hpp",
         "fingerprint": "sha256:6a97b20f7bb9a869f33f6cc52367cc2f9629660a9cb1341b284bfdf3479ee990",
         "disposition": "infrastructure",
