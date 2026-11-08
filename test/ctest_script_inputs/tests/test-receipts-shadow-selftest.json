@@ -6,6 +6,7 @@
    ".github/rulesets/main-protection.json",
    ".github/workflows/build.yml",
    "docs/status",
+   "test/ctest_script_inputs",
    "tools/ci/affected_tests_shadow.py",
    "tools/ci/always_run_names.py",
    "tools/ci/codemodel_digest.py",
@@ -16,6 +17,7 @@
    "tools/cmake",
    "tools/scripts/classify_changes.py",
    "tools/scripts/protected_merge_receipt.py",
+   "tools/scripts/script_inputs_store.py",
    "tools/scripts/test_protected_merge_receipt.py"
   ],
   "kind": "python"

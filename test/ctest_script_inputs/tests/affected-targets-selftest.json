@@ -12,6 +12,7 @@
    "core/view/include/pulp/view/widgets.hpp",
    "core/view/src/widgets.cpp",
    "docs/status",
+   "test/ctest_script_inputs",
    "test/fixtures",
    "test/harness/rt_allocation_probe.cpp",
    "test/support",
@@ -29,6 +30,7 @@
    "tools/cmake/PulpTestData.cmake",
    "tools/scripts/changed_surface_inventory.py",
    "tools/scripts/gate_common.py",
+   "tools/scripts/script_inputs_store.py",
    "tools/scripts/script_test_inputs.py",
    "tools/scripts/test_affected_targets.py"
   ],
