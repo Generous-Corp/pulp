@@ -5094,6 +5094,15 @@
    ],
    "kind": "python"
   },
+  "dependency-request-recorder-selftest": {
+   "entry": "tools/ci/test_dependency_request_check.py",
+   "inputs": [
+    "tools/ci/dependency_request_check.py",
+    "tools/ci/dependency_request_recorder.cmake",
+    "tools/ci/test_dependency_request_check.py"
+   ],
+   "kind": "python"
+  },
   "deps-audit-extra-selftest": {
    "entry": "tools/deps/test_audit_extra.py",
    "inputs": [
