@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-preset-file-schema-v2",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T18:06:36Z",
+  "receipt_export_id": "20261102-0f616a440cec",
+  "paths": [
+    "core/state/include/pulp/state/preset_manager.hpp",
+    "core/state/src/preset_manager.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Preset files gain schema 2 metadata (author, description, tags, program) and escaped parameter names; PresetManager gains prepare/apply and PreparedPreset, and listing caches metadata by mtime and size. All additive; load() keeps its behaviour and read_values now reads through prepare(), so the next Vellum re-export can carry it."
+}
