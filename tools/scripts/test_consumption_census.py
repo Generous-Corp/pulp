@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -257,6 +258,68 @@ class HeaderNamesComeFromTheIndex(unittest.TestCase):
             (plain / "include" / "a.h").write_text("")
             with self.assertRaises(cc.CensusError):
                 cc.header_names(plain, "include")
+
+
+class StaleFactsGuard(unittest.TestCase):
+    """A facts dump older than the CMake that feeds it is a tree nobody
+    reconfigured after merging main; writing from it reverts main's entries."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name) / "src"
+        self.build = pathlib.Path(self.tmp.name) / "build"
+        self.root.mkdir()
+        self.build.mkdir()
+        git(self.root, "init", "-q")
+        (self.root / "CMakeLists.txt").write_text("", encoding="utf-8")
+        git(self.root, "add", "CMakeLists.txt")
+        git(self.root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x")
+        self.facts = self.build / cc.FACTS_NAME
+        self.facts.write_text("{}", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def set_times(self, facts_offset: float) -> None:
+        cmake = self.root / "CMakeLists.txt"
+        base = cmake.stat().st_mtime
+        os.utime(self.facts, (base + facts_offset, base + facts_offset))
+
+    def test_facts_older_than_cmake_input_is_stale_and_says_reconfigure(self) -> None:
+        self.set_times(-10)
+        reason = cc.stale_facts_reason(self.build, self.root)
+        self.assertIsNotNone(reason)
+        self.assertIn("CMakeLists.txt", reason)
+        self.assertIn("Reconfigure first", reason)
+
+    def test_fresh_facts_are_not_stale(self) -> None:
+        self.set_times(10)
+        self.assertIsNone(cc.stale_facts_reason(self.build, self.root))
+
+    def test_write_refuses_on_stale_facts_and_leaves_census_untouched(self) -> None:
+        self.set_times(-10)
+        census = self.build / "census.json"
+        census.write_text("sentinel", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS / "consumption_census.py"), "--build-dir", str(self.build),
+             "--source-root", str(self.root), "--census", str(census), "--write"],
+            capture_output=True, text=True, encoding="utf-8", timeout=60,
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("refusing to write", proc.stderr)
+        self.assertIn("Reconfigure first", proc.stderr)
+        self.assertEqual(census.read_text(encoding="utf-8"), "sentinel")
+
+    def test_write_proceeds_past_the_guard_when_facts_are_fresh(self) -> None:
+        self.set_times(10)
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS / "consumption_census.py"), "--build-dir", str(self.build),
+             "--source-root", str(self.root), "--census", str(self.build / "c.json"), "--write"],
+            capture_output=True, text=True, encoding="utf-8", timeout=60,
+        )
+        # The stub facts are not a real dump, so the run fails later, but never
+        # on the staleness guard.
+        self.assertNotIn("refusing to write", proc.stderr)
 
 
 class OtherDriftKindsStayAccurate(unittest.TestCase):
