@@ -3765,8 +3765,6 @@
   "android-fixture-marker-selftest": {
    "entry": "tools/ci/test_android_fixture_marker.py",
    "inputs": [
-    "tools/ci/android-fixture-lane.sh",
-    "tools/ci/android-fixture-marker.sh",
     "tools/ci/test_android_fixture_marker.py"
    ],
    "kind": "python"
