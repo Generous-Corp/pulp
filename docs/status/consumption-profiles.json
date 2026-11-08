@@ -24,6 +24,8 @@
       "pulp/audio/audio_boundary_report.hpp",
       "pulp/audio/audio_device_manager.hpp",
       "pulp/audio/audio_file.hpp",
+      "pulp/audio/audio_file_layout.hpp",
+      "pulp/audio/audio_file_layout_json.hpp",
       "pulp/audio/audio_focus.hpp",
       "pulp/audio/audio_io_timing.hpp",
       "pulp/audio/audio_probe.hpp",
@@ -549,7 +551,8 @@
       "pulp/host/timeline_offline_graph.hpp",
       "pulp/host/timeline_offline_renderer.hpp",
       "pulp/host/trigger_graph.hpp",
-      "pulp/host/voice_identity.hpp"
+      "pulp/host/voice_identity.hpp",
+      "pulp/host/voice_template.hpp"
     ],
     "core/interchange/include": [
       "pulp/interchange/capability.hpp",
@@ -804,6 +807,8 @@
       "pulp/audio/audio_boundary_report.hpp",
       "pulp/audio/audio_device_manager.hpp",
       "pulp/audio/audio_file.hpp",
+      "pulp/audio/audio_file_layout.hpp",
+      "pulp/audio/audio_file_layout_json.hpp",
       "pulp/audio/audio_focus.hpp",
       "pulp/audio/audio_io_timing.hpp",
       "pulp/audio/audio_probe.hpp",
