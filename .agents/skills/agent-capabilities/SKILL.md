@@ -185,6 +185,15 @@ For a new public header or symbol:
 4. Leave `SURFACE_INVENTORY_VERSION` and `MANIFEST_REVISION` at the base
    value; the version-at-land bump assigns them (see the top of this skill).
 
+Worked example (2026-11-07): extending `pulp/signal/spectrogram.hpp`
+(FrequencyAxis double overloads) changed the bytes of a header the ledger held
+as frozen `legacy_unreviewed`. The fix was step 3, not a fingerprint refresh:
+add an `infrastructure` row for it in `agent_capability_registry.py` with the
+measured digest and a rationale, pick a `SURFACE_INVENTORY_VERSION` no open PR
+claims (the loop below found 200-202 taken, so 203), then `--write`. Plain
+`--write` keeps refusing with "public header fingerprint changed" until the
+classification exists; that refusal is the gate working, not a tool fault.
+
 For overloaded C++ free functions, keep the public `qualified_name` as the real
 API name and give each overload a distinct binding role. Use private generator
 metadata for an explicit `static_cast` address expression so the generated
