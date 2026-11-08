@@ -7158,6 +7158,14 @@
    ],
    "kind": "python"
   },
+  "graph-stall-guard-selftest": {
+   "entry": "tools/graph/test_graph_stall_guard.py",
+   "inputs": [
+    "tools/graph/graph_stall_guard.py",
+    "tools/graph/test_graph_stall_guard.py"
+   ],
+   "kind": "python"
+  },
   "graphql-filtered-count-guard": {
    "entry": "tools/scripts/test_graphql_filtered_count_guard.py",
    "inputs": [
