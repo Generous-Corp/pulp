@@ -636,9 +636,10 @@ delay on the linear part of the curve, fractional where an integer cannot hold
 it: 0.5 for `adaa`, whose half sample `latency_samples()` rounds down to 0.
 
 - Lifecycle: `prepare(sample_rate)`, `reset()`.
-- Controls: `set_shape()`, `set_drive_db()`, `set_bias()`, `set_tone_pre_hz()`, `set_tone_tracking()`, `set_tone_de_hz()`, `set_pre_boost_db()`, `set_alias_policy()`, `set_mix()`, `set_output_trim_db()`.
+- Controls: `set_shape()`, `set_drive_db()`, `set_bias()`, `set_tone_pre_hz()`, `set_tone_tracking()`, `set_tone_de_hz()`, `set_pre_boost_db()`, `set_alias_policy()`, `set_adaa_iir_kernel()`, `set_mix()`, `set_output_trim_db()`.
 - Processing and pure transfer: `process()`, `shaped()`.
-- Inspection: `shape()`, `drive_db()`, `bias()`, `alias_policy()`, `latency_samples()`, `group_delay_samples()`, `worst_case_gain()`.
+- Inspection: `shape()`, `drive_db()`, `bias()`, `alias_policy()`, `adaa_iir_kernel()`, `latency_samples()`, `group_delay_samples()`, `worst_case_gain()`.
+- IIR antialiasing kernel: `set_adaa_iir_kernel(kernel)` chooses the antialiasing filter used by the `adaa_iir` alias policy (a fourth-order Butterworth at 0.3 of the sample rate by default; see `AntiderivativeIirKernel::butterworth`). It is a control-thread call that restarts the kernel's state; it returns false, and keeps the current kernel, for an empty kernel or one with more than 31 samples of group delay. `adaa_iir_kernel()` returns the kernel in use. The policy's group delay is reported by `group_delay_samples()` and its whole samples by `latency_samples()`.
 
 ### Circuit clippers and tone stack
 
