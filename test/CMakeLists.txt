@@ -62,7 +62,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sample_region_sequencer_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/pr_fast_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/source_selftest_lane_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/g5_trigger_admission_tests.cmake")
-
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/g5_trigger_runtime_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/g5_host_event_consumer_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/g3_d4_prepared_description_tests.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/g4_voice_binding_tests.cmake")
