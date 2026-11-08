@@ -36,6 +36,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | Jost | 3.710 | SIL OFL 1.1 | Embedded UI font (Jost-Regular/Medium/SemiBold/Bold .ttf; SHA-256 `c3143e92…`, `d6ff7726…`, `a63c8d75…`, `3e49280c…`). Bundled so imported designs that specify it are measured and drawn in it rather than in a host substitute ~10% wider per glyph. The lab holdouts `lattice-panel.html` and `kelvin-panel.html` in `test/fixtures/import-differential/holdout/` inline Jost 3.710 faces from Forge's tape-machine pack (OFL text in `test/fixtures/import-differential/holdout/OFL.txt`) | pulp-view, test fixture | 2026-08-02 |
 | Khronos Box Textured fixture | b510eca2e2ef33f62f9ed57d6e7ce2d10ebb2bdebc4a8e59d347719ba81abdf4 | LicenseRef-CC-BY-TM + LicenseRef-LegalMark-Cesium | Official glTF Sample Assets `BoxTextured.glb` redistributed as a Scene3D native loader/render test fixture | test fixture | 2026-06-03 |
 | lcov_cobertura | 2.1.2 | Apache-2.0 | LCOV→Cobertura converter; vendored as `tools/scripts/lcov_cobertura.py` for the coverage pipeline (single-file Python script, no pip dependency in CI) | tooling | 2026-04-21 |
+| lilv | 0.28.0 | ISC | LV2 host library: reads plug-in bundles, instantiates plug-ins, and saves and restores their state for the LV2 `PluginSlot`. Vendored unmodified in `external/lilv/lilv` (tarball SHA-256 `8dcb70adb5cf072335115a6b091f4113710bdc73abaadaa3f9e9c1e55957b149`) and compiled into pulp-host with hidden symbols | pulp-host | 2026-11-07 |
 | Lucide | 0.x (Ink & Signal reference set) | ISC | Line-style icon SVGs under `assets/design-system/ink-signal/icons/`. Generic glyphs (chevrons, check, clock, copy, eye, …) are Lucide-derived; the audio glyphs (compressor, delay, distortion, eq, filter, fader, envelope, reverb, …) are original Pulp work. Design-system reference assets only — not compiled into or shipped in plugin/app binaries. | design-system | 2026-06-13 |
 | LV2 | 1.18.10 | ISC | LV2 plugin format headers | pulp-format | 2026-03-30 |
 | Material Design Icons | bundled-with-mkdocs-material | Apache-2.0 | Icon set bundled inside mkdocs-material and redistributed as SVG assets in the generated docs site | docs | 2026-04-22 |
@@ -54,6 +55,9 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | Node.js runtime | 22.23.2 | MIT and bundled third-party notices | Official target-architecture executable shipped with `pulp-import-design` so sandboxed plugin hosts do not depend on Homebrew, PATH, or host dylibs. Exact archive SHA-256 pins live in `prepare_node_runtime.py`; the complete upstream `node.LICENSE` ships beside the executable. | design-import | 2026-08-27 |
 | Noto Color Emoji | noto-emoji main @ 2026-05-17 | SIL OFL 1.1 | Embedded color-emoji typeface (NotoColorEmoji.ttf, SHA-256 `0ae57fe58645638523ba35f388d93739d292539a9acb84df5700c81b1e1a28d2`). Bundled only when `PULP_BUNDLE_NOTO_COLOR_EMOJI=ON` (defaults ON for Linux/Android/headless, OFF on macOS/Windows where the platform color-emoji typeface is preferred). Provides the cross-platform fallback for emoji clusters in Canvas2D text. | pulp-canvas | 2026-05-17 |
 | Brotli | v1.2.1 | MIT | Decoder used by the bundled WOFF2 path so Chromium-captured `@font-face` bytes can be registered by the native renderer. | pulp-canvas | 2026-08-12 |
+| serd | 0.32.10 | ISC | Turtle reader and writer used by lilv. Vendored unmodified in `external/lilv/serd` (tarball SHA-256 `b0e93b49e52f01a049475b7886ef140407115a32d3b1e5dc5f95141c88275d1c`) | pulp-host | 2026-11-07 |
+| sord | 0.16.22 | ISC | In-memory RDF store used by lilv. Vendored unmodified in `external/lilv/sord` (tarball SHA-256 `bb23b34b216579136795d518cffa73d91cf205594ce9accebfd408afb839173f`) | pulp-host | 2026-11-07 |
+| sratom | 0.6.22 | ISC | LV2 atom serialization used by lilv for plug-in state. Vendored unmodified in `external/lilv/sratom` (tarball SHA-256 `0209b7d0f22c96abb416722ed735b0933be47931ecff4aa4b26ded7760b4f252`) | pulp-host | 2026-11-07 |
 | WOFF2 | fb9c3379f260 | MIT | Google's WOFF2-to-sfnt decoder. Materialized browser imports register their exact packaged font subsets instead of substituting a system face. | pulp-canvas | 2026-08-12 |
 | Oboe | 1.11.0 | Apache-2.0 | Android audio backend (AAudio/OpenSL ES abstraction) | pulp-audio | 2026-04-07 |
 | Perfetto | v57.2 | Apache-2.0 | Tracing SDK (amalgamated `perfetto.cc`/`perfetto.h`, shipped as the `perfetto-cpp-sdk-src.zip` release artifact) for the dev-only Perfetto tracing subsystem. Fetched by pinned URL + SHA-256 in `tools/cmake/PulpTracing.cmake` ONLY when `PULP_TRACING=ON`; OFF by default, never linked into a shipping build, never exported by `cmake --install`. The prebuilt `trace_processor_shell` query tool (same v57.2) backs offline `pulp trace query --trace`; `pulp trace fetch` downloads it on demand into `$PULP_HOME`, SHA-256-verified per platform, never linked or shipped. | pulp-tracing (dev-only) | 2026-07-08 |
@@ -81,6 +85,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | wgpu-native | v24.0.3.1 | MIT OR Apache-2.0 | Prebuilt WebGPU runtime (`libwgpu_native`) that WebGPU-distribution links on desktop GPU builds and Pulp stages beside each module. Every release asset is pinned by SHA-256 (archive and extracted tree) in `tools/deps/manifest.json`; `setup.sh` and configure refuse a mismatch. | pulp-render | 2026-10-12 |
 | yaml-cpp | 0.9.0 | MIT | YAML frontmatter parser for the DESIGN.md import source (FetchContent) | pulp-view | 2026-05-13 |
 | Yoga | 3.2.1 | MIT | CSS Flexbox/Grid layout engine (Meta, FetchContent) | pulp-view | 2026-03-29 |
+| zix | 0.8.2 | ISC | Portable data structures and file system helpers used by lilv, serd, and sord. Vendored unmodified in `external/lilv/zix` (tarball SHA-256 `4c73aab0f8cbbfe56b00c8c6d648316021e699c5ae6cbf254391ef309047e67b`) | pulp-host | 2026-11-07 |
 
 ## Open-Source Format SDKs Pulp Can Bootstrap
 
@@ -92,6 +97,7 @@ These SDKs are permissively licensed and may be cloned, fetched, or installed as
 | AudioUnit SDK | Apache-2.0 | AU v2 format | Cloned at configure time (`git clone --depth 1`) |
 | CLAP | MIT | CLAP format | FetchContent (automatic) |
 | LV2 SDK | ISC | LV2 format | FetchContent (automatic) |
+| lilv, serd, sord, sratom, zix | ISC | Hosting LV2 plug-ins | Vendored in `external/lilv` |
 
 ## Optional Developer-Supplied Vendor SDKs
 

@@ -113,8 +113,13 @@ Embedded at build time for deterministic text rendering. Every font below is red
 |------|---------|---------|------|
 | **AudioUnitSDK** | Apache-2.0 | AU v2 plugin format adapter | [github.com/apple/AudioUnitSDK](https://github.com/apple/AudioUnitSDK) |
 | **CLAP** | MIT | CLAP plugin format headers | [github.com/free-audio/clap](https://github.com/free-audio/clap) |
+| **lilv** | ISC | Reads, instantiates, and saves the state of hosted LV2 plugins (vendored in `external/lilv`) | [drobilla.net/software/lilv](https://drobilla.net/software/lilv.html) |
 | **LV2** | ISC | LV2 plugin format headers | [github.com/lv2/lv2](https://github.com/lv2/lv2) |
+| **serd** | ISC | Turtle reader and writer used by lilv (vendored in `external/lilv`) | [drobilla.net/software/serd](https://drobilla.net/software/serd.html) |
+| **sord** | ISC | In-memory RDF store used by lilv (vendored in `external/lilv`) | [drobilla.net/software/sord](https://drobilla.net/software/sord.html) |
+| **sratom** | ISC | LV2 atom serialization used by lilv for plugin state (vendored in `external/lilv`) | [drobilla.net/software/sratom](https://drobilla.net/software/sratom.html) |
 | **VST3 SDK** | MIT | VST3 plugin format (pluginterfaces + base) | [github.com/steinbergmedia/vst3sdk](https://github.com/steinbergmedia/vst3sdk) |
+| **zix** | ISC | Data structures and file system helpers used by lilv, serd, and sord (vendored in `external/lilv`) | [gitlab.com/drobilla/zix](https://gitlab.com/drobilla/zix) |
 
 ### Platform-Specific Dependencies
 

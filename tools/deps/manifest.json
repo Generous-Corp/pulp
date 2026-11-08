@@ -484,6 +484,23 @@
       ]
     },
     {
+      "name": "lilv",
+      "category": "runtime",
+      "license": "ISC",
+      "version": "0.28.0",
+      "source_kind": "vendored",
+      "repository": "https://gitlab.com/drobilla/lilv.git",
+      "upstream": { "kind": "url-snapshot", "ref": "https://download.drobilla.net/lilv-0.28.0.tar.xz" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "LV2 host library: reads plug-in bundles, instantiates plug-ins, and saves and restores their state for the LV2 PluginSlot. Vendored unmodified (include/, src/, COPYING) in external/lilv/lilv from the release tarball, SHA-256 8dcb70adb5cf072335115a6b091f4113710bdc73abaadaa3f9e9c1e55957b149; compiled into pulp-host with hidden symbols. See external/lilv/README.md.",
+      "source_files": [
+        "external/lilv/lilv/COPYING",
+        "external/lilv/README.md",
+        "core/host/CMakeLists.txt"
+      ]
+    },
+    {
       "name": "LV2",
       "category": "format-sdk",
       "license": "ISC",
@@ -1063,6 +1080,23 @@
       ]
     },
     {
+      "name": "serd",
+      "category": "runtime",
+      "license": "ISC",
+      "version": "0.32.10",
+      "source_kind": "vendored",
+      "repository": "https://gitlab.com/drobilla/serd.git",
+      "upstream": { "kind": "url-snapshot", "ref": "https://download.drobilla.net/serd-0.32.10.tar.xz" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Turtle reader and writer used by lilv. Vendored unmodified (include/, src/, COPYING) in external/lilv/serd from the release tarball, SHA-256 b0e93b49e52f01a049475b7886ef140407115a32d3b1e5dc5f95141c88275d1c; compiled into pulp-host with hidden symbols. See external/lilv/README.md.",
+      "source_files": [
+        "external/lilv/serd/COPYING",
+        "external/lilv/README.md",
+        "core/host/CMakeLists.txt"
+      ]
+    },
+    {
       "name": "SheenBidi",
       "category": "canvas",
       "license": "Apache-2.0",
@@ -1193,6 +1227,23 @@
       ]
     },
     {
+      "name": "sord",
+      "category": "runtime",
+      "license": "ISC",
+      "version": "0.16.22",
+      "source_kind": "vendored",
+      "repository": "https://gitlab.com/drobilla/sord.git",
+      "upstream": { "kind": "url-snapshot", "ref": "https://download.drobilla.net/sord-0.16.22.tar.xz" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "In-memory RDF store used by lilv. Vendored unmodified (include/, src/, COPYING) in external/lilv/sord from the release tarball, SHA-256 bb23b34b216579136795d518cffa73d91cf205594ce9accebfd408afb839173f; compiled into pulp-host with hidden symbols. See external/lilv/README.md.",
+      "source_files": [
+        "external/lilv/sord/COPYING",
+        "external/lilv/README.md",
+        "core/host/CMakeLists.txt"
+      ]
+    },
+    {
       "name": "Sparkle",
       "category": "ship",
       "license": "MIT (bundled bsdiff BSD-2-Clause, sais-lite MIT and ed25519 zlib notices)",
@@ -1209,6 +1260,23 @@
       "source_files": [
         "tools/cmake/PulpSparkle.cmake",
         "core/format/src/standalone_updater_mac.mm"
+      ]
+    },
+    {
+      "name": "sratom",
+      "category": "runtime",
+      "license": "ISC",
+      "version": "0.6.22",
+      "source_kind": "vendored",
+      "repository": "https://gitlab.com/drobilla/sratom.git",
+      "upstream": { "kind": "url-snapshot", "ref": "https://download.drobilla.net/sratom-0.6.22.tar.xz" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "LV2 atom serialization used by lilv for plug-in state. Vendored unmodified (include/, src/, COPYING) in external/lilv/sratom from the release tarball, SHA-256 0209b7d0f22c96abb416722ed735b0933be47931ecff4aa4b26ded7760b4f252; compiled into pulp-host with hidden symbols. See external/lilv/README.md.",
+      "source_files": [
+        "external/lilv/sratom/COPYING",
+        "external/lilv/README.md",
+        "core/host/CMakeLists.txt"
       ]
     },
     {
@@ -1517,6 +1585,23 @@
       "documented_in_notice_md": true,
       "source_files": [
         "CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "zix",
+      "category": "runtime",
+      "license": "ISC",
+      "version": "0.8.2",
+      "source_kind": "vendored",
+      "repository": "https://gitlab.com/drobilla/zix.git",
+      "upstream": { "kind": "url-snapshot", "ref": "https://download.drobilla.net/zix-0.8.2.tar.xz" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Portable data structures and file system helpers used by lilv, serd, and sord. Vendored unmodified (include/, src/, COPYING) in external/lilv/zix from the release tarball, SHA-256 4c73aab0f8cbbfe56b00c8c6d648316021e699c5ae6cbf254391ef309047e67b; compiled into pulp-host with hidden symbols. See external/lilv/README.md.",
+      "source_files": [
+        "external/lilv/zix/COPYING",
+        "external/lilv/README.md",
+        "core/host/CMakeLists.txt"
       ]
     }
   ]
