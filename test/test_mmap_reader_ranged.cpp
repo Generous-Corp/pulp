@@ -355,10 +355,8 @@ TEST_CASE("MemoryMappedAudioReader survives retained source truncation",
 #endif
 
 // Note on the whole-file fallback path (read_frames when supports_ranged_read()
-// is false, or a seek/read fails): it is reachable only for formats the WAV
-// ranged reader can't seek (e.g. MP3, whose header frame count is an estimate
-// that can exceed the decoded length — the case the fallback's defensive
-// zero-fill of the uncovered [decoded, requested) region guards against). The
-// test harness can only write WAV, which always takes the ranged path, so that
-// branch is not unit-tested here; it is exercised by integration use and held
-// correct by review. If a non-WAV writer is added, add a fallback-gap fixture.
+// is false, or a seek/read fails): it is reachable for a FLAC or Ogg stream
+// whose header gives no length, for formats read through the platform decoder,
+// and when a compressed stream decodes short mid-file. test_audio_reader.cpp
+// covers the no-length case; the fallback's defensive zero-fill of the
+// uncovered [decoded, requested) region guards the short-decode case.

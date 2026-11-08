@@ -50,6 +50,11 @@ pulp_add_test_suite(pulp-test-offline-tracing
 pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
+# AudioReader: ranged reads from a path, memory or byte source equal a full
+# decode for WAV, AIFF, FLAC, MP3 and Ogg Vorbis built from one known signal.
+pulp_add_test_suite(pulp-test-audio-reader GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
 # System codec writer: AAC, ALAC and PCM written through ExtAudioFile (Apple)
 # or Media Foundation (Windows) read back as the source signal.
 pulp_add_test_suite(pulp-test-system-audio-codec GROUP pulp-test-group-cap-audio
