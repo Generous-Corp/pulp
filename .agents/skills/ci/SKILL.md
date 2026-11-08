@@ -2340,6 +2340,11 @@ when it would delete a checked-in test or executable your configure does not
 produce, such as the generated-name "Pulp UI Script Fixture" executable. Fix
 the configure; pass `--allow-delete` only when the registration really was
 removed.
+After merging main, reconfigure the build tree before any `--write` of
+`consumption_census.py` or `script_test_inputs.py`: both read facts only a configure
+rewrites, and a stale tree silently reverts main's newer entries. The census
+refuses (exit 2) when its facts file predates a tracked CMake input, and
+`--check` drift output names the stale tree.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
