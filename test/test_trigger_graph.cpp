@@ -238,8 +238,7 @@ TEST_CASE("Host ingress refuses a frame-window mismatch and retries the staged e
     // The mismatched callback must leave the record staged so the host can
     // retry the declared eight-frame block without publishing it again.
     REQUIRE(fixture.graph.begin_host_event_block(1, 0, 8) == HostEventResult::Accepted);
-    REQUIRE(fixture.graph.process_checked(block.out, block.in, 8) ==
-            TriggerGraphResult::Accepted);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 8) == TriggerGraphResult::Accepted);
     REQUIRE(fixture.graph.host_event_trace().size() == 1);
     pulp::midi::MidiBuffer delivered;
     delivered.reserve(4);
