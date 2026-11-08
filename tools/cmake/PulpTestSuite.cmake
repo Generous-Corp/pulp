@@ -802,8 +802,20 @@ endfunction()
 # (-fsanitize=fuzzer links), or PULP_FUZZ_RUNTIME_ARCHIVE names a driver
 # archive and the compiler only has to accept -fsanitize=fuzzer-no-link.
 function(pulp_check_libfuzzer_toolchain)
-    if(NOT PULP_ENABLE_FUZZING OR DEFINED PULP_HAVE_LIBFUZZER)
+    if(NOT PULP_ENABLE_FUZZING)
         return()
+    endif()
+    # The probe result is cached by check_cxx_source_compiles, so it is only
+    # reused while it still describes this configure: the same archive path
+    # as last time, and that archive still on disk. A changed or removed
+    # PULP_FUZZ_RUNTIME_ARCHIVE re-probes instead of inheriting an old TRUE.
+    if(DEFINED PULP_HAVE_LIBFUZZER)
+        if(DEFINED PULP_HAVE_LIBFUZZER_ARCHIVE
+           AND "${PULP_HAVE_LIBFUZZER_ARCHIVE}" STREQUAL "${PULP_FUZZ_RUNTIME_ARCHIVE}"
+           AND (NOT PULP_FUZZ_RUNTIME_ARCHIVE OR EXISTS "${PULP_FUZZ_RUNTIME_ARCHIVE}"))
+            return()
+        endif()
+        unset(PULP_HAVE_LIBFUZZER CACHE)
     endif()
     include(CheckCXXSourceCompiles)
     set(_entry "extern \"C\" int LLVMFuzzerTestOneInput(const unsigned char*, unsigned long) { return 0; }")
@@ -823,6 +835,8 @@ function(pulp_check_libfuzzer_toolchain)
         set(_hint "Apple's clang omits libclang_rt.fuzzer; use an LLVM that ships it, or point PULP_FUZZ_RUNTIME_ARCHIVE at one (Homebrew llvm@<N>/lib/clang/<N>/lib/darwin/libclang_rt.fuzzer_osx.a)")
     endif()
     unset(CMAKE_REQUIRED_FLAGS)
+    set(PULP_HAVE_LIBFUZZER_ARCHIVE "${PULP_FUZZ_RUNTIME_ARCHIVE}" CACHE INTERNAL
+        "PULP_FUZZ_RUNTIME_ARCHIVE the libFuzzer toolchain probe ran against")
     if(NOT PULP_HAVE_LIBFUZZER)
         message(FATAL_ERROR
             "PULP_ENABLE_FUZZING=ON but this toolchain cannot build a libFuzzer binary: ${_hint}.")
