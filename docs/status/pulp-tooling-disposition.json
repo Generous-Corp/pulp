@@ -277,6 +277,53 @@
             "subcommands": []
           },
           {
+            "name": "inspect",
+            "arguments": [
+              {
+                "name": "file",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--include-metadata-text",
+                "kind": "flag"
+              },
+              {
+                "name": "--absolute-paths",
+                "kind": "flag"
+              },
+              {
+                "name": "--raw",
+                "kind": "flag"
+              },
+              {
+                "name": "--format",
+                "kind": "option"
+              },
+              {
+                "name": "--channels",
+                "kind": "option"
+              },
+              {
+                "name": "--rate",
+                "kind": "option"
+              },
+              {
+                "name": "--endian",
+                "kind": "option"
+              },
+              {
+                "name": "--offset",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
             "name": "scope",
             "arguments": [
               {
@@ -327,6 +374,10 @@
             "arguments": [
               {
                 "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--absolute-paths",
                 "kind": "flag"
               }
             ],
@@ -4861,6 +4912,10 @@
       },
       {
         "name": "pulp_audio_excerpt_find",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_file_inspect",
         "disposition": "excluded"
       },
       {
