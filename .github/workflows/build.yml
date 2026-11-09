@@ -3094,6 +3094,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PULP_DEFERRED_ADMISSION: ${{ vars.PULP_DEFERRED_ADMISSION || 'shadow' }}
+          MATRIX_KEY: ${{ matrix.key }}
         run: |
           set -euo pipefail
           gate_args="$(python3 tools/ci/ctest_gate_args.py \
@@ -3102,9 +3103,13 @@ jobs:
           : "${label_exclude:?ctest gate arguments did not resolve}"
           # A warm build dir keeps files: never upload an earlier run's summary.
           rm -f "$PULP_BUILD_DIR/pr-affected-summary/pr-affected-summary.json"
+          # Only the required macos leg is an admission run or writes the summary.
           admission=()
-          if python3 tools/ci/deferred_admission.py probe --repo "$GITHUB_REPOSITORY" --head "$PR_HEAD_SHA"; then
-            admission=(--admission)
+          if [ "$MATRIX_KEY" = macos ]; then
+            admission=(--summary-json "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/pr-affected-summary/pr-affected-summary.json")
+          fi
+          if [ "$MATRIX_KEY" = macos ] && python3 tools/ci/deferred_admission.py probe --repo "$GITHUB_REPOSITORY" --head "$PR_HEAD_SHA"; then
+            admission+=(--admission)
             if [ "$GITHUB_RUN_ATTEMPT" -gt 1 ] && python3 tools/ci/deferred_admission.py prior \
                 --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
                 --out "$RUNNER_TEMP/pr-affected-prior.json"; then
@@ -3115,7 +3120,6 @@ jobs:
           python3 tools/ci/pr_head_affected_tests.py \
             --build-dir "$PULP_BUILD_DIR" --base HEAD^1 --head HEAD \
             --budget-secs 600 --jobs 4 --label-exclude "$label_exclude" ${admission[@]+"${admission[@]}"} \
-            --summary-json "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/pr-affected-summary/pr-affected-summary.json" \
             --junit-dir "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/pr-affected-junit" || rc=$?
           case "$rc" in
             0) ;;
@@ -3125,7 +3129,10 @@ jobs:
           esac
 
       - name: Upload the affected-test summary (pull request head)
-        if: always() && steps.pr_affected_tests.outcome != 'skipped'
+        # The macos leg only: an artifact name is unique per run, so a second
+        # leg's upload would fail. Never fails the required check itself.
+        if: always() && matrix.key == 'macos' && steps.pr_affected_tests.outcome != 'skipped'
+        continue-on-error: true
         uses: actions/upload-artifact@v7.0.2
         with:
           name: pr-head-affected-tests-a${{ github.run_attempt }}

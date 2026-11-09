@@ -357,3 +357,12 @@ title = "A build that cannot get the pinned Rust fails closed on self-hosted leg
 why = "A silent fallback leaves the required gate green on an unpinned compiler, so code that needs a newer stable passes review. The gate VMs reach the network through a proxy that refuses static.rust-lang.org ('tunnel error: unsuccessful' on all three attempts, PR 10789's first macos run), so their pin must come from the image: by name, or as a stable that is the same release with every pinned part."
 do_not = "Letting a self-hosted leg fall back; dropping the warning, summary line or receipt; keeping --fallback-to-default after the golden carries the pin by name; fixing a gate that cannot download Rust by re-enabling auto-install."
 guards = ["tools/ci/**", ".github/workflows/**", "experimental/pulp-rs/rust-toolchain.toml"]
+
+[[decision]]
+id = 31
+layer = "pulp"
+tags = ["merge-queue", "admission", "affected-tests", "rerun", "deferred", "shadow"]
+title = "An approved head's affected tests the PR-head budget deferred run on that head before admission, as a re-run of its own required `macos` job (deferred-tests-admission.yml). It adds no required context and never arms, enqueues, dequeues or updates; it never re-runs an armed or queued head or a red `macos`, re-runs a run at most once (attempt 3 is the cap), and stays shadow until PULP_DEFERRED_ADMISSION=enforce graduates it."
+why = "The pre-queue dry run study (W45) found 9 of 10 'passes on head, fails merged' ejections failed on the head alone, in tests the PR-head run deferred for its ten-minute budget (#11471 deferred 111), so the merge group was the first place they ran and each ejected a batch. Re-running the existing required check keeps the steward the only admission writer (row 15): a red result simply leaves the head unready."
+do_not = "Adding a separate required context for it; re-running a red `macos` (row 14) or a head the queue already holds; re-running from the PR's own workflow or with PR code; widening the budget for unapproved heads; enforcing before a shadow week shows would-rerun heads per day, their extra gate VM-minutes, and the deferred-test merge-group ejections it would have prevented."
+guards = [".github/workflows/deferred-tests-admission.yml", "tools/ci/deferred_admission.py", "tools/ci/pr_head_affected_tests.py"]

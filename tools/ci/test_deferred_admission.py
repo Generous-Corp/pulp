@@ -57,7 +57,8 @@ class FakeGitHub:
     def __init__(self, *, state="open", head=HEAD, fork=False, verdict="success",
                  verdict_status="completed", armed=False, queued=False, runs=True,
                  attempt=1, job_status="completed", job_conclusion="success",
-                 summaries=None, graphql_ok=True, fail_paths=()):
+                 summaries=None, graphql_ok=True, fail_paths=(), verdicts=None,
+                 run_status="completed", arm_after_reads=None):
         self.state, self.head, self.fork = state, head, fork
         self.verdict, self.verdict_status = verdict, verdict_status
         self.armed, self.queued, self.runs = armed, queued, runs
@@ -65,6 +66,10 @@ class FakeGitHub:
         self.summaries = {1: summary()} if summaries is None else summaries
         self.graphql_ok, self.fail_paths = graphql_ok, fail_paths
         self.writes: list[tuple[str, str]] = []
+        # Successive review-verdict conclusions (the comment path polls).
+        self.verdicts = list(verdicts) if verdicts else None
+        self.run_status = run_status
+        self.arm_after_reads, self.graphql_reads = arm_after_reads, 0
 
     def __call__(self, method: str, path: str, body):
         if any(f in path for f in self.fail_paths):
@@ -72,6 +77,9 @@ class FakeGitHub:
         if method == "POST" and path == "graphql":
             if not self.graphql_ok:
                 return {"data": {"repository": {"pullRequest": None}}}
+            self.graphql_reads += 1
+            if self.arm_after_reads is not None and self.graphql_reads > self.arm_after_reads:
+                self.armed = True
             return {"data": {"repository": {"pullRequest": {
                 "autoMergeRequest": {"enabledAt": "x"} if self.armed else None,
                 "mergeQueueEntry": {"state": "QUEUED"} if self.queued else None}}}}
@@ -82,6 +90,8 @@ class FakeGitHub:
             return {"state": self.state, "head": {"sha": self.head, "repo": {
                 "full_name": "someone/fork" if self.fork else REPO_NAME}}}
         if "/check-runs?check_name=review-verdict" in path:
+            if self.verdicts:
+                self.verdict = self.verdicts.pop(0)
             if self.verdict is None:
                 return {"check_runs": []}
             return {"check_runs": [
@@ -98,8 +108,9 @@ class FakeGitHub:
         if f"/workflows/{da.BUILD_WORKFLOW}/runs" in path:
             if not self.runs:
                 return {"workflow_runs": []}
-            return {"workflow_runs": [{"id": RUN_ID - 1, "run_attempt": 1},
-                                      {"id": RUN_ID, "run_attempt": self.attempt}]}
+            return {"workflow_runs": [{"id": RUN_ID - 1, "run_attempt": 1, "status": "completed"},
+                                      {"id": RUN_ID, "run_attempt": self.attempt,
+                                       "status": self.run_status}]}
         if f"/runs/{RUN_ID}/attempts/{self.attempt}/jobs" in path:
             return {"jobs": [{"id": 1, "name": "linux", "status": "completed", "conclusion": "success"},
                              {"id": JOB_ID, "name": "macos", "status": self.job_status,
@@ -135,8 +146,12 @@ def decide_with(fake: FakeGitHub, event_name="workflow_run", event=None, mode="e
         args = da.main.__globals__["argparse"].Namespace(
             repo=REPO_NAME, event_name=event_name, event_path=str(path), mode=mode)
         out = io.StringIO()
+        now = [0.0]
+
+        def sleep(secs: float) -> None:
+            now[0] += secs
         with contextlib.redirect_stdout(out), mock.patch.dict("os.environ", {}, clear=False):
-            da.cmd_decide(args, fetch=fake)
+            da.cmd_decide(args, fetch=fake, sleep=sleep, clock=lambda: now[0])
     line = [l for l in out.getvalue().splitlines() if l.startswith(f"::notice title={da.NOTICE_TITLE}::")]
     assert len(line) == 1, out.getvalue()
     return json.loads(line[0].split("::", 2)[2])
@@ -150,10 +165,33 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(fake.writes, [("POST", f"repos/{REPO_NAME}/actions/jobs/{JOB_ID}/rerun")])
         self.assertEqual(record["deferred"], 111)
 
-    def test_the_approve_comment_alone_starts_it(self) -> None:
-        fake = FakeGitHub(verdict=None)  # review-verdict has not refreshed yet
+    def test_the_approve_comment_waits_for_review_verdict(self) -> None:
+        # review-verdict is still re-running when the comment lands, then turns green.
+        fake = FakeGitHub(verdicts=[None, "failure", "success"])
         record = decide_with(fake, "issue_comment", comment_event())
         self.assertEqual(record["action"], "rerun", record)
+
+    def test_a_comment_review_verdict_never_accepts_starts_nothing(self) -> None:
+        # The signer or session rules refuse it: no gate VM is spent.
+        fake = FakeGitHub(verdict="failure")
+        record = decide_with(fake, "issue_comment", comment_event())
+        self.assertEqual(record["action"], "none", record)
+        self.assertEqual(fake.writes, [])
+
+    def test_armed_after_the_read_is_not_rerun(self) -> None:
+        fake = FakeGitHub(arm_after_reads=1)
+        record = decide_with(fake)
+        self.assertEqual(record["action"], "none", record)
+        self.assertIn("between the read and the re-run", record["reason"])
+        self.assertEqual(fake.writes, [])
+
+    def test_a_newer_run_in_progress_waits(self) -> None:
+        self._none(FakeGitHub(run_status="in_progress"), "newest Build and Test run")
+
+    def test_a_garbage_summary_count_decides_nothing(self) -> None:
+        self._none(FakeGitHub(summaries={1: summary(skipped_for_budget="many",
+                                                    deferred_to_merge_queue=None)}),
+                   "deferred nothing")
 
     def test_shadow_mode_reports_and_writes_nothing(self) -> None:
         fake = FakeGitHub()
@@ -273,7 +311,7 @@ class ProbeAndPriorTests(unittest.TestCase):
                 repo=REPO_NAME, run_id=RUN_ID, attempt=3, out=str(out))
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(da.cmd_prior(args, fetch=fake), 0)
-            self.assertEqual(json.loads(out.read_text())["passed_tests"], ["newer"])
+            self.assertEqual(json.loads(out.read_text(encoding="utf-8"))["passed_tests"], ["newer"])
 
     def test_prior_without_an_earlier_summary_runs_everything(self) -> None:
         fake = FakeGitHub(attempt=2, summaries={})
@@ -300,8 +338,10 @@ def step_block(text: str, name: str) -> str:
 def contract_problems(dispatcher: str, build: str, required: list[str]) -> list[str]:
     """Everything the two workflows must keep for this to be safe."""
     problems = []
-    if "issue_comment:" not in dispatcher or 'workflows: ["Build and Test"]' not in dispatcher:
-        problems.append("dispatcher must trigger on the approve comment and on Build and Test")
+    on_block = dispatcher[dispatcher.index("\non:"):dispatcher.index("\npermissions:")]
+    if ("issue_comment:" not in on_block
+            or 'workflows: ["Build and Test", "Review verdict"]' not in on_block):
+        problems.append("dispatcher must wake on the comment, Review verdict and Build and Test")
     if re.search(r"\n\s+checks:\s*write", dispatcher) or re.search(r"\n\s+contents:\s*write", dispatcher):
         problems.append("dispatcher may not write checks or contents")
     if not re.search(r"\n\s+actions:\s*write", dispatcher):
@@ -314,8 +354,10 @@ def contract_problems(dispatcher: str, build: str, required: list[str]) -> list[
         problems.append("dispatcher must ignore fork runs")
     if "github.event.comment.user.login == 'shipyard-local[bot]'" not in dispatcher:
         problems.append("dispatcher must only wake on the fleet App's comments")
-    if "pull_request_target" in dispatcher:
-        problems.append("dispatcher must not run on pull_request_target")
+    if "pull_request_target:" in on_block or re.search(r"\n  pull_request:", on_block):
+        problems.append("dispatcher must not run on pull request events (it holds actions: write)")
+    if "github.event.workflow_run.conclusion == 'success'" not in dispatcher:
+        problems.append("only a green Review verdict may wake the dispatcher")
     if "deferred_admission.py decide" not in dispatcher:
         problems.append("dispatcher must call the tested decision")
     names = re.findall(r"\n    name: (.+)", dispatcher)
@@ -345,6 +387,16 @@ def contract_problems(dispatcher: str, build: str, required: list[str]) -> list[
         problems.append("the artifact must hold the summary file the dispatcher unzips")
     if "always()" not in upload:
         problems.append("the summary must upload when a test failed too")
+    if "matrix.key == 'macos'" not in upload:
+        problems.append("only the macos leg may upload: an artifact name is unique per run")
+    if "continue-on-error: true" not in upload:
+        problems.append("a failed upload must not turn the required check red")
+    if ('if [ "$MATRIX_KEY" = macos ] && python3 tools/ci/deferred_admission.py probe' not in affected
+            or "MATRIX_KEY: ${{ matrix.key }}" not in affected):
+        problems.append("only the macos leg may be an admission run")
+    summary_arg = affected.find("--summary-json")
+    if summary_arg != -1 and 'if [ "$MATRIX_KEY" = macos ]; then' not in affected[:summary_arg]:
+        problems.append("only the macos leg may write the summary")
     if build.index("- name: Upload the affected-test summary") < build.index(
             "- name: Test what this pull request reaches"):
         problems.append("the upload must follow the affected step")
@@ -408,12 +460,27 @@ class WorkflowContractTests(unittest.TestCase):
                 "name: pr-head-affected-tests-a${{ github.run_attempt }}",
                 "name: pr-head-affected-tests")),
             "upload only on success": dict(build=b.replace(
-                "if: always() && steps.pr_affected_tests.outcome != 'skipped'",
-                "if: steps.pr_affected_tests.outcome == 'success'")),
+                "if: always() && matrix.key == 'macos' && steps.pr_affected_tests.outcome != 'skipped'",
+                "if: matrix.key == 'macos' && steps.pr_affected_tests.outcome == 'success'")),
             "affected step non-gating": dict(build=b.replace(
                 "        id: pr_affected_tests\n",
                 "        id: pr_affected_tests\n        continue-on-error: true\n")),
             "budget dropped": dict(build=b.replace("--budget-secs 600 --jobs 4", "--jobs 4")),
+            "every leg uploads": dict(build=b.replace(
+                "if: always() && matrix.key == 'macos' && steps.pr_affected_tests.outcome",
+                "if: always() && steps.pr_affected_tests.outcome")),
+            "upload can redden macos": dict(build=b.replace(
+                "        continue-on-error: true\n        uses: actions/upload-artifact@v7.0.2\n        with:\n          name: pr-head-affected-tests-a",
+                "        uses: actions/upload-artifact@v7.0.2\n        with:\n          name: pr-head-affected-tests-a")),
+            "every leg probes": dict(build=b.replace(
+                'if [ "$MATRIX_KEY" = macos ] && python3 tools/ci/deferred_admission.py probe',
+                'if python3 tools/ci/deferred_admission.py probe')),
+            "red verdict wakes": dict(dispatcher=d.replace(
+                "&& github.event.workflow_run.conclusion == 'success'", "")),
+            "runs on pull_request_target": dict(dispatcher=d.replace(
+                "on:\n  issue_comment:", "on:\n  pull_request_target:\n  issue_comment:")),
+            "drops Review verdict": dict(dispatcher=d.replace(
+                '["Build and Test", "Review verdict"]', '["Build and Test"]')),
         }
         for label, change in breaks.items():
             with self.subTest(label):

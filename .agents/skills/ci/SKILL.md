@@ -1568,14 +1568,20 @@ The ten-minute budget is why the merge group used to be the first place a large
 diff's affected tests ran: in the week to 2026-11-09, 9 of 10 "passes on the
 head, fails merged" ejections failed on the head alone, in tests its run had
 deferred (#11471's head deferred 111). `deferred-tests-admission.yml` closes
-that without a new required context or a new merge writer: on the fleet App's
-APPROVE comment, or on a Build and Test completion for an approved head, it
-re-runs the head's `macos` job when the budgeted attempt's summary artifact
-(`pr-head-affected-tests-a<attempt>`, written by `--summary-json`) reports
-`skipped_for_budget > 0`. The re-run's affected step sees a green
-`review-verdict` (`deferred_admission.py probe`), passes `--admission`
-(40-minute budget) and `--prior-summary` (drops what an earlier attempt passed
-on the same tested commit), so it runs exactly the deferred tests. Its result
+that without a new required context or a new merge writer (contract row 31):
+on a green Review verdict run, the fleet App's APPROVE comment (a wake-up only;
+it waits up to three minutes for `review-verdict` to turn green, which stays the
+only approval), or a Build and Test completion for an approved head, it re-runs
+the head's `macos` job when the budgeted attempt's summary artifact
+(`pr-head-affected-tests-a<attempt>`, written by `--summary-json` on the macos
+leg only, because an artifact name is unique per run and the Linux leg runs the
+same step) reports `skipped_for_budget > 0`. The re-run's affected step sees a
+green `review-verdict` (`deferred_admission.py probe`), passes `--admission`
+(40-minute budget) and `--prior-summary`: it runs this attempt's plan plus the
+earlier attempt's deferred tests, minus what that attempt passed on the same
+tested commit. The union matters: a warm re-run rebuilds less, so the
+rebuilt-executable edge alone would silently drop tests the first attempt
+deferred. The queue state is read again just before the re-run request. Its result
 is the head's `macos` check, which branch protection already requires, so the
 steward cannot arm the head while it runs or after it fails. It never touches
 an armed or queued head, never re-runs a red `macos` (contract row 14), and

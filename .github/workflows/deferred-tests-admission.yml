@@ -15,8 +15,10 @@ name: Deferred tests before admission
 # verdict), and re-runs a run at most once (the admission attempt says so in
 # its summary). Every doubt decides "no re-run", today's behaviour.
 #
-# Triggers: the fleet App's APPROVE comment (approval after the run), and a
-# Build and Test completion (approval before the run finished). Both run this
+# Triggers: a Review verdict completion and the fleet App's APPROVE comment
+# (approval after the run; the comment only wakes this up and waits, bounded,
+# for `review-verdict` to turn green, which stays the only approval), and a
+# Build and Test completion (approval before the run finished). All run this
 # definition from the default branch and check out only the decision script,
 # so no pull request code runs with the write token.
 #
@@ -28,7 +30,7 @@ on:
   issue_comment:
     types: [created]
   workflow_run:
-    workflows: ["Build and Test"]
+    workflows: ["Build and Test", "Review verdict"]
     types: [completed]
 
 permissions:
@@ -50,10 +52,14 @@ jobs:
        && github.event.comment.user.login == 'shipyard-local[bot]'
        && contains(github.event.comment.body, 'verdict: APPROVE head:'))
       || (github.event_name == 'workflow_run'
-          && github.event.workflow_run.event == 'pull_request'
+          && ((github.event.workflow_run.name == 'Build and Test'
+               && github.event.workflow_run.event == 'pull_request')
+              || (github.event.workflow_run.name == 'Review verdict'
+                  && github.event.workflow_run.event == 'pull_request_target'
+                  && github.event.workflow_run.conclusion == 'success'))
           && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Check out the decision script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

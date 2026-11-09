@@ -52,6 +52,7 @@ import io
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -69,6 +70,9 @@ SUMMARY_FILE = "pr-affected-summary.json"
 SUMMARY_SCHEMA = "pulp-pr-head-affected-tests/v1"
 NOTICE_TITLE = "deferred-tests-admission"
 NOTICE_SCHEMA = "pulp-deferred-tests-admission/v1"
+# How long the comment path waits for `review-verdict` to turn green.
+VERDICT_WAIT_SECS = 180
+VERDICT_POLL_SECS = 20
 # A run is never re-run by this workflow at or past this attempt.
 MAX_ATTEMPT = 3
 ENFORCE = "enforce"
@@ -105,7 +109,10 @@ def http(method: str, path: str, body: Any = None, *, raw: bool = False) -> Any:
         raise ApiError(f"{method} {path}: {exc}") from exc
     if raw:
         return payload
-    return json.loads(payload) if payload.strip() else {}
+    try:
+        return json.loads(payload) if payload.strip() else {}
+    except ValueError as exc:
+        raise ApiError(f"{method} {path}: not JSON ({exc})") from exc
 
 
 def latest_verdict_check(fetch: Fetch, repo: str, head: str) -> dict | None:
@@ -169,8 +176,11 @@ def deferred_count(summary: dict) -> int:
     `skipped_for_budget` counts every budget skip; `deferred_to_merge_queue`
     is its ordinary subset (a merge-only skip already fails the step).
     """
-    return max(int(summary.get("skipped_for_budget") or 0),
-               int(summary.get("deferred_to_merge_queue") or 0))
+    try:
+        return max(int(summary.get("skipped_for_budget") or 0),
+                   int(summary.get("deferred_to_merge_queue") or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 @dataclass
@@ -188,6 +198,7 @@ class Facts:
     attempt: int = 0
     job_id: int | None = None
     job_status: str = ""
+    run_status: str = "completed"
     job_conclusion: str = ""
     summary: dict | None = None
     errors: list[str] = field(default_factory=list)
@@ -211,6 +222,8 @@ def decide(facts: Facts) -> tuple[bool, str]:
         return False, "the head is armed or in the merge queue; it is not touched"
     if facts.run_id is None or facts.job_id is None:
         return False, f"no pull_request {GATE_JOB} job on the head"
+    if facts.run_status != "completed":
+        return False, f"the newest Build and Test run on the head is {facts.run_status}"
     if facts.job_status != "completed":
         return False, f"{GATE_JOB} is {facts.job_status}; its completion decides"
     if facts.job_conclusion != "success":
@@ -231,7 +244,9 @@ def decide(facts: Facts) -> tuple[bool, str]:
                   "affected test(s) to the merge queue")
 
 
-def gather(fetch: Fetch, repo: str, event_name: str, event: dict) -> Facts:
+def gather(fetch: Fetch, repo: str, event_name: str, event: dict,
+           sleep: Callable[[float], None] = time.sleep,
+           clock: Callable[[], float] = time.monotonic) -> Facts:
     """Read the facts for the pull request the event names."""
     pr_number, event_head, comment = None, "", None
     if event_name == "issue_comment":
@@ -263,14 +278,19 @@ def gather(fetch: Fetch, repo: str, event_name: str, event: dict) -> Facts:
         facts.open = pull.get("state") == "open"
         facts.head = (pull.get("head") or {}).get("sha") or ""
         facts.same_repo = ((pull.get("head") or {}).get("repo") or {}).get("full_name") == repo
-        if comment is not None and comment_approves(comment, facts.head):
-            facts.approved, facts.approval = True, "the triggering comment approves the head"
-        else:
-            facts.approved, facts.approval = head_approved(fetch, repo, facts.head)
+        facts.approved, facts.approval = head_approved(fetch, repo, facts.head)
+        if (not facts.approved and comment is not None and comment_approves(comment, facts.head)):
+            # The APPROVE comment only wakes this up; `review-verdict` (signer
+            # and session rules) is still the approval. Its head check re-runs
+            # on the comment, so give it a bounded time to turn green.
+            deadline = clock() + VERDICT_WAIT_SECS
+            while not facts.approved and clock() < deadline:
+                sleep(VERDICT_POLL_SECS)
+                facts.approved, facts.approval = head_approved(fetch, repo, facts.head)
         facts.armed_or_queued = armed_or_queued(fetch, repo, int(pr_number))
         locate_gate_job(fetch, repo, facts)
-    except ApiError as exc:
-        facts.errors.append(str(exc))
+    except (ApiError, KeyError, TypeError, ValueError) as exc:
+        facts.errors.append(f"{type(exc).__name__}: {exc}")
     return facts
 
 
@@ -297,6 +317,7 @@ def locate_gate_job(fetch: Fetch, repo: str, facts: Facts) -> None:
     if not runs:
         return
     run = max(runs, key=lambda r: r.get("id", 0))
+    facts.run_status = run.get("status") or ""
     facts.run_id = int(run["id"])
     facts.attempt = int(run.get("run_attempt") or 1)
     jobs = fetch("GET", f"repos/{repo}/actions/runs/{facts.run_id}/attempts/{facts.attempt}"
@@ -321,17 +342,25 @@ def notice(record: dict) -> str:
     return f"::notice title={NOTICE_TITLE}::{json.dumps(record, sort_keys=True)}"
 
 
-def cmd_decide(args: argparse.Namespace, fetch: Fetch = default_fetch) -> int:
+def cmd_decide(args: argparse.Namespace, fetch: Fetch = default_fetch,
+               sleep: Callable[[float], None] = time.sleep,
+               clock: Callable[[], float] = time.monotonic) -> int:
     event = json.loads(Path(args.event_path).read_text(encoding="utf-8"))
     mode = mode_from(args.mode)
-    facts = gather(fetch, args.repo, args.event_name, event)
+    facts = gather(fetch, args.repo, args.event_name, event, sleep, clock)
     rerun, why = decide(facts)
     action = "none"
     if rerun:
         action = "would-rerun" if mode != ENFORCE else "rerun"
         if mode == ENFORCE:
             try:
-                fetch("POST", f"repos/{args.repo}/actions/jobs/{facts.job_id}/rerun", {})
+                # The steward may have armed it since the facts were read.
+                late = armed_or_queued(fetch, args.repo, facts.pr)
+                if late is not False:
+                    action, why = "none", ("armed or queued between the read and the re-run"
+                                           if late else "queue state unreadable before the re-run")
+                else:
+                    fetch("POST", f"repos/{args.repo}/actions/jobs/{facts.job_id}/rerun", {})
             except ApiError as exc:
                 action, why = "rerun-failed", f"{why}; the re-run request failed: {exc}"
     record = {"schema": NOTICE_SCHEMA, "mode": mode, "action": action, "reason": why,

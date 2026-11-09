@@ -870,29 +870,55 @@ def diff_scoped_registration_problems(tests: list[dict]) -> list[str]:
 def resolve_sha(rev: str) -> str:
     """The commit ``rev`` names, or "" when git cannot say."""
     out = subprocess.run(["git", "rev-parse", "--verify", f"{rev}^{{commit}}"],
-                         cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+                         cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8",
+                         check=False)
     return out.stdout.strip() if out.returncode == 0 else ""
 
 
-def prior_passed(path: Path, tested_sha: str) -> list[str]:
-    """Tests an earlier attempt's summary says passed on ``tested_sha``.
+def prior_lists(path: Path, tested_sha: str) -> tuple[list[str], list[str]]:
+    """(passed, deferred) from an earlier attempt's summary on ``tested_sha``.
 
-    Only a budgeted attempt of this schema that tested the same commit counts;
+    Only a summary of this schema that tested the same commit counts;
     anything else (unreadable, another commit, no tested commit on either
     side) gives nothing, so the whole selection runs.
     """
     try:
         prior = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        return [], []
     if not isinstance(prior, dict) or prior.get("schema") != SCHEMA:
-        return []
+        return [], []
     if not tested_sha or prior.get("tested_sha") != tested_sha:
-        return []
-    passed = prior.get("passed_tests")
-    if not isinstance(passed, list):
-        return []
-    return [t for t in passed if isinstance(t, str)]
+        return [], []
+
+    def names(key: str) -> list[str]:
+        value = prior.get(key)
+        return [t for t in value if isinstance(t, str)] if isinstance(value, list) else []
+
+    return names("passed_tests"), names("deferred_tests") + names("merge_only_skipped_tests")
+
+
+def prior_passed(path: Path, tested_sha: str) -> list[str]:
+    """Tests an earlier attempt's summary says passed on ``tested_sha``."""
+    return prior_lists(path, tested_sha)[0]
+
+
+def admission_tests(planned: list[str], passed: list[str], deferred: list[str],
+                    names: dict[str, set[str]]) -> list[str]:
+    """What an admission attempt runs: the plan plus what was deferred, minus what passed.
+
+    The earlier attempt's deferred tests are added back even when this
+    attempt's plan lost them (a warm re-run rebuilds less, so the
+    rebuilt-executable edge selects less), as long as ctest still knows them.
+    """
+    done = set(passed)
+    out = [t for t in planned if t not in done]
+    have = set(out)
+    for test in deferred:
+        if test not in done and test not in have and (not names or test in names):
+            out.append(test)
+            have.add(test)
+    return out
 
 
 def write_summary(path: Path, summary: dict, tested_sha: str, results: dict,
@@ -980,12 +1006,12 @@ def main(argv: list[str] | None = None) -> int:
     tested_sha = resolve_sha(args.head)
     dropped: list[str] = []
     if args.admission and args.prior_summary:
-        dropped = prior_passed(args.prior_summary, tested_sha)
-        if dropped:
-            keep = set(dropped)
-            plan["tests"] = [t for t in plan["tests"] if t not in keep]
-            print(f"pr-head-affected-tests: admission run: {len(dropped)} test(s) an earlier "
-                  f"attempt passed on {tested_sha[:12]} are not run again", flush=True)
+        dropped, earlier_deferred = prior_lists(args.prior_summary, tested_sha)
+        if dropped or earlier_deferred:
+            plan["tests"] = admission_tests(plan["tests"], dropped, earlier_deferred, names)
+            print(f"pr-head-affected-tests: admission run: {len(plan['tests'])} test(s), "
+                  f"including {len(earlier_deferred)} an earlier attempt deferred; "
+                  f"{len(dropped)} it passed on {tested_sha[:12]} are not run again", flush=True)
 
     results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
                "excluded_or_absent": [],

@@ -1038,7 +1038,8 @@ class WorkflowWiringTests(unittest.TestCase):
         full = text.index("- name: Test (non-Windows)")
         self.assertLess(fast, step_at)
         self.assertLess(step_at, full)
-        block = text[step_at:full]
+        # The step itself: the summary upload that follows it is not gating.
+        block = text[step_at:text.index("\n      - name:", step_at + 10)]
         self.assertIn("github.event_name == 'pull_request'", block)
         self.assertIn("tools/ci/pr_head_affected_tests.py", block)
         self.assertIn("--budget-secs 600", block)
@@ -1381,6 +1382,30 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(record["deferred_tests"], ["d1", "d2"])
         self.assertEqual(record["passed_tests"], ["p1"])
         self.assertEqual(record["tested_sha"], "c" * 40)
+
+    def test_a_deferred_test_the_rerun_plan_lost_still_runs(self) -> None:
+        # A warm re-run rebuilds less, so the rebuilt-executable edge can drop
+        # a test the budgeted attempt selected and deferred.
+        with tempfile.TemporaryDirectory() as tmp:
+            prior = self._prior(Path(tmp), deferred_tests=["d1", "d2", "lost"])
+            names = {"lost": set(), "d1": set(), "d2": set(), "p1": set(), "p2": set()}
+            with mock.patch.object(step, "inventory_tests", return_value=names):
+                out = io.StringIO()
+                results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
+                           "excluded_or_absent": [], "seconds": 1.0}
+                with mock.patch.object(step, "diff_paths", return_value=["x.py"]), \
+                        mock.patch.object(step, "select", return_value=json.loads(json.dumps(self.PLAN))), \
+                        mock.patch.object(step, "resolve_sha", return_value="c" * 40), \
+                        mock.patch.object(step, "run_budgeted", return_value=results) as run, \
+                        contextlib.redirect_stdout(out):
+                    step.main(["--build-dir", "/nonexistent", "--admission",
+                               "--prior-summary", str(prior)])
+        self.assertEqual(run.call_args.args[1], ["d1", "d2", "lost"])
+
+    def test_control_a_deferred_test_ctest_no_longer_knows_is_not_added(self) -> None:
+        self.assertEqual(step.admission_tests(["a"], [], ["gone"], {"a": set()}), ["a"])
+        self.assertEqual(step.admission_tests(["a", "b"], ["a"], ["b", "c"], {"a": set(), "b": set(), "c": set()}),
+                         ["b", "c"])
 
     def test_an_admission_run_that_still_runs_out_of_time_defers_not_fails(self) -> None:
         # Past the admission budget the rest goes to the merge queue as before:
