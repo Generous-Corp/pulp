@@ -40,8 +40,7 @@ encoders when present (`/opt/homebrew/bin/flac`, `/opt/homebrew/bin/lame`,
 -map_metadata -1`, `/usr/bin/afconvert`); a missing encoder skips its seeds
 with a notice and never fails the run. Two consecutive runs on the same host
 produce identical bytes. A different encoder version changes the encoded
-seeds, so regenerate deliberately and commit the new manifest with the
-README.
+seeds; commit a regenerated set together with its manifest and this README.
 
 Versions used for the committed files:
 
@@ -145,8 +144,8 @@ path or timestamp (the m4a `mvhd`/`tkhd`/`mdhd` times are zeroed).
 Controls, run on the committed bytes: `ffprobe`/`ffmpeg -f null` (FFmpeg
 8.0) and `afinfo`/`afconvert` (macOS 27.2). `flac -t` covers the FLAC
 seeds. Agreement between the two readers is listed as "agree"; a
-disagreement is recorded as a fact, not a failure, and is exactly what the
-differential tests exist to surface.
+disagreement is recorded as a fact, not a failure, for the differential
+tests to surface.
 
 | File | ffprobe / ffmpeg | afinfo / CoreAudio |
 | --- | --- | --- |
