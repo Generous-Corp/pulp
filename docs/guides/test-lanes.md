@@ -115,7 +115,9 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   non-native tier's manifest, classifier or any `test/` CMake registration adds
   `wide-non-native-selftest`. Extra time is capped at ten minutes (batches stop
   starting; the rest are listed as skipped), and the merge group still runs
-  everything.
+  everything. Once the head is approved, `deferred-tests-admission.yml` re-runs
+  its `macos` job to run the skipped tests on the head before admission
+  (`PULP_DEFERRED_ADMISSION=enforce`; shadow when unset).
 - **`pr-fast`** — additive, never exclusive: a static repository contract
   (lint, drift, registry-completeness, generated-manifest check) that also runs
   on the pull request head, where the rest of the suite does not. Members are

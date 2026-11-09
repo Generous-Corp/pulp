@@ -3677,6 +3677,20 @@ after ten minutes, listing the rest as skipped. Its annotation is
 `pr-head-affected-tests` (`pulp-pr-head-affected-tests/v1`): selected, passed,
 failed, skipped-for-budget and minutes, which is the per-PR extra cost to watch.
 
+### Approved heads run the deferred tests before admission
+
+When the budget defers tests, the first place they run is otherwise the merge
+group, where a failure ejects the whole batch. Once a head is approved,
+`deferred-tests-admission.yml` re-runs its `macos` job, and that attempt runs
+exactly the tests the budgeted attempt deferred (`--admission`,
+`--prior-summary`; the budgeted attempt uploads its summary as the
+`pr-head-affected-tests-a<attempt>` artifact). The result is the existing
+required `macos` check, so no new required context exists and the steward
+remains the only writer of admission. Armed or queued heads, red runs and runs
+already re-run once are left alone. The repository variable
+`PULP_DEFERRED_ADMISSION=enforce` turns it on; unset is shadow mode, which only
+reports what it would re-run. Rules and tests: `tools/ci/deferred_admission.py`.
+
 ## Exact PR receipts on an unchanged merge-group candidate
 
 A pull-request head normally runs only the build and the `pr-fast` tier, which

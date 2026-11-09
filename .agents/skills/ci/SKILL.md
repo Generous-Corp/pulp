@@ -1562,6 +1562,35 @@ warning and does not fail the check. Compiled tests are never exempted: their
 binary is the pull request's own build, so a base run would compare it with
 itself.
 
+### An approved head runs its deferred affected tests before the queue does
+
+The ten-minute budget is why the merge group used to be the first place a large
+diff's affected tests ran: in the week to 2026-11-09, 9 of 10 "passes on the
+head, fails merged" ejections failed on the head alone, in tests its run had
+deferred (#11471's head deferred 111). `deferred-tests-admission.yml` closes
+that without a new required context or a new merge writer: on the fleet App's
+APPROVE comment, or on a Build and Test completion for an approved head, it
+re-runs the head's `macos` job when the budgeted attempt's summary artifact
+(`pr-head-affected-tests-a<attempt>`, written by `--summary-json`) reports
+`skipped_for_budget > 0`. The re-run's affected step sees a green
+`review-verdict` (`deferred_admission.py probe`), passes `--admission`
+(40-minute budget) and `--prior-summary` (drops what an earlier attempt passed
+on the same tested commit), so it runs exactly the deferred tests. Its result
+is the head's `macos` check, which branch protection already requires, so the
+steward cannot arm the head while it runs or after it fails. It never touches
+an armed or queued head, never re-runs a red `macos` (contract row 14), and
+re-runs a run at most once (the admission attempt's summary says
+`admission: true`; attempt 3 is the hard limit). Every unreadable fact decides
+"no re-run", which is the old behaviour. The repository variable
+`PULP_DEFERRED_ADMISSION` must be `enforce` for the re-run and the wider budget;
+unset is shadow, which logs `deferred-tests-admission` notices only. Gotchas:
+the summary file lives in the warm build dir, so the step deletes it before the
+selector runs or an earlier run's summary would be uploaded; and nothing relies
+on whether a re-run requested with `GITHUB_TOKEN` fires `workflow_run`
+consumers: if it does, the admission attempt's summary stops a second re-run,
+and if it does not, `macos-tier-record.yml` publishes no record for that
+attempt, which matters only once `[queue] tiered_required_checks` is set.
+
 ### Reuse-record readers gate on `unusable()`, and an unlisted object counts as changed
 
 The reuse record's link-members and object-deps files each have an

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import re
 import subprocess
@@ -1301,6 +1302,94 @@ class ExitCodeTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(step.main(["--build-dir", "/nonexistent"]), 0)
         run.assert_called_once()
+
+
+class AdmissionTests(unittest.TestCase):
+    """An approved head's attempt runs what the budgeted attempt deferred."""
+
+    PLAN = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
+            "tests": ["p1", "p2", "d1", "d2"], "merge_only": []}
+
+    def _run(self, argv: list[str], *, tested: str = "c" * 40,
+             results: dict | None = None) -> tuple[int, mock.MagicMock, str]:
+        results = results or {"passed": ["d1", "d2"], "failed": [], "skipped": [], "notrun": [],
+                              "excluded_or_absent": [], "seconds": 1.0}
+        out = io.StringIO()
+        with mock.patch.object(step, "diff_paths", return_value=["x.py"]), \
+                mock.patch.object(step, "inventory_tests", return_value={}), \
+                mock.patch.object(step, "select", return_value=json.loads(json.dumps(self.PLAN))), \
+                mock.patch.object(step, "resolve_sha", return_value=tested), \
+                mock.patch.object(step, "run_budgeted", return_value=results) as run, \
+                contextlib.redirect_stdout(out):
+            code = step.main(["--build-dir", "/nonexistent"] + argv)
+        return code, run, out.getvalue()
+
+    def _prior(self, tmp: Path, **over) -> Path:
+        record = {"schema": step.SCHEMA, "tested_sha": "c" * 40, "passed_tests": ["p1", "p2"],
+                  "admission": False}
+        record.update(over)
+        path = tmp / "prior.json"
+        path.write_text(json.dumps(record), encoding="utf-8")
+        return path
+
+    def test_admission_runs_exactly_what_the_prior_attempt_did_not_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prior = self._prior(Path(tmp))
+            code, run, out = self._run(["--admission", "--prior-summary", str(prior)])
+        self.assertEqual(code, 0)
+        tests, budget = run.call_args.args[1], run.call_args.args[2]
+        self.assertEqual(tests, ["d1", "d2"])
+        self.assertEqual(budget, step.ADMISSION_BUDGET_SECS)
+        self.assertIn('"admission": true', out)
+        self.assertIn('"prior_passed_not_rerun": 2', out)
+
+    def test_control_a_budgeted_run_ignores_the_prior_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prior = self._prior(Path(tmp))
+            _, run, out = self._run(["--prior-summary", str(prior)])
+        self.assertEqual(run.call_args.args[1], ["p1", "p2", "d1", "d2"])
+        self.assertEqual(run.call_args.args[2], step.DEFAULT_BUDGET_SECS)
+        self.assertIn('"admission": false', out)
+
+    def test_a_prior_summary_of_another_commit_drops_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prior = self._prior(Path(tmp), tested_sha="d" * 40)
+            _, run, _ = self._run(["--admission", "--prior-summary", str(prior)])
+        self.assertEqual(run.call_args.args[1], ["p1", "p2", "d1", "d2"])
+
+    def test_an_unreadable_or_foreign_prior_drops_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.json"
+            bad.write_text("{", encoding="utf-8")
+            self.assertEqual(step.prior_passed(bad, "c" * 40), [])
+            self.assertEqual(step.prior_passed(self._prior(Path(tmp), schema="x/v1"), "c" * 40), [])
+            self.assertEqual(step.prior_passed(self._prior(Path(tmp)), ""), [])
+            self.assertEqual(step.prior_passed(Path(tmp) / "missing.json", "c" * 40), [])
+
+    def test_the_summary_file_carries_what_the_dispatcher_reads(self) -> None:
+        results = {"passed": ["p1"], "failed": [], "skipped": ["d1", "d2"], "notrun": [],
+                   "excluded_or_absent": [], "seconds": 600.0}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nested" / "summary.json"
+            code, _, _ = self._run(["--summary-json", str(path)], results=results)
+            record = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(code, 0)
+        self.assertEqual(record["schema"], step.SCHEMA)
+        self.assertFalse(record["admission"])
+        self.assertEqual(record["skipped_for_budget"], 2)
+        self.assertEqual(record["deferred_to_merge_queue"], 2)
+        self.assertEqual(record["deferred_tests"], ["d1", "d2"])
+        self.assertEqual(record["passed_tests"], ["p1"])
+        self.assertEqual(record["tested_sha"], "c" * 40)
+
+    def test_an_admission_run_that_still_runs_out_of_time_defers_not_fails(self) -> None:
+        # Past the admission budget the rest goes to the merge queue as before:
+        # never worse than a budgeted run.
+        results = {"passed": ["d1"], "failed": [], "skipped": ["d2"], "notrun": [],
+                   "excluded_or_absent": [], "seconds": 2400.0}
+        code, _, out = self._run(["--admission"], results=results)
+        self.assertEqual(code, 0)
+        self.assertIn('"deferred_to_merge_queue": 1', out)
 
 
 if __name__ == "__main__":

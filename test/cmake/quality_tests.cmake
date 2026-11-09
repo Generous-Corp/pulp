@@ -893,6 +893,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME pr-head-affected-tests-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_pr_head_affected_tests.py")
         set_tests_properties(pr-head-affected-tests-selftest PROPERTIES TIMEOUT 120)
+        # An approved head's deferred affected tests run on the head before
+        # the merge queue: the re-run decision and both workflows' wiring.
+        add_test(NAME deferred-admission-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_deferred_admission.py")
+        set_tests_properties(deferred-admission-selftest PROPERTIES TIMEOUT 60)
         # The diff-scoped drift checks must carry PULP_DIFF_SCOPED in this
         # configure's inventory, or their base re-run is believed again.
         add_test(NAME pr-head-diff-scoped-registrations COMMAND ${Python3_EXECUTABLE}
