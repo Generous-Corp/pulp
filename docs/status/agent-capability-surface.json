@@ -1102,7 +1102,7 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/wave_layout.hpp",
-      "fingerprint": "sha256:6467a0ee0f59d1744c2b19e9f4ab4abfafbb6619a5236a3c703fda89b6264bc9",
+      "fingerprint": "sha256:0deeb170f8af37ab01395af5deec2d91a1826e0bb4311168e6d848dcdd56c826",
       "include": "pulp/audio/wave_layout.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
