@@ -732,7 +732,8 @@ def build_ogg_seeds(corpus: Corpus, tmp: str) -> None:
 def build_mp3_seeds(corpus: Corpus, tmp: str) -> None:
     lame = find_tool("lame")
     names = ("mp3-cbr-mono.mp3", "mp3-id3v2-xing-vbr.mp3", "mp3-apev2-footer.mp3", "mp3-apev1-footer.mp3",
-             "mp3-apev2-size-high-bit.mp3", "mp3-truncated-frame.mp3")
+             "mp3-ape-size-below-footer.mp3", "mp3-apev1-header-flag.mp3", "mp3-apev2-size-high-bit.mp3",
+             "mp3-truncated-frame.mp3")
     if not lame:
         for name in names:
             corpus.skip(name, "lame encoder not found")
@@ -760,6 +761,16 @@ def build_mp3_seeds(corpus: Corpus, tmp: str) -> None:
     corpus.add("mp3-apev1-footer.mp3",
                cbr + apev2_tag([(b"Title", b"SYNTHETIC TITLE"), (b"Comment", b"APEv1 footer appended by Pulp")],
                                version=1000, with_header=False))
+    # A footer whose size field (0) is below the footer's own 32 bytes, with no
+    # items and no header. A reader that trusts the size strips less than the
+    # footer and leaves tag bytes in front of the frame matcher.
+    corpus.add("mp3-ape-size-below-footer.mp3",
+               cbr + b"APETAGEX" + struct.pack("<IIII", 2000, 0, 0, 0) + bytes(8))
+    # An APEv1 tag whose footer flags carry bit 31. APEv1 has no header block,
+    # so a reader that trusts the flag strips 32 bytes of audio.
+    v1_flagged = bytearray(apev2_tag([(b"Title", b"SYNTHETIC TITLE")], version=1000, with_header=False))
+    struct.pack_into("<I", v1_flagged, len(v1_flagged) - 12, 1 << 31)
+    corpus.add("mp3-apev1-header-flag.mp3", cbr + bytes(v1_flagged))
     # A size of 0x1F0 puts 0xF0 in footer byte 12, so a reader that widens the
     # footer bytes through a signed char reads a sign-extended size.
     high_bit = apev2_tag_with_size([(b"Title", b"SYNTHETIC TITLE")], 0x1F0)

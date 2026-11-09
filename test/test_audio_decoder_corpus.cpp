@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -155,7 +156,9 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
         {"m4a-aac-lc-mono.m4a", E{true, {}, {}, ""}},
         {"m4a-aac-mdat-size1.m4a", E{true, {}, {}, ""}},
         {"m4a-alac-stereo.m4a", E{true, {}, {}, ""}},
+        {"mp3-ape-size-below-footer.mp3", E{true, {}, {}, ""}},
         {"mp3-apev1-footer.mp3", E{true, {}, {}, ""}},
+        {"mp3-apev1-header-flag.mp3", E{true, {}, {}, ""}},
         {"mp3-apev2-footer.mp3", E{true, {}, {}, ""}},
         {"mp3-apev2-size-high-bit.mp3", E{true, {}, {}, ""}},
         {"mp3-cbr-mono.mp3", E{true, {}, {}, ""}},
@@ -506,16 +509,23 @@ TEST_CASE("an MP3 with no declared length reports the frames the decoder deliver
 
 namespace {
 
+uint32_t le32(std::vector<uint8_t>::const_iterator at) {
+    return uint32_t(at[0]) | (uint32_t(at[1]) << 8) | (uint32_t(at[2]) << 16) |
+           (uint32_t(at[3]) << 24);
+}
+
 // The bytes in front of a trailing APE tag. The footer's size field (bytes
-// 12-15) counts the items and the footer; a 32-byte header also precedes the
-// items when flags bit 31 (footer byte 23, bit 7) is set.
+// 12-15) counts the items and the footer, and is never less than the footer's
+// own 32 bytes. An APEv2 tag (version 2000 or later, bytes 8-11) also has a
+// 32-byte header in front of the items when flags bit 31 (footer byte 23, bit
+// 7) is set; APEv1 never has one.
 std::vector<uint8_t> strip_ape_tag(const std::vector<uint8_t>& bytes) {
     REQUIRE(bytes.size() > 32u);
-    const auto footer = bytes.end() - 32;
+    const auto footer = bytes.cbegin() + static_cast<std::ptrdiff_t>(bytes.size() - 32u);
     REQUIRE(std::string(footer, footer + 8) == "APETAGEX");
-    const uint32_t tag_size = uint32_t(footer[12]) | (uint32_t(footer[13]) << 8) |
-                              (uint32_t(footer[14]) << 16) | (uint32_t(footer[15]) << 24);
-    const uint32_t header_size = (footer[23] & 0x80u) != 0 ? 32u : 0u;
+    const uint32_t version = le32(footer + 8);
+    const uint32_t tag_size = std::max<uint32_t>(le32(footer + 12), 32u);
+    const uint32_t header_size = version >= 2000u && (footer[23] & 0x80u) != 0 ? 32u : 0u;
     REQUIRE(uint64_t(tag_size) + header_size < bytes.size());
     return std::vector<uint8_t>(bytes.begin(), bytes.end() - (tag_size + header_size));
 }
@@ -535,14 +545,17 @@ void require_same_audio(const pulp::audio::AudioFileData& tagged,
 
 TEST_CASE("an MP3 behind an APE tag decodes exactly as the same MP3 without it",
           "[fuzz][audio][mp3]") {
-    // APEv2 with a header, APEv1 without one, and an APEv2 tag whose size
-    // byte has its high bit set. Each stripped stream is the untagged base.
+    // APEv2 with a header, APEv1 without one, APEv1 whose flags claim a header
+    // anyway, a footer whose size is below its own 32 bytes, and an APEv2 tag
+    // whose size byte has its high bit set. Each stripped stream is the
+    // untagged base.
     const auto base = read_bytes(corpus_dir() / "mp3-cbr-mono.mp3");
     pulp::test::ScopedTempDir dir("pulp-audio-decoder-ape");
     auto& registry = pulp::audio::FormatRegistry::instance();
     const auto limits = pulp_fuzz::audio_decoder::fuzz_limits();
     for (const char* name :
-         {"mp3-apev2-footer.mp3", "mp3-apev1-footer.mp3", "mp3-apev2-size-high-bit.mp3"}) {
+         {"mp3-apev2-footer.mp3", "mp3-apev1-footer.mp3", "mp3-apev1-header-flag.mp3",
+          "mp3-ape-size-below-footer.mp3", "mp3-apev2-size-high-bit.mp3"}) {
         INFO(name);
         const auto tagged = read_bytes(corpus_dir() / name);
         const auto stripped = strip_ape_tag(tagged);

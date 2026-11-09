@@ -128,6 +128,8 @@ path or timestamp (the m4a `mvhd`/`tkhd`/`mdhd` times are zeroed).
 | `mp3-apev2-footer.mp3` | 1146 | derived | Valid with trailer: the CBR base plus an APEv2 tag (header, two UTF-8 items, footer) built in Python. |
 | `mp3-apev1-footer.mp3` | 1114 | derived | Valid with trailer: the CBR base plus an APEv1 tag (version 1000, two items, footer, no header block, flags zero). A reader that always strips a 32-byte header cuts into the last frame. |
 | `mp3-apev2-size-high-bit.mp3` | 1536 | derived | Valid with trailer: the CBR base plus an APEv2 tag padded so the footer size is 0x1F0, putting 0xF0 in footer byte 12. A reader that widens the size bytes through a signed char reads a sign-extended size. |
+| `mp3-ape-size-below-footer.mp3` | 1040 | derived | Valid with trailer: the CBR base plus a bare APEv2 footer (no header, no items, flags zero) whose size field is 0, below the footer's own 32 bytes. A reader that trusts the size strips less than the footer. |
+| `mp3-apev1-header-flag.mp3` | 1069 | derived | Valid with trailer: the CBR base plus an APEv1 tag (version 1000, one item, no header block) whose footer flags carry bit 31. APEv1 has no header, so a reader that trusts the flag strips 32 bytes of audio. |
 | `mp3-truncated-frame.mp3` | 449 | derived | Malformed: cut 17 bytes into the fourth frame. |
 | `mp3-xing-declares-more-than-stream.mp3` | 1776 | derived | Malformed: the Xing VBR seed cut at 80% of its length, so the Xing header still declares 6400 PCM frames while the stream delivers 2351. Reproduces a libFuzzer finding whose artifact was not written. |
 | `mp3-id3v2-scan-counts-undecodable-frame.mp3` | 1777 | fuzzer | Malformed: libFuzzer reproducer mutated from the Xing VBR seed; the Xing frame is damaged so nothing is declared, dr_mp3's header scan counts 4 MP3 frames (4608 PCM) and the decoder delivers 3 (3456). Not produced by the generator script. |
@@ -180,6 +182,8 @@ differential tests exist to surface.
 | `mp3-apev2-footer.mp3` | 0.2865 s from the byte length, decodes 8064 samples (the base's count), no complaint | estimated 0.2865 s, 7 packets |
 | `mp3-apev1-footer.mp3` | 0.2785 s, "Header missing" on the trailing tag bytes, still decodes 8064 samples and exits 0 | estimated 0.2785 s, 7 packets |
 | `mp3-apev2-size-high-bit.mp3` | 0.384 s from the byte length, decodes 8064 samples, no complaint | estimated 0.384 s, 7 packets |
+| `mp3-ape-size-below-footer.mp3` | 0.26 s from the byte length, decodes 8064 samples, no complaint | estimated 0.26 s, 7 packets |
+| `mp3-apev1-header-flag.mp3` | 0.26725 s, "Header missing" on the trailing tag bytes, still decodes 8064 samples and exits 0 | estimated 0.26725 s, 7 packets |
 | `mp3-truncated-frame.mp3` | 0.11225 s, "invalid new backstep -1" | 0.11225 s, no complaint |
 | `mp3-xing-declares-more-than-stream.mp3` | 0.200 s (trusts the Xing count), no complaint | estimated 0.252 s |
 | `mp3-id3v2-scan-counts-undecodable-frame.mp3` | 0.1786 s, no complaint | estimated 0.252 s |
