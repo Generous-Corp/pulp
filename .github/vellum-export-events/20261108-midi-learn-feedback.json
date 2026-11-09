@@ -8,13 +8,8 @@
     "core/state/include/pulp/state/midi_decode.hpp",
     "core/state/include/pulp/state/midi_feedback.hpp",
     "core/state/include/pulp/state/midi_learn_engine.hpp",
-    "core/state/include/pulp/state/midi_learn_persistence.hpp",
-    "core/state/include/pulp/state/midi_learn_undo.hpp",
-    "core/state/include/pulp/state/midi_map_scale.hpp",
-    "core/state/include/pulp/state/midi_mapping.hpp",
-    "core/state/include/pulp/state/midi_source.hpp",
-    "core/state/src/midi_learn_persistence.cpp"
+    "core/state/include/pulp/state/midi_source.hpp"
   ],
   "vellum_inherits": false,
-  "rationale": "MIDI Learn state headers and the feedback encoder. None is included by any file in the exported closure, so the next re-export does not carry them."
+  "rationale": "MIDI Learn engine, decode and source headers and the feedback encoder this change edits. None is included by any file in the exported closure, so the next re-export does not carry them."
 }
