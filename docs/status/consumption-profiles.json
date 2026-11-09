@@ -663,6 +663,7 @@
       "pulp/platform/dialog_session.hpp",
       "pulp/platform/environment.hpp",
       "pulp/platform/file_dialog.hpp",
+      "pulp/platform/file_drag.hpp",
       "pulp/platform/gpu_fwd.hpp",
       "pulp/platform/main_thread.hpp",
       "pulp/platform/native_handle.hpp",

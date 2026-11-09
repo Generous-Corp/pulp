@@ -68,6 +68,14 @@ a change event or expansion-watch event that covers it, or an export event under
 }
 ```
 
+A re-pin applies to the changes after it, so an open branch whose added event
+names the previous `receipt_export_id` fails until its event is rewritten;
+merging main does not do that. `python3 tools/scripts/vellum_receipt_drift.py
+--repin-events` rewrites the export events the branch adds (never one already on
+`origin/main`) to the id pinned on `origin/main`, and drops paths an export event
+on `origin/main` already decides when the branch does not change them again.
+Commit the result: receipt mode reads committed HEAD.
+
 Two added events that state different values for one path fail as a conflict.
 To correct a landed export event, add a new one naming it in `supersedes`
 (sorted event ids). The correction may list only paths the superseded event

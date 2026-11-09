@@ -267,6 +267,14 @@ if(APPLE)
         PULP_OBJC_UNIQUE_FIXTURE_PATH="$<TARGET_FILE:pulp-test-objc-unique-fixture>")
     pulp_test_spawns(pulp-test-platform-objc-unique-class pulp-test-objc-unique-fixture)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # Outbound file drags: validation, the recorder seam automation uses, the
+    # operation mapping, the drag image, event anchoring and the drag source.
+    pulp_add_test_suite(pulp-test-platform-file-drag
+        SOURCES test_platform_file_drag.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-file-drag PRIVATE "-framework Cocoa")
+endif()
 if(TARGET pulp-native)
     # integrations/pulp-native: the Metal surface on the real system device in
     # offscreen windows (device, client-presented drawables, sizing, geometry
