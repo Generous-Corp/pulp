@@ -1,0 +1,19 @@
+{
+ "name": "web-timeline-source-closure-selftest",
+ "record": {
+  "entry": "tools/scripts/test_web_timeline_source_closure_check.py",
+  "inputs": [
+   "core/audio/src/finite_time_stretch.cpp",
+   "core/audio/src/realtime_time_stretch.cpp",
+   "core/audio/src/rolling_audio_capture_buffer.cpp",
+   "core/playback/PulpPlaybackSources.cmake",
+   "core/runtime/src/sha256.cpp",
+   "core/timeline/PulpTimelineSources.cmake",
+   "tools/cmake/PulpWam.cmake",
+   "tools/cmake/PulpWclap.cmake",
+   "tools/scripts/test_web_timeline_source_closure_check.py",
+   "tools/scripts/web_timeline_source_closure_check.py"
+  ],
+  "kind": "python"
+ }
+}

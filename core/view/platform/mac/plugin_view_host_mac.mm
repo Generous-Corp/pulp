@@ -286,7 +286,8 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
                 drag_target->set(refreshed.target);
             }
             auto* target = drag_target->live_in(*root);
-            if (!target || !pulp::view::transfer_input_focus(*root, target)) {
+            if (!target ||
+                !pulp::view::transfer_input_focus(*root, target, pulp::view::FocusCause::pointer)) {
                 drag_target->reset();
                 return;
             }
@@ -334,7 +335,8 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
             if (!drag_target->live_in(*root)) return;
         }
         auto* target = drag_target->live_in(*root);
-        if (!target || !pulp::view::transfer_input_focus(*root, target)) {
+        if (!target ||
+            !pulp::view::transfer_input_focus(*root, target, pulp::view::FocusCause::pointer)) {
             drag_target->reset();
             return;
         }
@@ -908,7 +910,7 @@ bool pulp_plugin_key_equivalent(pulp::view::View* root, NSEvent* event) {
     ke.is_repeat = event.isARepeat;
     if (auto* fv = pulp_focus_under_root(root);
         fv && fv->accepts_text_input()) {
-        if (fv->on_key_event(ke)) {
+        if (pulp::view::deliver_key_event(*fv, ke)) {
             root->request_repaint();
             return true;
         }
@@ -1124,6 +1126,15 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     _priorResponder = nil;  // the host chose a new responder; nothing to restore
     if (pulp_plugin_end_key_input(self, self.rootView)) [self setNeedsDisplay:YES];
     return [super resignFirstResponder];
+}
+// A modifier key went down or up with no other key: tell the focused view and
+// any view a pointer press is captured by (Shift pressed mid-drag).
+- (void)flagsChanged:(NSEvent*)event {
+    if (self.rootView &&
+        pulp::view::deliver_modifier_keys_changed(
+            *self.rootView, pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags)))
+        [self setNeedsDisplay:YES];
+    [super flagsChanged:event];
 }
 - (void)keyDown:(NSEvent*)event {
     if (!pulp_plugin_key_down(self, self.rootView, event, _scriptKeys) &&
@@ -2097,6 +2108,15 @@ private:
     if (pulp_plugin_end_key_input(self, self.rootView) && self.rootView)
         self.rootView->request_repaint();
     return [super resignFirstResponder];
+}
+// A modifier key went down or up with no other key: tell the focused view and
+// any view a pointer press is captured by (Shift pressed mid-drag).
+- (void)flagsChanged:(NSEvent*)event {
+    if (self.rootView &&
+        pulp::view::deliver_modifier_keys_changed(
+            *self.rootView, pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags)))
+        [self setNeedsDisplay:YES];
+    [super flagsChanged:event];
 }
 - (void)keyDown:(NSEvent*)event {
     if (!pulp_plugin_key_down(self, self.rootView, event, _scriptKeys) &&

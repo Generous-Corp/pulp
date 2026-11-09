@@ -1,0 +1,10 @@
+{
+ "name": "host-adapter-tracing-contract-selftest",
+ "record": {
+  "entry": "tools/scripts/test_check_host_adapter_tracing_contract.py",
+  "inputs": [
+   "tools/scripts/test_check_host_adapter_tracing_contract.py"
+  ],
+  "kind": "python"
+ }
+}

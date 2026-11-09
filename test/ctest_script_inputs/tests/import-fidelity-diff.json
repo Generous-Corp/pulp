@@ -1,0 +1,10 @@
+{
+ "name": "import-fidelity-diff",
+ "record": {
+  "entry": "test/test_import_fidelity_diff.py",
+  "inputs": [
+   "test/test_import_fidelity_diff.py"
+  ],
+  "kind": "python"
+ }
+}

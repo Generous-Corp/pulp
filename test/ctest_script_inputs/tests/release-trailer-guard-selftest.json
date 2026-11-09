@@ -1,0 +1,18 @@
+{
+ "name": "release-trailer-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_release_trailer_guard.py",
+  "inputs": [
+   ".github/workflows",
+   "tools/scripts/gate_common.py",
+   "tools/scripts/release_trailer_guard.py",
+   "tools/scripts/test_release_trailer_guard.py",
+   "tools/scripts/version_bump_apply.py",
+   "tools/scripts/version_bump_check.py",
+   "tools/scripts/version_bump_heuristics.py",
+   "tools/scripts/version_bump_render.py",
+   "tools/scripts/version_bump_surfaces.py"
+  ],
+  "kind": "python"
+ }
+}

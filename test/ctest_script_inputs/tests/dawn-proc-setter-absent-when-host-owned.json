@@ -1,0 +1,10 @@
+{
+ "name": "dawn-proc-setter-absent-when-host-owned",
+ "record": {
+  "entry": "test/verify_dawn_proc_setter_absent.py",
+  "inputs": [
+   "test/verify_dawn_proc_setter_absent.py"
+  ],
+  "kind": "python"
+ }
+}

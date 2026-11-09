@@ -11,7 +11,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace pulp::audio::detail {
@@ -92,6 +94,60 @@ inline void append_deinterleaved(std::vector<std::vector<float>>& channels,
         for (std::size_t i = 0; i < count; ++i)
             planar[offset + i] = interleaved[i * num_channels + ch];
     }
+}
+
+// Decodes a whole stream into planar float under the length contract every
+// codec-backed reader shares. `claimed_frames` is the container's declared
+// frame count, zero when it declares none. The claim is checked against
+// `limits` before any output is allocated and the running total is checked
+// as chunks arrive; at the end a declared count the stream did not deliver
+// is a refusal (a truncated or damaged file), while an undeclared length is
+// accepted as decoded. `read_chunk(float* interleaved, std::uint64_t
+// max_frames)` writes up to max_frames interleaved frames and returns how many,
+// zero at the end of the stream.
+template <typename ReadChunk>
+inline std::optional<AudioFileData>
+decode_chunked(std::string_view format, std::uint32_t sample_rate, std::uint32_t channels,
+               std::uint64_t claimed_frames, const DecodeLimits& limits, ReadChunk&& read_chunk) {
+    if (channels == 0u || !within_decode_limits(format, claimed_frames, channels, limits))
+        return std::nullopt;
+
+    AudioFileData data;
+    data.sample_rate = sample_rate;
+    data.channels.resize(channels);
+    reserve_planar(data.channels, claimed_frames);
+
+    std::vector<float> interleaved(static_cast<std::size_t>(kDecodeChunkFrames) * channels);
+    std::uint64_t frames_read = 0;
+    for (;;) {
+        const std::uint64_t got = read_chunk(interleaved.data(), kDecodeChunkFrames);
+        if (got == 0u)
+            break;
+        if (!within_decode_limits(format, frames_read + got, channels, limits))
+            return std::nullopt;
+        append_deinterleaved(data.channels, interleaved.data(), got, channels);
+        frames_read += got;
+    }
+    if (frames_read == 0u || (claimed_frames != 0u && frames_read != claimed_frames))
+        return std::nullopt;
+    return data;
+}
+
+// Frames a stream delivers, found by decoding and discarding, for a reader
+// whose container declares no length and whose header scan can count a frame
+// the decoder then rejects. Same read_chunk contract as decode_chunked.
+template <typename ReadChunk>
+inline std::uint64_t count_decoded_frames(std::uint32_t channels, ReadChunk&& read_chunk) {
+    std::vector<float> scratch(static_cast<std::size_t>(kDecodeChunkFrames) *
+                               std::max<std::uint32_t>(channels, 1u));
+    std::uint64_t frames = 0;
+    for (;;) {
+        const std::uint64_t got = read_chunk(scratch.data(), kDecodeChunkFrames);
+        if (got == 0u)
+            break;
+        frames += got;
+    }
+    return frames;
 }
 
 } // namespace pulp::audio::detail

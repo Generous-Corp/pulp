@@ -1,0 +1,23 @@
+{
+ "name": "pulp-test-authoring-capsule-hostile",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_authoring_capsule_hostile.cpp"
+  ],
+  "inputs": [
+   "core/authoring_capsule"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [
+   "test/test_authoring_capsule_hostile.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_authoring_capsule_hostile.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

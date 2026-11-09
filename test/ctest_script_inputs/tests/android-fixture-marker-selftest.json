@@ -1,0 +1,10 @@
+{
+ "name": "android-fixture-marker-selftest",
+ "record": {
+  "entry": "tools/ci/test_android_fixture_marker.py",
+  "inputs": [
+   "tools/ci/test_android_fixture_marker.py"
+  ],
+  "kind": "python"
+ }
+}

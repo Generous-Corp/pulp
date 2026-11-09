@@ -19,7 +19,11 @@ class Repo:
         self.root = root
         self.git("init", "-q")
         for path, text in {
-            guard.SCRIPT_INPUTS: json.dumps({"tests": {"a": {"entry": "tools/x/test_entry.py"}}}),
+            # One fragment per entry (script_inputs_store.py).
+            guard.SCRIPT_INPUTS + "/meta.json": json.dumps(
+                {"layout": "pulp-ctest-script-inputs-fragments/v1", "compiled": False, "document": {}}),
+            guard.SCRIPT_INPUTS + "/tests/a.json": json.dumps(
+                {"name": "a", "record": {"entry": "tools/x/test_entry.py"}}),
             guard.SOURCE_SELFTESTS: json.dumps({"tests": [{"argv": ["{repo}/tools/x/test_selftest.py"]}]}),
             ".github/workflows/ci.yml": "jobs:\n  t:\n    steps:\n      - run: python3 -m pytest tools/suite\n",
             "test/cmake/x.cmake": "add_test(NAME w COMMAND py ${S}/tools/x/test_cmake.py)\n",

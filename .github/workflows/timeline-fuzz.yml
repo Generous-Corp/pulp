@@ -42,6 +42,7 @@ on:
   pull_request:
     paths:
       - 'core/timeline/**'
+      - 'core/audio/**'
       - 'inspect/include/pulp/inspect/control_protocol.hpp'
       - 'inspect/src/control_protocol*.cpp'
       - 'inspect/src/control_json_*.cpp'
@@ -49,6 +50,8 @@ on:
       - 'test/fixtures/fuzz/**'
       - 'test/test_control_protocol_fuzz.cpp'
       - 'test/test_timeline_document_fuzz.cpp'
+      - 'test/test_audio_decoder_corpus.cpp'
+      - 'test/cmake/core_audio_platform_format_tests.cmake'
       - 'test/fixtures/timeline/**'
       - 'test/cmake/timeline_tests.cmake'
       - '.github/workflows/timeline-fuzz.yml'
@@ -107,6 +110,7 @@ jobs:
         run: |
           tools/ci/governed-build.sh cmake --build build-fuzz \
             --target pulp-test-timeline-document-fuzz pulp-test-control-protocol-fuzz \
+              pulp-test-audio-decoder-corpus
 
       - name: Replay
         env:
@@ -164,7 +168,7 @@ jobs:
               pulp-generate-control-protocol-fuzz-corpus \
               pulp-fuzz-plugin-state pulp-generate-plugin-state-fuzz-corpus \
               pulp-fuzz-ui-script pulp-fuzz-svg pulp-fuzz-smf \
-              pulp-fuzz-content-manifest pulp-fuzz-format-registry
+              pulp-fuzz-content-manifest pulp-fuzz-audio-decoder
 
       # Bounded pass over every registered target and its seed corpus. A
       # target that fails to load its seeds or crashes within a few thousand
@@ -193,7 +197,7 @@ jobs:
           # input into the first directory it is given, so each target gets a
           # scratch directory first and never grows the fixture tree.
           mkdir -p fuzz-corpus/ui-script fuzz-corpus/svg fuzz-corpus/smf \
-            fuzz-corpus/content-manifest fuzz-corpus/format-registry
+            fuzz-corpus/content-manifest fuzz-corpus/audio-decoder
           find fuzz-corpus -type f -print | sort
 
       - name: Fuzz
@@ -252,10 +256,10 @@ jobs:
             -rss_limit_mb=2048 \
             -timeout=25 \
             -print_final_stats=1
-          ./build-libfuzzer/test/pulp-fuzz-format-registry \
-            fuzz-corpus/format-registry \
+          ./build-libfuzzer/test/pulp-fuzz-audio-decoder \
+            fuzz-corpus/audio-decoder test/fixtures/fuzz/audio-decoder \
             -max_total_time=${{ inputs.libfuzzer_seconds || 600 }} \
-            -max_len=1048576 \
+            -max_len=262144 \
             -rss_limit_mb=2048 \
             -timeout=25 \
             -print_final_stats=1

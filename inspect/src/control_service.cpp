@@ -434,8 +434,9 @@ ControlServiceResult ControlService::dispatch_request(Session& session,
             }
             if (outcome.terminal_state == ControlReceiptState::Completed ||
                 outcome.terminal_state == ControlReceiptState::CompletedAfterRevocation) {
-                const auto* operation =
-                    resolve_control_operation(plan.operation_id, plan.operation_version);
+                const auto resolved = broker->resolve_operation(
+                    plan.manifest_digest, plan.operation_id, plan.operation_version);
+                const auto* operation = resolved.descriptor;
                 ControlJsonSchemaDiagnostics diagnostics;
                 if (!operation ||
                     !validate_control_output_json_schema(

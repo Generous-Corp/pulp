@@ -1,0 +1,11 @@
+{
+ "name": "commit-bound-labels-selftest",
+ "record": {
+  "entry": "tools/ci/test_commit_bound_labels.py",
+  "inputs": [
+   "test/cmake",
+   "tools/ci/test_commit_bound_labels.py"
+  ],
+  "kind": "python"
+ }
+}

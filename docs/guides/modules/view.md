@@ -75,6 +75,69 @@ knob->set_label("Gain");
 knob->on_change = [&](float v) { gain_binding.set_normalized(v); };
 ```
 
+## SpectrumView
+
+`SpectrumView` draws a spectrum on a log-frequency axis. It can analyse audio
+itself, so a plug-in only forwards its samples.
+
+```cpp
+// UI thread, once.
+spectrum.set_analysis_enabled(true);
+spectrum.set_sample_rate(sample_rate);
+spectrum.set_fft_size(4096);
+spectrum.set_window(SpectrumView::WindowType::blackman_harris);
+spectrum.set_level_mode(SpectrumView::LevelMode::peak);
+spectrum.set_frequency_range(20.0f, 20000.0f);
+spectrum.set_range(-90.0f, 0.0f);          // dB range
+spectrum.set_release_time(0.3f);           // seconds, frame-rate independent
+spectrum.set_style(SpectrumView::Style::filled);
+
+// Audio thread, every block: mono samples (mix or pick a channel first).
+spectrum.push_samples(mono, frames);
+```
+
+Options: window (Hann, Blackman-Harris, flat-top, rectangular and others from
+`WindowFunction`), FFT size (64 to 16384, rounded up to a power of two),
+overlap (0 to 0.9375), level mode, frequency range, dB range, release time and
+display type (bars, line, filled).
+
+Level modes, calibrated so a full-scale sine reads as noted:
+
+| Mode | Reads | Full-scale sine |
+|------|-------|-----------------|
+| `peak` | peak amplitude per bin | 0 dB |
+| `rms` | RMS amplitude per bin | -3.01 dB |
+| `power_db` | power, bins sum to the mean square | -3.01 dB total |
+| `psd` | power per Hz | -3.01 dB integrated over frequency |
+
+Thread rules:
+
+| Method | Thread |
+|--------|--------|
+| `push_samples()` | Audio. Wait-free, allocation-free, takes no lock. Drops samples (counted in `overflow_count()`) when the UI has stalled for several frames. |
+| `set_analysis_enabled()`, the setters, `update_analysis()`, `paint()`, getters | UI. Setters, including FFT size and window, are safe while audio is running. |
+
+The view must outlive any audio callback that can still call `push_samples()`.
+
+How a column reads the spectrum: a column narrower than one FFT bin (low
+frequencies) evaluates a parabola through the three nearest bins in dB at the
+column's exact fractional bin position, falling back to linear interpolation on
+ramps and valleys. A column wider than a bin (high frequencies) combines the
+bins it covers with fractional edges: loudest for `peak`, summed power for
+`power_db`, mean power for `rms` and `psd`. This is
+`pulp::signal::SpectrumBinMapping`, which `EqCurveView`'s analyzer overlay
+uses too, so both draw the same spectrum.
+
+Release is computed from elapsed time, so the fall looks identical at 30 or
+144 Hz. If the UI stalls, only the newest few FFT frames are analysed and the
+older audio is skipped (`skipped_frame_count()`), instead of replaying the
+backlog.
+
+`set_spectrum()` and `set_bins()` still work for callers that compute their own
+dB bins. They draw one bin per column on a linear axis, leave windowing,
+calibration and release to the caller, and are soft-deprecated in favour of the
+built-in analysis. When analysis is enabled it takes precedence.
+
 ## Theming
 
 Themes are structured data (design tokens), not code. Each view can have a theme; color resolution walks up the parent chain.
@@ -154,6 +217,67 @@ root.simulate_drag({30, 30}, {30, 80});  // Drag from top to bottom
 View::focus_next(root, current_focus);
 View::focus_prev(root, current_focus);
 ```
+
+## Input Events
+
+### Disabled views
+
+`View::set_enabled(false)` disables a view and everything inside it. A disabled
+view receives no key, text, gesture, hover-enter, press, move, drag or
+double-click. It still receives the pointer-up and the pointer-exit that
+finish an interaction already under way, so disabling a control while the user
+is dragging it ends the drag with exactly one release and leaves nothing stuck
+pressed. A gesture recognizer in flight on the view is cancelled once. The
+cursor over a disabled view is the default cursor.
+
+The delivery functions in `pulp/view/pointer_dispatch.hpp` enforce this, so a
+host that routes pointer and key events through them gets it without extra
+checks. Use `View::effectively_enabled()` to ask whether a view and all of its
+ancestors are enabled.
+
+### Modifier-key changes
+
+`View::on_modifier_keys_changed(Modifiers)` fires when a modifier key (Shift,
+Ctrl, Alt, Meta or Cmd) goes down or up on its own. The argument is the full
+set of modifiers now held. It reaches the focused view and every view a pointer
+press is currently captured by, each at most once, so a knob can switch to fine
+adjustment when Shift is pressed after the drag began, with no pointer
+movement. Disabled views are skipped.
+
+Hosts report the change with `deliver_modifier_keys_changed` in
+`pulp/view/pointer_dispatch.hpp`. The macOS standalone and plug-in hosts do so
+from `flagsChanged:`, the Windows plug-in host from the modifier virtual keys,
+and the browser host from `keydown` and `keyup` of Shift, Control, Alt and
+Meta. In tests, call `root.simulate_modifier_keys(kModShift)`.
+
+### Focus cause and focus-within
+
+Every focus change carries a `FocusCause`: `pointer` (a press focused the
+view), `keyboard` (Tab or another key moved focus) or `programmatic` (code moved
+it). Override `on_focus_changed(bool gained, FocusCause cause)` to read it; the
+one-argument `on_focus_changed(bool)` still works and is what the two-argument
+version calls by default. `View::focus_visible()` is true only for keyboard and
+programmatic focus, so a click does not draw a focus ring.
+
+`on_descendant_focus_changed(View& child, bool gained, FocusCause cause)` is
+called on every ancestor of the view whose focus changed, nearest first, after
+that view's own callback. `View::focus_within()` answers whether a view or any
+descendant holds focus. Use `transfer_input_focus(root, view, cause)` from
+`pointer_dispatch.hpp` to move focus with a cause.
+
+In a scripted UI, native focus changes become `focus`, `blur`, `focusin` and
+`focusout` events, keep `document.activeElement` current, and drive the CSS
+`:focus`, `:focus-visible` and `:focus-within` selectors.
+
+### Hover under a stationary pointer
+
+Scrolling, an animation or a list reorder can slide a different view under a
+pointer that has not moved. Call `reevaluate_stationary_hover(root)` from
+`pointer_dispatch.hpp` once per presented frame. If the view under the pointer
+changed, the old view sees its pointer-exit and the new view its enter and
+positioned move. If the same view moved under the pointer, it gets a positioned
+move only. Pass a `HoverDamage` region to skip the work when the frame repainted
+somewhere other than the pointer. It does nothing while a button is held.
 
 ## Accessibility
 

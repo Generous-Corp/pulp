@@ -1,0 +1,10 @@
+{
+ "name": "daw-smoke-reaper-smoke-selftest",
+ "record": {
+  "entry": "tools/testing/daw-smoke/test_reaper_smoke.py",
+  "inputs": [
+   "tools/testing/daw-smoke/test_reaper_smoke.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -3,6 +3,8 @@
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/format_registry.hpp>
 
+#include "../core/audio/src/decode_limits_detail.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -483,45 +485,60 @@ TEST_CASE("FormatRegistry decodes a small AIFF and refuses it beyond custom ceil
     REQUIRE_FALSE(registry.read(path, byte_ceiling).has_value());
 }
 
-TEST_CASE("FormatRegistry decodes a FLAC claiming a sixty-minute recording through the default "
-          "limits while a 36-bit claim is still refused",
+TEST_CASE("the FLAC pre-check admits a sixty-minute claim under the default limits and refuses "
+          "a 36-bit claim before decoding",
           "[audio][flac][decode-limits]") {
-    auto& registry = FormatRegistry::instance();
-    TempDir temp;
+    using pulp::audio::detail::within_decode_limits;
     // Sixty minutes of stereo at 96 kHz, as a real session would claim.
     constexpr uint64_t kHourAt96k = 345'600'000ull;
-    const auto long_path = (temp.path / "sixty-minutes.flac").string();
-    write_bytes(long_path, build_flac(kHourAt96k, true));
-
-    auto decoded = registry.read(long_path);
-    REQUIRE(decoded.has_value());
-    require_fixture_frame(*decoded);
-
-    const auto hostile_path = (temp.path / "huge-claim.flac").string();
-    write_bytes(hostile_path, build_flac(0xFFFFFFFFFull, true));
-    std::optional<AudioFileData> hostile;
-    REQUIRE_NOTHROW(hostile = registry.read(hostile_path));
-    REQUIRE_FALSE(hostile.has_value());
+    const DecodeLimits defaults;
+    REQUIRE(within_decode_limits("FLAC", kHourAt96k, kFixtureChannels, defaults));
+    // The widest claim STREAMINFO's 36-bit field can make.
+    REQUIRE_FALSE(within_decode_limits("FLAC", 0xFFFFFFFFFull, kFixtureChannels, defaults));
 }
 
-TEST_CASE("DecodeLimits::unbounded accepts a claim above a custom ceiling at the pre-check",
+TEST_CASE("FormatRegistry refuses a FLAC whose STREAMINFO declares frames the stream does not "
+          "deliver",
           "[audio][flac][decode-limits]") {
     auto& registry = FormatRegistry::instance();
     TempDir temp;
     constexpr uint64_t kHourAt96k = 345'600'000ull;
-    const auto path = (temp.path / "sixty-minutes.flac").string();
+    // One real block behind a sixty-minute declaration: the claim passes the
+    // pre-check, the decode delivers 192 frames, and the mismatch is refused.
+    const auto path = (temp.path / "sixty-minutes-declared.flac").string();
     write_bytes(path, build_flac(kHourAt96k, true));
+
+    const auto info = registry.read_info(path);
+    REQUIRE(info.has_value());
+    REQUIRE(info->num_frames == kHourAt96k);
+    std::optional<AudioFileData> decoded;
+    REQUIRE_NOTHROW(decoded = registry.read(path));
+    REQUIRE_FALSE(decoded.has_value());
+    REQUIRE_FALSE(registry.read(path, DecodeLimits::unbounded()).has_value());
+
+    // An honest declaration of the same block still decodes.
+    const auto honest_path = (temp.path / "one-block.flac").string();
+    write_bytes(honest_path, build_flac(kFixtureBlockFrames, true));
+    auto honest = registry.read(honest_path);
+    REQUIRE(honest.has_value());
+    require_fixture_frame(*honest);
+}
+
+TEST_CASE("DecodeLimits::unbounded is every ceiling off, and a ceiling below a claim refuses at "
+          "the pre-check",
+          "[audio][flac][decode-limits]") {
+    using pulp::audio::detail::within_decode_limits;
+    constexpr uint64_t kHourAt96k = 345'600'000ull;
 
     // Below the claimed output: the pre-check refuses before any frame decodes.
     DecodeLimits below_claim;
     below_claim.max_output_bytes = kHourAt96k * kFixtureChannels * sizeof(float) - 1u;
-    REQUIRE_FALSE(registry.read(path, below_claim).has_value());
+    REQUIRE_FALSE(within_decode_limits("FLAC", kHourAt96k, kFixtureChannels, below_claim));
 
     const auto unbounded = DecodeLimits::unbounded();
     REQUIRE(unbounded.max_frames == 0u);
     REQUIRE(unbounded.max_channels == 0u);
     REQUIRE(unbounded.max_output_bytes == 0u);
-    auto decoded = registry.read(path, unbounded);
-    REQUIRE(decoded.has_value());
-    require_fixture_frame(*decoded);
+    REQUIRE(within_decode_limits("FLAC", kHourAt96k, kFixtureChannels, unbounded));
+    REQUIRE(within_decode_limits("FLAC", 0xFFFFFFFFFull, kFixtureChannels, unbounded));
 }

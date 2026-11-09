@@ -1,0 +1,11 @@
+{
+ "name": "portable-ci-timeout-selftest",
+ "record": {
+  "entry": "tools/ci/test_run_with_timeout.py",
+  "inputs": [
+   "tools/ci/run_with_timeout.py",
+   "tools/ci/test_run_with_timeout.py"
+  ],
+  "kind": "python"
+ }
+}

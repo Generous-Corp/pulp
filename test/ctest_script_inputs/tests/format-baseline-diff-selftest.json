@@ -1,0 +1,10 @@
+{
+ "name": "format-baseline-diff-selftest",
+ "record": {
+  "entry": "tools/scripts/test_format_baseline_diff.py",
+  "inputs": [
+   "tools/scripts/test_format_baseline_diff.py"
+  ],
+  "kind": "python"
+ }
+}

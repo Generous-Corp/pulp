@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261108-control-agent-toolkit-20261108-watch",
+  "created_at": "2026-11-08T18:28:06Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "The range adds the agent tool kit library (opt-in vendor operations for presets, patch values and offline render analysis), its declaration template and CMake helper, an example Standalone plugin that binds it, and tests. It touches the control capability layer and the test tree only. No design-import, Chromium, rendering, or packaging authority moves, and no visual-proof harness behavior changes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-control-agent-toolkit",
+    "ctest --test-dir build -R pulp-test-control-vendor-operations-e2e",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

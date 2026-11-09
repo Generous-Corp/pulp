@@ -1,0 +1,11 @@
+{
+ "name": "ctest-unique-names-selftest",
+ "record": {
+  "entry": "tools/scripts/test_ctest_unique_names_check.py",
+  "inputs": [
+   "tools/scripts/ctest_unique_names_check.py",
+   "tools/scripts/test_ctest_unique_names_check.py"
+  ],
+  "kind": "python"
+ }
+}

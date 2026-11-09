@@ -1,0 +1,26 @@
+{
+ "name": "pulp-test-cli-package-analyzer-descriptors",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_cli_package_analyzer_descriptors.cpp"
+  ],
+  "inputs": [
+   "tools/packages/registry.json"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [
+   "test/test_cli_package_analyzer_descriptors.cpp",
+   "tools/cli/package_analyzer_descriptors.cpp",
+   "tools/cli/package_registry.cpp",
+   "tools/cli/package_registry_trust.cpp"
+  ],
+  "spawning_sources": [
+   "tools/cli/package_registry.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

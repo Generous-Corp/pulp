@@ -1,0 +1,22 @@
+{
+ "name": "pulp-test-cli-shellout-pr",
+ "record": {
+  "data": "whole_checkout",
+  "detected_sources": [],
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli"
+  ],
+  "sources": [
+   "test/test_cli_shellout_pr.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_shellout_helpers.hpp",
+   "test/test_cli_shellout_pr.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}
