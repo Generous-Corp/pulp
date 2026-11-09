@@ -48,7 +48,8 @@ REAL_JOB = [
 
 def pr_head_job(ran_tier: str | None) -> list[dict]:
     """A pull-request head: the full suite skipped, at most one tier ran."""
-    tiers = ["Test fast deterministic tier (pull request head)",
+    tiers = ["Test configure-only drift checks before the build (pull request head)",
+             "Test fast deterministic tier (pull request head)",
              "Test what this pull request reaches (pull request head)"]
     job = [step("Set up job"), step("Build")]
     job += [step(name, "success" if name == ran_tier else "skipped") for name in tiers]
@@ -96,10 +97,22 @@ class ClassifyStepsTests(unittest.TestCase):
     def test_each_pull_request_tier_alone_is_tier_only(self) -> None:
         # One fixture per tier step name, so deleting either alternative from
         # TIER_STEP_RE is caught on its own.
-        for name in ("Test fast deterministic tier (pull request head)",
+        for name in ("Test configure-only drift checks before the build (pull request head)",
+                     "Test fast deterministic tier (pull request head)",
                      "Test what this pull request reaches (pull request head)"):
             with self.subTest(tier=name):
                 self.assertEqual(gse.classify_steps(pr_head_job(name)), gse.TIER_ONLY)
+
+    def test_a_head_that_stopped_at_the_pre_build_drift_checks_is_tier_only(self) -> None:
+        # The drift checks run between Configure and Build; a red there skips
+        # Build and every later tier, and still says a tier ran.
+        job = [step("Set up job"), step("Configure"),
+               step("Test configure-only drift checks before the build (pull request head)",
+                    "failure"),
+               step("Build", "skipped"),
+               step("Test fast deterministic tier (pull request head)", "skipped"),
+               step("Test (non-Windows)", "skipped"), step("Complete job")]
+        self.assertEqual(gse.classify_steps(job), gse.TIER_ONLY)
 
     def test_a_tier_is_never_the_suite(self) -> None:
         # A pull-request head that ran a tier but skipped `Test (...)` must

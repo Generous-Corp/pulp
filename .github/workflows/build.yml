@@ -2814,6 +2814,44 @@ jobs:
           echo "::error::could not install $prefix/package-lock.json after 3 attempts; the Three.js bundler would fail the build" >&2
           exit 1
 
+      - name: Test configure-only drift checks before the build (pull request head)
+        # The `pr-fast-configure` members of the fast tier
+        # (test/cmake/pr_fast_tests.cmake) are the generated-manifest drift
+        # checks behind most red pull-request heads: script-test-inputs, the
+        # consumption census and the agent-capability manifest. They read only
+        # the checkout and what Configure wrote, so they run here, before the
+        # build. A forgotten regeneration then fails the required check about
+        # nine minutes sooner (median, over 79 such reds in a week) and frees
+        # the gate VM instead of building a head that cannot pass. The
+        # post-build fast tier leaves these members out when this step passed,
+        # so each runs exactly once. The contract lane, which never builds,
+        # keeps running the whole tier in its own step.
+        #
+        # Like the fast tier, this is not test evidence for the merge: its own
+        # JUnit file, never ctest.junit.xml; the merge queue runs everything.
+        id: pr_fast_configure_tests
+        if: (runner.os != 'Windows' && github.event_name == 'pull_request') && matrix.lane != 'contract'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate_args="$(python3 tools/ci/ctest_gate_args.py \
+            --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
+          eval "$gate_args"
+          : "${label_exclude:?ctest gate arguments did not resolve}"
+          rc=0
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
+            -L '^pr-fast$' -L '^pr-fast-configure$' -LE "$label_exclude" \
+            --no-tests=error --timeout 120 -j4 \
+            --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast-prebuild.junit.xml" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            # Configure left the build-in-progress marker and Build will not
+            # run to clear it. Nothing was compiled, so a warm build directory
+            # is still sound: clear the marker rather than make the next job
+            # on this directory start cold (tools/ci/build-dir-sentinel.sh).
+            rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
+            exit "$rc"
+          fi
+
       - name: Build
         shell: bash
         id: build
@@ -3013,11 +3051,15 @@ jobs:
         # members labelled `needs-build`.
         # That lane's green says so in a `deferred` tier annotation, which the
         # arm sweep refuses to arm on.
+        #
+        # On a building lane the `pr-fast-configure` members already ran before
+        # the build; they are left out only when that step passed.
         id: pr_fast_tests
         if: runner.os != 'Windows' && github.event_name == 'pull_request'
         shell: bash
         env:
           PULP_MACOS_LANE: ${{ matrix.lane }}
+          PR_FAST_CONFIGURE_OUTCOME: ${{ steps.pr_fast_configure_tests.outcome }}
         run: |
           set -euo pipefail
           # Same label exclusions as the full suite, from the same module.
@@ -3027,6 +3069,9 @@ jobs:
           : "${label_exclude:?ctest gate arguments did not resolve}"
           if [ "$PULP_MACOS_LANE" = contract ]; then
             label_exclude="${label_exclude}|^needs-build$"
+          fi
+          if [ "$PR_FAST_CONFIGURE_OUTCOME" = success ]; then
+            label_exclude="${label_exclude}|^pr-fast-configure$"
           fi
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
             -L '^pr-fast$' -LE "$label_exclude" \
@@ -3407,12 +3452,14 @@ jobs:
           junit="$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
           # When the full suite did not run (a pull-request head that took the
           # fast tier, or a build that stopped first) there is no full report
-          # by design: observe the fast tier's own report if it exists, and
+          # by design: observe the fast tier's own report if it exists (or the
+          # pre-build drift checks' report, when the head stopped there), and
           # otherwise record a named "not run" instead of an unavailable error.
           # A suite that DID run and left no report stays an error.
           absent=()
           if [ "$CTEST_OUTCOME" = skipped ]; then
             absent=(--fallback "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast.junit.xml"
+                    --fallback "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast-prebuild.junit.xml"
                     --not-run-reason "the full suite did not run on this leg (fast tier only, or the build stopped before ctest)")
           fi
           listing="$(ctest --test-dir "$PULP_BUILD_DIR" -N 2>/dev/null)" || listing=""
@@ -3673,6 +3720,7 @@ jobs:
           path: |
             ${{ env.PULP_BUILD_DIR }}/Testing/Temporary/
             ${{ env.PULP_BUILD_DIR }}/ctest.junit.xml
+            ${{ env.PULP_BUILD_DIR }}/ctest-pr-fast-prebuild.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest-pr-fast.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest-pr-guard.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest.nonruns.json
@@ -3703,6 +3751,7 @@ jobs:
           BUILD_OUTCOME: ${{ steps.build.outcome }}
           CTEST_OUTCOME: ${{ steps.ctest.outcome }}
           PR_FAST_OUTCOME: ${{ steps.pr_fast_tests.outcome }}
+          PR_FAST_CONFIGURE_OUTCOME: ${{ steps.pr_fast_configure_tests.outcome }}
           PR_AFFECTED_OUTCOME: ${{ steps.pr_affected_tests.outcome }}
         run: |
           set -uo pipefail
@@ -3712,6 +3761,7 @@ jobs:
           out="$RUNNER_TEMP/reuse-record"
           suites=()
           case "$CTEST_OUTCOME" in success|failure) suites+=(--suite "full=$b/ctest.junit.xml,attempts=$ev/LastTest.full.log,repeat") ;; esac
+          case "$PR_FAST_CONFIGURE_OUTCOME" in success|failure) suites+=(--suite "pr-fast-configure=$b/ctest-pr-fast-prebuild.junit.xml") ;; esac
           case "$PR_FAST_OUTCOME" in success|failure) suites+=(--suite "pr-fast=$b/ctest-pr-fast.junit.xml") ;; esac
           case "$PR_AFFECTED_OUTCOME" in success|failure) suites+=(--suite "pr-affected=$b/pr-affected-junit,repeat") ;; esac
           rc=0
@@ -3720,7 +3770,7 @@ jobs:
             --selected-json "$ev/selected.json" \
             --identity-json "$shadows/our-identity.json" --test-keys "$shadows/test-keys.json" \
             --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" --link-members --object-deps --codemodel --inventory \
-            --context "ctest=$CTEST_OUTCOME" --context "pr_fast=$PR_FAST_OUTCOME" \
+            --context "ctest=$CTEST_OUTCOME" --context "pr_fast_configure=$PR_FAST_CONFIGURE_OUTCOME" --context "pr_fast=$PR_FAST_OUTCOME" \
             --context "pr_affected=$PR_AFFECTED_OUTCOME" || rc=$?
           if [ "$rc" -ne 0 ] || [ ! -s "$out/job.json" ]; then
             echo "::warning title=reuse-record NOT written::reuse_record.py exited $rc; this job's per-test replay history is lost"
