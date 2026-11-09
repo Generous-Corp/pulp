@@ -104,6 +104,12 @@ Maintain three related artifacts:
   full. Never edit the file by hand: `--check` re-encodes it and refuses any
   difference.
 
+The append-only history is generated as compact JSON. Keep every parsed entry
+and its provenance, but avoid repeating indentation across the full snapshots:
+the artifact must stay below GitHub's 100 MiB blob limit. After a regeneration,
+verify the parsed entries are unchanged and check the byte count with
+`wc -c tools/agent-capabilities/contract-history.json`.
+
 The consumer manifest, its schema, and the handoff schema install into the SDK.
 Official release packaging stamps `agent-capability-handoff.json` only after
 installation; it binds the exact SDK source SHA and platform to the installed
@@ -174,6 +180,11 @@ all curated capability contracts stay identical. Bind related pending exposure
 evidence to the specific API or header fingerprint, not a literal global
 `SURFACE_INVENTORY_VERSION`; an unrelated inventory update must not invalidate
 that evidence. None of these source checks establishes installed execution.
+
+The G-7 control and event edge probe API is runtime diagnostics plumbing. Keep
+its public header fingerprint and surface inventory current when probe members
+change, but do not advertise probe attachment or live edge observation as a
+generator-facing capability.
 
 ### A legacy header that changes bytes cannot be re-fingerprinted
 
