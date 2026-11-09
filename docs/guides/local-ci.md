@@ -1733,7 +1733,11 @@ compiler, linker or CMake errors in the output). ctest must have exited 8 and
 run first runs the tests `--stop-on-failure` skipped (`--tests-from-file`) and
 judges the union. Known residual: a corroborating failure from a window in
 which main itself was briefly red still counts; the next group after a bad
-landing then fails on main's tip, which stops further excusals. The exit-code evidence keeps ctest's own status, so no
+landing then fails on main's tip, which stops further excusals. Two narrower residuals: the "touched" check of
+a corroborating pull request reads this group's checkout, so a file that pull
+request adds and that names the test is missed (its input-path check still
+applies), and a pull request branched from an earlier commit of a group pull
+request, without its head, is not recognised as carrying it. The exit-code evidence keeps ctest's own status, so no
 receipt claims an excused run passed. Every excusal is a
 `::warning title=flake-exoneration::` annotation, a job-summary table, and a
 `flake-excusals-macos` artifact (`pulp-flake-excusal/v1`, kept 90 days); a

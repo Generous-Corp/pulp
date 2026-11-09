@@ -197,8 +197,11 @@ def scope_from_compare(payload: dict | None, pr_number: int | None = None) -> Sc
         if m:
             prs.add(int(m.group(1)))
             parents = c.get("parents") or []
-            if len(parents) >= 2 and parents[1].get("sha"):
-                heads.add(parents[1]["sha"])
+            if len(parents) < 2 or not parents[1].get("sha"):
+                # Without the pull request's head, a corroborating run that
+                # carries it cannot be told apart from an independent one.
+                return Scope(frozenset(), frozenset(), f"group pull request #{m.group(1)} has no recorded head")
+            heads.add(parents[1]["sha"])
     paths = set()
     for f in files:
         for key in ("filename", "previous_filename"):
@@ -476,15 +479,18 @@ def independence_check(repo: str, scope: "Scope", source_root: Path,
     group pull request's head, and its own pull request does not touch the test.
     Anything unreadable counts as dependent."""
     files_cache: dict[int, frozenset[str] | None] = {}
+    carries_cache: dict[str, bool | None] = {}
 
     def check(run: dict, pr: int, test: str) -> bool:
         head = str(run.get("head_sha") or "")
         if not head:
             return False
-        if scope.pr_heads:
-            carried = contains_any(repo, head, sorted(scope.pr_heads))
-            if carried is not False:
-                return False
+        if not scope.pr_heads and scope.prs:
+            return False
+        if head not in carries_cache:
+            carries_cache[head] = contains_any(repo, head, sorted(scope.pr_heads))
+        if carries_cache[head] is not False:
+            return False
         if pr not in files_cache:
             files_cache[pr] = pr_files(repo, pr)
         files = files_cache[pr]

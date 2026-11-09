@@ -171,7 +171,8 @@ class VerdictTests(unittest.TestCase):
 class ScopeAndTouchTests(unittest.TestCase):
     def test_compare_payload_yields_prs_and_files(self) -> None:
         s = fx.scope_from_compare({"total_commits": 2, "commits": [
-            {"commit": {"message": "Merge pull request #11001 from x/y\n\nbody"}},
+            {"commit": {"message": "Merge pull request #11001 from x/y\n\nbody"},
+             "parents": [{"sha": "base"}, {"sha": "prhead"}]},
             {"commit": {"message": "fix: mixer"}}],
             "files": [{"filename": "a.cpp"}, {"filename": "b.cpp", "previous_filename": "old.cpp"}]})
         self.assertTrue(s.read)
@@ -183,6 +184,12 @@ class ScopeAndTouchTests(unittest.TestCase):
             {"commit": {"message": "Merge pull request #11001 from x/y"},
              "parents": [{"sha": "base"}, {"sha": "prhead"}]}]})
         self.assertEqual(s.pr_heads, {"prhead"})
+
+    def test_a_group_pr_without_a_recorded_head_leaves_the_scope_unread(self) -> None:
+        s = fx.scope_from_compare({"total_commits": 1, "files": [], "commits": [
+            {"commit": {"message": "Merge pull request #11001 from x/y"}, "parents": [{"sha": "base"}]}]})
+        self.assertFalse(s.read)
+        self.assertIn("11001", s.reason)
 
     def test_truncated_compare_is_unread(self) -> None:
         self.assertFalse(fx.scope_from_compare({"total_commits": 300, "commits": [{}] * 250, "files": []}).read)
