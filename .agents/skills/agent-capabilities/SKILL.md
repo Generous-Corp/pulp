@@ -1234,7 +1234,10 @@ and only some of them run in `gates.sh`:
 
 Keep one include root per module. The Doxygen parity check accepts a second
 public install root only by name, so a module that installs `audio/include`
-beside `include` fails it.
+beside `include` fails it. The same holds for a package outside `core/`
+(`integrations/pulp-native/include`): name its root in
+`doxygen_installed_header_check.py` and add it to the Doxyfile `INPUT`, or the
+check reports "unsupported independent public-header install authority".
 
 ## `gates.sh` does NOT run the capability check — adding a public header passes pre-push and fails in CI
 
@@ -1909,6 +1912,18 @@ an existing renderer or example, changing a widget label) adds no public header
 and changes no installed capability key. Run
 `python3 tools/docs_generate.py generate` so the generated limitations block
 follows the matrix, and do not touch the capability manifest for it.
+
+## Editing `processor.hpp` needs a fingerprint refresh in the catalog-performance script
+
+`tools/scripts/agent_capability_catalog_performance.py` pins
+`pulp/format/processor.hpp`'s SHA-256 in its `processor-hook` binding. Any byte
+change to the header (a new non-virtual member counts) makes `--write`,
+`--check` and `agent_capability_rederive.py` fail with `public header
+fingerprint mismatch for pulp/format/processor.hpp` and no other hint. Set
+`header_fingerprint` to `shasum -a 256 core/format/include/pulp/format/processor.hpp`
+after the final edit (re-hash if you format or edit again), then run
+`agent_capability_manifest.py --write`; for a side-table accessor like
+`set_midi_learn_engine` no registry classification or counter change followed.
 
 ## G-5 host ingress header refresh
 

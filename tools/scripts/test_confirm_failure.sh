@@ -117,6 +117,47 @@ check "a break that does not compile is INCONCLUSIVE" 2 "$NOCOMPILE"
 check "the tree is restored after a break that does not compile" "" \
     "$(cd "$TMP/nocompile" && git status --porcelain -- value.cpp)"
 
+# A downstream project copies a third-party library into its build directory at
+# configure time, and a post-build step needs it. No build rule produces it, so
+# purging it leaves the baseline build with nothing to recreate it from. The
+# purge must leave such a file alone, or the loop reports INCONCLUSIVE for a
+# test that does cover the change.
+if command -v ninja >/dev/null 2>&1; then
+    make_prebuilt_project() {
+        local root="$1"
+        mkdir -p "$root/prebuilt"
+        echo "not a real library" > "$root/prebuilt/libthird.dylib"
+        cat > "$root/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.20)
+project(confirm_failure_prebuilt CXX)
+set(CMAKE_CXX_STANDARD 17)
+file(COPY ${CMAKE_SOURCE_DIR}/prebuilt/libthird.dylib DESTINATION ${CMAKE_BINARY_DIR})
+add_library(fixture_lib STATIC value.cpp)
+add_executable(fixture_test test.cpp)
+target_link_libraries(fixture_test PRIVATE fixture_lib)
+add_custom_command(TARGET fixture_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/libthird.dylib
+            ${CMAKE_BINARY_DIR}/bundled_libthird.dylib)
+EOF
+        printf 'int answer();\n' > "$root/value.hpp"
+        printf '#include "value.hpp"\nint answer() { return 42; }\n' > "$root/value.cpp"
+        printf '#include "value.hpp"\nint main() { return answer() == 42 ? 0 : 1; }\n' > "$root/test.cpp"
+        ( cd "$root" && git init -q . && git config user.email t@example.com \
+            && git config user.name test && git add -A && git commit -qm fixture ) >/dev/null 2>&1
+        cmake -G Ninja -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+        cmake --build "$root/build" >/dev/null 2>&1
+    }
+    make_prebuilt_project "$TMP/prebuilt"
+    check "the fixture's post-build step works before any purge" yes \
+        "$([ -f "$TMP/prebuilt/build/bundled_libthird.dylib" ] && echo yes || echo no)"
+    check "a configure-time library the build cannot recreate does not make the loop INCONCLUSIVE" 0 \
+        "$(run_under_test "$TMP/prebuilt")"
+    check "the configure-time library is still there afterwards" yes \
+        "$([ -f "$TMP/prebuilt/build/libthird.dylib" ] && echo yes || echo no)"
+else
+    echo "  skip a configure-time library case (ninja is not installed)"
+fi
+
 # ── The --no-build lane, for a test whose subject is interpreted ────────────
 #
 # A Node/Python/shell test has no object or binary between the edited source and

@@ -1,0 +1,1 @@
+{"schema":"pulp.sample-region-installed-consumer.v1","accepted":true,"sample_rate":48000,"maximum_block":257,"renders":6,"oracle_tolerance":1e-6,"maximum_oracle_error":6.5035055230033834e-08,"null_tolerance_dbfs":-180,"reported_latency":0,"signed_bake_negative_controls":3,"lifecycle_recovery_cases":2,"measurement_negative_controls":2,"constructor_negative_controls":2}
