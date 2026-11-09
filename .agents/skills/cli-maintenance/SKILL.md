@@ -280,7 +280,11 @@ here; it is not a coverage gap in the test and rerunning it will not change the
 answer. Interpreted tests (`python3 …`, `bash …`) take `--no-build` instead.
 Whether the driver also links the edited source is read from the build's link
 graph (`ninja -t query`, or the Makefile generator's `link.txt`), never from
-shared symbol names, and a build dir whose graph cannot be read is INCONCLUSIVE.
+shared symbol names. The driver is the first word of `--test` that is a file in
+the build dir, so `--test` must name the test binary itself: a script or
+`ctest` in front of it is INCONCLUSIVE. A header edit is checked against
+ninja's dependency log and is INCONCLUSIVE in a Makefile build, as is any
+build dir whose graph cannot be read.
 
 ### `pulp status` reads `.shipyard/config.toml` line by line, not as TOML
 
@@ -3917,8 +3921,8 @@ Things that are easy to get wrong when touching them:
   `PULP_AUDIO_IMAGE_WRITE_GOLDENS=1 ./build/test/pulp-test-audio-image-raster "[golden]"`.
 - **`confirm_failure.sh --subject build/tools/cli/pulp-cpp` covers
   `cmd_audio_image_common.cpp`.** `pulp-test-cli-audio-image` shares libc++ and
-  header-inline definitions with the CLI source but does not link it; only
-  `pulp-cpp` does, so run the loop with `--target pulp-cli`.
+  header-inline definitions with the CLI source but does not link it. Run the
+  loop with `--target pulp-cli`.
 
 ## `audio heritage` owns sampler-profile interchange and evidence renders
 

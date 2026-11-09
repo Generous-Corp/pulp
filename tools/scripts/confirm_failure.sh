@@ -39,7 +39,10 @@
 # --subject the test executable is left in place (it only drives the subject),
 # so --target may name the subject's target alone, unless the driver links the
 # edited source too: then the run stops INCONCLUSIVE and asks for a --target
-# that rebuilds the driver as well.
+# that rebuilds the driver as well. The link is read from the build graph, and
+# the run is also INCONCLUSIVE when the graph cannot answer: no word of --test
+# is a binary in the build dir (a script or ctest wrapping the driver), or a
+# header is edited in a Makefile build, which records no header dependencies.
 #
 # A Catch2 test spec splits on commas, so a --test naming a test case whose
 # name contains a comma matches nothing and the baseline comes back
@@ -514,7 +517,7 @@ fi
 # the edited object would run the stale copy and could pass with the fix
 # broken (a false NOT CONFIRMED).
 #
-# The answer comes from the build's own link graph, never from symbol names. A
+# The answer comes from the build's own graph, never from symbol names. A
 # symbol comparison cannot tell a linked object from a shared header: inline
 # functions and template instantiations (libc++'s ABI-tagged ones included)
 # are emitted into every object that uses them, and Mach-O nm prints those weak
@@ -522,242 +525,336 @@ fi
 # like it linked the edited object. Instead the driver's link inputs are walked
 # - its objects, and recursively the objects of every library it links - in
 # build.ninja (via `ninja -t query`) or in the Makefile generator's link.txt
-# files, and the driver links the edited source only when that walk reaches the
-# object compiled from it.
+# files. A source edit reaches the driver when that walk reaches the object
+# compiled from it. A header has no object of its own, so a header edit reaches
+# the driver when one of those objects depends on it in ninja's dependency log
+# (`ninja -t deps`); the Makefile lane has no such log and cannot answer.
 #
-# Exit status: 0 the driver links the edited object, 1 it does not, 2 the graph
-# cannot answer (no ninja, driver unknown to the build); the reason is printed.
-# A link is harmless when --target itself rebuilds the driver; the helper
-# prints "rebuilt-by-target" then, which the caller treats as no link.
+# The driver is the first word of --test that is a file under --build-dir, so
+# a prefix such as `env` or `VAR=1` does not hide it. A --test with no such
+# word (a script, ctest, a command on PATH) may still run a binary that links
+# the edited code, so it cannot be checked and the run is INCONCLUSIVE. A
+# driver that is the subject itself is rebuilt by --target and needs no check.
+#
+# Exit status: 0 the driver carries the edited code, 1 it does not, 2 the
+# graph cannot answer; the reason or the linking object is printed. Any other
+# status (a crash) is treated as 2. A link is harmless when --target itself
+# rebuilds the driver; the helper then prints "rebuilt-by-target" and exits 1.
 driver_link_status() {
-    [ -n "$SUBJECT" ] && [ "$NO_BUILD" -eq 0 ] && [ "$IS_HEADER" -eq 0 ] || return 1
-    # A driver that is a command on PATH (sh, python3) is not a build product.
-    [ -f "$TEST_BINARY" ] || return 1
+    [ -n "$SUBJECT" ] && [ "$NO_BUILD" -eq 0 ] || return 1
     python3 - "$BUILD_DIR" "$FILE" "${OBJ_BASE}.o" "${OBJECT:+1}" \
-        "$TEST_BINARY" "$TARGET" "$STASH" <<'PY'
+        "$TEST_CMD" "$TARGET" "$STASH" "$SUBJECT" "$IS_HEADER" <<'PY'
 import os, re, shlex, shutil, subprocess, sys
-
-build, edited_file, obj_name, by_object, driver, target, stash = sys.argv[1:8]
-build = os.path.realpath(build)
-edited_file = os.path.realpath(edited_file)
-driver = os.path.realpath(driver)
-stash = os.path.realpath(stash) if stash else ""
-LIBRARY = re.compile(r"\.(a|lib|dylib|so(\.[0-9]+)*)$")
 
 def unknown(reason):
     print(reason)
     sys.exit(2)
 
-def inside(path, root):
-    return os.path.commonpath([path, root]) == root
+def main():
+    (build, edited_file, obj_name, by_object, test_cmd, target, stash,
+     subject, is_header) = sys.argv[1:10]
+    build = os.path.realpath(build)
+    edited_file = os.path.realpath(edited_file)
+    stash = os.path.realpath(stash) if stash else ""
+    is_header = is_header == "1"
+    LIBRARY = re.compile(r"\.(a|lib|dylib|so(\.[0-9]+)*)$")
+    OBJECT = (".o", ".obj")
 
-if not inside(driver, build):
-    with open(driver, "rb") as stream:
-        if stream.read(2) == b"#!":
-            sys.exit(1)  # a script built by nobody links nothing
-    unknown(f"the driver {driver} is not under the build dir {build}, so its "
-            "link inputs are not in this build's graph")
+    def inside(path, root):
+        return os.path.commonpath([path, root]) == root
 
-def is_edited_object(path, source_inputs):
-    if os.path.basename(path) != obj_name:
-        return False
-    # --object names a generated translation unit that embeds the edited
-    # file, so the object's own source is not the edited file.
-    if by_object:
-        return True
-    return any(os.path.realpath(s) == edited_file for s in source_inputs)
-
-# ── Ninja: build.ninja is the graph, `ninja -t query` reads it ──────────────
-def ninja_program():
-    override = os.environ.get("CONFIRM_FAILURE_NINJA")
-    if override is not None:
-        return override if os.access(override, os.X_OK) else None
+    # ── Which binary is the driver ──────────────────────────────────────────
     try:
-        with open(os.path.join(build, "CMakeCache.txt")) as cache:
-            for line in cache:
-                if line.startswith("CMAKE_MAKE_PROGRAM:"):
-                    candidate = line.split("=", 1)[1].strip()
-                    if os.access(candidate, os.X_OK):
-                        return candidate
-    except OSError:
-        pass
-    return shutil.which("ninja")
+        words = shlex.split(test_cmd)
+    except ValueError as exc:
+        unknown(f"--test cannot be parsed into words ({exc})")
+    driver = None
+    for word in words:
+        path = os.path.realpath(word)
+        if os.path.isfile(path) and inside(path, build):
+            driver = path
+            break
+    if driver is None:
+        first = words[0] if words else ""
+        unknown(f"no word of --test is a file under {build} (the first word is "
+                f"'{first}'), so the binary it runs cannot be checked for a copy "
+                "of the edited code; name the driver binary itself in --test")
+    if driver == os.path.realpath(subject):
+        sys.exit(1)  # the subject is rebuilt by --target
 
-def ninja_query(ninja, nodes):
-    """Explicit and implicit inputs of each node; order-only ones are not
-    linked, only sequenced, so they never count. None when ninja fails."""
-    proc = subprocess.run([ninja, "-C", build, "-t", "query", *nodes],
-                          capture_output=True, text=True)
-    if proc.returncode != 0:
-        return None
-    inputs, node, section = {}, None, None
-    for line in proc.stdout.splitlines():
-        if line and not line.startswith(" ") and line.endswith(":"):
-            node, section = line[:-1], None
-            inputs[node] = []
-        elif line.startswith("  ") and not line.startswith("    "):
-            section = line.strip().split(":", 1)[0]
-        elif section == "input" and node is not None:
-            item = line.strip()
-            if item.startswith("||") or item.startswith("|@"):
-                continue
-            if item.startswith("| "):
-                item = item[2:]
-            inputs[node].append(item)
-    return inputs
+    def is_edited_object(path, source_inputs):
+        if os.path.basename(path) != obj_name:
+            return False
+        # --object names a generated translation unit that embeds the edited
+        # file, so the object's own source is not the edited file.
+        if by_object:
+            return True
+        return any(os.path.realpath(s) == edited_file for s in source_inputs)
 
-def node_path(node):
-    return os.path.realpath(node if os.path.isabs(node) else os.path.join(build, node))
+    def node_path(node):
+        return os.path.realpath(node if os.path.isabs(node) else os.path.join(build, node))
 
-def ninja_links(ninja):
-    driver_node = os.path.relpath(driver, build)
-    first = ninja_query(ninja, [driver_node])
-    if first is None or not first.get(driver_node):
-        unknown(f"ninja does not know how {driver_node} is linked")
-    seen, frontier, objects = {driver_node}, [driver_node], []
-    graph = dict(first)
-    while frontier:
-        nxt = []
-        for node in frontier:
-            for item in graph.get(node, []):
-                if item in seen:
-                    continue
-                seen.add(item)
-                if item.endswith(".o") or item.endswith(".obj"):
-                    objects.append(item)
-                elif LIBRARY.search(item):
-                    nxt.append(item)
-        if nxt:
-            more = ninja_query(ninja, nxt)
-            if more is None:
-                unknown("ninja could not describe a library the driver links: "
-                        + " ".join(nxt))
-            graph.update(more)
-        frontier = nxt
-    candidates = [o for o in objects if os.path.basename(o) == obj_name]
-    if not candidates:
-        return None
-    sources = ninja_query(ninja, candidates) or {}
-    for obj in candidates:
-        if is_edited_object(obj, [node_path(s) for s in sources.get(obj, [])]):
-            return obj
-    return None
-
-def ninja_target_rebuilds_driver(ninja):
-    proc = subprocess.run([ninja, "-C", build, "-t", "inputs", target],
-                          capture_output=True, text=True)
-    if proc.returncode != 0:
-        return False
-    nodes = {target, *proc.stdout.split()}
-    return any(node_path(n) == driver for n in nodes)
-
-# ── Makefiles: each target's link.txt holds its link command ───────────────
-def make_links():
-    links = {}  # output path -> (cwd, input paths)
-    for root, dirs, files in os.walk(build):
-        if stash and inside(os.path.realpath(root), stash):
-            dirs[:] = []
-            continue
-        if "link.txt" not in files or not root.endswith(".dir"):
-            continue
-        cwd = os.path.dirname(os.path.dirname(root))  # parent of CMakeFiles
-        outputs, inputs = set(), []
-        with open(os.path.join(root, "link.txt")) as stream:
-            for line in stream:
-                try:
-                    argv = shlex.split(line)
-                except ValueError:
-                    continue
-                tokens = []
-                for arg in argv[1:]:
-                    if arg.startswith("@"):
-                        try:
-                            with open(os.path.join(cwd, arg[1:])) as rsp:
-                                tokens += shlex.split(rsp.read())
-                        except OSError:
-                            pass
-                    elif arg.startswith("-Wl,"):
-                        tokens += arg.split(",")[1:]
-                    else:
-                        tokens.append(arg)
-                if "-o" in tokens and tokens.index("-o") + 1 < len(tokens):
-                    outputs.add(tokens[tokens.index("-o") + 1])
-                elif argv and os.path.basename(argv[0]).endswith("ar") and len(tokens) >= 2:
-                    outputs.add(tokens[1])  # ar <flags> <archive> <objects...>
-                inputs += [t for t in tokens if t.endswith((".o", ".obj"))
-                           or LIBRARY.search(t)]
-        resolved_outputs = {os.path.realpath(os.path.join(cwd, o)) for o in outputs}
-        resolved_inputs = [os.path.realpath(os.path.join(cwd, i)) for i in inputs]
-        for out in resolved_outputs:
-            links[out] = (root, [i for i in resolved_inputs if i not in resolved_outputs])
-    if driver not in links:
-        unknown(f"no link.txt in {build} produces {driver}")
-    seen, frontier, objects = {driver}, [driver], []
-    while frontier:
-        nxt = []
-        for node in frontier:
-            for item in links.get(node, (None, []))[1]:
-                if item in seen:
-                    continue
-                seen.add(item)
-                if item.endswith((".o", ".obj")):
-                    objects.append(item)
-                elif item in links:
-                    nxt.append(item)
-        frontier = nxt
-    for obj in objects:
-        if os.path.basename(obj) != obj_name:
-            continue
-        # The object's .dir/build.make names its source: "<obj>: <source>".
-        obj_dir = os.path.dirname(obj)
-        while obj_dir != build and not obj_dir.endswith(".dir"):
-            parent = os.path.dirname(obj_dir)
-            if parent == obj_dir:
-                break  # outside the build dir; build.make is not found below
-            obj_dir = parent
-        sources = []
+    # ── Ninja: build.ninja is the graph, `ninja -t` reads it ────────────────
+    def ninja_program():
+        override = os.environ.get("CONFIRM_FAILURE_NINJA")
+        if override is not None:
+            return override if os.access(override, os.X_OK) else None
         try:
-            with open(os.path.join(obj_dir, "build.make")) as stream:
-                for line in stream:
-                    lhs, sep, rhs = line.rstrip("\n").partition(": ")
-                    if sep and os.path.realpath(os.path.join(build, lhs)) == obj:
-                        sources.append(rhs.strip())
+            with open(os.path.join(build, "CMakeCache.txt")) as cache:
+                for line in cache:
+                    if line.startswith("CMAKE_MAKE_PROGRAM:"):
+                        candidate = line.split("=", 1)[1].strip()
+                        if os.access(candidate, os.X_OK):
+                            return candidate
         except OSError:
-            sources = [edited_file]  # cannot tell; count it, which refuses
-        if is_edited_object(obj, sources):
-            return obj
-    return None
+            pass
+        return shutil.which("ninja")
 
-if os.path.exists(os.path.join(build, "build.ninja")):
-    ninja = ninja_program()
-    if ninja is None:
-        unknown("the build dir uses Ninja but no ninja executable was found")
-    linked = ninja_links(ninja)
-    if linked and ninja_target_rebuilds_driver(ninja):
-        print("rebuilt-by-target")
-        sys.exit(1)
-elif os.path.exists(os.path.join(build, "Makefile")):
-    linked = make_links()
-else:
-    unknown(f"{build} has neither build.ninja nor a Makefile to read the link graph from")
-if linked:
-    print(linked)
-    sys.exit(0)
-sys.exit(1)
+    def ninja_tool(ninja, tool, nodes):
+        proc = subprocess.run([ninja, "-C", build, "-t", tool, *nodes],
+                              capture_output=True, text=True)
+        return proc.stdout if proc.returncode == 0 else None
+
+    def ninja_query(ninja, nodes):
+        """Explicit and implicit inputs of each node; order-only ones are not
+        linked, only sequenced, so they never count. None when ninja fails."""
+        out = ninja_tool(ninja, "query", nodes)
+        if out is None:
+            return None
+        inputs, node, section = {}, None, None
+        for line in out.splitlines():
+            if line and not line.startswith(" ") and line.endswith(":"):
+                node, section = line[:-1], None
+                inputs[node] = []
+            elif line.startswith("  ") and not line.startswith("    "):
+                section = line.strip().split(":", 1)[0]
+            elif section == "input" and node is not None:
+                item = line.strip()
+                if item.startswith("||") or item.startswith("|@"):
+                    continue
+                if item.startswith("| "):
+                    item = item[2:]
+                inputs[node].append(item)
+        return inputs
+
+    def ninja_objects(ninja):
+        driver_node = os.path.relpath(driver, build)
+        first = ninja_query(ninja, [driver_node])
+        if first is None or not first.get(driver_node):
+            unknown(f"ninja does not know how {driver_node} is linked")
+        seen, frontier, objects = {driver_node}, [driver_node], []
+        graph = dict(first)
+        while frontier:
+            nxt = []
+            for node in frontier:
+                for item in graph.get(node, []):
+                    if item in seen:
+                        continue
+                    seen.add(item)
+                    if item.endswith(OBJECT):
+                        objects.append(item)
+                    elif LIBRARY.search(item):
+                        nxt.append(item)
+            if nxt:
+                more = ninja_query(ninja, nxt)
+                if more is None:
+                    unknown("ninja could not describe a library the driver links: "
+                            + " ".join(nxt))
+                graph.update(more)
+            frontier = nxt
+        return objects
+
+    def ninja_links_source(ninja, objects):
+        candidates = [o for o in objects if os.path.basename(o) == obj_name]
+        if not candidates:
+            return None
+        sources = ninja_query(ninja, candidates)
+        if sources is None:
+            unknown("ninja could not describe " + " ".join(candidates))
+        for obj in candidates:
+            if is_edited_object(obj, [node_path(s) for s in sources.get(obj, [])]):
+                return obj
+        return None
+
+    def ninja_links_header(ninja, objects):
+        if not objects:
+            return None
+        out = ninja_tool(ninja, "deps", objects)
+        if out is None:
+            unknown("`ninja -t deps` failed, so which headers the driver's "
+                    "objects include is unknown")
+        deps, node = {}, None
+        for line in out.splitlines():
+            if line and not line.startswith(" "):
+                node = line.split(":", 1)[0]
+                deps[node] = None if "#deps" not in line else []
+            elif line.strip() and node is not None and deps.get(node) is not None:
+                deps[node].append(line.strip())
+        for obj in objects:
+            if deps.get(obj) is None:
+                unknown(f"ninja's dependency log has no record for {obj}, so "
+                        "whether it includes the edited header is unknown")
+            if any(node_path(d) == edited_file for d in deps[obj]):
+                return obj
+        return None
+
+    def ninja_target_rebuilds_driver(ninja):
+        out = ninja_tool(ninja, "inputs", [target])
+        if out is None:
+            return False
+        nodes = {target, *(line.strip() for line in out.splitlines() if line.strip())}
+        return any(node_path(n) == driver for n in nodes)
+
+    # ── Makefiles: each target's link.txt holds its link command ───────────
+    def make_links():
+        links = {}  # output path -> (target .dir, input paths)
+        for root, dirs, files in os.walk(build):
+            if stash and inside(os.path.realpath(root), stash):
+                dirs[:] = []
+                continue
+            if "link.txt" not in files or not root.endswith(".dir"):
+                continue
+            cwd = os.path.dirname(os.path.dirname(root))  # parent of CMakeFiles
+            outputs, inputs = set(), []
+            with open(os.path.join(root, "link.txt")) as stream:
+                for line in stream:
+                    try:
+                        argv = shlex.split(line)
+                    except ValueError:
+                        continue
+                    tokens = []
+                    for arg in argv[1:]:
+                        if arg.startswith("@"):
+                            try:
+                                with open(os.path.join(cwd, arg[1:])) as rsp:
+                                    tokens += shlex.split(rsp.read())
+                            except OSError:
+                                pass
+                        elif arg.startswith("-Wl,"):
+                            tokens += arg.split(",")[1:]
+                        else:
+                            tokens.append(arg)
+                    if "-o" in tokens and tokens.index("-o") + 1 < len(tokens):
+                        outputs.add(tokens[tokens.index("-o") + 1])
+                    elif argv and os.path.basename(argv[0]).endswith("ar") and len(tokens) >= 2:
+                        outputs.add(tokens[1])  # ar <flags> <archive> <objects...>
+                    inputs += [t for t in tokens if t.endswith(OBJECT) or LIBRARY.search(t)]
+            resolved_outputs = {os.path.realpath(os.path.join(cwd, o)) for o in outputs}
+            resolved_inputs = [os.path.realpath(os.path.join(cwd, i)) for i in inputs]
+            for out in resolved_outputs:
+                links[out] = (root, [i for i in resolved_inputs if i not in resolved_outputs])
+        if driver not in links:
+            unknown(f"no link.txt in {build} produces {driver}")
+        seen, frontier, objects = {driver}, [driver], []
+        while frontier:
+            nxt = []
+            for node in frontier:
+                for item in links.get(node, (None, []))[1]:
+                    if item in seen:
+                        continue
+                    seen.add(item)
+                    if item.endswith(OBJECT):
+                        objects.append(item)
+                    elif item in links:
+                        nxt.append(item)
+            frontier = nxt
+        for obj in objects:
+            if os.path.basename(obj) != obj_name:
+                continue
+            # The object's .dir/build.make names its source: "<obj>: <source>".
+            obj_dir = os.path.dirname(obj)
+            while obj_dir != build and not obj_dir.endswith(".dir"):
+                parent = os.path.dirname(obj_dir)
+                if parent == obj_dir:
+                    break  # outside the build dir; build.make is not found below
+                obj_dir = parent
+            sources = []
+            try:
+                with open(os.path.join(obj_dir, "build.make")) as stream:
+                    for line in stream:
+                        lhs, sep, rhs = line.rstrip("\n").partition(": ")
+                        if sep and os.path.realpath(os.path.join(build, lhs)) == obj:
+                            sources.append(rhs.strip())
+            except OSError:
+                sources = [edited_file]  # cannot tell; count it, which refuses
+            if is_edited_object(obj, sources):
+                return obj, links[driver][0]
+        return None, links[driver][0]
+
+    def make_target_rebuilds_driver(driver_dir):
+        """CMakeFiles/Makefile2 holds the target graph: "<target>: <dir>/rule"
+        names the target's own .dir, and "<dir>/all: <dep>/all" its
+        dependencies. The driver is rebuilt when its .dir is in the closure."""
+        try:
+            with open(os.path.join(build, "CMakeFiles", "Makefile2")) as stream:
+                lines = stream.read().splitlines()
+        except OSError:
+            return False
+        start, edges = None, {}
+        for line in lines:
+            lhs, sep, rhs = line.partition(": ")
+            if not sep or line.startswith(("\t", "#")):
+                continue
+            if lhs == target and rhs.strip().endswith("/rule"):
+                start = rhs.strip()[: -len("/rule")]
+            if lhs.endswith("/all") and rhs.strip().endswith("/all"):
+                edges.setdefault(lhs[: -len("/all")], set()).add(rhs.strip()[: -len("/all")])
+        if start is None:
+            return False
+        seen, frontier = {start}, [start]
+        while frontier:
+            nxt = [d for node in frontier for d in edges.get(node, ()) if d not in seen]
+            seen.update(nxt)
+            frontier = nxt
+        return any(os.path.realpath(os.path.join(build, d)) == os.path.realpath(driver_dir)
+                   for d in seen)
+
+    if os.path.exists(os.path.join(build, "build.ninja")):
+        ninja = ninja_program()
+        if ninja is None:
+            unknown("the build dir uses Ninja but no ninja executable was found")
+        objects = ninja_objects(ninja)
+        linked = (ninja_links_header(ninja, objects) if is_header
+                  else ninja_links_source(ninja, objects))
+        if linked and ninja_target_rebuilds_driver(ninja):
+            print("rebuilt-by-target")
+            sys.exit(1)
+    elif os.path.exists(os.path.join(build, "Makefile")):
+        if is_header:
+            unknown("the Makefile generator keeps no dependency log to say "
+                    "whether the driver includes the edited header")
+        linked, driver_dir = make_links()
+        if linked and make_target_rebuilds_driver(driver_dir):
+            print("rebuilt-by-target")
+            sys.exit(1)
+    else:
+        unknown(f"{build} has neither build.ninja nor a Makefile to read the link graph from")
+    if linked:
+        print(linked)
+        sys.exit(0)
+    sys.exit(1)
+
+try:
+    main()
+except SystemExit:
+    raise
+except BaseException as exc:  # a crash must never read as "does not link"
+    unknown(f"the link check failed: {type(exc).__name__}: {exc}")
 PY
 }
 DRIVER_LINK="$(driver_link_status)"
-case $? in
-    0) die_inconclusive "the test driver '$TEST_BINARY' also links $BASE (through
+DRIVER_LINK_STATUS=$?
+case "$DRIVER_LINK_STATUS" in
+    0) die_inconclusive "the test driver also carries $BASE (through
     $DRIVER_LINK), and with --subject the driver is not rebuilt, so it would
     run the unbroken copy. Pass a --target that builds the driver as well as
     the subject (the driver's own target usually does)" ;;
-    2) die_inconclusive "cannot tell whether the test driver '$TEST_BINARY' links
-    $BASE: $DRIVER_LINK. A driver that links it would run the unbroken copy,
-    so no verdict is possible without that answer" ;;
+    1) [ "$DRIVER_LINK" != "rebuilt-by-target" ] ||
+           say "the test driver carries $BASE, and --target '$TARGET' rebuilds it too" ;;
+    *) die_inconclusive "cannot tell whether the test driver carries $BASE:
+    ${DRIVER_LINK:-the check exited $DRIVER_LINK_STATUS}. A driver that does
+    would run the unbroken copy, so no verdict is possible without that answer" ;;
 esac
-[ "$DRIVER_LINK" != "rebuilt-by-target" ] ||
-    say "the test driver links $BASE, and --target '$TARGET' rebuilds it too"
 
 # ── 2. Break the fix ─────────────────────────────────────────────────────────
 say "breaking the fix in $FILE"
