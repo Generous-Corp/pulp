@@ -2350,8 +2350,8 @@ JSON fields:
 | `conformance` | `standard` when `warnings` is empty, else `violations`. Valid BWF, float and RF64 files are standard |
 | `facts_confidence` | `parsed` (the structure was walked) or `container_only` (identity plus the codec's own first-page or first-frame claims) |
 | `bytes_read` | Bytes the inspector requested from the file |
-| `stream` | `sample_rate`, `channels`, `bits_per_sample` (container width), `valid_bits`, `frames` (0 when not stated; for WAV, the whole frames the file holds), `declared_frames` (WAV only: the frames the header declares, a partial last frame counted; 0 for other containers), `duration_seconds` (of `frames`), `encoding`, `bytes_per_frame`; `null` when the header gives no stream |
-| `decode` | `decodable`, `reason` and `truncated`: whether Pulp's WAV reader accepts the file, by the same walk and policy every WAV reader applies, and, when it does, whether the header declares more frames than the file holds (`truncated: true`: the whole frames present decode); `null` for containers without one |
+| `stream` | `sample_rate`, `channels`, `bits_per_sample` (container width), `valid_bits`, `frames` (0 when not stated; for WAV, the whole frames present), `declared_frames` (WAV only, see above), `duration_seconds` (of `frames`), `encoding`, `bytes_per_frame`; `null` when the header gives no stream |
+| `decode` | `decodable`, `reason` and `truncated` (see above): Pulp's WAV reader's verdict; `null` for containers without one |
 | `exceeds_decode_limits` | `exceeded`, `exceeded_by[]` (`max_frames`, `max_channels`, `max_output_bytes`), the `limits` in force and the `output_bytes` the declared stream would need. A fact, not an error |
 | `regions[]` | In file order: `offset`, `declared_size` (payload the header claims), `actual_size` (payload present), `id`, `kind` (`envelope`, `fmt`, `data`, `metadata`, `padding`, `unknown`), `fields` (what the specification defines for that region) and an optional `note` |
 | `regions_truncated` | The walk stopped at its region cap |
