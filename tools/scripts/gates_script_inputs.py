@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """gates.sh lane: check the generated test manifests whenever the diff can drift them.
 
-Three files are generated from a configured build and drift the same way, by
-being hand-edited or not regenerated after a test or script is added:
+Four files are generated from a configured build and drift the same way, by
+being hand-edited or not regenerated after a test, script or public header is
+added:
 
 - `test/ctest_script_inputs/` (`script_test_inputs.py`);
 - `tools/ci/source_selftests.json` (`tools/ci/source_selftests.py write`),
   which must carry each registration's TIMEOUT, RESOURCE_LOCK and argv;
 - the changed-surface script families file `.shipyard/changed-surface-families.toml`
   (`changed_surface_script_families.py --write`), which must map every new
-  script and list every new reader of the skills tree.
+  script and list every new reader of the skills tree;
+- the consumption census `docs/status/consumption-profiles.json`
+  (`consumption_census.py --write`), which records every public header under an
+  exported include root, so a new, removed or renamed public header owes a
+  regeneration (`consumption-census-drift`).
 
 Each surfaced only on the pull-request head (pr-fast, drift-fast) one CI
 roundtrip later. This lane checks all three from one configured build; the
@@ -69,6 +74,10 @@ GATE_DIR = "build-gate"
 TEST = "script-test-inputs-drift"
 LANE_TEST = "source-selftest-lane-contract"
 FAMILIES_TEST = "changed-surface-script-families-drift"
+CENSUS_TEST = "consumption-census-drift"
+CENSUS_SCRIPT = Path("tools/scripts/consumption_census.py")
+CENSUS_FILE = "docs/status/consumption-profiles.json"
+HEADER_SUFFIXES = (".h", ".hh", ".hpp", ".inc")
 FAMILIES = HERE / "changed_surface_script_families.py"
 CODEMODEL_QUERY = Path(".cmake") / "api" / "v1" / "query" / "codemodel-v2"
 
@@ -85,6 +94,32 @@ def generated_manifest_reasons(changed: set[str]) -> list[str]:
                 or (path.startswith(".agents/skills/") and path.endswith("/SKILL.md")):
             reasons.append(path)
     return reasons
+
+
+def census_reasons(root: Path, base: str, changed: set[str]) -> list[str]:
+    """Paths whose change can put the consumption census out of date.
+
+    The census lists every public header under an exported include root, so a
+    header ADDED, DELETED or RENAMED is a reason (an edit to an existing header
+    is not). Any CMake file, the census file and its script can also move it.
+    """
+    reasons = {p for p in changed
+               if p.endswith("CMakeLists.txt") or p.endswith(".cmake")
+               or p in (CENSUS_FILE, CENSUS_SCRIPT.as_posix())}
+    mb = subprocess.run(["git", "-C", str(root), "merge-base", base, "HEAD"],
+                        capture_output=True, text=True)
+    anchor = mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else base
+    # Uncommitted edits count too: gates.sh is often run before the commit.
+    for rev in ((anchor, "HEAD"), ("HEAD",)):
+        proc = subprocess.run(["git", "-C", str(root), "diff", "--name-status",
+                               "--diff-filter=ADR", *rev], capture_output=True, text=True)
+        if proc.returncode != 0:
+            continue
+        for line in proc.stdout.splitlines():
+            for path in line.split("\t")[1:]:
+                if path.endswith(HEADER_SUFFIXES) and "/include/" in path:
+                    reasons.add(path)
+    return sorted(reasons)
 
 
 def say(msg: str = "") -> None:
@@ -129,12 +164,14 @@ def main(argv: list[str]) -> int:
 
     try:
         reasons = sti.touch_reasons(root, a.base)
-        manifest_reasons = generated_manifest_reasons(sti.changed_files(root, a.base))
+        changed_paths = sti.changed_files(root, a.base)
+        manifest_reasons = generated_manifest_reasons(changed_paths)
+        census = census_reasons(root, a.base, changed_paths)
     except subprocess.CalledProcessError as exc:
-        for test in (TEST, LANE_TEST, FAMILIES_TEST):
+        for test in (TEST, LANE_TEST, FAMILIES_TEST, CENSUS_TEST):
             say(f"NOT CHECKED locally: {test} (could not diff against {a.base}: {exc})")
         return 0
-    if not reasons and not manifest_reasons:
+    if not reasons and not manifest_reasons and not census:
         say("  script-test-inputs: diff touches no declared script input or generated test "
             "manifest input; nothing to check")
         return 0
@@ -148,6 +185,11 @@ def main(argv: list[str]) -> int:
         for r in manifest_reasons[:8]:
             say(f"    {r}")
 
+    if census:
+        say(f"  consumption census: the diff can drift {CENSUS_FILE} ({len(census)} path(s)):")
+        for r in census[:8]:
+            say(f"    {r}")
+
     families_paths = families_surface(sti.changed_files(root, a.base)) if manifest_reasons else []
     static_rc = check_families_static(root, a.base) if families_paths else 0
 
@@ -158,7 +200,7 @@ def main(argv: list[str]) -> int:
         say("  script-test-inputs: !!! PULP_GATES_NO_CONFIGURE=1 and no usable configured build "
             f"({why}). The list is NOT verified here; CI's pr-fast / drift-fast will fail this "
             "PR if it drifted. Unset PULP_GATES_NO_CONFIGURE to configure build-gate (~40 s, no compile).")
-        for test in (TEST, LANE_TEST):
+        for test in (TEST, LANE_TEST) + ((CENSUS_TEST,) if census else ()):
             say(f"NOT CHECKED locally: {test} (PULP_GATES_NO_CONFIGURE=1; no usable build: {why})")
         return families_unverified(families_paths, static_rc,
                                    f"PULP_GATES_NO_CONFIGURE=1; no usable build: {why}")
@@ -170,7 +212,7 @@ def main(argv: list[str]) -> int:
             "(configure only, no compile)")
         failed = configure(root, build)
         if failed:
-            for test in (TEST, LANE_TEST):
+            for test in (TEST, LANE_TEST) + ((CENSUS_TEST,) if census else ()):
                 say(f"NOT CHECKED locally: {test} (configure failed: {failed})")
             return families_unverified(families_paths, static_rc, f"configure failed: {failed}")
 
@@ -184,6 +226,8 @@ def main(argv: list[str]) -> int:
     if manifest_reasons:
         drift |= check_selftest_manifest(root, build, shown)
         drift |= check_families(root, build, shown, a.base, families_paths, static_rc)
+    if census:
+        drift |= check_census(root, build, shown)
     return drift
 
 
@@ -211,6 +255,27 @@ def run_tool(cmd: list[str], root: Path) -> tuple[int, str]:
     except OSError as exc:
         return 2, f"{cmd[1]} could not run: {exc}"
     return proc.returncode, (proc.stdout + proc.stderr).strip()
+
+
+def check_census(root: Path, build: Path, shown: str) -> int:
+    """`consumption-census-drift`: the census lists the headers the tree has."""
+    script = root / CENSUS_SCRIPT
+    if not script.is_file():
+        say(f"NOT CHECKED locally: {CENSUS_TEST} ({CENSUS_SCRIPT.as_posix()} is not in this checkout)")
+        return 0
+    rc, out = run_tool([sys.executable, str(script), "--check", "--build-dir", str(build)], root)
+    for line in out.splitlines()[-12:]:
+        say(f"  {line}")
+    if rc == 0:
+        return 0
+    if rc == 1:
+        say("  consumption-census: DRIFT. Regenerate the census from this configured tree and commit it "
+            "(stage a new public header first: the header list is read from git's index):")
+        say(f"    python3 tools/scripts/consumption_census.py --build-dir {shown} --write")
+        say(f"    git add {CENSUS_FILE}")
+        return 1
+    say(f"NOT CHECKED locally: {CENSUS_TEST} (consumption_census.py --check exited {rc} on {shown})")
+    return 0
 
 
 def check_selftest_manifest(root: Path, build: Path, shown: str) -> int:
