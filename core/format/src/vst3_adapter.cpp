@@ -6,6 +6,7 @@
 #include <pulp/format/vst3_contract_view.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/format/vst3_adapter.hpp>
+#include <pulp/state/midi_learn_engine.hpp>
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
@@ -379,7 +380,40 @@ tresult PLUGIN_API PulpVst3Processor::queryInterface(const TUID iid, void** obj)
     QUERY_INTERFACE(iid, obj, IMidiMapping::iid, IMidiMapping)
     QUERY_INTERFACE(iid, obj, INoteExpressionController::iid, INoteExpressionController)
     QUERY_INTERFACE(iid, obj, IKeyswitchController::iid, IKeyswitchController)
+    // IMidiLearn is offered only when there is an engine to forward to, so a
+    // plug-in without MIDI Learn does not advertise it to the host.
+    if (processor_ && processor_->midi_learn_engine() &&
+        FUnknownPrivate::iidEqual(iid, IMidiLearn::iid)) {
+        addRef();
+        *obj = static_cast<IMidiLearn*>(this);
+        return kResultOk;
+    }
     return SingleComponentEffect::queryInterface(iid, obj);
+}
+
+tresult PLUGIN_API PulpVst3Processor::onLiveMIDIControllerInput(int32 /*busIndex*/, int16 channel,
+                                                                CtrlNumber midiControllerNumber) {
+    auto* engine = processor_ ? processor_->midi_learn_engine() : nullptr;
+    if (!engine || channel < 0 || channel > 15)
+        return kResultFalse;
+    state::MidiSource source;
+    source.channel = static_cast<uint8_t>(channel);
+    if (midiControllerNumber >= 0 && midiControllerNumber < 128) {
+        source.kind = state::MidiSourceKind::cc7;
+        source.number = static_cast<uint16_t>(midiControllerNumber);
+    } else if (midiControllerNumber == kAfterTouch) {
+        source.kind = state::MidiSourceKind::channel_pressure;
+    } else if (midiControllerNumber == kPitchBend) {
+        source.kind = state::MidiSourceKind::pitch_bend;
+    } else {
+        // Program change and poly pressure carry a second value the host does
+        // not report here, so there is no controller to bind.
+        return kResultFalse;
+    }
+    if (!engine->learning())
+        return kResultFalse;
+    engine->host_reported_controller(source);
+    return kResultTrue;
 }
 
 int32 PLUGIN_API PulpVst3Processor::getUnitCount() {
