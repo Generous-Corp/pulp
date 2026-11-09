@@ -1,5 +1,6 @@
 #include <pulp/audio/format_registry.hpp>
 #include "decode_limits_detail.hpp"
+#include "format_capabilities_detail.hpp"
 #include <filesystem>
 #include <algorithm>
 #include <array>
@@ -71,6 +72,12 @@ std::unique_ptr<FormatWriter> create_aac_writer();
 std::unique_ptr<FormatWriter> create_alac_writer();
 #endif
 
+std::unique_ptr<FormatWriter> create_system_audio_writer();
+
+#ifdef _WIN32
+std::unique_ptr<FormatReader> create_media_foundation_reader();
+#endif
+
 // ── WAV Reader/Writer (via CHOC) ────────────────────────────────────────
 
 class WavReader : public FormatReader {
@@ -98,6 +105,13 @@ public:
         return ext == ".wav" || ext == ".wave";
     }
     std::string format_name() const override { return "WAV"; }
+    FormatCapabilities capabilities() const override {
+        return {.format_name = "WAV",
+                .extensions = {".wav", ".wave"},
+                .bit_depths = {8, 16, 24, 32},
+                .float_samples = true,
+                .max_channels = 65535};
+    }
 };
 
 class WavWriter : public FormatWriter {
@@ -109,9 +123,25 @@ public:
         return ext == ".wav" || ext == ".wave";
     }
     std::string format_name() const override { return "WAV"; }
+    FormatCapabilities capabilities() const override {
+        // write() stores 16-bit integer PCM; write_wav_file() with a
+        // WavBitDepth also offers 24-bit and float.
+        return {.format_name = "WAV",
+                .extensions = {".wav", ".wave"},
+                .bit_depths = {16},
+                .max_channels = 65535};
+    }
 };
 
 // ── FLAC Reader (via dr_flac) ───────────────────────────────────────────
+
+// FLAC allows every integer depth from 4 to 32 bits; dr_flac decodes them all.
+static std::vector<std::uint32_t> flac_bit_depths() {
+    std::vector<std::uint32_t> depths;
+    for (std::uint32_t bits = 4; bits <= 32; ++bits)
+        depths.push_back(bits);
+    return depths;
+}
 
 class FlacReader : public FormatReader {
 public:
@@ -181,6 +211,13 @@ public:
         return ext == ".flac";
     }
     std::string format_name() const override { return "FLAC"; }
+    FormatCapabilities capabilities() const override {
+        return {.format_name = "FLAC",
+                .extensions = {".flac"},
+                .bit_depths = flac_bit_depths(),
+                .max_channels = 8,
+                .compressed = true};
+    }
 };
 
 // ── MP3 Reader (via dr_mp3) ─────────────────────────────────────────────
@@ -252,6 +289,14 @@ public:
         return ext == ".mp3";
     }
     std::string format_name() const override { return "MP3"; }
+    FormatCapabilities capabilities() const override {
+        return {.format_name = "MP3",
+                .extensions = {".mp3"},
+                .sample_rates = detail::mp3_sample_rates(),
+                .max_channels = 2,
+                .compressed = true,
+                .lossless = false};
+    }
 };
 
 // ── Registry ────────────────────────────────────────────────────────────
@@ -290,6 +335,14 @@ FormatRegistry::FormatRegistry() {
 #ifdef PULP_HAS_ALAC
     register_writer(create_alac_writer());
 #endif
+
+#ifdef _WIN32
+    register_reader(create_media_foundation_reader());
+#endif
+
+    // Registered last so an installed optional encoder keeps its extensions.
+    // Null (and skipped) where the platform has no system codec.
+    register_writer(create_system_audio_writer());
 }
 
 void FormatRegistry::register_reader(std::unique_ptr<FormatReader> reader) {
@@ -350,6 +403,22 @@ bool FormatRegistry::write(const std::string& path, const AudioFileData& data) c
 
 std::vector<std::string> FormatRegistry::supported_read_extensions() const {
     return collect_supported_extensions(readers_);
+}
+
+std::vector<FormatCapabilities> FormatRegistry::reader_capabilities() const {
+    std::vector<FormatCapabilities> result;
+    result.reserve(readers_.size());
+    for (const auto& reader : readers_)
+        result.push_back(reader->capabilities());
+    return result;
+}
+
+std::vector<FormatCapabilities> FormatRegistry::writer_capabilities() const {
+    std::vector<FormatCapabilities> result;
+    result.reserve(writers_.size());
+    for (const auto& writer : writers_)
+        result.push_back(writer->capabilities());
+    return result;
 }
 
 std::vector<std::string> FormatRegistry::supported_write_extensions() const {

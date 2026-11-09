@@ -68,6 +68,14 @@ StyleSheet.prototype._applyTo = function(el) {
             if (_matchesSelector(el, parsedNoPseudo)) {
                 _setupPseudoFocus(el, rule.properties);
             }
+        } else if (parsed.pseudo === "focus-visible") {
+            if (_matchesSelector(el, parsedNoPseudo)) {
+                _setupPseudoFocusVisible(el, rule.properties);
+            }
+        } else if (parsed.pseudo === "focus-within") {
+            if (_matchesSelector(el, parsedNoPseudo)) {
+                _setupPseudoFocusWithin(el, rule.properties);
+            }
         } else if (parsed.pseudo === "active") {
             if (_matchesSelector(el, parsedNoPseudo)) {
                 _setupPseudoActive(el, rule.properties);
@@ -289,6 +297,50 @@ function _setupPseudoFocus(el, props) {
 
     el.addEventListener("blur", function() {
         for (var k in savedProps) el.style[k] = savedProps[k];
+    });
+}
+
+// :focus-visible applies only when the element took focus from the keyboard or
+// from code. A pointer press that focuses it leaves the style off.
+function _setupPseudoFocusVisible(el, props) {
+    if (el._focusVisibleSetup) return;
+    el._focusVisibleSetup = true;
+    var savedProps = null;
+
+    el.addEventListener("focus", function() {
+        if (!el._focusVisible || savedProps) return;
+        savedProps = {};
+        for (var k in props) savedProps[k] = el.style[k];
+        _applyStyles(el, props);
+    });
+
+    el.addEventListener("blur", function() {
+        if (!savedProps) return;
+        for (var k in savedProps) el.style[k] = savedProps[k];
+        savedProps = null;
+    });
+}
+
+// :focus-within applies while the element or any descendant holds focus.
+// `focusin` and `focusout` bubble, so the ancestor hears every change below it.
+// Focus moving between two descendants is a focusout followed by a focusin, so
+// the style is restored and applied again rather than left on.
+function _setupPseudoFocusWithin(el, props) {
+    if (el._focusWithinSetup) return;
+    el._focusWithinSetup = true;
+    var savedProps = null;
+
+    el.addEventListener("focusin", function() {
+        if (savedProps) return;
+        savedProps = {};
+        for (var k in props) savedProps[k] = el.style[k];
+        _applyStyles(el, props);
+    });
+
+    el.addEventListener("focusout", function() {
+        if (!savedProps) return;
+        for (var k in savedProps) el.style[k] = savedProps[k];
+        savedProps = null;
     });
 }
 

@@ -10,6 +10,7 @@
 #include <pulp/inspect/control_client_connection.hpp>
 #endif
 #include <pulp/inspect/control_manifest.hpp>
+#include <pulp/inspect/control_vendor_operations.hpp>
 #if PULP_CLI_HAS_CONTROL_HEALTH
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/detail/durable_file_replacement.hpp>
@@ -498,8 +499,10 @@ int cmd_control(const std::vector<std::string>& args) {
                     "OPERATION",
                     json);
     if (verb == "grant-request" && !grant_operation.empty()) {
+        // A vendor id is resolved by the broker against the exact instance.
         const auto* descriptor = resolve_control_operation(grant_operation, 1);
-        if (!descriptor || !capability_is_grantable(descriptor->capability))
+        if ((!descriptor || !capability_is_grantable(descriptor->capability)) &&
+            !is_control_vendor_operation_id(grant_operation))
             return fail("invalid-request", "the grant operation is unknown or not grantable",
                         json);
     }
@@ -660,11 +663,33 @@ int cmd_control(const std::vector<std::string>& args) {
             : positional;
     if (operation.empty())
         return fail("invalid-request", verb + " requires OPERATION or RESOURCE", json);
+    // A Pulp operation comes from the frozen registry; a vendor operation only
+    // from the exact instance's declaration, which the broker re-checks.
+    std::uint32_t operation_version = 1;
+    std::string vendor_input_schema;
     const auto* descriptor = resolve_control_operation(operation, 1);
-    if (!descriptor)
-        return fail("invalid-request", "unknown operation: " + operation, json);
+    if (!descriptor) {
+        const auto vendor = parse_control_vendor_operation_id(operation);
+        if (vendor && item->hasObjectMember("vendor_operations") &&
+            (*item)["vendor_operations"].isArray()) {
+            const auto declared = (*item)["vendor_operations"];
+            for (std::uint32_t index = 0; index < declared.size(); ++index) {
+                const auto entry = declared[index];
+                if (entry["id"].isString() && entry["id"].getString() == operation &&
+                    entry["input_schema"].isObject()) {
+                    vendor_input_schema = choc::json::toString(entry["input_schema"], false);
+                    operation_version = vendor->version;
+                    break;
+                }
+            }
+        }
+        if (vendor_input_schema.empty())
+            return fail("invalid-request", "unknown operation: " + operation, json);
+    }
     ControlJsonSchemaDiagnostics diagnostics;
-    if (!validate_control_json_schema(params, descriptor->input_schema_json, &diagnostics))
+    if (descriptor
+            ? !validate_control_json_schema(params, descriptor->input_schema_json, &diagnostics)
+            : !validate_control_json_schema(params, vendor_input_schema, &diagnostics))
         return fail("invalid-request", diagnostics.explanation, json);
     if (grant_id.empty()) {
         auto grant_params = choc::value::createObject("");
@@ -716,14 +741,13 @@ int cmd_control(const std::vector<std::string>& args) {
         .grant_id = grant_id,
         .instance_generation = std::string((*item)["publication_id"].getString()),
         .operation_id = operation,
-        .operation_version = 1,
+        .operation_version = operation_version,
         .idempotency_key = *idempotency,
-        .deadline_unix_ms = deadline
-                                ? deadline->unix_deadline_ms(std::chrono::system_clock::now())
-                                : std::chrono::duration_cast<std::chrono::milliseconds>(
-                                      std::chrono::system_clock::now().time_since_epoch())
-                                          .count() +
-                                      timeout_ms,
+        .deadline_unix_ms = deadline ? deadline->unix_deadline_ms(std::chrono::system_clock::now())
+                                     : std::chrono::duration_cast<std::chrono::milliseconds>(
+                                           std::chrono::system_clock::now().time_since_epoch())
+                                               .count() +
+                                           timeout_ms,
         .params_json = params};
     request.request_hash = control_request_hash(request).value_or("");
     const auto result = client.request(request, *final_timeout);

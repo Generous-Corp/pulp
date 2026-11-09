@@ -26,6 +26,12 @@ TEST_CASE("DSPX-04 product binding reaches modulation route through broker",
     REQUIRE(std::filesystem::exists(cli));
     REQUIRE(std::filesystem::exists(mcp));
     REQUIRE(std::filesystem::exists(broker));
+    // The broker enrolls this process only as the trusted client copy beside
+    // it. Another target overwriting that copy shows up here, not as an
+    // unexplained enrollment denial.
+    const auto trusted_client = bin / "tools" / "cli" / "pulp-cpp";
+    REQUIRE(pulp::runtime::sha256_file_hex(trusted_client, 1024ULL * 1024 * 1024) ==
+            pulp::runtime::sha256_file_hex(executable, 1024ULL * 1024 * 1024));
     REQUIRE(std::filesystem::exists(built_host));
     const auto host_dir = root.path / "product";
     REQUIRE(std::filesystem::create_directory(host_dir));

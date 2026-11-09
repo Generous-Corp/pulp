@@ -83,7 +83,13 @@ on a real PR. Do them in order.
      covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
      surface. New GPU-audio virtual hooks belong at the end of that class;
      inserting one in the middle shifts existing slots even though the SDK
-     remains source-rebuild oriented.
+     remains source-rebuild oriented. The editor-host interfaces (`Editor`,
+     `EditorContext`, `EditorFactory`, `NativeSurfaceHost`) are checked under a
+     stricter FROZEN policy: an appended virtual fails too, because a UI
+     package and a format adapter are separate prebuilt binaries. Don't "fix"
+     the failure by appending at the tail. Ship the capability as a new
+     `query_extension()` id. A `Node-ABI-Break: <Class>` trailer exists for a
+     deliberate break, but on these classes it breaks every prebuilt peer.
 
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
@@ -139,6 +145,18 @@ stops at a failing command even when the script itself starts with
 then prints its report or picks a verdict from the exit code must capture the
 code with `set +e` ... `rc=$?` ... `set -e`, or the step ends at the checker
 with only "exit code 1" in the log. `format-changed-check.yml` hit this.
+
+### `printf "$output" | grep -q` fails under pipefail even when it matches
+
+A reader that stops early (`grep -q`, `head`, `sed q`) closes the pipe while
+the writer still has output, so the writer dies of SIGPIPE and, under
+`set -o pipefail`, the whole pipeline fails. The check then reports the very
+marker it found as missing. It is size- and timing-dependent, so it looks like
+a flake: `android-run-fixtures` failed "omitted pass marker" on a run whose
+fixtures all passed, with `printf: write error: Broken pipe` one line above.
+Search a captured variable with a here-string (`grep -Fq "$m" <<<"$output"`)
+instead of piping `printf` into it. `tools/ci/test_android_fixture_lane.py`
+reproduces the case through a fake `adb` (marker first, then 200k lines).
 
 ## Build emitters always use the governor
 
@@ -882,6 +900,16 @@ while main is red. Every such call carries
 `GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix`, which the queue-removal guard
 logs. Every other use needs Daniel's explicit OK first: rebasing or refreshing a
 queued PR, reordering or dequeuing any other PR, or making room ahead of the fix.
+
+## A cancelled `workflow-lint` job: read the step timings before raising the timeout
+
+The lint job's 10-minute `timeout-minutes` cancels the job (conclusion
+`cancelled`, later steps `skipped`), so the step that happened to be running
+looks guilty. It was not: the release-pipeline step needs ~75s and
+`test_generated_version_bump_check.py` needs 350-460s. Read per-step durations
+(`ghapp api repos/<o>/<r>/actions/runs/<id>/jobs`, `steps[].started_at` and
+`completed_at`) from a green run beside the cancelled one before choosing a
+fix. That suite now runs as its own `generated-version-bump-contract` job.
 
 ## Wait on a blocking waiter, not a poll loop
 
@@ -2312,6 +2340,11 @@ when it would delete a checked-in test or executable your configure does not
 produce, such as the generated-name "Pulp UI Script Fixture" executable. Fix
 the configure; pass `--allow-delete` only when the registration really was
 removed.
+After merging main, reconfigure the build tree before any `--write` of
+`consumption_census.py` or `script_test_inputs.py`: both read facts only a configure
+rewrites, and a stale tree silently reverts main's newer entries. The census
+refuses (exit 2) when its facts file predates a tracked CMake input, and
+`--check` drift output names the stale tree.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
@@ -2670,6 +2703,16 @@ Three things it cannot see on its own:
 The job's second configure is the control: GPU on, with
 `PULP_SKIA_AUTOFETCH=OFF` so it skips the download. It must show Skia and
 WebGPU. A forbidden-list pass without a green control proves nothing.
+
+The Pulp-only configure runs under `tools/ci/run_without_network.sh` (a fresh
+network namespace on Linux, `sandbox-exec` on macOS), so a download path that
+makes no note fails instead of passing unseen. Two controls go with it:
+`--probe` must see github.com blocked inside and reachable outside, and a GPU
+configure against an empty `PULP_SKIA_CACHE_ROOT` must fail at the Skia
+download. Be precise about what this proves. The configure downloads
+nothing, but the bootstrap step before it (`setup.sh --deps-only`) still primes
+the shared caches with the network on, so it is not proof that a dependency
+was never fetched on the runner.
 
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
@@ -7156,6 +7199,14 @@ pre-push hook applies the same rule there (`tools/scripts/refresh_push_check.py`
 - The GitHub lookup shares one 5 s budget and fails open: `lookup: failed:*` in
   the log, never a blocked push. A failing check that could not be confirmed as
   non-required counts as justification, so the check errs toward silence.
+  That makes a broken second (required-ness) query silent too: while
+  `REQUIRED_QUERY` was missing a closing brace, every PR with any failing
+  check logged `lookup: partial:exit:1` and `allowed:failing-required-check`
+  (82 of 96 pure refreshes on m3 in one week). Before reading
+  `allowed:failing-required-check` as a real justification, check that the
+  same log also has `lookup: ok` lines; the fake `gh` in
+  `test_refresh_push_check.py` now rejects an unbalanced query the way GitHub
+  does.
 
 Read the log to measure the habit: pure refreshes with `gate_in_flight: true`
 are the avoidable cancellations; all lines are the control population.
@@ -13258,3 +13309,12 @@ submodules cold (about 10 minutes) and a bootstrap step with a 10-minute limit
 dies. Main's Linux build leg saves both paths, and `drift-fast` and
 `read-audit-nightly` restore them. The path list is part of the cache version,
 so keep it identical across the save and every restore.
+
+**Downloads in CI go through `tools/scripts/download_retry.py`.** A GitHub or
+CDN 503/504 on a pinned-asset fetch used to fail the ~40-minute required
+`macos` gate. The helper makes 6 attempts with 5-60s jittered exponential
+backoff, retries only 5xx/408/425/429, timeouts and connection resets, and
+fails at once on other 4xx. Workflows call `python3
+tools/scripts/download_retry.py URL DEST` instead of a bare `curl -fsSL`; keep
+the sha256 check after it. A script copied into a temp tree must copy the
+helper too.

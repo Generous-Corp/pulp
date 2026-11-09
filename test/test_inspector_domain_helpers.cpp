@@ -27,7 +27,7 @@ TEST_CASE("Inspector method registry assigns one stable capability to every meth
           "[inspect][capabilities]") {
     const auto capabilities = inspector_capability_registry();
     const auto registry = inspector_method_registry();
-    REQUIRE(capabilities.size() == 28);
+    REQUIRE(capabilities.size() == 32);
     REQUIRE_FALSE(registry.empty());
 
     for (const auto& descriptor : capabilities) {
@@ -75,6 +75,7 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
         InspectorCapability::SequencerStateRead,
         InspectorCapability::SequencerTransportRead,
         InspectorCapability::GraphSampleRegionRead,
+        InspectorCapability::VendorRead,
     });
     const auto expected_develop = std::to_array<InspectorCapability>({
         InspectorCapability::SessionDescribe,
@@ -100,6 +101,8 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
         InspectorCapability::GraphSampleRegionRead,
         InspectorCapability::GraphSampleRegionEdit,
         InspectorCapability::ModulationRouteEdit,
+        InspectorCapability::VendorRead,
+        InspectorCapability::VendorGesture,
     });
     REQUIRE(std::ranges::equal(observe, expected_observe));
     REQUIRE(std::ranges::equal(develop, expected_develop));
@@ -122,6 +125,9 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
     REQUIRE(contains(develop, InspectorCapability::TestInput));
     REQUIRE(contains(develop, InspectorCapability::TelemetryStream));
     REQUIRE_FALSE(contains(develop, InspectorCapability::RuntimeEval));
+    // Render and destructive vendor tiers always need a single-operation grant.
+    REQUIRE_FALSE(contains(develop, InspectorCapability::VendorRender));
+    REQUIRE_FALSE(contains(develop, InspectorCapability::VendorDestructive));
     REQUIRE_FALSE(contains(develop, InspectorCapability::Unavailable));
 
     REQUIRE_FALSE(capability_is_grantable(InspectorCapability::Unavailable));
