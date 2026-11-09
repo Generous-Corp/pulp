@@ -1,0 +1,10 @@
+{
+ "name": "verify-rendered-panel-selftest",
+ "record": {
+  "entry": "tools/scripts/test_verify_rendered_panel.py",
+  "inputs": [
+   "tools/scripts/test_verify_rendered_panel.py"
+  ],
+  "kind": "python"
+ }
+}

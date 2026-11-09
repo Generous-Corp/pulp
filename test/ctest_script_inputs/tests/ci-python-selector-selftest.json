@@ -1,0 +1,10 @@
+{
+ "name": "ci-python-selector-selftest",
+ "record": {
+  "entry": "tools/ci/test_find_python311.py",
+  "inputs": [
+   "tools/ci/test_find_python311.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,12 @@
+{
+ "name": "pulp-browser-capture-process-lifecycle",
+ "record": {
+  "entry": "tools/import-design/browser_capture/browser_process.test.mjs",
+  "inputs": [
+   "tools/import-design/browser_capture/browser_process.mjs",
+   "tools/import-design/browser_capture/browser_process.test.mjs",
+   "tools/import-design/browser_capture/security.mjs"
+  ],
+  "kind": "node"
+ }
+}

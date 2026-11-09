@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-mac-platform-harness",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_mac_platform_harness.cpp"
+  ],
+  "inputs": [
+   "planning"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/mac_window_harness.mm",
+   "test/test_mac_platform_harness.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

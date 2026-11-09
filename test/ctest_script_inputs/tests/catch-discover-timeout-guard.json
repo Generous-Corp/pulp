@@ -1,0 +1,10 @@
+{
+ "name": "catch-discover-timeout-guard",
+ "record": {
+  "entry": "tools/scripts/catch_discover_timeout_guard.py",
+  "inputs": [
+   "tools/scripts/catch_discover_timeout_guard.py"
+  ],
+  "kind": "python"
+ }
+}

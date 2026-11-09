@@ -66,7 +66,7 @@ POLICIES
                  and the group is not stacked on an unlanded entry.
   inert-drift-inputs
                  inert-drift, plus no drifted file is a declared input of a
-                 script test (`test/ctest_script_inputs.json` at the group's
+                 script test (`test/ctest_script_inputs/` at the group's
                  tree); a group whose tree has no such list is unevaluable.
   source-key     tier 1a: a test is skipped, and its executable not rebuilt,
                  when its per-executable source key matches the head run's
@@ -141,7 +141,7 @@ GREEN_CONCLUSIONS = ("success", "skipped", "neutral")
 # A PR-head run is full-suite evidence only when it ran at least this share of
 # the tests its merge group ran (the receipt issuer's own floor).
 MIN_SELECTED_PERCENT = 80
-SCRIPT_INPUTS_PATH = "test/ctest_script_inputs.json"
+SCRIPT_INPUTS_PATH = "test/ctest_script_inputs"
 
 
 # --------------------------------------------------------------------------

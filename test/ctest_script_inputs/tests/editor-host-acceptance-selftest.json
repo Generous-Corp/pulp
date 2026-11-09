@@ -1,0 +1,16 @@
+{
+ "name": "editor-host-acceptance-selftest",
+ "record": {
+  "entry": "tools/scripts/test_editor_host_acceptance.py",
+  "inputs": [
+   "test/editor_host_slice/rmlui_editor.cpp",
+   "tools/ci/governed-build.sh",
+   "tools/scripts/confirm_failure.sh",
+   "tools/scripts/core_vellum_direction.py",
+   "tools/scripts/dawn_binding_census.py",
+   "tools/scripts/editor_host_acceptance.py",
+   "tools/scripts/test_editor_host_acceptance.py"
+  ],
+  "kind": "python"
+ }
+}

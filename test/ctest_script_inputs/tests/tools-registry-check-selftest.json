@@ -1,0 +1,12 @@
+{
+ "name": "tools-registry-check-selftest",
+ "record": {
+  "entry": "tools/scripts/test_tools_registry_check.py",
+  "inputs": [
+   "tools/import-design/montage.py",
+   "tools/scripts/test_tools_registry_check.py",
+   "tools/scripts/tools_registry_check.py"
+  ],
+  "kind": "python"
+ }
+}

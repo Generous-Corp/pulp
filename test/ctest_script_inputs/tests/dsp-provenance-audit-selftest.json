@@ -1,0 +1,13 @@
+{
+ "name": "dsp-provenance-audit-selftest",
+ "record": {
+  "entry": "tools/scripts/test_dsp_provenance_audit.py",
+  "inputs": [
+   "examples/faust-gain/generated_gain.hpp",
+   "tools/cmake/PulpFaust.cmake",
+   "tools/scripts/cmajor_external.py",
+   "tools/scripts/test_dsp_provenance_audit.py"
+  ],
+  "kind": "python"
+ }
+}

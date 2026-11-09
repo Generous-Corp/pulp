@@ -1,0 +1,10 @@
+{
+ "name": "timeline-launcher-resource-contract-mutation-control",
+ "record": {
+  "entry": "tools/scripts/verify_timeline_launcher_resource_contract.py",
+  "inputs": [
+   "tools/scripts/verify_timeline_launcher_resource_contract.py"
+  ],
+  "kind": "python"
+ }
+}

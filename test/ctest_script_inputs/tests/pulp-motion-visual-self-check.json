@@ -1,0 +1,10 @@
+{
+ "name": "pulp-motion-visual-self-check",
+ "record": {
+  "entry": "tools/motion/visual/test_self_check.py",
+  "inputs": [
+   "tools/motion/visual/test_self_check.py"
+  ],
+  "kind": "python"
+ }
+}

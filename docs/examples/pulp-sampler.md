@@ -69,13 +69,14 @@ if (!file.loaded()) {
 }
 ```
 
-The file path admits only true ranged readers: WAV and uncompressed
-AIFF/AIFF-C `NONE`, at one or two channels and no more than 192 kHz. FLAC is
-available to the general audio-file layer as a decode-once fallback, not as a
-ranged sampler reader, so the sampler rejects it transactionally instead of
-silently loading the entire asset. The same rule applies to any other codec
-that lacks ranged reads: a failed replacement leaves the previously published
-source usable. A successful open streams from an immutable private disk
+The file path admits only true ranged readers: WAV, uncompressed AIFF/AIFF-C
+(`NONE`, `twos` or `sowt`), FLAC, MP3 and Ogg Vorbis, at one or two channels and no more than
+192 kHz. The compressed formats seek inside the encoded stream, so a long FLAC
+streams without being decoded whole. A file that can only be decoded whole (a
+FLAC or Ogg stream whose header gives no length, or a format read through the
+platform decoder) is rejected transactionally instead of silently loading the
+entire asset: a failed replacement leaves the previously published source
+usable. A successful open streams from an immutable private disk
 snapshot retained for that publication, so replacing, overwriting, or
 truncating the original path afterward does not change its audio. Snapshot
 creation is a control-thread disk-copy cost bounded by the mapped-source byte

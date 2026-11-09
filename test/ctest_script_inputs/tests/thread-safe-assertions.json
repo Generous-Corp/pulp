@@ -1,0 +1,10 @@
+{
+ "name": "thread-safe-assertions",
+ "record": {
+  "entry": "tools/scripts/thread_assert_check.py",
+  "inputs": [
+   "tools/scripts/thread_assert_check.py"
+  ],
+  "kind": "python"
+ }
+}

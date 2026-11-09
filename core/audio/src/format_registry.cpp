@@ -169,41 +169,15 @@ public:
                                       const DecodeLimits& limits) override {
         drflac* flac = drflac_open_file(path.c_str(), nullptr);
         if (!flac) return std::nullopt;
-
-        // STREAMINFO's total sample count is a 36-bit untrusted claim (zero
-        // means unknown); refuse before any output allocation.
-        const uint64_t claimed_frames = flac->totalPCMFrameCount;
-        const uint32_t channels = flac->channels;
-        if (channels == 0 ||
-            !detail::within_decode_limits("FLAC", claimed_frames, channels, limits)) {
-            drflac_close(flac);
-            return std::nullopt;
-        }
-
-        AudioFileData data;
-        data.sample_rate = flac->sampleRate;
-        data.channels.resize(channels);
-        detail::reserve_planar(data.channels, claimed_frames);
-
-        std::vector<float> interleaved(static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
-        uint64_t frames_read = 0;
-        bool within_limits = true;
-        for (;;) {
-            const uint64_t got =
-                drflac_read_pcm_frames_f32(flac, detail::kDecodeChunkFrames, interleaved.data());
-            if (got == 0)
-                break;
-            if (!detail::within_decode_limits("FLAC", frames_read + got, channels, limits)) {
-                within_limits = false;
-                break;
-            }
-            detail::append_deinterleaved(data.channels, interleaved.data(), got, channels);
-            frames_read += got;
-        }
+        // STREAMINFO's total sample count is a 36-bit untrusted claim, zero
+        // when the encoder did not know it; decode_chunked holds it to the
+        // limits and to what the stream delivers.
+        auto data = detail::decode_chunked("FLAC", flac->sampleRate, flac->channels,
+                                           flac->totalPCMFrameCount, limits,
+                                           [flac](float* out, uint64_t frames) {
+                                               return drflac_read_pcm_frames_f32(flac, frames, out);
+                                           });
         drflac_close(flac);
-
-        if (!within_limits || frames_read == 0)
-            return std::nullopt;
         return data;
     }
 
@@ -232,7 +206,17 @@ public:
         AudioFileInfo info;
         info.sample_rate = mp3.sampleRate;
         info.num_channels = mp3.channels;
-        info.num_frames = drmp3_get_pcm_frame_count(&mp3);
+        // With a Xing/Info header the count is the header's, net of the
+        // encoder delay and padding, which is what read() checks the decode
+        // against. Without one the stream declares nothing, and dr_mp3's
+        // header scan can count a frame the decoder then rejects, so the
+        // count is taken by decoding: it is then the count read() delivers.
+        info.num_frames =
+            mp3.totalPCMFrameCount != DRMP3_UINT64_MAX
+                ? drmp3_get_pcm_frame_count(&mp3)
+                : detail::count_decoded_frames(mp3.channels, [&mp3](float* out, uint64_t frames) {
+                      return drmp3_read_pcm_frames_f32(&mp3, frames, out);
+                  });
         info.bits_per_sample = 16;  // MP3 is always decoded to 16-bit equivalent
         info.format = "MP3";
         info.duration_seconds = static_cast<double>(info.num_frames) / info.sample_rate;
@@ -250,38 +234,17 @@ public:
         drmp3 mp3;
         if (!drmp3_init_file(&mp3, path.c_str(), nullptr))
             return std::nullopt;
-
-        // MP3 carries no trustworthy frame count, so the running decoded
-        // size is the only check; decode in chunks so allocation follows it.
-        const uint32_t channels = mp3.channels;
-        if (channels == 0 || !detail::within_decode_limits("MP3", 0, channels, limits)) {
-            drmp3_uninit(&mp3);
-            return std::nullopt;
-        }
-
-        AudioFileData data;
-        data.sample_rate = mp3.sampleRate;
-        data.channels.resize(channels);
-
-        std::vector<float> interleaved(static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
-        uint64_t frames_read = 0;
-        bool within_limits = true;
-        for (;;) {
-            const uint64_t got =
-                drmp3_read_pcm_frames_f32(&mp3, detail::kDecodeChunkFrames, interleaved.data());
-            if (got == 0)
-                break;
-            if (!detail::within_decode_limits("MP3", frames_read + got, channels, limits)) {
-                within_limits = false;
-                break;
-            }
-            detail::append_deinterleaved(data.channels, interleaved.data(), got, channels);
-            frames_read += got;
-        }
+        // A Xing/Info header declares a frame count, which dr_mp3 reports net
+        // of the encoder delay and padding it also trims from the decode;
+        // without one the field stays at its maximum and the stream declares
+        // nothing. The count comes from the header only, never from a scan.
+        const uint64_t claimed_frames =
+            mp3.totalPCMFrameCount == DRMP3_UINT64_MAX ? 0u : drmp3_get_pcm_frame_count(&mp3);
+        auto data = detail::decode_chunked("MP3", mp3.sampleRate, mp3.channels, claimed_frames,
+                                           limits, [&mp3](float* out, uint64_t frames) {
+                                               return drmp3_read_pcm_frames_f32(&mp3, frames, out);
+                                           });
         drmp3_uninit(&mp3);
-
-        if (!within_limits || frames_read == 0)
-            return std::nullopt;
         return data;
     }
 

@@ -1,0 +1,10 @@
+{
+ "name": "daw-smoke-sample-region-native-reaper-selftest",
+ "record": {
+  "entry": "tools/testing/daw-smoke/test_sample_region_native_reaper.py",
+  "inputs": [
+   "tools/testing/daw-smoke/test_sample_region_native_reaper.py"
+  ],
+  "kind": "python"
+ }
+}

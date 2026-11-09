@@ -1,0 +1,22 @@
+{
+ "name": "source-selftest-lane-contract",
+ "record": {
+  "entry": "tools/ci/source_selftests.py",
+  "inputs": [
+   ".github/workflows/build.yml",
+   "docs/status/consumption-profiles.json",
+   "docs/status/consumption-profiles.schema.json",
+   "test/cmake/pr_fast_tests.cmake",
+   "tools/ci/ctest_gate_args.py",
+   "tools/ci/install_visual_python_deps.sh",
+   "tools/ci/source_selftests.json",
+   "tools/ci/source_selftests.py",
+   "tools/motion/visual/requirements.lock",
+   "tools/scripts/consumption_census.py",
+   "tools/scripts/gate_python_imports_check.py",
+   "tools/scripts/json_schema_lite.py",
+   "tools/scripts/test_generated_version_bump_check.py"
+  ],
+  "kind": "python"
+ }
+}

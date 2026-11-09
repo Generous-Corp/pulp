@@ -1,0 +1,13 @@
+{
+ "name": "hotspot-edit-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_hotspot_edit_guard.py",
+  "inputs": [
+   "test/ctest_script_inputs",
+   "tools/scripts/hotspot_edit_guard.json",
+   "tools/scripts/hotspot_edit_guard.py",
+   "tools/scripts/test_hotspot_edit_guard.py"
+  ],
+  "kind": "python"
+ }
+}

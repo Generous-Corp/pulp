@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-sample-region-runtime",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/sample_region_i2/i2_negative_controls.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

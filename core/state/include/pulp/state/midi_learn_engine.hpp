@@ -342,7 +342,8 @@ class MidiLearnEngine {
     ///
     /// A mapping is sent when its parameter has moved by at least half a step
     /// of the controller's resolution since the last send, and never for a
-    /// value the controller itself just wrote. The first call after a mapping
+    /// value the controller itself just wrote (that suppression lasts one
+    /// call; a later return to the same value is sent). The first call after a mapping
     /// appears sends its current value, so a controller can sync. At most one
     /// update per mapping per call.
     template <typename Emit>
@@ -355,10 +356,17 @@ class MidiLearnEngine {
                 !kFeedbackEncodableKinds.has(m.source.kind))
                 continue;
             const float current = store.get_normalized(m.id);
-            if (has_echo_[i] && std::fabs(current - echo_[i]) <= kEchoEpsilon) {
-                sent_[i] = current;
-                has_sent_[i] = 1;
-                continue;
+            if (has_echo_[i]) {
+                // The echo guard covers only the first pass after the
+                // controller's own write. Clear it either way, so a later
+                // return to the same value (reset, preset recall, automation)
+                // is still sent and the controller does not stay stale.
+                has_echo_[i] = 0;
+                if (std::fabs(current - echo_[i]) <= kEchoEpsilon) {
+                    sent_[i] = current;
+                    has_sent_[i] = 1;
+                    continue;
+                }
             }
             const float quantum = 0.5f / static_cast<float>(feedback_resolution(m.source.kind));
             if (has_sent_[i] && std::fabs(current - sent_[i]) < quantum)

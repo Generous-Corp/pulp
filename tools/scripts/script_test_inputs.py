@@ -62,9 +62,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # Comments are dropped before a source is scanned, so prose such as "the
 # effect system (bloom)" or a program named in a comment is not a call.
 from gate_common import strip_c_comments  # noqa: E402
+import script_inputs_store as store  # noqa: E402
 
 SCHEMA = "pulp-ctest-script-inputs/v1"
-DEFAULT_LIST = Path("test") / "ctest_script_inputs.json"
+# One fragment per entry (script_inputs_store.py); the combined document is
+# assembled on read and never committed.
+DEFAULT_LIST = store.FRAGMENT_DIR
 INTERPRETERS = ("python", "python3", "node", "bash", "sh", "zsh")
 UNDECLARABLE_EXES = ("cmake", "ninja", "make", "ctest", "xcodebuild", "cargo")
 # GPU-audio hardware-evidence registrations (PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF).
@@ -188,7 +191,7 @@ def _jsx_runtime_registration_reason(build_dir: Path, cache: dict[str, str],
     if not missing:
         return None
     return ("jsx-runtime npm dependencies are missing from this configure; registered Node tests omit "
-            + ", ".join(missing) + "; file=test/ctest_script_inputs.json; test=" + ",".join(missing) +
+            + ", ".join(missing) + "; file=test/ctest_script_inputs/; test=" + ",".join(missing) +
             "; evidence=CTest inventory has Node configured but these registrations are absent; "
             "cause_class=INCOMPLETE_CONFIGURE; "
             "fix=`npm ci --prefix tools/import-design/jsx-runtime && pulp build`; "
@@ -258,7 +261,7 @@ def stale_build_reason(build_dir: Path | None, root: Path | None) -> str | None:
         for rel in rels:
             # These are the outputs being regenerated; their fresh mtime must
             # not make the configure appear stale on the next check.
-            if rel in (DEFAULT_LIST.as_posix(), ".shipyard/changed-surface-families.toml"):
+            if store.is_store_path(rel) or rel == ".shipyard/changed-surface-families.toml":
                 continue
             path = root / rel
             try:
@@ -271,7 +274,7 @@ def stale_build_reason(build_dir: Path | None, root: Path | None) -> str | None:
             return None
         rel = _rel(newest_path, root) or str(newest_path)
         return (f"build directory is older than the source tree: CMakeCache.txt predates {rel}; "
-                f"file=test/ctest_script_inputs.json; evidence=CMakeCache.txt predates {rel}; "
+                f"file=test/ctest_script_inputs/; evidence=CMakeCache.txt predates {rel}; "
                 "cause_class=STALE_BUILD; fix=`pulp build --clean`; safe_to_auto_apply=no; "
                 f"verify=`test <build-dir>/CMakeCache.txt -nt {rel}` before regenerating")
     except OSError:
@@ -1211,15 +1214,11 @@ def base_list(root: Path, base: str | None) -> dict | None:
     compiled entries (then the checked-in list is the baseline)."""
     if not base:
         return None
-    proc = subprocess.run(["git", "-C", str(root), "show", f"{base}:{DEFAULT_LIST.as_posix()}"],
-                          capture_output=True, text=True)
-    if proc.returncode != 0:
-        return None
     try:
-        doc = json.loads(proc.stdout)
-    except json.JSONDecodeError:
+        doc = store.load_ref(root, base)
+    except store.StoreError:
         return None
-    return doc if "executables" in doc else None
+    return doc if doc and "executables" in doc else None
 
 
 def base_test_names(root: Path, base: str | None) -> set[str]:
@@ -1227,12 +1226,10 @@ def base_test_names(root: Path, base: str | None) -> set[str]:
     if not base:
         return set()
     try:
-        proc = subprocess.run(["git", "-C", str(root), "show", f"{base}:{DEFAULT_LIST.as_posix()}"],
-                              capture_output=True, text=True, encoding="utf-8", check=True)
-        doc = json.loads(proc.stdout)
-    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        doc = store.load_ref(root, base)
+    except (OSError, store.StoreError):
         return set()
-    return set((doc.get("tests") or {}).keys())
+    return set(((doc or {}).get("tests") or {}).keys())
 
 
 def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> dict:
@@ -1516,11 +1513,11 @@ def touch_reasons(root: Path, base: str, list_path: Path | None = None) -> list[
     wt = subprocess.run(["git", "-C", str(root), "diff", "--name-only", "HEAD"],
                         capture_output=True, text=True)
     changed |= {f for f in wt.stdout.split() if f} if wt.returncode == 0 else set()
-    list_path = list_path or root / DEFAULT_LIST
+    list_path = list_path or store.location(root)
     rel_list = _rel(list_path, root) or DEFAULT_LIST.as_posix()
     try:
-        checked_in = json.loads(list_path.read_text(encoding="utf-8")).get("tests", {})
-    except (OSError, json.JSONDecodeError, AttributeError):
+        checked_in = (store.load_path(list_path) or {}).get("tests", {})
+    except (OSError, store.StoreError, AttributeError):
         checked_in = {}
     files: dict[str, str] = {}
     dirs: dict[str, str] = {}
@@ -1532,7 +1529,7 @@ def touch_reasons(root: Path, base: str, list_path: Path | None = None) -> list[
     reasons = []
     for f in sorted(changed):
         under = next((d for d in dirs if f.startswith(d + "/")), None)
-        if f == rel_list:
+        if f == rel_list or f.startswith(rel_list.rstrip("/") + "/") or store.is_store_path(f):
             reasons.append(f"{f} (the list itself; regenerate it with --write, never hand-edit it)")
         elif f in files:
             reasons.append(f"{f} (declared input of {files[f]})")
@@ -1555,7 +1552,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[2]))
     ap.add_argument("--build-dir")
     ap.add_argument("--inventory-json", help="a saved `ctest --show-only=json-v1` document (tests)")
-    ap.add_argument("--list", default=None, help=f"the checked-in list (default {DEFAULT_LIST})")
+    ap.add_argument("--list", default=None, help=f"the checked-in list: a fragment directory "
+                    f"(default {DEFAULT_LIST}/) or a single legacy .json file")
     ap.add_argument("--base", default=None, help="diff-scope --check to changes since this ref "
                     "(default: PULP_SCRIPT_INPUTS_BASE, origin/$GITHUB_BASE_REF, or HEAD^1 in a merge group)")
     ap.add_argument("--full", action="store_true", help="--check every entry, ignoring any base")
@@ -1570,7 +1568,17 @@ def main(argv: list[str]) -> int:
     if not a.build_dir and not a.inventory_json:
         ap.error("--build-dir or --inventory-json is required")
     root = Path(a.repo_root).resolve()
-    list_path = Path(a.list) if a.list else root / DEFAULT_LIST
+    list_path = Path(a.list) if a.list else store.location(root)
+    if not a.list and (root / store.LEGACY_LIST).exists() and (root / DEFAULT_LIST).is_dir():
+        # The single generated file is the conflict hotspot the fragments
+        # replace; one next to the directory means a stale branch or a hand
+        # edit put it back, and which of the two is current is unknowable.
+        print(f"script-test-inputs: ERROR: file={store.LEGACY_LIST.as_posix()}; "
+              "cause_class=AGGREGATE_REINTRODUCED; evidence=the single combined list exists beside "
+              f"{DEFAULT_LIST.as_posix()}/; fix=`git rm {store.LEGACY_LIST.as_posix()}`, then regenerate "
+              "with script_test_inputs.py --write; safe_to_auto_apply=no; "
+              "verify=`python3 tools/scripts/hotspot_edit_guard.py`", file=sys.stderr)
+        return 1
     inventory = load_inventory(a.build_dir, a.inventory_json)
     if inventory is None:
         return 2
@@ -1586,7 +1594,7 @@ def main(argv: list[str]) -> int:
         return 0
     off_platform = outside_gate_platform(build_dir)
     if off_platform and a.write:
-        print("script-test-inputs: refusing to write: file=test/ctest_script_inputs.json; "
+        print("script-test-inputs: refusing to write: file=test/ctest_script_inputs/; "
               "cause_class=WRONG_PLATFORM; evidence=" + off_platform +
               "; safe_to_auto_apply=no; verify=`pulp build --platform macOS` then rerun "
               "script_test_inputs.py --check.\nRegenerate from a "
@@ -1597,9 +1605,15 @@ def main(argv: list[str]) -> int:
               "this is a skip, not a pass.")
         return SKIP_EXIT
     try:
-        checked_in = json.loads(list_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        checked_in = {"tests": {}}
+        checked_in = store.load_path(list_path) or {"tests": {}}
+    except store.StoreError as exc:
+        # A fragment that names the wrong entry, a stray file, or a half-merged
+        # fragment is drift: fail closed rather than compare against less.
+        print(f"script-test-inputs: ERROR: file={DEFAULT_LIST.as_posix()}; cause_class=INCONSISTENT_FRAGMENTS; "
+              f"evidence={exc}; fix=`python3 tools/scripts/script_test_inputs.py --build-dir "
+              f"{a.build_dir or '<configured build dir>'} --write`; safe_to_auto_apply=no; "
+              "verify=`python3 tools/scripts/script_test_inputs.py --check`", file=sys.stderr)
+        return 1
     current = build_list(inventory, root, build_dir)
     off_profile = outside_gate_profile_build(build_dir, inventory, root)
     # A stale configure blocks writes, but --check must still judge the
@@ -1611,7 +1625,7 @@ def main(argv: list[str]) -> int:
     total_scripts = sum(1 for t in inventory.get("tests", []) if t.get("command") and
                         os.path.basename(t["command"][0]).startswith(INTERPRETERS))
     if a.write and off_profile:
-        print("script-test-inputs: refusing to write: file=test/ctest_script_inputs.json; "
+        print("script-test-inputs: refusing to write: file=test/ctest_script_inputs/; "
               "cause_class=INCOMPLETE_CONFIGURE; evidence=the compiled entries depend on the configuration and "
               "this build is not the gate's: " + "; ".join(off_profile) + ".\nRegenerate from a gate-profile "
               "configure (-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF, no PULP_SANITIZER).",
@@ -1635,11 +1649,10 @@ def main(argv: list[str]) -> int:
                   f"file={DEFAULT_LIST}; cause_class=UNSEEN_ENTRY_DELETION; "
                   "fix=regenerate from the gate's configure, or pass --allow-delete if the "
                   "registration was really removed; safe_to_auto_apply=no; "
-                  "verify=`git diff --stat test/ctest_script_inputs.json` shows no removed entry",
+                  "verify=`git diff --stat test/ctest_script_inputs/` shows no removed entry",
                   file=sys.stderr)
             return 2
-        list_path.parent.mkdir(parents=True, exist_ok=True)
-        list_path.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        store.write_path(list_path, current)
         print(f"script-test-inputs: wrote {len(current['tests'])} declared tests "
               f"(of {total_scripts} interpreter-driven entries) to {list_path}")
         if carried:
@@ -1736,7 +1749,7 @@ def main(argv: list[str]) -> int:
         build_hint = a.build_dir or "<configured build dir>"
         fix = ("Fix: regenerate the list from a configure of THIS tree and commit it:\n"
                f"  python3 tools/scripts/script_test_inputs.py --build-dir {build_hint} --write\n"
-               f"  git add {DEFAULT_LIST.as_posix()}")
+               f"  git add {DEFAULT_LIST.as_posix()}/")
         print(f"script-test-inputs: {len(blocking)} drift problem(s) in scripts this change touches ({scope}).")
         for kind, name, _ in blocking[:40]:
             print(f"  file={DEFAULT_LIST.as_posix()}; test={name}; cause_class=INVENTORY_DRIFT; "

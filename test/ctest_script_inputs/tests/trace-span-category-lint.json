@@ -1,0 +1,10 @@
+{
+ "name": "trace-span-category-lint",
+ "record": {
+  "entry": "tools/scripts/trace_span_category_lint.py",
+  "inputs": [
+   "tools/scripts/trace_span_category_lint.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,12 @@
+{
+ "name": "fold-migration-notes-selftest",
+ "record": {
+  "entry": "tools/scripts/test_fold_migration_notes.py",
+  "inputs": [
+   "tools/scripts/build_migration_index.py",
+   "tools/scripts/fold_migration_notes.py",
+   "tools/scripts/test_fold_migration_notes.py"
+  ],
+  "kind": "python"
+ }
+}

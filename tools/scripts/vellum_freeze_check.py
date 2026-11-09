@@ -904,8 +904,8 @@ def _http_error_detail(exc: Exception, token: str) -> str:
 
 
 def _github_json(
-    url: str, token: str, *, allow_anonymous: bool = False
-) -> dict[str, Any]:
+    url: str, token: str, *, allow_anonymous: bool = False, expected: type = dict
+) -> Any:
     request = urllib.request.Request(
         url,
         headers={
@@ -927,14 +927,19 @@ def _github_json(
         raise FreezeError(
             f"cannot verify Vellum authority at {endpoint}: {exc}{detail}"
         ) from exc
-    if not isinstance(value, dict):
-        raise FreezeError("Vellum verification returned a non-object")
+    # Each endpoint has one JSON shape (an object, or an array for list
+    # endpoints); any other shape fails closed.
+    if not isinstance(value, expected):
+        raise FreezeError(
+            "Vellum verification returned a non-object" if expected is dict
+            else f"Vellum verification returned a non-{expected.__name__}"
+        )
     return value
 
 
 def _public_github_json(
-    url: str, token: str, fallback_token: str | None
-) -> dict[str, Any]:
+    url: str, token: str, fallback_token: str | None, *, expected: type = dict
+) -> Any:
     """Read a public Vellum object, retrying a 403 with the workflow's own token.
 
     The shared reader-App installation token has one rate bucket for every
@@ -945,7 +950,7 @@ def _public_github_json(
     retry, raises.
     """
     try:
-        return _github_json(url, token)
+        return _github_json(url, token, expected=expected)
     except FreezeError as exc:
         cause = exc.__cause__
         if not (isinstance(cause, urllib.error.HTTPError) and cause.code in (403, 429)):
@@ -959,7 +964,7 @@ def _public_github_json(
         + f" (first failure: {first})",
         file=sys.stderr,
     )
-    return _github_json(url, fallback_token or "", allow_anonymous=True)
+    return _github_json(url, fallback_token or "", allow_anonymous=True, expected=expected)
 
 
 def _git_blob(repo: pathlib.Path, revision: str, path: str) -> str:
@@ -1360,15 +1365,19 @@ def _receipt_mode(args: argparse.Namespace) -> int:
     token = os.environ.get("VELLUM_READER_TOKEN")
     report["receipt_source"] = "unchecked: no Vellum reader token"
     if token and report["state"] == "active":
-        try:
-            problems = receipt.receipt_copy_problems(
-                repo, (base, args.head),
-                lambda path: _public_github_json(
-                    f"https://api.github.com/{path}",
-                    token,
-                    os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
-                ),
+        def fetch(path: str, expected: type = dict) -> Any:
+            return _public_github_json(
+                f"https://api.github.com/{path}",
+                token,
+                os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
+                expected=expected,
             )
+
+        try:
+            problems = receipt.receipt_copy_problems(repo, (base, args.head), fetch)
+            # The framework-transfer record must be Vellum's transfer record at
+            # its framework_commit, a commit on Vellum's main.
+            problems += receipt.transfer_copy_problems(repo, (base, args.head), fetch)
         except (receipt.ReceiptDriftError, FreezeError, OSError) as exc:
             print(f"vellum-freeze receipt mode: {exc}", file=sys.stderr)
             return 1

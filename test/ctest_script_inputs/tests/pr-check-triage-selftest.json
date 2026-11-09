@@ -1,0 +1,10 @@
+{
+ "name": "pr-check-triage-selftest",
+ "record": {
+  "entry": "tools/scripts/test_pr_check_triage.py",
+  "inputs": [
+   "tools/scripts/test_pr_check_triage.py"
+  ],
+  "kind": "python"
+ }
+}

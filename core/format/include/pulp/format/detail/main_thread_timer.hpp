@@ -7,11 +7,14 @@
 // cannot be withdrawn: after the editor closes, one already-queued post still
 // runs plug-in code up to an interval later, and a host that unloads the
 // bundle right after closing would run unmapped code. This timer is a
-// cancellable source instead. On Apple platforms it is a dispatch timer source
-// on the main queue: stop() cancels it, after which libdispatch invokes the
-// handler no more, and it never interrupts a tick in progress because both run
-// on the main thread. Elsewhere it falls back to the post chain, which stops
-// ticking at stop() but may still run one guarded post.
+// cancellable source instead. On Apple platforms it is a
+// platform::MainThreadTimer: a CFRunLoopTimer in the common run-loop modes, so
+// it keeps ticking during menu tracking, live resize and modal panels, even
+// when that nested loop runs inside a main-queue block. stop() invalidates it,
+// after which the run loop calls it no more, and it never interrupts a tick in
+// progress because both run on the main thread. Elsewhere it falls back to
+// the post chain, which stops ticking at stop() but may still run one guarded
+// post.
 //
 // start() and stop() run on the main thread. stop() from another thread waits
 // for the main thread to cancel the source.
@@ -45,7 +48,9 @@ class MainThreadTimer {
 bool is_main_thread();
 
 /// Run `fn` on the main thread later and return at once, without waiting for
-/// it: the main queue on Apple platforms, MainThreadDispatcher elsewhere. On
+/// it: a common-mode run-loop source (platform::MainThreadScope) on Apple
+/// platforms, so it also runs inside menu tracking and modal panels, and
+/// MainThreadDispatcher elsewhere. On
 /// success `fn` is taken (left empty), so the posted task owns what it
 /// captured and the caller keeps no reference to it. False when nothing can
 /// run it (no main-thread backend); `fn` is then left as it was.

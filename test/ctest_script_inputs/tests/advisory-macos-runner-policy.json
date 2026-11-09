@@ -1,0 +1,10 @@
+{
+ "name": "advisory-macos-runner-policy",
+ "record": {
+  "entry": "tools/scripts/test_advisory_macos_runner_policy.py",
+  "inputs": [
+   "tools/scripts/test_advisory_macos_runner_policy.py"
+  ],
+  "kind": "python"
+ }
+}

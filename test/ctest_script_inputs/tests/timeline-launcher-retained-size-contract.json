@@ -1,0 +1,11 @@
+{
+ "name": "timeline-launcher-retained-size-contract",
+ "record": {
+  "entry": "tools/scripts/verify_timeline_launcher_resource_contract.py",
+  "inputs": [
+   "core/timeline/src/command.cpp",
+   "tools/scripts/verify_timeline_launcher_resource_contract.py"
+  ],
+  "kind": "python"
+ }
+}

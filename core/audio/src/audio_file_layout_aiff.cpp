@@ -87,7 +87,8 @@ double extended_to_double(const std::uint8_t* p) noexcept {
 }
 
 // Encoding vocabulary for an AIFF-C compression type. 'twos' and 'sowt' are
-// plain PCM in either byte order; the in-memory reader still admits only NONE.
+// plain PCM in either byte order, and the reader decodes both; 'in24'/'in32'
+// are PCM spellings it does not.
 std::string aifc_encoding(const std::string& compression_type) {
     if (compression_type.empty() || compression_type == "NONE" || compression_type == "twos" ||
         compression_type == "sowt" || compression_type == "in24" || compression_type == "in32")
@@ -261,12 +262,12 @@ void inspect_aiff_layout(Builder& b) {
         verdict.reason = "AIFF reader rejects the chunk layout";
     } else if (!walk.ssnd_seen) {
         verdict.reason = "no SSND chunk";
-    } else if (layout->info.num_frames == 0u) {
-        verdict.reason = "zero frames";
-    } else if (aifc && walk.compression_type != "NONE") {
-        // The reader admits only the NONE compression type; 'twos' and 'sowt'
-        // name plain PCM too but are refused as written.
-        verdict.reason = "AIFF-C compression type '" + walk.compression_type + "' is not NONE";
+    } else if (aifc && walk.compression_type != "NONE" && walk.compression_type != "twos" &&
+               walk.compression_type != "sowt") {
+        // The reader decodes the three plain-PCM spellings; every other
+        // compression type is a codec it does not carry.
+        verdict.reason = "AIFF-C compression type '" + walk.compression_type +
+                         "' is not plain PCM (NONE, twos or sowt)";
     } else {
         verdict.reason = "unsupported PCM width or SSND shorter than the declared frames";
     }

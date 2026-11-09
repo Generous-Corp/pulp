@@ -1,0 +1,12 @@
+{
+ "name": "pulp-ui-build-contracts",
+ "record": {
+  "entry": "tools/ui-build/test_ui_build.py",
+  "inputs": [
+   "tools/ui-build/lint/clean_output_lint.py",
+   "tools/ui-build/test_ui_build.py",
+   "tools/ui-build/ui_build.py"
+  ],
+  "kind": "python"
+ }
+}
