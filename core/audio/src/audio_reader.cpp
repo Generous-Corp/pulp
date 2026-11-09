@@ -539,9 +539,14 @@ struct VorbisDecoder final : StreamingDecoder {
     }
 };
 
-// Byte offset of a RIFF/RF64 file's "data" chunk payload, or nullopt. Leaves
-// the source position unspecified.
-std::optional<std::uint64_t> wav_data_offset(AudioByteSource& source) {
+struct WavDataChunk {
+    std::uint64_t payload_offset = 0;
+    std::uint64_t declared_size = 0; // the 32-bit size field as written
+};
+
+// A RIFF/RF64 file's "data" chunk payload offset and declared size, or
+// nullopt. Leaves the source position unspecified.
+std::optional<WavDataChunk> wav_data_chunk(AudioByteSource& source) {
     std::uint8_t header[12];
     if (!source.seek(0) || source.read(header, sizeof(header)) != sizeof(header))
         return std::nullopt;
@@ -556,7 +561,7 @@ std::optional<std::uint64_t> wav_data_offset(AudioByteSource& source) {
                                    (static_cast<std::uint64_t>(chunk_header[6]) << 16) |
                                    (static_cast<std::uint64_t>(chunk_header[7]) << 24);
         if (std::memcmp(chunk_header, "data", 4) == 0)
-            return position + sizeof(chunk_header);
+            return WavDataChunk{position + sizeof(chunk_header), size};
         position += sizeof(chunk_header) + size + (size & 1u);
     }
     return std::nullopt;
@@ -568,9 +573,10 @@ struct WavDecoder final : Decoder {
         // An RF64 header's ds64 length is not clamped to the bytes present,
         // and choc reads past the end without reporting it. Bound the frame
         // count by the bytes that follow the data chunk header.
-        const auto data_offset = wav_data_offset(*source);
-        if (!data_offset || !source->seek(0))
+        const auto data_chunk = wav_data_chunk(*source);
+        if (!data_chunk || !source->seek(0))
             return false;
+        const auto data_offset = data_chunk->payload_offset;
         buffer = std::make_unique<SourceStreamBuf>(*source);
         stream = std::make_shared<std::istream>(buffer.get());
         choc::audio::WAVAudioFileFormat<false> format;
@@ -586,9 +592,14 @@ struct WavDecoder final : Decoder {
             static_cast<std::uint64_t>(choc::audio::getBytesPerSample(props.bitDepth)) *
             props.numChannels;
         const std::uint64_t present =
-            *data_offset < source->size() ? source->size() - *data_offset : 0;
+            data_offset < source->size() ? source->size() - data_offset : 0;
         info.num_frames =
             frame_bytes == 0 ? 0 : std::min<std::uint64_t>(props.numFrames, present / frame_bytes);
+        // Zero frames is a valid empty file only when the data chunk declares
+        // zero bytes; a claim the file does not hold at all is refused, as
+        // the registry's whole-file reader refuses it.
+        if (info.num_frames == 0 && data_chunk->declared_size != 0)
+            return false;
         info.bits_per_sample = choc::audio::getBytesPerSample(props.bitDepth) * 8;
         bit_depth = props.bitDepth;
         finish_info(info, props.formatName);
@@ -656,7 +667,7 @@ struct AiffDecoder final : Decoder {
                 for (std::uint32_t ch = 0; ch < info.num_channels; ++ch) {
                     out[ch][produced + frame] = detail::decode_aiff_pcm_sample(
                         frame_bytes + static_cast<std::size_t>(ch) * layout.bytes_per_sample,
-                        info.bits_per_sample);
+                        info.bits_per_sample, layout.little_endian);
                 }
             }
             produced += count;
@@ -737,7 +748,10 @@ std::unique_ptr<Decoder> admit(std::unique_ptr<Decoder> decoder, const DecodeLim
     if (!detail::within_decode_limits(info.format, info.num_frames, info.num_channels,
                                       claim_limits))
         return nullptr;
-    if (info.num_frames != 0)
+    // A seekable container's frame count is exact, so zero frames is a valid
+    // empty file (the WAV and AIFF decoders report it as the registry does).
+    // Only a streaming codec's zero means "no length claim".
+    if (info.num_frames != 0 || decoder->as_streaming() == nullptr)
         return decoder;
     auto* streaming = decoder->as_streaming();
     if (streaming == nullptr || fallback == AudioReaderFallback::Refuse)

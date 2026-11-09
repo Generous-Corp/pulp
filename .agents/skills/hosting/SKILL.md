@@ -3094,6 +3094,15 @@ invalid channel views before dereferencing pointers or mutating output, clock,
 or envelope state. The public consumer in
 `examples/g5-trigger-runtime-consumer` proves this bounded SDK seam; it does not
 establish complete G-5 coverage or realtime timing qualification.
+## G-5 host ingress successor seam
+
+The bounded host MIDI/UMP/MPE ingress adapter is graph-owned and serial. Keep
+`HostEventIngress<256>` epoch/cursor checks, retained-prefix publication, and
+fail-closed stale, late, unbound, and overflow behavior intact when refreshing
+its public fingerprints or receipts. Validate the focused trigger-graph group
+and installed consumer; this seam does not establish hosted-plugin voice
+coverage or realtime qualification.
+
 # G-7 edge diagnostics
 
 SignalGraph control and event edge probes are serial routed diagnostics with

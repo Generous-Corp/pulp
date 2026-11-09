@@ -40,6 +40,54 @@ TEST_CASE("byte-span WAV decoder inspects and deinterleaves PCM16", "[audio][wav
     CHECK(decoded->channels[1] == std::vector<float>{0.5f, -0.5f});
 }
 
+TEST_CASE("byte-span WAV decoder returns a zero-frame file as no audio, not a failure",
+          "[audio][wav-decoder][zero-frames]") {
+    const auto format = make_format(1u, 2u, 48'000u, 16u);
+
+    SECTION("empty data chunk") {
+        const auto wav = make_wav(format, Bytes{});
+        const auto info = pulp::audio::inspect_wav(wav);
+        REQUIRE(info);
+        CHECK(info->sample_rate == 48'000u);
+        CHECK(info->num_channels == 2u);
+        CHECK(info->num_frames == 0u);
+        CHECK(info->duration_seconds == 0.0);
+
+        const auto decoded = pulp::audio::decode_wav(wav);
+        REQUIRE(decoded);
+        CHECK(decoded->sample_rate == 48'000u);
+        REQUIRE(decoded->channels.size() == 2u);
+        CHECK(decoded->channels[0].empty());
+        CHECK(decoded->channels[1].empty());
+        CHECK(decoded->num_frames() == 0u);
+        CHECK(decoded->empty());
+    }
+    SECTION("empty data chunk ahead of fmt") {
+        const auto wav = make_wav(format, Bytes{}, true);
+        const auto decoded = pulp::audio::decode_wav(wav);
+        REQUIRE(decoded);
+        CHECK(decoded->num_channels() == 2u);
+        CHECK(decoded->num_frames() == 0u);
+    }
+    SECTION("the channel ceiling still applies with no frames to allocate") {
+        const auto wav = make_wav(format, Bytes{});
+        pulp::audio::WavDecodeLimits limits;
+        limits.max_channels = 1u;
+        CHECK_FALSE(pulp::audio::decode_wav(wav, limits));
+        // A zero frame ceiling is refused as a configuration error before any
+        // header is read, so it says nothing about zero-frame files; the
+        // channel ceiling above is the one this file can reach.
+        limits = {};
+        limits.max_frames = 0u;
+        CHECK_FALSE(pulp::audio::decode_wav(wav, limits));
+    }
+    SECTION("a zero channel count is still a defect") {
+        const auto wav = make_wav(make_format(1u, 0u, 48'000u, 16u), Bytes{});
+        CHECK_FALSE(pulp::audio::inspect_wav(wav));
+        CHECK_FALSE(pulp::audio::decode_wav(wav));
+    }
+}
+
 TEST_CASE("byte-span WAV decoder supports PCM and float sample widths", "[audio][wav-decoder]") {
     SECTION("PCM8") {
         const Bytes samples{0x00u, 0x80u, 0xffu};
