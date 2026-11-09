@@ -298,6 +298,10 @@ pulp_add_test_suite(pulp-test-midi-learn-engine
     SOURCES test_midi_learn_engine.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::state)
 
+# MIDI mapping persistence (binary chunk, JSON, import modes) and undo.
+pulp_add_test_suite(pulp-test-midi-learn-persistence GROUP pulp-test-group-cap-state
+    LIBRARIES pulp::state)
+
 # Cross-version parameter-ordering guard (host-facing ID + index stability).
 pulp_add_test_suite(pulp-test-param-ordering GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)

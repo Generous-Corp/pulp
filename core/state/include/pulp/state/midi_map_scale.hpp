@@ -24,6 +24,8 @@ struct MidiMapScale {
     float apply_normalized(float position) const {
         return min + position * (max - min);
     }
+
+    friend constexpr bool operator==(const MidiMapScale&, const MidiMapScale&) = default;
 };
 
 } // namespace pulp::state
