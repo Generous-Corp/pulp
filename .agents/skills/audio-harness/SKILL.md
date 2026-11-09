@@ -969,6 +969,11 @@ harness or `ctest`.
   with its reason (a deliberate Pulp contract or a tracked issue); an unlisted split, or a listed
   one that stops happening, fails the test, and the sample comparison is never relaxed. Lossy
   seeds stay out because libsndfile's Ogg/MP3 paths are different codecs from Pulp's.
+  Truncated WAV seeds (data past EOF, a lying size) are compared, not split: Pulp and
+  libsndfile both decode the whole frames present, bit for bit. The WAV splits are files
+  libsndfile refuses and Pulp accepts on purpose (BW64, a byte-identical repeated fmt, fmt
+  after data) plus the block-align contradiction Pulp refuses; a new WAV split means the two
+  acceptance policies diverged, so check `wave_layout.hpp` before adding a row.
 - **Synth-guidance experiment:** `tools/rack/fidelity.py patch.vcv --wav render.wav`
   writes only the speaker-bound audio taps, using one shared peak-normalization gain while
   refusing a silent source and content-binding original Rack voltage levels in the adjacent
