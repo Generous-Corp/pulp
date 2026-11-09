@@ -136,9 +136,13 @@ the changes after the one that adds it.
 
 ## Renamed units are Vellum-native
 
-Vellum renames the exported units from `pulp` to `vellum` and moves them out of
-its `mirror/` into the native root `framework/`, keeping the export's layout
-(Vellum Decision 0010, amendment of 2026-11-07). The integrator decision of
+Vellum's rename change renames the exported units from `pulp` to `vellum` and
+moves them out of its `mirror/` into the native root `framework/`, keeping the
+export's layout (Vellum Decision 0010, amendment of 2026-11-07). The ownership
+flip takes effect when that change has merged in Vellum and
+`.github/vellum-export-receipt/framework-transfer.json`, which names it, has
+landed here; until both hold, the rules earlier in this contract apply
+unchanged. The integrator decision of
 2026-11-07 that ends the freeze-versus-mirror contradiction states three rules:
 the renamed units are Vellum-native and editable; "Pulp's frozen copies change
 only by `framework-backport` from a named Vellum commit"; and Pulp's copies are
