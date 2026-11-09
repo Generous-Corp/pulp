@@ -5,12 +5,13 @@
 
 add_library(pulp-native STATIC
     src/frame_pump_mac.cpp
+    src/input_mac.mm
     src/metal_surface_mac.mm)
 add_library(pulp::native ALIAS pulp-native)
 
 target_include_directories(pulp-native PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-set_source_files_properties(src/metal_surface_mac.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc)
+set_source_files_properties(src/input_mac.mm src/metal_surface_mac.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc)
 target_compile_features(pulp-native PUBLIC cxx_std_20)
 target_link_libraries(pulp-native
     PUBLIC
