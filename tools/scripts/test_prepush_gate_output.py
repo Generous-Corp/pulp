@@ -288,7 +288,7 @@ prepush_print_failed_gates
         summary = subprocess.run(
             ("bash", "-c", summary_script, "gate-output-test", str(GATE_OUTPUT_HELPER),
              sys.executable, str(noisy), str(quiet)),
-            text=True, capture_output=True, check=False, timeout=30,
+            text=True, encoding="utf-8", capture_output=True, check=False, timeout=30,
         )
         tail = summary.stderr.splitlines()[-4:]
         if "fail=1" not in summary.stdout:
