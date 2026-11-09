@@ -9,6 +9,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1910"></a>
+## [1.91.0] - 2026-11-09
+
+- release/version bump ([#11852](https://github.com/Generous-Corp/pulp/pull/11852))
+- feature/audio decoder acceptance gaps 20261108 ([#11845](https://github.com/Generous-Corp/pulp/pull/11845))
+- feature/control agent toolkit 20261108 ([#11830](https://github.com/Generous-Corp/pulp/pull/11830))
+- release/version bump ([#11846](https://github.com/Generous-Corp/pulp/pull/11846))
+- feature/format main thread common modes ([#11776](https://github.com/Generous-Corp/pulp/pull/11776))
+- feature/native frame pump ([#11780](https://github.com/Generous-Corp/pulp/pull/11780))
+- repair/pulp 11736 contract blob latest main 20261108 ([#11812](https://github.com/Generous-Corp/pulp/pull/11812))
+- release/version bump ([#11844](https://github.com/Generous-Corp/pulp/pull/11844))
+- fix/vellum framework transfer guard ([#11842](https://github.com/Generous-Corp/pulp/pull/11842))
+- feature/ctest script inputs fragments ([#11834](https://github.com/Generous-Corp/pulp/pull/11834))
+- docs/vellum framework ownership flip ([#11841](https://github.com/Generous-Corp/pulp/pull/11841))
+
 <a id="v1900"></a>
 ## [1.90.0] - 2026-11-09
 
@@ -12538,6 +12553,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.91.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.91.0
 [1.90.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.90.0
 [1.89.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.89.0
 [1.88.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.88.0
