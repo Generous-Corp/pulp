@@ -2,6 +2,7 @@
 // relative encoders, takeover, the UI-thread learn flow, real-time allocation
 // safety, and a UI-versus-audio-thread hammer.
 
+#include <pulp/state/midi_feedback.hpp>
 #include <pulp/state/midi_learn_engine.hpp>
 #include <pulp/state/store.hpp>
 
@@ -461,4 +462,280 @@ TEST_CASE("engine: UI edits and learning race the audio thread safely",
     REQUIRE(e.set_mapping(map_to({MidiSourceKind::cc7, 0, 74}, kMix)));
     send(e, s, cc(0, 74, 127));
     CHECK_THAT(norm(s, kMix), WithinAbs(1.0f, 1e-5f));
+}
+
+// ── Feedback ──
+
+namespace {
+
+struct Sent {
+    std::vector<RawMidi> messages;
+    void operator()(const RawMidi& m) {
+        messages.push_back(m);
+    }
+};
+
+MidiMapping fb(MidiSource src, ParamID id) {
+    auto m = map_to(src, id);
+    m.feedback = true;
+    return m;
+}
+
+constexpr auto kAllKinds = kFeedbackEncodableKinds;
+
+} // namespace
+
+TEST_CASE("feedback encoding: each kind produces the controller's own message",
+          "[state][midi-learn][feedback]") {
+    RawMidi out[kMaxFeedbackMessages];
+
+    auto m = map_to({MidiSourceKind::cc7, 3, 74}, 1);
+    REQUIRE(encode_feedback(m, 1.0f, out) == 1);
+    CHECK((out[0] == RawMidi{0xB3, 74, 127}));
+    REQUIRE(encode_feedback(m, 0.5f, out) == 1);
+    CHECK(out[0].data2 == 64);
+
+    m = map_to({MidiSourceKind::cc14, 0, 7}, 1);
+    REQUIRE(encode_feedback(m, 1.0f, out) == 2);
+    CHECK((out[0] == RawMidi{0xB0, 7, 127}));
+    CHECK((out[1] == RawMidi{0xB0, 39, 127}));
+    REQUIRE(encode_feedback(m, 8193.0f / 16383.0f, out) == 2);
+    CHECK(out[0].data2 == 64);
+    CHECK(out[1].data2 == 1);
+
+    m = map_to({MidiSourceKind::nrpn, 1, (3 << 7) | 4}, 1);
+    REQUIRE(encode_feedback(m, 1.0f, out) == 4);
+    CHECK((out[0] == RawMidi{0xB1, 99, 3}));
+    CHECK((out[1] == RawMidi{0xB1, 98, 4}));
+    CHECK((out[2] == RawMidi{0xB1, 6, 127}));
+    CHECK((out[3] == RawMidi{0xB1, 38, 127}));
+
+    m = map_to({MidiSourceKind::rpn, 0, 2}, 1);
+    REQUIRE(encode_feedback(m, 0.0f, out) == 4);
+    CHECK(out[0].data1 == 101);
+    CHECK(out[1].data1 == 100);
+
+    m = map_to({MidiSourceKind::pitch_bend, 2, 0}, 1);
+    REQUIRE(encode_feedback(m, 1.0f, out) == 1);
+    CHECK((out[0] == RawMidi{0xE2, 127, 127}));
+
+    m = map_to({MidiSourceKind::channel_pressure, 0, 0}, 1);
+    REQUIRE(encode_feedback(m, 1.0f, out) == 1);
+    CHECK((out[0] == RawMidi{0xD0, 127, 0}));
+
+    m = map_to({MidiSourceKind::poly_pressure, 0, 61}, 1);
+    REQUIRE(encode_feedback(m, 1.0f, out) == 1);
+    CHECK((out[0] == RawMidi{0xA0, 61, 127}));
+
+    // An omni mapping sends on channel 1. Program change is a trigger, not a position.
+    m = map_to({MidiSourceKind::cc7, MidiSource::kOmni, 9}, 1);
+    REQUIRE(encode_feedback(m, 1.0f, out) == 1);
+    CHECK(out[0].channel() == 0);
+    m = map_to({MidiSourceKind::program_change, 0, 3}, 1);
+    CHECK(encode_feedback(m, 1.0f, out) == 0);
+}
+
+TEST_CASE("feedback: the controller position inverts the window", "[state][midi-learn][feedback]") {
+    auto m = map_to({MidiSourceKind::cc7, 0, 1}, 1);
+    m.scale = {0.25f, 0.75f};
+    CHECK_THAT(*controller_position(m, 0.5f), WithinAbs(0.5f, 1e-6f));
+    CHECK_THAT(*controller_position(m, 0.75f), WithinAbs(1.0f, 1e-6f));
+    CHECK_THAT(*controller_position(m, 0.0f), WithinAbs(0.0f, 1e-6f)); // outside: clamps
+
+    m.scale = {1.0f, 0.0f}; // inverted
+    CHECK_THAT(*controller_position(m, 1.0f), WithinAbs(0.0f, 1e-6f));
+    CHECK_THAT(*controller_position(m, 0.25f), WithinAbs(0.75f, 1e-6f));
+
+    m.scale = {0.5f, 0.5f}; // flat: no position
+    CHECK_FALSE(controller_position(m, 0.5f).has_value());
+}
+
+TEST_CASE("feedback: first call syncs, then only changes are sent",
+          "[state][midi-learn][feedback][engine]") {
+    StateStore s;
+    populate(s);
+    MidiLearnEngine e;
+    REQUIRE(e.set_mapping(fb({MidiSourceKind::cc7, 0, 74}, kMix)));
+    REQUIRE(e.set_mapping(map_to({MidiSourceKind::cc7, 0, 75}, kGain))); // feedback off
+    e.begin_block();
+
+    Sent sent;
+    e.emit_feedback(s, kAllKinds, sent);
+    REQUIRE(sent.messages.size() == 1);
+    CHECK((sent.messages[0] == RawMidi{0xB0, 74, 64})); // Mix default 0.5
+
+    sent.messages.clear();
+    e.emit_feedback(s, kAllKinds, sent);
+    CHECK(sent.messages.empty());
+
+    // Below half a step of the controller's resolution: nothing.
+    s.set_normalized_rt(kMix, 0.5f + 0.2f / 127.0f);
+    e.emit_feedback(s, kAllKinds, sent);
+    CHECK(sent.messages.empty());
+
+    s.set_normalized_rt(kMix, 1.0f);
+    e.emit_feedback(s, kAllKinds, sent);
+    REQUIRE(sent.messages.size() == 1);
+    CHECK(sent.messages[0].data2 == 127);
+
+    // At most one update per mapping per call, however far it moved.
+    sent.messages.clear();
+    s.set_normalized_rt(kMix, 0.1f);
+    s.set_normalized_rt(kMix, 0.9f);
+    e.emit_feedback(s, kAllKinds, sent);
+    CHECK(sent.messages.size() == 1);
+}
+
+TEST_CASE("feedback: a value the controller just wrote is not echoed back",
+          "[state][midi-learn][feedback][engine]") {
+    StateStore s;
+    populate(s);
+    MidiLearnEngine e;
+    REQUIRE(e.set_mapping(fb({MidiSourceKind::cc7, 0, 74}, kMix)));
+    e.begin_block();
+    Sent sent;
+    e.emit_feedback(s, kAllKinds, sent); // initial sync
+    sent.messages.clear();
+
+    e.begin_block();
+    e.route(s, cc(0, 74, 100)); // the controller moves the parameter
+    e.emit_feedback(s, kAllKinds, sent);
+    CHECK(sent.messages.empty());
+
+    // Automation moves it afterwards: that is sent.
+    s.set_normalized_rt(kMix, 0.2f);
+    e.emit_feedback(s, kAllKinds, sent);
+    REQUIRE(sent.messages.size() == 1);
+    CHECK(sent.messages[0].data2 == static_cast<uint8_t>(std::lround(0.2f * 127.0f)));
+
+    // The parameter returns to the value the controller wrote (reset, preset
+    // recall, automation): it is sent, so the fader does not stay at 0.2.
+    sent.messages.clear();
+    s.set_normalized_rt(kMix, 100.0f / 127.0f);
+    e.emit_feedback(s, kAllKinds, sent);
+    REQUIRE(sent.messages.size() == 1);
+    CHECK(sent.messages[0].data2 == 100);
+
+    // A relative encoder's move is not echoed either.
+    auto r = fb({MidiSourceKind::cc7, 0, 16}, kGain);
+    r.mode = RelativeMode::twos_complement;
+    r.relative = {0.05f, 0.0f};
+    REQUIRE(e.set_mapping(r));
+    e.begin_block();
+    sent.messages.clear();
+    e.emit_feedback(s, kAllKinds, sent); // sync for the new mapping
+    sent.messages.clear();
+    e.route(s, cc(0, 16, 3));
+    e.emit_feedback(s, kAllKinds, sent);
+    CHECK(sent.messages.empty());
+}
+
+TEST_CASE("feedback: only kinds the format can carry are sent",
+          "[state][midi-learn][feedback][engine]") {
+    StateStore s;
+    populate(s);
+    MidiLearnEngine e;
+    REQUIRE(e.set_mapping(fb({MidiSourceKind::cc7, 0, 74}, kMix)));
+    REQUIRE(e.set_mapping(fb({MidiSourceKind::cc14, 0, 1}, kPan)));
+    REQUIRE(e.set_mapping(fb({MidiSourceKind::nrpn, 0, 5}, kGain)));
+    e.begin_block();
+
+    Sent sent;
+    e.emit_feedback(s, MidiSourceKindMask::of({MidiSourceKind::cc7}), sent);
+    REQUIRE(sent.messages.size() == 1);
+    CHECK(sent.messages[0].data1 == 74);
+
+    // Nothing allowed: nothing sent, and nothing is remembered as sent.
+    MidiLearnEngine none;
+    REQUIRE(none.set_mapping(fb({MidiSourceKind::cc7, 0, 74}, kMix)));
+    none.begin_block();
+    Sent nothing;
+    none.emit_feedback(s, MidiSourceKindMask{}, nothing);
+    CHECK(nothing.messages.empty());
+    none.emit_feedback(s, kAllKinds, nothing);
+    CHECK(nothing.messages.size() == 1);
+
+    // Multi-message kinds send their whole sequence.
+    Sent all;
+    MidiLearnEngine e2;
+    REQUIRE(e2.set_mapping(fb({MidiSourceKind::nrpn, 0, 5}, kGain)));
+    e2.begin_block();
+    e2.emit_feedback(s, kAllKinds, all);
+    CHECK(all.messages.size() == 4);
+}
+
+TEST_CASE("feedback: sent state survives a table edit by uid",
+          "[state][midi-learn][feedback][engine]") {
+    StateStore s;
+    populate(s);
+    MidiLearnEngine e;
+    REQUIRE(e.set_mapping(fb({MidiSourceKind::cc7, 0, 74}, kMix)));
+    e.begin_block();
+    Sent sent;
+    e.emit_feedback(s, kAllKinds, sent);
+    sent.messages.clear();
+
+    REQUIRE(e.set_mapping(map_to({MidiSourceKind::cc7, 0, 1}, kGain))); // unrelated edit
+    e.begin_block();
+    e.emit_feedback(s, kAllKinds, sent);
+    CHECK(sent.messages.empty()); // no repeat of the initial sync
+}
+
+TEST_CASE("learn: a host-reported controller binds without a burst",
+          "[state][midi-learn][engine][learn]") {
+    StateStore s;
+    populate(s);
+    MidiLearnEngine e;
+
+    // Not listening: ignored.
+    e.host_reported_controller({MidiSourceKind::cc7, 2, 74});
+    CHECK_FALSE(e.poll_learn(100).has_value());
+
+    e.begin_learn(kMix, 0);
+    CHECK(e.learning());
+    e.host_reported_controller({MidiSourceKind::cc7, 2, 74});
+    auto out = e.poll_learn(1);
+    REQUIRE(out.has_value());
+    CHECK(out->bound);
+    CHECK(out->mapping.source == MidiSource{MidiSourceKind::cc7, 2, 74});
+    CHECK(out->mapping.mode == RelativeMode::absolute);
+    CHECK_FALSE(e.learning());
+
+    // An out-of-range report is ignored and the listen continues.
+    e.begin_learn(kGain, 0);
+    e.host_reported_controller({MidiSourceKind::cc7, 20, 74}); // channel 20
+    CHECK_FALSE(e.poll_learn(1).has_value());
+    CHECK(e.learning());
+    e.host_reported_controller({MidiSourceKind::pitch_bend, 0, 0});
+    out = e.poll_learn(2);
+    REQUIRE(out.has_value());
+    CHECK(out->mapping.source.kind == MidiSourceKind::pitch_bend);
+
+    // begin_learn discards a stale report.
+    e.begin_learn(kPan, 0);
+    e.host_reported_controller({MidiSourceKind::cc7, 0, 9});
+    e.begin_learn(kPan, 10);
+    CHECK_FALSE(e.poll_learn(11).has_value());
+    e.cancel_learn();
+}
+
+TEST_CASE("feedback: emitting allocates nothing", "[state][midi-learn][feedback][rt-safety]") {
+    StateStore s;
+    populate(s);
+    MidiLearnEngine e;
+    REQUIRE(e.set_mapping(fb({MidiSourceKind::cc7, 0, 74}, kMix)));
+    REQUIRE(e.set_mapping(fb({MidiSourceKind::nrpn, 0, 5}, kGain)));
+    e.begin_block();
+    s.set_normalized_rt(kMix, 0.3f);
+    std::size_t count = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int i = 0; i < 100; ++i) {
+            s.set_normalized_rt(kMix, (i % 10) / 10.0f);
+            e.begin_block();
+            e.emit_feedback(s, kAllKinds, [&](const RawMidi&) { ++count; });
+        }
+        CHECK(probe.allocation_count() == 0);
+    }
+    CHECK(count > 0);
 }
