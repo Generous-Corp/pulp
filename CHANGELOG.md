@@ -9,6 +9,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1920"></a>
+## [1.92.0] - 2026-11-09
+
+- release/version bump ([#11857](https://github.com/Generous-Corp/pulp/pull/11857))
+- feature/platform async dialogs ([#11767](https://github.com/Generous-Corp/pulp/pull/11767))
+- feature/midi learn persistence ([#11762](https://github.com/Generous-Corp/pulp/pull/11762))
+- feature/native input translator ([#11784](https://github.com/Generous-Corp/pulp/pull/11784))
+- release/version bump ([#11854](https://github.com/Generous-Corp/pulp/pull/11854))
+- repair/pulp 11812 hold frame window 20261108 ([#11832](https://github.com/Generous-Corp/pulp/pull/11832))
+
 <a id="v1910"></a>
 ## [1.91.0] - 2026-11-09
 
@@ -12553,6 +12563,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.92.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.92.0
 [1.91.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.91.0
 [1.90.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.90.0
 [1.89.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.89.0
