@@ -78,18 +78,22 @@ class PresetProgramRouter final : public state::MidiSourceReservation {
     /// on an omni channel overlaps whichever channel the router listens to.
     bool claims(const state::MidiSource& source) const noexcept override {
         const auto s = settings();
-        if (!s.enabled) return false;
+        if (!s.enabled)
+            return false;
         if (s.channel != 0 && source.channel != state::MidiSource::kOmni &&
             source.channel != s.channel - 1)
             return false;
         using Kind = state::MidiSourceKind;
         switch (source.kind) {
-        case Kind::program_change: return true;
+        case Kind::program_change:
+            return true;
         case Kind::cc7:
             return (source.number == 0 && s.mode != BankSelectMode::ignore_bank) ||
                    (source.number == 32 && s.mode == BankSelectMode::msb_lsb);
-        case Kind::cc14: return source.number == 0 && s.mode == BankSelectMode::msb_lsb;
-        default: return false;
+        case Kind::cc14:
+            return source.number == 0 && s.mode == BankSelectMode::msb_lsb;
+        default:
+            return false;
         }
     }
     const char* reason() const noexcept override {

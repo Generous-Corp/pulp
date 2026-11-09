@@ -10,7 +10,7 @@
 namespace pulp::state {
 
 class MidiSourceReservation {
-public:
+  public:
     virtual ~MidiSourceReservation() = default;
 
     /// True when `source` is consumed elsewhere. `source` may use an omni
