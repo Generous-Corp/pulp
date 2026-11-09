@@ -428,9 +428,11 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
         # Vendored sources compiled into the SDK libraries, and the patches
         # carried on them, ship in the SDK even though they sit outside
         # core/. A fix to one of them must reach an SDK release on the patch
-        # lane. Skia headers are installed and included by public Pulp
-        # headers, so a change there is on the minor lane. Fonts that are not
-        # embedded stay outside the surface.
+        # lane, as must a build module that pins or compiles SDK code. Skia's
+        # include/ and modules/ headers are installed and included by public
+        # Pulp headers, so a change there is on the minor lane; a VERSION.md
+        # re-cut is patch. Fonts that are not embedded, test helpers and the
+        # web-module helpers stay outside the surface.
         vbc = self._import_gate_module("version_bump_check")
         cfg_path = VBC.parents[2] / "tools/scripts/versioning.json"
         surface = next(s for s in vbc.load_config(cfg_path).surfaces
@@ -452,6 +454,13 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
                 "tools/deps/patches/dr_libs/0001-dr_mp3-64-bit-xing-frame-count.patch": "patch",
                 "tools/cmake/PulpPatchChoc.cmake": "patch",
                 "external/skia-build/include/core/SkCanvas.h": "minor",
+                "external/skia-build/modules/skcms/skcms.h": "minor",
+                "external/skia-build/VERSION.md": "patch",
+                "tools/cmake/PulpDependencies.cmake": "patch",
+                "core/view/cmake/PulpViewJsEngines.cmake": "patch",
+                "tools/cmake/PulpWgpuNative.cmake": "patch",
+                "tools/cmake/PulpTestSuite.cmake": "none",
+                "tools/cmake/PulpWam.cmake": "none",
                 "external/fonts/FunnelDisplay-VariableFont_wght.ttf": "none",
                 "external/fonts/README.md": "none",
                 "external/vst3sdk/CMakeLists.txt": "none",
@@ -499,6 +508,35 @@ def installed_pulp_modules(install_rules_text: str) -> set[str]:
     return shipped
 
 
+# Build modules that are sdk trigger paths without being installed: each pins
+# a dependency the SDK links or changes the code its libraries compile. Every
+# entry is a deliberate classification, so a trigger that neither ships nor
+# appears here is still reported as stale.
+COMPILED_SDK_MODULES = {
+    "tools/cmake/PulpAndroid.cmake",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpFloatingPointContraction.cmake",
+    "tools/cmake/PulpForgeCatalogInstall.cmake",
+    "tools/cmake/PulpGitState.cmake",
+    "tools/cmake/PulpGpuAudioProviderIdentity.cmake",
+    "tools/cmake/PulpGpuRuntime.cmake",
+    "tools/cmake/PulpLiteEditorObjects.cmake",
+    "tools/cmake/PulpMacOsArch.cmake",
+    "tools/cmake/PulpPortableWav.cmake",
+    "tools/cmake/PulpProfiles.cmake",
+    "tools/cmake/PulpReleaseMatrix.cmake",
+    "tools/cmake/PulpRuntimePins.cmake",
+    "tools/cmake/PulpSdl3Linux.cmake",
+    "tools/cmake/PulpSimdSupport.cmake",
+    "tools/cmake/PulpSkiaCache.cmake",
+    "tools/cmake/PulpV8ConsumerDefines.cmake",
+    "tools/cmake/PulpV8Windows.cmake",
+    "tools/cmake/PulpWgpuNative.cmake",
+    "tools/cmake/PulpWgpuUniversal.cmake",
+    "tools/cmake/PulpWindowsSkiaProvider.cmake",
+}
+
+
 def source_patch_modules() -> set[str]:
     """CMake modules that rewrite fetched dependency source at configure time.
 
@@ -518,8 +556,9 @@ def sdk_module_drift(install_rules_text: str, sdk_trigger_paths: list[str]) -> t
     listed = {p for p in sdk_trigger_paths
               if re.fullmatch(r"tools/cmake/Pulp[A-Za-z0-9_]*\.cmake", p)}
     # The install rules file defines what ships rather than shipping itself,
-    # and a source-patch module changes compiled SDK code without shipping.
-    return shipped - listed, listed - shipped - {INSTALL_RULES} - source_patch_modules()
+    # and source-patch and compiled-SDK modules change SDK code without shipping.
+    return shipped - listed, (listed - shipped - {INSTALL_RULES} - source_patch_modules()
+                              - COMPILED_SDK_MODULES)
 
 
 class SdkShippedCmakeModulesTests(unittest.TestCase):
@@ -538,6 +577,14 @@ class SdkShippedCmakeModulesTests(unittest.TestCase):
         self.assertEqual(unshipped, set(), "an sdk trigger path for a module the SDK does not install")
         self.assertGreater(len(installed_pulp_modules(self.rules)), 30,
                            "the install-list parser found almost nothing; it is broken")
+
+    def test_compiled_sdk_modules_are_unshipped_triggers(self) -> None:
+        shipped = installed_pulp_modules(self.rules)
+        for module in sorted(COMPILED_SDK_MODULES):
+            with self.subTest(module=module):
+                self.assertTrue((REPO_ROOT / module).is_file(), "listed module does not exist")
+                self.assertIn(module, self.triggers, "classified as compiled SDK code but not a trigger path")
+                self.assertNotIn(module, shipped, "installed, so the shipped-module check already covers it")
 
     def test_every_source_patch_module_is_an_sdk_trigger(self) -> None:
         patchers = source_patch_modules()
