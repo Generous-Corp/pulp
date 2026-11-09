@@ -1,0 +1,8 @@
+[governed-build] interactive lease acquired id=pulp-shipyard-local-7089-1794249104 cores=19 (asked 26, normal QoS)
+[governed-build] heartbeat every 60s for lease id=pulp-shipyard-local-7089-1794249104
+[1/3] Rewriting Skia's libskunicode_icu.a with trimmed ICU data
+icu_data_subset: x86_64: 10876560 -> 4847120 bytes (717/2361 items)
+icu_data_subset: arm64: 10876560 -> 4847120 bytes (717/2361 items)
+[2/3] Building CXX object CMakeFiles/pulp-graph-tuning-cookbook.dir/main.cpp.o
+[3/3] Linking CXX executable pulp-graph-tuning-cookbook
+ld: warning: ignoring duplicate libraries: '/Volumes/Workshop/Code/pulp-a9-sdk-prefix-3fad8b42/external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a', '/Volumes/Workshop/Code/pulp-a9-sdk-prefix-3fad8b42/lib/libpulp-midi.a'
