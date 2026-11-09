@@ -832,3 +832,9 @@ only a causal, material improvement, otherwise record `no-change`. A generic
 Vellum-installed `SkLogHandler` is a later diagnostic producer, not Horizon A.
 
 A3 v2 terminal proof also requires digest-bound blank-frame and external audio-thread controls plus the derived four-state trace-producer overhead receipt. Keep the checked-in receipt blocked until all controls, seven campaigns, pinned trace replays, and fresh protected-main publication verification pass.
+
+`fetch_skia_for_release.py` downloads the asset through
+`tools/scripts/download_retry.py` (6 attempts, jittered 5-60s backoff on
+5xx/timeouts). A 504 that survives that is a real outage; a 403/404 means a bad
+pin and is not retried. Copy `download_retry.py` beside the fetcher whenever it
+is relocated.
