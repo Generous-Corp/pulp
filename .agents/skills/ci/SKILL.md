@@ -526,6 +526,36 @@ macOS.
   record, or a `deferred` one, cannot be armed once `tiered_required_checks`
   is set.
 
+## A clean merge of main takes the contract lane (row 31, shadow first)
+
+Independent of `PULP_MACOS_PR_GATING`. A `synchronize` head that is exactly a
+conflict-free merge of a base-branch commit into the previous head
+(`github.event.before`), whose tree equals `git merge-tree --write-tree` of
+those two parents, and whose previous head's newest same-repository
+`build.yml` `pull_request` `macos` check was a full-lane success (`Build`
+succeeded, tier `fast` or `full`), runs only configure, `pr-fast` (minus
+`needs-build`) and `pr-guard`, with tier `clean-merge`.
+`tools/ci/clean_merge_lane.py` decides in the step `Decide the clean-merge lane
+(pull request head)`.
+
+- **Fail closed to the full lane.** Any unreadable input (shallow history, an
+  API error, a missing check, a crash of the step) is `full`. No chaining: a
+  previous green that was a contract or clean-merge lane is `full`. Never
+  republish a previous head's conclusion; the lane runs on the head.
+- **Mode.** `PULP_CLEAN_MERGE_LANE_MODE` is `shadow` when unset (annotate
+  `would_take`, run the full lane), `enforce` takes the lane, `off` is the
+  rollback. `clean_merge_lane.py report --since <date>` gives the enforcement
+  figures; enforce only after 7 days or 50 `would_take` heads with zero
+  `would_take` heads whose Build, affected tests or SDK proof failed.
+- **A new build-fed step must read both lanes.** Every step the contract lane
+  skips is conditioned on
+  `matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'`,
+  and `tools/scripts/test_build_workflow.py` (`CleanMergeLaneTest`) fails a
+  step that reads `matrix.lane != 'contract'` without the second clause.
+- **After enforcement the merge group is the control.** A clean-merge-lane
+  green followed by a merge-group red in a test the full lane would have run
+  sets the mode back to `shadow` until the input is found.
+
 ## The native-build decision on merge_group uses main, not base_sha
 
 Opposite to the diff-scoped gates below, and on purpose. `classify` decides

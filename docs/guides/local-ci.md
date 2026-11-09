@@ -4294,6 +4294,62 @@ Unset `PULP_MACOS_PR_GATING`, or set it to anything but `true`. Every pull
 request then takes the full lane and the reset
 workflow does nothing. `pr-guard` keeps running on the full lane.
 
+## A clean merge of main takes the contract lane
+
+**Shadow by default.** The repository variable `PULP_CLEAN_MERGE_LANE_MODE`
+reads `shadow` when unset: the leg decides, annotates `would_take`, and runs the
+full lane anyway. `enforce` takes the lane; `off` decides nothing and is the
+rollback. It is independent of `PULP_MACOS_PR_GATING` (with gating on, every
+`synchronize` head is already on the contract lane, so this decision never runs).
+
+**Trigger.** A `pull_request` `synchronize` head on the macOS leg's full lane
+takes the clean-merge lane only when every one of these is read and holds;
+anything unreadable is the full lane:
+
+- the head has exactly two parents: `github.event.before` (the previous head)
+  and a different commit on the base branch's first-parent chain, fetched at run
+  time;
+- `git merge-tree --write-tree <before> <base parent>` exits 0 and its tree is
+  the head's tree, so the merge carries no conflict resolution or hand edit;
+- the newest `macos` check run on `before` from this repository's `build.yml`
+  on a same-repository `pull_request` run concluded `success`, its `Build` step
+  succeeded, and its `shipyard-test-tier` is `fast` or `full`. A previous green
+  that was itself a contract or clean-merge lane does not count (no chaining).
+
+**What runs.** The contract lane's steps: configure, `pr-fast` (minus
+`needs-build`) and `pr-guard`. No Build, no affected tests, no installed-SDK
+proof, no artifact uploads. The check is green on the head's own run, never on
+a copied verdict, and says so in its tier notice:
+`{"schema":"shipyard-test-tier/v1","tier":"clean-merge","selector":"pr-fast+pr-guard","carried_from":"<before>","full_suite_runs_in":"merge_group"}`.
+The merge group builds and tests the commit that lands, as it does for every
+pull request.
+
+**Where.** `tools/ci/clean_merge_lane.py` decides, in the step `Decide the
+clean-merge lane (pull request head)` after the history hydration and before
+Configure. Every step the contract lane skips reads the same expression,
+`matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'`;
+`tools/scripts/test_build_workflow.py` pins it at every site, so a new
+build-fed step must use it too. The step is `continue-on-error`: a crash leaves
+the output empty, which is the full lane. Each decision is a notice titled
+`pulp-clean-merge-lane` (schema `pulp-clean-merge-lane/v1`, verdicts
+`would_take | took | full`).
+
+**Shadow window and control.** Enforce only after at least 7 days or 50
+`would_take` heads with zero `would_take` heads whose full lane then failed
+Build, affected tests or the SDK proof (a `pr-fast` red does not count; the lane
+runs it). One command gives the figures:
+
+```bash
+GH_TOKEN=... python3 tools/ci/clean_merge_lane.py report \
+  --repository Generous-Corp/pulp --since 2026-11-10
+```
+
+After enforcement the control is the merge group: a clean-merge-lane green
+followed by a merge-group red in a test the head's full lane would have run is
+a `missed` event (`report` lists the `took` heads to check). One such event sets
+the mode back to `shadow` until the cause is found. Decisions contract row 31
+holds the rule.
+
 ## Windows is gated by the merge queue, not by the PR head
 
 Windows is advisory and runs entirely on GitHub-hosted runners, and a single

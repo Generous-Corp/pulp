@@ -422,8 +422,11 @@ class WorkflowContractTest(Harness):
         build = yaml.safe_load(BUILD.read_text(encoding="utf-8"))
         native_steps = {step.get("name"): step for step in build["jobs"]["build"]["steps"]}
         self.assertLessEqual({"Build", "Test (non-Windows)"}, set(native_steps))
-        self.assertEqual(native_steps["Build"]["if"], "matrix.lane != 'contract'",
-                         "the contract lane is the lane that skips Build")
+        # The contract lane and the clean-merge lane skip Build; the record
+        # reads either as `deferred`, which no full-lane path accepts.
+        self.assertEqual(native_steps["Build"]["if"],
+                         "matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'",
+                         "the contract and clean-merge lanes are the lanes that skip Build")
         alias_steps = {step.get("name") for step in build["jobs"]["macos"]["steps"]}
         self.assertIn(BOOTSTRAP, alias_steps)
 
