@@ -30,6 +30,11 @@
 #
 # --keep-logs keeps the per-phase test logs after a CONFIRMED run too.
 #
+# The purge touches only archives and libraries the build graph produces (read
+# from `ninja -t targets all`), so a third-party library a project copies into
+# its build directory at configure time survives. With another generator the
+# graph cannot be listed and every archive and library is purged.
+#
 # --subject names the compiled binary the edit must reach when it is not the
 # test's own executable: a CLI shell-out suite fingerprints as
 # pulp-test-cli-shellout while the edited code is compiled into pulp-cpp.
@@ -241,7 +246,8 @@ PY
     say "build dir: $2 removed artifact(s) rebuilt by --target, $1 outside it put back as they were"
 }
 
-trap 'rm -f "$BUILD_LOG" "$PRISTINE"; put_back_stash' EXIT
+REBUILDABLE_LIST=""
+trap 'rm -f "$BUILD_LOG" "$PRISTINE" "$REBUILDABLE_LIST"; put_back_stash' EXIT
 
 # Delete the objects built from this source so the rebuild cannot be skipped on
 # a timestamp comparison. Header-only edits have no object of their own, so the
@@ -330,23 +336,66 @@ invalidate() {
     if [ "$STASHED" -eq 0 ]; then
         # First pass: these were built from the committed source; keep them.
         STASHED=1
-        find "$BUILD_DIR" -path "$STASH" -prune -o \
-            \( -name '*.a' -o -name '*.dylib' -o -name '*.so' -o -name "$objects" \) \
-            -type f -print0 2>/dev/null |
-            python3 -c '
-import os, sys
-build, stash = sys.argv[1], sys.argv[2]
-for p in filter(None, sys.stdin.buffer.read().split(b"\0")):
-    p = p.decode()
-    dst = os.path.join(stash, os.path.relpath(p, build))
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    os.rename(p, dst)
-' "$BUILD_DIR" "$STASH" || true
+        record_rebuildable_outputs
+        purge_artifacts stash "$objects"
         return 0
     fi
+    purge_artifacts delete "$objects"
+}
+
+# The archives, libraries and objects the build graph produces, one build-dir
+# relative path per line, so the purge touches only what a rebuild can recreate.
+# A downstream project can copy third-party libraries into its build directory
+# at configure time (FreeType, libpng); no build rule makes them, so purging
+# one leaves the baseline build with nothing to recreate it from and the whole
+# verdict INCONCLUSIVE. Ninja can list its outputs; for another generator the
+# list is unknown and every archive and library is purged, as before.
+record_rebuildable_outputs() {
+    [ -f "$BUILD_DIR/build.ninja" ] && command -v ninja >/dev/null 2>&1 || return 0
+    local list
+    list="$(mktemp "${TMPDIR:-/tmp}/confirm-failure-outputs.XXXXXX")" || return 0
+    if ( cd "$BUILD_DIR" && ninja -t targets all 2>/dev/null ) | sed 's/: .*$//' > "$list" &&
+        [ -s "$list" ]; then
+        REBUILDABLE_LIST="$list"
+    else
+        rm -f "$list"
+    fi
+}
+
+# Stash (first pass) or delete (second pass) the artifacts between the edited
+# source and the test binary. An archive or library the build graph does not
+# produce stays where it is.
+purge_artifacts() {
+    local mode="$1" objects="$2"
     find "$BUILD_DIR" -path "$STASH" -prune -o \
         \( -name '*.a' -o -name '*.dylib' -o -name '*.so' -o -name "$objects" \) \
-        -type f -exec rm -f {} + 2>/dev/null || true
+        -type f -print0 2>/dev/null |
+        python3 -c '
+import os, sys
+mode, build, stash, listing = sys.argv[1:5]
+known = None
+if listing:
+    with open(listing) as f:
+        known = {line.strip() for line in f if line.strip()}
+kept = 0
+for p in filter(None, sys.stdin.buffer.read().split(b"\0")):
+    p = p.decode()
+    rel = os.path.relpath(p, build)
+    if known is not None and rel.endswith((".a", ".dylib", ".so")) and rel not in known:
+        kept += 1
+        continue
+    if mode == "stash":
+        dst = os.path.join(stash, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        os.rename(p, dst)
+    else:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+if kept and mode == "stash":
+    print(f"confirm-failure: left {kept} archive/library file(s) in place that the build graph does not produce", file=sys.stderr)
+' "$mode" "$BUILD_DIR" "$STASH" "$REBUILDABLE_LIST" || true
 }
 
 # Build, and require evidence that the edited file was actually compiled. This

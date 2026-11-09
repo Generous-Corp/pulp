@@ -924,6 +924,50 @@ when the condition holds. A loop that reads the same state every few seconds
 costs an agent turn per read and changes nothing: in one week of agent sessions
 on one host, poll turns were a fifth of all tool calls.
 
+## One push per fix round: read the head's `macos` job before pushing
+
+`build.yml` cancels a PR's older `pull_request` run when a new head arrives
+(`cancel-in-progress` on `build-refs/pull/N/merge`). A `workflow_dispatch` run
+groups on the branch ref instead, so a push does not cancel it. What a push
+costs therefore depends on the state of the current head's `macos` job, not on
+how soon you push:
+
+| `macos` job on the current head | What a new push costs | Do |
+|---|---|---|
+| none yet (resolve-provider/classify still running, or no run will start, e.g. a conflicting PR has no merge ref) | Nothing | Push now if you have the whole fix; do not wait for a run that may never start |
+| `queued` (no runner yet) | No runner time; at most a VM tartci had started booting for it | Push now if you have the whole fix |
+| `in_progress`, head already known bad: `drift-fast` red, a HOLD at this head, or DIRTY | The minutes it has run; the rest is saved | Push the fix now |
+| `in_progress`, anything else (including a red `Enforce version & skill sync` alone) | The minutes it has run, plus the macOS failures it would have shown you | Finish the round, wait for the result, then push once |
+| `completed` (green or red) | Nothing extra | Push once, with everything |
+
+`drift-fast` counts as known bad because it runs the same drift tests as the
+macOS fast deterministic tier, so a running `macos` job on that head mostly
+repeats it. A version-skill red says nothing about the build or the tests, so
+the running job still carries signal you would otherwise wait another round for.
+
+Read the newest `macos` run in one call. A commit can carry several (re-runs,
+an older cancelled run, a `workflow_dispatch` full-lane run); on a head that
+needs no native build the alias job named `macos` is the one returned, and it
+finishes in seconds:
+
+```bash
+ghapp api "repos/Generous-Corp/pulp/commits/<head-sha>/check-runs?check_name=macos" \
+  --jq '.check_runs | sort_by(.started_at) | last | "\(.status) \(.started_at)"'
+```
+
+Fold everything for the round into that one push: the fix, its test and,
+when the PR is DIRTY, the merge of its base. Two pushes in one round pay for a
+second gate run, and the queue wait, which is often longer than the run, starts
+again. Over one week of Pulp PR heads, about two thirds of cancelled `macos`
+runs were cancelled while still queued. The runs cancelled after starting had
+been running for about 11 minutes (median), and over half of that time was on
+heads superseded by a merge of `main` pushed separately from the fix.
+
+A check-run's `startedAt` on a job cancelled while queued equals its creation
+time, so its "duration" is queue wait, not runner time. Measure the VM time a
+cancelled job held from its job record (`runner_name` set, first to last step),
+never from the check run alone.
+
 ## Reporting PR state: quote the checks, never characterize them
 
 - **Ground every status claim.** When you report a PR's state, quote the
@@ -1702,6 +1746,15 @@ consequences worth knowing before you debug:
   `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
   merge receipt pins the same label string as `ctest_gate_args.py`
   (`REQUIRED_LABEL_EXCLUDE`), so change both or receipts stop being reused.
+- A new, deleted or renamed public header under an exported include root, or a
+  CMake change, makes `gates.sh` run `consumption_census.py --check` in the
+  generated-manifest lane (`gates_script_inputs.py`), so a stale
+  `docs/status/consumption-profiles.json` fails locally instead of as
+  `consumption-census-drift` on macos, drift-fast and linux. The header list is
+  read from git's index: `git add` the new header before regenerating with
+  `python3 tools/scripts/consumption_census.py --build-dir <build> --write`. A
+  host that cannot configure reports it NOT CHECKED. The pre-push hook's own
+  merge-tree script-state check does not run it.
 - `gates.sh` now runs this lane scoped to your diff
   (`source_selftests.py run --changed-from "$BASE"`): an entry runs when its own
   script changed or its source names a changed file (full path, a distinctive
@@ -13070,6 +13123,15 @@ registered is only reported at configure (some members are platform-conditional)
 real guard is `pr-fast-tier-contract`, which fails if the label selects fewer than
 50 tests or loses one of its pinned members. The tier writes `ctest-pr-fast.junit.xml`, never
 `ctest.junit.xml`: it is not merge test evidence and must never satisfy a protected receipt.
+
+The drift members that fail most heads (`script-test-inputs-drift`, the consumption-census
+drift checks, `agent-capability-manifest-check`) also carry `pr-fast-configure` and run
+between `Configure` and `Build`, so a stale manifest fails before the build; the post-build
+tier excludes that label only when the pre-build step passed. Add a member there only if it
+reads nothing a build produces (codemodel, `CTestTestfile.cmake` and configure-time facts
+are fine; a built binary or a Catch2 discovery file's contents are not). A test that needs
+the build belongs under `needs-build`, never under `pr-fast-configure`; the contract check
+refuses both labels on one test.
 
 Two consequences worth knowing:
 

@@ -79,8 +79,8 @@ These layers answer different questions. A verified commit or tag means GitHub
 verified a signature from a configured maintainer or release-bot signing key for
 the source ref. A SHA-256 check means the bytes you downloaded match the bytes
 Pulp published. Neither replaces reading code you are about to execute, but
-together they make the source identity and downloaded artifact integrity much
-clearer.
+together they establish the source identity and the integrity of the
+downloaded artifact.
 
 </details>
 
@@ -93,10 +93,10 @@ claude plugin marketplace add Generous-Corp/pulp && claude plugin install pulp
 <details>
 <summary><strong>Learn more</strong></summary>
 
-The CLI works great with any AI coding agent (Claude, Codex, Cursor). If you use
+The CLI works with any AI coding agent (Claude, Codex, Cursor). If you use
 **Claude Code**, you can additionally install the
 [Pulp plugin](docs/agent-integrations.md#claude-code-with-the-optional-plugin)
-for slash-command shortcuts (`/build`, `/test`, `/ship`) and a native MCP
+for slash-command shortcuts (`/create`, `/test`, `/ship`) and a native MCP
 server.
 
 Install the CLI first. The plugin's MCP server is `pulp-mcp`, which ships with
@@ -151,14 +151,14 @@ Three commands from zero to a working native plugin for your platform.
 
 **[Full Documentation](https://www.generouscorp.com/pulp/)** · **[Getting Started](https://www.generouscorp.com/pulp/getting-started.html)** · **[Capabilities](https://www.generouscorp.com/pulp/capabilities.html)** · **[Examples](https://www.generouscorp.com/pulp/examples-index.html)**
 
-- [Getting Started](docs/guides/getting-started.md) — install, create, build, run
-- [Capabilities Reference](docs/reference/capabilities.md) — full feature inventory with status
-- [Module Reference](docs/reference/modules.md) — module-by-module API docs
-- [CLI Reference](docs/reference/cli.md) — all `pulp` commands
-- [Creative Timeline Engine SDK](docs/guides/timeline-sdk.md) — embed,
+- [Getting Started](docs/guides/getting-started.md): install, create, build, run
+- [Capabilities Reference](docs/reference/capabilities.md): full feature inventory with status
+- [Module Reference](docs/reference/modules.md): module-by-module API docs
+- [CLI Reference](docs/reference/cli.md): all `pulp` commands
+- [Creative Timeline Engine SDK](docs/guides/timeline-sdk.md): embed,
   edit, persist, play, import, and automate timeline projects
-- [CI & Local CI](docs/guides/local-ci.md) — local and cloud CI setup
-- [Shipping Guide](docs/guides/shipping.md) — signing, notarization, packaging
+- [CI & Local CI](docs/guides/local-ci.md): local and cloud CI setup
+- [Shipping Guide](docs/guides/shipping.md): signing, notarization, packaging
 
 <a id="build-from-source"></a>
 <details>
@@ -232,7 +232,7 @@ version values.
 
 Pulp's CLI works with any AI coding agent. Skills (`.agents/skills/`) are auto-loaded by Claude Code and Codex; `AGENTS.md` redirects Codex to the same `CLAUDE.md` Claude reads. No agent-specific install is required to use the CLI.
 
-**Claude Code users** can additionally install the optional Pulp plugin for slash-command shortcuts and a native MCP server. The plugin extends Claude Code with `/build`, `/test`, `/create`, `/design`, `/ship`, `/import-design`, `/version`, `/upgrade` plus build/test/inspect MCP tools.
+**Claude Code users** can additionally install the optional Pulp plugin for slash-command shortcuts and a native MCP server. The plugin extends Claude Code with `/create`, `/test`, `/design`, `/ship`, `/import-design`, `/version`, `/upgrade` plus build/test/inspect MCP tools.
 
 Full breakdown of which agent gets what: [docs/agent-integrations.md](docs/agent-integrations.md). Plugin-specific setup details: [docs/guides/claude-code-plugin.md](docs/guides/claude-code-plugin.md).
 
@@ -241,7 +241,7 @@ Full breakdown of which agent gets what: [docs/agent-integrations.md](docs/agent
 <details>
 <summary><strong>How does Pulp handle minimum OS support (Windows, Linux, macOS)?</strong></summary>
 
-Depends on the platform and on whether you enable an optional engine (the default is QuickJS; JSC is opt-in on Apple and V8 is opt-in where supported). We track the lowest OS the prebuilts support and occasionally sit a step above for toolchain reasons. Numbers live at the source, not here — your floor is the highest of whatever you link:
+Depends on the platform and on whether you enable an optional engine (the default is QuickJS; JSC is opt-in on Apple and V8 is opt-in where supported). We track the lowest OS the prebuilts support and occasionally sit a step above for toolchain reasons. Numbers live at the source, not here. Your floor is the highest of whatever you link:
 
 | Floor | Where |
 |---|---|
@@ -253,8 +253,8 @@ Depends on the platform and on whether you enable an optional engine (the defaul
 
 ## Contributing
 
-Pulp is early and actively evolving — contributions and plugin-author
-feedback are very welcome. People seeking to extend the Pulp framework should clone the repo. See
+Pulp is early and actively evolving. Contributions and plugin-author
+feedback are welcome. People seeking to extend the Pulp framework should clone the repo. See
 [Build from source](#build-from-source) to get set up.
 
 ### Workflow
