@@ -5,10 +5,11 @@
 // without rewriting the audio payload; the original `fmt ` and `data`
 // chunks are preserved verbatim.
 //
-// Why a separate chunk codec: the WAV decoder reads samples and only the
-// chunk headers it needs to find them, never metadata payloads. Tooling
-// needs exact, reversible byte-level access to the named chunks so
-// production-audio metadata round-trips losslessly.
+// Why a hand-rolled chunk codec on top of CHOC: CHOC's WAV reader
+// gives us PCM samples but only surfaces a small subset of metadata
+// (bext fields as a string map, no iXML/axml/acid). We need exact,
+// reversible byte-level access to the named chunks so production-audio
+// metadata round-trips losslessly through Pulp tooling.
 //
 // Chunks supported (canonical four-CCs in parens):
 //   • bext  — EBU R 128 / EBU Tech 3285 "Broadcast Wave Format" extension.

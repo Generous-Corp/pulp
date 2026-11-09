@@ -67,9 +67,6 @@ class DecodedAudioAssetPool {
     static runtime::Result<std::shared_ptr<const DecodedAudioAssetPool>, AudioRendererError>
     create(std::vector<DecodedAudioAsset> assets, AudioRendererLimits limits = {});
 
-    /// Decodes a WAV asset. A file whose header declares more frames than
-    /// it holds is refused as InvalidAsset, though the WAV reader could
-    /// recover the frames present: the timeline assumes the declared length.
     static runtime::Result<DecodedAudioAsset, AudioRendererError>
     decode_wav(timeline::ItemId id, std::span<const std::uint8_t> bytes,
                audio::WavDecodeLimits decode_limits = {});
