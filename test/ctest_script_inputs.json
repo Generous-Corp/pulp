@@ -302,6 +302,18 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-auv3-slot": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_plugin_slot_auv3.mm"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-baked-graph-processor-parity": {
    "data": "none",
    "inputs": [],
@@ -2126,6 +2138,8 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
+    "PulpHostMidiProbe_AU",
+    "PulpHostProbe_AU",
     "PulpHostProbe_CLAP",
     "PulpHostProbe_VST3"
    ],
@@ -2971,6 +2985,7 @@
   "pulp-test-audio-workgroup-wiring",
   "pulp-test-authoring-capsule",
   "pulp-test-authoring-capsule-hostile",
+  "pulp-test-auv3-slot",
   "pulp-test-baked-graph-param-injection",
   "pulp-test-baked-graph-processor-parity",
   "pulp-test-baked-node-fixture",

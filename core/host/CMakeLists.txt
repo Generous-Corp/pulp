@@ -239,12 +239,15 @@ endif()
 if(APPLE)
     target_sources(pulp-host PRIVATE
         src/plugin_slot_au.mm
+        src/plugin_slot_auv3.mm
         src/scanner_au.mm
     )
     target_link_libraries(pulp-host PRIVATE
+        "-framework AVFoundation"
         "-framework AudioToolbox"
         "-framework AudioUnit"
         "-framework CoreAudio"
+        "-framework CoreAudioKit"
         "-framework CoreFoundation"
     )
     target_compile_definitions(pulp-host PUBLIC PULP_HOST_HAS_AU=1)

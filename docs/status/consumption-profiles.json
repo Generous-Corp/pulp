@@ -526,6 +526,7 @@
       "pulp/host/parameter_event_queue.hpp",
       "pulp/host/plugin_identity.hpp",
       "pulp/host/plugin_slot.hpp",
+      "pulp/host/plugin_slot_auv3.hpp",
       "pulp/host/processor_restore.hpp",
       "pulp/host/processor_signal_graph_binding.hpp",
       "pulp/host/sample_region_authoring.hpp",
@@ -1701,23 +1702,23 @@
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 114
+            "closure_node_count": 115
           },
           {
             "exported_as": "Pulp::inspect-graph-runtime",
-            "closure_node_count": 105
+            "closure_node_count": 106
           },
           {
             "exported_as": "Pulp::inspect-sample-region-runtime",
-            "closure_node_count": 105
+            "closure_node_count": 106
           },
           {
             "exported_as": "Pulp::view-graph-editor",
-            "closure_node_count": 100
+            "closure_node_count": 101
           },
           {
             "exported_as": "Pulp::host",
-            "closure_node_count": 99
+            "closure_node_count": 100
           },
           {
             "exported_as": "Pulp::inspect",
@@ -4168,7 +4169,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/host",
           "closure": {
-            "node_count": 99,
+            "node_count": 100,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -4231,7 +4232,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 66,
+            "count": 67,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4280,6 +4281,7 @@
               "Carbon",
               "Cocoa",
               "CoreAudio",
+              "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
@@ -4317,10 +4319,12 @@
           },
           "direct_dependencies": [
             "clap",
+            "framework:AVFoundation",
             "framework:AppKit",
             "framework:AudioToolbox",
             "framework:AudioUnit",
             "framework:CoreAudio",
+            "framework:CoreAudioKit",
             "framework:CoreFoundation",
             "lv2-headers",
             "pulp-audio",
@@ -4741,7 +4745,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 105,
+            "node_count": 106,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -4810,7 +4814,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 70,
+            "count": 71,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -4863,6 +4867,7 @@
               "Carbon",
               "Cocoa",
               "CoreAudio",
+              "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
@@ -5373,7 +5378,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 105,
+            "node_count": 106,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -5442,7 +5447,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 70,
+            "count": 71,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -5495,6 +5500,7 @@
               "Carbon",
               "Cocoa",
               "CoreAudio",
+              "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
@@ -5540,7 +5546,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 114,
+            "node_count": 115,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -5618,7 +5624,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 76,
+            "count": 77,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -5677,6 +5683,7 @@
               "Carbon",
               "Cocoa",
               "CoreAudio",
+              "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
@@ -8544,7 +8551,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view/audio",
           "closure": {
-            "node_count": 100,
+            "node_count": 101,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -8608,7 +8615,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 66,
+            "count": 67,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -8657,6 +8664,7 @@
               "Carbon",
               "Cocoa",
               "CoreAudio",
+              "CoreAudioKit",
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
