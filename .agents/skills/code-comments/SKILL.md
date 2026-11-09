@@ -2,7 +2,7 @@
 name: code-comments
 description: >-
   How to write source comments, doc comments, and test names/tags that have
-  lasting value — and what to never write. Consult before adding or editing
+  lasting value, and what never to write. Consult before adding or editing
   comments in core/**, examples/**, tools/**, test/**, docs/**, or any shipped
   source. Handles "write a comment", "is this comment ok", "comment hygiene",
   and keeping new code from adding the breadcrumbs the cleanup stream removes.
@@ -10,11 +10,17 @@ description: >-
 
 # Writing Durable Comments
 
+For prose voice in general (plain words, no em dashes, no padding), follow the
+`crisp-writing` skill when it is installed (`~/.agents/skills/crisp-writing`;
+its `scripts/check.py --diff origin/main` checks a branch). This skill keeps the
+Pulp-specific rules below: what counts as a breadcrumb here, and how Pulp's lint
+treats comments and test tags.
+
 A comment earns its place by explaining something the code cannot say for
 itself and that will still be true next year: current behavior, an invariant, a
 non-obvious "why", an upstream/vendor/host quirk, a security or compat
 constraint, a regression- or RT-safety guard. It must not encode *how the code
-got here* — that provenance belongs in the commit message, `planning/`,
+got here*. That provenance belongs in the commit message, `planning/`,
 `docs/reports/`, the changelog, or a commit trailer. This repo will be
 open-sourced; every comment is read by strangers with no access to our issue
 tracker or session history.
@@ -25,11 +31,11 @@ cleanup is removing. The cleanup backlog + classification rules are parked at
 
 ## Never write these (the "Remove" category)
 
-- **Phase / milestone / slice labels.** No `(Phase 4)`, `Phase N will…`,
+- **Phase / milestone / slice labels.** No `(Phase 4)`, `Phase N will...`,
   `4f`-style sub-phase labels, `Tier A Slice 7`, `Feature 3`, `plan item 7.2`,
   `item 6.12 follow-up`. `[phaseN]` / `[phase3-large]` Catch2 tags are forbidden.
   Capital-letter+digit plan tags (`C2`, `D6`, `M1`) are the same kind of
-  breadcrumb — the lint can't safely match them (they collide with MIDI note
+  breadcrumb. The lint can't safely match them (they collide with MIDI note
   names and register labels), so it's on you to keep them out of comments.
 - **Agent / review breadcrumbs.** No `Codex P1/P2/P0`, `codex review`,
   `[codex-*]`, "per the reviewer", "sub-PR", "slice N of".
@@ -41,10 +47,10 @@ cleanup is removing. The cleanup backlog + classification rules are parked at
 - **Bare `#1234` as the explanation.** A PR/issue number is not a reason. If the
   issue explains a still-live invariant, state the invariant; a durable
   `[issue-NNN]` *anchor* on a regression test is fine (note: `#` is reserved in
-  Catch2 tags — use `[issue-NNN]`).
+  Catch2 tags, so use `[issue-NNN]`).
 - **Speculative future / roadmap.** No "Future v2 …", "will support X later",
   TODO-for-a-someday-feature. (Real example removed: a `Future v2 license-key
-  payloads (post-RSA migration)` bullet that was already inaccurate — current
+  payloads (post-RSA migration)` bullet that was already inaccurate: current
   crypto is AES-256-GCM.)
 - **`WIP` / "temporary" / "hack for now".** Either it's the behavior (describe
   it) or it's a tracked task (put it in `planning/`).
@@ -85,22 +91,21 @@ stripped of the phase/PR wrapper. Real before → after cases from the cleanup:
 
 ## Self-check before you commit
 
-Scan your own diff for the breadcrumbs above — cheaper than a cleanup PR later:
+Scan your own diff for the breadcrumbs above. That is cheaper than a cleanup PR later:
 
 ```bash
 # stale provenance in ADDED lines of the staged/working diff
 git diff --cached -U0 | rg '^\+' | \
   rg -n -iE '\b(phase\s?[0-9]|slice [0-9]|tier [a-z] slice|plan item|sub-?pr|codex (p[012]|review)|\[(phase[0-9a-z-]*|codecov|coverage|requested|codex[a-z0-9-]*)\]|future v[0-9]|WIP|clean-?room)\b' \
-  && echo "↑ reconsider these — see the code-comments skill" || echo "clean"
+  && echo "reconsider the lines above (see the code-comments skill)" || echo "clean"
 
 # repo-wide evergreen-scope lint (docs/reference/** + skills)
 python3 tools/scripts/docs_noise_lint.py --mode=report
 ```
 
-Enforcement today: `docs_noise_lint.py` covers `docs/reference/**` and
-`.agents/skills/**/SKILL.md` (diff-scoped in CI + pre-push). Source-comment
-enforcement is the author's responsibility until the lint's source scope lands —
-so run the `rg` self-check above on any source diff that adds comments.
+Enforcement: `docs_noise_lint.py` scans docs and skills, and the comments and
+test tags of source files, on changed lines only (CI and pre-push). The `rg`
+self-check above catches the same patterns before you push.
 
 ## The rule in one line
 
