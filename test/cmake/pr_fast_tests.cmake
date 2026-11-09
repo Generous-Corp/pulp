@@ -269,6 +269,27 @@ foreach(_pulp_pr_fast_test IN LISTS PULP_PR_FAST_NEEDS_BUILD)
     endif()
 endforeach()
 
+# The generated-manifest drift checks that fail most pull-request heads. Each
+# reads only the checkout and what the configure wrote (CTestTestfile.cmake,
+# the CMake file-API codemodel, the census facts), never a built artifact, so
+# the macOS leg runs them between Configure and Build: a stale manifest then
+# fails the required check before the build instead of after it, and the
+# post-build fast tier leaves them out rather than running them twice.
+# `pr-fast-tier-contract` keeps every member inside pr-fast and outside
+# needs-build.
+set(PULP_PR_FAST_CONFIGURE_TESTS
+    script-test-inputs-drift
+    consumption-census-drift
+    consumption-census-drift-description
+    consumption-census-negative-contract
+    agent-capability-manifest-check
+)
+foreach(_pulp_pr_fast_test IN LISTS PULP_PR_FAST_CONFIGURE_TESTS)
+    if(TEST "${_pulp_pr_fast_test}")
+        set_property(TEST "${_pulp_pr_fast_test}" APPEND PROPERTY LABELS pr-fast-configure)
+    endif()
+endforeach()
+
 # Guards too slow for pr-fast (a minute, not seconds) that fail every pull
 # request at once, so in a merge group they eject whole batches. The macOS leg
 # runs them on every pull-request head, approved or not, with `-L '^pr-guard$'`.
