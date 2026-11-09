@@ -3893,7 +3893,7 @@ rasterizers live in `tools/audio/analysis` (`spectrogram_raster.hpp`,
 parse flags, stream the input and write files, through the shared
 `cmd_audio_image_common.{hpp,cpp}`.
 
-Things that are easy to get wrong when touching them:
+Gotchas:
 
 - **Input streams through `MemoryMappedAudioReader::read_frames` in windows.**
   Never route these verbs through `read_audio_file` / `decode_wav`: the WAV
