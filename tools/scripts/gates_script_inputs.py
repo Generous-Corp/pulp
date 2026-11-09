@@ -4,7 +4,7 @@
 Three files are generated from a configured build and drift the same way, by
 being hand-edited or not regenerated after a test or script is added:
 
-- `test/ctest_script_inputs.json` (`script_test_inputs.py`);
+- `test/ctest_script_inputs/` (`script_test_inputs.py`);
 - `tools/ci/source_selftests.json` (`tools/ci/source_selftests.py write`),
   which must carry each registration's TIMEOUT, RESOURCE_LOCK and argv;
 - the changed-surface script families file `.shipyard/changed-surface-families.toml`
@@ -62,6 +62,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "ci"))
 import script_test_inputs as sti  # noqa: E402
+import script_inputs_store as store  # noqa: E402
 import source_selftests as sst  # noqa: E402
 
 GATE_DIR = "build-gate"
@@ -79,8 +80,8 @@ def generated_manifest_reasons(changed: set[str]) -> list[str]:
         if (path.endswith(".py") and path.startswith("tools/")) \
                 or path.startswith("test/cmake/") or path.endswith("CMakeLists.txt") \
                 or path in ("tools/ci/source_selftests.json", ".shipyard/config.toml",
-                            ".shipyard/changed-surface-families.toml",
-                            "test/ctest_script_inputs.json") \
+                            ".shipyard/changed-surface-families.toml") \
+                or store.is_store_path(path) \
                 or (path.startswith(".agents/skills/") and path.endswith("/SKILL.md")):
             reasons.append(path)
     return reasons
@@ -138,7 +139,7 @@ def main(argv: list[str]) -> int:
             "manifest input; nothing to check")
         return 0
     if reasons:
-        say(f"  script-test-inputs: the diff can drift test/ctest_script_inputs.json ({len(reasons)} path(s)):")
+        say(f"  script-test-inputs: the diff can drift test/ctest_script_inputs/ ({len(reasons)} path(s)):")
         for r in reasons[:8]:
             say(f"    {r}")
     if manifest_reasons:
@@ -195,9 +196,9 @@ def check_script_inputs(root: Path, build: Path, shown: str, base: str) -> int:
         say(f"  {line}")
     if rc == 1:
         say("  script-test-inputs: DRIFT. Regenerate the list from this configured tree and commit it "
-            "(never hand-edit test/ctest_script_inputs.json):")
+            "(never hand-edit test/ctest_script_inputs/):")
         say(f"    python3 tools/scripts/script_test_inputs.py --build-dir {shown} --write")
-        say("    git add test/ctest_script_inputs.json")
+        say("    git add test/ctest_script_inputs/")
         return 1
     if rc != 0:
         say(f"NOT CHECKED locally: {TEST} (script_test_inputs.py --check exited {rc} on {shown})")
@@ -234,8 +235,8 @@ def families_surface(changed: set[str]) -> list[str]:
     """Changed paths a stale family could bound wrongly (the generator's blocks_on)."""
     return sorted(p for p in changed
                   if p in {".shipyard/config.toml", ".shipyard/changed-surface-families.toml",
-                           "test/ctest_script_inputs.json",
                            "tools/scripts/changed_surface_script_families.py"}
+                  or store.is_store_path(p)
                   or (p.startswith("tools/scripts/") and p.endswith(".py"))
                   or (p.startswith(".agents/skills/") and p.endswith("/SKILL.md")))
 

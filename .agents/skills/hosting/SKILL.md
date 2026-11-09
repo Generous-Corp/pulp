@@ -450,6 +450,18 @@ consequences: a mid-stream change cannot be refused (there is nothing to refuse
 on), and any test of change-handling needs a synthetic latency source rather
 than a real backend.
 
+### Artifact latency is compensated; intentional delay never is
+
+A hosted plugin's reported latency is always artifact latency: the graph
+compensates it where parallel paths reconverge and adds it to the host total.
+Custom nodes may also declare `intentional_delay_samples` (an echo), which is
+reported in `prepared_latency_snapshot()` and the realtime report but never
+compensated. Per-output-port latency is equalised inside the node binding, and
+every `AudioOutput` is aligned to the one reported total because outputs sum
+into the same host buffer. Do not "fix" a dry path that stays undelayed beside
+an echo node; that is the contract. See `docs/reference/signal-graph.md`
+(latency semantics) and `pulp/host/graph_rt_report.hpp`.
+
 The timeline binding builds on this to schedule compensated event streams; the
 contract, including why an event-to-audio device contributes nothing to the
 shift, is `docs/policies/event-stream-pdc.md`.
@@ -1824,6 +1836,75 @@ sample-at-block-start so the offset-(N-1) value wins.
 MixMode::Replace is the default; second Replace edge to the same
 (node, param) is rejected. MixMode::Add sums then clamps.
 
+## The AUAudioUnit slot (`PluginFormat::AudioUnitV3`)
+
+`plugin_slot_auv3.mm` hosts AU v3 extensions and AU v2 components through
+`AUAudioUnit`, out of process by default (`load_auv3_plugin()` takes
+`AuV3LoadOptions` for in-process). Traps found getting it to pass against
+Apple's units and the host probe:
+
+- **Out of process, input buses start disabled.** A disabled bus is never
+  pulled and every render returns `kAudioUnitErr_NoConnection` (-10876). The
+  slot sets `bus.enabled = YES` on every bus it configures.
+- **The pull-input block may get null `mData`.** Hand the unit slot-owned
+  scratch, never the host's const input; the unit may process in place.
+- **A plugin's own parameter edits arrive on the main run loop.** AU v2
+  components post them with `AUEventListenerNotify`, and the bridge delivers
+  them to `AUParameterTree` observers there. Tests must pump the main loop
+  while draining edits (`collect_edits()` in `test_host_probe_bundles.cpp`);
+  `get_parameter()` also lags until then.
+- **Disposing a bridged AU v2 unit with events still queued crashes** inside
+  `AUEventListener::MessagesAreAvailable` on the `AUAudioUnitV2Bridge.eventListener`
+  queue. The slot drops its last reference to the unit after a short delay on a
+  background queue; without that the probe suite crashed on about half its runs.
+- **A remote editor needs a launched app.** Out of process,
+  `requestViewControllerWithCompletionHandler` builds an `NSRemoteView`, which
+  throws "invoked too early" unless `NSApplication` has finished launching.
+  The slot refuses without `NSApp` and catches the exception; tests call
+  `[NSApp finishLaunching]` first.
+- **Big parameter addresses and repeated names.** AUMultiChannelMixer's
+  addresses exceed 32 bits (scope and element are packed in), so ids become
+  list positions, and its many "Gain" parameters get their key path appended.
+- **Out of process needs a registered binary.** `AudioComponentRegister` makes
+  a component findable in this process only, so in-process loading works
+  without an install, but out of process needs the component in
+  `~/Library/Audio/Plug-Ins/Components` (or an AU v3 extension registered
+  through its app). The probe's opt-in out-of-process run is
+  `PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` with the component installed; remove
+  it afterwards. Confirm the process boundary by finding the component mapped
+  in the `AUHostingService` process with `lsof`.
+- **A unit republishes its parameter tree after a bus format change.** About
+  2 ms after `setFormat:` (AUDelay, AUPeakLimiter; not DLSMusicDevice or the
+  mixer), and only if the host has already read `parameterTree`. A warm
+  out-of-process allocation returns in about 2 ms, so the republish can land
+  after `prepare()`. The old tree's objects are then disconnected: writes to
+  them never reach the unit, though a new proxy can show the written value
+  locally. So `prepare()` settles (25 ms quiet, 250 ms cap), every tree change
+  is adopted, host writes since the last tree are replayed unconditionally,
+  and `set_parameter()` also queues the value for the next block's
+  `scheduleParameterBlock`. Keeping a same-address tree's old objects made
+  every AUDelay run fail; replaying only differing values left 1 in 60.
+- **The audio thread reads a published `ParameterMapping` through an atomic
+  pointer**, never `mapping_mutex_`; old mappings are kept until the slot
+  dies. A try-lock there dropped 91 of 2000 automation events while a control
+  thread read parameters (the "never drops automation" test).
+- **Every system callback goes through `PulpHostAuV3Observer`.** It holds the
+  slot pointer under a lock that the destructor's `detach` takes first; blocks
+  and observers retain it, never the slot. A plugin that dies posts
+  `kAudioComponentInstanceInvalidationNotification`; the probe's command 4
+  aborts the extension to test it (opt-in, out of process only).
+- **Apple's AUDelay applies scheduled parameter events at the block start**,
+  in and out of process, so it cannot show sample offsets; DLSMusicDevice
+  starting a note at its MIDI offset can.
+- **A test `.mm` that uses `AVAudioFormat` must import AVFoundation.** With only
+  AudioToolbox the class is just forward-declared, the init returns nil, and
+  the failure shows up as a bus that will not build.
+- **What the probe's AU component cannot report:** it is an `aufx` effect, so
+  it receives no MIDI; the AU v2 adapter reads `CallHostTransportState`, which
+  has no recording flag; and the AU effect base has one output element, so no
+  aux bus. Those are plugin-side limits; cover MIDI with Apple's
+  `DLSMusicDevice` (`aumu:dls :appl`) instead.
+
 ## Bypass is a parameter in VST3/CLAP and a unit property in AU
 
 `ParamFlags::is_bypass` can only describe a bypass that IS a parameter. VST3
@@ -3013,6 +3094,15 @@ invalid channel views before dereferencing pointers or mutating output, clock,
 or envelope state. The public consumer in
 `examples/g5-trigger-runtime-consumer` proves this bounded SDK seam; it does not
 establish complete G-5 coverage or realtime timing qualification.
+## G-5 host ingress successor seam
+
+The bounded host MIDI/UMP/MPE ingress adapter is graph-owned and serial. Keep
+`HostEventIngress<256>` epoch/cursor checks, retained-prefix publication, and
+fail-closed stale, late, unbound, and overflow behavior intact when refreshing
+its public fingerprints or receipts. Validate the focused trigger-graph group
+and installed consumer; this seam does not establish hosted-plugin voice
+coverage or realtime qualification.
+
 # G-7 edge diagnostics
 
 SignalGraph control and event edge probes are serial routed diagnostics with

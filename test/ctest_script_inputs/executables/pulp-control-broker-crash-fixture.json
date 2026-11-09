@@ -1,0 +1,20 @@
+{
+ "name": "pulp-control-broker-crash-fixture",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli",
+   "pulp-control-trusted-host-e2e-fixture",
+   "pulp-mcp"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "inspect/src/control_broker_daemon.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

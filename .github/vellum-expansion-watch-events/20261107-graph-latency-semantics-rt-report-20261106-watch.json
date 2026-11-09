@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261107-graph-latency-semantics-rt-report-20261106-watch",
+  "created_at": "2026-11-07T02:39:35Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Adds SignalGraph latency semantics (intentional delay versus compensated artifact latency, per-port equalisation, aligned audio outputs), a control-thread realtime report, and a read-only pulp graph report CLI verb with its MCP projection. The touched CLI reference and command ledger only document the new graph verb. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-shellout",
+    "ctest --test-dir build -R pulp-test-graph-rt-report",
+    "ctest --test-dir build -R pulp-test-mcp-server",
+    "ctest --test-dir build -R pulp-test-signal-graph-latency-semantics",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -1,0 +1,12 @@
+{
+ "name": "component-visual-regression",
+ "record": {
+  "entry": "tools/scripts/component_regression.py",
+  "inputs": [
+   "assets/design-system/ink-signal/reference/components",
+   "tools/scripts/component_regression.py",
+   "tools/scripts/gallery_visual_diff.py"
+  ],
+  "kind": "python"
+ }
+}

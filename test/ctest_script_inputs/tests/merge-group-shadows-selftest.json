@@ -1,0 +1,11 @@
+{
+ "name": "merge-group-shadows-selftest",
+ "record": {
+  "entry": "tools/ci/test_merge_group_shadows.py",
+  "inputs": [
+   "tools/ci/merge_group_shadows.py",
+   "tools/ci/test_merge_group_shadows.py"
+  ],
+  "kind": "python"
+ }
+}

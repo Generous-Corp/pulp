@@ -347,6 +347,22 @@ turn. For browser file/drop imports, prefer the page's `AudioContext.decodeAudio
 when session-rate resampling is wanted, then transfer the resulting PCM through
 plugin state or another explicitly bounded handoff.
 
+**Gotcha: a zero-frame WAV is a successful decode, not a failure.** An empty
+`data` chunk is a valid file (libsndfile and CoreAudio agree), so `decode_wav`
+returns an `AudioFileData` with the right `sample_rate`, the right channel
+count and empty channel vectors; `inspect_wav` reports `num_frames == 0`. Any
+consumer that indexes `channels[c][0]`, calls `.front()`/`.back()`, or divides
+by `num_frames()` right after a successful decode will fault on such a file.
+Check `data.empty()` and treat it as "no audio" — `decode_wav` itself returns
+the empty asset, and the playback pool refuses it at `create()` with
+`InvalidAsset` (clip compile refuses it again); `pulp-test-wav-memory-decoder`'s
+`[zero-frames]` case is the fixture to copy. The AIFF reader and the seekable
+`AudioReader` follow the same rule (a zero-frame WAV or AIFF opens with
+`info().num_frames == 0`; only a streaming codec's zero means "no length
+claim"), so the contract is per decoder output, not per container. Only an envelope or format fault
+(RIFF size, zero channels, zero rate, a short last frame) is a `nullopt`;
+"nothing to play" is a present value with `empty()` true.
+
 - The WAM adapter marks the processor dirty on a control write and services it
   **once per render turn**, right after the render call (`WamStage::service_non_realtime`
   / `mark_non_realtime_dirty`). A knob drag delivers many control messages in one

@@ -1,0 +1,10 @@
+{
+ "name": "macos-plugin-bundle-signing",
+ "record": {
+  "entry": "tools/scripts/check_apple_bundle_signing.sh",
+  "inputs": [
+   "tools/scripts/check_apple_bundle_signing.sh"
+  ],
+  "kind": "shell"
+ }
+}

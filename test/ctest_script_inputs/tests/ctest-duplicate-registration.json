@@ -1,0 +1,10 @@
+{
+ "name": "ctest-duplicate-registration",
+ "record": {
+  "entry": "tools/scripts/test_ctest_duplicate_registration.py",
+  "inputs": [
+   "tools/scripts/test_ctest_duplicate_registration.py"
+  ],
+  "kind": "python"
+ }
+}

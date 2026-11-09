@@ -1,0 +1,35 @@
+{
+ "name": "pulp-test-browser-capture-import",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_browser_capture_backdrop_filter.cpp",
+   "test/test_browser_capture_font_smoothing.cpp",
+   "test/test_browser_capture_gradient_border.cpp",
+   "test/test_browser_capture_group_opacity.cpp",
+   "test/test_browser_capture_ir.cpp",
+   "test/test_browser_capture_paint_scale.cpp",
+   "test/test_browser_capture_svg_render.cpp",
+   "test/test_browser_capture_text_metrics.cpp",
+   "test/test_browser_capture_tree.cpp"
+  ],
+  "inputs": [
+   "test/fixtures/browser-capture-*",
+   "test/fixtures/import-differential/18-keyed-list-panel.identity.json"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_browser_capture_backdrop_filter.cpp",
+   "test/test_browser_capture_font_smoothing.cpp",
+   "test/test_browser_capture_gradient_border.cpp",
+   "test/test_browser_capture_group_opacity.cpp",
+   "test/test_browser_capture_ir.cpp",
+   "test/test_browser_capture_paint_scale.cpp",
+   "test/test_browser_capture_svg_render.cpp",
+   "test/test_browser_capture_text_metrics.cpp",
+   "test/test_browser_capture_tree.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

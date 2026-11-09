@@ -14,6 +14,20 @@ TEST_CASE("audio renderer decodes WAV bytes into the immutable asset pool") {
     REQUIRE_THAT(assets.value()->find({3})->audio->channels[0][1], WithinAbs(0.5f, 1e-5f));
 }
 
+TEST_CASE("audio renderer refuses a zero-frame WAV asset at pool creation") {
+    // The WAV decoder returns a zero-frame file as a successful decode with
+    // empty channels; the pool is where that becomes InvalidAsset.
+    const auto bytes = mono_pcm16_wav(std::span<const std::int16_t>{});
+    REQUIRE(bytes.size() == 44u);
+    auto decoded = DecodedAudioAssetPool::decode_wav({3}, bytes);
+    REQUIRE(decoded);
+    REQUIRE(decoded.value().audio->num_frames() == 0);
+    auto assets = DecodedAudioAssetPool::create({std::move(decoded).value()});
+    REQUIRE_FALSE(assets);
+    REQUIRE(assets.error().code == AudioRendererErrorCode::InvalidAsset);
+    REQUIRE(assets.error().item == timeline::ItemId{3});
+}
+
 TEST_CASE("audio renderer honors source range gain fades and varied block boundaries") {
     std::vector<float> source(2'050, 1.0f);
     source[0] = 99.0f;

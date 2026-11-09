@@ -1,0 +1,25 @@
+{
+ "name": "framework-neutrality-selftest",
+ "record": {
+  "entry": "tools/scripts/framework_neutrality_check.py",
+  "inputs": [
+   "core/format/include/pulp/format/host_quirks/cubase.hpp",
+   "core/runtime/include/pulp/runtime/spsc_ring_index.hpp",
+   "core/state/include/pulp/state/parameter.hpp",
+   "core/view/js/web-compat-element.js",
+   "experimental/pulp-rs/src/cmd/pkg.rs",
+   "test/fixtures/refactor-baselines",
+   "test/test_cli_import.cpp",
+   "test/test_host_quirks.cpp",
+   "test/test_host_version.cpp",
+   "tools/cmake",
+   "tools/deps",
+   "tools/packages/registry.json",
+   "tools/scripts/cmajor_external.py",
+   "tools/scripts/framework_neutrality_check.py",
+   "tools/scripts/test_cmajor_external_extra.py",
+   "tools/validation"
+  ],
+  "kind": "python"
+ }
+}

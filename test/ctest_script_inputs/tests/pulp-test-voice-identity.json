@@ -1,0 +1,10 @@
+{
+ "name": "pulp-test-voice-identity",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "sources": [],
+  "undeclared_sources": []
+ }
+}

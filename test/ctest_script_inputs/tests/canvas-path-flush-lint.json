@@ -1,0 +1,11 @@
+{
+ "name": "canvas-path-flush-lint",
+ "record": {
+  "entry": "tools/scripts/check_canvas_path_flush.py",
+  "inputs": [
+   "core/view/js/web-compat-canvas.js",
+   "tools/scripts/check_canvas_path_flush.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,13 @@
+{
+ "name": "pulp-worktree-creation-selftest",
+ "record": {
+  "entry": "tools/ci/test_pulp_worktree_creation.py",
+  "inputs": [
+   "tools/ci",
+   "tools/ci/checkout_location_guard.py",
+   "tools/ci/pulp-worktree.sh",
+   "tools/ci/test_pulp_worktree_creation.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,26 @@
+{
+ "name": "vellum-watch-preflight-selftest",
+ "record": {
+  "entry": "tools/scripts/test_vellum_watch_preflight.py",
+  "inputs": [
+   ".githooks/pre-push",
+   ".github/vellum-change-events",
+   ".github/vellum-expansion-watch-events",
+   ".github/vellum-export-events",
+   ".github/vellum-export-receipt",
+   ".github/vellum-export-receipt/pin.json",
+   ".github/vellum-ownership.json",
+   "core/platform",
+   "core/platform/src/file_dialog_stub.cpp",
+   "core/view/cmake/PulpDesignUnits.cmake",
+   "core/view/src/pointer_dispatch.cpp",
+   "tools/scripts",
+   "tools/scripts/gates.sh",
+   "tools/scripts/generate_vellum_ownership_projection.py",
+   "tools/scripts/pulp_tooling_disposition.py",
+   "tools/scripts/test_vellum_watch_preflight.py",
+   "tools/scripts/vellum_freeze_check.py"
+  ],
+  "kind": "python"
+ }
+}

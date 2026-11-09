@@ -1,0 +1,12 @@
+{
+ "name": "prepush-cannot-measure",
+ "record": {
+  "entry": "tools/scripts/test_prepush_cannot_measure.py",
+  "inputs": [
+   ".githooks/lib/gate-output.sh",
+   ".githooks/pre-push",
+   "tools/scripts/test_prepush_cannot_measure.py"
+  ],
+  "kind": "python"
+ }
+}
