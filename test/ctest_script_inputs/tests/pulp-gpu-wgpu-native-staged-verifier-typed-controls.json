@@ -1,0 +1,11 @@
+{
+ "name": "pulp-gpu-wgpu-native-staged-verifier-typed-controls",
+ "record": {
+  "entry": "tools/diagnostics/test_verify_wgpu_native_staged.py",
+  "inputs": [
+   "tools/diagnostics/test_verify_wgpu_native_staged.py",
+   "tools/diagnostics/verify_wgpu_native_staged.py"
+  ],
+  "kind": "python"
+ }
+}

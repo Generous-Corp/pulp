@@ -1,0 +1,11 @@
+{
+ "name": "install-sh-runs-sdk-install",
+ "record": {
+  "entry": "test/test_install_sh_runs_sdk_install.sh",
+  "inputs": [
+   "test/test_install_sh_runs_sdk_install.sh",
+   "tools/install/install.sh"
+  ],
+  "kind": "shell"
+ }
+}

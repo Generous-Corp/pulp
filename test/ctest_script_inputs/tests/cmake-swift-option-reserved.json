@@ -1,0 +1,10 @@
+{
+ "name": "cmake-swift-option-reserved",
+ "record": {
+  "entry": "test/cmake/test_swift_option_reserved.sh",
+  "inputs": [
+   "test/cmake/test_swift_option_reserved.sh"
+  ],
+  "kind": "shell"
+ }
+}

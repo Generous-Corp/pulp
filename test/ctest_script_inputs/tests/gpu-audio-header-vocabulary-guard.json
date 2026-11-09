@@ -1,0 +1,10 @@
+{
+ "name": "gpu-audio-header-vocabulary-guard",
+ "record": {
+  "entry": "tools/scripts/gpu_audio_header_vocabulary_guard.py",
+  "inputs": [
+   "tools/scripts/gpu_audio_header_vocabulary_guard.py"
+  ],
+  "kind": "python"
+ }
+}

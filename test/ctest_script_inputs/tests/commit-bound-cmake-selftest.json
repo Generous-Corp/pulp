@@ -1,0 +1,11 @@
+{
+ "name": "commit-bound-cmake-selftest",
+ "record": {
+  "entry": "tools/ci/test_commit_bound_cmake.py",
+  "inputs": [
+   "tools/ci/test_commit_bound_cmake.py",
+   "tools/cmake"
+  ],
+  "kind": "python"
+ }
+}

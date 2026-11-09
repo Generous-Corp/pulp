@@ -1,0 +1,40 @@
+{
+ "name": "agent-capability-manifest-check",
+ "record": {
+  "entry": "tools/scripts/agent_capability_manifest.py",
+  "inputs": [
+   ".github/workflows",
+   "core/audio/include/pulp/audio",
+   "core/host/include",
+   "core/midi/include/pulp/midi",
+   "core/music/include/pulp/music",
+   "core/playback/include/pulp/playback",
+   "core/sequence/include/pulp/sequence",
+   "core/signal/include/pulp/signal",
+   "core/timebase/include/pulp/timebase",
+   "docs/status/agent-capabilities.json",
+   "docs/status/agent-capabilities.schema.json",
+   "docs/status/agent-capability-surface.json",
+   "docs/status/agent-capability-surface.schema.json",
+   "docs/status/forge-catalog.json",
+   "test/test_agent_capability_compile.cpp",
+   "tools/agent-capabilities/contract-history.json",
+   "tools/agent-capabilities/legacy-unreviewed-baseline.json",
+   "tools/dsp_vocabulary.py",
+   "tools/scripts/agent_capability_catalog_foundations.py",
+   "tools/scripts/agent_capability_catalog_performance.py",
+   "tools/scripts/agent_capability_catalog_signal.py",
+   "tools/scripts/agent_capability_catalog_timing.py",
+   "tools/scripts/agent_capability_evolution.py",
+   "tools/scripts/agent_capability_history.py",
+   "tools/scripts/agent_capability_manifest.py",
+   "tools/scripts/agent_capability_registry.py",
+   "tools/scripts/agent_capability_registry_types.py",
+   "tools/scripts/agent_capability_surface.py",
+   "tools/scripts/agent_capability_transaction.py",
+   "tools/scripts/gate_common.py",
+   "tools/scripts/json_schema_lite.py"
+  ],
+  "kind": "python"
+ }
+}

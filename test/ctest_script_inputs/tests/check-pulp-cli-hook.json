@@ -1,0 +1,11 @@
+{
+ "name": "check-pulp-cli-hook",
+ "record": {
+  "entry": "test/test_check_pulp_cli_hook.sh",
+  "inputs": [
+   "hooks/scripts/check-pulp-cli.sh",
+   "test/test_check_pulp_cli_hook.sh"
+  ],
+  "kind": "shell"
+ }
+}

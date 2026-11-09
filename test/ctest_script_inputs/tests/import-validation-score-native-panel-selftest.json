@@ -1,0 +1,11 @@
+{
+ "name": "import-validation-score-native-panel-selftest",
+ "record": {
+  "entry": "tools/import-validation/test_score_native_panel.py",
+  "inputs": [
+   "tools/import-validation/score_native_panel.py",
+   "tools/import-validation/test_score_native_panel.py"
+  ],
+  "kind": "python"
+ }
+}

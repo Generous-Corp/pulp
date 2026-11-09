@@ -1,0 +1,10 @@
+{
+ "name": "timeline-schema-drift-selftest",
+ "record": {
+  "entry": "tools/scripts/test_schema_drift_check.py",
+  "inputs": [
+   "tools/scripts/test_schema_drift_check.py"
+  ],
+  "kind": "python"
+ }
+}

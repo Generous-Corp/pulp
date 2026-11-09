@@ -1,0 +1,11 @@
+{
+ "name": "view-audio-seam-debts",
+ "record": {
+  "entry": "tools/scripts/view_audio_seam_debts.py",
+  "inputs": [
+   "docs/status/view-audio-seam-debts.json",
+   "tools/scripts/view_audio_seam_debts.py"
+  ],
+  "kind": "python"
+ }
+}

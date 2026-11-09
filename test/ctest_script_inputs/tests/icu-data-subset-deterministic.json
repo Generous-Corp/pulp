@@ -1,0 +1,10 @@
+{
+ "name": "icu-data-subset-deterministic",
+ "record": {
+  "entry": "tools/cmake/scripts/icu_data_subset.py",
+  "inputs": [
+   "tools/cmake/scripts/icu_data_subset.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-timeline-multitrack-pdc",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "examples/timeline-phase1/timeline_multitrack_arrangement.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

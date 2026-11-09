@@ -1,0 +1,13 @@
+{
+ "name": "gpu-probe-acceptance-verifier-selftest",
+ "record": {
+  "entry": "tools/scripts/test_verify_gpu_probe_acceptance.py",
+  "inputs": [
+   "tools/cli/gpu_probe/src/native_acceptance.cpp",
+   "tools/cli/gpu_probe/src/native_recipes.cpp",
+   "tools/cli/gpu_probe/src/probe_result_json.cpp",
+   "tools/scripts/test_verify_gpu_probe_acceptance.py"
+  ],
+  "kind": "python"
+ }
+}

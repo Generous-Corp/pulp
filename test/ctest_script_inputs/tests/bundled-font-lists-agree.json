@@ -1,0 +1,10 @@
+{
+ "name": "bundled-font-lists-agree",
+ "record": {
+  "entry": "tools/scripts/check_bundled_font_lists.py",
+  "inputs": [
+   "tools/scripts/check_bundled_font_lists.py"
+  ],
+  "kind": "python"
+ }
+}

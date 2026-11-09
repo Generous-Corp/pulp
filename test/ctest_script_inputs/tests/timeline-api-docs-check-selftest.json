@@ -1,0 +1,14 @@
+{
+ "name": "timeline-api-docs-check-selftest",
+ "record": {
+  "entry": "tools/scripts/timeline_api_docs_check.py",
+  "inputs": [
+   "core/music/include",
+   "core/timeline/include",
+   "core/timeline_editor/include",
+   "core/timeline_view/include",
+   "tools/scripts/timeline_api_docs_check.py"
+  ],
+  "kind": "python"
+ }
+}

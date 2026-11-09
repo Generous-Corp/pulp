@@ -1,0 +1,13 @@
+{
+ "name": "import-layout-parity-gate",
+ "record": {
+  "entry": "test/test_layout_parity_gate.py",
+  "inputs": [
+   "test/fixtures/imports/fig/synthetic.fig",
+   "test/test_layout_parity_gate.py",
+   "tools/import-design/fig_decode.mjs",
+   "tools/import-design/layout_parity.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "pulp-motion-visual-capture-smoke",
+ "record": {
+  "entry": "tools/motion/visual/test_capture_smoke.py",
+  "inputs": [
+   "tools/motion/visual/test_capture_smoke.py"
+  ],
+  "kind": "python"
+ }
+}

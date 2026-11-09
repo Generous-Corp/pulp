@@ -1,0 +1,12 @@
+{
+ "name": "resolve-classify-base-selftest",
+ "record": {
+  "entry": "tools/scripts/test_resolve_classify_base.py",
+  "inputs": [
+   ".github/workflows/build.yml",
+   "tools/scripts/resolve_classify_base.py",
+   "tools/scripts/test_resolve_classify_base.py"
+  ],
+  "kind": "python"
+ }
+}

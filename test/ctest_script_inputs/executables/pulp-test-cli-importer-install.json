@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-cli-importer-install",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_cli_importer_install.cpp",
+   "tools/cli/import_spi.cpp",
+   "tools/cli/importer_install.cpp",
+   "tools/cli/tool_registry.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

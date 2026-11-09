@@ -1,0 +1,11 @@
+{
+ "name": "pulp-ui-clean-output-lint",
+ "record": {
+  "entry": "tools/ui-build/lint/clean_output_lint.py",
+  "inputs": [
+   "tools/ui-build/lint/clean_output_lint.py",
+   "tools/ui-build/lint/fixtures/clean"
+  ],
+  "kind": "python"
+ }
+}

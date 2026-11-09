@@ -1,0 +1,24 @@
+{
+ "name": "pulp-test-control-vendor-operations-e2e",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli",
+   "pulp-control-vendor-product-fixture",
+   "pulp-mcp"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "inspect/src/control_broker_daemon.cpp",
+   "test/support/control_sample_region_e2e.hpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": [],
+  "unmatched_programs": [
+   "pulp-control-broker"
+  ]
+ },
+ "scanned": true
+}

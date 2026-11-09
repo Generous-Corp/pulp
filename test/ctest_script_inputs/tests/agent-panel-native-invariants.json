@@ -1,0 +1,11 @@
+{
+ "name": "agent-panel-native-invariants",
+ "record": {
+  "entry": "tools/import-validation/check_agent_panel_invariants.py",
+  "inputs": [
+   "test/fixtures/agent-panels/magneto",
+   "tools/import-validation/check_agent_panel_invariants.py"
+  ],
+  "kind": "python"
+ }
+}

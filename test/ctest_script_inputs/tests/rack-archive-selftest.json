@@ -1,0 +1,12 @@
+{
+ "name": "rack-archive-selftest",
+ "record": {
+  "entry": "tools/rack/test_archive.py",
+  "inputs": [
+   "tools/rack/archive.py",
+   "tools/rack/test_archive.py",
+   "tools/rack/toolpaths.py"
+  ],
+  "kind": "python"
+ }
+}

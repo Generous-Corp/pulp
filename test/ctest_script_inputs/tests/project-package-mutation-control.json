@@ -1,0 +1,8 @@
+{
+ "name": "project-package-mutation-control",
+ "record": {
+  "entry": "${CMAKE_BINARY_DIR}/test/run_project_package_mutation_control.py",
+  "inputs": [],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,12 @@
+{
+ "name": "dead-test-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_dead_test_guard.py",
+  "inputs": [
+   "test/CMakeLists.txt",
+   "tools/scripts/dead_test_guard.py",
+   "tools/scripts/test_dead_test_guard.py"
+  ],
+  "kind": "python"
+ }
+}

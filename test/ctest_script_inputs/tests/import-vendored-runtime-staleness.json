@@ -1,0 +1,11 @@
+{
+ "name": "import-vendored-runtime-staleness",
+ "record": {
+  "entry": "tools/import-validation/test_check_vendored_runtime.py",
+  "inputs": [
+   "tools/import-validation/check_vendored_runtime.py",
+   "tools/import-validation/test_check_vendored_runtime.py"
+  ],
+  "kind": "python"
+ }
+}

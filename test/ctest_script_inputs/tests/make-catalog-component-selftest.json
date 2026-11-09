@@ -1,0 +1,15 @@
+{
+ "name": "make-catalog-component-selftest",
+ "record": {
+  "entry": "tools/import-design/test_make_catalog_component.py",
+  "inputs": [
+   "core/view",
+   "core/view/audio/CMakeLists.txt",
+   "core/view/audio/include/pulp/view/audio_widgets.hpp",
+   "core/view/cmake/PulpViewSources.cmake",
+   "core/view/include/pulp/design/design_system.hpp",
+   "tools/import-design/test_make_catalog_component.py"
+  ],
+  "kind": "python"
+ }
+}
