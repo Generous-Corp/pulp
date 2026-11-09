@@ -643,7 +643,7 @@ per-ABI entry point for it.** Go through the plugin's own state:
 
   The portable list is `wav_decoder.cpp` alone. The layout report
   (`core/audio/src/audio_file_layout*.cpp`, behind `pulp audio inspect`) sits in
-  `pulp-audio` only and is not portable: it opens files with
+  `pulp-audio` only and is not portable by design: it opens files with
   positional reads and pulls in the AIFF, FLAC, Ogg, MP3 and MP4 walkers.
   `wav_decoder.hpp` exposes `interpret_wav_format` for it, which runs dr_wav
   over a synthetic header built from a `fmt ` payload and a data size; that

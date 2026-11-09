@@ -284,8 +284,8 @@ can still be wrong. `test/test_store_lifetime.cpp` pins the ordering.
 path enforces the format registry's `DecodeLimits` (2^30 frames, 64 channels,
 4 GiB of float output) and refuses a header past them, naming the limit on
 stderr. Run `pulp audio inspect` first on any large or suspicious file: it
-reads the header window only and tells you
-whether the decoder would accept the layout and which ceiling it would hit.
+reads the header window only and tells you whether the decoder would accept
+the layout and which ceiling it would hit.
 The CHOC WAV path behind `read_audio_file` has no ceiling of its own and
 allocates whatever the header declares; a WAV declaring 2^30+1 frames crashes
 `summarize` with a bus error instead of refusing. Inspect it, do not decode it.

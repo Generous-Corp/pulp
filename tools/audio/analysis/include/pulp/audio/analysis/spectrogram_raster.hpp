@@ -12,9 +12,9 @@
 ///          ──frequency_axis_labels + compose_plot_with_chrome──▶ final image
 ///
 /// Display-only contract: the grid and the image never feed a verdict. The
-/// dB values are calibrated (a full-scale sine reads 0 dBFS at its bin), so a reader
-/// can trust the colour bar, but anything that needs a number should call the
-/// analyzers in audio_spectrum.hpp, not read pixels.
+/// dB values are calibrated (a full-scale sine reads 0 dBFS at its bin), so
+/// a reader can trust the colour bar, but anything that needs a number
+/// should call the analyzers in audio_spectrum.hpp, not read pixels.
 ///
 /// Why not `pulp::signal::StftT`: that class is the realtime visualization
 /// STFT (symmetric windows from `WindowFunction`, an FFT size capped for

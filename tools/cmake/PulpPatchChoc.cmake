@@ -236,8 +236,8 @@ endfunction()
 # channels with a block of one byte makes the reader step through the data
 # one byte per frame while copying two samples per frame: the last frame of
 # each 2048-byte raw block reads past the stack buffer (an AddressSanitizer
-# stack-buffer-overflow). A block smaller than its channels' samples cannot be laid out, so the patch refuses
-# it; a larger block (padding) stays legal.
+# stack-buffer-overflow). A block smaller than its channels' samples cannot
+# be laid out, so the patch refuses it; a larger block (padding) stays legal.
 function(pulp_patch_choc_wav_block_align_bounds choc_source_dir)
     set(_pulp_choc_wav_header
         "${choc_source_dir}/choc/audio/choc_AudioFileFormat_WAV.h")
