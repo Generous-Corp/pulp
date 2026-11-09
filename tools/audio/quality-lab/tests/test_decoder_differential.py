@@ -47,12 +47,6 @@ EXPECTED_ACCEPTANCE_SPLITS: dict[str, tuple[bool, bool, str]] = {
         False, True, "the SSND chunk runs past the end of the file; Pulp refuses truncated streams"),
     "wav-w64-pcm16-mono.wav": (
         False, True, "Sony Wave64 envelope; Pulp registers no Wave64 reader"),
-    "aifc-sowt-pcm16-stereo.aifc": (
-        False, True, "AIFF-C 'sowt' (little-endian PCM) is not supported by the AIFF reader; "
-        "tracked in Generous-Corp/pulp issue 11788"),
-    "wav-data-size-zero.wav": (
-        False, True, "the registry refuses a zero-frame WAV; tracked in Generous-Corp/pulp "
-        "issue 11788"),
     "wav-block-align-smaller-than-frame.wav": (
         False, True, "nBlockAlign smaller than channels x sample width; the registry refuses a "
         "frame layout the header contradicts, libsndfile derives the stride"),

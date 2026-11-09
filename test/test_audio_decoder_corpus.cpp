@@ -143,6 +143,7 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
     static const std::map<std::string, SeedExpectation> rows = {
         // valid seeds
         {"aifc-none-pcm16-mono.aifc", E{true, {}, {}, ""}},
+        {"aifc-sowt-pcm16-stereo.aifc", E{true, {}, {}, ""}},
         {"aiff-comm-after-ssnd.aiff", E{true, {}, {}, ""}},
         {"aiff-pcm16-mono.aiff", E{true, {}, {}, ""}},
         {"caf-pcm16-mono.caf", E{true, {}, {}, ""}},
@@ -158,6 +159,7 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
         {"ogg-chained-two-streams.ogg", E{true, {}, {}, ""}},
         {"ogg-vorbis-mono.ogg", E{true, {}, {}, ""}},
         {"wav-bwf-bext-before-data.wav", E{true, {}, {}, ""}},
+        {"wav-data-size-zero.wav", E{true, {}, {}, ""}},
         {"wav-extensible-pcm24in32-stereo.wav", E{true, {}, {}, ""}},
         {"wav-float32-mono-fmt18.wav", E{true, {}, {}, ""}},
         {"wav-float64-mono.wav", E{true, {}, {}, ""}},
@@ -174,13 +176,6 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
                                    {},
                                    "dr_mp3 fails to initialise behind a well-formed APEv2 tag; "
                                    "Generous-Corp/pulp issue 11788"}},
-        {"aifc-sowt-pcm16-stereo.aifc",
-         E{false,
-           {},
-           true,
-           "AIFF-C sowt (little-endian PCM) is not supported by the AIFF reader; issue 11788"}},
-        {"wav-data-size-zero.wav",
-         E{false, {}, true, "a zero-frame WAV is refused as empty; issue 11788"}},
         {"wav-w64-pcm16-mono.wav",
          E{false, {}, true, "Sony Wave64 envelope; Pulp registers no Wave64 reader"}},
         // malformed seeds: refused or decoded, the oracle judges what comes back
