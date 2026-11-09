@@ -254,7 +254,7 @@ TEST_CASE("MemoryMappedAudioReader ranged read of a WAV", "[audio][mmap][ranged]
     }
 
     // Sub-channel (mono-from-stereo) reads must stay on the ranged path (no
-    // whole-file decode) — a normal sample-library operation. The decoder
+    // whole-file decode), a normal sample-library operation. The decoder
     // writes every file channel, so the reader decodes both into scratch and
     // copies the requested channel-0 prefix.
     auto read_mono_at = [&](std::uint64_t start, std::uint64_t n) {
