@@ -587,14 +587,18 @@ def _fold_migration_notes(repo: Path, plan: list[Assignment]) -> list[str]:
 
 
 # What `agent_capability_manifest.py --assign-pending` rewrites: the counter
-# constants and the three generated artifacts that carry them.
+# constants and the generated records that carry them. The surface ledger's
+# counter lives in its meta file; an assignment adds one history entry file.
 CAPABILITY_SCRIPT = "tools/scripts/agent_capability_manifest.py"
 CAPABILITY_ASSIGNED_PATHS = (
     CAPABILITY_SCRIPT,
     "docs/status/agent-capabilities.json",
-    "docs/status/agent-capability-surface.json",
-    "tools/agent-capabilities/contract-history.json",
+    "docs/status/agent-capability-surface/meta.json",
+    "tools/agent-capabilities/history",
 )
+# Directories among CAPABILITY_ASSIGNED_PATHS whose new, untracked files a
+# failed assignment must remove as well as restore.
+CAPABILITY_ASSIGNED_DIRECTORIES = ("tools/agent-capabilities/history",)
 
 
 # --assign-pending regenerates the manifest, surface ledger and history, which
@@ -627,8 +631,11 @@ def _assign_capability_counters(repo: Path, plan: list[Assignment]) -> list[str]
         # combined checkout restore nothing.
         for path in CAPABILITY_ASSIGNED_PATHS:
             subprocess.run(["git", "checkout", "--", path], cwd=repo, capture_output=True)
+        for path in CAPABILITY_ASSIGNED_DIRECTORIES:
+            subprocess.run(["git", "clean", "-fq", "--", path], cwd=repo, capture_output=True)
         return []
-    moved = subprocess.run(["git", "status", "--porcelain", "--", *CAPABILITY_ASSIGNED_PATHS],
+    moved = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all", "--",
+                            *CAPABILITY_ASSIGNED_PATHS],
                            cwd=repo, capture_output=True, text=True, encoding="utf-8").stdout
     return [line[3:] for line in moved.splitlines() if line.strip()]
 

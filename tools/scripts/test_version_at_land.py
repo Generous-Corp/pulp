@@ -2315,6 +2315,34 @@ class CapabilityCounterAssignTest(unittest.TestCase):
         self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text(encoding="utf-8"))
         self.assertIn("timed out", err.getvalue())
 
+    def test_an_assignment_carries_its_new_history_entry_and_a_failure_removes_it(self):
+        """An assignment adds one history entry file; a failed one leaves none behind."""
+        entry = "tools/agent-capabilities/history/" + "e" * 64 + ".json"
+        meta = "docs/status/agent-capability-surface/meta.json"
+        self.r.write(meta, '{"inventory_version": 1}\n')
+        self.r.commit("seed surface meta")
+        for exit_code in (1, 0):
+            self.r.write(val.CAPABILITY_SCRIPT,
+                         "import pathlib, sys\n"
+                         f"pathlib.Path({entry!r}).parent.mkdir(parents=True, exist_ok=True)\n"
+                         f"pathlib.Path({entry!r}).write_text('{{}}\\n')\n"
+                         f"pathlib.Path({meta!r}).write_text('{{\"inventory_version\": 2}}\\n')\n"
+                         f"sys.exit({exit_code})\n")
+            self.r.commit(f"install stub exiting {exit_code}")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                edited = val._write_plan(self.repo, CONFIG, self._sdk())
+            if exit_code:
+                self.assertNotIn(entry, edited)
+                self.assertFalse((self.repo / entry).exists(), "a failed assignment left its entry")
+                self.assertIn('"inventory_version": 1', (self.repo / meta).read_text(encoding="utf-8"))
+                _git(self.repo, "checkout", "--", ".", env=self.r.env)
+            else:
+                self.assertIn(entry, edited)
+                self.assertIn(meta, edited)
+                self.assertEqual(val.paths_outside_writer_allowlist(
+                    load_config(Path(__file__).with_name("versioning.json")), [entry, meta]), [])
+
     def test_control_a_bump_without_capability_edits_carries_no_skill_trailer(self):
         message = val._bump_message(self._sdk(), "a" * 40, "b" * 40, ["CMakeLists.txt"])
         self.assertNotIn("Skill-Update", message)
@@ -2458,6 +2486,18 @@ class WriterAllowlistHelpersTest(unittest.TestCase):
         self.assertEqual(val.paths_outside_writer_allowlist(
             self.config,
             ["CMakeLists.txt", "CHANGELOG.md", "docs/migrations/unreleased/x.md"]), [])
+
+    def test_a_capability_assignment_is_inside_and_a_header_record_is_not(self) -> None:
+        """The bump may write the surface counter and one history entry; it never
+        rewrites a header's record or its reviewed fingerprint."""
+        inside = ["docs/status/agent-capability-surface/meta.json",
+                  "tools/agent-capabilities/history/" + "a" * 64 + ".json",
+                  "docs/status/agent-capabilities.json",
+                  "tools/scripts/agent_capability_manifest.py"]
+        self.assertEqual(val.paths_outside_writer_allowlist(self.config, inside), [])
+        outside = ["docs/status/agent-capability-surface/headers/pulp/midi/strum.hpp.json",
+                   "tools/agent-capabilities/fingerprints/pulp/midi/strum.hpp.json"]
+        self.assertEqual(val.paths_outside_writer_allowlist(self.config, outside), sorted(outside))
 
     def test_any_other_path_is_reported_sorted(self) -> None:
         self.assertEqual(val.paths_outside_writer_allowlist(

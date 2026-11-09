@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/breakpoint_envelope.hpp",
+  "fingerprint": "sha256:4f37c4c188e7094d8bf615144d0735a629d26a974f394f40e380a69d82a74c06",
+  "include": "pulp/signal/breakpoint_envelope.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.modulation-primitives"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

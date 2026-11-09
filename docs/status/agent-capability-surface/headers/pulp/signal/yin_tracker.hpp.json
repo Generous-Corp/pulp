@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/yin_tracker.hpp",
+  "fingerprint": "sha256:a2667df45dc5c6a29a920a3381a808958ebcca3c7ae7c15feaa9e9de4fffd171",
+  "include": "pulp/signal/yin_tracker.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/explicit_q_resonator_bank.hpp",
+  "fingerprint": "sha256:1504f5c4bc3752754bc7591e6a6509a9aeb06df018417749bd149802463917da"
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/audio_renderer_limits.hpp",
+  "fingerprint": "sha256:4fc9eb204afba8208594e823cf27a3b89e5e0979ed8cfa064b34bdf111b0d0d0",
+  "include": "pulp/playback/audio_renderer_limits.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "sequence.controller-playback"
+  ],
+  "rationale": "Shared compile-path and realtime ceilings for the audio renderer, deliberately split out of the renderer API so the structural PlaybackProgram header can bound itself without pulling buffer or decoder surfaces. pulp/playback/program.hpp is the include the sequence.controller-playback bindings name, and it includes this header directly, so the advertised bindings do not compile without it."
+}

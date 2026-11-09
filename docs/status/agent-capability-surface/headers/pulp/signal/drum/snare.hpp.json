@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/drum/snare.hpp",
+  "fingerprint": "sha256:d2d65499d7f607bb891fbbee478207b288a92ab3afc5c4e23fc86d6af40810e6",
+  "include": "pulp/signal/drum/snare.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

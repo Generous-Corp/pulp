@@ -84,7 +84,7 @@
         },
         {
           "kind": "agent_manifest",
-          "path": "docs/status/agent-capability-surface.json",
+          "path": "docs/status/agent-capability-surface/headers/pulp/midi/strum.hpp.json",
           "needles": [
             "\"source\": \"core/midi/include/pulp/midi/strum.hpp\""
           ]

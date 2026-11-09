@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/zero_latency_convolver_support.hpp",
+  "fingerprint": "sha256:8a70ab86dcf8dcdd7df62d8d7c6720ec3d71f947866d1310ee5675a3a158c815",
+  "include": "pulp/signal/zero_latency_convolver_support.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Design constants, schedule groups and per-cell state behind ZeroLatencyConvolverT. Support infrastructure for that engine rather than an advertised generator surface; it carries no capability claim of its own."
+}

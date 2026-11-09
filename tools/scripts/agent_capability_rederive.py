@@ -46,6 +46,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import agent_capability_history as history  # noqa: E402
 import agent_capability_manifest as manifest  # noqa: E402
+import agent_capability_store as store  # noqa: E402
 import agent_capability_surface as surface  # noqa: E402
 
 MANIFEST_CONSTANT = "MANIFEST_REVISION"
@@ -126,7 +127,7 @@ def _read_base_history(
     the integer every open branch races for. That is never silent; the
     warning names the fallback and why. `--write` and `--check` still
     validate the history in full."""
-    item = history.read_git_path(root, comparison, history.HISTORY_FILE)
+    item = store.read_at(root, comparison, history.HISTORY_FILE)
     reason = None
     if item.status != "available":
         reason = f"it is {item.status}"
@@ -304,7 +305,7 @@ def _resolve_base(
             "PULP_AGENT_CAPABILITY_BASE_REF at the ref being merged."
         )
     manifest_read = history.read_git_path(root, comparison, history.SNAPSHOT)
-    surface_read = history.read_git_path(root, comparison, surface.SURFACE_SNAPSHOT)
+    surface_read = store.read_at(root, comparison, surface.SURFACE_SNAPSHOT)
     _require_base_merged(root, comparison, merge_head, surface_read.content)
     for item in (manifest_read, surface_read):
         if item.status in {"history_unavailable", "command_failed"}:
@@ -328,10 +329,13 @@ def _resolve_base(
     return base_manifest, base_surface, comparison
 
 
+# What a reset returns to the base: the manifest snapshot and the two record
+# directories --write regenerates from it. The reviewed fingerprints are
+# inputs, not generated, so they are never reset.
 GENERATED_ARTIFACTS = (
     history.SNAPSHOT,
-    surface.SURFACE_SNAPSHOT,
-    history.HISTORY_FILE,
+    store.SURFACE_DIR,
+    store.HISTORY_DIR,
 )
 
 
@@ -348,9 +352,11 @@ def _restore_generated_artifacts(
     change`. The cell is correct and the write refuses anyway.
 
     Resetting first makes "previous" mean the base for both checks. It is safe
-    precisely because these three files are generated — `--write` rebuilds them
+    precisely because these records are generated — `--write` rebuilds them
     from the catalogs and headers, so discarding a merged intermediate loses
-    nothing that is not immediately recomputed.
+    nothing that is not immediately recomputed. The surface ledger and history
+    are rewritten from the base's documents (whichever layout the base holds)
+    into their fragment directories, extra fragments included in the reset.
     """
     restored: list[str] = []
     tip = protected_tip
@@ -361,13 +367,29 @@ def _restore_generated_artifacts(
         tip = history._resolve_protected_tip(root, base_ref)
     if tip is None:
         return restored
-    for artifact in GENERATED_ARTIFACTS:
-        completed = subprocess.run(
-            ["git", "checkout", tip, "--", str(artifact)],
-            cwd=root, capture_output=True, text=True,
-        )
-        if completed.returncode == 0:
-            restored.append(str(artifact))
+    completed = subprocess.run(
+        ["git", "checkout", tip, "--", str(history.SNAPSHOT)],
+        cwd=root, capture_output=True, text=True,
+    )
+    if completed.returncode == 0:
+        restored.append(str(history.SNAPSHOT))
+    try:
+        surface_text = store.text_at(root, tip, surface.SURFACE_SNAPSHOT)
+        history_text = store.text_at(root, tip, history.HISTORY_FILE)
+        if surface_text is None or history_text is None:
+            return restored
+        base_history = history.json.loads(history_text)
+        if base_history.get("schema") != history.HISTORY_SCHEMA:
+            base_history = history.history_document(history.history_entries(base_history))
+        for directory, files in (
+            (store.SURFACE_DIR, store.split_surface(history.json.loads(surface_text))),
+            (store.HISTORY_DIR, store.split_history(base_history)),
+        ):
+            store.replace_directory(root, directory, files)
+            restored.append(str(directory))
+    except (store.StoreError, history.HistoryFormatError,
+            history.json.JSONDecodeError, OSError):
+        return restored
     return restored
 
 

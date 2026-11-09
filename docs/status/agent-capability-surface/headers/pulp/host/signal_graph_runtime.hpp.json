@@ -1,0 +1,11 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
+  "fingerprint": "sha256:19bd9625c2b4178c78bf55826f09645383e5d86e13b63830ebe58273daf7f412",
+  "include": "pulp/host/signal_graph_runtime.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.sample-region"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

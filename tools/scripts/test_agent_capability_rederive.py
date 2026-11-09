@@ -201,14 +201,15 @@ def exercise_reset_is_write_path_only() -> int:
     someone was still inspecting.
     """
     checks = 0
-    # The reset covers exactly the three files --write regenerates. If a fourth
-    # generated artifact is ever added, this fails rather than silently leaving
-    # it merged-but-unreset — which is the defect this whole path exists to fix.
+    # The reset covers exactly the records --write regenerates from the base.
+    # If another generated artifact is ever added, this fails rather than
+    # silently leaving it merged-but-unreset — which is the defect this whole
+    # path exists to fix.
     names = {str(a) for a in rederive.GENERATED_ARTIFACTS}
     assert names == {
         "docs/status/agent-capabilities.json",
-        "docs/status/agent-capability-surface.json",
-        "tools/agent-capabilities/contract-history.json",
+        "docs/status/agent-capability-surface",
+        "tools/agent-capabilities/history",
     }, names
     checks += 1
 
@@ -217,7 +218,7 @@ def exercise_reset_is_write_path_only() -> int:
     # deliberately broken tool for exactly that reason. Give the reset something
     # to destroy: a generated artifact that differs from the base, standing in
     # for the merge resolution a read-only run must not discard.
-    artifact = ROOT / "docs/status/agent-capability-surface.json"
+    artifact = ROOT / "docs/status/agent-capability-surface/meta.json"
     original = artifact.read_text(encoding="utf-8")
     manifest_script = ROOT / "tools/scripts/agent_capability_manifest.py"
     original_manifest_script = manifest_script.read_text(encoding="utf-8")
@@ -530,15 +531,11 @@ def exercise_github_event_repairs_exact_shallow_merge() -> int:
 
 
 def exercise_git_unavailable_is_not_source_archive() -> int:
-    history_document = rederive.history.json.loads(
-        (ROOT / rederive.history.HISTORY_FILE).read_text()
-    )
+    history_document = rederive.store.load_history(ROOT)
     manifest_document = rederive.history.json.loads(
         (ROOT / rederive.history.SNAPSHOT).read_text()
     )
-    surface_document = rederive.history.json.loads(
-        (ROOT / rederive.surface.SURFACE_SNAPSHOT).read_text()
-    )
+    surface_document = rederive.store.load_surface(ROOT)
     with tempfile.TemporaryDirectory() as directory:
         repo = pathlib.Path(directory, "worktree")
         archive = pathlib.Path(directory, "archive")
@@ -773,7 +770,7 @@ def exercise_unreadable_base_history_warns() -> int:
     import types
 
     checks = 0
-    original = rederive.history.read_git_path
+    original = rederive.store.read_at
     cases = (
         (types.SimpleNamespace(status="history_unavailable", content=None),
          "history_unavailable"),
@@ -782,7 +779,7 @@ def exercise_unreadable_base_history_warns() -> int:
     )
     try:
         for item, reason in cases:
-            rederive.history.read_git_path = lambda *_args, _item=item: _item
+            rederive.store.read_at = lambda *_args, _item=item: _item
             stream = io.StringIO()
             with contextlib.redirect_stderr(stream):
                 result = rederive._read_base_history(ROOT, None)
@@ -791,14 +788,14 @@ def exercise_unreadable_base_history_warns() -> int:
             assert "falls back to base + 1" in message and reason in message, message
             checks += 1
         readable = types.SimpleNamespace(status="available", content='{"schema": "x"}')
-        rederive.history.read_git_path = lambda *_args: readable
+        rederive.store.read_at = lambda *_args: readable
         stream = io.StringIO()
         with contextlib.redirect_stderr(stream):
             assert rederive._read_base_history(ROOT, None) == {"schema": "x"}
         assert stream.getvalue() == "", "a readable history warned"
         checks += 1
     finally:
-        rederive.history.read_git_path = original
+        rederive.store.read_at = original
     return checks
 
 

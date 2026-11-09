@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/lfo.hpp",
+  "fingerprint": "sha256:cf8ba3b89400e1807b5cc4576bafd5f58046780ad68d073bdbda6131762d8adf",
+  "include": "pulp/signal/lfo.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.unison-voice-primitives"
+  ],
+  "rationale": "The house LFO gains opt-in band limiting and a block-mean read built on lfo_sampling.hpp; its wave vocabulary moved there. A modulation-source contract for generators is a separate slice."
+}

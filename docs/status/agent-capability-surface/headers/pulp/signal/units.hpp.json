@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/units.hpp",
+  "fingerprint": "sha256:2f0af86ba3fccbb3017339235c05b7d43b492939c111fc67e93ee2046ee6e264",
+  "include": "pulp/signal/units.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "timebase.beat-division"
+  ],
+  "rationale": "The signal Division compatibility vocabulary now derives from the canonical timebase BeatDivision table. The broad signal unit-conversion header remains outside this slice's generator-facing claims."
+}

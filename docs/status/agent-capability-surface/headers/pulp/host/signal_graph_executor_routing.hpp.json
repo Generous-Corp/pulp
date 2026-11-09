@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/signal_graph_executor_routing.hpp",
+  "fingerprint": "sha256:e77a455304bffa7e75d94903aee89f5d61ec9155b68281eaa107b8e6facd1088",
+  "include": "pulp/host/signal_graph_executor_routing.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Existing executor lowering infrastructure with graph-owned opaque spectral resolver; no public native spectral-stage registration or notation capability."
+}

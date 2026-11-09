@@ -44,7 +44,6 @@ EXPORTS = [
                 include="pulp/format/processor.hpp",
                 qualified_name="pulp::format::Processor::process_block",
                 target="Pulp::format",
-                header_fingerprint="sha256:c343477eeaca3cd7b64f16bf98adafa902ef5cd09df962562f5d89f189ad65d3",
                 address_expression=(
                     "static_cast<bool (pulp::format::Processor::*)("
                     "pulp::format::ProcessBlock&)>(&pulp::format::Processor::process_block)"
@@ -56,7 +55,6 @@ EXPORTS = [
                 include="pulp/format/processor_node_adapter.hpp",
                 qualified_name="pulp::format::ProcessorNodeInstance::create",
                 target="Pulp::format",
-                header_fingerprint="sha256:3ebe075f3ea9c34ef20b9f5838a5cb49fa4adbc32ca4ca29df85b0c54b0ac325",
             ),
         ],
         _link_probes=[
@@ -129,7 +127,6 @@ EXPORTS = [
             include="pulp/audio/wavetable_authoring.hpp",
             qualified_name="pulp::audio::compile_wavetable",
             target="Pulp::audio",
-            header_fingerprint="sha256:52df577e59972f830983062f5c69b9c2f3796597547eb6e6c4fdc011a1951905",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -176,7 +173,6 @@ EXPORTS = [
             include="pulp/audio/midi_voice_modulation_adapter.hpp",
             qualified_name="pulp::audio::MidiVoiceModulationAdapter<128>",
             target="Pulp::audio",
-            header_fingerprint="sha256:8fb955d00ce0ed708d96c397d5bd9cc7f2926c1414ce9ac9976ad6abdae9ef7a",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -224,7 +220,6 @@ EXPORTS = [
             include="pulp/audio/unison_voice_stack.hpp",
             qualified_name="pulp::audio::UnisonVoiceStackManager<>",
             target="Pulp::audio",
-            header_fingerprint="sha256:e5cef314c00880c58fc33618a6657b27811c1afcf003220b9e3176435d8c737d",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -269,7 +264,6 @@ EXPORTS = [
             include="pulp/audio/voice_runtime_facade.hpp",
             qualified_name="pulp::audio::VoiceNoteModulationBridge::write",
             target="Pulp::audio",
-            header_fingerprint="sha256:4237f8cdf64ed1a28330822f41ea8d3fc5a42d955a5b964a54ba24106a7ceab6",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -324,7 +318,6 @@ EXPORTS = [
             include="pulp/audio/voice_modulation_sources.hpp",
             qualified_name="pulp::audio::VoiceModulationSources<4>",
             target="Pulp::audio",
-            header_fingerprint="sha256:fcebd2eee1729ee806c369dd9e2696cc0c1aa8e6442afe01b9e84b2d3dd70da0",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -374,7 +367,6 @@ EXPORTS = [
                 "pulp::audio::VoiceRuntimeFacade<pulp::audio::InstrumentVoiceAllocator>"
             ),
             target="Pulp::audio",
-            header_fingerprint="sha256:4237f8cdf64ed1a28330822f41ea8d3fc5a42d955a5b964a54ba24106a7ceab6",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -417,7 +409,6 @@ EXPORTS = [
             include="pulp/audio/onset_detector.hpp",
             qualified_name="pulp::audio::OnsetDetector",
             target="Pulp::audio",
-            header_fingerprint="sha256:9fc9b55fef9c42057386588c738ecf7fb70908e900ad9698c7e2ff89f753c11c",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -467,7 +458,6 @@ EXPORTS = [
             include="pulp/midi/arpeggiator.hpp",
             qualified_name="pulp::midi::Arpeggiator<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:96ba2417d37bd1ff46876463d61f53fb7345b5aa88c92c9c05f04339e37d4b25",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -515,7 +505,6 @@ EXPORTS = [
             include="pulp/midi/step_player.hpp",
             qualified_name="pulp::midi::StepPlayer<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:b6589ba86b12b13f051e0cf662324b4b0aa08a952b92ea41ce3aba3f4cab5325",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -564,7 +553,6 @@ EXPORTS = [
             include="pulp/midi/chord_memory.hpp",
             qualified_name="pulp::midi::ChordMemory<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:3bce0cc159d68496cf145ad1fb8cd26415f0c7ba18446d5d3618d6cd7bede81b",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -613,13 +601,11 @@ EXPORTS = [
             include="pulp/midi/humanize.hpp",
             qualified_name="pulp::midi::Humanize<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:1c4307dd8107cb3e38f9b3fd5046303f8ab8346164f021ecca414c9f227468b1",
         ), binding(
             role="future-attack-update", kind="cpp_function",
             include="pulp/midi/humanize.hpp",
             qualified_name="pulp::midi::Humanize<>::update_spec_for_future_attacks",
             target="Pulp::midi",
-            header_fingerprint="sha256:1c4307dd8107cb3e38f9b3fd5046303f8ab8346164f021ecca414c9f227468b1",
             address_expression=(
                 "static_cast<bool (pulp::midi::Humanize<>::*)(pulp::midi::HumanizeSpec) noexcept>("
                 "&pulp::midi::Humanize<>::update_spec_for_future_attacks)"
@@ -677,7 +663,6 @@ EXPORTS = [
             include="pulp/midi/latch.hpp",
             qualified_name="pulp::midi::Latch",
             target="Pulp::midi",
-            header_fingerprint="sha256:b00c053ad5172fa56273fabcbcd28001ecc4fba71b81564a7cf20aed0e5e9552",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -727,7 +712,6 @@ EXPORTS = [
             include="pulp/midi/note_delay.hpp",
             qualified_name="pulp::midi::NoteDelay<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:4c327df79dc7cc156f81918268c6dcb8c8da0b279edc3a633adba4bc014eb72d",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -775,7 +759,6 @@ EXPORTS = [
             include="pulp/midi/note_repeat.hpp",
             qualified_name="pulp::midi::NoteRepeat<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:8c00626a60e2ac1813d8ac117f0ce13e0931040107c8383b9265038d932ef763",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -823,7 +806,6 @@ EXPORTS = [
             include="pulp/midi/strum.hpp",
             qualified_name="pulp::midi::Strum<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:d048728399a0f642cc59b8772e834851dfb263f395069cc73a2f6403020ca258",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -863,7 +845,6 @@ EXPORTS = [
             role="entrypoint", kind="cpp_type",
             include="pulp/midi/controller_utility_kernels.hpp",
             qualified_name="pulp::midi::ControllerMapper<>", target="Pulp::midi",
-            header_fingerprint="sha256:4e28f94ab7787db493e743d3f8cf65d1d6c0015dfd15e9425f6006dfe1d9c711",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::ControllerMapper<>",
@@ -895,7 +876,6 @@ EXPORTS = [
             role="entrypoint", kind="cpp_type",
             include="pulp/midi/controller_utility_kernels.hpp",
             qualified_name="pulp::midi::ScaleAwareMpePitch", target="Pulp::midi",
-            header_fingerprint="sha256:4e28f94ab7787db493e743d3f8cf65d1d6c0015dfd15e9425f6006dfe1d9c711",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::ScaleAwareMpePitch",
@@ -930,7 +910,6 @@ EXPORTS = [
             role="entrypoint", kind="cpp_type",
             include="pulp/midi/note_utility_kernels.hpp",
             qualified_name="pulp::midi::NoteLengthShaper<>", target="Pulp::midi",
-            header_fingerprint="sha256:6b4005421eb2f5f98b88765883154451e800a76188a8608887755201f9cc21e6",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::NoteLengthShaper<>",
@@ -965,7 +944,6 @@ EXPORTS = [
             role="entrypoint", kind="cpp_type",
             include="pulp/midi/note_utility_kernels.hpp",
             qualified_name="pulp::midi::MonophonicNoteSelector", target="Pulp::midi",
-            header_fingerprint="sha256:6b4005421eb2f5f98b88765883154451e800a76188a8608887755201f9cc21e6",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::MonophonicNoteSelector",
@@ -1000,7 +978,6 @@ EXPORTS = [
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
             qualified_name="pulp::midi::ChannelRouter", target="Pulp::midi",
-            header_fingerprint="sha256:25f48eace55842dd5e31cfd50722d6a65e5327057b1ec1866e2640145ba27636",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::ChannelRouter",
@@ -1034,7 +1011,6 @@ EXPORTS = [
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
             qualified_name="pulp::midi::NoteRangeFilter", target="Pulp::midi",
-            header_fingerprint="sha256:25f48eace55842dd5e31cfd50722d6a65e5327057b1ec1866e2640145ba27636",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::NoteRangeFilter",
@@ -1068,7 +1044,6 @@ EXPORTS = [
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/midi/routing_utility_kernels.hpp",
             qualified_name="pulp::midi::KeyboardSplit", target="Pulp::midi",
-            header_fingerprint="sha256:25f48eace55842dd5e31cfd50722d6a65e5327057b1ec1866e2640145ba27636",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::midi::KeyboardSplit",
@@ -1097,7 +1072,6 @@ EXPORTS = [
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/music/markov.hpp",
             qualified_name="pulp::music::PreparedMarkovModel<>", target="Pulp::music",
-            header_fingerprint="sha256:8b013fa744ad12df04d4efc454330258afa3977371a66582b91448e6f1c086ef",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::music::PreparedMarkovModel<>",
@@ -1133,27 +1107,22 @@ EXPORTS = [
             binding(
                 role="euclidean", kind="cpp_function", include="pulp/music/pattern.hpp",
                 qualified_name="pulp::music::euclidean_pattern<64>", target="Pulp::music",
-                header_fingerprint="sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
             ),
             binding(
                 role="recipe", kind="cpp_function", include="pulp/music/pattern.hpp",
                 qualified_name="pulp::music::materialize_pattern<64>", target="Pulp::music",
-                header_fingerprint="sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
             ),
             binding(
                 role="walker", kind="cpp_type", include="pulp/music/pattern.hpp",
                 qualified_name="pulp::music::PatternWalker<>", target="Pulp::music",
-                header_fingerprint="sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
             ),
             binding(
                 role="cellular", kind="cpp_function", include="pulp/music/pattern.hpp",
                 qualified_name="pulp::music::cellular_evolve<64>", target="Pulp::music",
-                header_fingerprint="sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
             ),
             binding(
                 role="shift_register", kind="cpp_function", include="pulp/music/pattern.hpp",
                 qualified_name="pulp::music::looping_shift_register<64>", target="Pulp::music",
-                header_fingerprint="sha256:ca7cc580012662880465801996dca4b6b6e23aec07c6ec07d573788347bf32f5",
             ),
         ],
         _link_probes=[
@@ -1214,91 +1183,76 @@ EXPORTS = [
                 role="event-id", kind="cpp_type",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::PatternEventId", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="event-role", kind="cpp_type",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::PatternEventRole", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="event-record", kind="cpp_type",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::PatternEvent", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="error", kind="cpp_type",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::PatternDevelopmentError", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="pattern", kind="cpp_type",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::DevelopmentPattern<>", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="result", kind="cpp_type",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::PatternDevelopmentResult<>", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="set-operation", kind="cpp_type",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::PatternSetOperation", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="density-selection", kind="cpp_type",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::DensitySelection", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="regional-fill-selection", kind="cpp_type",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::RegionalFillSelection", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="morph-selection", kind="cpp_type",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::PatternMorphSelection", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="make-event-id", kind="cpp_function",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::make_pattern_event_id", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="set-algebra", kind="cpp_function",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::pattern_set<64>", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="density", kind="cpp_function",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::select_pattern_density<64>", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="regional-fill", kind="cpp_function",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::apply_regional_fill<64>", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
             binding(
                 role="morph", kind="cpp_function",
                 include="pulp/music/pattern_development.hpp",
                 qualified_name="pulp::music::morph_patterns<64>", target="Pulp::music",
-                header_fingerprint="sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
             ),
         ],
         _link_probes=[
@@ -1360,7 +1314,6 @@ EXPORTS = [
             role="entrypoint", kind="cpp_function",
             include="pulp/music/rhythm_relationship.hpp",
             qualified_name="pulp::music::derive_rhythm_relationship<64>", target="Pulp::music",
-            header_fingerprint="sha256:bcb234becb7b912a516ebf4d33152fcbf4e326b59251a5977b4c1a2e653de433",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::music::derive_rhythm_relationship<64>",

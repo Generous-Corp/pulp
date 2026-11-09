@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/sample_zone_map.hpp",
+  "fingerprint": "sha256:1da1aee15d53f0a8b862d6879eed971babcbedaad24bb4a35dbb04d68e365a83",
+  "include": "pulp/audio/sample_zone_map.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

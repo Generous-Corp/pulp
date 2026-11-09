@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/realtime_stretch_renderer.hpp",
+  "fingerprint": "sha256:25b344ef63523fdad5f4af59072a908b488042f2e149494ca36ec3e1beb32073",
+  "include": "pulp/playback/realtime_stretch_renderer.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "RealtimeStretchRenderCode and the live stretch runtime that owns a disjoint mutable lane per track, with explicit codes for unsupported scrubbing, impossible ratios, backpressure and underflow. It is a bounded realtime renderer composed inside the playback engine, not an advertised installed capability."
+}
