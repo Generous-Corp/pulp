@@ -394,8 +394,6 @@ if(PULP_AUDIO_QUALITY_LAB_GATE)
             "-DPULP_AUDIO_QUALITY_LAB_PYTHON=/path/to/python with numpy, "
             "soundfile, quality_lab, and pytest available")
     endif()
-    set(_pulp_sampler_aql_test
-        "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_sampler_interpolation_reference.py")
     foreach(_pulp_sampler_aql_case IN ITEMS reference negative-control)
         if(_pulp_sampler_aql_case STREQUAL "reference")
             set(_pulp_sampler_aql_expression
@@ -404,64 +402,34 @@ if(PULP_AUDIO_QUALITY_LAB_GATE)
             set(_pulp_sampler_aql_expression
                 "test_reference_comparison_has_a_working_negative_control")
         endif()
-        add_test(NAME sampler-quality-lab-${_pulp_sampler_aql_case}
-            COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
-                "${_pulp_sampler_aql_test}" -q -k "${_pulp_sampler_aql_expression}")
-        set_tests_properties(sampler-quality-lab-${_pulp_sampler_aql_case}
-            PROPERTIES
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-                ENVIRONMENT
-                    "PULP_SAMPLER_RENDER_WAV=$<TARGET_FILE:pulp-sampler-render-wav>;PULP_SAMPLER_AQL_REQUIRED=1;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-                LABELS "audio;sampler;quality-lab;dependency-gate"
-                TIMEOUT 120)
+        pulp_add_quality_lab_pytest(sampler-quality-lab-${_pulp_sampler_aql_case}
+            TEST_FILE tools/audio/quality-lab/tests/test_sampler_interpolation_reference.py
+            FILTER "${_pulp_sampler_aql_expression}"
+            ENV "PULP_SAMPLER_RENDER_WAV=$<TARGET_FILE:pulp-sampler-render-wav>"
+                PULP_SAMPLER_AQL_REQUIRED=1
+            LABELS sampler)
     endforeach()
-    set(_pulp_sampler_heritage_aql_test
-        "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_sampler_heritage_reference.py")
     foreach(_pulp_sampler_heritage_case IN ITEMS reference negative-control)
         if(_pulp_sampler_heritage_case STREQUAL "reference")
-            set(_pulp_sampler_heritage_expression
-                "not negative_control")
+            set(_pulp_sampler_heritage_expression "not negative_control")
         else()
             set(_pulp_sampler_heritage_expression "negative_control")
         endif()
-        add_test(NAME sampler-heritage-quality-lab-${_pulp_sampler_heritage_case}
-            COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
-                "${_pulp_sampler_heritage_aql_test}" -q -k
-                "${_pulp_sampler_heritage_expression}")
-        set_tests_properties(
-            sampler-heritage-quality-lab-${_pulp_sampler_heritage_case}
-            PROPERTIES
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-                ENVIRONMENT
-                    "PULP_SAMPLER_HERITAGE_RENDER_WAV=$<TARGET_FILE:pulp-sampler-heritage-render-wav>;PULP_SAMPLER_AQL_REQUIRED=1;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-                LABELS "audio;sampler;heritage;quality-lab;dependency-gate"
-                TIMEOUT 120)
+        pulp_add_quality_lab_pytest(sampler-heritage-quality-lab-${_pulp_sampler_heritage_case}
+            TEST_FILE tools/audio/quality-lab/tests/test_sampler_heritage_reference.py
+            FILTER "${_pulp_sampler_heritage_expression}"
+            ENV "PULP_SAMPLER_HERITAGE_RENDER_WAV=$<TARGET_FILE:pulp-sampler-heritage-render-wav>"
+                PULP_SAMPLER_AQL_REQUIRED=1
+            LABELS sampler heritage)
     endforeach()
-    add_test(NAME quality-lab-reference-free
-        COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
-            "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_reference_free.py"
-            -q)
-    set_tests_properties(quality-lab-reference-free
-        PROPERTIES
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-            ENVIRONMENT
-                "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-            LABELS "audio;quality-lab;dependency-gate"
-            TIMEOUT 120)
+    pulp_add_quality_lab_pytest(quality-lab-reference-free
+        TEST_FILE tools/audio/quality-lab/tests/test_reference_free.py)
     # Display-only image artifacts: a report with and without them has an
     # identical gate view, no verdict module imports the exporter, and the
     # attached block carries no absolute paths. Uses a fake CLI; needs no build.
-    add_test(NAME quality-lab-artifacts
-        COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
-            "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_artifacts.py"
-            -q)
-    set_tests_properties(quality-lab-artifacts
-        PROPERTIES
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-            ENVIRONMENT
-                "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-            LABELS "audio;quality-lab;dependency-gate"
-            TIMEOUT 300)
+    pulp_add_quality_lab_pytest(quality-lab-artifacts
+        TEST_FILE tools/audio/quality-lab/tests/test_artifacts.py
+        TIMEOUT 300)
 endif()
 if(PULP_HAS_VST3)
     # The VST3 sibling of the CLAP null above: same deterministic Processor,

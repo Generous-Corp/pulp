@@ -301,3 +301,24 @@ TEST_CASE("an idle scope causes no main-thread callouts", "[platform][main-threa
     timer.cancel();
     REQUIRE(pulp::platform::detail::main_thread_callouts() - armed_before >= 3);
 }
+
+TEST_CASE("teardown hooks run once when the scope is destroyed",
+          "[platform][main-thread][teardown]") {
+    int ran = 0, removed = 0;
+    bool posts_stopped_first = false;
+    {
+        MainThreadScope scope;
+        MainThreadScope::Handle handle = scope.handle();
+        // The hook runs from the scope's destructor, after `handle` (declared
+        // later) is gone, so it holds its own copy.
+        REQUIRE(scope.add_teardown([&ran, &posts_stopped_first, handle] {
+            ++ran;
+            posts_stopped_first = !handle.post([] {});
+        }) != 0);
+        const auto id = scope.add_teardown([&] { ++removed; });
+        scope.remove_teardown(id);
+    }
+    REQUIRE(ran == 1);
+    REQUIRE(removed == 0);
+    REQUIRE(posts_stopped_first);
+}

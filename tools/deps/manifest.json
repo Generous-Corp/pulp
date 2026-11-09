@@ -7,7 +7,9 @@
       "version": "user-supplied",
       "source_kind": "developer-supplied",
       "repository": "https://my.avid.com/products/cppsdk?toolkit=AAX",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "source_files": [
@@ -24,7 +26,10 @@
       "version": "1.3.0",
       "source_kind": "external-clone",
       "repository": "https://github.com/apple/AudioUnitSDK.git",
-      "upstream": { "kind": "git-tag", "ref": "AudioUnitSDK-1.3.0" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "AudioUnitSDK-1.3.0"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -40,8 +45,13 @@
       "version": "7.29.7",
       "source_kind": "npm",
       "repository": "https://github.com/babel/babel/tree/main/packages/babel-parser",
-      "upstream": { "kind": "none" },
-      "external_names": ["@babel/parser", "babel-parser"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "@babel/parser",
+        "babel-parser"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "JSX/TSX parser for tools/import-design/jsx-runtime/jsx-contract-audit.mjs. Used for source-contract extraction during import validation; npm-installed in the local jsx-runtime tooling directory and not bundled into Pulp's C++ runtime.",
@@ -60,8 +70,12 @@
       "version": "7.29.0",
       "source_kind": "vendored",
       "repository": "https://github.com/babel/babel/tree/main/packages/babel-standalone",
-      "upstream": { "kind": "none" },
-      "external_names": ["@babel/standalone"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "@babel/standalone"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Unmodified @babel/standalone 7.29.0 build embedded, gzip+base64, in the Claude standalone bundle frozen as the importer differential lab holdout fixture test/fixtures/import-differential/holdout/spectr-standalone.html. Chromium evaluates it only inside the lab's browser capture; it is never built, linked, or shipped.",
@@ -81,10 +95,17 @@
       "version": "v1.2.1",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/google/brotli.git",
-      "upstream": { "kind": "git-tag", "ref": "v1.2.1", "commit": "db24a98aed38a16de78cc05ca15cdd8dc2a0d92d" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v1.2.1",
+        "commit": "db24a98aed38a16de78cc05ca15cdd8dc2a0d92d"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "source_files": ["tools/cmake/PulpDependencies.cmake", "core/canvas/CMakeLists.txt"]
+      "source_files": [
+        "tools/cmake/PulpDependencies.cmake",
+        "core/canvas/CMakeLists.txt"
+      ]
     },
     {
       "name": "Catch2",
@@ -93,7 +114,10 @@
       "version": "v3.16.1",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/catchorg/Catch2.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.16.1" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v3.16.1"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -107,7 +131,11 @@
       "version": "pulp-webview-dnd-poc2 (b586f33d)",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/danielraffel/choc.git",
-      "upstream": { "kind": "git-tag", "ref": "pulp-webview-dnd-poc2", "commit": "b586f33d1c9e8bee98c2b420a5b20bf525c3c7be" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "pulp-webview-dnd-poc2",
+        "commit": "b586f33d1c9e8bee98c2b420a5b20bf525c3c7be"
+      },
       "interim_fork": "Pinned to a danielraffel/choc fork tag adding WebView file drag-and-drop (Tracktion/choc#64 PoC) plus a cherry-pick of upstream Tracktion/choc 9181665: parseString() stops at end of input instead of reading past an unterminated string (a fuzzed pulp.package.json content-pack manifest reached that heap over-read). Fork is upstream f0f5cdf5a938 +5 DnD commits +2 JSON EOF commits, -0. Revert to upstream Tracktion/choc when #64 merges — see pulp #3619.",
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
@@ -122,7 +150,10 @@
       "version": "1.2.10",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/free-audio/clap.git",
-      "upstream": { "kind": "git-tag", "ref": "1.2.10" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "1.2.10"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -137,7 +168,9 @@
       "version": "5.0.1",
       "source_kind": "cargo",
       "repository": "https://github.com/watchexec/command-group",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Statically linked into the Rust CLI to contain trace_processor in a Unix process group or Windows Job Object and terminate the full child tree when named GPU analysis exceeds its deadline or output cap. Pulp redistributes under Apache-2.0 because command-group's Windows job-object implementation contains Apache-2.0-only adapted code.",
@@ -154,7 +187,9 @@
       "version": "vendored-snapshot",
       "source_kind": "vendored",
       "repository": "https://github.com/yhirose/cpp-httplib.git",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -170,8 +205,12 @@
       "version": "3.2.1",
       "source_kind": "npm",
       "repository": "https://github.com/csstree/csstree",
-      "upstream": { "kind": "none" },
-      "external_names": ["csstree"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "csstree"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "CSS value parser and lexer validator for tools/import-design/jsx-runtime/jsx-contract-audit.mjs. Used to normalize source style contracts during import validation; npm-installed in the local jsx-runtime tooling directory and not bundled into Pulp's C++ runtime.",
@@ -190,7 +229,9 @@
       "version": "chrome/m158 deps (bundled in Skia toolchain)",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://dawn.googlesource.com/dawn",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Bundled through the Skia chrome/m158 prebuilt toolchain (danielraffel/skia-builder fork). Exact Dawn revision tracks Skia's DEPS file at be7d7c3e996e567eda7dc9774274f7a0103cdb8c; the bundled build reports Dawn SHA1 1716e88cc9e58398fab5d4473f7f2e858667b677 (include/dawn/dawn_version.h).",
@@ -209,7 +250,9 @@
       "version": "vendored-snapshot; dr_mp3@4d74802+0b12cb57",
       "source_kind": "vendored",
       "repository": "https://github.com/mackron/dr_libs.git",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -228,7 +271,10 @@
       "version": "1.5.9",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/google/draco.git",
-      "upstream": { "kind": "git-tag", "ref": "1.5.9" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "1.5.9"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Optional, only fetched when PULP_ENABLE_DRACO=ON. Codex 2026-04-21 wave 2 P2 on #565: reclassified from the developer-supplied vendor-SDK carve-out into the normal dependency graph so strict audits and upstream-drift checks cover it.",
@@ -243,8 +289,12 @@
       "version": "0.25.x direct (0.28.1 via Remotion)",
       "source_kind": "npm",
       "repository": "https://github.com/evanw/esbuild",
-      "upstream": { "kind": "none" },
-      "external_names": ["esbuild"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "esbuild"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "notes": "Build-time JS/TS bundler for @pulp/react, pulp-import-ir, the Figma plugin, and the Three.js IIFE bundle. npm devDependency, installed on demand; build-time only, never bundled into Pulp or shipped in plugins.",
@@ -265,7 +315,10 @@
       "version": "v0.9.1",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/spnda/fastgltf.git",
-      "upstream": { "kind": "git-tag", "ref": "v0.9.1" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v0.9.1"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Optional native no-JS glTF/GLB parser, fetched only when PULP_ENABLE_SCENE3D=ON. Kept behind core/scene so fastgltf types do not leak into public Pulp APIs.",
@@ -285,8 +338,12 @@
       "version": "^0.8.3",
       "source_kind": "npm",
       "repository": "https://github.com/101arrowz/fflate",
-      "upstream": { "kind": "none" },
-      "external_names": ["fflate"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "fflate"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "notes": "Deflate/zip used by the developer-only Figma plugin (tools/figma-plugin). npm-installed on demand; never bundled into Pulp or shipped in plugins.",
@@ -303,8 +360,13 @@
       "version": "5.2.0",
       "source_kind": "developer-supplied",
       "repository": "https://github.com/eugeneware/ffmpeg-static",
-      "upstream": { "kind": "none" },
-      "external_names": ["ffmpeg-static", "ffmpeg"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "ffmpeg-static",
+        "ffmpeg"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "notes": "Optional developer-only ffmpeg provider for the desktop video-proof composer (tools/local-ci). npm-installed on demand into a gitignored node_modules; the runtime resolver also accepts a system ffmpeg via PULP_FFMPEG/PATH. Never committed, bundled, exported by cmake --install, shipped in plugins, or required by public CI.",
@@ -323,7 +385,10 @@
       "version": "8.11",
       "source_kind": "vendored",
       "repository": "https://github.com/gradle/gradle.git",
-      "upstream": { "kind": "git-tag", "ref": "v8.11.0" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v8.11.0"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Redistributed Android build bootstrap. gradle-wrapper.jar SHA-256: b3a875ddc1f044746e1b1a55f645584505f4a10438c1afea9f15e92a7c42ec13; the JAR manifest identifies Gradle Wrapper and SPDX Apache-2.0, and META-INF/LICENSE contains the full license.",
@@ -344,7 +409,11 @@
       "version": "1.4.0",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/google/highway.git",
-      "upstream": { "kind": "git-tag", "ref": "1.4.0", "commit": "2607d3b5b0113992fe84d3848859eae13b3b52c1" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "1.4.0",
+        "commit": "2607d3b5b0113992fe84d3848859eae13b3b52c1"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "CMake pins the exact 1.4.0 release SHA (2607d3b5b0113992fe84d3848859eae13b3b52c1) instead of the tag name to avoid intermittent `fatal: invalid reference: 1.2.0` shallow-clone failures hit by tools/scripts/local_diff_cover.sh (Pulp #1930). Upstream drift is still tracked against the 1.4.0 tag.",
@@ -381,7 +450,9 @@
       "version": "4.001;git-9221beed3",
       "source_kind": "vendored",
       "repository": "https://github.com/rsms/inter",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Vendored deterministic text-shaping font. Inter-Regular.ttf SHA-256: 40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82. The web-player also redistributes the identical TTF and inter.woff2 (SHA-256: 338239f6b590b8ced3bf857654d32da3fd3663294cd3003651ed57aa3abd7aa1). The holdout fixture test/fixtures/import-differential/holdout/spectr-standalone.html embeds Inter 4.001;git-66647c0bb variable WOFF2 subsets as part of an unmodified Claude standalone bundle; the OFL text ships at test/fixtures/import-differential/holdout/OFL.txt.",
@@ -404,7 +475,9 @@
       "version": "2.304",
       "source_kind": "vendored",
       "repository": "https://github.com/JetBrains/JetBrainsMono",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Vendored deterministic monospace text-shaping font. SHA-256: a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f. Holdout fixtures embed JetBrains Mono 2.211: variable WOFF2 subsets inside test/fixtures/import-differential/holdout/spectr-standalone.html, and the static 400/500/700 TTFs of Forge's tape-machine design pack, base64-inlined, in test/fixtures/import-differential/holdout/lattice-panel.html and kelvin-panel.html. The OFL text ships at test/fixtures/import-differential/holdout/OFL.txt.",
@@ -450,8 +523,12 @@
       "version": "^15.0.0",
       "source_kind": "npm",
       "repository": "https://github.com/bcherny/json-schema-to-typescript",
-      "upstream": { "kind": "none" },
-      "external_names": ["json-schema-to-typescript"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "json-schema-to-typescript"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "notes": "Generates TypeScript types from JSON Schema for the developer-only Figma plugin. npm devDependency, build-time only; never bundled or shipped.",
@@ -507,7 +584,10 @@
       "version": "v1.18.10",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/lv2/lv2.git",
-      "upstream": { "kind": "git-tag", "ref": "v1.18.10" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v1.18.10"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -521,7 +601,9 @@
       "version": "bundled-with-mkdocs-material",
       "source_kind": "transitive-python",
       "repository": "https://github.com/Templarian/MaterialDesign",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Icon set bundled inside mkdocs-material and redistributed as SVG assets in the generated docs site (generouscorp.com/pulp/). Added 2026-04-22 under #582 follow-up.",
@@ -537,7 +619,10 @@
       "version": "v3.6.2",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/Mbed-TLS/mbedtls.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.6.2" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v3.6.2"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -552,7 +637,11 @@
       "version": "3.1.2",
       "source_kind": "vendored",
       "repository": "https://github.com/richgel999/miniz.git",
-      "upstream": { "kind": "git-tag", "ref": "3.1.2", "commit": "77d0dce8627735138c51770d1799a1ef48f2117d" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "3.1.2",
+        "commit": "77d0dce8627735138c51770d1799a1ef48f2117d"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Vendored from the upstream tag byte-for-byte except one local patch: mz_zip_add_mem_to_archive_file_in_place_v2 in external/miniz/miniz_zip.c opens the archive once (r+b, else exclusive w+bx) and keeps that stream, instead of upstream's stat()-then-open sequence that another process can race. Re-apply it on every bump; the in-place archive tests in test/test_preset_manager.cpp cover it. miniz_export.h is Pulp's stand-in for the header upstream's CMake generates.",
@@ -570,10 +659,16 @@
       "version": "2026.10.17",
       "source_kind": "developer-supplied",
       "repository": "https://github.com/jdx/mise",
-      "upstream": { "kind": "git-tag", "ref": "v2026.10.17", "tag_pattern": "v\\d{4}\\.\\d{1,2}\\.\\d{1,3}" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v2026.10.17",
+        "tag_pattern": "v\\d{4}\\.\\d{1,2}\\.\\d{1,3}"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
-      "external_names": ["mise"],
+      "external_names": [
+        "mise"
+      ],
       "notes": "Optional developer tool that installs the exact build-tool versions pinned in tools/toolchain/manifest.toml from the checksummed mise.toolchain.lock, and runs the .mise.toml project tasks. Developer-installed; Pulp commits only configuration and generated lock files. Never bundled, shipped in plugins, or required by setup.sh, pulp build, or public CI.",
       "source_files": [
         ".mise.toml",
@@ -591,7 +686,9 @@
       "version": "transitive-of-mkdocs-material",
       "source_kind": "python-pip",
       "repository": "https://github.com/mkdocs/mkdocs",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Static site generator. Pulled in transitively via mkdocs-material. Its built-in theme assets (search JS, sitemap generation) are redistributed in the generated docs site (generouscorp.com/pulp/). Added 2026-04-22 under #582 follow-up.",
@@ -607,7 +704,9 @@
       "version": ">=2.9,<3",
       "source_kind": "python-pip",
       "repository": "https://github.com/lukasgeiter/mkdocs-awesome-pages-plugin",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "MkDocs plugin that customises navigation ordering. Executed at build time only; no JS/CSS from this plugin is redistributed. Listed for attribution completeness since it is a declared docs build dependency. Added 2026-04-22 under #582 follow-up.",
@@ -623,7 +722,9 @@
       "version": ">=1.2,<2",
       "source_kind": "python-pip",
       "repository": "https://github.com/timvink/mkdocs-git-revision-date-localized-plugin",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "MkDocs plugin that injects git-revision dates into page metadata. Build-time only. Added 2026-04-22 under #582 follow-up.",
@@ -639,7 +740,9 @@
       "version": ">=9.5,<10",
       "source_kind": "python-pip",
       "repository": "https://github.com/squidfunk/mkdocs-material",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "MkDocs Material theme. CSS, JS, SVG icons, and search worker from this theme are redistributed in the generated docs site (generouscorp.com/pulp/). Added 2026-04-22 under #582 follow-up after the MkDocs Material parallel-build lane landed without attribution coverage.",
@@ -656,7 +759,10 @@
       "version": "3.3.0",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/Moonbase-sh/moonbase-cpp.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.3.0" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v3.3.0"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Optional, opt-in license-activation SDK (moonbase-cpp). Header-only, MIT; fetched via FetchContent only when a developer runs `pulp add moonbase` and exports the upstream target `moonbase::licensing`. Consumed by examples/moonbase-activation/. Built with MOONBASE_USE_CURL=OFF (upstream then defines MOONBASE_DISABLE_CURL_TRANSPORT; Pulp supplies the HTTP transport over cpp-httplib/mbedTLS). Moonbase documents OpenSSL as a system requirement and v3.3.0 CMake links it unconditionally, so OpenSSL must be present at configure time; the integration uses the OpenSSL RS256 backend (OS-native crypto is optional and does not remove the OpenSSL requirement).",
@@ -675,7 +781,9 @@
       "version": "1.12",
       "source_kind": "planned-fetchcontent",
       "repository": "https://github.com/Chlumsky/msdfgen",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -692,7 +800,10 @@
       "version": "f214739b",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/ODDSound/MTS-ESP.git",
-      "upstream": { "kind": "git-commit", "ref": "f214739b8832e7f297cb9970d0c0efbf783f1462" },
+      "upstream": {
+        "kind": "git-commit",
+        "ref": "f214739b8832e7f297cb9970d0c0efbf783f1462"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Optional, opt-in microtuning client integration. Fetched via FetchContent only when PULP_ENABLE_MTS_ESP=ON or when a developer runs `pulp add mts-esp`. Pulp exposes it through the provider-neutral TuningProvider API; installed SDKs may ship Pulp-owned wrapper glue for pulp_enable_midi_tuning_provider(), but the ODDSound Client/libMTSClient.cpp source is fetched only on opt-in. The client dynamically loads an installed libMTS shared library at runtime when present and falls back to local 12-TET or MTS SysEx data when no master is installed. Not part of the default dependency chain.",
@@ -738,7 +849,9 @@
       "version": "vendored-snapshot",
       "source_kind": "vendored",
       "repository": "https://github.com/memononen/nanosvg",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -754,7 +867,9 @@
       "version": "user-installed",
       "source_kind": "npm",
       "repository": "https://github.com/nodejs/node-addon-api",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -768,7 +883,10 @@
       "version": "22.23.2",
       "source_kind": "release-asset",
       "repository": "https://github.com/nodejs/node",
-      "upstream": { "kind": "github_release", "tag": "v22.23.2" },
+      "upstream": {
+        "kind": "github_release",
+        "tag": "v22.23.2"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Target-architecture official binary and complete upstream LICENSE ship beside pulp-import-design; archive SHA-256 values are pinned in prepare_node_runtime.py.",
@@ -785,7 +903,9 @@
       "version": "noto-emoji main @ 2026-05-17",
       "source_kind": "vendored",
       "repository": "https://github.com/googlefonts/noto-emoji",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Bundled cross-platform color-emoji typeface (COLRv1 build). SHA-256: 0ae57fe58645638523ba35f388d93739d292539a9acb84df5700c81b1e1a28d2. Gated by PULP_BUNDLE_NOTO_COLOR_EMOJI CMake option (defaults ON for Linux/Android/headless/CI, OFF for macOS/Windows release builds that use the platform color-emoji typeface).",
@@ -803,8 +923,12 @@
       "version": ">=1.24",
       "source_kind": "python-pip",
       "repository": "https://github.com/numpy/numpy",
-      "upstream": { "kind": "none" },
-      "external_names": ["numpy"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "numpy"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "notes": "Array ops for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped in plugin/app artifacts.",
@@ -821,10 +945,15 @@
       "version": "1.11.0",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/google/oboe.git",
-      "upstream": { "kind": "git-tag", "ref": "1.11.0" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "1.11.0"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "platforms": ["android"],
+      "platforms": [
+        "android"
+      ],
       "source_files": [
         "tools/cmake/PulpAndroid.cmake"
       ]
@@ -836,8 +965,13 @@
       "version": ">=4.8",
       "source_kind": "python-pip",
       "repository": "https://github.com/opencv/opencv-python",
-      "upstream": { "kind": "none" },
-      "external_names": ["opencv-python", "cv2"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "opencv-python",
+        "cv2"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "notes": "Optional affine first->last estimation for the Motion visual-analysis lane; the pipeline falls back to a PIL/FFT estimator when absent. pip-installed on demand; analysis-only, never bundled or shipped.",
@@ -854,7 +988,10 @@
       "version": "v57.2",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/google/perfetto.git",
-      "upstream": { "kind": "git-tag", "ref": "v57.2" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v57.2"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Dev-only tracing SDK, gated behind PULP_TRACING (OFF by default; never linked into a shipping build, never exported by cmake --install). The amalgamated C++ SDK ships as the release artifact perfetto-cpp-sdk-src.zip (no longer in the git tree at sdk/); fetched by pinned URL + SHA-256 c6fa3d89aee30f7da39402c9cd178c9f2e344544fda5c2109fd8457e319c3a2f. The prebuilt trace_processor_shell query tool (same v57.2) backs `pulp trace query --trace` (offline SQL over a .pftrace); `pulp trace fetch` downloads it on demand into $PULP_HOME, SHA-256-verified, from the immutable per-platform artifacts at https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v57.2/<platform>/ (mac-arm64 98a41b80e9f60da0373d64aff6455681f8c26b7c391ae5736324a5b11e3dacc2, mac-amd64 c0f61397901da47cbe1bb9a0843624f7c2038ac92176ce15e3736ce9aa0afef0, linux-amd64 55ba613fc6d4f71df81eee2dbfc293020063655c241b3e314bff75345b802684, linux-arm64 1dcc1d9aaff2eb92e8bc58f1957e4e445600294bd61dbc09345c1018c5ff0868, windows-amd64 trace_processor_shell.exe 100334b6091596fbc97f872556849a5747bf47a7f7190c485ba8cea8d2409c7b). Never linked or shipped.",
@@ -870,8 +1007,13 @@
       "version": ">=10.0",
       "source_kind": "python-pip",
       "repository": "https://github.com/python-pillow/Pillow",
-      "upstream": { "kind": "none" },
-      "external_names": ["Pillow", "PIL"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "Pillow",
+        "PIL"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "notes": "Image IO for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped.",
@@ -888,7 +1030,11 @@
       "version": "1.16",
       "source_kind": "vendored",
       "repository": "https://github.com/zeux/pugixml.git",
-      "upstream": { "kind": "git-tag", "ref": "v1.16", "commit": "c8033ce9d039e7f9d134877c363397b3cfe20816" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v1.16",
+        "commit": "c8033ce9d039e7f9d134877c363397b3cfe20816"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -905,7 +1051,10 @@
       "version": "v2.13.6",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/pybind/pybind11.git",
-      "upstream": { "kind": "git-tag", "ref": "v2.13.6" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v2.13.6"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -919,7 +1068,9 @@
       "version": "transitive-of-mkdocs-material",
       "source_kind": "python-pip",
       "repository": "https://github.com/pygments/pygments",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Syntax highlighter used by mkdocs + pymdownx.highlight. Redistributed as inline HTML/CSS class output in the generated docs site (generouscorp.com/pulp/). Added 2026-04-22 under #582 follow-up.",
@@ -935,7 +1086,9 @@
       "version": ">=10.7,<11",
       "source_kind": "python-pip",
       "repository": "https://github.com/facelessuser/pymdown-extensions",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Markdown extension bundle used by mkdocs-material (admonitions, tabs, superfences, highlight, emoji, etc.). Added 2026-04-22 under #582 follow-up.",
@@ -951,8 +1104,13 @@
       "version": "2021-03-27",
       "source_kind": "transitive-fetchcontent",
       "repository": "https://github.com/bellard/quickjs.git",
-      "upstream": { "kind": "git-branch", "ref": "master" },
-      "external_names": ["quickjs"],
+      "upstream": {
+        "kind": "git-branch",
+        "ref": "master"
+      },
+      "external_names": [
+        "quickjs"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Default JS engine, embedded whole inside CHOC's choc/javascript/choc_javascript_QuickJS.h rather than fetched on its own; the version is that header's CONFIG_VERSION (bellard/quickjs publishes release snapshots, not tags, so the upstream reference is the master branch and the audit reports its tip), so a QuickJS bump only arrives through a CHOC pin bump. Listed separately so --check-upstream reports QuickJS drift instead of hiding it behind CHOC.",
@@ -968,7 +1126,9 @@
       "version": "^18.2.0",
       "source_kind": "npm",
       "repository": "https://github.com/facebook/react",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Peer dependency of @pulp/react (packages/pulp-react). npm-installed by plugin authors; never bundled into Pulp itself. Added 2026-04-29 under #1042.",
@@ -983,8 +1143,13 @@
       "version": "18.3.1",
       "source_kind": "vendored",
       "repository": "https://github.com/facebook/react",
-      "upstream": { "kind": "none" },
-      "external_names": ["react", "react-dom"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "react",
+        "react-dom"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Unmodified react.development.js and react-dom.development.js 18.3.1 UMD builds embedded, gzip+base64, in the Claude standalone bundle frozen as the importer differential lab holdout fixture test/fixtures/import-differential/holdout/spectr-standalone.html. Chromium evaluates them only inside the lab's browser capture; they are never built, linked, or shipped.",
@@ -1004,7 +1169,9 @@
       "version": "^0.29.2",
       "source_kind": "npm",
       "repository": "https://github.com/facebook/react",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Reconciler runtime wrapped by @pulp/react to drive pulp::view::WidgetBridge. npm-installed alongside the package; never bundled into Pulp's C++ tree. Added 2026-04-29 under #1042.",
@@ -1019,8 +1186,14 @@
       "version": "4.0.513",
       "source_kind": "developer-supplied",
       "repository": "https://github.com/remotion-dev/remotion",
-      "upstream": { "kind": "none" },
-      "external_names": ["remotion", "@remotion/bundler", "@remotion/renderer"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "remotion",
+        "@remotion/bundler",
+        "@remotion/renderer"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "notes": "Optional developer-only video-proof composer (tools/local-ci) that turns desktop automation run bundles into short annotated MP4 proofs. npm-installed on demand into a gitignored node_modules (also pulls MIT react/react-dom); never committed, bundled, exported by cmake --install, shipped in plugins, or required by public CI. Source-available — companies over Remotion's free tier need a Remotion license to run the composer.",
@@ -1039,7 +1212,9 @@
       "version": "^0.23.2",
       "source_kind": "npm",
       "repository": "https://github.com/facebook/react",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Cooperative-scheduling runtime pulled in transitively by react-reconciler for @pulp/react. npm-installed; never bundled into Pulp's C++ tree. Added 2026-04-29 under #1042.",
@@ -1054,8 +1229,13 @@
       "version": ">=0.22",
       "source_kind": "python-pip",
       "repository": "https://github.com/scikit-image/scikit-image",
-      "upstream": { "kind": "none" },
-      "external_names": ["scikit-image", "skimage"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "scikit-image",
+        "skimage"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "notes": "Image metrics for the developer-only Motion visual-analysis lane (tools/motion/visual). pip-installed on demand; analysis-only, never bundled or shipped.",
@@ -1072,7 +1252,11 @@
       "version": "release-3.4.18",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/libsdl-org/SDL.git",
-      "upstream": { "kind": "git-tag", "ref": "release-3.4.18", "commit": "829a65d769d935c4852f8159e964312c0957260a" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "release-3.4.18",
+        "commit": "829a65d769d935c4852f8159e964312c0957260a"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -1103,7 +1287,11 @@
       "version": "v3.0.0",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/Tehreer/SheenBidi.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.0.0", "commit": "cfe430e7375a7845b679adae9d51dac6deaa8858" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v3.0.0",
+        "commit": "cfe430e7375a7845b679adae9d51dac6deaa8858"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Unicode Bidirectional Algorithm engine backing core/canvas::BidiAnalyzer. Pulp-owned bidi pass for Arabic / Hebrew / mixed-direction text that does not depend on system ICU; consumed by TextRunPlanner as the canonical fallback for iOS / Android / headless / minimal-toolchain hosts. Item 6.8 of the 2026-05-24 macOS plugin-authoring plan.",
@@ -1122,7 +1310,10 @@
       "version": "v3.12.3",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/simdjson/simdjson.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.12.3" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v3.12.3"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Optional JSON parser used by fastgltf. Registered explicitly when PULP_ENABLE_SCENE3D=ON so fastgltf does not use an unaudited nested file(DOWNLOAD) path.",
@@ -1140,7 +1331,9 @@
       "version": "chrome/m158",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://skia.googlesource.com/skia.git",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, Windows ARM64, and Skia.xcframework slices the upstream does not ship. The chrome/m158 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Its two Linux archives were re-cut from the same Skia revision with skia_use_partition_alloc = false (skia-builder run 41466672481); the release notes' replacement ledger records both digests. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
@@ -1280,13 +1473,34 @@
       ]
     },
     {
+      "name": "stb_vorbis",
+      "category": "audio",
+      "license": "MIT OR Unlicense (public domain)",
+      "version": "v1.22",
+      "source_kind": "vendored",
+      "repository": "https://github.com/nothings/stb.git",
+      "upstream": {
+        "kind": "none"
+      },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "external/dr_libs/stb_vorbis.c",
+        "core/audio/src/ogg_reader.cpp"
+      ],
+      "notes": "Single-file Ogg Vorbis decoder, vendored beside the dr_libs headers. Carries one local patch (tools/deps/patches/dr_libs/0002-stb_vorbis-reject-negative-header-string-lengths.patch, recorded under the stb_vorbis entry of tools/deps/patches.json): the comment header's vendor length, comment count and comment lengths are rejected when negative or above a ceiling (1 MiB per string, 65536 comments), so a hostile header cannot wrap the allocator's size and write past the setup arena. Pulp opens it with a bounded stb_vorbis_alloc arena (core/audio/src/ogg_reader.cpp)."
+    },
+    {
       "name": "Surge Synth Team tuning-library",
       "category": "music-theory",
       "license": "MIT",
       "version": "release_1.1.0",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/surge-synthesizer/tuning-library.git",
-      "upstream": { "kind": "git-commit", "ref": "64a939111891cb698f37d6ca9ecfc4b8c260053d" },
+      "upstream": {
+        "kind": "git-commit",
+        "ref": "64a939111891cb698f37d6ca9ecfc4b8c260053d"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Optional, opt-in Scala .scl/.kbm parser and tuning-table lookup. Fetched source-only via FetchContent only when PULP_ENABLE_SCALA_TUNING=ON or when a developer runs `pulp add sst-tuning-library`; Pulp exposes it through `pulp::midi::ScalaTuningProvider` behind the provider-neutral TuningProvider API. Installed SDKs may ship Pulp-owned wrapper glue for pulp_enable_midi_tuning_provider(), but Surge's tuning-library source is fetched only on opt-in. The upstream CMake tools/tests are intentionally not added to Pulp or consumer builds. Not part of the default dependency chain.",
@@ -1311,7 +1525,10 @@
       "version": "077dd13c0e869d9f3dbe55875686f920367de457",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/mrdoob/three.js.git",
-      "upstream": { "kind": "git-branch", "ref": "dev" },
+      "upstream": {
+        "kind": "git-branch",
+        "ref": "dev"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Pinned native WebGPU runtime for demos, tests, and installed-SDK consumers. Fetched or supplied through PULP_THREEJS_RUNTIME_DIR when PULP_ENABLE_THREEJS_RUNTIME is enabled (the default when GPU support is enabled), then staged under share/pulp/threejs.",
@@ -1326,7 +1543,10 @@
       "version": "20140427",
       "source_kind": "vendored",
       "repository": "https://tweetnacl.cr.yp.to/",
-      "upstream": { "kind": "url-snapshot", "ref": "https://tweetnacl.cr.yp.to/20140427/tweetnacl.c" },
+      "upstream": {
+        "kind": "url-snapshot",
+        "ref": "https://tweetnacl.cr.yp.to/20140427/tweetnacl.c"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures and future v2 license-key payloads. `randombytes()` supplied by core/runtime/src/crypto.cpp via mbedTLS CTR-DRBG.",
@@ -1343,8 +1563,12 @@
       "version": "^5.4.0 / ^5.6.0",
       "source_kind": "npm",
       "repository": "https://github.com/microsoft/TypeScript",
-      "upstream": { "kind": "none" },
-      "external_names": ["typescript"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "typescript"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "notes": "Type-checking and build for @pulp/react, pulp-import-ir, and the Figma plugin. npm devDependency, build-time only; never bundled or shipped.",
@@ -1361,10 +1585,14 @@
       "category": "view",
       "license": "BSD-3-Clause",
       "version": "v8-m158-15.8.62.6-38351a002e2c",
-      "external_names": ["v8-build"],
+      "external_names": [
+        "v8-build"
+      ],
       "source_kind": "prebuilt-toolchain",
       "repository": "https://chromium.googlesource.com/v8/v8.git",
-      "upstream": { "kind": "none" },
+      "upstream": {
+        "kind": "none"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -1457,8 +1685,13 @@
       "version": "^3.2.6",
       "source_kind": "npm",
       "repository": "https://github.com/vitest-dev/vitest",
-      "upstream": { "kind": "none" },
-      "external_names": ["vitest", "@vitest/coverage-v8"],
+      "upstream": {
+        "kind": "none"
+      },
+      "external_names": [
+        "vitest",
+        "@vitest/coverage-v8"
+      ],
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
       "notes": "Unit-test runner (with @vitest/coverage-v8) for @pulp/react and pulp-import-ir. npm devDependency, test-only; never bundled or shipped.",
@@ -1476,7 +1709,11 @@
       "version": "v3.8.1_build_84",
       "source_kind": "external-clone",
       "repository": "https://github.com/steinbergmedia/vst3sdk.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.8.1_build_84", "commit": "3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v3.8.1_build_84",
+        "commit": "3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Pin must stay at v3.8.0_build_66 or newer: that is the first Steinberg tag released under MIT. Earlier tags (including v3.7.12_build_20) offer only 'Steinberg VST3 License OR GPLv3', neither of which Pulp may redistribute inside its MIT-licensed SDK artifacts. assert_vst3_license_is_mit in setup.sh fails the setup if the pin drifts below that.",
@@ -1494,8 +1731,13 @@
       "version": "17dcd42a7683",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/eliemichel/WebGPU-distribution.git",
-      "upstream": { "kind": "git-branch", "ref": "main" },
-      "offline_fetch": { "cache_name": "webgpu" },
+      "upstream": {
+        "kind": "git-branch",
+        "ref": "main"
+      },
+      "offline_fetch": {
+        "cache_name": "webgpu"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -1509,35 +1751,62 @@
       "version": "v24.0.3.1",
       "source_kind": "release-asset",
       "repository": "https://github.com/gfx-rs/wgpu-native",
-      "upstream": { "kind": "git-tag", "ref": "v24.0.3.1" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v24.0.3.1"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "notes": "Prebuilt WebGPU runtime (libwgpu_native) behind WebGPU-distribution on desktop GPU builds; staged beside every module that links WebGPU. Each release asset is digest-pinned in `artifacts`: `sha256` is the downloaded zip (setup.sh and configure refuse a mismatch), `tree_sha256` is its extracted tree (configure re-checks the shared source cache against it). tools/deps/wgpu_native_digests.py computes both. Bumping it also bumps PULP_WGPU_NATIVE_VERSION, WGPU_NATIVE_VERSION in setup.sh and tools/deps/shared-source-contract.txt.",
       "artifacts": [
-        { "name": "wgpu-linux-aarch64-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-linux-aarch64-release.zip",
+        {
+          "name": "wgpu-linux-aarch64-release",
+          "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-linux-aarch64-release.zip",
           "sha256": "97786f622d6d4f9aaa87c27d165de8db65daf1d391e0bcc32a2dd9bb45fcd299",
-          "tree_sha256": "b6673c0bfa6d5913588c2d2c818776eac839ec5137fc5647633552649f1a6591" },
-        { "name": "wgpu-linux-x86_64-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-linux-x86_64-release.zip",
+          "tree_sha256": "b6673c0bfa6d5913588c2d2c818776eac839ec5137fc5647633552649f1a6591"
+        },
+        {
+          "name": "wgpu-linux-x86_64-release",
+          "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-linux-x86_64-release.zip",
           "sha256": "86f3eb9f74d7f1ac82ee52d9b2ab15e366ef86a932759c750b7472652836ee59",
-          "tree_sha256": "5675a82d171f2936313859b96803bf0c073032e5554d18b34edfd955dbd8e403" },
-        { "name": "wgpu-macos-aarch64-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-macos-aarch64-release.zip",
+          "tree_sha256": "5675a82d171f2936313859b96803bf0c073032e5554d18b34edfd955dbd8e403"
+        },
+        {
+          "name": "wgpu-macos-aarch64-release",
+          "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-macos-aarch64-release.zip",
           "sha256": "f140ff27234ebfa9fcca2b492d0cb499f2e197424b9edc45134bcbad0f8d3a78",
-          "tree_sha256": "ab8484562a4c36a02a82a3f781ee3a0df9a37217a99a45a5e84e20025ff1c188" },
-        { "name": "wgpu-macos-x86_64-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-macos-x86_64-release.zip",
+          "tree_sha256": "ab8484562a4c36a02a82a3f781ee3a0df9a37217a99a45a5e84e20025ff1c188"
+        },
+        {
+          "name": "wgpu-macos-x86_64-release",
+          "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-macos-x86_64-release.zip",
           "sha256": "1fbc6930e2811b7fde7f046e5300ae5dc20c451d0c3e42a10ff71efae1f565ac",
-          "tree_sha256": "62a2b079b3aaa39ef7b4f12aa30c7a49adcf8371d2ee89767abb8b8e00e2c4cb" },
-        { "name": "wgpu-windows-aarch64-msvc-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-aarch64-msvc-release.zip",
+          "tree_sha256": "62a2b079b3aaa39ef7b4f12aa30c7a49adcf8371d2ee89767abb8b8e00e2c4cb"
+        },
+        {
+          "name": "wgpu-windows-aarch64-msvc-release",
+          "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-aarch64-msvc-release.zip",
           "sha256": "b2adb3c0e7ffaccb9373b1b4156892dcec6b40778b06d88fb4d62fa386676881",
-          "tree_sha256": "40aa5c173071f8b79e41d207276fba41e84db8d6f5b3f3d4d4b33d615379f19d" },
-        { "name": "wgpu-windows-i686-msvc-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-i686-msvc-release.zip",
+          "tree_sha256": "40aa5c173071f8b79e41d207276fba41e84db8d6f5b3f3d4d4b33d615379f19d"
+        },
+        {
+          "name": "wgpu-windows-i686-msvc-release",
+          "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-i686-msvc-release.zip",
           "sha256": "226e196ba4b65a29a1f08e236ad53787f066e4677a8e62382af5a049d07787b2",
-          "tree_sha256": "ed83f95481b1c33641337abb2fc72742f2b4a4982f038c9a4e67827207876c92" },
-        { "name": "wgpu-windows-x86_64-gnu-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-x86_64-gnu-release.zip",
+          "tree_sha256": "ed83f95481b1c33641337abb2fc72742f2b4a4982f038c9a4e67827207876c92"
+        },
+        {
+          "name": "wgpu-windows-x86_64-gnu-release",
+          "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-x86_64-gnu-release.zip",
           "sha256": "fb3efad0ca05c2eda61ee54349709f05ff28290308b4b80b01f1bad574ce19f7",
-          "tree_sha256": "80c507ff943a6dfc5d055bc76ebfc3f1d747201487f5bf53b45924e58e476632" },
-        { "name": "wgpu-windows-x86_64-msvc-release", "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-x86_64-msvc-release.zip",
+          "tree_sha256": "80c507ff943a6dfc5d055bc76ebfc3f1d747201487f5bf53b45924e58e476632"
+        },
+        {
+          "name": "wgpu-windows-x86_64-msvc-release",
+          "url": "https://github.com/gfx-rs/wgpu-native/releases/download/v24.0.3.1/wgpu-windows-x86_64-msvc-release.zip",
           "sha256": "72d3abf74e0b55f9474602e2ce7f20fd0f9b9c46be8405b45a697ec1ee343436",
-          "tree_sha256": "c930805f09da78e31a1317532c9e4103e5618a5ee9991c7b5cd4fb9369a9ae45" }
+          "tree_sha256": "c930805f09da78e31a1317532c9e4103e5618a5ee9991c7b5cd4fb9369a9ae45"
+        }
       ],
       "source_files": [
         "setup.sh",
@@ -1554,10 +1823,16 @@
       "version": "fb9c3379f260",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/google/woff2.git",
-      "upstream": { "kind": "git-commit", "ref": "fb9c3379f2605b10f3e8f1d9636664ab5576775c" },
+      "upstream": {
+        "kind": "git-commit",
+        "ref": "fb9c3379f2605b10f3e8f1d9636664ab5576775c"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
-      "source_files": ["tools/cmake/PulpDependencies.cmake", "core/canvas/CMakeLists.txt"]
+      "source_files": [
+        "tools/cmake/PulpDependencies.cmake",
+        "core/canvas/CMakeLists.txt"
+      ]
     },
     {
       "name": "yaml-cpp",
@@ -1566,7 +1841,11 @@
       "version": "0.9.0",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/jbeder/yaml-cpp.git",
-      "upstream": { "kind": "git-tag", "ref": "yaml-cpp-0.9.0", "commit": "56e3bb550c91fd7005566f19c079cb7a503223cf" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "yaml-cpp-0.9.0",
+        "commit": "56e3bb550c91fd7005566f19c079cb7a503223cf"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [
@@ -1580,7 +1859,11 @@
       "version": "v3.2.1",
       "source_kind": "fetchcontent",
       "repository": "https://github.com/facebook/yoga.git",
-      "upstream": { "kind": "git-tag", "ref": "v3.2.1", "commit": "042f5013152eb81c1552dec945b88f7b95ca350f" },
+      "upstream": {
+        "kind": "git-tag",
+        "ref": "v3.2.1",
+        "commit": "042f5013152eb81c1552dec945b88f7b95ca350f"
+      },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [

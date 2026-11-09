@@ -1,0 +1,58 @@
+{
+  "id": "audio-decoder-fuzz-lane",
+  "title": "Audio decoder fuzz target replaces the format-registry target in the nightly fuzz workflow; libFuzzer targets take tree-wide instrumentation",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "91e29f95-3d29-4937-8fe9-ee43ee6dfc9f",
+  "owned_paths": [
+    ".github/workflows/timeline-fuzz.yml",
+    "test/cmake/timeline_tests.cmake",
+    ".agents/skills/timeline/SKILL.md",
+    "docs/status/sequencer-exposure/rows/audio-decoder-fuzz-lane.json"
+  ],
+  "evidence": [
+    {
+      "path": ".github/workflows/timeline-fuzz.yml",
+      "needles": [
+        "pulp-fuzz-audio-decoder",
+        "fuzz-corpus/audio-decoder test/fixtures/fuzz/audio-decoder",
+        "pulp-test-audio-decoder-corpus"
+      ]
+    },
+    {
+      "path": "test/cmake/timeline_tests.cmake",
+      "needles": [
+        "pulp_fuzz_instrument_target(pulp-fuzz-timeline-document)"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "`pulp_fuzz_instrument_target()` (tools/cmake/PulpTestSuite.cmake)",
+        "PULP_FUZZ_RUNTIME_ARCHIVE"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "CI test topology only: the fuzz workflow builds a renamed audio target and the replay suite, and the timeline manifest routes its libFuzzer flags through a helper. No header, library target, or installed artifact changes; everything is behind PULP_ENABLE_FUZZING, which defaults OFF."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, handler, or document shape changes; the timeline fuzz targets are unchanged in what they exercise."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition, schema entry, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, grant, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged; a nightly fuzz lane and its toolchain wiring are CI test topology, not a design-time capability."
+    }
+  }
+}
