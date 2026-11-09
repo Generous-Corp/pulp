@@ -1,0 +1,11 @@
+{
+ "name": "unbounded-wait-lint-selftest",
+ "record": {
+  "entry": "tools/scripts/test_unbounded_wait_lint.py",
+  "inputs": [
+   "core/host/src/signal_graph.cpp",
+   "tools/scripts/test_unbounded_wait_lint.py"
+  ],
+  "kind": "python"
+ }
+}

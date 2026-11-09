@@ -50,22 +50,62 @@ pulp_add_test_suite(pulp-test-offline-tracing
 pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
+# AudioReader: ranged reads from a path, memory or byte source equal a full
+# decode for WAV, AIFF, FLAC, MP3 and Ogg Vorbis built from one known signal.
+pulp_add_test_suite(pulp-test-audio-reader GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
+# System codec writer: AAC, ALAC and PCM written through ExtAudioFile (Apple)
+# or Media Foundation (Windows) read back as the source signal.
+pulp_add_test_suite(pulp-test-system-audio-codec GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
+# Format capability reports: each reader and writer describes the bit depths,
+# rates, channel limits and encoder settings its codec actually has.
+pulp_add_test_suite(pulp-test-audio-format-capabilities GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
 # DecodeLimits contract for the codec-backed readers (FLAC, MP3, OGG Vorbis).
 # A container header is an untrusted size claim: the reader must refuse it
 # before allocating output, and bound an unknown-length stream as it decodes.
 pulp_add_test_suite(pulp-test-format-registry-limits GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
-# Coverage-guided lane over every registered reader. Off by default; the
-# timeline manifest, included earlier, proves the libFuzzer runtime exists
-# before this block is reached.
+# Deterministic replay of the audio decoder seed corpus through the oracle the
+# libFuzzer target shares (test/fuzz/audio_decoder_fuzz_oracle.hpp). Runs on
+# the required gate; it is the one lane that reaches the platform CoreAudio
+# reader, which the fuzzer excludes, and it holds the CHOC-vs-dr_wav WAV
+# differential.
+pulp_add_test_suite(pulp-test-audio-decoder-corpus LIBRARIES pulp::audio
+    LABELS fuzz audio)
+pulp_test_data(pulp-test-audio-decoder-corpus PATHS test/fixtures/fuzz/audio-decoder)
+
+# Developer-lane dump for the quality lab's libsndfile differential
+# (tools/audio/quality-lab/tests/test_decoder_differential.py): one file in,
+# a JSON header plus raw float32 interleaved samples out. Built with the tests,
+# never a ctest of its own.
+add_executable(pulp-audio-decode-dump fuzz/audio_decode_dump_main.cpp)
+target_link_libraries(pulp-audio-decode-dump PRIVATE pulp::audio)
+# The lab differential itself is registered only behind the dependency-bearing
+# Quality Lab gate (declared in app_audio_host_tests.cmake), where soundfile
+# and pytest are known to exist; PULP_AUDIO_DECODE_DUMP_REQUIRED turns its
+# developer-lane skips into failures so a missing dependency cannot pass.
+pulp_add_quality_lab_pytest(quality-lab-decoder-differential
+    TEST_FILE tools/audio/quality-lab/tests/test_decoder_differential.py
+    ENV "PULP_AUDIO_DECODE_DUMP_BIN=$<TARGET_FILE:pulp-audio-decode-dump>"
+        PULP_AUDIO_DECODE_DUMP_REQUIRED=1
+    LABELS fuzz
+    TIMEOUT 300)
+
+# Coverage-guided lane over the WAV, AIFF, FLAC, MP3 and Ogg Vorbis readers,
+# one reader per input. Off by default; the timeline manifest, included
+# earlier, proves the libFuzzer runtime exists before this block is reached.
 if(PULP_ENABLE_FUZZING)
-    add_executable(pulp-fuzz-format-registry
-        fuzz/format_registry_fuzz_target.cpp)
-    target_link_libraries(pulp-fuzz-format-registry PRIVATE pulp::audio)
-    target_compile_options(pulp-fuzz-format-registry PRIVATE
-        -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
-    target_link_options(pulp-fuzz-format-registry PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS})
+    pulp_add_libfuzzer_target(pulp-fuzz-audio-decoder
+        SOURCES fuzz/audio_decoder_fuzz_target.cpp
+        LIBRARIES pulp::audio
+        CORPUS "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fuzz/audio-decoder"
+        MAX_LEN 262144)
 endif()
 
 # Impulse-response loading. The PCM entry point is fed by UNTRUSTED, already-
@@ -122,6 +162,7 @@ if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
         fixtures/mcp_gpu_probe_fake_cli.cpp)
     add_executable(pulp-test-mcp-server
         test_mcp_server.cpp
+        test_mcp_audio_tools.cpp
         test_mcp_control_adapter.cpp)
     target_link_libraries(pulp-test-mcp-server PRIVATE
         pulp-mcp-core
@@ -275,6 +316,17 @@ pulp_add_test_suite(pulp-test-external-binding GROUP pulp-test-group-cap-state
 pulp_add_test_suite(pulp-test-midi-learn-decode GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 
+# MidiLearnEngine: mapping table publication, routing of every source kind,
+# relative encoders, takeover, the learn flow, real-time safety and a
+# UI-versus-audio-thread hammer.
+pulp_add_test_suite(pulp-test-midi-learn-engine
+    SOURCES test_midi_learn_engine.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::state)
+
+# MIDI mapping persistence (binary chunk, JSON, import modes) and undo.
+pulp_add_test_suite(pulp-test-midi-learn-persistence GROUP pulp-test-group-cap-state
+    LIBRARIES pulp::state)
+
 # Cross-version parameter-ordering guard (host-facing ID + index stability).
 pulp_add_test_suite(pulp-test-param-ordering GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
@@ -303,6 +355,8 @@ pulp_add_test_suite(pulp-test-format-hardening GROUP pulp-test-group-cap-format
 # Processor-level MIDI panic: request, service, voice reset, MIDI-out emission
 pulp_add_test_suite(pulp-test-midi-panic-processor GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format pulp::midi)
+# Stock panic button: availability, hiding, click -> request -> next block
+pulp_add_test_suite(pulp-test-panic-button LIBRARIES pulp::format pulp::midi pulp::view)
 
 # Editor parameter-write provenance: host automation interleaved with editor
 # edits during an open gesture, exact begin/value/end ordering, one normalized
@@ -319,6 +373,17 @@ pulp_add_test_suite(pulp-test-editor-host GROUP pulp-test-group-cap-format
 # The cancellable main-thread timer behind contract editors' idle ticks.
 pulp_add_test_suite(pulp-test-main-thread-timer GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
+
+# The same timer, and post_to_main_thread, inside AppKit's nested run loops
+# (menu tracking, modal panels) entered from a main-queue block. Its own
+# process: it creates the shared NSApplication and runs nested loops.
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-main-thread-timer-nested-modes
+        SOURCES test_main_thread_timer_nested_modes.mm
+        LIBRARIES pulp::format)
+    target_link_libraries(pulp-test-main-thread-timer-nested-modes PRIVATE
+        "-framework AppKit" "-framework CoreFoundation")
+endif()
 
 # Plugin registry: legacy single global slot + keyed multi-plugin-bundle table.
 pulp_add_test_suite(pulp-test-plugin-registry GROUP pulp-test-group-cap-format
@@ -400,6 +465,17 @@ if(PULP_HAS_CLAP)
     target_include_directories(pulp-test-clap-slot-channel-width
         PRIVATE ${PULP_ROOT_DIR}/core/host/src)
     catch_discover_tests(pulp-test-clap-slot-channel-width)
+
+    # What a hosted CLAP plugin sees from the CLAP slot: host identity and
+    # extensions, transport, offline render mode, every declared audio port,
+    # note/MIDI/sysex both ways, parameter feedback, and restart requests
+    # reaching SignalGraph latency compensation. Fake plugin, no bundle.
+    add_executable(pulp-test-clap-slot-process-fidelity test_clap_slot_process_fidelity.cpp)
+    target_link_libraries(pulp-test-clap-slot-process-fidelity
+        PRIVATE pulp::host clap Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-clap-slot-process-fidelity
+        PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    catch_discover_tests(pulp-test-clap-slot-process-fidelity)
 
     # The CLAP adapter opening a processor's editor through the editor-host
     # contract, built the way a UI-package plug-in is: no PULP_CLAP_GUI, and
@@ -782,11 +858,15 @@ if(PULP_HAS_LV2)
             LIBRARY_OUTPUT_DIRECTORY "${_pulp_lv2_slot_probe_bundle}")
 
         file(MAKE_DIRECTORY "${_pulp_lv2_slot_probe_bundle}")
+        # LV2 requires a plugin to have a doap:name; the slot refuses one
+        # without it, as it refuses any description lilv cannot verify.
         string(CONCAT _pulp_lv2_slot_probe_ttl [=[
+@prefix doap: <http://usefulinc.com/ns/doap#> .
 @prefix lv2: <http://lv2plug.in/ns/lv2core#> .
 
 <http://example.com/pulp/lv2-slot-probe>
     a lv2:Plugin ;
+    doap:name "Pulp LV2 Slot Probe" ;
     lv2:binary <lv2-slot-probe]=]
     "${CMAKE_SHARED_MODULE_SUFFIX}"
     [=[> ;
@@ -794,26 +874,31 @@ if(PULP_HAS_LV2)
     [
         a lv2:InputPort , lv2:AudioPort ;
         lv2:index 0 ;
+        lv2:symbol "in_l" ;
         lv2:name "Input L"
     ] ,
     [
         a lv2:InputPort , lv2:AudioPort ;
         lv2:index 1 ;
+        lv2:symbol "in_r" ;
         lv2:name "Input R"
     ] ,
     [
         a lv2:OutputPort , lv2:AudioPort ;
         lv2:index 2 ;
+        lv2:symbol "out_l" ;
         lv2:name "Output L"
     ] ,
     [
         a lv2:OutputPort , lv2:AudioPort ;
         lv2:index 3 ;
+        lv2:symbol "out_r" ;
         lv2:name "Output R"
     ] ,
     [
         a lv2:InputPort , lv2:ControlPort ;
         lv2:index 4 ;
+        lv2:symbol "gain" ;
         lv2:name "Probe Gain" ;
         lv2:default 0.5 ;
         lv2:minimum -2.0 ;
@@ -822,6 +907,21 @@ if(PULP_HAS_LV2)
 ]=])
         file(WRITE "${_pulp_lv2_slot_probe_bundle}/plugin.ttl"
             "${_pulp_lv2_slot_probe_ttl}")
+        # Every LV2 host starts from manifest.ttl; the plugin's ports live in
+        # plugin.ttl, which the manifest points at.
+        string(CONCAT _pulp_lv2_slot_probe_manifest [=[
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<http://example.com/pulp/lv2-slot-probe>
+    a lv2:Plugin ;
+    lv2:binary <lv2-slot-probe]=]
+    "${CMAKE_SHARED_MODULE_SUFFIX}"
+    [=[> ;
+    rdfs:seeAlso <plugin.ttl> .
+]=])
+        file(WRITE "${_pulp_lv2_slot_probe_bundle}/manifest.ttl"
+            "${_pulp_lv2_slot_probe_manifest}")
 
         add_dependencies(pulp-test-lv2-host-discovery
             pulp-test-lv2-slot-probe)
@@ -831,6 +931,42 @@ if(PULP_HAS_LV2)
     endif()
 
     catch_discover_tests(pulp-test-lv2-host-discovery)
+
+    # A real LV2 instrument bundle (test/fixtures/lv2_host_instrument) hosted
+    # through the lilv-backed LV2 slot: note input, MIDI out, time:Position,
+    # options, worker, state, patch:Set, latency. Runs wherever LV2 modules
+    # load (macOS and Linux).
+    if(UNIX)
+        set(_pulp_lv2_host_instrument_bundle
+            "${CMAKE_CURRENT_BINARY_DIR}/Lv2HostInstrument.lv2")
+        add_library(pulp-test-lv2-host-instrument MODULE
+            fixtures/lv2_host_instrument/lv2_host_instrument.cpp)
+        target_link_libraries(pulp-test-lv2-host-instrument PRIVATE lv2-headers)
+        set_target_properties(pulp-test-lv2-host-instrument PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "lv2_host_instrument"
+            CXX_VISIBILITY_PRESET hidden
+            LIBRARY_OUTPUT_DIRECTORY "${_pulp_lv2_host_instrument_bundle}")
+        set(LV2_BINARY "lv2_host_instrument${CMAKE_SHARED_MODULE_SUFFIX}")
+        configure_file(fixtures/lv2_host_instrument/manifest.ttl.in
+            "${_pulp_lv2_host_instrument_bundle}/manifest.ttl" @ONLY)
+        configure_file(fixtures/lv2_host_instrument/plugin.ttl
+            "${_pulp_lv2_host_instrument_bundle}/plugin.ttl" COPYONLY)
+        unset(LV2_BINARY)
+
+        add_executable(pulp-test-lv2-host-slot test_lv2_host_slot.cpp
+            harness/rt_allocation_probe.cpp)
+        target_include_directories(pulp-test-lv2-host-slot PRIVATE
+            ${CMAKE_SOURCE_DIR}/core/host/src
+            ${CMAKE_SOURCE_DIR}/test)
+        target_link_libraries(pulp-test-lv2-host-slot PRIVATE
+            pulp::host lv2-headers Catch2::Catch2WithMain)
+        add_dependencies(pulp-test-lv2-host-slot pulp-test-lv2-host-instrument)
+        target_compile_definitions(pulp-test-lv2-host-slot PRIVATE
+            PULP_TEST_LV2_HOST_INSTRUMENT_BUNDLE="${_pulp_lv2_host_instrument_bundle}"
+            PULP_TEST_LV2_MODULE_SUFFIX="${CMAKE_SHARED_MODULE_SUFFIX}")
+        catch_discover_tests(pulp-test-lv2-host-slot)
+    endif()
 
     # End-to-end: build a real LV2 module, let the SAME POST_BUILD path every
     # plugin uses describe it, then read the result back through pulp::host's

@@ -1,0 +1,10 @@
+{
+ "name": "control-profile-downgrade-announced",
+ "record": {
+  "entry": "tools/scripts/test_control_profile_downgrade_is_announced.py",
+  "inputs": [
+   "tools/scripts/test_control_profile_downgrade_is_announced.py"
+  ],
+  "kind": "python"
+ }
+}

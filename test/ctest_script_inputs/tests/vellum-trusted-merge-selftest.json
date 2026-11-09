@@ -1,0 +1,10 @@
+{
+ "name": "vellum-trusted-merge-selftest",
+ "record": {
+  "entry": "tools/scripts/test_vellum_trusted_merge.py",
+  "inputs": [
+   "tools/scripts/test_vellum_trusted_merge.py"
+  ],
+  "kind": "python"
+ }
+}

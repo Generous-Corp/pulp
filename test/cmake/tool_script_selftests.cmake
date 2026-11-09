@@ -37,6 +37,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-audio-header-vocabulary-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_header_vocabulary_guard.py")
     set_tests_properties(gpu-audio-header-vocabulary-guard-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    add_test(NAME graph-stall-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/graph/test_graph_stall_guard.py")
+    set_tests_properties(graph-stall-guard-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     # macos_merge_group_bootstrap.sh: the merge-group `macos` verdict. A failed
     # or missing dependency fails closed; a cancelled classify (never given a
     # runner) is classified in-job, and the verdict proceeds on that answer.

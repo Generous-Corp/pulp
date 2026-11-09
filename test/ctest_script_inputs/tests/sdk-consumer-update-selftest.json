@@ -1,0 +1,11 @@
+{
+ "name": "sdk-consumer-update-selftest",
+ "record": {
+  "entry": "tools/scripts/test_sdk_consumer_update.py",
+  "inputs": [
+   "tools/scripts/sdk_consumer_update.py",
+   "tools/scripts/test_sdk_consumer_update.py"
+  ],
+  "kind": "python"
+ }
+}

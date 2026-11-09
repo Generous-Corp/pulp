@@ -1,0 +1,10 @@
+{
+ "name": "install-sha256sums-current",
+ "record": {
+  "entry": "tools/scripts/test_install_sha256sums.py",
+  "inputs": [
+   "tools/scripts/test_install_sha256sums.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,14 @@
+{
+ "name": "pulp-editor-bridge-generator-selftest",
+ "record": {
+  "entry": "tools/bridge/bridge_gen_checks.py",
+  "inputs": [
+   "tools/bridge/bridge.toml",
+   "tools/bridge/bridge_gen.py",
+   "tools/bridge/bridge_gen_checks.py",
+   "tools/bridge/generated_editor_bridge.hpp",
+   "tools/bridge/generated_editor_bridge.ts"
+  ],
+  "kind": "python"
+ }
+}

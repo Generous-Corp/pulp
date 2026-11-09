@@ -1,0 +1,10 @@
+{
+ "name": "harness-css-adapter-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_css_adapter.py",
+  "inputs": [
+   "tools/harness/tests/test_css_adapter.py"
+  ],
+  "kind": "python"
+ }
+}

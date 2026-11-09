@@ -1,0 +1,10 @@
+{
+ "name": "vst3-bundle-layout",
+ "record": {
+  "entry": "tools/cmake/scripts/check_vst3_bundle_layout.py",
+  "inputs": [
+   "tools/cmake/scripts/check_vst3_bundle_layout.py"
+  ],
+  "kind": "python"
+ }
+}

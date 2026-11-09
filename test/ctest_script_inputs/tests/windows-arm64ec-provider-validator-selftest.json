@@ -1,0 +1,10 @@
+{
+ "name": "windows-arm64ec-provider-validator-selftest",
+ "record": {
+  "entry": "tools/windows/test_validate_arm64ec_provider.py",
+  "inputs": [
+   "tools/windows/test_validate_arm64ec_provider.py"
+  ],
+  "kind": "python"
+ }
+}

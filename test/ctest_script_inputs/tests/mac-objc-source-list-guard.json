@@ -1,0 +1,14 @@
+{
+ "name": "mac-objc-source-list-guard",
+ "record": {
+  "entry": "tools/scripts/mac_objc_source_list_guard.py",
+  "inputs": [
+   "core/view/CMakeLists.txt",
+   "core/view/platform/mac",
+   "tools/cmake/PulpInstallRules.cmake",
+   "tools/cmake/PulpUtils.cmake",
+   "tools/scripts/mac_objc_source_list_guard.py"
+  ],
+  "kind": "python"
+ }
+}

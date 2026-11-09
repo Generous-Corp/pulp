@@ -1,0 +1,10 @@
+{
+ "name": "sanitizer-gate-inventory-contract",
+ "record": {
+  "entry": "tools/ci/test_sanitizer_gate_inventory.py",
+  "inputs": [
+   "tools/ci/test_sanitizer_gate_inventory.py"
+  ],
+  "kind": "python"
+ }
+}

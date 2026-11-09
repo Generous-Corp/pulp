@@ -1,0 +1,10 @@
+{
+ "name": "combined-installer-selftest",
+ "record": {
+  "entry": "tools/scripts/test_build_combined_installer.py",
+  "inputs": [
+   "tools/scripts/test_build_combined_installer.py"
+  ],
+  "kind": "python"
+ }
+}

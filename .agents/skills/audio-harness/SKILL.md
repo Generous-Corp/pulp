@@ -78,6 +78,7 @@ signal generators → scenarios → contracts → doctor
 | Spectrum | `<pulp/audio/analysis/audio_spectrum.hpp>` | lib | The FFT-bearing core of the Doctor, over **already-rendered buffers** (no `Processor`): `response_relative_to_input(input, output, …)`, `magnitude_spectrum_curve()`, `measure_thd(signal, …)`, `measure_group_delay(input, output, …)` (phase + group delay), plus the shared `ResponseCurve` / `ThdResult` / `PhaseCurve` / `Window` types. This is what the `pulp audio validate doctor` CLI runs over decoded WAVs — and what you call directly when your audio came from somewhere other than a scenario (e.g. rendered through a real format adapter). |
 | Doctor artifacts | `<pulp/audio/analysis/audio_doctor_artifacts.hpp>` | lib | `write_response_artifact()` / `write_thd_artifact()` / `write_phase_artifact()` + the JSON serializers (`phase_curve_to_json`); `kDoctorCurveSchemaVersion`. |
 | Latency evidence | `<pulp/audio/analysis/latency_evidence.hpp>` | lib | Delayed-null + impulse-marker latency policies as pure functions (see *Proving reported latency*). |
+| Images | `<pulp/audio/analysis/spectrogram_raster.hpp>`, `<pulp/audio/analysis/waveform_raster.hpp>` | lib | **Display only, never a gate.** Streaming peak-hold STFT grid → RGBA (linear/log/HTK-mel axis, fixed palette, ticks, 5x7 footer font) and `WaveformOverview` level → columns with clip flags; what `pulp audio spectrogram` / `pulp audio waveform` draw and the Quality Lab attaches under `advisory.artifacts`. Every stage is a pure function; nothing reads pixels back into a verdict. |
 | Generators | `"support/audio_test_signals.hpp"`, `"support/audio_signal_generators.hpp"` | test | Deterministic stimulus: sine/square/saw, impulse(+train), step, DC, multi-sine, swept sine, seeded white/pink/brown noise, stepped automation + MIDI note scripts. No clocks, no `random_device`. |
 | Reverb | `"support/reverb_metrics.hpp"` | test | `t60_schroeder` / `band_t60` (Schroeder backward integration, T20-extrapolated), `echo_density_curve` / `mixing_time_seconds` (Abel & Huang), `range_rms`, `band_energy`. Header-only; measures a reverberant DECAY, which is why it is not in the analysis lib (see *Measuring a reverb* below). |
 | Scenarios | `"support/render_scenario.hpp"` | test | `RenderScenario` builder over HeadlessHost (factory, sample rate, block size, channels, duration, input/MIDI/param scripts); `render()` → `ScenarioResult`. `run_matrix()` (SR × block sweeps) + `assert_block_partition_invariant()`. |
@@ -959,6 +960,15 @@ harness or `ctest`.
   `engine [--input <wav>] --character <c>` (validate the REAL stretch engine, reference-free
   on a dry input), `engine-baseline` (regression gate: did an engine change make it worse?),
   `corpus list|add` (versioned, license-guarded corpus).
+- **Decoder differential (developer lane):** `tests/test_decoder_differential.py` decodes
+  every lossless seed in `test/fixtures/fuzz/audio-decoder/` (`.wav` `.flac` `.aiff`) with
+  libsndfile and with `pulp-audio-decode-dump` (built with the C++ tests; set
+  `PULP_AUDIO_DECODE_DUMP_BIN` to it) and requires the float32 streams to be byte-identical.
+  It skips without `soundfile` or the binary, so it never holds a gate. A seed only one side
+  decodes is an acceptance split and must be listed in the test's `EXPECTED_ACCEPTANCE_SPLITS`
+  with its reason (a deliberate Pulp contract or a tracked issue); an unlisted split, or a listed
+  one that stops happening, fails the test, and the sample comparison is never relaxed. Lossy
+  seeds stay out because libsndfile's Ogg/MP3 paths are different codecs from Pulp's.
 - **Synth-guidance experiment:** `tools/rack/fidelity.py patch.vcv --wav render.wav`
   writes only the speaker-bound audio taps, using one shared peak-normalization gain while
   refusing a silent source and content-binding original Rack voltage levels in the adjacent

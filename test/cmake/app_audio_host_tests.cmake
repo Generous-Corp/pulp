@@ -394,8 +394,6 @@ if(PULP_AUDIO_QUALITY_LAB_GATE)
             "-DPULP_AUDIO_QUALITY_LAB_PYTHON=/path/to/python with numpy, "
             "soundfile, quality_lab, and pytest available")
     endif()
-    set(_pulp_sampler_aql_test
-        "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_sampler_interpolation_reference.py")
     foreach(_pulp_sampler_aql_case IN ITEMS reference negative-control)
         if(_pulp_sampler_aql_case STREQUAL "reference")
             set(_pulp_sampler_aql_expression
@@ -404,50 +402,34 @@ if(PULP_AUDIO_QUALITY_LAB_GATE)
             set(_pulp_sampler_aql_expression
                 "test_reference_comparison_has_a_working_negative_control")
         endif()
-        add_test(NAME sampler-quality-lab-${_pulp_sampler_aql_case}
-            COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
-                "${_pulp_sampler_aql_test}" -q -k "${_pulp_sampler_aql_expression}")
-        set_tests_properties(sampler-quality-lab-${_pulp_sampler_aql_case}
-            PROPERTIES
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-                ENVIRONMENT
-                    "PULP_SAMPLER_RENDER_WAV=$<TARGET_FILE:pulp-sampler-render-wav>;PULP_SAMPLER_AQL_REQUIRED=1;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-                LABELS "audio;sampler;quality-lab;dependency-gate"
-                TIMEOUT 120)
+        pulp_add_quality_lab_pytest(sampler-quality-lab-${_pulp_sampler_aql_case}
+            TEST_FILE tools/audio/quality-lab/tests/test_sampler_interpolation_reference.py
+            FILTER "${_pulp_sampler_aql_expression}"
+            ENV "PULP_SAMPLER_RENDER_WAV=$<TARGET_FILE:pulp-sampler-render-wav>"
+                PULP_SAMPLER_AQL_REQUIRED=1
+            LABELS sampler)
     endforeach()
-    set(_pulp_sampler_heritage_aql_test
-        "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_sampler_heritage_reference.py")
     foreach(_pulp_sampler_heritage_case IN ITEMS reference negative-control)
         if(_pulp_sampler_heritage_case STREQUAL "reference")
-            set(_pulp_sampler_heritage_expression
-                "not negative_control")
+            set(_pulp_sampler_heritage_expression "not negative_control")
         else()
             set(_pulp_sampler_heritage_expression "negative_control")
         endif()
-        add_test(NAME sampler-heritage-quality-lab-${_pulp_sampler_heritage_case}
-            COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
-                "${_pulp_sampler_heritage_aql_test}" -q -k
-                "${_pulp_sampler_heritage_expression}")
-        set_tests_properties(
-            sampler-heritage-quality-lab-${_pulp_sampler_heritage_case}
-            PROPERTIES
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-                ENVIRONMENT
-                    "PULP_SAMPLER_HERITAGE_RENDER_WAV=$<TARGET_FILE:pulp-sampler-heritage-render-wav>;PULP_SAMPLER_AQL_REQUIRED=1;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-                LABELS "audio;sampler;heritage;quality-lab;dependency-gate"
-                TIMEOUT 120)
+        pulp_add_quality_lab_pytest(sampler-heritage-quality-lab-${_pulp_sampler_heritage_case}
+            TEST_FILE tools/audio/quality-lab/tests/test_sampler_heritage_reference.py
+            FILTER "${_pulp_sampler_heritage_expression}"
+            ENV "PULP_SAMPLER_HERITAGE_RENDER_WAV=$<TARGET_FILE:pulp-sampler-heritage-render-wav>"
+                PULP_SAMPLER_AQL_REQUIRED=1
+            LABELS sampler heritage)
     endforeach()
-    add_test(NAME quality-lab-reference-free
-        COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
-            "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_reference_free.py"
-            -q)
-    set_tests_properties(quality-lab-reference-free
-        PROPERTIES
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-            ENVIRONMENT
-                "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
-            LABELS "audio;quality-lab;dependency-gate"
-            TIMEOUT 120)
+    pulp_add_quality_lab_pytest(quality-lab-reference-free
+        TEST_FILE tools/audio/quality-lab/tests/test_reference_free.py)
+    # Display-only image artifacts: a report with and without them has an
+    # identical gate view, no verdict module imports the exporter, and the
+    # attached block carries no absolute paths. Uses a fake CLI; needs no build.
+    pulp_add_quality_lab_pytest(quality-lab-artifacts
+        TEST_FILE tools/audio/quality-lab/tests/test_artifacts.py
+        TIMEOUT 300)
 endif()
 if(PULP_HAS_VST3)
     # The VST3 sibling of the CLAP null above: same deterministic Processor,
@@ -540,7 +522,31 @@ if(PULP_HAS_VST3)
     target_link_libraries(pulp-test-vst3-connection
         PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-vst3-connection)
+
+    # What a hosted VST3 plug-in sees from the VST3 slot: host name,
+    # ProcessContext transport, offline and 64-bit setup, sidechain and aux
+    # buses, the MIDI map both ways (IMidiMapping for controllers),
+    # IComponentHandler feedback, and latency restarts reaching SignalGraph.
+    # The EditController fake needs vsteditcontroller.cpp compiled in; this
+    # suite uses no SingleComponentEffect, so nothing duplicates its symbols.
+    add_executable(pulp-test-vst3-slot-process-fidelity
+        test_vst3_slot_process_fidelity.cpp
+        ${VST3_SDK_DIR}/public.sdk/source/vst/vsteditcontroller.cpp)
+    target_link_libraries(pulp-test-vst3-slot-process-fidelity
+        PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-vst3-slot-process-fidelity
+        PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    catch_discover_tests(pulp-test-vst3-slot-process-fidelity)
 endif()
+
+# The format-independent layer every hosted-plugin slot shares: bus binding,
+# the MIDI view, the plugin-edit inbox, and transport validity.
+add_executable(pulp-test-hosted-slot-process-request test_hosted_slot_process_request.cpp)
+target_link_libraries(pulp-test-hosted-slot-process-request
+    PRIVATE pulp::host Catch2::Catch2WithMain)
+target_include_directories(pulp-test-hosted-slot-process-request
+    PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+catch_discover_tests(pulp-test-hosted-slot-process-request)
 
 if(PULP_HAS_VST3)
     # Host-side VST3 editor (IPlugView) negotiation seam
@@ -636,6 +642,25 @@ pulp_bind_cli_shellout_target(pulp-test-cli-audio-compare)
 # The spawned pulp-cpp reads the shipped tool registry to resolve the tool.
 pulp_test_data(pulp-test-cli-audio-compare NO_DEFINE PATHS tools/packages/tool-registry.json)
 catch_discover_tests(pulp-test-cli-audio-compare)
+
+# Spectrogram and waveform image pipelines (tools/audio/analysis rasterizers).
+# Golden PNG comparison and regeneration both go through ImageIO, so those cases
+# run on macOS and skip elsewhere; the render layer is not linked here.
+add_executable(pulp-test-audio-image-raster test_audio_image_raster.cpp)
+target_link_libraries(pulp-test-audio-image-raster PRIVATE pulp::audio-analysis Catch2::Catch2WithMain)
+if(APPLE)
+    target_sources(pulp-test-audio-image-raster PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/png_rgba_decode_apple.cpp)
+    target_link_libraries(pulp-test-audio-image-raster PRIVATE
+        "-framework ImageIO" "-framework CoreGraphics" "-framework CoreFoundation")
+endif()
+pulp_test_data(pulp-test-audio-image-raster PATHS test/fixtures/audio/images)
+catch_discover_tests(pulp-test-audio-image-raster)
+
+# Shell-out coverage for `pulp audio spectrogram` and `pulp audio waveform`.
+add_executable(pulp-test-cli-audio-image test_cli_audio_image.cpp)
+target_link_libraries(pulp-test-cli-audio-image PRIVATE pulp::audio pulp::runtime pulp::platform Catch2::Catch2WithMain)
+pulp_bind_cli_shellout_target(pulp-test-cli-audio-image)
+catch_discover_tests(pulp-test-cli-audio-image)
 
 add_executable(pulp-test-cli-audio-latency test_cli_audio_latency.cpp)
 target_link_libraries(pulp-test-cli-audio-latency PRIVATE pulp::platform Catch2::Catch2WithMain)
@@ -775,6 +800,14 @@ target_link_libraries(pulp-test-host PRIVATE pulp::host Catch2::Catch2WithMain)
 # reuse pulp::host + rt_allocation_probe here and must stay off non-Apple (.mm/MSVC).
 if(APPLE)
   target_sources(pulp-test-host PRIVATE test_plugin_slot_au.mm)
+endif()
+# The AUAudioUnit slot hosting Apple's own Audio Units out of process: real
+# plugin binaries present on every Mac, so nothing is installed.
+if(APPLE)
+  add_executable(pulp-test-auv3-slot test_plugin_slot_auv3.mm)
+  target_link_libraries(pulp-test-auv3-slot PRIVATE pulp::host Catch2::Catch2WithMain
+      "-framework AudioToolbox" "-framework AVFoundation" "-framework Foundation")
+  catch_discover_tests(pulp-test-auv3-slot)
 endif()
 # PulpGain_CLAP fixture wiring lives in the ROOT CMakeLists.txt after
 # add_subdirectory(examples) (test/ registered first, so a TARGET guard here
@@ -1032,6 +1065,48 @@ if(PULP_HAS_CLAP AND NOT IOS AND NOT ANDROID)
         pulp-test-fixture-clap-abort
         pulp-scan-worker
         PulpNoEditorLinkFloor_CLAP)
+endif()
+
+# Real VST3 and CLAP bundles of the Pulp Host Probe fixture
+# (test/fixtures/host_probe), loaded through PluginSlot::load. The probe reports
+# what its host delivered (transport, offline mode, sample rate, block size,
+# sidechain, mapped MIDI) and, on command, edits its own parameter or changes
+# its latency, so the test checks host behavior from inside a real plug-in.
+# The fixture directory is configured after test/, so gate on the same flags
+# it uses; target dependencies resolve at generate time.
+if((PULP_HAS_VST3 OR PULP_HAS_CLAP) AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN OR WIN32))
+    add_executable(pulp-test-host-probe-bundles test_host_probe_bundles.cpp)
+    target_link_libraries(pulp-test-host-probe-bundles
+        PRIVATE pulp::host pulp::format pulp::events Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-host-probe-bundles PRIVATE ${PULP_ROOT_DIR}/test)
+    if(PULP_HAS_VST3)
+        add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_VST3)
+        # CMake's BUNDLE property is Apple-only: on macOS the VST3 is the
+        # .vst3 bundle directory, elsewhere the linker output is a plain module
+        # that PluginSlot's VST3 loader opens directly.
+        if(APPLE)
+            set(_pulp_host_probe_vst3 "${CMAKE_BINARY_DIR}/VST3/Pulp Host Probe.vst3")
+        else()
+            set(_pulp_host_probe_vst3 "$<TARGET_FILE:PulpHostProbe_VST3>")
+        endif()
+        target_compile_definitions(pulp-test-host-probe-bundles PRIVATE
+            PULP_TEST_HOST_PROBE_VST3="${_pulp_host_probe_vst3}")
+    endif()
+    if(PULP_HAS_CLAP)
+        add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_CLAP)
+        target_compile_definitions(pulp-test-host-probe-bundles PRIVATE
+            PULP_TEST_HOST_PROBE_CLAP="$<IF:$<BOOL:${APPLE}>,${CMAKE_BINARY_DIR}/CLAP/Pulp Host Probe.clap,$<TARGET_FILE:PulpHostProbe_CLAP>>")
+    endif()
+    # The AU component, hosted through the AUAudioUnit slot.
+    if(APPLE AND PULP_HAS_AUSDK)
+        add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_AU PulpHostMidiProbe_AU)
+        target_compile_definitions(pulp-test-host-probe-bundles PRIVATE
+            PULP_TEST_HOST_PROBE_AU="${CMAKE_BINARY_DIR}/AU/Pulp Host Probe.component"
+            PULP_TEST_HOST_MIDI_PROBE_AU="${CMAKE_BINARY_DIR}/AU/Pulp Host MIDI Probe.component")
+        target_link_libraries(pulp-test-host-probe-bundles PRIVATE
+            "-framework AudioToolbox" "-framework CoreFoundation")
+    endif()
+    catch_discover_tests(pulp-test-host-probe-bundles)
 endif()
 
 # NetworkServiceDiscovery backend-dispatch tests

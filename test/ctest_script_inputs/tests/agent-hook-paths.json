@@ -1,0 +1,13 @@
+{
+ "name": "agent-hook-paths",
+ "record": {
+  "entry": "tools/scripts/test_agent_hook_paths.py",
+  "inputs": [
+   "hooks/hooks.json",
+   "hooks/scripts/cli-plugin-sync.sh",
+   "hooks/scripts/docs-reminder.sh",
+   "tools/scripts/test_agent_hook_paths.py"
+  ],
+  "kind": "python"
+ }
+}

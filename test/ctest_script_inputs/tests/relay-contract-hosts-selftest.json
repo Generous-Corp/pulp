@@ -1,0 +1,14 @@
+{
+ "name": "relay-contract-hosts-selftest",
+ "record": {
+  "entry": "tools/scripts/test_relay_contract_check.py",
+  "inputs": [
+   "tools/ci",
+   "tools/rack/library_catalog.py",
+   "tools/scripts/bundle_threejs_for_jsc.mjs",
+   "tools/scripts/relay_contract_check.py",
+   "tools/scripts/test_relay_contract_check.py"
+  ],
+  "kind": "python"
+ }
+}

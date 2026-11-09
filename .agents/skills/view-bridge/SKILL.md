@@ -44,6 +44,13 @@ it and its tests, and both look like bugs until you know them:
   stays prompt while a client is acquiring. Holding drawables to force a block
   will not fail the way you expect.
 
+- **A headless Mac has no display link.** `CVDisplayLinkCreateWithActiveCGDisplays`
+  fails on a host with no active display (m1, CI VMs), so a pump that relied
+  on it would skip every test on exactly the hosts that run them.
+  `pulp::native::FramePump` falls back to a 60 Hz timer with the same pacing
+  logic, and `follows_display()` says which one is running. Only the one
+  display-link case skips. It ran green on a Mac with a display, where the
+  rate cap also held.
 - **A synthetic right-button event reports button number 0.**
   `+[NSEvent mouseEventWithType:...]` leaves `buttonNumber` at 0 for
   right-button types. `pulp::native::translate_pointer` therefore takes the
@@ -60,13 +67,6 @@ it and its tests, and both look like bugs until you know them:
   held it when the client took it, falling back to nil. Handing it to nil
   leaves a host's key routing (Musical Typing) dead, as the plug-in host's
   key-focus etiquette below describes.
-- **A headless Mac has no display link.** `CVDisplayLinkCreateWithActiveCGDisplays`
-  fails on a host with no active display (m1, CI VMs), so a pump that relied
-  on it would skip every test on exactly the hosts that run them.
-  `pulp::native::FramePump` falls back to a 60 Hz timer with the same pacing
-  logic, and `follows_display()` says which one is running. Only the one
-  display-link case skips. It ran green on a Mac with a display, where the
-  rate cap also held.
 
 The view's Objective-C class is registered at run time through
 `pulp/platform/objc_unique_class.hpp`, so two plug-ins never share it. Every
@@ -143,6 +143,24 @@ linker keeps whichever copy it sees first. The proof is
 `ui-script-plugin-editor-{vst3,clap,au}` (built bundles opened through
 `PluginSlot`, asserting `mode=scripted`, `gpu=true`, and the script's own
 console line) plus `ui-script-plugin-editor-installed-sdk`.
+
+### Pick the UI stack before writing the editor
+
+Everything in this skill assumes the default stack, Vellum on Skia/Dawn: the
+in-tree scripted UI or a Vellum `UI <package>`. RmlUi and a bring-your-own
+native surface are opt-in alternatives, not peers to weigh on every task (see
+`CLAUDE.md` "Choosing a UI stack" and the `rmlui` skill). In practice:
+
+- Do not propose RmlUi for a new editor because it "might be lighter". Use it
+  only when the product already ships RML/RCSS skins or Lua skin scripts, or
+  when the developer asks for it.
+- An RmlUi or native-surface editor does not go through `create_view()` or
+  `ViewBridge`. It reaches the host only through the editor-host contract
+  (`editor_host.hpp`), so none of the ViewBridge, WidgetBridge or scripted-UI
+  rules below apply to it.
+- One editor, one stack. A Vellum view tree and a separately owned GPU device
+  in the same editor is two devices presenting into one window. Keep them in
+  separate editors.
 
 ### `UI <package>` is the editor-host contract's default, per binary
 

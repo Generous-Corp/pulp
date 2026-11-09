@@ -1,0 +1,21 @@
+{
+ "name": "pulp-test-control-endpoint-enrollment",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-control-enrollment-host-fixture",
+   "pulp-control-installed-host-e2e-fixture",
+   "pulp-control-trusted-host-e2e-fixture",
+   "pulp-control-trusted-host-fixture"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_control_endpoint_enrollment.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

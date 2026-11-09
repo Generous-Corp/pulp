@@ -1,0 +1,11 @@
+{
+ "name": "tool-registry-reminder-hook",
+ "record": {
+  "entry": "test/test_tool_registry_reminder_hook.sh",
+  "inputs": [
+   "hooks/scripts/tool-registry-reminder.sh",
+   "test/test_tool_registry_reminder_hook.sh"
+  ],
+  "kind": "shell"
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "name": "rack-intent-context-selftest",
+ "record": {
+  "entry": "tools/rack/test_intent_context.py",
+  "inputs": [
+   "tools/rack/intent_context.py",
+   "tools/rack/test_intent_context.py"
+  ],
+  "kind": "python"
+ }
+}

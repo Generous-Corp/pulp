@@ -1,0 +1,10 @@
+{
+ "name": "test-pch-wiring",
+ "record": {
+  "entry": "tools/scripts/pch_wiring_check.py",
+  "inputs": [
+   "tools/scripts/pch_wiring_check.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -12,9 +12,9 @@ Current scope: CLAP, VST3, AU, and LV2 have real `PluginSlot` loaders
 when the matching SDK or platform support is compiled in. Each loader can
 open a bundle, prepare it, and process audio through the common host
 interface. Feature depth still varies by format: parameter, MIDI, state,
-editor, and extension support are not identical across loaders. In
-particular, **instruments are hostable through AU, VST3, and CLAP but not
-LV2** — see [Limits](#limits).
+editor, and extension support are not identical across loaders. Instruments
+are hostable through every format; see [LV2 plugins](#lv2-plugins) for what
+the LV2 loader provides and [Limits](#limits) for what no loader does yet.
 `SignalGraph` topology, block processing, automation routing, and delay
 compensation are implemented over the same `PluginSlot` interface.
 The VST3 and AU loaders are not stubs: both instantiate and process third-party
@@ -158,6 +158,102 @@ servicing bounded slices between offline blocks when the plug-in requires it.
 For plug-ins that slew parameter changes, render and discard an appropriate
 settle interval before capturing the measurement.
 
+## Audio Units through AUAudioUnit
+
+`PluginFormat::AudioUnitV3` loads an Audio Unit through `AUAudioUnit`, out of
+process by default: the system runs the plugin in its Audio Unit hosting
+service, so a plugin crash cannot take the host down. The same path hosts AU v2
+components, which the system wraps as `AUAudioUnit`; `PluginFormat::AudioUnit`
+keeps the in-process AU v2 slot.
+
+```cpp
+#include <pulp/host/plugin_slot_auv3.hpp>
+
+pulp::host::PluginInfo info;
+info.format = pulp::host::PluginFormat::AudioUnitV3;
+info.unique_id = "aufx:dely:appl";             // TYPE:SUBT:MANU, as the scanner writes it
+auto delay = pulp::host::PluginSlot::load(info);   // out of process
+
+pulp::host::AuV3LoadOptions in_process;
+in_process.out_of_process = false;
+auto local = pulp::host::load_auv3_plugin(info, in_process);
+```
+
+The slot builds every block from the same request as the CLAP and VST3 slots,
+so what follows in [What a hosted plugin sees](#what-a-hosted-plugin-sees)
+applies to it:
+
+- **Buses.** Every input and output bus is enabled at the width the plugin
+  accepts; the main buses take the caller's preferred layout. Out of process,
+  input buses start disabled, and the slot turns them on.
+- **Transport and mode.** The host transport reaches the plugin through
+  `musicalContextBlock` and `transportStateBlock`, and
+  `PluginHostSettings::process_mode` sets `renderingOffline` at `prepare()`.
+- **MIDI and automation.** MIDI and SysEx go through `scheduleMIDIEventBlock`,
+  and parameter events through `scheduleParameterBlock`, each at its sample
+  offset. MIDI the plugin emits comes back in `midi_out`. An AU effect of type
+  `aufx` takes no MIDI; instruments (`aumu`) and MIDI effects (`aumf`) do.
+- **Parameters.** Parameter ids are the plugin's parameter addresses, or
+  positions in its parameter list when an address does not fit 32 bits.
+  Parameters that share a display name carry their key path in the name.
+  Changes the plugin makes, gestures included, arrive through
+  `drain_parameter_edits()`. An Audio Unit delivers them on the main run loop,
+  so a host that never services it sees them late or not at all.
+- **Latency.** `latency_samples()` reads the plugin's `latency`. A change is a
+  restart request, so `apply_plugin_restarts()` rebuilds the graph's delay
+  compensation.
+- **State and editor.** State is the plugin's `fullState` as a binary property
+  list. The editor is the view controller from
+  `requestViewControllerWithCompletionHandler`, a remote view when the plugin
+  runs out of process; it needs an `NSApplication` that has finished
+  launching.
+
+- **A changing parameter list.** A plugin may replace its parameter tree, as a
+  sampler does when it loads a preset. The slot rebuilds `parameters()`,
+  moves its observer to the new tree, and raises a restart request so a graph
+  re-reads the list. A unit also republishes its tree a couple of
+  milliseconds after a bus format changes, so `prepare()` waits (25 ms of
+  quiet, at most 250 ms) for the tree to settle before it returns. Host edits
+  made on a tree that was then replaced are sent again to the new one, unless
+  a state restore came in between.
+- **Host edits reach the audio at the next block.** `set_parameter()` writes
+  the parameter and also queues the value for the next block, which delivers
+  it through `scheduleParameterBlock` with the render request, so the audio
+  follows a host edit at the next block in or out of process. That queue
+  holds 1024 edits between blocks; an edit that does not fit still reaches
+  the plugin through its parameter write, and is counted in
+  `dropped_parameter_edit_count()` with the plugin edits the slot could not
+  hand on. A read straight
+  after a write may briefly show the previous value out of process, while the
+  remote unit confirms it.
+- **A plugin that dies.** When the plugin's process exits, the system posts
+  `kAudioComponentInstanceInvalidationNotification`. From then on
+  `is_loaded()` is false, each block passes its input through and reports
+  `ProcessStatus::failed`, and the slot raises one restart request. The slot
+  never renders the dead unit again; load the plugin anew to recover.
+- **Bypass and buses.** A bypassed slot sets `shouldBypassEffect` and stops
+  rendering, so the plugin's tail is not rendered while bypassed. Every
+  output bus is rendered each block, even ones the host does not bind, so a
+  16-output instrument costs 16 renders.
+
+The plugin's binary must be registered with the system: an AU v3 app extension
+through its containing app, an AU v2 component by being installed in
+`~/Library/Audio/Plug-Ins/Components` or `/Library/Audio/Plug-Ins/Components`.
+A component registered only inside the host process with
+`AudioComponentRegister` loads in process only.
+
+What the tests cover, and where: Apple's own units (AUDelay, DLSMusicDevice,
+AUPeakLimiter, AUMultiChannelMixer) run out of process in every macOS test
+run, covering audio both ways, host parameter edits, automation, state, MIDI
+into an instrument at its sample offset, latency, per-bus routing, and the
+editor. The host-probe and MIDI-probe fixtures run in process there, covering
+transport, offline mode, the plugin's own edits and gestures, a latency change,
+and MIDI output. The same probe cases, plus a plugin that dies, run out of
+process only when the probe components are installed and
+`PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` is set; CI does not install them. A
+freshly built AU v3 app extension is not tested, because macOS registers one
+only when it is signed with a Developer ID and notarized.
+
 ## Runnable example
 
 [`examples/plugin-host-demo`](../../examples/plugin-host-demo/) scans installed
@@ -247,7 +343,7 @@ if (!attachment) {
 }
 ```
 
-Available for CLAP, VST3, and AU v2 on macOS today; see Limits below.
+Available for CLAP, VST3, AU v2, and AUv3 on macOS today; see Limits below.
 
 A plugin may also ask to resize itself once its editor is open. The
 attachment handles that for you: it re-bounds the child view at the same
@@ -297,6 +393,217 @@ with `ParamCursor` or subblock helpers. Dense
 `connect_audio_rate_modulation()` is the PDC-aligned path for parameters that
 must track a delayed audio branch sample by sample.
 
+### Restart requests and latency changes
+
+A hosted plugin can report that its latency changed (VST3
+`restartComponent(kLatencyChanged)`, CLAP `clap_host_latency::changed`), that
+its I/O changed, or that it needs a restart (CLAP `request_restart`, VST3
+`kReloadComponent`). Each of these needs the plugin deactivated and
+re-activated, so the slot counts them in `PluginSlot::restart_request_count()`
+rather than acting on the audio thread. The graph compares that count with the
+value it saw at `prepare()`:
+
+```cpp
+if (graph.plugin_restart_pending()) {
+    // Same contract as prepare(): no concurrent process() or anticipation pump.
+    graph.apply_plugin_restarts();   // re-activates plugins, rebuilds PDC
+}
+```
+
+`apply_plugin_restarts()` re-prepares at the last prepared sample rate and
+block size, so the latency compensation is rebuilt from the plugins' new
+reports. Poll it from the control thread, for example after draining parameter
+edits.
+
+## What a hosted plugin sees
+
+The CLAP, VST3, and AUv3 slots build every block from one internal request: all host
+buses, MIDI in and out, parameter events, the host transport (when there is
+one), and the process mode the slot was prepared in. Whichever `process()`
+overload the host calls, the plugin sees the same thing.
+
+### Host identity
+
+`set_plugin_host_identity()` sets the name, vendor, URL, and version a plugin
+reads from its host. Call it once at startup, before loading plugins: a plugin
+may ask during its own initialization. CLAP plugins see all four fields
+through `clap_host`; VST3 plug-ins see only the name, through
+`IHostApplication::getName`. The sample rate and maximum block size reach the
+plugin through `prepare()` (CLAP `activate`, VST3 `setupProcessing`).
+
+### Process mode and precision
+
+`PluginSlot::set_host_settings()` takes a `PluginHostSettings`, applied at the
+next `prepare()`:
+
+- **`process_mode`**: `Offline` prepares a VST3 plug-in with `kOffline` and
+  puts a CLAP plugin in `CLAP_RENDER_OFFLINE`, so it can take its
+  higher-quality path. A CLAP plugin that declares a hard realtime requirement
+  stays realtime.
+- **`prefer_double_precision`**: processes in 64-bit when the plugin supports
+  it (VST3 `kSample64`; CLAP only when every port supports 64-bit). Host
+  buffers stay 32-bit and the slot converts through prepared scratch.
+- **`deliver_transport`**: on by default. Turn it off to keep a slot eligible
+  for anticipative rendering, at the cost of the plugin seeing no tempo.
+
+`SignalGraph::set_hosted_plugin_process_mode()` hands a mode to every hosted
+plugin node at its next `prepare()`. `render_timeline_offline()` uses it to
+prepare hosted plugins offline for a bounce
+(`TimelineOfflineRenderConfig::hosted_plugin_mode`) and restores the graph's
+previous setting when it returns, so re-prepare before live playback.
+
+### Transport
+
+A slot that delivers transport receives the graph's `ProcessContext` and
+translates it: CLAP gets a `clap_event_transport` (tempo, beat and seconds
+timeline, time signature, bar, loop range, play/record/loop flags), VST3 gets
+a `ProcessContext` (tempo, musical position, bar start, time signature, cycle
+range, system time, SMPTE rate, play/record/cycle flags). Only fields the host
+marked valid in `ProcessContext::transport_validity` set their format flag, so
+a plugin never mistakes a default for a real tempo. Without a host transport a
+CLAP plugin gets a null transport and a VST3 plug-in gets a free-running sample
+clock with no musical fields.
+
+### Buses and sidechain
+
+Every audio bus the plugin declares is activated and processed. The host's main
+input and output bind to the plugin's main buses; the host's other buses
+(sidechain, aux) bind to the plugin's other buses in order. A plugin bus the
+host does not supply gets silence on input and a discard buffer on output, and
+host output channels the plugin does not write are zeroed. Use the
+`process(format::ProcessBuffers&, ...)` overload to sidechain a hosted
+compressor or to collect a multi-out instrument's aux outputs.
+
+### MIDI
+
+| Message | VST3 | CLAP |
+|---|---|---|
+| Note on/off | note events | note events in the CLAP dialect, else MIDI |
+| Poly pressure | `kPolyPressureEvent` | pressure note-expression in the CLAP dialect, else MIDI |
+| CC, channel pressure, pitch bend, program change | parameter changes through the plug-in's `IMidiMapping`; unmapped ones are dropped | MIDI |
+| SysEx | `DataEvent` (`kMidiSysEx`) | `CLAP_EVENT_MIDI_SYSEX` |
+
+The CLAP dialect is chosen from the plugin's first note port. Output travels
+the other way: VST3 note, poly-pressure, `LegacyMIDICCOutEvent` and SysEx
+events, and CLAP note, note-expression pressure, MIDI and SysEx events all
+arrive in `midi_out`. SysEx output uses the buffer's realtime payload pool when
+the host reserved one.
+
+### Parameter feedback
+
+Edits the plugin makes itself (a knob turned in its editor, a value it emits
+from `process()`) are queued for the host. Drain them on the control thread:
+
+```cpp
+std::array<pulp::host::PluginParameterEdit, 64> edits;
+const auto n = slot->drain_parameter_edits(edits);
+for (std::size_t i = 0; i < n; ++i) {
+    // begin_gesture / value (plain units) / end_gesture
+}
+```
+
+VST3 editor edits arrive through the host's `IComponentHandler`, which also
+forwards each value to the processor at the next block; processor output
+parameters are pushed back to the edit controller during the drain. CLAP
+gestures and values arrive as output events. The drain is also where a CLAP
+plugin's `request_callback` (`on_main_thread`) and a parameter flush requested
+while it is not processing are serviced. `state_change_count()` counts CLAP
+`mark_dirty` and VST3 `setDirty(true)`.
+
+## LV2 plugins
+
+The LV2 loader reads a bundle the way every LV2 host does, through lilv: it
+starts at `manifest.ttl`, follows `rdfs:seeAlso`, and loads the module the
+plugin's `lv2:binary` names. A bundle without a manifest describes no plugin and
+does not load, and neither does a plugin whose description lilv cannot verify:
+a file that fails to parse, no ports, or no `doap:name`, which LV2 requires. lilv and its dependencies are vendored under `external/lilv` and
+compiled into `pulp::host`, so hosting LV2 needs nothing installed on the
+system.
+
+```cpp
+pulp::host::PluginInfo info;
+info.format = pulp::host::PluginFormat::LV2;
+info.path = "/usr/lib/lv2/MySynth.lv2";        // the bundle directory
+info.unique_id = "http://example.com/my-synth"; // the plugin URI; empty picks the first
+auto synth = pulp::host::PluginSlot::load(info);
+```
+
+What the slot gives the plugin:
+
+- **Every port connected.** Audio, control, CV, and atom ports are connected
+  before the first `run()`, so instruments and event-driven plugins run with
+  defined behavior. CV inputs receive silence. A required port of any other
+  kind makes `load()` fail and names the port in the log.
+- **MIDI in and out.** Host MIDI reaches each atom input that supports
+  `midi:MidiEvent`, at its sample offset. MIDI the plugin writes to an atom
+  output comes back in `midi_out` at the frame it was written. Messages longer
+  than three bytes (SysEx) are not delivered.
+- **Transport.** A plugin with an atom input that supports `time:Position`
+  reports `wants_transport()`, and `SignalGraph` then hands the slot the host
+  transport. The graph does this on its routed executor, so enable it with
+  `set_canonical_executor_routing_enabled(true)` and pass an input buffer
+  whose length matches the block (a block that fails validation runs the
+  reference walk, which carries no transport). The slot sends a
+  `time:Position` object on the first block, whenever the play state, tempo,
+  or meter changes, and whenever the position jumps. It carries frame, frames
+  per second, speed, beat (`time:beat`, in beats of the meter's beat unit),
+  bar, bar beat, beat unit, beats per bar, and tempo, but only the ones the
+  host supplied: when `ProcessContext::transport_validity` is set, a field it
+  does not mark is left out rather than sent as a default.
+- **Parameters.** Control input ports are parameters, identified by port
+  index. Properties the plugin declares `patch:writable` (or `patch:readable`)
+  with a numeric `rdfs:range` are parameters too, with ids from `0x40000000`
+  in property-URI order. Setting one sends `patch:Set` at the start of the
+  next block; automating one sends it at the event's frame. The value is
+  clamped to the declared bounds and sent as the atom type of the property's
+  `rdfs:range` (`atom:Int`, `atom:Long`, `atom:Bool`, `atom:Double`, or
+  `atom:Float`), since plugins ignore a value of another type. A `patch:Set` the
+  plugin emits updates the value `get_parameter()` returns, and the slot sends
+  `patch:Get` after a prepare or a state restore so the host's values start in
+  agreement with the plugin's. Output control ports are readable through
+  `get_parameter(port index)` but are not listed as parameters. A control
+  port marked `lv2:sampleRate` declares its range as fractions of the sample
+  rate; the slot scales it by the prepared rate.
+- **Event buffers.** Each atom input holds the larger of 8192 bytes and the
+  port's `rsz:minimumSize`. An event that does not fit is dropped whole, so a
+  plugin never sees a partial one.
+- **Host features.** `urid:map`, `urid:unmap`, `options:options` (buf-size
+  min, max, and nominal block length, sequence size, and `param:sampleRate`),
+  `buf-size:boundedBlockLength`, `log:log`, `worker:schedule`, and
+  `state:loadDefaultState`. A plugin that requires any other feature is
+  refused at `load()`, as LV2 requires.
+- **Worker.** A plugin's scheduled work runs on a worker thread and its
+  responses reach `work_response()` after a later `run()`. In an offline block
+  (`ProcessContext::process_mode` is `Offline`) work runs inside the block and
+  answers after the same `run()`, so an offline render does not depend on
+  thread timing. An `lv2:freeWheeling` input is set to 1 for offline blocks.
+  When the request queue is full, `schedule_work()` returns
+  `LV2_WORKER_ERR_NO_SPACE` and the plugin can try again later.
+- **State.** `save_state()` returns the plugin's LV2 state and its control
+  input values as Turtle text. It runs alongside the audio thread, as LV2
+  allows, so saving never interrupts playback. `restore_state()` applies it to the running
+  instance, or holds it until `prepare()` when there is no instance yet. A
+  re-prepare builds a new instance (LV2 fixes the sample rate at
+  instantiation) and carries the state across. A plugin's default state from
+  its bundle is applied when it is first instantiated.
+- **Latency.** An `lv2:reportsLatency` output port is read back by
+  `latency_samples()`. `prepare()` runs one silent block so the value is valid
+  when `SignalGraph` reads it for delay compensation.
+
+Restores and re-prepares lock out the audio thread with a try-lock: a block that
+arrives during one passes its input through instead of waiting. A bypassed
+plugin misses the note-offs sent meanwhile, so it gets All Notes Off on every
+channel when the bypass ends. A plugin's `log:log` trace messages, the only
+kind it may log from `run()`, are dropped; other messages go to the Pulp log.
+
+Audio inputs map to the host's main input in port order, and outputs to the
+main output; `lv2:portGroup` (a sidechain group, for example) is not modelled
+as a separate bus.
+
+The LV2 host tests run the fixture bundle on macOS and Linux. On Windows the
+loader and the vendored libraries are compiled, but no test hosts an LV2
+plugin there.
+
 ## CLI
 
 Two commands surface hosting in the CLI:
@@ -311,18 +618,21 @@ These exist to smoke-test the loaders outside a full DAW context.
 ## Limits
 
 - Feature coverage is format-specific. CLAP, VST3, and AU route parameter
-  automation through their native event paths; LV2 routes host parameter
-  events through block-rate control ports, so the last event in a block wins.
-- **LV2 cannot host instruments.** The LV2 loader discovers only
-  `lv2:AudioPort` and `lv2:ControlPort`, so atom, event, and CV ports are
-  never `connect_port`'d — and LV2 requires *every* port be connected before
-  `run()`. Every LV2 instrument has an atom MIDI input port, so running one
-  is undefined behavior rather than a clean failure. No MIDI reaches an LV2
-  plugin at all: `process()` accepts the host's `MidiBuffer` and discards it.
-  Host instruments through **AU, VST3, or CLAP**, which do route MIDI.
+  automation through their native event paths. LV2 control ports are read at
+  block start, so the last event in a block wins; LV2 patch parameters are
+  sample-accurate.
+- The LV2 loader shows no plugin UI (`lv2:ui`), feeds CV inputs silence, does
+  not deliver SysEx, and gives plugins no `state:mapPath` or `state:makePath`,
+  so a plugin that saves files in its state cannot be restored from them.
+- Host transport, offline mode, 64-bit processing, every declared bus,
+  plugin parameter feedback, and restart requests are implemented by the
+  **CLAP, VST3, and AUv3** slots (64-bit processing excepted for AUv3, which
+  renders 32-bit float). The AU v2 slot still runs realtime on a single main
+  bus with no host transport and reports no parameter edits or restart
+  requests.
 - Only one factory descriptor per `.clap` is selected (first one, or one
   matching `info.unique_id`).
-- Hosted editor embedding is wired for CLAP, VST3, and AU v2 on macOS. LV2
+- Hosted editor embedding is wired for CLAP, VST3, AU v2, and AUv3 on macOS. LV2
   slots still report no editor, and Windows and Linux have no desktop
   `WindowHost` implementing the native-child seam, so nothing can be parented
   there yet.

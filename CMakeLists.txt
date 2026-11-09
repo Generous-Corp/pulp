@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.88.0
+    VERSION 1.94.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -390,6 +390,36 @@ option(PULP_ENABLE_FUZZING "Build libFuzzer targets (requires a libFuzzer runtim
 # main) can still build and run the targets with "fuzzer" alone.
 set(PULP_FUZZ_SANITIZERS "fuzzer,address" CACHE STRING
     "Comma-separated -fsanitize= list for libFuzzer targets")
+# A compiler that ships no libFuzzer driver runtime (Apple clang) can still
+# build the lane: it accepts -fsanitize=fuzzer-no-link, which emits the
+# coverage counters, and the libFuzzer main comes from a static archive
+# built by another LLVM of the same major version, such as Homebrew's
+# llvm@<N>/lib/clang/<N>/lib/darwin/libclang_rt.fuzzer_osx.a. Name it here and
+# every fuzz target links it instead of asking the driver for one.
+set(PULP_FUZZ_RUNTIME_ARCHIVE "" CACHE FILEPATH
+    "libFuzzer static archive to link when the compiler provides no -fsanitize=fuzzer runtime")
+if(PULP_ENABLE_FUZZING)
+    # The libraries a fuzz target reaches carry the same instrumentation as the
+    # target itself. libFuzzer only learns about branches that were compiled
+    # with its coverage counters and ASan only checks accesses in code it
+    # instrumented, so an entry file instrumented alone leaves every decoder,
+    # parser and dependency behind it invisible: a run then reports coverage of
+    # the entry point and nothing else. "fuzzer" becomes "fuzzer-no-link"
+    # tree-wide (counters without a second main); the target adds the driver.
+    set(PULP_FUZZ_LIBRARY_SANITIZERS "")
+    string(REPLACE "," ";" _pulp_fuzz_sanitizer_list "${PULP_FUZZ_SANITIZERS}")
+    foreach(_sanitizer IN LISTS _pulp_fuzz_sanitizer_list)
+        if(_sanitizer STREQUAL "fuzzer")
+            set(_sanitizer "fuzzer-no-link")
+        endif()
+        list(APPEND PULP_FUZZ_LIBRARY_SANITIZERS "${_sanitizer}")
+    endforeach()
+    list(JOIN PULP_FUZZ_LIBRARY_SANITIZERS "," _pulp_fuzz_library_sanitizers)
+    add_compile_options(-fsanitize=${_pulp_fuzz_library_sanitizers} -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=${_pulp_fuzz_library_sanitizers})
+    unset(_pulp_fuzz_library_sanitizers)
+    unset(_pulp_fuzz_sanitizer_list)
+endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Sanitizers.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstrumentation.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)
@@ -979,6 +1009,8 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/render_provider_floor)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
+    add_subdirectory(test/fixtures/host_probe)
+    add_subdirectory(test/fixtures/host_midi_probe)
     add_subdirectory(test/fixtures/data_display_editor)
     add_subdirectory(test/fixtures/editor_ui_package)
     add_subdirectory(test/fixtures/linux_plugin_isolation)

@@ -1,0 +1,12 @@
+{
+ "name": "deps-patches-selftest",
+ "record": {
+  "entry": "tools/deps/test_check_patches.py",
+  "inputs": [
+   "tools/deps/check_patches.py",
+   "tools/deps/patches.json",
+   "tools/deps/test_check_patches.py"
+  ],
+  "kind": "python"
+ }
+}

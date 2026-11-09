@@ -1,0 +1,12 @@
+{
+ "name": "build-time-report-selftest",
+ "record": {
+  "entry": "tools/scripts/test_build_time_report.py",
+  "inputs": [
+   "core/view",
+   "core/view/include/pulp/view/view.hpp",
+   "tools/scripts/test_build_time_report.py"
+  ],
+  "kind": "python"
+ }
+}

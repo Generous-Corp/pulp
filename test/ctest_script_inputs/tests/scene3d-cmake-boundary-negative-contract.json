@@ -1,0 +1,12 @@
+{
+ "name": "scene3d-cmake-boundary-negative-contract",
+ "record": {
+  "entry": "tools/scene3d/verify_scene3d_cmake_boundary_contract.py",
+  "inputs": [
+   "core/scene",
+   "tools/scene3d/verify_scene3d_cmake_boundary.py",
+   "tools/scene3d/verify_scene3d_cmake_boundary_contract.py"
+  ],
+  "kind": "python"
+ }
+}

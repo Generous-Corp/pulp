@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-modal-spec",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_modal_spec.cpp"
+  ],
+  "inputs": [
+   "examples/modal-specs"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/harness/rt_allocation_probe.cpp",
+   "test/test_modal_spec.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

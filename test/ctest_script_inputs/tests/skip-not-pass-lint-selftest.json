@@ -1,0 +1,10 @@
+{
+ "name": "skip-not-pass-lint-selftest",
+ "record": {
+  "entry": "tools/scripts/test_check_skip_not_pass.py",
+  "inputs": [
+   "tools/scripts/test_check_skip_not_pass.py"
+  ],
+  "kind": "python"
+ }
+}

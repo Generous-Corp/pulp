@@ -1,0 +1,10 @@
+{
+ "name": "daw-smoke-sample-region-native-smoke-selftest",
+ "record": {
+  "entry": "tools/testing/daw-smoke/test_sample_region_native_smoke.py",
+  "inputs": [
+   "tools/testing/daw-smoke/test_sample_region_native_smoke.py"
+  ],
+  "kind": "python"
+ }
+}

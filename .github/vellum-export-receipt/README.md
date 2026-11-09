@@ -36,6 +36,21 @@ the new receipt, updating `export_id`, `receipt_path`, `receipt_source` and
 `receipt_sha256` together, and removing the old copy. The pin cannot be deleted
 while the guard runs.
 
+`framework-transfer.json` records Vellum's transfer of an export's units into
+its native `framework/` root: the Vellum pull request, the commit that merged
+it (`framework_commit`), the SHA-256 of `provenance/framework/transfer.json`
+at that commit, the export and its Pulp commit, and the exact Pulp paths
+transferred. It is not here until Vellum's transfer has merged; it lands in its
+own change, after the rule that reads it. No re-export follows it, so while the
+record is at a change's base, receipt mode refuses `vellum_inherits: true` on
+every path it judges (exported, producer or source-directory, whichever export
+named it) and on any event covering a frozen path; `false` records a Pulp-only
+edit. In the trusted lanes, `framework_commit` must be on Vellum's main, it must be
+the record's pull request's merge into main (that pull request's
+`merge_commit_sha`), and the record must equal Vellum's transfer record at that commit; a later Vellum edit
+to its record does not affect this one. It cannot be removed or edited once it
+lands.
+
 A changed exported path needs an added event that states `vellum_inherits`:
 a change event or expansion-watch event that covers it, or an export event under
 `.github/vellum-export-events/`:
@@ -52,6 +67,14 @@ a change event or expansion-watch event that covers it, or an export event under
   "rationale": "What changed, and why Vellum does or does not take it."
 }
 ```
+
+A re-pin applies to the changes after it, so an open branch whose added event
+names the previous `receipt_export_id` fails until its event is rewritten;
+merging main does not do that. `python3 tools/scripts/vellum_receipt_drift.py
+--repin-events` rewrites the export events the branch adds (never one already on
+`origin/main`) to the id pinned on `origin/main`, and drops paths an export event
+on `origin/main` already decides when the branch does not change them again.
+Commit the result: receipt mode reads committed HEAD.
 
 Two added events that state different values for one path fail as a conflict.
 To correct a landed export event, add a new one naming it in `supersedes`

@@ -1,0 +1,10 @@
+{
+ "name": "harness-adapters-base-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_adapters_base.py",
+  "inputs": [
+   "tools/harness/tests/test_adapters_base.py"
+  ],
+  "kind": "python"
+ }
+}

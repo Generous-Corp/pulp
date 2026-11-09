@@ -269,6 +269,7 @@ SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 MIGRATION_NOTE_GUARD="$ROOT/tools/scripts/migration_note_guard.py"
 TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
 SCRIPT_INPUTS_PRECHECK="$ROOT/tools/scripts/script_inputs_precheck.py"
+HOTSPOT_EDIT_GUARD="$ROOT/tools/scripts/hotspot_edit_guard.py"
 SURFACE_FAMILIES="$ROOT/tools/scripts/changed_surface_script_families.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
@@ -846,15 +847,27 @@ if [ -f "$TEXT_ENCODING_LINT" ]; then
     esac
 fi
 
-# A new script-driven add_test() with no test/ctest_script_inputs.json entry.
+# A new script-driven add_test() with no test/ctest_script_inputs/ entry.
 # CI's script-test-inputs-drift needs a configured build; this reads only the
 # CMake text the push adds, so it runs on any host, including a gate host.
 if [ -f "$SCRIPT_INPUTS_PRECHECK" ]; then
     run_gate_captured "$PYTHON" "$SCRIPT_INPUTS_PRECHECK" --root "$ROOT" --base "$BASE"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] script inputs: regenerate test/ctest_script_inputs.json (commands above)." >&2; fail=1 ;;
+        1) echo "[pre-push] script inputs: regenerate test/ctest_script_inputs/ (commands above)." >&2; fail=1 ;;
         *) gate_could_not_run "script_inputs_precheck" "$gate_rc"; fail=1 ;;
+    esac
+fi
+
+# A direct edit to a registered shared hotspot aggregate (a generated file that
+# now lives as one fragment per entry; tools/scripts/hotspot_edit_guard.json).
+if [ -f "$HOTSPOT_EDIT_GUARD" ]; then
+    run_gate_captured "$PYTHON" "$HOTSPOT_EDIT_GUARD" --root "$ROOT" --base "$BASE" \
+        --head "${_prepush_pushed_head_sha:-HEAD}"
+    gate_rc=$?; case $gate_rc in
+        0) ;;
+        1) echo "[pre-push] hotspot edit: write the named fragment instead of the aggregate (commands above)." >&2; fail=1 ;;
+        *) gate_could_not_run "hotspot_edit_guard" "$gate_rc"; fail=1 ;;
     esac
 fi
 
