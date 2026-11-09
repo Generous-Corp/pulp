@@ -302,6 +302,18 @@
    "spawns": "none",
    "undeclared_sources": []
   },
+  "pulp-test-auv3-slot": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_plugin_slot_auv3.mm"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-baked-graph-processor-parity": {
    "data": "none",
    "inputs": [],
@@ -1774,6 +1786,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-graph-control-event-probe": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_graph_control_event_probe.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-graph-identity": {
    "data": "none",
    "inputs": [],
@@ -2114,6 +2138,8 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
+    "PulpHostMidiProbe_AU",
+    "PulpHostProbe_AU",
     "PulpHostProbe_CLAP",
     "PulpHostProbe_VST3"
    ],
@@ -2808,6 +2834,13 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-voice-template": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-vst3-slot-process-fidelity": {
    "data": "none",
    "inputs": [],
@@ -2818,13 +2851,6 @@
     "test/test_vst3_slot_process_fidelity.cpp"
    ],
    "spawns": "undeclared",
-   "undeclared_sources": []
-  },
-  "pulp-test-voice-template": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "sources": [],
    "undeclared_sources": []
   },
   "pulp-test-widget-bridge-api-contracts": {
@@ -2959,6 +2985,7 @@
   "pulp-test-audio-workgroup-wiring",
   "pulp-test-authoring-capsule",
   "pulp-test-authoring-capsule-hostile",
+  "pulp-test-auv3-slot",
   "pulp-test-baked-graph-param-injection",
   "pulp-test-baked-graph-processor-parity",
   "pulp-test-baked-node-fixture",
@@ -3213,9 +3240,11 @@
   "pulp-test-gpu-wavenet-descriptor",
   "pulp-test-gpu-wavenet-realtime-node",
   "pulp-test-gpu-wavenet-session",
+  "pulp-test-graph-control-event-probe",
   "pulp-test-graph-executor-routing",
   "pulp-test-graph-identity",
   "pulp-test-graph-plugin-resolution",
+  "pulp-test-graph-rt-report",
   "pulp-test-graph-runtime-worker-pool",
   "pulp-test-graphic-eq",
   "pulp-test-group-app-audio",
@@ -3388,6 +3417,7 @@
   "pulp-test-native-core-processor",
   "pulp-test-native-metal-audio-comparator",
   "pulp-test-native-metal-compute",
+  "pulp-test-native-metal-surface",
   "pulp-test-negative-path",
   "pulp-test-network-service-discovery",
   "pulp-test-neural-cpu-simd",
@@ -3405,6 +3435,7 @@
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
+  "pulp-test-platform-main-thread",
   "pulp-test-platform-objc-unique-class",
   "pulp-test-playback-audio-renderer",
   "pulp-test-playback-automation-cursor",
@@ -3796,6 +3827,7 @@
     "tools/scripts/agent_capability_evolution.py",
     "tools/scripts/agent_capability_history.py",
     "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/agent_capability_rederive.py",
     "tools/scripts/agent_capability_registry.py",
     "tools/scripts/agent_capability_registry_types.py",
     "tools/scripts/agent_capability_surface.py",
@@ -6036,6 +6068,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/gpu_audio_p2_campaign.py",
     "tools/scripts/gpu_audio_provider_identity.py",
@@ -6089,6 +6122,7 @@
     "tools/deps",
     "tools/deps/manifest.json",
     "tools/scripts",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/test_gpu_audio_provider_identity.py"
@@ -13850,6 +13884,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"
@@ -13861,6 +13896,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"

@@ -484,13 +484,14 @@ class DownloadRetry(unittest.TestCase):
             slept: list[float] = []
             with mock.patch.object(skia.urllib.request, "urlopen",
                                    side_effect=urllib.error.URLError("down")), \
+                 mock.patch.object(skia.download_retry, "jitter_factor", return_value=1.0), \
                  contextlib.redirect_stdout(io.StringIO()):
                 with self.assertRaises(urllib.error.URLError):
                     skia.download_release_asset(
                         "https://example.invalid/skia.zip", self._zip_path(td),
                         attempts=3, sleep=slept.append,
                     )
-            self.assertEqual(slept, [2.0, 4.0])
+            self.assertEqual(slept, [5.0, 10.0])
 
             served: list[float] = []
             with mock.patch.object(skia.urllib.request, "urlopen",

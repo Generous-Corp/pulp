@@ -22,7 +22,10 @@ hand. This performs the second half, deterministically:
      excluded, so each counter moves only when its own material actually
      changed — bumping one whose material is identical fails the opposite
      rule, `... changed without a manifest change`,
-  4. rewrite the two constants and hand off to `--write`.
+  4. leave a moved counter at the base value when the base's history lets
+     the change be pending (the version-at-land bump assigns it), and only
+     otherwise advance it by one,
+  5. rewrite the two constants and hand off to `--write`.
 
 Only the counters are decided here. Every contract, digest, and evolution rule
 is still enforced by `--write` and `--check`, which this deliberately does not
@@ -68,12 +71,18 @@ def derive(
     current_surface: dict[str, Any],
     base_manifest: Any,
     base_surface: Any,
+    base_history: Any = None,
 ) -> tuple[int, int]:
     """Return the counters this tree should carry on top of its base.
 
     A counter advances only when its own material moved. Advancing one whose
     material is unchanged is not a harmless over-bump: it trips
     `... changed without a manifest change`.
+
+    With the base's history, a moved counter stays at the base value whenever
+    the change can be pending (`counters_that_can_stay`): the version-at-land
+    bump assigns it, so no two branches race for base + 1. Without the
+    history, or for a mixed base, it falls back to base + 1.
     """
     if not isinstance(base_manifest, dict) or not isinstance(base_surface, dict):
         raise DeriveError(
@@ -95,9 +104,45 @@ def derive(
         base_surface, "inventory_version"
     )
 
-    revision = base_revision + 1 if manifest_moved else base_revision
-    inventory = base_inventory + 1 if surface_moved else base_inventory
+    manifest_stays, surface_stays = (
+        history.counters_that_can_stay(base_history, base_manifest, base_surface)
+        if base_history is not None else (False, False)
+    )
+    revision = (
+        base_revision + 1 if manifest_moved and not manifest_stays else base_revision
+    )
+    inventory = (
+        base_inventory + 1 if surface_moved and not surface_stays else base_inventory
+    )
     return revision, inventory
+
+
+def _read_base_history(
+    root: pathlib.Path, comparison: history.GitComparisonProvenance
+) -> Any:
+    """The protected base's contract history, or None when it cannot be read.
+
+    None costs the conflict-free path: derive falls back to base + 1, which is
+    the integer every open branch races for. That is never silent; the
+    warning names the fallback and why. `--write` and `--check` still
+    validate the history in full."""
+    item = history.read_git_path(root, comparison, history.HISTORY_FILE)
+    reason = None
+    if item.status != "available":
+        reason = f"it is {item.status}"
+    else:
+        try:
+            return history.json.loads(item.content or "")
+        except history.json.JSONDecodeError as error:
+            reason = f"it is not valid JSON ({error})"
+    print(
+        f"agent-capability-rederive: WARNING: could not read the protected "
+        f"base's {history.HISTORY_FILE} ({reason}), so a moved counter falls "
+        "back to base + 1 instead of staying pending. Two branches that do this "
+        "race for the same integer and conflict; fix the base read and re-run.",
+        file=sys.stderr,
+    )
+    return None
 
 
 def rewrite_constants(root: pathlib.Path, revision: int, inventory: int) -> bool:
@@ -360,7 +405,8 @@ def main(argv: list[str]) -> int:
                 f"from it: {error}"
             ) from error
         revision, inventory = derive(
-            current_manifest, current_surface, base_manifest, base_surface
+            current_manifest, current_surface, base_manifest, base_surface,
+            _read_base_history(root, comparison),
         )
     except DeriveError as error:
         print(f"agent-capability-rederive: {error}", file=sys.stderr)
