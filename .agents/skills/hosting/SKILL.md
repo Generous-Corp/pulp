@@ -3021,3 +3021,10 @@ fail-closed stale, late, unbound, and overflow behavior intact when refreshing
 its public fingerprints or receipts. Validate the focused trigger-graph group
 and installed consumer; this seam does not establish hosted-plugin voice
 coverage or realtime qualification.
+
+# G-7 edge diagnostics
+
+SignalGraph control and event edge probes are serial routed diagnostics with
+fixed-capacity publication and explicit refusal in unsupported execution modes.
+Host lifecycle changes must preserve detach-on-reset and the source-edge event
+observation boundary.
