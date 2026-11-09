@@ -21,7 +21,9 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 | Platform detection | `detect.hpp` | Compile-time and runtime platform checks |
 | Native handles | `native_handle.hpp` | Typed OS window/device handles for adapters |
 | Clipboard | `clipboard.hpp` | Cross-platform text clipboard access where implemented |
-| File dialogs | `file_dialog.hpp` | Native open/save panels where implemented |
+| File dialogs | `file_dialog.hpp` | Native open/save panels where implemented. `open_async` / `save_async` / `save_copy_async` are non-blocking sheets on the parent view's window, with one completion on the main thread that is dropped if the `MainThreadScope` dies first; `set_async_backend` lets a host or test supply them |
+| Alerts | `alert.hpp` | `show_alert_async`: an OK, OK/Cancel or Yes/No alert as a sheet on the parent view's window (NSAlert on macOS), with its result delivered asynchronously; `unavailable` without a window or a native backend. Where the platform has no main-thread backend (`main_thread_supported() == false`), results are delivered inline instead of posted |
+| Open URL | `open_url.hpp` | Opens http, https and mailto links in the default application; refuses every other scheme |
 | Outbound file drag | `file_drag.hpp` | `begin_file_drag` drags existing files out of any native view (macOS: an NSDraggingSession) from inside a pointer-down or drag handler, offering copy and/or move with an optional drag image, and reports the destination's operation once on the main thread. `set_file_drag_recorder` records the request instead, so automation and tests can start a drag without a pointer event |
 | Popup menus | `popup_menu.hpp` | Native menu affordances for UI surfaces |
 | Main-thread work | `main_thread.hpp` | `MainThreadScope` posts work to the main thread from any thread, and `MainThreadTimer` gives one-shot or repeating millisecond timers. Both run in the common run-loop modes, so they keep running during menu tracking, live resize and modal panels, and nothing runs after the scope is destroyed. macOS and iOS; other platforms report `main_thread_supported() == false` |
@@ -582,7 +584,7 @@ therefore counts it twice.
 | Format | Read | Write | Backend |
 |--------|:----:|:-----:|---------|
 | AAC | macOS, Windows | macOS, Windows, ✓* | Read through ExtAudioFile on macOS and Media Foundation on Windows. Written by the system codec writer (M4A or ADTS on macOS, M4A at 44.1 or 48 kHz on Windows) or optional FDK AAC (`pulp add fdk-aac --accept-license FDK-AAC`). FDK AAC writes an ADTS stream for both `.aac` and `.m4a`, so a `.m4a` it writes is not an MPEG-4 file and some players refuse it |
-| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian); the system codec writer adds 24- and 32-bit AIFF on macOS |
+| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit integer PCM; AIFF-C `NONE`/`twos` big-endian and `sowt` little-endian; writes 16-bit AIFF); the system codec writer adds 24- and 32-bit AIFF on macOS |
 | ALAC | macOS | macOS, ✓* | Read through ExtAudioFile on macOS. Written by the system codec writer on macOS or optional Apple ALAC (`pulp add alac`) |
 | CAF | macOS | macOS | Read and written through ExtAudioFile on macOS (AAC, ALAC or PCM inside) |
 | FLAC | ✓ | ✓* | dr_flac / libflac (`pulp add libflac`) |

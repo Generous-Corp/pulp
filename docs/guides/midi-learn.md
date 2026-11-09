@@ -59,6 +59,49 @@ or the same parameter and returns them in `replaced`.
 `learn_state()` reports `idle`, `listening` or `bound` for the UI, and a listen
 gives up after `timeout_ms`.
 
+## Saving and loading
+
+Mappings belong to the controller, not the sound, so by default they are saved
+once per plug-in instance (global) and survive preset changes. A processor that
+wants per-preset mappings stores the chunk in its preset data instead; the
+engine does not decide.
+
+```cpp
+// serialize_plugin_state(): append the chunk to the processor's blob
+auto chunk = learn_.save_state();                    // versioned binary chunk
+// deserialize_plugin_state(): hand the chunk back (an empty span clears)
+auto report = learn_.load_state(chunk, &state());    // drops unknown parameters
+```
+
+`load_state()` reports `status`, how many mappings loaded and how many were
+dropped (invalid, over capacity, or naming a parameter the store does not have).
+A chunk written before mappings existed is empty and loads as no mappings. A
+chunk from a newer version loads its known fields and reports `newer_version`.
+Damaged data (bad magic, size or checksum) is rejected and the current table is
+kept. The wire layout is documented in `midi_learn_persistence.hpp` and pinned by
+a test.
+
+`save_json()` / `load_json()` produce and read a text form for preset and
+import/export files (`{"version":1,"mappings":[...]}`). Import takes a
+`MidiImportMode`: `replace` makes the file the whole table, `merge` lets the
+file's mappings displace overlapping ones and keeps the rest.
+
+## Undo
+
+`MidiLearnEditor` (`midi_learn_undo.hpp`) wraps the engine and an `UndoManager`;
+each edit is one undo step:
+
+```cpp
+MidiLearnEditor editor(learn_, undo_);
+editor.set_mapping(mapping);
+editor.clear(param_id);
+editor.record_learn(*outcome);   // a learn the engine already applied
+```
+
+Undo of a learn removes the new mapping and restores whatever it replaced.
+Mappings keep their `uid` across undo, so takeover state is not reset. The engine
+must outlive the undo history.
+
 ## Pure pieces
 
 `midi_decode.hpp` and `midi_learn.hpp` hold the decoders, `decode_relative`,

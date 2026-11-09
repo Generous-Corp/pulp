@@ -298,6 +298,10 @@ pulp_add_test_suite(pulp-test-midi-learn-engine
     SOURCES test_midi_learn_engine.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::state)
 
+# MIDI mapping persistence (binary chunk, JSON, import modes) and undo.
+pulp_add_test_suite(pulp-test-midi-learn-persistence GROUP pulp-test-group-cap-state
+    LIBRARIES pulp::state)
+
 # Cross-version parameter-ordering guard (host-facing ID + index stability).
 pulp_add_test_suite(pulp-test-param-ordering GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
@@ -344,6 +348,17 @@ pulp_add_test_suite(pulp-test-editor-host GROUP pulp-test-group-cap-format
 # The cancellable main-thread timer behind contract editors' idle ticks.
 pulp_add_test_suite(pulp-test-main-thread-timer GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
+
+# The same timer, and post_to_main_thread, inside AppKit's nested run loops
+# (menu tracking, modal panels) entered from a main-queue block. Its own
+# process: it creates the shared NSApplication and runs nested loops.
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-main-thread-timer-nested-modes
+        SOURCES test_main_thread_timer_nested_modes.mm
+        LIBRARIES pulp::format)
+    target_link_libraries(pulp-test-main-thread-timer-nested-modes PRIVATE
+        "-framework AppKit" "-framework CoreFoundation")
+endif()
 
 # Plugin registry: legacy single global slot + keyed multi-plugin-bundle table.
 pulp_add_test_suite(pulp-test-plugin-registry GROUP pulp-test-group-cap-format

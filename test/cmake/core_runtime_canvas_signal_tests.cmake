@@ -1278,6 +1278,15 @@ pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform
 pulp_add_test_suite(pulp-test-file-dialog GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)
 
+# How asynchronous dialogs deliver their completion: posted with a main-thread
+# backend, inline without one, dropped once the scope is gone. Portable, so it
+# covers the platforms with no main-thread backend. Reads the platform's
+# internal delivery helper.
+pulp_add_test_suite(pulp-test-platform-dialog-delivery
+    LIBRARIES pulp::platform)
+target_include_directories(pulp-test-platform-dialog-delivery PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/platform/src)
+
 # D-Bus client + Linux xdg-desktop-portal file-dialog backend
 pulp_add_test_suite(pulp-test-dbus GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)

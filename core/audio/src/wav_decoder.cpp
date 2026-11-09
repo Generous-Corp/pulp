@@ -183,8 +183,10 @@ bool has_complete_frames(drwav& wav, const RiffLayout& layout) noexcept {
     return bytes_per_frame != 0u && layout.data_size % bytes_per_frame == 0u;
 }
 
+// A zero frame count is not a defect: an empty data chunk is a valid WAV that
+// decodes to its channel count and rate with no samples.
 bool valid_properties(const drwav& wav) noexcept {
-    return wav.channels != 0u && wav.sampleRate != 0u && wav.totalPCMFrameCount != 0u;
+    return wav.channels != 0u && wav.sampleRate != 0u;
 }
 
 bool checked_output_bytes(std::uint64_t frames, std::uint32_t channels,

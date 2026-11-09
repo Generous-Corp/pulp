@@ -25,9 +25,9 @@ temporary directory, and maps that immutable snapshot for the callback's
 lifetime. The copy is bounded by `maximum_mapped_bytes`, uses disk rather than
 decoded-audio RAM, and is removed on close. A later in-place overwrite or
 truncate of the source path therefore cannot change playback or fault the
-mapping. WAV, uncompressed AIFF/AIFF-C `NONE`, FLAC, MP3 and Ogg Vorbis files
-use bounded ranged decode from the snapshot bytes; they are not decoded
-completely before playback. The compressed formats seek inside the encoded
+mapping. WAV, uncompressed AIFF/AIFF-C (`NONE`, `twos` or `sowt`), FLAC, MP3
+and Ogg Vorbis files use bounded ranged decode from the snapshot bytes; they are
+not decoded completely before playback. The compressed formats seek inside the encoded
 stream through `AudioReader`, so a long FLAC, MP3 or Ogg file streams with the
 same memory as a short one. Time differs by format. FLAC and Ogg seek directly,
 but MP3 has no frame index: opening an MP3 without a Xing or Info header reads

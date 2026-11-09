@@ -95,6 +95,13 @@ headers). A legacy header whose bytes change (`wav_decoder.hpp` gaining
 kind of row; `--write` then reports it as reviewed and the baseline count
 shrinks by one.
 
+The fingerprint is over the header's bytes, so a comment-only edit to a covered
+header costs the same row and inventory bump as a signature change; when a
+contract note or a behavior fix can live in the `.cpp`, put it there. A
+header-only class (`sample_resource.hpp`, 2026-11-08: a zero-frame decode
+became a load failure) has no `.cpp` to hide in, so its fix takes the row and
+the bump; say so in the commit rather than reverting the fix to dodge the gate.
+
 ## Public-header fingerprint refresh
 
 Change the reviewed fingerprint in `agent_capability_registry.py` only, bump
@@ -1902,3 +1909,27 @@ an existing renderer or example, changing a widget label) adds no public header
 and changes no installed capability key. Run
 `python3 tools/docs_generate.py generate` so the generated limitations block
 follows the matrix, and do not touch the capability manifest for it.
+
+## G-5 host ingress header refresh
+
+The host-event ingress adapter changes `pulp/host/graph_event_contract.hpp`
+(reviewed as infrastructure) and `pulp/host/signal_graph_runtime.hpp`. Refresh
+the registry fingerprint and the `agent_capability_catalog_signal.py` binding
+fingerprints to the merged header bytes, then regenerate with
+`agent_capability_manifest.py --write`. Leave `SURFACE_INVENTORY_VERSION`
+alone: the surface change stays pending until version-at-land assigns it, and
+the history keeps main's line-per-entry storage rather than a compact rewrite.
+## Merging main into a branch that rewrote the contract history
+
+A branch older than the digest-keyed history format (see the top of this
+skill) may carry its own re-encoding of
+`tools/agent-capabilities/contract-history.json`, for example a one-line
+compact dump, and a `render_history()` helper to write it. On merge, take
+main's history file and generator (`git checkout origin/main --
+tools/agent-capabilities/contract-history.json
+tools/scripts/agent_capability_manifest.py`), drop the branch's helper and its
+tests, then re-apply only the branch's real counter or fingerprint changes and
+run `--write` and `--check`. Never keep the branch's history blob: it shows up
+as millions of deleted lines and replaces main's format. Worked example
+(2026-11-08, the G5 host-ingress adapter): after the merge, the diff against
+main shrank from -2,530,508 lines to the PR's own 15 files.

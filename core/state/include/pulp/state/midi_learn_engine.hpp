@@ -49,26 +49,17 @@
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/state/midi_decode.hpp>
 #include <pulp/state/midi_learn.hpp>
+#include <pulp/state/midi_learn_persistence.hpp>
 #include <pulp/state/midi_map_scale.hpp>
+#include <pulp/state/midi_mapping.hpp>
 #include <pulp/state/midi_source.hpp>
 #include <pulp/state/store.hpp>
+#include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::state {
-
-inline constexpr std::size_t kMaxMidiMappings = 256;
-
-/// One controller-to-parameter mapping.
-struct MidiMapping {
-    uint32_t uid = 0; ///< Stable identity; assigned by the engine when 0.
-    MidiSource source{};
-    ParamID id = 0;
-    MidiMapScale scale{};                       ///< Normalized window; min > max inverts.
-    RelativeMode mode = RelativeMode::absolute; ///< Applies to cc7 sources.
-    RelativeConfig relative{};
-    TakeoverMode takeover = TakeoverMode::jump;
-    bool feedback = false; ///< Reserved for MIDI-out feedback.
-};
 
 /// Build a `RawMidi` from the first three bytes of a short message.
 inline RawMidi raw_midi_from_bytes(const uint8_t* bytes, uint32_t size) {
@@ -102,6 +93,19 @@ struct MidiLearnOutcome {
     bool bound = false;                ///< False when the table was full.
     MidiMapping mapping;               ///< The new mapping (when bound).
     std::vector<MidiMapping> replaced; ///< Mappings this one displaced, for undo.
+};
+
+enum class MidiImportMode : uint8_t {
+    replace, ///< The loaded mappings become the whole table.
+    merge,   ///< Loaded mappings displace overlapping ones; the rest stay.
+};
+
+/// What a load did.
+struct MidiLoadReport {
+    MidiMapParseResult::Status status = MidiMapParseResult::Status::ok;
+    uint32_t loaded = 0;
+    uint32_t dropped = 0; ///< Invalid, over capacity, or naming an unknown parameter.
+    bool changed = false; ///< False when the data was unusable and the table was kept.
 };
 
 class MidiLearnEngine {
@@ -145,6 +149,59 @@ class MidiLearnEngine {
 
     std::vector<MidiMapping> clear_all() {
         return remove_if([](const MidiMapping&) { return true; });
+    }
+
+    /// Replace the whole table with `incoming`. A mapping keeps its `uid` when
+    /// it has one (so takeover state and undo snapshots stay valid); a later
+    /// entry for the same source replaces an earlier one. Returns false and
+    /// changes nothing when more than `kMaxMidiMappings` remain.
+    bool replace_all(std::span<const MidiMapping> incoming) {
+        std::vector<MidiMapping> built;
+        built.reserve(incoming.size());
+        for (MidiMapping m : incoming) {
+            m.scale = clamp_scale(m.scale);
+            auto same = std::find_if(built.begin(), built.end(),
+                                     [&](const MidiMapping& e) { return e.source == m.source; });
+            if (m.uid == 0)
+                m.uid = next_uid_++;
+            else
+                next_uid_ = std::max(next_uid_, m.uid + 1);
+            if (same != built.end())
+                *same = m;
+            else
+                built.push_back(m);
+        }
+        if (built.size() > kMaxMidiMappings)
+            return false;
+        for (uint32_t i = 0; i < kMaxMidiMappings; ++i)
+            ui_->items[i] = i < built.size() ? built[i] : MidiMapping{};
+        ui_->count = static_cast<uint32_t>(built.size());
+        publish();
+        return true;
+    }
+
+    /// The table as a binary chunk for a plug-in's state blob.
+    std::vector<uint8_t> save_state() const {
+        const auto all = mappings();
+        return serialize_midi_mappings(all);
+    }
+
+    /// The table as a JSON document for a preset or export file.
+    std::string save_json() const {
+        const auto all = mappings();
+        return midi_mappings_to_json(all);
+    }
+
+    /// Load a binary chunk written by `save_state`. See `apply_parsed`.
+    MidiLoadReport load_state(std::span<const uint8_t> data, const StateStore* known = nullptr,
+                              MidiImportMode mode = MidiImportMode::replace) {
+        return apply_parsed(parse_midi_mappings(data), known, mode);
+    }
+
+    /// Load a JSON document written by `save_json`.
+    MidiLoadReport load_json(std::string_view text, const StateStore* known = nullptr,
+                             MidiImportMode mode = MidiImportMode::replace) {
+        return apply_parsed(midi_mappings_from_json(text), known, mode);
     }
 
     /// Copy of every mapping, in table order.
@@ -254,6 +311,48 @@ class MidiLearnEngine {
         s.min = std::isfinite(s.min) ? std::clamp(s.min, 0.0f, 1.0f) : 0.0f;
         s.max = std::isfinite(s.max) ? std::clamp(s.max, 0.0f, 1.0f) : 1.0f;
         return s;
+    }
+
+    MidiLoadReport apply_parsed(MidiMapParseResult parsed, const StateStore* known,
+                                MidiImportMode mode) {
+        MidiLoadReport report;
+        report.status = parsed.status;
+        report.dropped = parsed.dropped;
+        if (parsed.status == MidiMapParseResult::Status::corrupt)
+            return report;
+
+        std::vector<MidiMapping> keep;
+        keep.reserve(parsed.mappings.size());
+        for (auto& m : parsed.mappings) {
+            if (known && !known->info(m.id))
+                ++report.dropped;
+            else
+                keep.push_back(m);
+        }
+        std::vector<MidiMapping> next;
+        if (mode == MidiImportMode::merge) {
+            next = mappings();
+            for (const auto& m : keep) {
+                next.erase(std::remove_if(next.begin(), next.end(),
+                                          [&](const MidiMapping& e) {
+                                              return overlaps(e.source, m.source) || e.id == m.id;
+                                          }),
+                           next.end());
+            }
+            for (auto m : keep) {
+                m.uid = 0;
+                next.push_back(m);
+            }
+        } else {
+            next = std::move(keep);
+        }
+        if (!replace_all(next)) {
+            report.dropped += static_cast<uint32_t>(next.size());
+            return report;
+        }
+        report.loaded = static_cast<uint32_t>(next.size());
+        report.changed = true;
+        return report;
     }
 
     /// Same controller on a channel the other also listens to.
