@@ -2469,6 +2469,20 @@
    "spawns": "declared",
    "undeclared_sources": []
   },
+  "pulp-test-platform-objc-unique-class": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [
+    "pulp-test-objc-unique-fixture"
+   ],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_platform_objc_unique_class.mm"
+   ],
+   "spawns": "declared",
+   "undeclared_sources": []
+  },
   "pulp-test-plugin-manager-panel": {
    "data": "none",
    "inputs": [],
@@ -2806,6 +2820,13 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-voice-template": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-vst3-slot-process-fidelity": {
    "data": "none",
    "inputs": [],
@@ -2816,13 +2837,6 @@
     "test/test_vst3_slot_process_fidelity.cpp"
    ],
    "spawns": "undeclared",
-   "undeclared_sources": []
-  },
-  "pulp-test-voice-template": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "sources": [],
    "undeclared_sources": []
   },
   "pulp-test-widget-bridge-api-contracts": {
@@ -3387,6 +3401,7 @@
   "pulp-test-native-core-processor",
   "pulp-test-native-metal-audio-comparator",
   "pulp-test-native-metal-compute",
+  "pulp-test-native-metal-surface",
   "pulp-test-negative-path",
   "pulp-test-network-service-discovery",
   "pulp-test-neural-cpu-simd",
@@ -3404,6 +3419,8 @@
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
+  "pulp-test-platform-main-thread",
+  "pulp-test-platform-objc-unique-class",
   "pulp-test-playback-audio-renderer",
   "pulp-test-playback-automation-cursor",
   "pulp-test-playback-capture-engine",
@@ -3794,6 +3811,7 @@
     "tools/scripts/agent_capability_evolution.py",
     "tools/scripts/agent_capability_history.py",
     "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/agent_capability_rederive.py",
     "tools/scripts/agent_capability_registry.py",
     "tools/scripts/agent_capability_registry_types.py",
     "tools/scripts/agent_capability_surface.py",
@@ -6034,6 +6052,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/gpu_audio_p2_campaign.py",
     "tools/scripts/gpu_audio_provider_identity.py",
@@ -6087,6 +6106,7 @@
     "tools/deps",
     "tools/deps/manifest.json",
     "tools/scripts",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/test_gpu_audio_provider_identity.py"
@@ -13848,6 +13868,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"
@@ -13859,6 +13880,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"

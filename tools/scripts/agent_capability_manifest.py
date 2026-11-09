@@ -41,6 +41,7 @@ from agent_capability_history import (
     protected_base_problems,
     HistoryFormatError,
     rendered_history,
+    state_is_recorded,
     stored_history_problems,
     updated_history_entries,
 )
@@ -56,7 +57,7 @@ from agent_capability_transaction import recover_transaction, write_transaction
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 91
+MANIFEST_REVISION = 92
 SURFACE_INVENTORY_VERSION = 210
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
@@ -831,10 +832,17 @@ def counter_status(root: pathlib.Path, doc: dict[str, Any],
             return 1
         print("agent-capabilities: every counter is assigned")
         return 0
-    if not any(pending):
-        print("agent-capabilities: nothing pending to assign")
-        return 0
     source = pathlib.Path(__file__).resolve()
+    if not any(pending):
+        if state_is_recorded(history, doc, surface_document):
+            print("agent-capabilities: nothing pending to assign")
+            return 0
+        # An assigned state the history has not recorded (a hand-bumped
+        # counter) blocks the next branch from leaving its counter alone.
+        # --write records it; nothing is renumbered.
+        print("agent-capabilities: nothing pending; recording the assigned state")
+        return subprocess.run([sys.executable, str(source), "--write"], cwd=root,
+                              env=_assignment_environment()).returncode
     text = source.read_text(encoding="utf-8")
     for (constant, _), value, is_pending in zip(COUNTER_CONSTANTS, values, pending):
         if is_pending:
@@ -844,8 +852,19 @@ def counter_status(root: pathlib.Path, doc: dict[str, Any],
             text = text.replace(line, f"{constant} = {value + 1}\n")
     source.write_text(text, encoding="utf-8")
     # The constants are read at import, so the write runs in a fresh process.
-    result = subprocess.run([sys.executable, str(source), "--write"], cwd=root)
+    result = subprocess.run([sys.executable, str(source), "--write"], cwd=root,
+                            env=_assignment_environment())
     return result.returncode
+
+
+def _assignment_environment() -> dict[str, str]:
+    """Assign against the commit being assigned, not a CI event's base.
+
+    An assignment is the base's own material with its pending counters
+    advanced, so the protected base for that write is HEAD. On a push event
+    the default resolution would pick the pre-push commit instead, and the
+    single-writer rule would refuse the bump's own entry."""
+    return {**os.environ, "PULP_AGENT_CAPABILITY_BASE_REF": "HEAD"}
 
 
 def main() -> int:
@@ -1048,7 +1067,7 @@ def main() -> int:
             return 1
         print(
             f"agent-capabilities: fresh; {len(doc['capabilities'])} keys and "
-            f"{surface_document['counts']['public_headers']} public headers checked"
+            f"{len(surface_document['headers'])} public headers checked"
         )
         if comparison is not None:
             print("agent-capabilities: comparison receipt=" +

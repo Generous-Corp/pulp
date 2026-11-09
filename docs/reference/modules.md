@@ -23,6 +23,8 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 | Clipboard | `clipboard.hpp` | Cross-platform text clipboard access where implemented |
 | File dialogs | `file_dialog.hpp` | Native open/save panels where implemented |
 | Popup menus | `popup_menu.hpp` | Native menu affordances for UI surfaces |
+| Main-thread work | `main_thread.hpp` | `MainThreadScope` posts work to the main thread from any thread, and `MainThreadTimer` gives one-shot or repeating millisecond timers. Both run in the common run-loop modes, so they keep running during menu tracking, live resize and modal panels, and nothing runs after the scope is destroyed. macOS and iOS; other platforms report `main_thread_supported() == false` |
+| Unique Objective-C classes | `objc_unique_class.hpp` | Registers Objective-C classes at run time under `<base>_<image token>`, so two Pulp binaries in one host process never share a class name and run each other's code. It adds methods from C functions and gives each instance a context slot. Apple platforms |
 
 ---
 

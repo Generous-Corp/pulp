@@ -23,35 +23,32 @@ if(NOT _install EQUAL 0)
 endif()
 file(COPY "${PULP_SOURCE_DIR}/examples/graph-control-event-probe/CMakeLists.txt"
      "${PULP_SOURCE_DIR}/examples/graph-control-event-probe/main.cpp" DESTINATION "${_source}")
-# Build the consumer the way the parent tree was built. Sanitizer trees
-# install instrumented archives (they need the parent's sanitizer flags and
-# runtime at link time) and Debug trees install a Debug SDK, which the SDK
-# guard refuses unless the consumer opts in.
-set(_configure_args -S "${_source}" -B "${_build}" -G Ninja
+string(TOLOWER "${PULP_PARENT_BUILD_TYPE}" _build_type_lower)
+set(_consumer_cxx_flags "${PULP_PARENT_CXX_FLAGS}")
+set(_consumer_linker_flags "${PULP_PARENT_EXE_LINKER_FLAGS}")
+if(PULP_PARENT_INSTRUMENTATION_CXX_FLAGS)
+    string(APPEND _consumer_cxx_flags
+        " ${PULP_PARENT_INSTRUMENTATION_CXX_FLAGS}")
+endif()
+if(PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS)
+    string(APPEND _consumer_linker_flags
+        " ${PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS}")
+endif()
+string(STRIP "${_consumer_cxx_flags}" _consumer_cxx_flags)
+string(STRIP "${_consumer_linker_flags}" _consumer_linker_flags)
+set(_debug_sdk_arg)
+if(_build_type_lower STREQUAL "debug")
+    set(_debug_sdk_arg "-DPULP_ALLOW_DEBUG_SDK=ON")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${_source}" -B "${_build}" -G Ninja
     "-DCMAKE_BUILD_TYPE=${PULP_PARENT_BUILD_TYPE}"
-    "-DCMAKE_PREFIX_PATH=${_prefix}" "-DPulp_DIR=${_prefix}/lib/cmake/Pulp")
-if(PULP_PARENT_CXX_COMPILER)
-    list(APPEND _configure_args "-DCMAKE_CXX_COMPILER=${PULP_PARENT_CXX_COMPILER}")
-endif()
-string(STRIP "${PULP_PARENT_CXX_FLAGS} ${PULP_PARENT_INSTRUMENTATION_CXX_FLAGS}" _consumer_cxx_flags)
-string(STRIP "${PULP_PARENT_EXE_LINKER_FLAGS} ${PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS}" _consumer_link_flags)
-if(_consumer_cxx_flags)
-    list(APPEND _configure_args "-DCMAKE_CXX_FLAGS=${_consumer_cxx_flags}")
-endif()
-if(_consumer_link_flags)
-    list(APPEND _configure_args "-DCMAKE_EXE_LINKER_FLAGS=${_consumer_link_flags}")
-endif()
-string(TOLOWER "${PULP_PARENT_BUILD_TYPE}" _parent_config_lower)
-if(_parent_config_lower STREQUAL "debug")
-    list(APPEND _configure_args -DPULP_ALLOW_DEBUG_SDK=ON)
-endif()
-if(PULP_PARENT_SANITIZER)
-    list(APPEND _configure_args "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
-endif()
-if(PULP_PARENT_OSX_ARCHITECTURES)
-    list(APPEND _configure_args "-DCMAKE_OSX_ARCHITECTURES=${PULP_PARENT_OSX_ARCHITECTURES}")
-endif()
-execute_process(COMMAND "${CMAKE_COMMAND}" ${_configure_args}
+    "-DCMAKE_CXX_COMPILER=${PULP_PARENT_CXX_COMPILER}"
+    "-DCMAKE_CXX_FLAGS=${_consumer_cxx_flags}"
+    "-DCMAKE_EXE_LINKER_FLAGS=${_consumer_linker_flags}"
+    "-DCMAKE_PREFIX_PATH=${_prefix}" "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
+    "-DCMAKE_OSX_ARCHITECTURES=${PULP_PARENT_OSX_ARCHITECTURES}"
+    "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}"
+    ${_debug_sdk_arg}
     RESULT_VARIABLE _configure)
 if(NOT _configure EQUAL 0)
     message(FATAL_ERROR "SDK consumer configure failed")
