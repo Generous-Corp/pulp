@@ -34,6 +34,16 @@ through its transferred slice with disposition ``framework-backport`` (bringing
 a named Vellum commit back) or ``emergency-exception``. A ``pulp-only`` change
 event does not unfreeze a path.
 
+Once Vellum transfers an export's units to its native ``framework/`` root
+(the rename and ownership flip), no later re-export carries a Pulp edit to
+them. ``TRANSFER_PATH`` records that transfer: the Vellum pull request and
+transfer record it is keyed to, and the exact Pulp paths transferred. While it
+is present at the base, a change that states ``vellum_inherits: true`` for a
+transferred path fails: an edit there is Pulp-only, and a change Vellum needs
+is made first in Vellum's ``framework/``. ``vellum_inherits: false`` still
+records a Pulp-only edit to a transferred path the pin has not frozen. The
+record cannot be removed or edited once it lands.
+
 The pin, the receipt copy and the slice map are always read at the BASE
 commit, so a change cannot exempt itself by editing them; a re-pin takes effect
 for the changes after it. Events are read at the head commit, since they are
@@ -63,6 +73,11 @@ import vellum_expansion_watch_check as watch  # noqa: E402  (needs the path inse
 
 PIN_DIRECTORY = ".github/vellum-export-receipt"
 PIN_PATH = f"{PIN_DIRECTORY}/pin.json"
+TRANSFER_PATH = f"{PIN_DIRECTORY}/framework-transfer.json"
+TRANSFER_KEYS = {
+    "schema_version", "framework_repository", "framework_pull_request", "transfer_record",
+    "transfer_record_sha256", "export_id", "pulp_sha", "transferred_paths",
+}
 EXPORT_EVENT_DIRECTORY = ".github/vellum-export-events"
 CHANGE_EVENT_DIRECTORY = ".github/vellum-change-events"
 WATCH_EVENT_DIRECTORY = ".github/vellum-expansion-watch-events"
@@ -98,6 +113,12 @@ class Pin:
     receipt_path: str
     receipt_sha256: str
     frozen_paths: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class Transfer:
+    export_id: str
+    paths: frozenset[str]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -214,6 +235,51 @@ def parse_pin(raw: bytes) -> Pin:
     for index, path in enumerate(frozen):
         _safe_path(path, f"{PIN_PATH}.frozen_paths[{index}]", directory_ok=True)
     return Pin(export_id, value["receipt_path"], digest, tuple(frozen))
+
+
+def parse_transfer(raw: bytes) -> Transfer:
+    value = _exact_keys(_strict_json(raw, TRANSFER_PATH), TRANSFER_KEYS, TRANSFER_PATH)
+    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
+        raise ReceiptDriftError(f"{TRANSFER_PATH}: schema_version must be 1")
+    if value["framework_repository"] != FRAMEWORK_REPOSITORY:
+        raise ReceiptDriftError(f"{TRANSFER_PATH}: framework_repository must be {FRAMEWORK_REPOSITORY}")
+    number = value["framework_pull_request"]
+    if type(number) is not int or number <= 0:
+        raise ReceiptDriftError(f"{TRANSFER_PATH}: framework_pull_request must be a pull request number")
+    if value["transfer_record"] != "provenance/framework/transfer.json":
+        raise ReceiptDriftError(f"{TRANSFER_PATH}: transfer_record must be provenance/framework/transfer.json")
+    digest = value["transfer_record_sha256"]
+    if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+        raise ReceiptDriftError(f"{TRANSFER_PATH}: transfer_record_sha256 must be a sha256 hex digest")
+    export_id = value["export_id"]
+    if not isinstance(export_id, str) or not EXPORT_ID_RE.fullmatch(export_id):
+        raise ReceiptDriftError(f"{TRANSFER_PATH}: export_id is malformed")
+    pulp_sha = value["pulp_sha"]
+    if not isinstance(pulp_sha, str) or not SHA40_RE.fullmatch(pulp_sha) or not export_id.endswith(pulp_sha[:12]):
+        raise ReceiptDriftError(f"{TRANSFER_PATH}: pulp_sha must be the export's 40-hex Pulp commit")
+    paths = _sorted_unique(value["transferred_paths"], f"{TRANSFER_PATH}.transferred_paths", allow_empty=False)
+    for index, path in enumerate(paths):
+        _safe_path(path, f"{TRANSFER_PATH}.transferred_paths[{index}]")
+    return Transfer(export_id, frozenset(paths))
+
+
+def transfer_in_effect(repo: pathlib.Path, base: str, head: str) -> Transfer | None:
+    """The framework transfer judging ``base..head``: the record at the base, if any.
+
+    Like the pin, it takes effect for the changes after the one that adds it,
+    and a record that has landed may be neither removed nor edited.
+    """
+    base_raw = _blob(repo, base, TRANSFER_PATH, MAX_RECEIPT_BYTES)
+    head_raw = _blob(repo, head, TRANSFER_PATH, MAX_RECEIPT_BYTES)
+    if base_raw is None:
+        if head_raw is not None:
+            parse_transfer(head_raw)  # the introducing change must still be well formed
+        return None
+    if head_raw is None:
+        raise ReceiptDriftError(f"{TRANSFER_PATH} cannot be removed: the transfer is permanent")
+    if head_raw != base_raw:
+        raise ReceiptDriftError(f"{TRANSFER_PATH} cannot be edited once it has landed")
+    return parse_transfer(base_raw)
 
 
 def receipt_copy_problems(
@@ -667,8 +733,17 @@ def check(repo: pathlib.Path, base: str, head: str) -> dict[str, Any]:
     edits = frozen_edits(changes, pin)
     unfrozen = frozen_edit_coverage(repo, head, changes, edits, slice_paths)
     frozen = [path for path in edits if path not in unfrozen]
+    # After the transfer no re-export carries a Pulp edit, so "Vellum inherits
+    # this" is false for every transferred path; such an edit is Pulp-only.
+    transfer = transfer_in_effect(repo, base, head)
+    inherited = sorted(
+        path for path, values in decisions.items()
+        if transfer is not None and path in transfer.paths and True in values
+    )
     return {
-        "status": "fail" if missing or conflicting or frozen else "pass",
+        "status": "fail" if missing or conflicting or frozen or inherited else "pass",
+        "transfer": transfer.export_id if transfer is not None else None,
+        "inherited_after_transfer": inherited,
         "state": "active",
         "export_id": pin.export_id,
         "owed": dict(sorted(owed.items())),
@@ -679,8 +754,27 @@ def check(repo: pathlib.Path, base: str, head: str) -> dict[str, Any]:
     }
 
 
+def describe_inherited(report: dict[str, Any]) -> str:
+    lines = [
+        f"these paths were transferred to Vellum's framework/ (export {report['transfer']}); "
+        "no re-export carries a Pulp edit to them, so vellum_inherits cannot be true:",
+        "",
+    ]
+    lines.extend(f"    - {path}" for path in report["inherited_after_transfer"])
+    lines.append("")
+    lines.append(
+        '  Fix: state "vellum_inherits": false (a Pulp-only edit), and make any change '
+        "Vellum needs first in Vellum's framework/."
+    )
+    return "\n".join(lines)
+
+
 def describe_failure(report: dict[str, Any]) -> str:
-    if report.get("frozen") and not report["missing"] and not report["conflicting"]:
+    if report.get("inherited_after_transfer") and not report["missing"] and not report["conflicting"] \
+            and not report.get("frozen"):
+        return describe_inherited(report)
+    if report.get("frozen") and not report["missing"] and not report["conflicting"] \
+            and not report.get("inherited_after_transfer"):
         return describe_frozen(report)
     lines = [
         f"changed paths exported by Vellum receipt {report['export_id']} need an "
@@ -712,6 +806,9 @@ def describe_failure(report: dict[str, Any]) -> str:
     if report.get("frozen"):
         lines.append("")
         lines.append(describe_frozen(report))
+    if report.get("inherited_after_transfer"):
+        lines.append("")
+        lines.append(describe_inherited(report))
     return "\n".join(lines)
 
 

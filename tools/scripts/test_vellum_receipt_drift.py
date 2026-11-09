@@ -622,6 +622,109 @@ class ReceiptDriftTests(unittest.TestCase):
         self.assertIn("vellum_inherits", result.stderr)
 
 
+def transfer_value(paths: list[str] | None = None, **overrides) -> dict:
+    value = {
+        "schema_version": 1,
+        "framework_repository": "Generous-Corp/vellum",
+        "framework_pull_request": 257,
+        "transfer_record": "provenance/framework/transfer.json",
+        "transfer_record_sha256": "8" * 64,
+        "export_id": EXPORT_ID,
+        "pulp_sha": PULP_SHA,
+        "transferred_paths": sorted(paths if paths is not None else EXPORTED),
+    }
+    value.update(overrides)
+    return value
+
+
+STATE = "core/state/src/s.cpp"  # exported, in no transferred slice, not frozen
+CANVAS = "core/canvas/src/a.cpp"  # exported, in the canvas-kernel slice
+
+
+class FrameworkTransferTests(unittest.TestCase):
+    """After the transfer, a Pulp edit to a transferred path cannot claim Vellum inherits it."""
+
+    def setUp(self) -> None:
+        self.fixture = Fixture()
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def land_transfer(self, paths: list[str] | None = None) -> None:
+        self.fixture.write(drift.TRANSFER_PATH, transfer_value(paths))
+        self.fixture.base = self.fixture.commit("record the framework transfer")
+
+    def edit_with_decision(self, path: str, inherits: bool) -> dict:
+        self.fixture.write(path, "// edited\n")
+        self.fixture.write(f"{drift.EXPORT_EVENT_DIRECTORY}/20261108-edit.json",
+                           export_event("20261108-edit", [path], inherits))
+        return self.fixture.check()
+
+    def test_inherits_true_on_a_transferred_path_fails_after_the_transfer(self):
+        self.land_transfer()
+        report = self.edit_with_decision(STATE, True)
+        self.assertEqual(report["status"], "fail", report)
+        self.assertEqual(report["inherited_after_transfer"], [STATE])
+        self.assertIn("vellum_inherits cannot be true", drift.describe_failure(report))
+
+    def test_inherits_false_on_a_transferred_path_passes_after_the_transfer(self):
+        self.land_transfer()
+        report = self.edit_with_decision(STATE, False)
+        self.assertEqual(report["status"], "pass", report)
+        self.assertEqual(report["inherited_after_transfer"], [])
+
+    def test_a_change_event_claiming_inheritance_fails_after_the_transfer(self):
+        self.land_transfer()
+        self.fixture.write(CANVAS, "// edited\n")
+        self.fixture.write(".github/vellum-change-events/20261108-canvas.json",
+                           {"kind": "change", "slices": ["canvas-kernel"], "vellum_inherits": True})
+        report = self.fixture.check()
+        self.assertEqual(report["inherited_after_transfer"], [CANVAS])
+        self.assertEqual(report["status"], "fail")
+
+    def test_before_the_transfer_behaviour_is_unchanged(self):
+        report = self.edit_with_decision(STATE, True)
+        self.assertEqual(report["status"], "pass", report)
+        self.assertIsNone(report["transfer"])
+        self.assertEqual(report["inherited_after_transfer"], [])
+
+    def test_the_change_that_records_the_transfer_is_not_judged_by_it(self):
+        self.fixture.write(drift.TRANSFER_PATH, transfer_value())
+        self.assertEqual(self.edit_with_decision(STATE, True)["status"], "pass")
+
+    def test_a_path_that_was_not_transferred_is_unaffected(self):
+        self.land_transfer([path for path in EXPORTED if path != STATE])
+        report = self.edit_with_decision(STATE, True)
+        self.assertEqual(report["status"], "pass", report)
+        self.assertEqual(report["transfer"], EXPORT_ID)
+
+    def test_the_transfer_record_cannot_be_removed_or_edited(self):
+        self.land_transfer()
+        self.fixture.remove(drift.TRANSFER_PATH)
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "cannot be removed"):
+            self.fixture.check()
+        self.fixture.git("reset", "-q", "--hard", self.fixture.base)
+        self.fixture.write(drift.TRANSFER_PATH, transfer_value([CANVAS]))
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "cannot be edited"):
+            self.fixture.check()
+
+    def test_a_malformed_transfer_record_fails_cleanly(self):
+        for overrides in ({"framework_pull_request": "257"}, {"pulp_sha": "0" * 40},
+                          {"transferred_paths": []}, {"extra": 1}):
+            with self.subTest(overrides=overrides):
+                self.fixture.write(drift.TRANSFER_PATH, transfer_value(**overrides))
+                with self.assertRaises(drift.ReceiptDriftError):
+                    self.fixture.check()
+
+    def test_the_landed_record_is_vellum_s_transfer(self):
+        raw = (SCRIPTS.parents[1] / drift.TRANSFER_PATH).read_bytes()
+        transfer = drift.parse_transfer(raw)
+        value = json.loads(raw)
+        self.assertEqual(value["framework_pull_request"], 257)
+        self.assertEqual(transfer.export_id, "20261107-f0ac0a4ff392")
+        self.assertEqual(len(transfer.paths), 911)
+
+
 class ReceiptSourceTests(unittest.TestCase):
     """The pinned receipt copy must be Vellum main's receipt, byte for byte."""
 
