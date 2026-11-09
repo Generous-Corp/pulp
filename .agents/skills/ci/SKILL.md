@@ -1746,6 +1746,15 @@ consequences worth knowing before you debug:
   `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
   merge receipt pins the same label string as `ctest_gate_args.py`
   (`REQUIRED_LABEL_EXCLUDE`), so change both or receipts stop being reused.
+- A new, deleted or renamed public header under an exported include root, or a
+  CMake change, makes `gates.sh` run `consumption_census.py --check` in the
+  generated-manifest lane (`gates_script_inputs.py`), so a stale
+  `docs/status/consumption-profiles.json` fails locally instead of as
+  `consumption-census-drift` on macos, drift-fast and linux. The header list is
+  read from git's index: `git add` the new header before regenerating with
+  `python3 tools/scripts/consumption_census.py --build-dir <build> --write`. A
+  host that cannot configure reports it NOT CHECKED. The pre-push hook's own
+  merge-tree script-state check does not run it.
 - `gates.sh` now runs this lane scoped to your diff
   (`source_selftests.py run --changed-from "$BASE"`): an entry runs when its own
   script changed or its source names a changed file (full path, a distinctive
@@ -13114,6 +13123,15 @@ registered is only reported at configure (some members are platform-conditional)
 real guard is `pr-fast-tier-contract`, which fails if the label selects fewer than
 50 tests or loses one of its pinned members. The tier writes `ctest-pr-fast.junit.xml`, never
 `ctest.junit.xml`: it is not merge test evidence and must never satisfy a protected receipt.
+
+The drift members that fail most heads (`script-test-inputs-drift`, the consumption-census
+drift checks, `agent-capability-manifest-check`) also carry `pr-fast-configure` and run
+between `Configure` and `Build`, so a stale manifest fails before the build; the post-build
+tier excludes that label only when the pre-build step passed. Add a member there only if it
+reads nothing a build produces (codemodel, `CTestTestfile.cmake` and configure-time facts
+are fine; a built binary or a Catch2 discovery file's contents are not). A test that needs
+the build belongs under `needs-build`, never under `pr-fast-configure`; the contract check
+refuses both labels on one test.
 
 Two consequences worth knowing:
 
