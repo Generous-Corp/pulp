@@ -394,12 +394,12 @@ commands:
 
   - name: graph
     status: usable
-    summary: Inspect, validate, explain, format, render, and probe saved graphs offline.
+    summary: Inspect, validate, explain, format, render, probe, and report on saved graphs offline.
     args:
       - name: operation
         kind: positional
         required: true
-        description: inspect, validate, explain, render, probe, fmt, or canonicalize
+        description: inspect, validate, explain, render, probe, report, fmt, or canonicalize
       - name: file
         kind: positional
         required: true
@@ -428,6 +428,18 @@ commands:
       - name: --block-frames
         kind: option
         description: Probe block size from 1 to 4096 frames (default 64)
+      - name: --sample-rate
+        kind: option
+        description: Report preparation sample rate (default 48000)
+      - name: --max-block-size
+        kind: option
+        description: Report preparation maximum block size from 1 to 16384 (default 512)
+      - name: --block-size
+        kind: option
+        description: Block size the report verdict is made for (default the prepared maximum)
+      - name: --measure-blocks
+        kind: option
+        description: Blocks rendered for the report's measured pass, 0 to skip (default 16)
     docs: reference/cli.md#graph
 
   - name: bake

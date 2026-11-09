@@ -6,6 +6,9 @@
 // by PULP_HOST_HAS_<FORMAT> compile definitions in core/host/CMakeLists.txt.
 
 #include <pulp/host/plugin_slot.hpp>
+#if PULP_HOST_HAS_AU
+#include <pulp/host/plugin_slot_auv3.hpp>
+#endif
 #include <pulp/host/timeline_device_resolver.hpp>
 #include <pulp/runtime/log.hpp>
 #include <choc/text/choc_JSON.h>
@@ -60,8 +63,15 @@ std::unique_ptr<PluginSlot> PluginSlot::load(const PluginInfo& requested) {
             runtime::log_warn("PluginSlot::load: CLAP loader not compiled in");
             return nullptr;
 #endif
-        case PluginFormat::AudioUnit:
         case PluginFormat::AudioUnitV3:
+#if PULP_HOST_HAS_AU
+            // AUAudioUnit, out of process by default.
+            return load_auv3_plugin(info);
+#else
+            runtime::log_warn("PluginSlot::load: AU loader only available on macOS");
+            return nullptr;
+#endif
+        case PluginFormat::AudioUnit:
 #if PULP_HOST_HAS_AU
             return load_au_plugin(info);
 #else

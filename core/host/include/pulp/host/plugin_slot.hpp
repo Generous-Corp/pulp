@@ -240,10 +240,10 @@ class PluginSlot {
     // Format-specific editor surfaces:
     //   CLAP   — clap_plugin_gui: create / set_parent / show / get_size
     //   VST3   — IEditController::createView("editor") + IPlugView::attached
-    //   AU     — kAudioUnitProperty_CocoaUI on the v2 AudioUnit handle. Both
-    //            AudioUnit and AudioUnitV3 load through the v2 C API
-    //            (AudioComponentInstanceNew), so there is no AUAudioUnit object
-    //            here and no requestViewControllerWithCompletionHandler.
+    //   AU     — kAudioUnitProperty_CocoaUI on the v2 AudioUnit handle
+    //            (PluginFormat::AudioUnit).
+    //   AUv3   — AUAudioUnit requestViewControllerWithCompletionHandler
+    //            (PluginFormat::AudioUnitV3, see plugin_slot_auv3.hpp).
     //   LV2    — ui: extension + shared-object UI
     //
     // CLAP and VST3 CONSUME a parent view rather than returning one, so those
