@@ -4,6 +4,7 @@
 #include <pulp/format/preset_program_router.hpp>
 #include <pulp/midi/buffer.hpp>
 
+#include <string>
 #include <vector>
 
 using namespace pulp::format;
