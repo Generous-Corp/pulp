@@ -24,6 +24,11 @@ def contract_payload(row: dict[str, Any]) -> dict[str, Any]:
 # rule still holds.
 
 
+# Surface fields that are pure functions of `headers`, so they are never
+# material on their own.
+DERIVED_SURFACE_FIELDS = ("counts",)
+
+
 def manifest_evolution_problems(
     previous: Any, current: dict[str, Any], *, allow_unpublished_migration: bool,
     unassigned: bool = False, assigning: bool = False,
@@ -152,6 +157,11 @@ def surface_evolution_problems(
     new_material = copy.deepcopy(current)
     old_material.pop("inventory_version", None)
     new_material.pop("inventory_version", None)
+    # `counts` is derived from `headers` and no longer committed; a protected
+    # base written before that change still carries it.
+    for derived in DERIVED_SURFACE_FIELDS:
+        old_material.pop(derived, None)
+        new_material.pop(derived, None)
     if old_material != new_material and not (unassigned and new_version == old_version) and (
         not isinstance(old_version, int)
         or not isinstance(new_version, int)
