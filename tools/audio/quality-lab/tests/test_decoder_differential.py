@@ -60,6 +60,16 @@ EXPECTED_ACCEPTANCE_SPLITS: dict[str, tuple[bool, bool, str]] = {
         "libsndfile refuses any second fmt"),
 }
 
+# Seeds both sides decode to a different number of frames BY DESIGN, as
+# (pulp_frames, libsndfile_frames, reason). The shared prefix is still compared
+# bit for bit; an unlisted length difference, or a row whose counts no longer
+# match, is a finding.
+EXPECTED_LENGTH_DIFFERENCES: dict[str, tuple[int, int, str]] = {
+    "wav-rf64-ds64-data-size-zero.wav": (
+        800, 0, "RF64 data size 0xFFFFFFFF with a ds64 data size of zero (never back-filled); "
+        "Pulp treats the zero as unresolved and recovers the data to EOF, libsndfile trusts it"),
+}
+
 
 def test_every_acceptance_split_states_its_reason():
     # A row without a reason is a split nobody can review; this runs without
@@ -73,6 +83,9 @@ def test_every_acceptance_split_states_its_reason():
     assert "BW64" in EXPECTED_ACCEPTANCE_SPLITS["wav-bw64-ds64.wav"][2]
     assert "fmt" in EXPECTED_ACCEPTANCE_SPLITS["wav-duplicate-fmt-identical.wav"][2]
     assert "after the data" in EXPECTED_ACCEPTANCE_SPLITS["wav-fmt-after-data.wav"][2]
+    for name, (pulp_frames, sf_frames, reason) in EXPECTED_LENGTH_DIFFERENCES.items():
+        assert pulp_frames != sf_frames, f"{name}: a length row must name two different counts"
+        assert len(reason.strip()) >= 20, f"{name}: the length difference's reason is missing"
 
 
 def _unavailable(reason: str) -> None:
@@ -160,6 +173,17 @@ def test_cpp_decoders_match_libsndfile_bit_exactly():
 
         rate, frames = reference
         assert header is not None
+        length_row = EXPECTED_LENGTH_DIFFERENCES.get(seed.name)
+        if length_row is not None:
+            if (header["frames"], frames.shape[0]) != length_row[:2]:
+                findings.append(f"{seed.name}: EXPECTED_LENGTH_DIFFERENCES row is stale; pulp "
+                                f"{header['frames']} frames, libsndfile {frames.shape[0]}")
+                continue
+            shared = min(header["frames"], frames.shape[0]) * frames.shape[1] * 4
+            if payload[:shared] != frames.astype("<f4", copy=False).tobytes(order="C")[:shared]:
+                findings.append(f"{seed.name}: samples differ within the shared prefix")
+            compared += 1
+            continue
         if header["sample_rate"] != rate or header["channels"] != frames.shape[1] \
                 or header["frames"] != frames.shape[0]:
             findings.append(
@@ -176,6 +200,9 @@ def test_cpp_decoders_match_libsndfile_bit_exactly():
             continue
         compared += 1
 
+    for name in EXPECTED_LENGTH_DIFFERENCES:
+        if outcomes.get(name) != (True, True):
+            findings.append(f"{name}: listed in EXPECTED_LENGTH_DIFFERENCES but not decoded by both sides")
     for name, (pulp_decodes, sf_decodes, _reason) in EXPECTED_ACCEPTANCE_SPLITS.items():
         observed = outcomes.get(name)
         if observed is None:

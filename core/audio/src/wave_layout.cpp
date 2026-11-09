@@ -86,9 +86,21 @@ bool is_adpcm(std::uint16_t translated) noexcept {
     return translated == kTagAdpcm || translated == kTagImaAdpcm;
 }
 
-// Per-block header bytes an ADPCM block carries before its nibbles.
+// Per-block header bytes the frame arithmetic subtracts before the nibbles
+// (MS ADPCM's 7-byte channel header carries its first two samples, so the
+// count subtracts 6; IMA's 4-byte header carries one).
 std::uint64_t adpcm_block_header(std::uint16_t translated, std::uint32_t channels) noexcept {
     return static_cast<std::uint64_t>(translated == kTagAdpcm ? 6u : 4u) * channels;
+}
+
+// Smallest block that holds every channel's header: MS ADPCM reads 7 bytes
+// per channel, IMA 4, and an IMA block needs at least one nibble byte past
+// them.
+bool adpcm_block_too_small(std::uint16_t translated, std::uint32_t channels,
+                           std::uint64_t block_align) noexcept {
+    if (translated == kTagAdpcm)
+        return block_align < 7u * static_cast<std::uint64_t>(channels);
+    return block_align <= adpcm_block_header(translated, channels);
 }
 
 // Frames `blocks` whole ADPCM blocks decode to, by the decoder's own count
@@ -186,6 +198,8 @@ const char* wave_refusal_reason(WaveRefusal refusal) noexcept {
         return "zero sample rate";
     case WaveRefusal::block_align_too_small:
         return "block align is smaller than the frame the fmt chunk describes";
+    case WaveRefusal::too_many_channels:
+        return "more than 256 channels";
     case WaveRefusal::no_whole_frame:
         return "the data chunk declares bytes but holds no whole frame";
     }
@@ -279,7 +293,9 @@ WaveLayout walk_wave_layout(const WaveByteCursor& cursor) {
 
         if (size32 == kSizeSentinel) {
             bool resolved = false;
-            if (layout.has_ds64 && data) {
+            // A ds64 data size of zero is a placeholder a recorder never
+            // back-filled, not a size: it resolves nothing.
+            if (layout.has_ds64 && data && layout.ds64_data_size != 0u) {
                 declared = layout.ds64_data_size;
                 resolved = true;
             } else if (layout.has_ds64) {
@@ -374,7 +390,13 @@ WaveDecision decide_wave(const WaveLayout& layout,
         return decision;
     }
     if (!facts) {
-        decision.refusal = WaveRefusal::unsupported_format;
+        // The decoder declines these at open, so name the field rather than
+        // reporting an unsupported format.
+        const auto raw = interpret(layout.fmt.bytes());
+        decision.refusal = raw.channels == 0u      ? WaveRefusal::zero_channels
+                           : raw.sample_rate == 0u ? WaveRefusal::zero_sample_rate
+                           : raw.channels > 256u   ? WaveRefusal::too_many_channels
+                                                   : WaveRefusal::unsupported_format;
         return decision;
     }
     if (facts->channels == 0u) {
@@ -390,7 +412,7 @@ WaveDecision decide_wave(const WaveLayout& layout,
     const auto translated = facts->translated_format_tag;
     const std::uint64_t block_align = fmt.block_align;
     if (is_adpcm(translated)) {
-        if (block_align <= adpcm_block_header(translated, facts->channels)) {
+        if (adpcm_block_too_small(translated, facts->channels, block_align)) {
             decision.refusal = WaveRefusal::block_align_too_small;
             return decision;
         }

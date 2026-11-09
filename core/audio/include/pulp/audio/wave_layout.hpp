@@ -15,16 +15,23 @@
 ///   chunk after the data chunk, and a byte-for-byte repeat of the fmt
 ///   chunk, are accepted with a warning.
 /// - Recovered and reported truncated: a data chunk running past the end of
-///   the file, a data size of 0xFFFFFFFF with no ds64 to resolve it, an odd
-///   data chunk ending the file without its pad byte, and a data size that
-///   is not a whole number of frames. A RIFF size wrong in either direction
-///   is a warning only.
+///   the file, a data size of 0xFFFFFFFF that no ds64 entry resolves (no
+///   ds64, or a ds64 data size of zero left by a recorder that never
+///   back-filled it), and a data size that is not a whole number of frames.
+///   A RIFF size wrong in either direction, and an odd chunk ending the file
+///   without its pad byte, are warnings only.
 /// - Refused: no RIFF/RF64/BW64 WAVE header (Sony Wave64 included), no fmt
 ///   or no data chunk, a fmt payload under 16 bytes, a second fmt that
 ///   differs from the first in a field the decoder interprets, an RF64 data
 ///   size whose 32-bit field and ds64 entry disagree, zero channels or zero
-///   rate, a block align smaller than its channels' samples, and a data
-///   chunk that declares bytes but holds no whole frame.
+///   rate, more than 256 channels, a block align smaller than the frame or
+///   ADPCM block header it must hold, and a data chunk that declares bytes
+///   but holds no whole frame.
+///
+/// The authoring capsule's canonical PCM parser
+/// (core/authoring_capsule/src/canonical_pcm.cpp) is the one deliberate
+/// exception: it hashes the bytes it seals, so it parses WAV strictly on its
+/// own and refuses anything this policy would recover.
 ///
 /// This header is dependency-free (no CHOC, no dr_wav, no iostream, no
 /// exceptions) so the web lanes compile it with the portable decoder.
@@ -91,6 +98,7 @@ enum class WaveRefusal : std::uint8_t {
     zero_sample_rate,
     block_align_too_small, ///< nBlockAlign smaller than the frame the fmt describes
     no_whole_frame,        ///< the data chunk declares bytes but holds no whole frame
+    too_many_channels,     ///< more channels than the decoder reads (256)
 };
 
 /// One sentence naming the refusal, for reports and logs.

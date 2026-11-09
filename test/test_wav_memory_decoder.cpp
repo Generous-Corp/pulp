@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/audio/audio_file_layout.hpp>
 #include <pulp/audio/wav_decoder.hpp>
 
 #include "support/wav_fixture_builders.hpp"
@@ -390,4 +391,99 @@ TEST_CASE("byte-span WAV decoder applies hostile-input allocation ceilings",
     limits.max_channels = 1u;
     limits.max_output_bytes = 2u * sizeof(float);
     REQUIRE(pulp::audio::decode_wav(wav, limits));
+}
+
+namespace {
+
+// The refusal the shared policy reaches for these bytes, and the reason the
+// layout report prints for it.
+pulp::audio::WaveRefusal refusal_of(std::span<const std::uint8_t> bytes) {
+    const auto layout = pulp::audio::walk_wave_layout(pulp::audio::WaveByteCursor::over(bytes));
+    std::optional<pulp::audio::WavFormatFacts> facts;
+    if (layout.refusal == pulp::audio::WaveRefusal::none)
+        facts = pulp::audio::interpret_wav_format(layout.fmt.bytes(), 0u);
+    return pulp::audio::decide_wave(layout, facts).refusal;
+}
+
+std::string report_reason(std::span<const std::uint8_t> bytes) {
+    const auto report = pulp::audio::inspect_audio_file_layout(bytes);
+    return report.decode ? report.decode->reason : std::string();
+}
+
+} // namespace
+
+TEST_CASE("byte-span WAV decoder names the fmt field it refuses", "[audio][wav-decoder][refusal]") {
+    using pulp::audio::wave_refusal_reason;
+    using pulp::audio::WaveRefusal;
+    Bytes samples(4u, 0u);
+    // dr_wav declines these at open; the reason still names the field.
+    const auto no_channels = make_wav(make_format(1u, 0u, 48'000u, 16u), samples);
+    CHECK(refusal_of(no_channels) == WaveRefusal::zero_channels);
+    CHECK(report_reason(no_channels) == "zero channels");
+    CHECK(report_reason(no_channels) == wave_refusal_reason(WaveRefusal::zero_channels));
+    CHECK_FALSE(pulp::audio::inspect_wav(no_channels));
+
+    const auto no_rate = make_wav(make_format(1u, 1u, 0u, 16u), samples);
+    CHECK(refusal_of(no_rate) == WaveRefusal::zero_sample_rate);
+    CHECK(report_reason(no_rate) == "zero sample rate");
+    CHECK_FALSE(pulp::audio::decode_wav(no_rate));
+
+    const auto wide = make_wav(make_format(1u, 257u, 48'000u, 16u), Bytes(257u * 2u, 0u));
+    CHECK(refusal_of(wide) == WaveRefusal::too_many_channels);
+    CHECK(report_reason(wide) == "more than 256 channels");
+
+    // The control: a well-formed file is not refused at all.
+    CHECK(refusal_of(make_wav(make_format(1u, 1u, 48'000u, 16u), samples)) == WaveRefusal::none);
+}
+
+TEST_CASE("byte-span WAV decoder refuses an MS ADPCM block too small for its headers",
+          "[audio][wav-decoder][adpcm]") {
+    using pulp::audio::WaveRefusal;
+    // MS ADPCM carries a 7-byte header per channel at the start of every
+    // block, so a stereo block needs 14 bytes; 13 cannot hold it.
+    auto adpcm = [](std::uint16_t block_align) {
+        auto format = make_format(2u, 2u, 22'050u, 4u);
+        format[12] = static_cast<std::uint8_t>(block_align);
+        format[13] = static_cast<std::uint8_t>(block_align >> 8u);
+        return make_wav(format, Bytes(static_cast<std::size_t>(block_align) * 2u, 0u));
+    };
+    const auto short_block = adpcm(13u);
+    CHECK(refusal_of(short_block) == WaveRefusal::block_align_too_small);
+    CHECK_FALSE(pulp::audio::inspect_wav(short_block));
+    CHECK_FALSE(pulp::audio::decode_wav(short_block));
+
+    // The smallest block that holds both headers decodes their two samples.
+    const auto header_only = adpcm(14u);
+    const auto info = pulp::audio::inspect_wav(header_only);
+    REQUIRE(info);
+    CHECK(info->num_frames == 4u);
+    const auto decoded = pulp::audio::decode_wav(header_only);
+    REQUIRE(decoded);
+    CHECK(decoded->num_frames() == 4u);
+}
+
+TEST_CASE("an RF64 data size of 0xFFFFFFFF with a zero ds64 entry runs to the end of the file",
+          "[audio][wav-decoder][rf64]") {
+    // A recorder that stopped before back-filling ds64 leaves its data size
+    // at zero: that resolves nothing, so the data runs to EOF and the file is
+    // reported truncated, as it is with no ds64 at all.
+    Bytes samples;
+    for (int i = 0; i < 6; ++i)
+        append_sample(samples, static_cast<std::int16_t>(i * 1000));
+    const auto format = make_format(1u, 2u, 44'100u, 16u);
+    auto bytes = make_rf64(format, samples);
+    constexpr std::size_t kDs64DataSize = 12u + 8u + 8u;
+    for (std::size_t i = 0; i < 8u; ++i)
+        bytes[kDs64DataSize + i] = 0u;
+
+    const auto layout = pulp::audio::walk_wave_layout(pulp::audio::WaveByteCursor::over(bytes));
+    CHECK(layout.has_warning(pulp::audio::LayoutWarningKind::sentinel_size_without_ds64));
+    const auto info = pulp::audio::inspect_wav(bytes);
+    REQUIRE(info);
+    CHECK(info->truncated);
+    CHECK(info->num_frames == 3u);
+    CHECK(info->declared_frames == 0xffffffffu / 4u + 1u);
+    const auto decoded = pulp::audio::decode_wav(bytes);
+    REQUIRE(decoded);
+    CHECK(decoded->channels[1][2] == 5000.0f / 32768.0f);
 }

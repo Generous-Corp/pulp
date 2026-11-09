@@ -187,6 +187,10 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
          E{true, true, {}, "odd data chunk at EOF with no pad byte: the partial frame is dropped"}},
         {"wav-riff-size-lying-small.wav",
          E{true, false, {}, "RIFF size smaller than the chunks it holds: a warning only"}},
+        {"wav-rf64-ds64-data-size-zero.wav",
+         E{true, true, true,
+           "0xFFFFFFFF data size and a zero ds64 entry: decodes to the end of the file; "
+           "libsndfile trusts the zero and decodes no frames"}},
         {"wav-rf64-ds64-data-past-eof.wav",
          E{true, true, {}, "ds64 data size runs past EOF: the whole frames present decode"}},
         // valid per the README, refused by Pulp for a stated reason
