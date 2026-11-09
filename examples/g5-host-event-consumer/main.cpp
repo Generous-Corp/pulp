@@ -333,10 +333,10 @@ void graph_callback_wiring_controls() {
     check(lane.reset(7) == GraphEventResult::Accepted, "callback-reset");
     check(lane.begin_block(7, 0, 4) == GraphEventResult::Accepted, "callback-begin");
     check(lane.begin_producer_block() == GraphEventResult::Accepted, "callback-producer");
-    GraphEventWriter writer(lane, 7, 42);
+    pulp::host::GraphEventWriter writer(lane, 7, 42);
     check(writer.emit_at(3, 9) == GraphEventResult::Accepted, "callback-emit");
     check(lane.begin_consumer_block() == GraphEventResult::Accepted, "callback-consumer");
-    GraphEventReader reader(lane);
+    pulp::host::GraphEventReader reader(lane);
     const auto events = reader.events();
     check(events.size() == 1 && events[0].producer == 42 && events[0].sample == 3 &&
               events[0].payload == 9,
