@@ -750,6 +750,28 @@ class FrameworkTransferTests(unittest.TestCase):
                     finally:
                         fixture.close()
 
+    def test_a_watch_event_claiming_inheritance_on_a_frozen_path_is_refused(self):
+        family, frozen = "design-ir-contract", "core/view/src/design_probe.cpp"
+        self.assertTrue(any(drift.watch._matches(frozen, selector)  # control: the family selects it
+                            for selector in drift.watch.EXPECTED_SCOPES[family]))
+        for inherits, status in ((True, "fail"), (False, "pass")):
+            with self.subTest(inherits=inherits):
+                fixture = Fixture(frozen=[frozen])
+                try:
+                    fixture.write(drift.TRANSFER_PATH, transfer_value())
+                    fixture.base = fixture.commit("record the framework transfer")
+                    fixture.write(frozen, "// edited\n")
+                    fixture.write(".github/vellum-change-events/20261108-backport.json",
+                                  {"kind": "change", "slices": ["canvas-kernel"], "disposition": "framework-backport"})
+                    fixture.write(".github/vellum-expansion-watch-events/20261108-watch.json",
+                                  {"capability_families": [family], "vellum_inherits": inherits})
+                    report = fixture.check()
+                    self.assertEqual(report["inherited_after_transfer"], [frozen] if inherits else [])
+                    if inherits:
+                        self.assertEqual(report["status"], "fail")
+                finally:
+                    fixture.close()
+
     def test_every_failing_part_is_described(self):
         report = {"export_id": EXPORT_ID, "transfer": EXPORT_ID, "owed": {}, "missing": [],
                   "conflicting": [], "frozen": [CANVAS], "inherited_after_transfer": [STATE]}
@@ -778,6 +800,8 @@ class FrameworkTransferTests(unittest.TestCase):
                           {"schema_version": 2}, {"framework_repository": "Generous-Corp/pulp"},
                           {"transfer_record": "provenance/framework/other.json"},
                           {"transfer_record_sha256": "8" * 63}, {"export_id": "2026-11-07"},
+                          # Ends in the Pulp commit, so only the export_id format check refuses it.
+                          {"export_id": f"2026110-{PULP_SHA[:12]}"},
                           {"framework_commit": "c" * 39}, {"framework_commit": "main"},
                           {"transferred_paths": ["../x"]},
                           {"transferred_paths": [EXPORTED[1], EXPORTED[0]]}):
@@ -835,6 +859,7 @@ class TransferSourceTests(unittest.TestCase):
         self.fixture.write(drift.TRANSFER_PATH,
                            transfer_value(transfer_record_sha256=hashlib.sha256(self.vellum).hexdigest()))
         self.head = self.fixture.commit("record the framework transfer")
+        self.pulls = [{"number": 257, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z"}]
 
     def tearDown(self) -> None:
         self.fixture.close()
@@ -849,6 +874,8 @@ class TransferSourceTests(unittest.TestCase):
                 raise OSError("unreachable")
             if path == f"repos/Generous-Corp/vellum/compare/{FRAMEWORK_COMMIT}...main?per_page=1":
                 return {"status": status}
+            if path == f"repos/Generous-Corp/vellum/commits/{FRAMEWORK_COMMIT}/pulls":
+                return self.pulls
             self.assertEqual(path, f"repos/Generous-Corp/vellum/contents/{self.SOURCE}?ref={FRAMEWORK_COMMIT}")
             value = {"type": "file", "path": self.SOURCE, "encoding": "base64",
                      "content": base64.b64encode(data).decode()}
@@ -899,6 +926,44 @@ class TransferSourceTests(unittest.TestCase):
         with self.assertRaises(OSError):
             self.problems(self.served(None))
 
+    def test_the_commit_must_be_the_merge_of_the_named_pull_request(self):
+        refused = {
+            "another pull request": [{"number": 999, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z"}],
+            "not merged": [{"number": 257, "base": {"ref": "main"}, "merged_at": None}],
+            "another base": [{"number": 257, "base": {"ref": "release"}, "merged_at": "2026-11-09T05:00:00Z"}],
+            "none": [],
+            "not a list": {"message": "Not Found"},
+        }
+        for case, pulls in refused.items():
+            with self.subTest(case=case):
+                self.pulls = pulls
+                problems = self.problems(self.served(self.vellum))
+                self.assertEqual(problems, [f"Generous-Corp/vellum commit {FRAMEWORK_COMMIT[:12]} is not the merge "
+                                            "of pull request #257 into main"])
+        def failing(path: str):
+            if path.endswith("/pulls"):
+                raise OSError("pulls read failed")
+            return self.served(self.vellum)(path)
+        self.pulls = [{"number": 257, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z"}]
+        with self.assertRaises(OSError):
+            self.problems(failing)
+
+    def test_an_unreadable_record_at_the_commit_is_refused(self):
+        for case, data in {"undecodable": b"\xff\xfe not json", "no records": b'{"schema": "x"}'}.items():
+            with self.subTest(case=case):
+                problems = self.problems(self.served(data))
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn("is unreadable", problems[0])
+
+    def test_a_non_dict_compare_result_is_refused(self):
+        def fetch(path: str):
+            if "/compare/" in path:
+                return ["not", "a", "comparison"]
+            return self.served(self.vellum)(path)
+        problems = self.problems(fetch)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is not on main (compare status None)", problems[0])
+
     def test_an_unreachable_framework_commit_fails_closed(self):
         # The compare read itself fails (a 404 for an unknown commit raises in
         # the reader): the error propagates and nothing reads as a match.
@@ -935,6 +1000,8 @@ class TransferSourceTests(unittest.TestCase):
             "def serve(url, token):\n"
             "    if '/compare/' in url:\n"
             "        return {'status': 'diverged' if record == '-' else 'ahead'}\n"
+            "    if url.endswith('/pulls'):\n"
+            "        return [{'number': 257, 'base': {'ref': 'main'}, 'merged_at': '2026-11-09T05:00:00Z'}]\n"
             "    path = url.split('/contents/')[1].split('?')[0]\n"
             "    if path.startswith('provenance/mirror/'):\n"
             "        return {'type': 'file', 'path': path, 'sha': local}\n"

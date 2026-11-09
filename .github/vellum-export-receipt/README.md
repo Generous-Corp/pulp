@@ -45,8 +45,9 @@ own change, after the rule that reads it. No re-export follows it, so while the
 record is at a change's base, receipt mode refuses `vellum_inherits: true` on
 every path it judges (exported, producer or source-directory, whichever export
 named it) and on any event covering a frozen path; `false` records a Pulp-only
-edit. In the trusted lanes, `framework_commit` must be on Vellum's main and the
-record must equal Vellum's transfer record at that commit; a later Vellum edit
+edit. In the trusted lanes, `framework_commit` must be on Vellum's main, the
+record's pull request must be the merged pull request into main associated with
+that commit, and the record must equal Vellum's transfer record at that commit; a later Vellum edit
 to its record does not affect this one. It cannot be removed or edited once it
 lands.
 

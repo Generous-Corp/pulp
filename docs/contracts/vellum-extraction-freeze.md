@@ -181,10 +181,13 @@ deleted at cutover. In Pulp they apply as follows.
    `framework_commit`, the commit that merged Vellum's transfer. In the
    trusted lanes, where a Vellum reader token is present, receipt mode
    requires that commit to be on Vellum's main (the compare API reports main
-   `ahead` of it or `identical`), and reads `provenance/framework/transfer.json`
+   `ahead` of it or `identical`), requires the record's
+   `framework_pull_request` to be a pull request associated with that commit,
+   based on `main` and merged, and reads `provenance/framework/transfer.json`
    at that commit: the record's `transfer_record_sha256` must equal that file's
    SHA-256 and its `transferred_paths` that file's `pulp_path` set. A missing
-   file, a difference, a commit main does not contain, or a failed read fails
+   file, a difference, a commit main does not contain, a pull request that is
+   not that commit's merged pull request into main, or a failed read fails
    the check. Because the comparison is at a fixed commit, a later Vellum edit
    to its own record does not invalidate Pulp's. Like the pin, the record judges
    only the changes after the one that adds it, and once it lands it can be

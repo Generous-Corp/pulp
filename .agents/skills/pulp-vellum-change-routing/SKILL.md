@@ -514,8 +514,9 @@ Traps:
 - The rule and the record ship in separate changes, rule first: the trusted
   lanes run protected `main`'s scripts, so a change that adds both would be
   judged without the rule. The record change follows Vellum's merge; in the
-  trusted lanes `framework_commit` must be on Vellum's main and the record must
-  equal Vellum's transfer record at that commit, so it stays red until the
+  trusted lanes `framework_commit` must be on Vellum's main, be the merge of the
+  record's `framework_pull_request` into main, and the record must equal
+  Vellum's transfer record at that commit, so it stays red until the
   merge. The record cannot be removed or edited after it lands, and it judges
   only later changes.
 - The pin is data a reviewer must read. A change to `frozen_paths` takes effect

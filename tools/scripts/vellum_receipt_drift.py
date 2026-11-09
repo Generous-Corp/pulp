@@ -126,6 +126,7 @@ class Transfer:
     paths: frozenset[str]
     record_sha256: str
     framework_commit: str
+    pull_request: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -270,7 +271,7 @@ def parse_transfer(raw: bytes) -> Transfer:
     paths = _sorted_unique(value["transferred_paths"], f"{TRANSFER_PATH}.transferred_paths", allow_empty=False)
     for index, path in enumerate(paths):
         _safe_path(path, f"{TRANSFER_PATH}.transferred_paths[{index}]")
-    return Transfer(export_id, frozenset(paths), digest, framework_commit)
+    return Transfer(export_id, frozenset(paths), digest, framework_commit, number)
 
 
 def transfer_copy_problems(
@@ -281,9 +282,10 @@ def transfer_copy_problems(
     Like ``receipt_copy_problems``: ``fetch`` reads the GitHub REST API and a
     fetch failure propagates, so an unreachable Vellum never reads as a match.
     The record names ``framework_commit``, the Vellum commit that landed the
-    transfer. The record must equal ``provenance/framework/transfer.json`` at
-    that commit (its SHA-256 and its ``pulp_path`` set), and the commit must be
-    on Vellum's main. Reading at an immutable commit, not at main, means a later
+    transfer, and ``framework_pull_request``. The commit must be on Vellum's
+    main, the named pull request must be associated with it, based on main and
+    merged, and the record must equal ``provenance/framework/transfer.json`` at
+    that commit (its SHA-256 and its ``pulp_path`` set). Reading at an immutable commit, not at main, means a later
     Vellum edit to its record cannot invalidate Pulp's, which cannot be edited.
     """
     problems: list[str] = []
@@ -300,6 +302,20 @@ def transfer_copy_problems(
         if not isinstance(compared, dict) or compared.get("status") not in ("ahead", "identical"):
             status = compared.get("status") if isinstance(compared, dict) else None
             problems.append(f"{FRAMEWORK_REPOSITORY} commit {at[:12]} is not on main (compare status {status!r})")
+            continue
+        # The commit must be the merge of the named pull request into main.
+        pulls = fetch(f"repos/{FRAMEWORK_REPOSITORY}/commits/{at}/pulls")
+        merged = [
+            pull for pull in (pulls if isinstance(pulls, list) else [])
+            if isinstance(pull, dict) and pull.get("number") == transfer.pull_request
+            and isinstance(pull.get("base"), dict) and pull["base"].get("ref") == "main"
+            and pull.get("merged_at")
+        ]
+        if not merged:
+            problems.append(
+                f"{FRAMEWORK_REPOSITORY} commit {at[:12]} is not the merge of pull request "
+                f"#{transfer.pull_request} into main"
+            )
             continue
         remote = fetch(f"repos/{FRAMEWORK_REPOSITORY}/contents/{source}?ref={at}")
         if not isinstance(remote, dict) or remote.get("type") != "file" or remote.get("path") != source:
