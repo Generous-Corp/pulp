@@ -124,6 +124,8 @@ ALLOWED_ROOT_PATHS = frozenset({
     "forge-seam",
     "hooks",
     "inspect",
+    # Optional UI integration packages core never links (integrations/CMakeLists.txt).
+    "integrations",
     "packages",
     "planning",
     "scripts",

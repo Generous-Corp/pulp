@@ -5,7 +5,9 @@
 // state or execution machinery.
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/host/custom_node_events.hpp>
+#include <pulp/signal/rt_work_counter.hpp>
 #include <pulp/state/parameter.hpp>
 
 #include <cmath>
@@ -86,6 +88,26 @@ using CustomNodeTransportProcessFn =
                        const audio::BufferView<const float>& input,
                        int num_samples,
                        const format::ProcessContext& transport)>;
+
+// Declared realtime contract of a custom node, consumed by the static graph
+// realtime report (graph_rt_report.hpp). Everything here is the registrar's
+// claim; the report labels it as declared, never as measured. `declared ==
+// false` (the default) means "no contract", which the report surfaces as
+// unknown rather than assuming the node is safe.
+struct CustomNodeRtContract {
+    bool declared = false;
+    audio::RtSafetyClass safety_class = audio::RtSafetyClass::ControlThreadOnly;
+    // True when the registrar asserts process() never allocates after prepare.
+    bool allocation_free = false;
+    // Worst-case counted work (FFT / transcendental / per-bin units, the same
+    // operations rt_work_counter.hpp counts) for one process() call of
+    // `block_size` frames. Called on the control thread by the report only.
+    std::function<signal::rt::RtWorkCounts(int /*block_size*/)> worst_case_work;
+    // Where the loop bound behind worst_case_work comes from, for example
+    // "one FFT per 256-frame hop; ceil(block/256) hops". Free text, reported
+    // verbatim; empty when the node does not declare one.
+    std::string loop_bound;
+};
 
 struct CustomNodeType {
     std::string type_id;
@@ -219,6 +241,37 @@ struct CustomNodeType {
     CustomNodeEventProcessFn process_events;
     CustomNodeInstanceEventProcessFn process_instance_events;
 
+    // Latency semantics. `latency_samples` / `latency_samples_for_block` above
+    // declare ARTIFACT latency: delay the node introduces as a side effect of
+    // how it computes (lookahead, oversampling filters, FFT framing). The graph
+    // compensates artifact latency on parallel paths and reports it to the
+    // host. The two declarations below complete that vocabulary and keep the
+    // aggregate's historical positional layout intact.
+    //
+    // Intentional delay: the musical delay the author asked for (an echo, a
+    // pre-delay, a slapback). It is reported in the prepared latency snapshot
+    // and the realtime report but NEVER compensated and never added to the
+    // host latency: compensating it would delay every parallel dry path by the
+    // echo time. A nominal value is fine when the delay is parameter-driven.
+    // Evaluated once per prepare, off the audio thread, clamped to
+    // [0, kMaxLatencySamples].
+    std::function<int(double /*sample_rate*/)> intentional_delay_samples;
+
+    // Per-output-port artifact latency, for a node whose outputs carry
+    // different amounts of lookahead or filter delay (for example a crossover
+    // whose bands use different linear-phase filters). The graph equalises the
+    // ports: every port is delayed to the largest declared value inside the
+    // node binding, so downstream sees one scalar node latency and the host
+    // sees one total. Mutually exclusive with latency_samples and
+    // latency_samples_for_block, and not lowerable (the bake layer has no
+    // per-port equaliser). Evaluated once per prepare, off the audio thread,
+    // for ports [0, num_output_ports); each value is clamped to
+    // [0, kMaxLatencySamples].
+    std::function<int(double /*sample_rate*/, int /*output_port*/)> output_port_latency_samples;
+
+    // Optional declared realtime contract for the static graph report.
+    CustomNodeRtContract rt_contract;
+
     // True when this type declares a usable event-aware execution path.
     // DERIVED from callback presence rather than stored as a flag, so it can
     // never disagree with the callbacks it describes.
@@ -240,9 +293,20 @@ struct CustomNodeType {
         // or loses a transport context. Declaring ANY latency callback is the
         // registration-time stand-in for a non-zero fixed latency, since the
         // value itself is not resolvable this early.
+        const bool declares_artifact_latency = static_cast<bool>(latency_samples) ||
+                                               static_cast<bool>(latency_samples_for_block) ||
+                                               static_cast<bool>(output_port_latency_samples);
         if (type_id.empty() || version <= 0 || num_input_ports < 0 || num_output_ports < 0 ||
-            ((latency_samples || latency_samples_for_block) && has_transport_callback &&
-             !has_plain_callback)) {
+            (declares_artifact_latency && has_transport_callback && !has_plain_callback)) {
+            return false;
+        }
+
+        // Per-port latency replaces the scalar declaration; accepting both would
+        // leave the node's latency ambiguous. The bake layer lowers one scalar
+        // latency per node and has no port equaliser, so a per-port node cannot
+        // be lowered without silently misaligning its outputs.
+        if (output_port_latency_samples &&
+            (latency_samples || latency_samples_for_block || lowerable)) {
             return false;
         }
 

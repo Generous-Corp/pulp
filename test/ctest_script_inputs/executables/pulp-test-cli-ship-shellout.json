@@ -1,0 +1,27 @@
+{
+ "name": "pulp-test-cli-ship-shellout",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_cli_ship_shellout.cpp"
+  ],
+  "inputs": [
+   "tools/cmake/PulpReleaseArtifactScan.cmake",
+   "tools/cmake/release_artifact_forbidden.json"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli",
+   "pulp-test-ship-strip-fixture"
+  ],
+  "sources": [
+   "test/test_cli_ship_shellout.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_ship_shellout.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

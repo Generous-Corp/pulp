@@ -1,0 +1,12 @@
+{
+ "name": "host-vitals-selftest",
+ "record": {
+  "entry": "tools/scripts/test_host_vitals.sh",
+  "inputs": [
+   "tools/scripts/host_vitals.sh",
+   "tools/scripts/host_vitals_sensor.sh",
+   "tools/scripts/test_host_vitals.sh"
+  ],
+  "kind": "shell"
+ }
+}

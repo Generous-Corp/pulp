@@ -1,0 +1,11 @@
+{
+ "name": "spectr-roundtrip-window-only-capture",
+ "record": {
+  "entry": "test/test_spectr_roundtrip_window_only_capture.sh",
+  "inputs": [
+   "test/test_spectr_roundtrip_window_only_capture.sh",
+   "tools/import-validation/spectr-roundtrip.sh"
+  ],
+  "kind": "shell"
+ }
+}

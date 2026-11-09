@@ -1,0 +1,12 @@
+{
+ "name": "rack-generation-lock-selftest",
+ "record": {
+  "entry": "tools/rack/test_generation_lock.py",
+  "inputs": [
+   "tools/rack/file_lock.py",
+   "tools/rack/generation_lock.py",
+   "tools/rack/test_generation_lock.py"
+  ],
+  "kind": "python"
+ }
+}

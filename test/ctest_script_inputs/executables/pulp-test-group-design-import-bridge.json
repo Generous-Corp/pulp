@@ -1,0 +1,18 @@
+{
+ "name": "pulp-test-group-design-import-bridge",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_design_import_anchors.cpp"
+  ],
+  "inputs": [
+   "test/fixtures/anchor_vectors.json"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_design_import_anchors.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

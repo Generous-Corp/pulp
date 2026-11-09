@@ -1,0 +1,10 @@
+{
+ "name": "packages-freshness-check-extra-selftest",
+ "record": {
+  "entry": "tools/packages/test_freshness_check_extra.py",
+  "inputs": [
+   "tools/packages/test_freshness_check_extra.py"
+  ],
+  "kind": "python"
+ }
+}

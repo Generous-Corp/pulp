@@ -1,0 +1,11 @@
+{
+ "name": "git-read-memo-selftest",
+ "record": {
+  "entry": "tools/scripts/test_git_read_memo.py",
+  "inputs": [
+   "tools/scripts/git_read_memo.py",
+   "tools/scripts/test_git_read_memo.py"
+  ],
+  "kind": "python"
+ }
+}

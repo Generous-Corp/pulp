@@ -1,0 +1,11 @@
+{
+ "name": "pr-flow-audit-selftest",
+ "record": {
+  "entry": "tools/scripts/test_pr_flow_audit.py",
+  "inputs": [
+   ".github/workflows/build.yml",
+   "tools/scripts/test_pr_flow_audit.py"
+  ],
+  "kind": "python"
+ }
+}

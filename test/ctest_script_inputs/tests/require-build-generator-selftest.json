@@ -1,0 +1,10 @@
+{
+ "name": "require-build-generator-selftest",
+ "record": {
+  "entry": "tools/ci/test_require_build_generator.py",
+  "inputs": [
+   "tools/ci/test_require_build_generator.py"
+  ],
+  "kind": "python"
+ }
+}

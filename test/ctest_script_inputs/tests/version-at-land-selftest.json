@@ -1,0 +1,32 @@
+{
+ "name": "version-at-land-selftest",
+ "record": {
+  "entry": "tools/scripts/test_version_at_land.py",
+  "inputs": [
+   ".github/workflows",
+   "docs/status/agent-capabilities.json",
+   "docs/status/agent-capability-surface.json",
+   "docs/status/gpu-vellum-handoff.yaml",
+   "docs/status/pulp-tooling-disposition.json",
+   "tools/agent-capabilities/contract-history.json",
+   "tools/scripts/agent_capability_manifest.py",
+   "tools/scripts/build_migration_index.py",
+   "tools/scripts/connected_git_history.py",
+   "tools/scripts/fold_migration_notes.py",
+   "tools/scripts/gate_common.py",
+   "tools/scripts/gate_test_support.py",
+   "tools/scripts/gpu_handoff_provenance.py",
+   "tools/scripts/pulp_tooling_disposition.py",
+   "tools/scripts/skill_path_map.json",
+   "tools/scripts/test_version_at_land.py",
+   "tools/scripts/version_at_land.py",
+   "tools/scripts/version_bump_apply.py",
+   "tools/scripts/version_bump_check.py",
+   "tools/scripts/version_bump_heuristics.py",
+   "tools/scripts/version_bump_render.py",
+   "tools/scripts/version_bump_surfaces.py",
+   "tools/scripts/versioning.json"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,12 @@
+{
+ "name": "pulp-test-timeout-enforced",
+ "record": {
+  "entry": "test/test_ctest_timeout_kills_wedged.sh",
+  "inputs": [
+   "test/test_ctest_timeout_kills_wedged.sh",
+   "tools/cmake",
+   "tools/cmake/PulpTestTimeout.cmake"
+  ],
+  "kind": "shell"
+ }
+}

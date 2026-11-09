@@ -1,0 +1,11 @@
+{
+ "name": "sdk-consumer-sweep-selftest",
+ "record": {
+  "entry": "tools/scripts/test_sdk_consumer_sweep.py",
+  "inputs": [
+   "tools/scripts/sdk_consumer_sweep.py",
+   "tools/scripts/test_sdk_consumer_sweep.py"
+  ],
+  "kind": "python"
+ }
+}

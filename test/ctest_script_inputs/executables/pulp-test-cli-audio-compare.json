@@ -1,0 +1,23 @@
+{
+ "name": "pulp-test-cli-audio-compare",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [
+   "tools/packages/tool-registry.json"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli"
+  ],
+  "sources": [
+   "test/test_cli_audio_compare.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_shellout_helpers.hpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

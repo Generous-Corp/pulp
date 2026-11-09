@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-gpu-dpr-native-measurement",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_gpu_dpr_native_measurement.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

@@ -1,0 +1,14 @@
+{
+ "name": "agent-capability-sdk-handoff-selftest",
+ "record": {
+  "entry": "tools/scripts/test_sdk_capability_handoff.py",
+  "inputs": [
+   "docs/status/agent-capability-handoff.schema.json",
+   "tools/scripts/json_schema_lite.py",
+   "tools/scripts/sdk_capability_handoff.py",
+   "tools/scripts/sdk_provenance.py",
+   "tools/scripts/test_sdk_capability_handoff.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "build-speed-scorecard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_build_speed_scorecard.py",
+  "inputs": [
+   "tools/scripts/test_build_speed_scorecard.py"
+  ],
+  "kind": "python"
+ }
+}

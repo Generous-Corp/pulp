@@ -45,6 +45,9 @@ COPIED = [
     "tools/scripts/gates.sh",
     "tools/scripts/gates_script_inputs.py",
     "tools/scripts/script_test_inputs.py",
+    "tools/scripts/script_inputs_store.py",
+    "tools/scripts/hotspot_edit_guard.py",
+    "tools/scripts/hotspot_edit_guard.json",
     "tools/scripts/gate_common.py",
     "tools/ci/source_selftests.py",
     "tools/ci/ctest_gate_args.py",
@@ -508,6 +511,14 @@ class TouchReasonsTests(unittest.TestCase):
         self.assertTrue(self.reasons_after("tools/CMakeLists.txt"))       # registers tests
         git(self.root, "checkout", "-q", ".")
         self.assertTrue(self.reasons_after("test/ctest_script_inputs.json"))
+        git(self.root, "checkout", "-q", ".")
+        # One fragment per entry: editing any fragment is editing the list.
+        frag = self.root / "test/ctest_script_inputs/tests/a.json"
+        frag.parent.mkdir(parents=True)
+        frag.write_text("{}\n", encoding="utf-8")
+        git(self.root, "add", str(frag))
+        self.assertTrue(any(r.startswith("test/ctest_script_inputs/tests/a.json (the list itself")
+                            for r in self.sti.touch_reasons(self.root, "main")))
 
 
 if __name__ == "__main__":

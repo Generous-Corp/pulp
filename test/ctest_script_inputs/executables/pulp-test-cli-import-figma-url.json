@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-cli-import-figma-url",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli",
+   "pulp-import-design"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_cli_import_figma_url.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

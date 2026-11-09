@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import base64
+import contextlib
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -12,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPTS = pathlib.Path(__file__).resolve().parent
 REPO = SCRIPTS.parents[1]
@@ -622,6 +626,473 @@ class ReceiptDriftTests(unittest.TestCase):
         self.assertIn("vellum_inherits", result.stderr)
 
 
+def transfer_value(paths: list[str] | None = None, **overrides) -> dict:
+    value = {
+        "schema_version": 1,
+        "framework_repository": "Generous-Corp/vellum",
+        "framework_pull_request": 257,
+        "transfer_record": "provenance/framework/transfer.json",
+        "transfer_record_sha256": "8" * 64,
+        "framework_commit": FRAMEWORK_COMMIT,
+        "export_id": EXPORT_ID,
+        "pulp_sha": PULP_SHA,
+        "transferred_paths": sorted(paths if paths is not None else EXPORTED),
+    }
+    value.update(overrides)
+    return value
+
+
+FRAMEWORK_COMMIT = "c" * 40
+STATE = "core/state/src/s.cpp"  # exported, in no transferred slice, not frozen
+CANVAS = "core/canvas/src/a.cpp"  # exported, in the canvas-kernel slice
+
+
+class FrameworkTransferTests(unittest.TestCase):
+    """After the transfer, a Pulp edit to a transferred path cannot claim Vellum inherits it."""
+
+    def setUp(self) -> None:
+        self.fixture = Fixture()
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def land_transfer(self, paths: list[str] | None = None) -> None:
+        self.fixture.write(drift.TRANSFER_PATH, transfer_value(paths))
+        self.fixture.base = self.fixture.commit("record the framework transfer")
+
+    def edit_with_decision(self, path: str, inherits: bool) -> dict:
+        self.fixture.write(path, "// edited\n")
+        self.fixture.write(f"{drift.EXPORT_EVENT_DIRECTORY}/20261108-edit.json",
+                           export_event("20261108-edit", [path], inherits))
+        return self.fixture.check()
+
+    def test_inherits_true_on_a_transferred_path_fails_after_the_transfer(self):
+        self.land_transfer()
+        report = self.edit_with_decision(STATE, True)
+        self.assertEqual(report["status"], "fail", report)
+        self.assertEqual(report["inherited_after_transfer"], [STATE])
+        self.assertIn("vellum_inherits cannot be true", drift.describe_failure(report))
+
+    def test_inherits_false_on_a_transferred_path_passes_after_the_transfer(self):
+        self.land_transfer()
+        report = self.edit_with_decision(STATE, False)
+        self.assertEqual(report["status"], "pass", report)
+        self.assertEqual(report["inherited_after_transfer"], [])
+
+    def test_a_change_event_claiming_inheritance_fails_after_the_transfer(self):
+        self.land_transfer()
+        self.fixture.write(CANVAS, "// edited\n")
+        self.fixture.write(".github/vellum-change-events/20261108-canvas.json",
+                           {"kind": "change", "slices": ["canvas-kernel"], "vellum_inherits": True})
+        report = self.fixture.check()
+        self.assertEqual(report["inherited_after_transfer"], [CANVAS])
+        self.assertEqual(report["status"], "fail")
+
+    def test_before_the_transfer_behaviour_is_unchanged(self):
+        report = self.edit_with_decision(STATE, True)
+        self.assertEqual(report["status"], "pass", report)
+        self.assertIsNone(report["transfer"])
+        self.assertEqual(report["inherited_after_transfer"], [])
+
+    def test_the_change_that_records_the_transfer_is_not_judged_by_it(self):
+        self.fixture.write(drift.TRANSFER_PATH, transfer_value())
+        self.assertEqual(self.edit_with_decision(STATE, True)["status"], "pass")
+
+    def test_a_pinned_path_outside_the_transfer_is_refused_too(self):
+        # The pinned receipt and the transfer's export can differ (Pulp's pin
+        # lists paths the transfer dropped). Neither is re-exported, so the
+        # refusal covers every path the pinned receipt makes owe a decision.
+        self.land_transfer([path for path in EXPORTED if path != STATE])
+        report = self.edit_with_decision(STATE, True)
+        self.assertEqual(report["inherited_after_transfer"], [STATE])
+        self.assertEqual(report["status"], "fail")
+
+    def test_a_path_no_export_names_is_unaffected(self):
+        self.land_transfer()
+        self.fixture.write("docs/readme.md", "// edited\n")
+        report = self.fixture.check()
+        self.assertEqual(report["status"], "pass", report)
+        self.assertEqual((report["owed"], report["inherited_after_transfer"]), ({}, []))
+
+    def test_a_new_file_under_a_transferred_source_directory_is_refused(self):
+        self.land_transfer()
+        path = "core/canvas/src/brand_new.cpp"
+        self.fixture.write(path, "// new\n")
+        self.fixture.write(f"{drift.EXPORT_EVENT_DIRECTORY}/20261108-new.json",
+                           export_event("20261108-new", [path], True))
+        report = self.fixture.check()
+        self.assertEqual(report["owed"], {path: "added in an exported source directory"})
+        self.assertEqual(report["inherited_after_transfer"], [path])
+        self.assertEqual(report["status"], "fail")
+
+    def test_a_generated_input_producer_is_refused(self):
+        self.land_transfer()
+        self.fixture.write(PRODUCER, "# edited\n")
+        self.fixture.write(f"{drift.EXPORT_EVENT_DIRECTORY}/20261108-producer.json",
+                           export_event("20261108-producer", [PRODUCER], True))
+        self.assertEqual(self.fixture.check()["inherited_after_transfer"], [PRODUCER])
+
+    def test_an_unfreezing_event_on_a_frozen_path_cannot_claim_inheritance(self):
+        for disposition in ("framework-backport", "emergency-exception"):
+            for inherits, status in ((True, "fail"), (False, "pass")):
+                with self.subTest(disposition=disposition, inherits=inherits):
+                    fixture = Fixture(frozen=[CANVAS])
+                    try:
+                        fixture.write(drift.TRANSFER_PATH, transfer_value())
+                        fixture.base = fixture.commit("record the framework transfer")
+                        fixture.write(CANVAS, "// backported\n")
+                        fixture.write(".github/vellum-change-events/20261108-canvas.json",
+                                      {"kind": "change", "slices": ["canvas-kernel"],
+                                       "disposition": disposition, "vellum_inherits": inherits})
+                        report = fixture.check()
+                        self.assertEqual(report["frozen"], [])
+                        self.assertEqual(report["inherited_after_transfer"], [CANVAS] if inherits else [])
+                        self.assertEqual(report["status"], status, report)
+                    finally:
+                        fixture.close()
+
+    def test_a_watch_event_claiming_inheritance_on_a_frozen_path_is_refused(self):
+        family, frozen = "design-ir-contract", "core/view/src/design_probe.cpp"
+        self.assertTrue(any(drift.watch._matches(frozen, selector)  # control: the family selects it
+                            for selector in drift.watch.EXPECTED_SCOPES[family]))
+        for inherits, status in ((True, "fail"), (False, "pass")):
+            with self.subTest(inherits=inherits):
+                fixture = Fixture(frozen=[frozen])
+                try:
+                    fixture.write(drift.TRANSFER_PATH, transfer_value())
+                    fixture.base = fixture.commit("record the framework transfer")
+                    fixture.write(frozen, "// edited\n")
+                    fixture.write(".github/vellum-change-events/20261108-backport.json",
+                                  {"kind": "change", "slices": ["canvas-kernel"], "disposition": "framework-backport"})
+                    fixture.write(".github/vellum-expansion-watch-events/20261108-watch.json",
+                                  {"capability_families": [family], "vellum_inherits": inherits})
+                    report = fixture.check()
+                    self.assertEqual(report["inherited_after_transfer"], [frozen] if inherits else [])
+                    if inherits:
+                        self.assertEqual(report["status"], "fail")
+                finally:
+                    fixture.close()
+
+    def test_every_failing_part_is_described(self):
+        report = {"export_id": EXPORT_ID, "transfer": EXPORT_ID, "owed": {}, "missing": [],
+                  "conflicting": [], "frozen": [CANVAS], "inherited_after_transfer": [STATE]}
+        text = drift.describe_failure(report)
+        self.assertIn("frozen in Pulp", text)
+        self.assertIn("vellum_inherits cannot be true", text)
+        self.assertNotIn("need an explicit vellum_inherits decision", text)
+        report.update(missing=[STATE], owed={STATE: "exported"}, frozen=[])
+        text = drift.describe_failure(report)
+        self.assertIn("need an explicit vellum_inherits decision", text)
+        self.assertIn("vellum_inherits cannot be true", text)
+
+    def test_the_transfer_record_cannot_be_removed_or_edited(self):
+        self.land_transfer()
+        self.fixture.remove(drift.TRANSFER_PATH)
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "cannot be removed"):
+            self.fixture.check()
+        self.fixture.git("reset", "-q", "--hard", self.fixture.base)
+        self.fixture.write(drift.TRANSFER_PATH, transfer_value([CANVAS]))
+        with self.assertRaisesRegex(drift.ReceiptDriftError, "cannot be edited"):
+            self.fixture.check()
+
+    def test_a_malformed_transfer_record_fails_cleanly(self):
+        for overrides in ({"framework_pull_request": "257"}, {"framework_pull_request": 0},
+                          {"pulp_sha": "0" * 40}, {"transferred_paths": []}, {"extra": 1},
+                          {"schema_version": 2}, {"framework_repository": "Generous-Corp/pulp"},
+                          {"transfer_record": "provenance/framework/other.json"},
+                          {"transfer_record_sha256": "8" * 63}, {"export_id": "2026-11-07"},
+                          # Ends in the Pulp commit, so only the export_id format check refuses it.
+                          {"export_id": f"2026110-{PULP_SHA[:12]}"},
+                          {"framework_commit": "c" * 39}, {"framework_commit": "main"},
+                          {"transferred_paths": ["../x"]},
+                          {"transferred_paths": [EXPORTED[1], EXPORTED[0]]}):
+            with self.subTest(overrides=overrides):
+                self.fixture.write(drift.TRANSFER_PATH, transfer_value(**overrides))
+                with self.assertRaises(drift.ReceiptDriftError):
+                    self.fixture.check()
+
+    def test_this_change_ships_the_rule_without_a_record(self):
+        # The rule lands first; the record follows in a later change, after
+        # Vellum's transfer merges. Until then receipt mode behaves as before.
+        self.assertFalse((SCRIPTS.parents[1] / drift.TRANSFER_PATH).exists())
+        self.assertIsNone(drift.transfer_in_effect(self.fixture.root, self.fixture.base, self.fixture.base))
+        report = self.edit_with_decision(STATE, True)
+        self.assertEqual((report["status"], report["transfer"], report["inherited_after_transfer"]),
+                         ("pass", None, []))
+
+
+class NoRecordIsInertTests(unittest.TestCase):
+    """With no transfer record, every PR shape the existing tests cover is judged exactly as before."""
+
+    def test_every_existing_receipt_mode_case_is_untouched(self):
+        seen: list[dict] = []
+        real_check = drift.check
+
+        def check(repo, base, head):
+            report = real_check(repo, base, head)
+            seen.append(report)
+            # The transfer machinery reads nothing and changes nothing.
+            if report.get("transfer") is not None or report.get("inherited_after_transfer"):
+                raise AssertionError(f"the transfer guard acted with no record: {report}")
+            return report
+
+        suite = unittest.TestSuite()
+        for case in (ReceiptDriftTests, FrozenCliTests):
+            suite.addTests(unittest.TestLoader().loadTestsFromTestCase(case))
+        with mock.patch.object(drift, "check", check), \
+                mock.patch.object(drift, "transfer_copy_problems",
+                                  side_effect=AssertionError("no record, so nothing is fetched")):
+            result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+        self.assertTrue(result.wasSuccessful(), result.failures + result.errors)
+        # Control: the existing cases ran through the wrapper (38 complete a
+        # report today; the rest raise before one, or run the CLI in a subprocess).
+        self.assertGreaterEqual(len(seen), 30)
+
+
+class TransferSourceTests(unittest.TestCase):
+    """The framework-transfer record must be Vellum main's transfer record."""
+
+    SOURCE = "provenance/framework/transfer.json"
+
+    def setUp(self) -> None:
+        self.fixture = Fixture()
+        self.vellum = json.dumps({"records": [{"pulp_path": p} for p in EXPORTED]}).encode()
+        self.fixture.write(drift.TRANSFER_PATH,
+                           transfer_value(transfer_record_sha256=hashlib.sha256(self.vellum).hexdigest()))
+        self.head = self.fixture.commit("record the framework transfer")
+        self.pulls = [{"number": 257, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z",
+                       "merge_commit_sha": FRAMEWORK_COMMIT}]
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def served(self, data: bytes | None, status: str = "ahead", main: bytes | None = None, **overrides):
+        """Vellum as the reader sees it: the record at FRAMEWORK_COMMIT, and main's position."""
+        self.asked = []
+
+        def fetch(path: str, expected=dict):
+            self.asked.append(path)
+            if data is None:
+                raise OSError("unreachable")
+            if path == f"repos/Generous-Corp/vellum/compare/{FRAMEWORK_COMMIT}...main?per_page=1":
+                return {"status": status}
+            if path == f"repos/Generous-Corp/vellum/commits/{FRAMEWORK_COMMIT}/pulls":
+                return self.pulls
+            self.assertEqual(path, f"repos/Generous-Corp/vellum/contents/{self.SOURCE}?ref={FRAMEWORK_COMMIT}")
+            value = {"type": "file", "path": self.SOURCE, "encoding": "base64",
+                     "content": base64.b64encode(data).decode()}
+            value.update(overrides)
+            return value
+        return fetch
+
+    def problems(self, fetch) -> list[str]:
+        return drift.transfer_copy_problems(self.fixture.root, (self.fixture.base, self.head), fetch)
+
+    def test_vellum_s_record_at_the_commit_matches(self):
+        self.assertEqual(self.problems(self.served(self.vellum)), [])
+        self.assertEqual(self.problems(self.served(self.vellum, status="identical")), [])
+
+    def test_a_later_vellum_edit_on_main_does_not_break_the_record(self):
+        # main's transfer.json has moved on; the record is read at its commit,
+        # never at main, so it still matches.
+        self.assertEqual(self.problems(self.served(self.vellum, main=self.vellum + b"\n")), [])
+        self.assertFalse(any("ref=main" in path for path in self.asked), self.asked)
+
+    def test_a_commit_main_does_not_contain_is_refused(self):
+        for status in ("behind", "diverged"):
+            with self.subTest(status=status):
+                problems = self.problems(self.served(self.vellum, status=status))
+                self.assertEqual(len(problems), 1)
+                self.assertIn("is not on main", problems[0])
+
+    def test_a_commit_without_the_record_is_refused(self):
+        self.assertEqual(self.problems(self.served(self.vellum, type="dir")),
+                         [f"Generous-Corp/vellum commit {FRAMEWORK_COMMIT[:12]} has no file {self.SOURCE}"])
+
+    def test_other_bytes_at_the_commit_are_refused(self):
+        problems = self.problems(self.served(self.vellum + b" "))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("names transfer record", problems[0])
+
+    def test_another_path_set_at_the_commit_is_refused(self):
+        other = json.dumps({"records": [{"pulp_path": p} for p in EXPORTED[1:]]}).encode()
+        self.fixture.write(drift.TRANSFER_PATH,
+                           transfer_value(transfer_record_sha256=hashlib.sha256(other).hexdigest()))
+        self.head = self.fixture.commit("record a transfer with another path set")
+        problems = self.problems(self.served(other))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("1 differ", problems[0])
+
+
+    def test_an_unreachable_vellum_never_reads_as_a_match(self):
+        with self.assertRaises(OSError):
+            self.problems(self.served(None))
+
+    def test_the_commit_must_be_the_merge_of_the_named_pull_request(self):
+        refused = {
+            "another pull request": [{"number": 999, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z",
+                                      "merge_commit_sha": FRAMEWORK_COMMIT}],
+            "not merged": [{"number": 257, "base": {"ref": "main"}, "merged_at": None,
+                            "merge_commit_sha": FRAMEWORK_COMMIT}],
+            "another base": [{"number": 257, "base": {"ref": "release"}, "merged_at": "2026-11-09T05:00:00Z",
+                              "merge_commit_sha": FRAMEWORK_COMMIT}],
+            "none": [],
+            "not a list": {"message": "Not Found"},
+            # A commit from the pull request's own branch is associated with it
+            # too; only the merge commit is the pull request's merge.
+            "branch commit": [{"number": 257, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z",
+                               "merge_commit_sha": "d" * 40}],
+        }
+        for case, pulls in refused.items():
+            with self.subTest(case=case):
+                self.pulls = pulls
+                problems = self.problems(self.served(self.vellum))
+                self.assertEqual(problems, [f"Generous-Corp/vellum commit {FRAMEWORK_COMMIT[:12]} is not the merge "
+                                            "of pull request #257 into main"])
+        def failing(path: str, expected=dict):
+            if path.endswith("/pulls"):
+                raise OSError("pulls read failed")
+            return self.served(self.vellum)(path, expected)
+        self.pulls = [{"number": 257, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z",
+                       "merge_commit_sha": FRAMEWORK_COMMIT}]
+        with self.assertRaises(OSError):
+            self.problems(failing)
+
+    def test_an_unreadable_record_at_the_commit_is_refused(self):
+        for case, data in {"undecodable": b"\xff\xfe not json", "no records": b'{"schema": "x"}'}.items():
+            with self.subTest(case=case):
+                problems = self.problems(self.served(data))
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn("is unreadable", problems[0])
+
+    def test_a_non_dict_compare_result_is_refused(self):
+        def fetch(path: str, expected=dict):
+            if "/compare/" in path:
+                return ["not", "a", "comparison"]
+            return self.served(self.vellum)(path, expected)
+        problems = self.problems(fetch)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is not on main (compare status None)", problems[0])
+
+    def test_an_unreachable_framework_commit_fails_closed(self):
+        # The compare read itself fails (a 404 for an unknown commit raises in
+        # the reader): the error propagates and nothing reads as a match.
+        def fetch(path: str, expected=dict):
+            if "/compare/" in path:
+                raise OSError("404 Not Found: no common ancestor or unknown commit")
+            return self.served(self.vellum)(path, expected)
+        with self.assertRaises(OSError):
+            self.problems(fetch)
+        # A reader that returns GitHub's error object instead of raising.
+        def not_found(path: str, expected=dict):
+            if "/compare/" in path:
+                return {"message": "Not Found"}
+            return self.served(self.vellum)(path, expected)
+        problems = self.problems(not_found)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is not on main", problems[0])
+
+    def test_a_commit_force_pushed_away_from_main_is_refused(self):
+        # A force-push leaves the commit reachable by sha but not from main:
+        # compare reports diverged, never ahead or identical.
+        problems = self.problems(self.served(self.vellum, status="diverged"))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is not on main (compare status 'diverged')", problems[0])
+        self.assertFalse(any("/contents/" in path for path in self.asked), self.asked)
+
+    def test_trusted_reads_through_the_real_github_reader(self):
+        # Only urlopen is replaced: the real _github_json and _public_github_json
+        # parse each endpoint's real JSON shape (an object for compare and
+        # contents, an array for commits/<sha>/pulls).
+        import urllib.parse
+        import vellum_freeze_check as freeze
+        local = self.fixture.git("rev-parse", f"{self.fixture.base}:{drift.PIN_DIRECTORY}/{EXPORT_ID}.json")
+        served_record = {"bytes": self.vellum}
+        asked: list[str] = []
+
+        def urlopen(request, timeout=None):
+            url = urllib.parse.urlsplit(request.full_url)
+            path, query = url.path, url.query
+            asked.append(path + ("?" + query if query else ""))
+            receipt = f"/repos/Generous-Corp/vellum/contents/provenance/mirror/receipts/{EXPORT_ID}.json"
+            if path == receipt:
+                body = {"type": "file", "path": receipt.split("/contents/")[1], "sha": local}
+            elif path == f"/repos/Generous-Corp/vellum/compare/{FRAMEWORK_COMMIT}...main":
+                body = {"status": "ahead", "ahead_by": 3, "behind_by": 0, "commits": []}
+            elif path == f"/repos/Generous-Corp/vellum/commits/{FRAMEWORK_COMMIT}/pulls":
+                body = [{"number": 257, "state": "closed", "base": {"ref": "main"},
+                         "merged_at": "2026-11-09T05:00:00Z", "merge_commit_sha": FRAMEWORK_COMMIT}]
+            elif path == "/repos/Generous-Corp/vellum/contents/provenance/framework/transfer.json":
+                self.assertEqual(query, f"ref={FRAMEWORK_COMMIT}")
+                encoded = base64.encodebytes(served_record["bytes"]).decode()  # GitHub wraps at 60 columns
+                body = {"type": "file", "path": "provenance/framework/transfer.json",
+                        "encoding": "base64", "content": encoded}
+            else:
+                raise AssertionError(f"unexpected read {path}?{query}")
+            return io.BytesIO(json.dumps(body).encode())
+
+        def run(base: str, head: str) -> int:
+            with tempfile.TemporaryDirectory() as out, \
+                    mock.patch.object(freeze.urllib.request, "urlopen", urlopen), \
+                    mock.patch.dict(os.environ, {"VELLUM_READER_TOKEN": "t"}), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                return freeze.main(["--receipt-mode", "--repo", str(self.fixture.root), "--base", base,
+                                    "--head", head, "--output", str(pathlib.Path(out) / "r.json")])
+
+        # No record anywhere in the range: only the receipt copy is read.
+        self.assertEqual(run(self.fixture.base, self.fixture.base), 0)
+        self.assertFalse(any("framework" in path or "/pulls" in path for path in asked), asked)
+        # The record matches Vellum's at its commit: every trusted read passes.
+        asked.clear()
+        self.assertEqual(run(self.fixture.base, self.head), 0)
+        self.assertTrue(any(path.endswith("/pulls") for path in asked), asked)
+        # Vellum's record at that commit differs: refused.
+        served_record["bytes"] = self.vellum + b" "
+        self.assertEqual(run(self.fixture.base, self.head), 1)
+
+    def test_cli_refuses_a_record_whose_commit_main_does_not_contain(self):
+        local = self.fixture.git("rev-parse", f"{self.fixture.base}:{drift.PIN_DIRECTORY}/{EXPORT_ID}.json")
+        script = (
+            "import base64, sys\n"
+            f"sys.path.insert(0, {str(SCRIPTS)!r})\n"
+            "import vellum_freeze_check as f\n"
+            "local, record = sys.argv[1], sys.argv[2]\n"
+            "def serve(url, token, **_):\n"
+            "    if '/compare/' in url:\n"
+            "        return {'status': 'diverged' if record == '-' else 'ahead'}\n"
+            "    if url.endswith('/pulls'):\n"
+            "        return [{'number': 257, 'base': {'ref': 'main'}, 'merged_at': '2026-11-09T05:00:00Z',\n"
+            f"                 'merge_commit_sha': {FRAMEWORK_COMMIT!r}}}]\n"
+            "    path = url.split('/contents/')[1].split('?')[0]\n"
+            "    if path.startswith('provenance/mirror/'):\n"
+            "        return {'type': 'file', 'path': path, 'sha': local}\n"
+            "    return {'type': 'file', 'path': path, 'encoding': 'base64',\n"
+            "            'content': base64.b64encode(open(record, 'rb').read()).decode()}\n"
+            "f._github_json = serve\n"
+            "sys.argv = [sys.argv[0]] + sys.argv[3:]\n"
+            "raise SystemExit(f.main())\n"
+        )
+        with tempfile.TemporaryDirectory() as out:
+            vellum = pathlib.Path(out) / "transfer.json"
+            vellum.write_bytes(self.vellum)
+            def run(record: str):
+                env = dict(os.environ, VELLUM_READER_TOKEN="t")
+                return subprocess.run(
+                    [sys.executable, "-c", script, local, record, "--receipt-mode",
+                     "--repo", str(self.fixture.root), "--base", self.fixture.base, "--head", self.head,
+                     "--output", str(pathlib.Path(out) / "r.json")],
+                    capture_output=True, text=True, encoding="utf-8", env=env, check=False)
+            missing = run("-")
+            self.assertEqual(missing.returncode, 1, missing.stdout + missing.stderr)
+            self.assertIn("is not on main", missing.stderr)
+            merged = run(str(vellum))
+            self.assertEqual(merged.returncode, 0, merged.stdout + merged.stderr)
+
+    def test_no_record_asks_nothing(self):
+        self.assertEqual(drift.transfer_copy_problems(self.fixture.root, (self.fixture.base,),
+                                                      lambda path: self.fail("fetched")), [])
+
+
 class ReceiptSourceTests(unittest.TestCase):
     """The pinned receipt copy must be Vellum main's receipt, byte for byte."""
 
@@ -680,7 +1151,7 @@ class ReceiptSourceTests(unittest.TestCase):
             f"sys.path.insert(0, {str(SCRIPTS)!r})\n"
             "import vellum_freeze_check as f\n"
             "served = sys.argv[1]\n"
-            "f._github_json = lambda url, token: {'type': 'file', 'path': url.split('/contents/')[1].split('?')[0], 'sha': served}\n"
+            "f._github_json = lambda url, token, **_: {'type': 'file', 'path': url.split('/contents/')[1].split('?')[0], 'sha': served}\n"
             "sys.argv = [sys.argv[0]] + sys.argv[2:]\n"
             "raise SystemExit(f.main())\n"
         )

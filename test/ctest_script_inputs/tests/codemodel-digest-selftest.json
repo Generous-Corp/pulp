@@ -1,0 +1,12 @@
+{
+ "name": "codemodel-digest-selftest",
+ "record": {
+  "entry": "tools/ci/test_codemodel_digest.py",
+  "inputs": [
+   "tools/ci/codemodel_digest.py",
+   "tools/ci/test_codemodel_digest.py",
+   "tools/ci/testdata/codemodel_digest"
+  ],
+  "kind": "python"
+ }
+}

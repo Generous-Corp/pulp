@@ -1,0 +1,24 @@
+{
+ "name": "pulp-test-group-script-format",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_view_bridge.cpp"
+  ],
+  "inputs": [
+   "core/format/include/pulp/format/clap_entry.hpp",
+   "core/format/src/aax_effect_gui.cpp",
+   "core/format/src/au_v2_cocoa_view.mm",
+   "core/format/src/au_view_controller_ios.mm",
+   "core/format/src/au_view_controller_mac.mm",
+   "core/format/src/standalone.cpp",
+   "core/format/src/vst3_plug_view.cpp"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_view_bridge.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

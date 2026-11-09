@@ -1,0 +1,11 @@
+{
+ "name": "timeline-transaction-launcher-complexity",
+ "record": {
+  "entry": "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
+  "inputs": [
+   "core/timeline/src/transaction_scene_internal.cpp",
+   "tools/scripts/verify_timeline_transaction_launcher_complexity.py"
+  ],
+  "kind": "python"
+ }
+}

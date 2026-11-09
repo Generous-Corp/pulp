@@ -1,0 +1,11 @@
+{
+ "name": "rack-inert-input-cause",
+ "record": {
+  "entry": "tools/rack/test_inert_input_cause.py",
+  "inputs": [
+   "tools/rack/fetch_sdk.py",
+   "tools/rack/test_inert_input_cause.py"
+  ],
+  "kind": "python"
+ }
+}

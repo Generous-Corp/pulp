@@ -1,0 +1,11 @@
+{
+ "name": "examples-index-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_examples_index_guard.py",
+  "inputs": [
+   "tools/scripts/examples_index_guard.py",
+   "tools/scripts/test_examples_index_guard.py"
+  ],
+  "kind": "python"
+ }
+}

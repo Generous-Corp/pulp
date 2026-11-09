@@ -33,7 +33,7 @@ from resolve_classify_base import (  # noqa: E402
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-# Spelled as whole literals so test/ctest_script_inputs.json records them as
+# Spelled as whole literals so test/ctest_script_inputs/ records them as
 # this test's inputs: a change to either file then selects this test.
 BUILD_WORKFLOW = REPO_ROOT / ".github/workflows/build.yml"
 SHIPYARD_PROFILE = REPO_ROOT / ".shipyard/ci-profiles/normal-local-fast.toml"

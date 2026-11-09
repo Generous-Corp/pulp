@@ -1,0 +1,22 @@
+{
+ "name": "wide-non-native-selftest",
+ "record": {
+  "entry": "tools/scripts/test_wide_non_native.py",
+  "inputs": [
+   ".github/workflows/build-macos.yml",
+   ".github/workflows/build.yml",
+   ".github/workflows/version-skill-check.yml",
+   "core/view/src/widgets.cpp",
+   "test/CMakeLists.txt",
+   "test/cmake/quality_tests.cmake",
+   "tools/ci/governed-build.sh",
+   "tools/ci/wide_non_native_reviewed_scanners.json",
+   "tools/cli/cmd_pr.cpp",
+   "tools/cmake/PulpTestSuite.cmake",
+   "tools/scripts",
+   "tools/scripts/agent_capability_manifest.py",
+   "tools/scripts/test_wide_non_native.py"
+  ],
+  "kind": "python"
+ }
+}

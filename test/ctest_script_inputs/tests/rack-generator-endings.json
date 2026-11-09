@@ -1,0 +1,10 @@
+{
+ "name": "rack-generator-endings",
+ "record": {
+  "entry": "tools/rack/test_generator_endings.py",
+  "inputs": [
+   "tools/rack/test_generator_endings.py"
+  ],
+  "kind": "python"
+ }
+}

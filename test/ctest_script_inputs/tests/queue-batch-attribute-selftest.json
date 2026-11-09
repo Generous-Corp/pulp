@@ -1,0 +1,42 @@
+{
+ "name": "queue-batch-attribute-selftest",
+ "record": {
+  "entry": "tools/scripts/test_queue_batch_attribute.py",
+  "inputs": [
+   ".github/actions",
+   ".github/actions/install-linux-build-deps/action.yml",
+   ".github/workflows",
+   ".github/workflows/build.yml",
+   ".github/workflows/wclap-cloudflare.yml",
+   "core/canvas/include",
+   "core/canvas/include/pulp/canvas/drawlist_format.hpp",
+   "core/canvas/include/pulp/canvas/path.hpp",
+   "core/canvas/include/pulp/canvas/path_measure.hpp",
+   "core/canvas/src/path_measure.cpp",
+   "core/view/include",
+   "core/view/src/widget_bridge/widget_assets_api.cpp",
+   "core/view/src/widgets.cpp",
+   "docs/status/consumption-profiles.json",
+   "docs/status/consumption-profiles.schema.json",
+   "test/cmake/consumption_census_tests.cmake",
+   "test/cmake/quality_tests.cmake",
+   "test/cmake/test_gpu_audio_sdk_consumer.cmake",
+   "test/ctest_script_inputs",
+   "test/test_canvas_path_measure.cpp",
+   "tools/ci/install_visual_python_deps.sh",
+   "tools/motion/visual/requirements.lock",
+   "tools/motion/visual/requirements.txt",
+   "tools/scripts/consumption_census.py",
+   "tools/scripts/consumption_census_contract.py",
+   "tools/scripts/fixtures/queue_chain_rule.json",
+   "tools/scripts/queue_admission_guard.py",
+   "tools/scripts/queue_batch_attribute.py",
+   "tools/scripts/queue_known_flakes.json",
+   "tools/scripts/script_argv.py",
+   "tools/scripts/script_inputs_store.py",
+   "tools/scripts/test_prepush_cannot_measure.py",
+   "tools/scripts/test_queue_batch_attribute.py"
+  ],
+  "kind": "python"
+ }
+}

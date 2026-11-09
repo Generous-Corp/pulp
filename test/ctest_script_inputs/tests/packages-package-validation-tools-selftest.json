@@ -1,0 +1,10 @@
+{
+ "name": "packages-package-validation-tools-selftest",
+ "record": {
+  "entry": "tools/packages/test_package_validation_tools.py",
+  "inputs": [
+   "tools/packages/test_package_validation_tools.py"
+  ],
+  "kind": "python"
+ }
+}

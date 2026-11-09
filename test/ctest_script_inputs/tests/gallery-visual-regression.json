@@ -1,0 +1,12 @@
+{
+ "name": "gallery-visual-regression",
+ "record": {
+  "entry": "tools/scripts/gallery_regression.py",
+  "inputs": [
+   "assets/design-system/ink-signal/reference/gallery",
+   "tools/scripts/gallery_regression.py",
+   "tools/scripts/gallery_visual_diff.py"
+  ],
+  "kind": "python"
+ }
+}

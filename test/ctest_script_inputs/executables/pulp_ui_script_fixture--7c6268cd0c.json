@@ -1,0 +1,22 @@
+{
+ "name": "Pulp UI Script Fixture",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+  ],
+  "inputs": [
+   "test/fixtures/ui_script_plugin/ui/main.js"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/PulpUiScriptFixture_PulpUiScriptFixture_Standalone_STANDALONE_control_shipping_marker.cpp",
+   "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp",
+   "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_mac_objc/PulpUiScriptFixture_Standalone_mac_objc_cluster.mm",
+   "test/fixtures/ui_script_plugin/main.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true,
+ "target": "PulpUiScriptFixture_Standalone"
+}
