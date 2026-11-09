@@ -133,3 +133,30 @@ disposition `framework-backport` (bringing a named Vellum commit back) or
 `emergency-exception`; a `pulp-only` event does not unfreeze it. Like the rest
 of the pin, `frozen_paths` is read at the base commit, so a freeze applies to
 the changes after the one that adds it.
+
+## Renamed units are Vellum-native
+
+Vellum renames the exported units from `pulp` to `vellum` and moves them out of
+its `mirror/` into the native root `framework/`, keeping the export's layout
+(Vellum Decision 0010). From that Vellum commit on, three rules hold for every
+path the rename transfers:
+
+1. **The renamed units are Vellum-native and editable.** Generic work on them
+   originates in Vellum's `framework/` and is reviewed there like any other
+   Vellum source. Vellum no longer re-exports these paths from Pulp: its
+   transfer record proves the one rename commit against Pulp at the export's
+   commit, and the proof does not follow later Vellum edits.
+2. **Pulp's frozen copies change only by `framework-backport`.** A change to a
+   frozen path needs a change event with disposition `framework-backport` that
+   names the immutable Vellum commit it brings back, with destination tests, or
+   an `emergency-exception`. The receipt-mode rules above already enforce this
+   for the pin's `frozen_paths`; the rename makes it permanent, because there is
+   no later export that could carry a Pulp-side edit.
+3. **Pulp's copies are deleted at cutover.** When Pulp consumes Vellum, its
+   frozen copies of the transferred paths are removed rather than kept in sync.
+   Until then they are Pulp's build inputs and keep the `pulp` spelling.
+
+The order for generic work on these paths is therefore "change Vellum first,
+then backport to Pulp if Pulp needs it before cutover". Pulp-specific audio,
+plug-in, host, and legacy integration work stays `pulp-only` and does not touch
+the frozen paths.
