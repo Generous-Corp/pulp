@@ -1,0 +1,57 @@
+name: Flake quarantine
+
+# Moves a test the merge-group gate keeps excusing as a flake out of the
+# required lane for a bounded time (tools/ci/flake_quarantine.py).
+#
+# The merge-group macOS job uploads a `flake-excusals-macos` record for every
+# excused run (tools/ci/flake_exoneration.py). This sweep counts them: a test
+# excused 3 or more times in 7 days gets an owner issue labelled `ci:flake`
+# and `flake-quarantine`, which the gate reads to exclude the test and run it
+# in an advisory step instead. After 14 days the sweep removes the
+# `flake-quarantine` label and the test is back in the required lane; closing
+# the issue as fixed ends the quarantine at once.
+#
+# Kill switch: the repository variable PULP_FLAKE_EXONERATION_MODE=shadow
+# makes this a dry run, and makes the gate quarantine and excuse nothing.
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report what would change without writing issues'
+        required: false
+        default: 'false'
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: flake-quarantine
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PULP_GH_CLI: gh
+      PULP_FLAKE_EXONERATION_MODE: ${{ vars.PULP_FLAKE_EXONERATION_MODE }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Sweep excusals and quarantines
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(sweep --repo "$GITHUB_REPOSITORY")
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          python3 tools/ci/flake_quarantine.py "${args[@]}"

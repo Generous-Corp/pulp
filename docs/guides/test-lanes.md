@@ -550,6 +550,13 @@ promotion to a required context is what turns that signal into enforcement.
 Use a dedicated gating lane for anything that must block before then. "It runs
 nightly" is a backstop, not enforcement.
 
+The one automatic exit is the flake quarantine (`tools/ci/flake_quarantine.py`):
+a test the merge-group gate excused as a corroborated flake 3 times in 7 days
+leaves the gate for at most 14 days, behind an owner issue labelled `ci:flake`.
+Its enforcer is the expiry, which returns it to the gate; meanwhile the
+`Quarantined flaky tests (advisory)` step runs it on every gate run, and a
+change that touches the test runs it in the gate. See `docs/guides/local-ci.md`.
+
 ### A label is not the only way to leave the gate
 
 Labels are the *visible* exit. The quieter one is an **opt-in CMake flag**: a
