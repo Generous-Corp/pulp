@@ -44,6 +44,14 @@ it and its tests, and both look like bugs until you know them:
   stays prompt while a client is acquiring. Holding drawables to force a block
   will not fail the way you expect.
 
+- **A headless Mac has no display link.** `CVDisplayLinkCreateWithActiveCGDisplays`
+  fails on a host with no active display (m1, CI VMs), so a pump that relied
+  on it would skip every test on exactly the hosts that run them.
+  `pulp::native::FramePump` falls back to a 60 Hz timer with the same pacing
+  logic, and `follows_display()` says which one is running. Only the one
+  display-link case skips. It ran green on a Mac with a display, where the
+  rate cap also held.
+
 The view's Objective-C class is registered at run time through
 `pulp/platform/objc_unique_class.hpp`, so two plug-ins never share it. Every
 override calls super through `super_implementation(<registered class>, sel)`,
