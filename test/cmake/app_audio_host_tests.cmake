@@ -63,6 +63,9 @@ pulp_add_test_suite(pulp-test-preset-manager GROUP pulp-test-group-app-state
 pulp_add_test_suite(pulp-test-preset-library GROUP pulp-test-group-app-state
     LIBRARIES pulp::state)
 
+pulp_add_test_suite(pulp-test-preset-program-map GROUP pulp-test-group-app-state
+    LIBRARIES pulp::state)
+
 # Waveform editor tests
 pulp_add_test_suite(pulp-test-waveform-editor GROUP pulp-test-group-app-view
     LIBRARIES pulp::view)

@@ -72,6 +72,13 @@ class PresetMetadataStore {
     bool add_tag(const std::string& key, const std::string& tag, const std::string& digest);
     bool remove_tag(const std::string& key, const std::string& tag, const std::string& digest);
 
+    /// The program map (see ProgramMap) rides in the same file as one JSON
+    /// document, replaced as a whole: the newest write wins. Empty = none.
+    const std::string& program_map_json() const {
+        return program_map_json_;
+    }
+    bool set_program_map_json(const std::string& json);
+
     /// Move a record to a new key (a preset that was renamed or moved).
     bool rekey(const std::string& old_key, const std::string& new_key);
     /// Drop a record (a tombstone is written so the removal merges).
@@ -81,11 +88,19 @@ class PresetMetadataStore {
     template <typename Edit>
     bool edit(const std::string& key, const std::string& digest, Edit&& apply);
     bool commit();
-    bool read_file(std::map<std::string, PresetRecord>& out) const;
-    bool write_file(const std::map<std::string, PresetRecord>& records);
+    struct Disk {
+        std::map<std::string, PresetRecord> records;
+        std::string program_map_json;
+        std::int64_t program_map_updated_ms = 0;
+    };
+    bool read_file(Disk& out) const;
+    bool write_file();
+    void merge_disk(const Disk& disk);
 
     std::filesystem::path file_;
     std::map<std::string, PresetRecord> records_; ///< Includes tombstones
+    std::string program_map_json_;
+    std::int64_t program_map_updated_ms_ = 0;
     std::uint64_t revision_ = 0;
     std::filesystem::file_time_type seen_mtime_{};
     std::uintmax_t seen_size_ = 0;
