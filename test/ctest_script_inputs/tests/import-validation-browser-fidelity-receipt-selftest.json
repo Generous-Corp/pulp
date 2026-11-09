@@ -1,0 +1,11 @@
+{
+ "name": "import-validation-browser-fidelity-receipt-selftest",
+ "record": {
+  "entry": "tools/import-validation/test_verify_browser_fidelity_receipt.py",
+  "inputs": [
+   "tools/import-validation/test_verify_browser_fidelity_receipt.py",
+   "tools/import-validation/verify_browser_fidelity_receipt.py"
+  ],
+  "kind": "python"
+ }
+}

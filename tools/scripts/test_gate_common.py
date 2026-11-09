@@ -139,7 +139,7 @@ class GitHelperTests(unittest.TestCase):
             self.assertEqual(gc.repo_root(), pathlib.Path("/repo/path"))
         run.assert_called_once_with(
             ["git", "rev-parse", "--show-toplevel"],
-            check=True, capture_output=True, text=True,
+            timeout=10.0, check=True, capture_output=True, text=True,
         )
 
     def test_git_diff_names_splits_lines_and_drops_blanks(self) -> None:
@@ -166,6 +166,15 @@ class GitHelperTests(unittest.TestCase):
         argv = run.call_args.args[0]
         self.assertIn("origin/main...HEAD", argv)
         self.assertNotIn("origin/main..HEAD", argv)
+
+    def test_git_diff_names_timeout_with_check_raises_called_process_error(self) -> None:
+        command = ["git", "diff", "--name-only", "main...HEAD"]
+        timeout = subprocess.TimeoutExpired(command, 0.01)
+        with mock.patch.object(gc.subprocess, "run", side_effect=timeout):
+            with self.assertRaises(subprocess.CalledProcessError) as raised:
+                gc.git_diff_names("main", "HEAD")
+        self.assertEqual(raised.exception.returncode, 124)
+        self.assertEqual(raised.exception.cmd, command)
 
     def test_git_diff_names_ignores_files_branch_is_behind_on(self) -> None:
         """Integration: a branch that adds only Y, while base advances with X, must

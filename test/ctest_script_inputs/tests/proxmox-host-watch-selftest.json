@@ -1,0 +1,11 @@
+{
+ "name": "proxmox-host-watch-selftest",
+ "record": {
+  "entry": "tools/ci/test_proxmox_host_watch.py",
+  "inputs": [
+   "tools/ci/proxmox_host_watch.py",
+   "tools/ci/test_proxmox_host_watch.py"
+  ],
+  "kind": "python"
+ }
+}

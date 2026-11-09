@@ -35,6 +35,8 @@ _pulp_pick_target(_PULP_CONTRACT_STANDALONE_TARGET
     Pulp::standalone-contract pulp::standalone-contract)
 _pulp_pick_target(_PULP_CONTROL_STANDALONE_TARGET
     Pulp::inspect-standalone-runtime pulp::inspect-standalone-runtime)
+_pulp_pick_target(_PULP_CONTROL_AGENT_TOOLKIT_TARGET
+    Pulp::inspect-agent-toolkit pulp::inspect-agent-toolkit)
 _pulp_pick_target(_PULP_CONTROL_UI_TARGET
     Pulp::inspect-ui-runtime pulp::inspect-ui-runtime)
 _pulp_pick_target(_PULP_CONTROL_INSPECT_TARGET Pulp::inspect pulp::inspect)

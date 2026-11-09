@@ -112,10 +112,10 @@ class CoreVellumDirectionTests(unittest.TestCase):
                 self.assertEqual(self._run(), 1)
 
     def test_core_inputs_cover_the_whole_scanned_tree(self):
-        import json
+        import script_inputs_store
 
         self.assertTrue((REPO / CORE_SCAN_ROOT).is_dir())
-        inventory = json.loads((REPO / "test/ctest_script_inputs.json").read_text(encoding="utf-8"))
+        inventory = script_inputs_store.load(REPO)
         for name in ("core-vellum-direction", "core-vellum-direction-negative-contract"):
             with self.subTest(name=name):
                 self.assertIn("core", inventory["tests"][name]["inputs"])

@@ -1,0 +1,13 @@
+{
+ "name": "decisions-contract-selftest",
+ "record": {
+  "entry": "tools/scripts/test_decisions_contract.py",
+  "inputs": [
+   ".github/workflows/build.yml",
+   "tools/scripts/decisions_contract.py",
+   "tools/scripts/test_decisions_contract.py",
+   "tools/shipyard.toml"
+  ],
+  "kind": "python"
+ }
+}

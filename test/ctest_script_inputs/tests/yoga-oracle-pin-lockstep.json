@@ -1,0 +1,10 @@
+{
+ "name": "yoga-oracle-pin-lockstep",
+ "record": {
+  "entry": "tools/scripts/check_yoga_oracle_pin.py",
+  "inputs": [
+   "tools/scripts/check_yoga_oracle_pin.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "build-matrix-contract",
+ "record": {
+  "entry": "tools/ci/test_build_matrix_contract.py",
+  "inputs": [
+   "tools/ci/test_build_matrix_contract.py"
+  ],
+  "kind": "python"
+ }
+}

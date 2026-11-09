@@ -1,0 +1,12 @@
+{
+ "name": "shipping-macro-guard",
+ "record": {
+  "entry": "tools/scripts/shipping_macro_guard.py",
+  "inputs": [
+   "core/format/src/au_v2_cocoa_view.mm",
+   "tools/scripts/shipping_macro_guard.py",
+   "tools/scripts/test_shipping_macro_guard.py"
+  ],
+  "kind": "python"
+ }
+}

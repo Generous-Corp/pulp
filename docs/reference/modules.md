@@ -21,8 +21,12 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 | Platform detection | `detect.hpp` | Compile-time and runtime platform checks |
 | Native handles | `native_handle.hpp` | Typed OS window/device handles for adapters |
 | Clipboard | `clipboard.hpp` | Cross-platform text clipboard access where implemented |
-| File dialogs | `file_dialog.hpp` | Native open/save panels where implemented |
+| File dialogs | `file_dialog.hpp` | Native open/save panels where implemented. `open_async` / `save_async` / `save_copy_async` are non-blocking sheets on the parent view's window, with one completion on the main thread that is dropped if the `MainThreadScope` dies first; `set_async_backend` lets a host or test supply them |
+| Alerts | `alert.hpp` | `show_alert_async`: an OK, OK/Cancel or Yes/No alert as a sheet on the parent view's window (NSAlert on macOS), with its result delivered asynchronously; `unavailable` without a window or a native backend. Where the platform has no main-thread backend (`main_thread_supported() == false`), results are delivered inline instead of posted |
+| Open URL | `open_url.hpp` | Opens http, https and mailto links in the default application; refuses every other scheme |
 | Popup menus | `popup_menu.hpp` | Native menu affordances for UI surfaces |
+| Main-thread work | `main_thread.hpp` | `MainThreadScope` posts work to the main thread from any thread, and `MainThreadTimer` gives one-shot or repeating millisecond timers. Both run in the common run-loop modes, so they keep running during menu tracking, live resize and modal panels, and nothing runs after the scope is destroyed. macOS and iOS; other platforms report `main_thread_supported() == false` |
+| Unique Objective-C classes | `objc_unique_class.hpp` | Registers Objective-C classes at run time under `<base>_<image token>`, so two Pulp binaries in one host process never share a class name and run each other's code. It adds methods from C functions and gives each instance a context slot. Apple platforms |
 
 ---
 
@@ -447,6 +451,45 @@ auto info = FormatRegistry::instance().read_info("song.mp3");
 // info->duration_seconds, info->num_channels, info->sample_rate
 ```
 
+### Ranged reads from a file, memory or byte source
+
+`AudioReader` decodes only the frames you ask for, and its memory does not grow
+with the file. Open it from a path, from encoded bytes already in memory, or
+from your own `AudioByteSource` (an archive member or a download cache, for
+example). The cost of reaching a frame depends on the format:
+
+| Format | Open | Seek to any frame |
+|--------|------|-------------------|
+| WAV, AIFF | Reads the header | Direct byte offset |
+| FLAC | Reads the header | Seeks within the encoded stream |
+| Ogg Vorbis | Reads the header (a byte source is copied into memory, up to 2 GiB) | Seeks within the encoded stream |
+| MP3 | Reads every frame header once when the file has no Xing or Info header | Forward seeks decode onward; a backward seek decodes from the start of the stream |
+
+```cpp
+#include <pulp/audio/audio_reader.hpp>
+
+auto reader = AudioReader::open_file("long_take.flac");
+if (reader && reader->supports_ranged_read()) {
+    // Two seconds starting one minute in, every channel.
+    const auto rate = reader->info().sample_rate;
+    auto window = reader->read(60ull * rate, 2ull * rate);
+}
+
+// Encoded bytes you already hold; the format is detected from the first bytes.
+auto from_memory = AudioReader::open_memory(bytes);
+```
+
+The reader applies the same `DecodeLimits` as the registry: the header's
+length and channel claims are checked on open, and the allocating `read()`
+refuses a window larger than `max_output_bytes`. Reading into your own planar
+buffers zero-fills frames past the end and returns how many frames were
+decoded. A format with no seekable decoder (AAC, ALAC and CAF on macOS, opened
+from a path) is decoded once on open and `supports_ranged_read()` returns
+false, as does a FLAC or Ogg stream whose header gives no length. Pass
+`AudioReaderFallback::Refuse` to open only readers that seek; such a stream
+then returns `nullptr` without being decoded. An empty stream does not open.
+Opening and reading decode and allocate, so keep both off the audio callback.
+
 To choose a format before writing, ask the registry what each reader and writer
 supports. `reader_capabilities()` and `writer_capabilities()` return one
 `FormatCapabilities` per registered handler: its extensions, integer bit
@@ -540,7 +583,7 @@ therefore counts it twice.
 | Format | Read | Write | Backend |
 |--------|:----:|:-----:|---------|
 | AAC | macOS, Windows | macOS, Windows, ✓* | Read through ExtAudioFile on macOS and Media Foundation on Windows. Written by the system codec writer (M4A or ADTS on macOS, M4A at 44.1 or 48 kHz on Windows) or optional FDK AAC (`pulp add fdk-aac --accept-license FDK-AAC`). FDK AAC writes an ADTS stream for both `.aac` and `.m4a`, so a `.m4a` it writes is not an MPEG-4 file and some players refuse it |
-| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian); the system codec writer adds 24- and 32-bit AIFF on macOS |
+| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit integer PCM; AIFF-C `NONE`/`twos` big-endian and `sowt` little-endian; writes 16-bit AIFF); the system codec writer adds 24- and 32-bit AIFF on macOS |
 | ALAC | macOS | macOS, ✓* | Read through ExtAudioFile on macOS. Written by the system codec writer on macOS or optional Apple ALAC (`pulp add alac`) |
 | CAF | macOS | macOS | Read and written through ExtAudioFile on macOS (AAC, ALAC or PCM inside) |
 | FLAC | ✓ | ✓* | dr_flac / libflac (`pulp add libflac`) |
@@ -2924,7 +2967,7 @@ now explicitly schedule UI-owned `poll()` before reading updated data.
 | Meter | Peak/RMS level meter with configurable ballistics and clip indicators |
 | MultiMeter | Multiple level meters side-by-side for multi-channel monitoring |
 | SpectrogramView | Rolling time-frequency heatmap showing spectral content over time |
-| SpectrumView | Real-time frequency spectrum analyzer with configurable FFT size |
+| SpectrumView | Spectrum analyzer on a log-frequency axis with built-in lock-free analysis (window, FFT size, overlap, level mode) |
 | WaveformView | Audio waveform display with zoom, selection, and playhead |
 | XYPad | Two-dimensional control surface for parameters like pan/width or filter freq/res |
 

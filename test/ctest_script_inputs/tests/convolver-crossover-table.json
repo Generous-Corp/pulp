@@ -1,0 +1,11 @@
+{
+ "name": "convolver-crossover-table",
+ "record": {
+  "entry": "tools/scripts/convolver_crossover_check.py",
+  "inputs": [
+   "core/signal/include/pulp/signal/fixed_ir_convolver.hpp",
+   "tools/scripts/convolver_crossover_check.py"
+  ],
+  "kind": "python"
+ }
+}

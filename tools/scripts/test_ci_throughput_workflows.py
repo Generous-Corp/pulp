@@ -164,7 +164,7 @@ def catch_test_suite_call(text: str, name: str, test_spec: str) -> str:
     # pulp_add_test_suite() call when the suite is a grouped member; both
     # carry the spec as TEST_SPEC.
     calls = re.findall(
-        rf"(?:catch_discover_tests|pulp_add_test_suite)\(\s*{re.escape(name)}\b.*?\)",
+        rf"(?:catch_discover_tests|pulp_add_test_suite)\(\s*{re.escape(name)}(?![\w-]).*?\)",
         text,
         re.S,
     )

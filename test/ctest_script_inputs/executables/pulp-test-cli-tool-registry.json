@@ -1,0 +1,27 @@
+{
+ "name": "pulp-test-cli-tool-registry",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [
+   "tools/packages/tool-registry.json"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [
+   "test/test_cli_tool_registry.cpp",
+   "tools/cli/import_spi.cpp",
+   "tools/cli/importer_install.cpp",
+   "tools/cli/tool_registry.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_tool_registry.cpp",
+   "tools/cli/import_spi.cpp",
+   "tools/cli/importer_install.cpp",
+   "tools/cli/tool_registry.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

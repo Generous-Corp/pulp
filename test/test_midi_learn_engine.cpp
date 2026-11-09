@@ -608,6 +608,14 @@ TEST_CASE("feedback: a value the controller just wrote is not echoed back",
     REQUIRE(sent.messages.size() == 1);
     CHECK(sent.messages[0].data2 == static_cast<uint8_t>(std::lround(0.2f * 127.0f)));
 
+    // The parameter returns to the value the controller wrote (reset, preset
+    // recall, automation): it is sent, so the fader does not stay at 0.2.
+    sent.messages.clear();
+    s.set_normalized_rt(kMix, 100.0f / 127.0f);
+    e.emit_feedback(s, kAllKinds, sent);
+    REQUIRE(sent.messages.size() == 1);
+    CHECK(sent.messages[0].data2 == 100);
+
     // A relative encoder's move is not echoed either.
     auto r = fb({MidiSourceKind::cc7, 0, 16}, kGain);
     r.mode = RelativeMode::twos_complement;

@@ -1,0 +1,10 @@
+{
+ "name": "timeline-transaction-launcher-complexity-mutation-control",
+ "record": {
+  "entry": "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
+  "inputs": [
+   "tools/scripts/verify_timeline_transaction_launcher_complexity.py"
+  ],
+  "kind": "python"
+ }
+}

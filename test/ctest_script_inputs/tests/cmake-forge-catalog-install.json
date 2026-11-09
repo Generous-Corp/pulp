@@ -1,0 +1,13 @@
+{
+ "name": "cmake-forge-catalog-install",
+ "record": {
+  "entry": "test/cmake/test_forge_catalog_install.py",
+  "inputs": [
+   "docs/status/forge-catalog.json",
+   "test/cmake/test_forge_catalog_install.py",
+   "tools/cmake/PulpForgeCatalogInstall.cmake",
+   "tools/cmake/PulpInstallRules.cmake"
+  ],
+  "kind": "python"
+ }
+}

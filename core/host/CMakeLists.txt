@@ -26,6 +26,7 @@ target_sources(pulp-host PRIVATE
     src/signal_graph_live_swap.cpp
     src/signal_graph_live_swap_catalog.cpp
     src/signal_graph_prepared_topology_edit.cpp
+    src/prepared_description.cpp
     src/offline_signal_graph_host.cpp
     src/plugin_slot.cpp
     src/graph_serializer.cpp
@@ -59,6 +60,7 @@ target_sources(pulp-host PRIVATE
     src/forge_tape_catalog.cpp
     src/forge_catalog_json.cpp
     src/signal_graph_executor_routing.cpp
+    src/graph_rt_report.cpp
     src/graph_timing_contract.cpp
     src/baked_graph_processor.cpp
     src/baked_graph_param_injection.cpp
@@ -239,12 +241,15 @@ endif()
 if(APPLE)
     target_sources(pulp-host PRIVATE
         src/plugin_slot_au.mm
+        src/plugin_slot_auv3.mm
         src/scanner_au.mm
     )
     target_link_libraries(pulp-host PRIVATE
+        "-framework AVFoundation"
         "-framework AudioToolbox"
         "-framework AudioUnit"
         "-framework CoreAudio"
+        "-framework CoreAudioKit"
         "-framework CoreFoundation"
     )
     target_compile_definitions(pulp-host PUBLIC PULP_HOST_HAS_AU=1)

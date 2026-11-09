@@ -1,0 +1,29 @@
+{
+ "name": "pulp-test-import-design-tool",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_import_design_tool.cpp"
+  ],
+  "inputs": [
+   "test/fixtures/imports/fig/synthetic.fig",
+   "test/fixtures/v0-dev/audio-control-panel.tsx",
+   "tools/import-design"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-import-design"
+  ],
+  "sources": [
+   "test/test_import_design_tool.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_import_design_tool.cpp",
+   "tools/import-design/fig_lane.cpp",
+   "tools/import-design/node_runtime.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

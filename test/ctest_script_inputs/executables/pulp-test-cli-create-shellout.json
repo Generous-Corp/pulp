@@ -1,0 +1,31 @@
+{
+ "name": "pulp-test-cli-create-shellout",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_cli_create_shellout.cpp"
+  ],
+  "inputs": [
+   "!packages.lock.json",
+   "fixtures/packages/gain-dsp-kit",
+   "fixtures/packages/simple-plugin-template",
+   "tools/packages/registry.json",
+   "tools/templates/effect",
+   "tools/templates/gain",
+   "tools/templates/standalone"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli"
+  ],
+  "sources": [
+   "test/test_cli_create_shellout.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_create_shellout.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

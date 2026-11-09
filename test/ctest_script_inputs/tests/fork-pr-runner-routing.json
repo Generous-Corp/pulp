@@ -1,0 +1,10 @@
+{
+ "name": "fork-pr-runner-routing",
+ "record": {
+  "entry": "tools/scripts/test_fork_pr_runner_routing.py",
+  "inputs": [
+   "tools/scripts/test_fork_pr_runner_routing.py"
+  ],
+  "kind": "python"
+ }
+}

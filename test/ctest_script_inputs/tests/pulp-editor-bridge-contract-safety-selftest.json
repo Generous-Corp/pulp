@@ -1,0 +1,13 @@
+{
+ "name": "pulp-editor-bridge-contract-safety-selftest",
+ "record": {
+  "entry": "tools/bridge/bridge_contract_safety_checks.py",
+  "inputs": [
+   "tools/bridge/bridge.toml",
+   "tools/bridge/bridge_contract_safety.py",
+   "tools/bridge/bridge_contract_safety_checks.py",
+   "tools/bridge/bridge_gen.py"
+  ],
+  "kind": "python"
+ }
+}

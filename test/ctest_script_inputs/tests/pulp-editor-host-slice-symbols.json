@@ -1,0 +1,10 @@
+{
+ "name": "pulp-editor-host-slice-symbols",
+ "record": {
+  "entry": "test/editor_host_slice/check_symbols.py",
+  "inputs": [
+   "test/editor_host_slice/check_symbols.py"
+  ],
+  "kind": "python"
+ }
+}

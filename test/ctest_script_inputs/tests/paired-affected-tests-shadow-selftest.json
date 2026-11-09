@@ -1,0 +1,12 @@
+{
+ "name": "paired-affected-tests-shadow-selftest",
+ "record": {
+  "entry": "tools/ci/test_paired_affected_tests_shadow.py",
+  "inputs": [
+   "tools/ci/paired_affected_tests_shadow.py",
+   "tools/ci/test_paired_affected_tests_shadow.py",
+   "tools/scripts/process_liveness.py"
+  ],
+  "kind": "python"
+ }
+}

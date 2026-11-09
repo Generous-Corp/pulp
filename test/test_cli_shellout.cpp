@@ -266,6 +266,30 @@ TEST_CASE("pulp graph probe refuses incomplete options without opening files",
     REQUIRE(duplicate.stdout_output.find("invalid_option") != std::string::npos);
 }
 
+TEST_CASE("pulp graph report prints the realtime report and refuses bad options",
+          "[cli][shellout][graph]") {
+    if (!binary_exists())
+        SKIP("pulp not built");
+    const auto unknown = run_pulp({"graph", "report", "absent.pulpgraph", "--unknown", "1"});
+    REQUIRE(unknown.exit_code == 2);
+    REQUIRE(unknown.stdout_output.find("invalid_option") != std::string::npos);
+    const auto range = run_pulp({"graph", "report", "absent.pulpgraph", "--block-size", "0"});
+    REQUIRE(range.exit_code == 2);
+    REQUIRE(range.stdout_output.find("invalid_option") != std::string::npos);
+
+    const auto project = unique_temp_dir("pulp-graph-report");
+    const auto graph = project / "simple.pulpgraph";
+    write_text(
+        graph,
+        R"({"format_version":1,"nodes":[{"id":1,"type":"audio_in","name":"in","num_input_ports":0,"num_output_ports":2,"gain":1},{"id":2,"type":"gain","name":"trim","num_input_ports":2,"num_output_ports":2,"gain":0.5},{"id":3,"type":"audio_out","name":"out","num_input_ports":2,"num_output_ports":0,"gain":1}],"connections":[{"source_node":1,"source_port":0,"dest_node":2,"dest_port":0,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false},{"source_node":2,"source_port":0,"dest_node":3,"dest_port":0,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false}]})");
+    const auto report =
+        run_pulp({"graph", "report", graph.string(), "--block-size", "256", "--json"});
+    REQUIRE(report.exit_code == 0);
+    REQUIRE(report.stdout_output.find("\"schema\": \"pulp.graph.rt-report\"") != std::string::npos);
+    REQUIRE(report.stdout_output.find("\"verdict\": \"holds\"") != std::string::npos);
+    REQUIRE(report.stdout_output.find("\"block_size\": 256") != std::string::npos);
+}
+
 TEST_CASE("pulp graph fmt is byte stable and render produces a WAV", "[cli][shellout][graph]") {
     if (!binary_exists())
         SKIP("pulp not built");

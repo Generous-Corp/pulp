@@ -1,0 +1,11 @@
+{
+ "name": "ensure-signing-ready",
+ "record": {
+  "entry": "tools/scripts/test_ensure_signing_ready.sh",
+  "inputs": [
+   "tools/scripts/ensure_signing_ready.sh",
+   "tools/scripts/test_ensure_signing_ready.sh"
+  ],
+  "kind": "shell"
+ }
+}

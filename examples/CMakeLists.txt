@@ -76,6 +76,11 @@ endif()
 if(TARGET pulp::host AND NOT TARGET sample-region-allpass-core)
     add_subdirectory(sample-region-allpass)
 endif()
+# Agent tool kit synth: vendor operations need the full macOS Standalone adapter.
+if(APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS AND
+   TARGET pulp::inspect-agent-toolkit AND NOT TARGET AgentToolkitSynth)
+    add_subdirectory(agent-toolkit-synth)
+endif()
 # Pulp Delay: stereo character delay with tempo and in-loop tone controls
 add_subdirectory(pulp-delay)
 # Combined-bundle demo: ONE binary per format exposing TWO plugins via
@@ -196,6 +201,7 @@ add_subdirectory(faust-tremolo)
 # Dense AudioRate ProcessorNode: a public, headless example of a native
 # Processor consuming a per-sample parameter lane produced by the graph.
 add_subdirectory(audio-rate-processor-node)
+add_subdirectory(graph-control-event-probe)
 
 # ViewBridge demo: custom create_view() + secondary-view attach
 add_subdirectory(view-bridge-demo)

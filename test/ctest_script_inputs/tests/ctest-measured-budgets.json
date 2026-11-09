@@ -1,0 +1,10 @@
+{
+ "name": "ctest-measured-budgets",
+ "record": {
+  "entry": "tools/scripts/test_ctest_measured_budgets.py",
+  "inputs": [
+   "tools/scripts/test_ctest_measured_budgets.py"
+  ],
+  "kind": "python"
+ }
+}

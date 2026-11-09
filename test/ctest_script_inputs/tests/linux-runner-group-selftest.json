@@ -1,0 +1,11 @@
+{
+ "name": "linux-runner-group-selftest",
+ "record": {
+  "entry": "tools/ci/test_verify_linux_runner_group.py",
+  "inputs": [
+   ".github/workflows/build.yml",
+   "tools/ci/test_verify_linux_runner_group.py"
+  ],
+  "kind": "python"
+ }
+}

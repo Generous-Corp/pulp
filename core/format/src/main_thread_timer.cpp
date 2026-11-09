@@ -2,10 +2,14 @@
 
 #include <pulp/events/main_thread_dispatcher.hpp>
 
+#include <chrono>
 #include <cstdint>
+#include <memory>
 #include <utility>
 
 #if defined(__APPLE__)
+#include <pulp/platform/main_thread.hpp>
+
 #include <dispatch/dispatch.h>
 #include <pthread.h>
 #endif
@@ -14,25 +18,19 @@ namespace pulp::format::detail {
 
 #if defined(__APPLE__)
 
+// The timer is a platform::MainThreadTimer in its own MainThreadScope: a
+// CFRunLoopTimer in the common modes, so an editor's idle tick keeps running
+// during menu tracking, live resize and modal panels, including when the
+// nested loop was entered from a GCD main-queue block (which a main-queue
+// dispatch timer cannot fire inside). Destroying the scope invalidates the
+// timer, so nothing is left on the run loop after stop().
 struct MainThreadTimer::Impl {
-    dispatch_source_t source = nullptr;
-    std::function<void()> tick;
+    std::unique_ptr<platform::MainThreadScope> scope;
+    std::unique_ptr<platform::MainThreadTimer> timer;
 
-    static void fire(void* context) {
-        auto* self = static_cast<Impl*>(context);
-        if (self->tick)
-            self->tick();
-    }
-
-    // Cancel, on the main thread where the handler runs, so no tick is in
-    // progress while cancelling and none is invoked afterwards.
     void stop_on_main_thread() {
-        if (source == nullptr)
-            return;
-        dispatch_source_cancel(source);
-        dispatch_release(source);
-        source = nullptr;
-        tick = nullptr;
+        timer.reset();
+        scope.reset();
     }
 
     static void stop_thunk(void* context) {
@@ -41,7 +39,7 @@ struct MainThreadTimer::Impl {
 
     void stop() {
         // Nothing to cancel: never wait for the main thread for nothing.
-        if (source == nullptr)
+        if (scope == nullptr)
             return;
         if (pthread_main_np() != 0)
             stop_on_main_thread();
@@ -51,22 +49,14 @@ struct MainThreadTimer::Impl {
 
     bool start(int interval_ms, std::function<void()> fn) {
         stop();
-        source =
-            dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
-        if (source == nullptr)
-            return false;
-        tick = std::move(fn);
-        const auto interval = static_cast<std::uint64_t>(interval_ms) * NSEC_PER_MSEC;
-        dispatch_set_context(source, this);
-        dispatch_source_set_event_handler_f(source, &Impl::fire);
-        dispatch_source_set_timer(source, dispatch_time(DISPATCH_TIME_NOW, interval), interval,
-                                  interval / 10);
-        dispatch_resume(source);
+        scope = std::make_unique<platform::MainThreadScope>();
+        timer = std::make_unique<platform::MainThreadTimer>(*scope, std::move(fn));
+        timer->fire_every(std::chrono::milliseconds(interval_ms));
         return true;
     }
 
     bool running() const {
-        return source != nullptr;
+        return scope != nullptr;
     }
 };
 
@@ -144,12 +134,14 @@ bool is_main_thread() {
 
 bool post_to_main_thread(std::function<void()>& fn) {
 #if defined(__APPLE__)
-    auto* boxed = new std::function<void()>(std::move(fn));
+    // One process-wide scope: posts run in the common modes, so they are not
+    // held back while a main-queue block runs a nested loop. Its run-loop
+    // source is invalidated when the binary's statics are destroyed.
+    static platform::MainThreadScope scope;
+    if (!fn || !scope.handle().alive())
+        return false;
+    scope.post(std::move(fn));
     fn = nullptr;
-    dispatch_async_f(dispatch_get_main_queue(), boxed, [](void* context) {
-        std::unique_ptr<std::function<void()>> task(static_cast<std::function<void()>*>(context));
-        (*task)();
-    });
     return true;
 #else
     // The posted task and this frame share one box; the task empties it after

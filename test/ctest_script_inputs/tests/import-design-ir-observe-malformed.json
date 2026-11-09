@@ -1,0 +1,10 @@
+{
+ "name": "import-design-ir-observe-malformed",
+ "record": {
+  "entry": "test/test_design_ir_observe_malformed.py",
+  "inputs": [
+   "test/test_design_ir_observe_malformed.py"
+  ],
+  "kind": "python"
+ }
+}

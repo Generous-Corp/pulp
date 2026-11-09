@@ -1,0 +1,18 @@
+{
+ "name": "pulp-test-forge-catalog-index",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_forge_catalog_index.cpp"
+  ],
+  "inputs": [
+   "core/host/include/pulp/host"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_forge_catalog_index.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

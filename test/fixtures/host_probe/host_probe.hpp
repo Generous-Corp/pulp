@@ -15,7 +15,8 @@
 // makes the next prepare() perform an editor-style gesture on Gain
 // (begin_gesture, set_value, end_gesture on the main thread), which a VST3
 // plug-in reports through IComponentHandler and a CLAP plug-in as gesture and
-// value events.
+// value events. Command 4 aborts the process from process(): out of process
+// that kills only the extension, which is how a host test sees a plug-in die.
 // It writes a constant to its aux output so a host can see that bus is live.
 
 #include <pulp/format/processor.hpp>
@@ -23,6 +24,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 
 namespace pulp::test_fixtures {
@@ -73,7 +75,7 @@ class HostProbe final : public format::Processor {
     void define_parameters(state::StateStore& store) override {
         store.add_parameter(
             {.id = kGain, .name = "Gain", .unit = "dB", .range = {-60.0f, 12.0f, 0.0f}});
-        store.add_parameter({.id = kCommand, .name = "Command", .range = {0.0f, 3.0f, 0.0f, 1.0f}});
+        store.add_parameter({.id = kCommand, .name = "Command", .range = {0.0f, 4.0f, 0.0f, 1.0f}});
         auto observed = [&](state::ParamID id, const char* name, float max) {
             state::ParamInfo info{.id = id, .name = name, .range = {0.0f, max, 0.0f}};
             info.read_only = true;
@@ -195,6 +197,8 @@ class HostProbe final : public format::Processor {
         } else if (command == 2) {
             latency_.store(kChangedLatency, std::memory_order_release);
             flag_latency_changed();
+        } else if (command == 4) {
+            std::abort();
         }
     }
 
