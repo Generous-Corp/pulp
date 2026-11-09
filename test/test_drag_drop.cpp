@@ -15,6 +15,7 @@
 // adding a CMake include-dir line to the frozen test/CMakeLists.txt.
 #include "../core/view/platform/linux/xdnd_parse.hpp"
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -389,6 +390,47 @@ TEST_CASE("a drop a DropReceiver declines bubbles to View::on_drop",
     REQUIRE(dispatch_drop(root, session, make_text("hi"), {10, 10}));
     CHECK_FALSE(zone_fired);     // zone declines text
     CHECK(got_type == "text");   // bubbled to the ancestor on_drop
+}
+
+namespace {
+// Records the receiver calls a drag and drop make, in order.
+class OrderRecorder : public View, public DropReceiver {
+  public:
+    std::vector<std::string> calls;
+    Point drop_local{};
+    bool accept_drag(const DropData&, Point) override {
+        calls.push_back("accept_drag");
+        return true;
+    }
+    void leave_drag() override {
+        calls.push_back("leave_drag");
+    }
+    bool accept_drop(const DropData&, Point local) override {
+        calls.push_back("accept_drop");
+        drop_local = local;
+        return true;
+    }
+};
+} // namespace
+
+TEST_CASE("a drop clears the hover with leave_drag before accept_drop", "[view][dnd]") {
+    // The documented order: a receiver that resets hover-derived state in
+    // leave_drag has lost it by accept_drop, which therefore carries the drop
+    // point itself, in the receiver's local coordinates.
+    View root;
+    root.set_bounds({0, 0, 300, 300});
+    auto owned = std::make_unique<OrderRecorder>();
+    OrderRecorder* receiver = owned.get();
+    receiver->set_bounds({100, 50, 100, 100});
+    root.add_child(std::move(owned));
+
+    DragSession session;
+    const auto data = make_files({"/a.wav"});
+    dispatch_drag_enter(root, session, data, {130, 70});
+    REQUIRE(dispatch_drop(root, session, data, {140, 90}));
+    CHECK(receiver->calls == std::vector<std::string>{"accept_drag", "leave_drag", "accept_drop"});
+    CHECK(receiver->drop_local.x == 40.0f);
+    CHECK(receiver->drop_local.y == 40.0f);
 }
 
 // ── XDND payload parsing + coordinate mapping (Linux X11 producer) ───────────
