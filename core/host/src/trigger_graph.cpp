@@ -388,8 +388,7 @@ GraphEventBindingResult SignalGraph::connect_graph_event(GraphAuthoredEventEdge 
     const auto order = processing_order();
     const auto producer_it = std::find(order.begin(), order.end(), edge.producer);
     const auto consumer_it = std::find(order.begin(), order.end(), edge.consumer);
-    if (producer_it == order.end() || consumer_it == order.end() ||
-        producer_it >= consumer_it)
+    if (producer_it == order.end() || consumer_it == order.end() || producer_it >= consumer_it)
         return GraphEventBindingResult::Binding;
     graph_event_edge_ = edge;
     invalidate_live_locked_();

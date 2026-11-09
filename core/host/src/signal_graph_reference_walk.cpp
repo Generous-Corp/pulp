@@ -598,7 +598,8 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
                         if (cg->graph_event_lane->begin_producer_block() !=
                             GraphEventResult::Accepted) {
                             cg->graph_event_lane->abort_block();
-                            for (std::size_t channel = 0; channel < out_view.num_channels(); ++channel)
+                            for (std::size_t channel = 0; channel < out_view.num_channels();
+                                 ++channel)
                                 std::memset(out_view.channel_ptr(channel), 0,
                                             sizeof(float) * out_view.num_samples());
                             break;
@@ -609,7 +610,8 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
                         if (cg->graph_event_lane->begin_consumer_block() !=
                             GraphEventResult::Accepted) {
                             cg->graph_event_lane->abort_block();
-                            for (std::size_t channel = 0; channel < out_view.num_channels(); ++channel)
+                            for (std::size_t channel = 0; channel < out_view.num_channels();
+                                 ++channel)
                                 std::memset(out_view.channel_ptr(channel), 0,
                                             sizeof(float) * out_view.num_samples());
                             break;

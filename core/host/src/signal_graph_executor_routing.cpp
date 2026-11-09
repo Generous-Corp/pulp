@@ -216,8 +216,7 @@ bool custom_binding(fmt::ProcessBlock& block,
             if (cctx->graph_event_lane->begin_producer_block() != GraphEventResult::Accepted) {
                 cctx->graph_event_lane->abort_block();
                 for (std::size_t channel = 0; channel < out.num_channels(); ++channel)
-                    std::memset(out.channel_ptr(channel), 0,
-                                sizeof(float) * out.num_samples());
+                    std::memset(out.channel_ptr(channel), 0, sizeof(float) * out.num_samples());
                 return true;
             }
             writer =
@@ -226,8 +225,7 @@ bool custom_binding(fmt::ProcessBlock& block,
             if (cctx->graph_event_lane->begin_consumer_block() != GraphEventResult::Accepted) {
                 cctx->graph_event_lane->abort_block();
                 for (std::size_t channel = 0; channel < out.num_channels(); ++channel)
-                    std::memset(out.channel_ptr(channel), 0,
-                                sizeof(float) * out.num_samples());
+                    std::memset(out.channel_ptr(channel), 0, sizeof(float) * out.num_samples());
                 return true;
             }
             reader = GraphEventReader<>(*cctx->graph_event_lane);

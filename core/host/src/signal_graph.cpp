@@ -535,9 +535,9 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
                    custom_node_key(n->custom_type_id, n->custom_type_version) == key;
         };
         const auto& replacement = custom_node_types_.at(key);
-        const bool replacement_is_event_compatible =
-            replacement.consumes_events() && !replacement.process_transport &&
-            !replacement.process_instance_transport;
+        const bool replacement_is_event_compatible = replacement.consumes_events() &&
+                                                     !replacement.process_transport &&
+                                                     !replacement.process_instance_transport;
         if ((endpoint_uses_replaced_type(graph_event_edge_->producer) ||
              endpoint_uses_replaced_type(graph_event_edge_->consumer)) &&
             !replacement_is_event_compatible)

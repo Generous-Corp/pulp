@@ -222,7 +222,8 @@ TEST_CASE("Graph-authored event admission requires a connected forward path",
         REQUIRE(graph.register_custom_node_type(make_type()));
         const auto producer = graph.add_custom_node("test.g5.graph-event-path");
         const auto consumer = graph.add_custom_node("test.g5.graph-event-path");
-        REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Binding);
+        REQUIRE(graph.connect_graph_event({producer, consumer}) ==
+                GraphEventBindingResult::Binding);
     }
     SECTION("reverse path") {
         SignalGraph graph;
@@ -230,7 +231,8 @@ TEST_CASE("Graph-authored event admission requires a connected forward path",
         const auto producer = graph.add_custom_node("test.g5.graph-event-path");
         const auto consumer = graph.add_custom_node("test.g5.graph-event-path");
         REQUIRE(graph.connect(consumer, 0, producer, 0));
-        REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Binding);
+        REQUIRE(graph.connect_graph_event({producer, consumer}) ==
+                GraphEventBindingResult::Binding);
     }
     SECTION("forward path") {
         SignalGraph graph;
@@ -238,7 +240,8 @@ TEST_CASE("Graph-authored event admission requires a connected forward path",
         const auto producer = graph.add_custom_node("test.g5.graph-event-path");
         const auto consumer = graph.add_custom_node("test.g5.graph-event-path");
         REQUIRE(graph.connect(producer, 0, consumer, 0));
-        REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted);
+        REQUIRE(graph.connect_graph_event({producer, consumer}) ==
+                GraphEventBindingResult::Accepted);
         graph.set_parallel_routing_enabled(true);
         REQUIRE_FALSE(graph.parallel_routing_enabled());
         REQUIRE(graph.remove_node(producer));
