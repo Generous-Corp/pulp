@@ -280,9 +280,9 @@ here; it is not a coverage gap in the test and rerunning it will not change the
 answer. Interpreted tests (`python3 …`, `bash …`) take `--no-build` instead.
 Whether the driver also links the edited source is read from the build's link
 graph (`ninja -t query`, or the Makefile generator's `link.txt`), never from
-shared symbol names. The driver is the first word of `--test` that is a file in
-the build dir, so `--test` must name the test binary itself: a script or
-`ctest` in front of it is INCONCLUSIVE. A header edit is checked against
+shared symbol names. Every word of `--test` that is a file in the build dir
+is checked as a driver, so `--test` must name the test binary itself: a script,
+a custom-command output, or `ctest` in front of it is INCONCLUSIVE. A header edit is checked against
 ninja's dependency log and is INCONCLUSIVE in a Makefile build, as is any
 build dir whose graph cannot be read.
 

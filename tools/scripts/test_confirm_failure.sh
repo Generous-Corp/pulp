@@ -516,15 +516,17 @@ check "a driver sharing only local symbol names with the edited source is CONFIR
 #   no-driver-header the driver does not include shared.hpp
 #   own-value        the driver compiles its own, unrelated driver_src/value.cpp
 #   object           value.cpp embeds value_data.txt, the file a run edits
+#   custom-script    a custom command writes build/run.sh, which runs the driver
 make_graph_project() {
     local root="$1" generator="$2"; shift 2
-    local links=0 driver_header=1 own_value=0 object=0 variant
+    local links=0 driver_header=1 own_value=0 object=0 custom_script=0 variant
     for variant in "$@"; do
         case "$variant" in
             links) links=1 ;;
             no-driver-header) driver_header=0 ;;
             own-value) own_value=1 ;;
             object) object=1 ;;
+            custom-script) custom_script=1 ;;
         esac
     done
     mkdir -p "$root/driver_src"
@@ -547,6 +549,15 @@ EOF
     printf 'add_dependencies(fixture_driver fixture_subject)\n' >> "$root/CMakeLists.txt"
     [ "$links" -eq 1 ] &&
         printf 'target_link_libraries(fixture_driver PRIVATE fixture_lib)\n' >> "$root/CMakeLists.txt"
+    if [ "$custom_script" -eq 1 ]; then
+        printf '#!/bin/sh\nexec ./build/fixture_driver\n' > "$root/run.sh.in"
+        cat >> "$root/CMakeLists.txt" <<'EOF'
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/run.sh
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/run.sh.in ${CMAKE_BINARY_DIR}/run.sh
+    DEPENDS ${CMAKE_SOURCE_DIR}/run.sh.in fixture_driver)
+add_custom_target(fixture_script ALL DEPENDS ${CMAKE_BINARY_DIR}/run.sh)
+EOF
+    fi
     cat > "$root/shared.hpp" <<'EOF'
 #include <string>
 #include <vector>
@@ -662,10 +673,20 @@ for generator in "${GENERATOR_LIST[@]}"; do
         "$(run_graph_under_test "$TMP/graph-links-$tag" fixture_subject)"
     check "($generator) the same driver behind an env prefix is INCONCLUSIVE" 2 \
         "$(run_graph_under_test "$TMP/graph-links-$tag" fixture_subject --test "env ./build/fixture_driver")"
+    # Running the subject first does not exempt the driver chained after it.
+    check "($generator) the same driver chained after the subject is INCONCLUSIVE" 2 \
+        "$(run_graph_under_test "$TMP/graph-links-$tag" fixture_subject \
+           --test "./build/fixture_subject && ./build/fixture_driver")"
     # A --target that rebuilds the driver makes the link harmless: the stale
     # copy is relinked from the broken object, so the run gets a verdict.
     check "($generator) a linking driver whose own target is --target is CONFIRMED" 0 \
         "$(run_graph_under_test "$TMP/graph-links-$tag" fixture_driver)"
+
+    # A build-dir file that no object is linked into (a custom command's
+    # output) may run anything, here the linking driver.
+    make_graph_project "$TMP/graph-script-$tag" "$generator" links custom-script
+    check "($generator) a custom-command script that runs the driver is INCONCLUSIVE" 2 \
+        "$(run_graph_under_test "$TMP/graph-script-$tag" fixture_subject --test "sh ./build/run.sh")"
 
     # The driver's own value.cpp shares the edited file's basename, so only
     # the source match keeps it from reading as a link.
@@ -712,6 +733,9 @@ if command -v ninja >/dev/null 2>&1; then
         "$(CONFIRM_FAILURE_NINJA="$TMP/garbage-ninja" \
            run_graph_under_test "$TMP/graph-shared-ninja" fixture_subject)"
 fi
+# The default target relinks every target, the driver included.
+check "(Unix Makefiles) a linking driver with --target all is CONFIRMED" 0 \
+    "$(run_graph_under_test "$TMP/graph-links-unix-makefiles" all)"
 # The Makefile lane records no header dependencies, so a header edit cannot be
 # checked there.
 check "(Unix Makefiles) a header edit with --subject is INCONCLUSIVE" 2 \

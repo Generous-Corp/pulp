@@ -530,11 +530,14 @@ fi
 # the driver when one of those objects depends on it in ninja's dependency log
 # (`ninja -t deps`); the Makefile lane has no such log and cannot answer.
 #
-# The driver is the first word of --test that is a file under --build-dir, so
-# a prefix such as `env` or `VAR=1` does not hide it. A --test with no such
-# word (a script, ctest, a command on PATH) may still run a binary that links
-# the edited code, so it cannot be checked and the run is INCONCLUSIVE. A
-# driver that is the subject itself is rebuilt by --target and needs no check.
+# Every word of --test that is a file under --build-dir is a driver and is
+# checked, so a prefix such as `env` or `VAR=1` does not hide one, and neither
+# does a chain such as `./build/subject && ./build/driver`. The subject itself
+# is rebuilt by --target and needs no check. A --test with no such word (a
+# script, ctest, a command on PATH) may still run a binary that links the
+# edited code, so it cannot be checked and the run is INCONCLUSIVE; so is a
+# driver that the graph knows but that no object is linked into (a custom
+# command's output), since what it runs is unknown.
 #
 # Exit status: 0 the driver carries the edited code, 1 it does not, 2 the
 # graph cannot answer; the reason or the linking object is printed. Any other
@@ -568,19 +571,23 @@ def main():
         words = shlex.split(test_cmd)
     except ValueError as exc:
         unknown(f"--test cannot be parsed into words ({exc})")
-    driver = None
+    # Every word that is a build-dir file may run code, so each one is
+    # checked: `./build/subject && ./build/driver` runs both.
+    candidates = []
     for word in words:
         path = os.path.realpath(word)
-        if os.path.isfile(path) and inside(path, build):
-            driver = path
-            break
-    if driver is None:
+        if os.path.isfile(path) and inside(path, build) and path not in candidates:
+            candidates.append(path)
+    if not candidates:
         first = words[0] if words else ""
         unknown(f"no word of --test is a file under {build} (the first word is "
                 f"'{first}'), so the binary it runs cannot be checked for a copy "
                 "of the edited code; name the driver binary itself in --test")
-    if driver == os.path.realpath(subject):
-        sys.exit(1)  # the subject is rebuilt by --target
+    # The subject is rebuilt by --target, so it needs no check.
+    drivers = [c for c in candidates if c != os.path.realpath(subject)]
+    if not drivers:
+        sys.exit(1)
+    driver = drivers[0]  # rebound per driver below; the helpers read it late
 
     def is_edited_object(path, source_inputs):
         if os.path.basename(path) != obj_name:
@@ -662,6 +669,9 @@ def main():
                             + " ".join(nxt))
                 graph.update(more)
             frontier = nxt
+        if not objects:
+            unknown(f"{driver_node} is not linked from any object (a custom "
+                    "command output, for example), so what it runs is unknown")
         return objects
 
     def ninja_links_source(ninja, objects):
@@ -758,6 +768,8 @@ def main():
                     elif item in links:
                         nxt.append(item)
             frontier = nxt
+        if not objects:
+            unknown(f"no object is linked into {driver}, so what it runs is unknown")
         for obj in objects:
             if os.path.basename(obj) != obj_name:
                 continue
@@ -783,25 +795,28 @@ def main():
 
     def make_target_rebuilds_driver(driver_dir):
         """CMakeFiles/Makefile2 holds the target graph: "<target>: <dir>/rule"
-        names the target's own .dir, and "<dir>/all: <dep>/all" its
-        dependencies. The driver is rebuilt when its .dir is in the closure."""
+        names the target's own .dir ("all: <dir>/all" lists each of the
+        default target's), and "<dir>/all: <dep>/all" its dependencies. The
+        driver is rebuilt when its .dir is in the closure."""
         try:
             with open(os.path.join(build, "CMakeFiles", "Makefile2")) as stream:
                 lines = stream.read().splitlines()
         except OSError:
             return False
-        start, edges = None, {}
+        starts, edges = set(), {}
         for line in lines:
             lhs, sep, rhs = line.partition(": ")
             if not sep or line.startswith(("\t", "#")):
                 continue
-            if lhs == target and rhs.strip().endswith("/rule"):
-                start = rhs.strip()[: -len("/rule")]
+            if lhs == target:
+                for suffix in ("/rule", "/all"):
+                    if rhs.strip().endswith(suffix):
+                        starts.add(rhs.strip()[: -len(suffix)])
             if lhs.endswith("/all") and rhs.strip().endswith("/all"):
                 edges.setdefault(lhs[: -len("/all")], set()).add(rhs.strip()[: -len("/all")])
-        if start is None:
+        if not starts:
             return False
-        seen, frontier = {start}, [start]
+        seen, frontier = set(starts), list(starts)
         while frontier:
             nxt = [d for node in frontier for d in edges.get(node, ()) if d not in seen]
             seen.update(nxt)
@@ -809,29 +824,33 @@ def main():
         return any(os.path.realpath(os.path.join(build, d)) == os.path.realpath(driver_dir)
                    for d in seen)
 
-    if os.path.exists(os.path.join(build, "build.ninja")):
+    use_ninja = os.path.exists(os.path.join(build, "build.ninja"))
+    if use_ninja:
         ninja = ninja_program()
         if ninja is None:
             unknown("the build dir uses Ninja but no ninja executable was found")
-        objects = ninja_objects(ninja)
-        linked = (ninja_links_header(ninja, objects) if is_header
-                  else ninja_links_source(ninja, objects))
-        if linked and ninja_target_rebuilds_driver(ninja):
-            print("rebuilt-by-target")
-            sys.exit(1)
     elif os.path.exists(os.path.join(build, "Makefile")):
         if is_header:
             unknown("the Makefile generator keeps no dependency log to say "
                     "whether the driver includes the edited header")
-        linked, driver_dir = make_links()
-        if linked and make_target_rebuilds_driver(driver_dir):
-            print("rebuilt-by-target")
-            sys.exit(1)
     else:
         unknown(f"{build} has neither build.ninja nor a Makefile to read the link graph from")
-    if linked:
-        print(linked)
-        sys.exit(0)
+    rebuilt = False
+    for driver in drivers:
+        if use_ninja:
+            objects = ninja_objects(ninja)
+            linked = (ninja_links_header(ninja, objects) if is_header
+                      else ninja_links_source(ninja, objects))
+            harmless = bool(linked) and ninja_target_rebuilds_driver(ninja)
+        else:
+            linked, driver_dir = make_links()
+            harmless = bool(linked) and make_target_rebuilds_driver(driver_dir)
+        if linked and not harmless:
+            print(f"{linked} in {driver}")
+            sys.exit(0)
+        rebuilt = rebuilt or harmless
+    if rebuilt:
+        print("rebuilt-by-target")
     sys.exit(1)
 
 try:
