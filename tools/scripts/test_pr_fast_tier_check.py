@@ -210,6 +210,37 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(any("without checking that the pre-build step passed" in e
                             for e in tier.check_workflow(mutated)))
 
+    def test_pre_build_step_running_on_windows_fails(self) -> None:
+        start, end = self.configure_section()
+        section = self.text[start:end]
+        mutated = self.text[:start] + section.replace(
+            "runner.os != 'Windows' && ", "", 1) + self.text[end:]
+        self.assertNotEqual(mutated, self.text)
+        self.assertTrue(any("away from Windows" in e for e in tier.check_workflow(mutated)))
+
+    def test_pre_build_step_without_label_exclusions_fails(self) -> None:
+        start, end = self.configure_section()
+        section = self.text[start:end]
+        mutated = self.text[:start] + section.replace(' -LE "$label_exclude"', "", 1) + self.text[end:]
+        self.assertNotEqual(mutated, self.text)
+        self.assertTrue(any("label exclusions" in e for e in tier.check_workflow(mutated)))
+
+    def test_drop_outside_the_success_guard_fails(self) -> None:
+        # The guard is present but the exclusion moved out of it.
+        start = self.text.index("- name: " + tier.STEP_NAME)
+        end = self.text.index("- name:", start + 1)
+        section = self.text[start:end]
+        moved = section.replace(
+            '            label_exclude="${label_exclude}|^pr-fast-configure$"\n', "", 1)
+        moved = moved.replace(
+            '          if [ "$PR_FAST_CONFIGURE_OUTCOME" = success ]; then\n',
+            '          label_exclude="${label_exclude}|^pr-fast-configure$"\n'
+            '          if [ "$PR_FAST_CONFIGURE_OUTCOME" = success ]; then\n            :\n', 1)
+        self.assertNotEqual(moved, section)
+        mutated = self.text[:start] + moved + self.text[end:]
+        self.assertTrue(any("without checking that the pre-build step passed" in e
+                            for e in tier.check_workflow(mutated)))
+
     def test_missing_pre_build_step_while_post_build_drops_fails(self) -> None:
         mutated = self.text.replace(tier.CONFIGURE_STEP_NAME, "Renamed pre-build step")
         self.assertTrue(any("expected exactly one" in e and tier.CONFIGURE_STEP_NAME in e

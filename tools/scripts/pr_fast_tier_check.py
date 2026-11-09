@@ -168,7 +168,10 @@ def check_workflow(text: str) -> list[str]:
     # pre-build step passed; otherwise (contract lane, step skipped) it runs
     # the whole tier.
     drops = f"|^{CONFIGURE_LABEL}$" in code
-    if drops and 'if [ "$PR_FAST_CONFIGURE_OUTCOME" = success ]; then' not in code:
+    guard = 'if [ "$PR_FAST_CONFIGURE_OUTCOME" = success ]; then'
+    guarded = (guard in code and
+               f"|^{CONFIGURE_LABEL}$" in code.split(guard, 1)[1].split("\n          fi", 1)[0])
+    if drops and not guarded:
         errors.append(
             f"the step leaves out {CONFIGURE_LABEL} without checking that the "
             "pre-build step passed"
@@ -199,6 +202,12 @@ def check_configure_workflow(text: str, *, post_build_drops: bool = True) -> lis
         errors.append("the pre-build step lost its id: pr_fast_configure_tests")
     if "github.event_name == 'pull_request'" not in code:
         errors.append("the pre-build step is not scoped to pull_request")
+    if "runner.os != 'Windows'" not in code:
+        # Windows lists Catch2 tests by running the binaries, which do not
+        # exist yet before the build.
+        errors.append("the pre-build step is not scoped away from Windows")
+    if '-LE "$label_exclude"' not in code:
+        errors.append("the pre-build step does not apply the gate's label exclusions")
     if "matrix.lane != 'contract'" not in code:
         errors.append("the pre-build step also runs on the contract lane, which runs the whole tier")
     # Position: the step must sit between this job's Configure and its Build,

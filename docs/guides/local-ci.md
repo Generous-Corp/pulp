@@ -3919,8 +3919,11 @@ before the build, about nine minutes sooner at the median, and frees the gate
 VM. When that step passed, the post-build tier excludes `^pr-fast-configure$`
 so each member runs once; when it was skipped (the contract lane, which never
 builds) the post-build step runs the whole tier as before. The step writes
-`ctest-pr-fast-configure.junit.xml`, uploaded with the other ctest logs and
-recorded as its own `pr-fast-configure` suite in the reuse record. `pr-fast-tier-contract` fails if a `pr-fast-configure` member is
+`ctest-pr-fast-prebuild.junit.xml`, uploaded with the other ctest logs and
+recorded as its own `pr-fast-configure` suite in the reuse record; the
+ctest non-run report falls back to it when the head stopped before the build.
+A red here clears the `.pulp-build-incomplete` marker Configure left, because
+nothing was compiled and the warm build directory is still sound. `pr-fast-tier-contract` fails if a `pr-fast-configure` member is
 outside `pr-fast`, carries `needs-build`, or one of the four pinned drift checks
 loses the label, and if the step stops being the one immediately before `Build`.
 

@@ -2838,10 +2838,19 @@ jobs:
             --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
           eval "$gate_args"
           : "${label_exclude:?ctest gate arguments did not resolve}"
+          rc=0
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
             -L '^pr-fast$' -L '^pr-fast-configure$' -LE "$label_exclude" \
             --no-tests=error --timeout 120 -j4 \
-            --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast-configure.junit.xml"
+            --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast-prebuild.junit.xml" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            # Configure left the build-in-progress marker and Build will not
+            # run to clear it. Nothing was compiled, so a warm build directory
+            # is still sound: clear the marker rather than make the next job
+            # on this directory start cold (tools/ci/build-dir-sentinel.sh).
+            rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
+            exit "$rc"
+          fi
 
       - name: Build
         shell: bash
@@ -3443,12 +3452,14 @@ jobs:
           junit="$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
           # When the full suite did not run (a pull-request head that took the
           # fast tier, or a build that stopped first) there is no full report
-          # by design: observe the fast tier's own report if it exists, and
+          # by design: observe the fast tier's own report if it exists (or the
+          # pre-build drift checks' report, when the head stopped there), and
           # otherwise record a named "not run" instead of an unavailable error.
           # A suite that DID run and left no report stays an error.
           absent=()
           if [ "$CTEST_OUTCOME" = skipped ]; then
             absent=(--fallback "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast.junit.xml"
+                    --fallback "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast-prebuild.junit.xml"
                     --not-run-reason "the full suite did not run on this leg (fast tier only, or the build stopped before ctest)")
           fi
           listing="$(ctest --test-dir "$PULP_BUILD_DIR" -N 2>/dev/null)" || listing=""
@@ -3709,7 +3720,7 @@ jobs:
           path: |
             ${{ env.PULP_BUILD_DIR }}/Testing/Temporary/
             ${{ env.PULP_BUILD_DIR }}/ctest.junit.xml
-            ${{ env.PULP_BUILD_DIR }}/ctest-pr-fast-configure.junit.xml
+            ${{ env.PULP_BUILD_DIR }}/ctest-pr-fast-prebuild.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest-pr-fast.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest-pr-guard.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest.nonruns.json
@@ -3750,7 +3761,7 @@ jobs:
           out="$RUNNER_TEMP/reuse-record"
           suites=()
           case "$CTEST_OUTCOME" in success|failure) suites+=(--suite "full=$b/ctest.junit.xml,attempts=$ev/LastTest.full.log,repeat") ;; esac
-          case "$PR_FAST_CONFIGURE_OUTCOME" in success|failure) suites+=(--suite "pr-fast-configure=$b/ctest-pr-fast-configure.junit.xml") ;; esac
+          case "$PR_FAST_CONFIGURE_OUTCOME" in success|failure) suites+=(--suite "pr-fast-configure=$b/ctest-pr-fast-prebuild.junit.xml") ;; esac
           case "$PR_FAST_OUTCOME" in success|failure) suites+=(--suite "pr-fast=$b/ctest-pr-fast.junit.xml") ;; esac
           case "$PR_AFFECTED_OUTCOME" in success|failure) suites+=(--suite "pr-affected=$b/pr-affected-junit,repeat") ;; esac
           rc=0
