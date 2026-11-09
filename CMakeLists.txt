@@ -522,6 +522,10 @@ if(NOT IOS)
 endif()
 add_subdirectory(core/dsl)
 
+# Optional integration packages (integrations/CMakeLists.txt). Core never links
+# them.
+add_subdirectory(integrations)
+
 # Wire Android-specific sources into subsystem targets (must come after add_subdirectory)
 if(ANDROID)
     pulp_wire_android_sources()
