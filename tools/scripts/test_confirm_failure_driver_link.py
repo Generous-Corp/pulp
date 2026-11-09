@@ -181,8 +181,8 @@ class Drivers(unittest.TestCase):
         self.build = os.path.join(root, "build")
         os.makedirs(self.build)
         for name in ("driver", "subject", "data.wav"):
-            open(os.path.join(self.build, name), "w").close()
-        open(os.path.join(root, "run.sh"), "w").close()
+            open(os.path.join(self.build, name), "w", encoding="utf-8").close()
+        open(os.path.join(root, "run.sh"), "w", encoding="utf-8").close()
         self.root = root
 
     def tearDown(self):
@@ -281,7 +281,7 @@ class Main(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             build = os.path.join(tmp, "build")
             os.makedirs(build)
-            open(os.path.join(build, "driver"), "w").close()
+            open(os.path.join(build, "driver"), "w", encoding="utf-8").close()
             status = link.main(["--build-dir", build, "--file", __file__,
                                 "--obj-name", "x.cpp.o", "--test", f"{build}/driver",
                                 "--target", "t", "--subject", f"{build}/subject"])

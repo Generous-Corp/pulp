@@ -270,7 +270,7 @@ class NinjaGraph:
     build: str
     ninja: str
     run: Callable[[list[str]], subprocess.CompletedProcess] = field(
-        default=lambda argv: subprocess.run(argv, capture_output=True, text=True))
+        default=lambda argv: subprocess.run(argv, capture_output=True, text=True, encoding="utf-8"))
 
     def tool(self, name: str, nodes: list[str]) -> str | None:
         proc = self.run([self.ninja, "-C", self.build, "-t", name, *nodes])
@@ -370,10 +370,11 @@ class MakeGraph:
             cwd = os.path.dirname(os.path.dirname(root))  # parent of CMakeFiles
 
             def read_rsp(path: str, cwd: str = cwd) -> str:
-                with open(os.path.join(cwd, path)) as rsp:
+                with open(os.path.join(cwd, path), encoding="utf-8", errors="replace") as rsp:
                     return rsp.read()
 
-            with open(os.path.join(root, "link.txt")) as stream:
+            link_txt = os.path.join(root, "link.txt")
+            with open(link_txt, encoding="utf-8", errors="replace") as stream:
                 outputs, inputs = parse_link_txt(stream.read(), read_rsp)
             for out in outputs:
                 self.links[realpath(out, cwd)] = MakeLink(
@@ -410,7 +411,8 @@ class MakeGraph:
                 break
             obj_dir = parent
         try:
-            with open(os.path.join(obj_dir, "build.make")) as stream:
+            build_make = os.path.join(obj_dir, "build.make")
+            with open(build_make, encoding="utf-8", errors="replace") as stream:
                 rules = parse_build_make(stream.read())
         except OSError as exc:
             raise Unknown(f"no build.make names the source of {obj}") from exc
@@ -430,7 +432,8 @@ class MakeGraph:
     def target_rebuilds(self, target: str, driver: str) -> bool:
         if self._makefile2 is None:
             try:
-                with open(os.path.join(self.build, "CMakeFiles", "Makefile2")) as stream:
+                makefile2 = os.path.join(self.build, "CMakeFiles", "Makefile2")
+                with open(makefile2, encoding="utf-8", errors="replace") as stream:
                     self._makefile2 = parse_makefile2(stream.read())
             except OSError:
                 return False
@@ -448,7 +451,8 @@ def ninja_program(build: str) -> str | None:
     if override is not None:
         return override if os.access(override, os.X_OK) else None
     try:
-        with open(os.path.join(build, "CMakeCache.txt")) as cache:
+        cache_path = os.path.join(build, "CMakeCache.txt")
+        with open(cache_path, encoding="utf-8", errors="replace") as cache:
             for line in cache:
                 if line.startswith("CMAKE_MAKE_PROGRAM:"):
                     candidate = line.split("=", 1)[1].strip()
