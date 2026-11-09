@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1940"></a>
+## [1.94.0] - 2026-11-09
+
+- release/version bump ([#11872](https://github.com/Generous-Corp/pulp/pull/11872))
+- feature/native surface input ([#11785](https://github.com/Generous-Corp/pulp/pull/11785))
+- fix/vellum receipt repin events ([#11868](https://github.com/Generous-Corp/pulp/pull/11868))
+- feature/platform file drag ([#11773](https://github.com/Generous-Corp/pulp/pull/11773))
+- codex/g5 followup contract 20261109 ([#11860](https://github.com/Generous-Corp/pulp/pull/11860))
+
 <a id="v1930"></a>
 ## [1.93.0] - 2026-11-09
 
@@ -12570,6 +12579,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.94.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.94.0
 [1.93.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.93.0
 [1.92.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.92.0
 [1.91.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.91.0
