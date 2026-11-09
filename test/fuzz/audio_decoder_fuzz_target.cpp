@@ -7,7 +7,7 @@
 // every mutation that keeps its header) goes to the reader that owns it.
 // When no magic matches, the first byte selects a format and the rest is the
 // payload, which lets the fuzzer reach a reader with a header it invented.
-// The platform CoreAudio reader is deliberately never selected: it is system
+// The platform CoreAudio reader is never selected: it is system
 // code, and the deterministic Catch2 corpus replay covers it on Apple.
 //
 // Readers take paths, so the input is written to one scratch file per call.

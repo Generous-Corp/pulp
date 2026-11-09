@@ -79,13 +79,13 @@ curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 claude plugin marketplace add Generous-Corp/pulp && claude plugin install pulp
 
 # 3. Verify the wiring.
-pulp doctor          # expects: pulp-mcp — <path> (pulp-mcp <version>)
+pulp doctor          # expects a passing pulp-mcp check showing its path and version
 ```
 
 `pulp upgrade --install` carries `pulp-mcp` forward to `~/.pulp/bin/` on
 upgrade, so the plugin keeps working across CLI bumps without reinstalling
 the plugin. Drift between an older installed `pulp-mcp` and a newer CLI is
-advisory — `pulp doctor` reports the version pairing so you can see it.
+advisory: `pulp doctor` reports the version pairing so you can see it.
 
 Then create your first plugin:
 
@@ -111,8 +111,6 @@ For an embedded editor, recorder, or playback engine, start with the
 see the [multitrack arrangement](../examples/timeline-phase1.md). Claude Code
 users can ask the shipped Timeline skill to inspect or edit a project; it uses
 the same validation, command, explain, and render implementation through MCP.
-
-That's it — three commands from zero to a working plugin.
 
 If you're developing Pulp itself and want to scaffold a framework example instead of a standalone product project, use:
 
@@ -174,18 +172,18 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 `setup.sh` is the shared bootstrap implementation, but the supported Windows entrypoint is `setup.ps1`. The wrapper imports the Visual Studio C++ environment, uses Git Bash from Git for Windows, and temporarily maps the repo to a short drive alias so first-time dependency bootstrap does not trip Windows path-length limits.
 
 `setup.sh` bootstraps dependencies and then configures and builds **Release
-without the example projects** — the same configure the required CI gate uses.
+without the example projects**, the same configure the required CI gate uses.
 Both are opt-in if you want them.
 
 Options:
-- `./setup.sh --ci` — non-interactive mode for CI/automation
-- `./setup.sh --deps-only` — bootstrap SDKs and dependencies without configuring/building
-- `./setup.sh --debug` — configure and build Debug instead of Release
-- `./setup.sh --examples` — also build the example projects (a long first build)
-- `./setup.sh --print-plan` — print the resolved configure/build plan and exit
-- `./setup.sh --dry-run` — show what would be done without doing it
-- `powershell -ExecutionPolicy Bypass -File .\setup.ps1 --ci` — Windows non-interactive bootstrap
-- `powershell -ExecutionPolicy Bypass -File .\setup.ps1 --deps-only` — Windows dependency-only bootstrap
+- `./setup.sh --ci`: non-interactive mode for CI/automation
+- `./setup.sh --deps-only`: bootstrap SDKs and dependencies without configuring/building
+- `./setup.sh --debug`: configure and build Debug instead of Release
+- `./setup.sh --examples`: also build the example projects (a long first build)
+- `./setup.sh --print-plan`: print the resolved configure/build plan and exit
+- `./setup.sh --dry-run`: show what would be done without doing it
+- `powershell -ExecutionPolicy Bypass -File .\setup.ps1 --ci`: Windows non-interactive bootstrap
+- `powershell -ExecutionPolicy Bypass -File .\setup.ps1 --deps-only`: Windows dependency-only bootstrap
 
 Optional: to build with the exact CMake, Ninja, Python, Node.js and clang-format
 versions Pulp pins, use mise. See [Pinned Build Tools with mise](mise.md).
@@ -195,7 +193,7 @@ versions Pulp pins, use mise. See [Pinned Build Tools with mise](mise.md).
 - **git**
 - **CMake 3.24+**
 - **C++20 compiler** (Clang 15+, GCC 13+, MSVC 2022+)
-- **git-lfs** — required for pre-built Skia GPU rendering binaries
+- **git-lfs**: required for pre-built Skia GPU rendering binaries
   - macOS: `brew install git-lfs && git lfs install`
   - Linux: `sudo apt install git-lfs && git lfs install`
     - if you installed `git-lfs` with a per-user tool such as `~/.local/bin/git-lfs`, make sure that location is also on the non-interactive PATH used by SSH/CI
@@ -218,7 +216,7 @@ After building, use `pulp doctor` to check your environment:
 ```bash
 pulp doctor             # show status of all checks
 pulp doctor --fix       # auto-fix issues where possible
-pulp doctor --ci        # CI mode — exit codes only, no prompts
+pulp doctor --ci        # CI mode: exit codes only, no prompts
 pulp doctor --dry-run   # show what --fix would do
 ```
 
@@ -226,7 +224,7 @@ In SDK mode, `pulp doctor` validates the generated project's `pulp.toml`, instal
 
 ### Cross-Platform CI (Optional)
 
-If you want to validate builds on macOS, Ubuntu, and Windows before merging, see the [Local CI guide](local-ci.md) — it covers SSH key setup for Windows and Linux VMs, host configuration, and the `pulp ci-local` runner.
+If you want to validate builds on macOS, Ubuntu, and Windows before merging, see the [Local CI guide](local-ci.md). It covers SSH key setup for Windows and Linux VMs, host configuration, and the `pulp ci-local` runner.
 
 ## Project Structure
 
@@ -428,7 +426,7 @@ Restart your DAW to scan the new plugins.
 Pulp UIs are defined in JavaScript and hot-reloaded. Create a `ui/main.js` file next to your plugin source:
 
 ```js
-// ui/main.js — Gain plugin UI
+// ui/main.js: Gain plugin UI
 
 const root = createCol("root");
 setFlex("root", "padding", 24);
@@ -489,7 +487,7 @@ You should see a window with a centered knob labeled "Gain" and a dB readout bel
 
 ## Step 8: Hot-Reload
 
-With the standalone running on macOS, edit `ui/main.js` — changes appear instantly. No rebuild needed.
+With the standalone running on macOS, edit `ui/main.js`; changes appear instantly. No rebuild needed.
 
 Try changing the background color or adding a second knob. The scripted standalone host watches `ui/main.js` and re-evaluates your script whenever it changes. Widget values are restored across reloads. JavaScript heap state is not preserved.
 
@@ -533,23 +531,17 @@ Or define a custom theme in JSON:
 }
 ```
 
-Save this as `ui/theme.json` next to `ui/main.js`:
-
-```js
-// Themes cascade — child views inherit parent tokens
-setBackground("root", getThemeColor("background"));
-setTextColor("title", getThemeColor("on_surface"));
-```
+Save this as `ui/theme.json` next to `ui/main.js`.
 
 Scripted UI sessions automatically apply a sibling `theme.json` when the UI loads. In the macOS standalone hot-reload lane, edits to `theme.json` are also picked up live. Design tokens resolve by walking up the view tree: child → parent → root → built-in fallback. This lets you override tokens for specific sections of your UI without affecting the rest.
 
 ## Next Steps
 
-- **[From React/CSS Guide](from-react-css.md)** — mapping your web skills to Pulp
-- **[Cookbook](cookbook.md)** — 10 recipes for common UI patterns
-- **[API Reference](../reference/js-bridge.md)** — commonly used JS bridge functions
-- **[Design Tokens Guide](design-tokens.md)** — deep dive into theming
-- **[Custom Rendering Guide](custom-rendering.md)** — Canvas, SDF, and WebGPU drawing
-- **[Examples Gallery](examples.md)** — curated walkthroughs of core example plugins
-- **[CMake Reference](../reference/cmake.md)** — full `pulp_add_plugin()` documentation
-- **[CLI Reference](../reference/cli.md)** — all CLI commands
+- **[From React/CSS Guide](from-react-css.md)**: mapping your web skills to Pulp
+- **[Cookbook](cookbook.md)**: 10 recipes for common UI patterns
+- **[API Reference](../reference/js-bridge.md)**: commonly used JS bridge functions
+- **[Design Tokens Guide](design-tokens.md)**: deep dive into theming
+- **[Custom Rendering Guide](custom-rendering.md)**: Canvas, SDF, and WebGPU drawing
+- **[Examples Gallery](examples.md)**: curated walkthroughs of core example plugins
+- **[CMake Reference](../reference/cmake.md)**: full `pulp_add_plugin()` documentation
+- **[CLI Reference](../reference/cli.md)**: all CLI commands

@@ -1576,6 +1576,21 @@ processor and wraps `process()` with `service_panic()` before and
 process path (including f64) or `Processor::request_panic()` silently stops
 working there. Tests: test_vst3_audio_parity.cpp (note-off and legacy CC events on the output event list).
 
+## MIDI Learn: IMidiLearn and controller feedback
+
+`PulpVst3Processor` implements `IMidiLearn`, but `queryInterface` offers it only
+when the processor registered a `state::MidiLearnEngine`
+(`format::MidiLearnHandle`); offering it unconditionally would advertise MIDI
+Learn to the host for every plug-in. `onLiveMIDIControllerInput` maps the host's
+controller number to a `MidiSource` (0..127 to CC, `kAfterTouch` to channel
+pressure, `kPitchBend` to pitch bend) and declines program change and poly
+pressure, which carry a second value the callback does not report. Feedback to a
+controller needs no new adapter code: the engine writes ordinary messages into
+`midi_out` and `write_midi_output()` sends them as `kLegacyMIDICCOutEvent`.
+Whether a host forwards that output is host behaviour; the capability flag
+(`format::midi_feedback_capabilities`) only says the adapter writes it.
+Tests: test_vst3_audio_parity.cpp (`[vst3][midi-learn]`).
+
 ## Factory presets (program list)
 
 `PulpVst3Processor::initialize()` builds a `FactoryProgramTable`
