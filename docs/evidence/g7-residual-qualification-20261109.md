@@ -1,16 +1,18 @@
-# G7 residual qualification evidence — 2026-11-09
+# G7 residual qualification evidence: 2026-11-09
 
 State: **PARTIAL / HOLD**.
 
 This document records bounded evidence from the public G7 graph probe APIs. It
 contains no implementation change and does not modify the G7 roadmap/status
-files. The evidence branch was fast-forwarded to current `origin/main` before
-this document was committed.
+files. The evidence branch was fast-forwarded to `origin/main` before this
+document was committed; the refresh merge now brings the PR to the current
+`origin/main` without changing the evidence claims.
 
 ## Provenance
 
 - Evidence source head used for build/test: `2f6aa0d90421a24c9c092c1bc96ab2dd34ad8914`.
-- Current `origin/main` at handoff/commit: `546051b66b44df141b7f0bec1217fa96e971022c`.
+- `origin/main` at the original evidence handoff: `546051b66b44df141b7f0bec1217fa96e971022c`.
+- Current `origin/main` merged for this refresh: `8ec2c7adeeb14fec51b64633bcc5b20b1e7267ff`.
 - Worktree: `codex/g7-qualification-20261109`, classified active as
   `g7-qualification-evidence`.
 - Configure: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF`.
@@ -72,5 +74,5 @@ continued at the wrapper's bounded `-j2`. Later small targets acquired leases.
 `tart list` showed standard build images stopped and one Vellum gate VM running;
 that inventory does not establish provider or realtime availability.
 
-No PR #11733 was revived, no duplicate implementation was created, and no PR
-was armed, enqueued, approved, or merged by this lane.
+No prior qualification lane was revived, no duplicate implementation was
+created, and this lane did not arm, enqueue, approve, or merge a pull request.
