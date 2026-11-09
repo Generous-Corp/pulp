@@ -19,7 +19,7 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 | **CHOC** | ISC | JS engine, MIDI utilities, audio file I/O, WebView, networking | [github.com/Tracktion/choc](https://github.com/Tracktion/choc) |
 | **command-group** | Apache-2.0 | Cross-platform process-tree containment for bounded Rust CLI trace analysis | [github.com/watchexec/command-group](https://github.com/watchexec/command-group) |
 | **cpp-httplib** | MIT | HTTP client (GET/POST/download) used by `pulp-runtime` | [github.com/yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) |
-| **dr_libs** | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (`dr_flac`, `dr_mp3`, `dr_wav`) | [github.com/mackron/dr_libs](https://github.com/mackron/dr_libs) |
+| **dr_libs** | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (`dr_flac`, `dr_mp3`, `dr_wav`); Ogg Vorbis decode (`stb_vorbis` v1.22, public domain, vendored alongside) | [github.com/mackron/dr_libs](https://github.com/mackron/dr_libs) |
 | **Highway** | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | [github.com/google/highway](https://github.com/google/highway) |
 | **Mbed TLS** | Apache-2.0 (dual-licensed; Pulp uses the Apache-2.0 option) | Cryptographic primitives (SHA-256, RSA, AES) | [github.com/Mbed-TLS/mbedtls](https://github.com/Mbed-TLS/mbedtls) |
 | **miniz** | MIT | ZIP/GZIP compression | [github.com/richgel999/miniz](https://github.com/richgel999/miniz) |

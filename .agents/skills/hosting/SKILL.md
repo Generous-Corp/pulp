@@ -1693,6 +1693,20 @@ rules:
 - **Thread rules doc.** `docs/reference/host-thread-rules.md` is the
   canonical reference.
 
+## Slot settings and parameter queues on the audio thread
+
+- `PluginHostSettings::deliver_transport` is the one setting the audio thread
+  reads live: `RequestDrivenSlot` mirrors it in an atomic written by
+  `set_host_settings()`. Any other setting a future change reads from
+  `process()` needs the same treatment; the plain `settings_` copy is for
+  `prepare()`.
+- VST3 parameter queues are bounded, not allocation-free. The SDK reserves 5
+  points per queue and `setMaxParameters()` preallocates max(parameter count,
+  16) queues; more points for one parameter in a block, or more distinct
+  parameters, grows a vector on the audio thread once. Clear
+  `in_param_changes_` every block (it is, at the top of `process_request()`)
+  so the growth stops at the busiest block.
+
 ## Hosted plugin editors
 
 `EditorAttachment::create(slot, window)` embeds a hosted plugin's own GUI.
@@ -2999,3 +3013,9 @@ invalid channel views before dereferencing pointers or mutating output, clock,
 or envelope state. The public consumer in
 `examples/g5-trigger-runtime-consumer` proves this bounded SDK seam; it does not
 establish complete G-5 coverage or realtime timing qualification.
+# G-7 edge diagnostics
+
+SignalGraph control and event edge probes are serial routed diagnostics with
+fixed-capacity publication and explicit refusal in unsupported execution modes.
+Host lifecycle changes must preserve detach-on-reset and the source-edge event
+observation boundary.

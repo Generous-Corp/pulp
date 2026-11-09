@@ -50,6 +50,11 @@ pulp_add_test_suite(pulp-test-offline-tracing
 pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
+# AudioReader: ranged reads from a path, memory or byte source equal a full
+# decode for WAV, AIFF, FLAC, MP3 and Ogg Vorbis built from one known signal.
+pulp_add_test_suite(pulp-test-audio-reader GROUP pulp-test-group-cap-audio
+    LIBRARIES pulp::audio)
+
 # System codec writer: AAC, ALAC and PCM written through ExtAudioFile (Apple)
 # or Media Foundation (Windows) read back as the source signal.
 pulp_add_test_suite(pulp-test-system-audio-codec GROUP pulp-test-group-cap-audio
@@ -309,6 +314,13 @@ pulp_add_test_suite(pulp-test-external-binding GROUP pulp-test-group-cap-state
 # MIDI controller decoding, relative encoders, learn classification, takeover
 # (pure functions; no audio or StateStore).
 pulp_add_test_suite(pulp-test-midi-learn-decode GROUP pulp-test-group-cap-state
+    LIBRARIES pulp::state)
+
+# MidiLearnEngine: mapping table publication, routing of every source kind,
+# relative encoders, takeover, the learn flow, real-time safety and a
+# UI-versus-audio-thread hammer.
+pulp_add_test_suite(pulp-test-midi-learn-engine
+    SOURCES test_midi_learn_engine.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::state)
 
 # Cross-version parameter-ordering guard (host-facing ID + index stability).

@@ -294,6 +294,9 @@ dr_libs (dr_flac, dr_mp3, dr_wav) is dual-licensed under the Unlicense
 (public domain) and MIT No Attribution. Pulp redistributes the headers
 under the Unlicense terms.
 
+stb_vorbis v1.22 (Sean Barrett), vendored in the same directory for Ogg
+Vorbis decode, is released into the public domain (with an MIT alternative).
+
 The vendored `dr_mp3.h` snapshot originates at upstream commit
 `4d74802a098a2abbef4d063dd211e89260521313` and carries the exact one-line
 Xing/Info frame-count overflow fix from upstream commit

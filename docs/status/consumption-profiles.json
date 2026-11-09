@@ -31,6 +31,7 @@
       "pulp/audio/audio_probe.hpp",
       "pulp/audio/audio_probe_json.hpp",
       "pulp/audio/audio_probe_snapshot.hpp",
+      "pulp/audio/audio_reader.hpp",
       "pulp/audio/audio_scope.hpp",
       "pulp/audio/audio_scope_json.hpp",
       "pulp/audio/audio_stats.hpp",
@@ -658,7 +659,9 @@
       "pulp/platform/environment.hpp",
       "pulp/platform/file_dialog.hpp",
       "pulp/platform/gpu_fwd.hpp",
+      "pulp/platform/main_thread.hpp",
       "pulp/platform/native_handle.hpp",
+      "pulp/platform/objc_unique_class.hpp",
       "pulp/platform/permissions.hpp",
       "pulp/platform/platform.hpp",
       "pulp/platform/popup_menu.hpp",
@@ -816,6 +819,7 @@
       "pulp/audio/audio_probe.hpp",
       "pulp/audio/audio_probe_json.hpp",
       "pulp/audio/audio_probe_snapshot.hpp",
+      "pulp/audio/audio_reader.hpp",
       "pulp/audio/audio_scope.hpp",
       "pulp/audio/audio_scope_json.hpp",
       "pulp/audio/audio_stats.hpp",
@@ -1166,6 +1170,8 @@
       "pulp/signal/spectral_mask_processor.hpp",
       "pulp/signal/spectral_morph.hpp",
       "pulp/signal/spectrogram.hpp",
+      "pulp/signal/spectrum_analyzer.hpp",
+      "pulp/signal/spectrum_bin_mapping.hpp",
       "pulp/signal/spectrum_trace.hpp",
       "pulp/signal/square_osc_bank.hpp",
       "pulp/signal/stage_sequencer.hpp",
@@ -1231,6 +1237,8 @@
       "pulp/state/listener_token.hpp",
       "pulp/state/midi_decode.hpp",
       "pulp/state/midi_learn.hpp",
+      "pulp/state/midi_learn_engine.hpp",
+      "pulp/state/midi_map_scale.hpp",
       "pulp/state/midi_parameter_map.hpp",
       "pulp/state/midi_source.hpp",
       "pulp/state/modulation_lane.hpp",
@@ -1952,15 +1960,15 @@
             "closure_node_count": 5
           },
           {
+            "exported_as": "Pulp::platform",
+            "closure_node_count": 5
+          },
+          {
             "exported_as": "Pulp::ausdk",
             "closure_node_count": 4
           },
           {
             "exported_as": "Pulp::mbedx509",
-            "closure_node_count": 4
-          },
-          {
-            "exported_as": "Pulp::platform",
             "closure_node_count": 4
           },
           {
@@ -6434,7 +6442,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/platform",
           "closure": {
-            "node_count": 4,
+            "node_count": 5,
             "pulp_targets": [
               "pulp-platform"
             ],
@@ -6443,7 +6451,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 3,
+            "count": 4,
             "third_party_targets": [
               "gpu-runtime-device-api"
             ],
@@ -6451,6 +6459,7 @@
             "imported_targets": [],
             "frameworks": [
               "Cocoa",
+              "CoreFoundation",
               "UniformTypeIdentifiers"
             ],
             "system_libraries": []
@@ -6463,6 +6472,7 @@
           },
           "direct_dependencies": [
             "framework:Cocoa",
+            "framework:CoreFoundation",
             "framework:UniformTypeIdentifiers",
             "gpu-runtime-device-api"
           ]
