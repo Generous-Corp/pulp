@@ -54,6 +54,14 @@ import urllib.parse
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
 try:
+    import download_retry
+except ImportError:  # imported as tools.scripts.*, or loaded by path
+    try:
+        from tools.scripts import download_retry
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import download_retry
+try:
     from process_liveness import pid_alive
 except ImportError:  # imported as tools.scripts.*, or copied without its sibling
     try:
@@ -385,8 +393,7 @@ def verify_release_metadata(v8_entry: dict, asset_url: str) -> str | None:
     expected_sha = determinism.get("release_metadata_sha256")
     if not isinstance(url, str) or not isinstance(expected_sha, str):
         raise ValueError("matched V8 pin has no release metadata URL/SHA-256")
-    with urllib.request.urlopen(url) as response:
-        payload = response.read()
+    payload = download_retry.read_bytes(url)
     actual_sha = hashlib.sha256(payload).hexdigest()
     if actual_sha != expected_sha:
         raise ValueError(
@@ -573,9 +580,7 @@ def _download_and_seal_generation(
         v8_entry.get("determinism", {}).get("pair_kind") == "chromium-milestone"
     )
     print(f"Downloading -> {archive_path}")
-    with urllib.request.urlopen(url) as response, archive_path.open("wb") as output:
-        for chunk in iter(lambda: response.read(1024 * 1024), b""):
-            output.write(chunk)
+    download_retry.download(url, archive_path)
 
     actual_sha = file_sha256(archive_path)
     if actual_sha != expected_sha:
