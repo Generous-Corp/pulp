@@ -12,7 +12,7 @@
 ///          ──frequency_axis_labels + compose_plot_with_chrome──▶ final image
 ///
 /// Display-only contract: the grid and the image never feed a verdict. The
-/// dB values are honest (full-scale sine reads 0 dBFS at its bin) so a reader
+/// dB values are calibrated (a full-scale sine reads 0 dBFS at its bin), so a reader
 /// can trust the colour bar, but anything that needs a number should call the
 /// analyzers in audio_spectrum.hpp, not read pixels.
 ///
