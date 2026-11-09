@@ -1513,3 +1513,8 @@ symbol` in the `Build WebCLAP module` step of the required
 (keep it free of view-layer dependencies; the editor prewarm is a no-op here
 because no view scheduler is installed). There is no local wasm toolchain on
 the Macs by default, so this gate is usually first seen in CI.
+
+The wasi-sdk and Skia wasm archives are downloaded with
+`python3 tools/scripts/download_retry.py URL DEST` (6 attempts, jittered
+backoff on 5xx/timeouts, immediate failure on 4xx), then sha256-verified as
+before. Do not reintroduce a bare `curl -fsSL` for these.

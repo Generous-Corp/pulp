@@ -8584,3 +8584,24 @@ also carries `timeout-minutes: 10`. Before this, a stalled fetch held the requir
 `macos` gate for 43 minutes with no output and no build.
 
 <!-- same-base keyed reuse canary probe -->
+
+## Downloads ride out short GitHub / CDN outages
+
+A pinned-asset download that meets a 503/504 from GitHub or its CDN used to
+fail the required `macos` gate (about 40 minutes to re-run). Every CI fetch of a
+release asset now goes through one policy, `tools/scripts/download_retry.py`:
+
+- 6 attempts, exponential backoff of 5, 10, 20, 40 and 60 seconds, each scaled
+  by a random 75-125% jitter: about 2-3 minutes in total.
+- Retried: HTTP 408/425/429/500/502/503/504, timeouts, connection resets and
+  truncated bodies. A numeric `Retry-After` overrides the schedule (capped at
+  60 seconds).
+- Not retried: any other status (a 403/404 is a bad pin or a revoked asset) and
+  a full disk. The helper never inspects the bytes; each caller keeps its own
+  sha256 check.
+
+`fetch_skia_for_release.py` and `fetch_v8_for_release.py` import it; the
+workflows (`web-plugins.yml`, `wclap-cloudflare.yml`, `format-baseline-diff.yml`)
+call it as `python3 tools/scripts/download_retry.py URL DEST`. The macOS
+`brew install ccache` step in `build.yml` uses the same schedule inline. A new
+workflow download should use the helper rather than a bare `curl -fsSL`.
