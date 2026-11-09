@@ -146,9 +146,16 @@ positive test then failed as required (exit 42: `first_error` remained
 the original header and binary hashes and restored all four controls to PASS.
 The mutation was temporary and no production source changed.
 
+The dedicated-builder build/source-selftest lane is **NOT CHECKED**: this
+focused host run does not provide that gate, and the focused target build is not
+substituted for it. Dedicated-builder diff coverage is likewise **NOT CHECKED**;
+no coverage percentage is claimed. The locally used test executable is not a
+retained or published binary artifact (**UNAVAILABLE**); only its recorded
+SHA-256 identifies the local run. Full G-10 and A3 remain **PARTIAL**.
+
 The complete machine-readable receipt is
 `docs/validation/g10-spectral/row16-output-clock-receipt.json` (SHA-256
-`a4bc2d66d7f15a05ed0d328cac34410c3d8416d5d79c367a3d924dd877a8f71d`). This
+`990948f0fc4752946596f45a0fb2d2d5cd83a4745b85b9868c5fe2facdcc57ae`). This
 packet qualifies the named output-clock/fault boundary and the existing
 allocation and unchanged-output controls only; full G-10 and A3 status remains
 PARTIAL.

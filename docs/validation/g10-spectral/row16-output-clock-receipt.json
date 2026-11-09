@@ -70,5 +70,19 @@
     }
   },
   "verdict": "PASS_FOR_ROW16_BOUNDED_EVIDENCE",
-  "scope_limit": "This packet qualifies the named output-clock/fault boundary and existing allocation/output controls only. It does not qualify the full G-10 phase or A3."
+  "scope_limit": "This packet qualifies the named output-clock/fault boundary and existing allocation/output controls only. It does not qualify the full G-10 phase or A3.",
+  "gate_status": {
+    "dedicated_builder_build_and_source_selftest": {
+      "status": "NOT CHECKED",
+      "reason": "The dedicated-builder build and source-selftest lanes were unavailable for this evidence run; the focused target build is not substituted for those gates."
+    },
+    "diff_coverage": {
+      "status": "NOT CHECKED",
+      "reason": "The dedicated-builder diff-coverage lane was unavailable for this evidence run; no coverage percentage is claimed."
+    }
+  },
+  "binary_artifact_boundary": {
+    "status": "UNAVAILABLE",
+    "detail": "The focused test executable was used locally and its SHA-256 is recorded above, but the binary artifact is not retained or published in this repository receipt."
+  }
 }
