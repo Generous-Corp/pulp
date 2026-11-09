@@ -114,26 +114,67 @@ Element.prototype.click = function() {
 // setFocus()/clearFocus() run the same transfer a pointer press does, and
 // refuse views that cannot take focus (not focusable, disabled, hidden), so a
 // focus() on a plain container leaves the focused field alone.
+//
+// A native focus change (a click, Tab, or setFocus) reaches __dispatch__ as a
+// `focus` / `blur` event on the element and is turned into the DOM events by
+// __pulpApplyNativeFocus__ below, so focus() and blur() only dispatch the DOM
+// events themselves when no native change happened.
 Element.prototype.focus = function() {
     var navigationClaim = this.getAttribute && this.getAttribute("aria-haspopup")
         && this.getAttribute("data-pulp-popup-default") !== "off"
         && typeof claimDocumentNavigationFocus === "function";
+    var nativeFocused = false;
     // A popup trigger hands keyboard focus to the document navigation owner
     // instead, so giving the trigger native focus first would only be undone.
     if (!navigationClaim && this._nativeCreated && typeof setFocus === "function")
-        setFocus(this._id);
+        nativeFocused = !!setFocus(this._id);
     if (typeof document !== "undefined") document.activeElement = this;
     if (navigationClaim) claimDocumentNavigationFocus();
-    this.dispatchEvent(_makeEvent("focus", this, { bubbles: false }));
+    if (!nativeFocused) {
+        this._hasFocus = true;
+        this._focusVisible = true;
+        this.dispatchEvent(_makeEvent("focus", this, { bubbles: false }));
+        this.dispatchEvent(_makeEvent("focusin", this, { bubbles: true }));
+    }
 };
 
 Element.prototype.blur = function() {
+    var nativeBlurred = false;
     if (this._nativeCreated && typeof clearFocus === "function")
-        clearFocus(this._id);
+        nativeBlurred = !!clearFocus(this._id);
     if (typeof document !== "undefined" && document.activeElement === this)
         document.activeElement = null;
-    this.dispatchEvent(_makeEvent("blur", this, { bubbles: false }));
+    if (!nativeBlurred) {
+        this._hasFocus = false;
+        this._focusVisible = false;
+        this.dispatchEvent(_makeEvent("blur", this, { bubbles: false }));
+        this.dispatchEvent(_makeEvent("focusout", this, { bubbles: true }));
+    }
 };
+
+// Applies one native focus change to the element's DOM state and events.
+// `data.cause` is "pointer", "keyboard" or "programmatic"; `data.focusVisible`
+// is true for the last two. `focus` and `blur` do not bubble. `focusin` and
+// `focusout` do, which is what lets an ancestor track :focus-within.
+function __pulpApplyNativeFocus__(el, gained, data) {
+    var cause = (data && data.cause) || "programmatic";
+    var visible = !!(data && data.focusVisible);
+    if (gained) {
+        el._hasFocus = true;
+        el._focusVisible = visible;
+        el._focusCause = cause;
+        if (typeof document !== "undefined") document.activeElement = el;
+        el.dispatchEvent(_makeEvent("focus", el, { bubbles: false }));
+        el.dispatchEvent(_makeEvent("focusin", el, { bubbles: true }));
+    } else {
+        el._hasFocus = false;
+        el._focusVisible = false;
+        if (typeof document !== "undefined" && document.activeElement === el)
+            document.activeElement = null;
+        el.dispatchEvent(_makeEvent("blur", el, { bubbles: false }));
+        el.dispatchEvent(_makeEvent("focusout", el, { bubbles: true }));
+    }
+}
 
 // ── Mount-time focus: `autofocus` and the dialog default ────────────────────
 //
@@ -341,14 +382,13 @@ Element.prototype._registerNativeEvent = function(type) {
         });
     } else if (type === "keydown" || type === "keyup" || type === "keypress") {
         // Global key events are forwarded through __dispatch__
-    } else if (type === "focus") {
-        on(id, "focus", function() {
-            self.dispatchEvent(_makeEvent("focus", self));
-        });
-    } else if (type === "blur") {
-        on(id, "blur", function() {
-            self.dispatchEvent(_makeEvent("blur", self));
-        });
+    } else if (type === "focus" || type === "focusin") {
+        // __dispatch__ owns the DOM fan-out for native focus changes (see
+        // __pulpApplyNativeFocus__); registering a second dispatcher here would
+        // deliver every focus event twice.
+        on(id, "focus", function() {});
+    } else if (type === "blur" || type === "focusout") {
+        on(id, "blur", function() {});
     } else if (type === "wheel") {
         // `el.addEventListener('wheel', fn)` routes through the bridge
         // `registerWheel` / `__dispatch__` path so DOM consumers can use

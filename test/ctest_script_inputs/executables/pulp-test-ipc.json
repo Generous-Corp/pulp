@@ -1,0 +1,18 @@
+{
+ "name": "pulp-test-ipc",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-connected-child-process-fixture"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_ipc.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

@@ -1,0 +1,18 @@
+{
+ "name": "rack-fidelity",
+ "record": {
+  "entry": "tools/rack/test_fidelity.py",
+  "inputs": [
+   "tools/rack/crash_watch.py",
+   "tools/rack/fetch_sdk.py",
+   "tools/rack/fidelity.py",
+   "tools/rack/fidelity_signal.py",
+   "tools/rack/measure_ranges.py",
+   "tools/rack/module_kinds.py",
+   "tools/rack/param_units.py",
+   "tools/rack/portmap_seed.py",
+   "tools/rack/test_fidelity.py"
+  ],
+  "kind": "python"
+ }
+}

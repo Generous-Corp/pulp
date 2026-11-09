@@ -1,0 +1,13 @@
+{
+ "name": "install-shipyard-queue-repair",
+ "record": {
+  "entry": "tools/scripts/test_install_shipyard_queue_repair.py",
+  "inputs": [
+   "tools/install-shipyard.sh",
+   "tools/scripts/test_install_shipyard_queue_repair.py",
+   "tools/shipyard.toml",
+   "tools/toolchain/shipyard.sha256"
+  ],
+  "kind": "python"
+ }
+}

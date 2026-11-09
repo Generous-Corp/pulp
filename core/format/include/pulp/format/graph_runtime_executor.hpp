@@ -41,6 +41,41 @@ struct GraphRuntimeAudioEdgeProbe {
     std::uint64_t timestamp_samples = 0;
 };
 
+// One source audio -> destination parameter observation. The source buffer is
+// sampled after per-edge range mapping and slew, before the destination's
+// per-parameter mixing and bounds clamp. It describes the selected edge's
+// mapped/slewed contribution, not the final value consumed by the parameter.
+struct GraphRuntimeControlEdgeProbe {
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
+                  std::atomic<bool>::is_always_lock_free);
+    graph::GraphRuntimeProbe<> samples;
+    std::uint32_t source_index = 0;
+    std::uint32_t source_port = 0;
+    std::uint32_t destination_index = 0;
+    std::uint32_t parameter_id = 0;
+    std::uint32_t edge_index = 0;
+    std::uint64_t timestamp_samples = 0;
+};
+
+// One MIDI/event edge observation. The bounded sample carries the event count
+// and the first event's status/offset; event payloads remain in the graph's
+// existing bounded MIDI buffers and are never copied into the probe ring.
+struct GraphRuntimeEventEdgeProbe {
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
+                  std::atomic<bool>::is_always_lock_free);
+    graph::GraphRuntimeProbe<> samples;
+    std::uint32_t source_index = 0;
+    std::uint32_t destination_index = 0;
+    std::uint32_t edge_index = 0;
+    std::uint64_t timestamp_samples = 0;
+};
+
+struct GraphRuntimeEdgeProbeSet {
+    GraphRuntimeAudioEdgeProbe* audio = nullptr;
+    GraphRuntimeControlEdgeProbe* control = nullptr;
+    GraphRuntimeEventEdgeProbe* event = nullptr;
+};
+
 enum class AudioRateModulationDelivery : std::uint8_t {
     LegacyParameterEvents = 0,
     DenseViews = 1,
@@ -386,6 +421,13 @@ class GraphRuntimeBufferPool {
     bool bind(const GraphRuntimeSnapshot& snapshot) noexcept;
     bool bound_to(const GraphRuntimeSnapshot& snapshot) const noexcept {
         return bound_snapshot_id_ != 0 && bound_snapshot_id_ == snapshot.id();
+    }
+
+    // Control-side provenance for receipts and diagnostics. This is the exact
+    // snapshot token written by bind(), rather than a value inferred from the
+    // pool's capacity or the caller's requested block size.
+    std::uint64_t bound_snapshot_id() const noexcept {
+        return bound_snapshot_id_;
     }
 
     // One node's resolved routing state while the pool is bound.
@@ -817,7 +859,8 @@ public:
                    GraphRuntimeCommandHandler command_handler = {},
                    GraphRuntimeEventSink event_sink = {},
                    std::span<const std::uint8_t> skip_mask = {},
-                   GraphRuntimeAudioEdgeProbe* audio_probe = nullptr) noexcept;
+                   GraphRuntimeAudioEdgeProbe* audio_probe = nullptr,
+                   GraphRuntimeEdgeProbeSet* edge_probes = nullptr) noexcept;
 
     // `skip_mask` (optional, indexed by dense node index; empty = run everything):
     // a non-zero entry means "do not run this node — its output slots are already

@@ -1,0 +1,16 @@
+{
+ "name": "pulp-editor-bridge-contract-check",
+ "record": {
+  "entry": "tools/bridge/bridge_contract_check.py",
+  "inputs": [
+   "docs/reference/generated-editor-bridge-contract.md",
+   "tools/bridge/bridge.toml",
+   "tools/bridge/bridge_contract_check.py",
+   "tools/bridge/bridge_contract_safety.py",
+   "tools/bridge/bridge_gen.py",
+   "tools/bridge/generated_editor_bridge.hpp",
+   "tools/bridge/generated_editor_bridge.ts"
+  ],
+  "kind": "python"
+ }
+}

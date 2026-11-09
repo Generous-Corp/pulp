@@ -1,0 +1,55 @@
+{
+  "schema": "pulp.a9.action-plan/v1",
+  "model_id": "deterministic-offline-actions-v1",
+  "model_digest": "sha256:c71de6d73a45012afe1d67d3e3e0a61c78f0b0dea25cfd9716aab39810af5b97",
+  "tool_id": "pulp-graph-agent-loop",
+  "tool_version": "1",
+  "source_sha": "2f3d36dae75c3dca283c58e47f7731356f088e0d",
+  "network_policy": "deny",
+  "plugin_policy": "deny-ambient",
+  "steps": [
+    {
+      "id": "author-graph",
+      "kind": "graph.author"
+    },
+    {
+      "id": "validate-replay",
+      "kind": "graph.validate",
+      "load_plugins": false
+    },
+    {
+      "id": "render-probe",
+      "kind": "graph.render",
+      "edge_probe": true
+    },
+    {
+      "id": "bounded-edit",
+      "kind": "graph.edit",
+      "target": "stage.gain",
+      "value": 0.25
+    },
+    {
+      "id": "saved-input-replay",
+      "kind": "graph.replay",
+      "input": "a9-baseline.pulpgraph"
+    }
+  ],
+  "assertions": [
+    {
+      "id": "semantic_fingerprint",
+      "relation": "baseline == replay; edit preserves topology"
+    }
+  ],
+  "mutations": [
+    {
+      "id": "wrong-edit-oracle",
+      "target": "edit-changes-render",
+      "expected": "reject"
+    },
+    {
+      "id": "wrong-replay-input",
+      "target": "replay-baseline",
+      "expected": "reject"
+    }
+  ]
+}

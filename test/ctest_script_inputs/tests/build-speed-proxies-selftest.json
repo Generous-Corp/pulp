@@ -1,0 +1,10 @@
+{
+ "name": "build-speed-proxies-selftest",
+ "record": {
+  "entry": "tools/scripts/test_build_speed_proxies.py",
+  "inputs": [
+   "tools/scripts/test_build_speed_proxies.py"
+  ],
+  "kind": "python"
+ }
+}

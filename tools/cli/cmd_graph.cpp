@@ -10,16 +10,21 @@
 #include <iostream>
 #include <map>
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/host/graph_rt_report.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 namespace {
 void usage() {
-    std::cout << "Usage: pulp graph <inspect|validate|explain|render|probe|fmt|canonicalize|save> "
+    std::cout << "Usage: pulp graph "
+                 "<inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
                  "<file.pulpgraph> [--json] [--output path]\n";
+    std::cout << "report: [--sample-rate 48000] [--max-block-size 512] [--block-size N] "
+                 "[--measure-blocks 16] (always JSON)\n";
     std::cout << "probe: --input file.wav --source-node NAME --source-port NAME "
                  "--destination-node NAME --destination-port NAME [--block-frames 64] "
+                 "[--edge-kind audio|control|event] [--destination-param ID] "
                  "[--plan] [--latency] [--node-loads]\n";
 }
 void json_error(const std::string& code, const std::string& message) {
@@ -40,6 +45,7 @@ int probe_graph(const std::vector<std::string>& args) {
     bool include_plan = false;
     bool include_latency = false;
     bool include_node_loads = false;
+    std::string edge_kind = "audio";
     for (std::size_t i = 2; i < args.size(); ++i) {
         if (args[i] == "--json")
             continue;
@@ -57,15 +63,24 @@ int probe_graph(const std::vector<std::string>& args) {
         }
         const auto key = args[i];
         if (key != "--input" && key != "--source-node" && key != "--source-port" &&
-            key != "--destination-node" && key != "--destination-port" && key != "--block-frames")
+            key != "--destination-node" && key != "--destination-port" && key != "--block-frames" &&
+            key != "--edge-kind" && key != "--destination-param")
             return fail("invalid_option", "unknown probe option: " + key);
         if (++i == args.size() || !options.emplace(key, args[i]).second)
             return fail("invalid_option", "each probe option requires one value: " + key);
     }
-    for (const auto* key :
-         {"--input", "--source-node", "--source-port", "--destination-node", "--destination-port"})
+    if (options.contains("--edge-kind")) {
+        edge_kind = options["--edge-kind"];
+        if (edge_kind != "audio" && edge_kind != "control" && edge_kind != "event")
+            return fail("invalid_edge_kind", "edge-kind must be audio, control or event");
+    }
+    for (const auto* key : {"--input", "--source-node", "--source-port", "--destination-node"})
         if (options[key].empty())
             return fail("missing_option", std::string("probe requires ") + key);
+    if (edge_kind != "control" && options["--destination-port"].empty())
+        return fail("missing_option", "probe requires --destination-port for audio/event edges");
+    if (edge_kind == "control" && options["--destination-param"].empty())
+        return fail("missing_option", "control probes require --destination-param");
     int block = 64;
     if (options.contains("--block-frames")) {
         const auto& value = options["--block-frames"];
@@ -141,7 +156,9 @@ int probe_graph(const std::vector<std::string>& args) {
     if (!source || !destination)
         return fail("unknown_node", "use existing unique source and destination node names");
     const auto source_port = source->out(options["--source-port"]);
-    const auto destination_port = destination->in(options["--destination-port"]);
+    const auto destination_port = edge_kind == "control"
+                                      ? pulp::host::PortHandle{}
+                                      : destination->in(options["--destination-port"]);
     auto input = pulp::audio::read_audio_file(options["--input"], [block](const auto& info) {
         return info.sample_rate >= 8000 && info.sample_rate <= 192000 && info.num_channels >= 1 &&
                info.num_channels <= 8 && info.num_frames >= 1 && info.num_frames <= 480000 &&
@@ -167,7 +184,19 @@ int probe_graph(const std::vector<std::string>& args) {
                        .input_channels = static_cast<int>(input->num_channels()),
                        .output_channels = 8}))
         return fail("prepare_failed", "graph preparation failed");
-    const auto status = graph.attach_audio_edge_probe(source_port, destination_port);
+    Graph::EdgeProbeStatus status = Graph::EdgeProbeStatus::Busy;
+    if (edge_kind == "audio") {
+        status = graph.attach_audio_edge_probe(source_port, destination_port);
+    } else if (edge_kind == "event") {
+        status = graph.attach_event_edge_probe(source_port, destination_port);
+    } else {
+        std::uint32_t parameter = 0;
+        const auto text = options["--destination-param"];
+        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), parameter);
+        if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
+            return fail("invalid_destination_param", "destination-param must be an integer");
+        status = graph.attach_control_edge_probe(source_port, destination->id, parameter);
+    }
     const char* status_name = "Busy";
     switch (status) {
     case Graph::EdgeProbeStatus::Attached:
@@ -195,8 +224,18 @@ int probe_graph(const std::vector<std::string>& args) {
         break;
     }
     if (status != Graph::EdgeProbeStatus::Attached)
-        return fail(status_name, "cannot attach the requested serial ordinary audio edge");
-    const auto identity = graph.audio_edge_probe_identity();
+        return fail(status_name, "cannot attach the requested prepared control/event edge");
+    const auto identity = edge_kind == "audio"     ? graph.audio_edge_probe_identity()
+                          : edge_kind == "control" ? graph.control_edge_probe_identity()
+                                                   : graph.event_edge_probe_identity();
+    if (edge_kind == "event") {
+        pulp::midi::MidiBuffer events;
+        events.reserve(4);
+        events.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+        events.sort();
+        if (!graph.inject_midi(source->id, events))
+            return fail("event_injection_failed", "event probe could not seed the MIDI input");
+    }
     // Timing is opt-in: an unattached/ordinary graph remains on the zero-cost
     // path, and the per-node clock reads begin only when requested by tooling.
     if (include_node_loads)
@@ -213,8 +252,15 @@ int probe_graph(const std::vector<std::string>& args) {
         if (!rendered.ok)
             return fail("render_failed", "offline probe render failed");
         pulp::graph::GraphRuntimeProbeSample sample;
-        while (graph.read_audio_edge_probe(sample)) {
-            if (!std::isfinite(sample.peak) || !std::isfinite(sample.rms))
+        auto read_sample = [&] {
+            if (edge_kind == "audio")
+                return graph.read_audio_edge_probe(sample);
+            if (edge_kind == "control")
+                return graph.read_control_edge_probe(sample);
+            return graph.read_event_edge_probe(sample);
+        };
+        while (read_sample()) {
+            if (edge_kind == "audio" && (!std::isfinite(sample.peak) || !std::isfinite(sample.rms)))
                 return fail("non_finite_sample",
                             "probe measurement is non-finite; no JSON sample report was published");
             auto record = choc::value::createObject("ProbeSample");
@@ -222,18 +268,33 @@ int probe_graph(const std::vector<std::string>& args) {
             record.addMember("timestamp_samples", static_cast<int64_t>(sample.timestamp_samples));
             record.addMember("edge_index", static_cast<int64_t>(sample.edge_index));
             record.addMember("frames", static_cast<int64_t>(sample.frames));
+            record.addMember("kind", static_cast<int64_t>(sample.kind));
             record.addMember("peak", sample.peak);
             record.addMember("rms", sample.rms);
+            record.addMember("value", sample.value);
+            record.addMember("value_end", sample.value_end);
+            record.addMember("payload_id", static_cast<int64_t>(sample.payload_id));
+            record.addMember("payload_count", static_cast<int64_t>(sample.payload_count));
+            record.addMember("payload_status", static_cast<int64_t>(sample.payload_status));
+            record.addMember("payload_offset", static_cast<int64_t>(sample.payload_offset));
+            record.addMember("payload_dropped", static_cast<int64_t>(sample.payload_dropped));
             records.addArrayElement(record);
         }
     }
     auto report = choc::value::createObject("GraphProbe");
     report.addMember("valid", true);
     report.addMember("code", "Attached");
-    report.addMember("observation", "source_before_mixing_and_pdc");
+    report.addMember("edge_kind", edge_kind);
+    report.addMember("observation", edge_kind == "audio" ? "source_before_mixing_and_pdc"
+                                    : edge_kind == "control"
+                                        ? "per_edge_mapped_and_slewed_before_mixing_and_bounds"
+                                        : "events_before_destination_consumer");
     report.addMember("sample_rate", static_cast<int64_t>(input->sample_rate));
     report.addMember("frames", static_cast<int64_t>(input->num_frames()));
-    report.addMember("dropped", static_cast<int64_t>(graph.audio_edge_probe_dropped()));
+    report.addMember("dropped", static_cast<int64_t>(
+                                    edge_kind == "audio"     ? graph.audio_edge_probe_dropped()
+                                    : edge_kind == "control" ? graph.control_edge_probe_dropped()
+                                                             : graph.event_edge_probe_dropped()));
     auto id = choc::value::createObject("ProbeIdentity");
     id.addMember("graph_identity", std::to_string(identity.authoring.graph_identity));
     id.addMember("generation", std::to_string(identity.authoring.generation));
@@ -242,6 +303,7 @@ int probe_graph(const std::vector<std::string>& args) {
     id.addMember("destination", static_cast<int64_t>(identity.destination));
     id.addMember("source_port", static_cast<int64_t>(identity.source_port));
     id.addMember("destination_port", static_cast<int64_t>(identity.destination_port));
+    id.addMember("parameter_id", static_cast<int64_t>(identity.parameter_id));
     report.addMember("identity", id);
     report.addMember("records", records);
     if (include_plan) {
@@ -318,6 +380,74 @@ int probe_graph(const std::vector<std::string>& args) {
     std::cout << choc::json::toString(report) << '\n';
     return 0;
 }
+bool parse_report_int(const std::string& text, int min, int max, int& out) {
+    int value = 0;
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || value < min ||
+        value > max)
+        return false;
+    out = value;
+    return true;
+}
+
+// `pulp graph report`: prepare the graph offline and print the static realtime
+// report (declared contracts, latency semantics, and a measured pass) as JSON.
+int report_graph(const std::vector<std::string>& args) {
+    int sample_rate = 48000;
+    int max_block = 512;
+    int block = 0;
+    int measure_blocks = 16;
+    for (std::size_t i = 2; i < args.size(); ++i) {
+        const auto& key = args[i];
+        if (key == "--json")
+            continue;
+        int* target = key == "--sample-rate"      ? &sample_rate
+                      : key == "--max-block-size" ? &max_block
+                      : key == "--block-size"     ? &block
+                      : key == "--measure-blocks" ? &measure_blocks
+                                                  : nullptr;
+        if (target == nullptr) {
+            json_error("invalid_option", "unknown report option: " + key);
+            return 2;
+        }
+        const int min = target == &measure_blocks ? 0 : 1;
+        const int max = target == &sample_rate ? 768000 : target == &measure_blocks ? 4096 : 16384;
+        if (++i == args.size() || !parse_report_int(args[i], min, max, *target)) {
+            json_error("invalid_option", key + " requires an integer from " + std::to_string(min) +
+                                             " to " + std::to_string(max));
+            return 2;
+        }
+    }
+    if (block > max_block) {
+        json_error("invalid_option", "--block-size must not exceed --max-block-size");
+        return 2;
+    }
+    pulp::host::SignalGraph graph;
+    pulp::host::GraphLoadOptions load_options;
+    load_options.load_plugins = false;
+    const auto loaded = pulp::host::GraphSerializer::from_file(graph, args[1], load_options);
+    if (!loaded.ok) {
+        json_error(loaded.error.starts_with("graph file ") ? "file_unreadable" : "invalid_graph",
+                   loaded.error);
+        return 1;
+    }
+    if (!graph.prepare(static_cast<double>(sample_rate), max_block)) {
+        json_error("prepare_failed", "graph preparation failed");
+        return 1;
+    }
+    pulp::host::GraphRtReportOptions report_options;
+    report_options.block_size = block;
+    auto report = pulp::host::build_graph_rt_report(graph, report_options);
+    if (measure_blocks > 0) {
+        pulp::host::GraphRtMeasureOptions measure;
+        measure.blocks = measure_blocks;
+        measure.block_size = report.block_size;
+        if (const auto measured = pulp::host::measure_graph_rt_work(graph, measure))
+            pulp::host::apply_graph_rt_measurement(report, *measured, report_options);
+    }
+    std::cout << pulp::host::graph_rt_report_to_json(report) << '\n';
+    return 0;
+}
 } // namespace
 int cmd_graph(const std::vector<std::string>& args) {
     if (args.empty() || args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
@@ -332,6 +462,8 @@ int cmd_graph(const std::vector<std::string>& args) {
     const std::string path = args[1];
     if (op == "probe")
         return probe_graph(args);
+    if (op == "report")
+        return report_graph(args);
     const bool json = std::find(args.begin() + 2, args.end(), "--json") != args.end();
     for (const auto* flag : {"--plan", "--latency", "--node-loads"}) {
         if (std::find(args.begin() + 2, args.end(), flag) != args.end()) {

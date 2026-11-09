@@ -1,0 +1,10 @@
+{
+ "name": "clean-build-cov-selftest",
+ "record": {
+  "entry": "tools/scripts/test_clean_build_cov.py",
+  "inputs": [
+   "tools/scripts/test_clean_build_cov.py"
+  ],
+  "kind": "python"
+ }
+}

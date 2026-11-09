@@ -370,6 +370,7 @@ jobs:
               .github/workflows/android.yml|CMakeLists.txt|\
               core/*|\
               test/fixtures/timeline/*|tools/ci/android-fixture-lane.sh|\
+              tools/ci/android-fixture-marker.sh|\
               tools/cmake/*|tools/deps/manifest.json|\
               tools/scripts/test_android_aligned_buffer.py)
                 affected=true

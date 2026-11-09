@@ -43,6 +43,7 @@ These were built deliberately for exactly this. Reaching for a hand-written
 | Glitch/artifact + "audio doctor" detection | `audio_artifacts.hpp`, `audio_doctor_artifacts.hpp` | `tools/audio/analysis/` |
 | Magnitude response / THD / phase + group delay from rendered buffers | `response_relative_to_input()`, `measure_thd()`, `measure_group_delay()` (gate on `defined_at(hz)` for delay, and the stricter `phase_defined_at(hz)` for phase — a stopband reports undefined, and the accessors return NaN) | `pulp/audio/analysis/audio_spectrum.hpp` |
 | Command-line: render/inspect/compare a WAV without writing C++ | **`pulp audio validate <summarize\|doctor\|compare\|assert>`** (assert checks: `no_nan_inf`, `not_silent`, `silent`, `peak_below`, `frequency_near`) | `tools/cli/cmd_audio_validate.cpp` |
+| What a file's bytes declare before decoding it (container, header fields, region offsets, spec violations, decoder verdict, decode-limit fact) | **`pulp audio inspect <file> [--json]`** / `pulp::audio::inspect_audio_file_layout` | `tools/cli/cmd_audio_inspect.cpp`, `core/audio/include/pulp/audio/audio_file_layout.hpp` |
 | Live per-callback metering / MIDI log / buffer-underrun capture | `pulp::inspect::AudioInspector` | `inspect/include/pulp/inspect/audio_inspector.hpp` |
 | Interactive inspection from an agent session | the canonical broker/control audio capability | Control platform |
 
@@ -277,6 +278,18 @@ this is what keeps `~Processor` from joining that thread against a freed store. 
 crashes only on teardown, only sometimes, so a scene that "passes" a hundred times
 can still be wrong. `test/test_store_lifetime.cpp` pins the ordering.
 
+## A file that "cannot decode" may be a ceiling, not corruption
+
+`validate summarize` decodes through `read_audio_file`; for FLAC/MP3/Ogg that
+path enforces the format registry's `DecodeLimits` (2^30 frames, 64 channels,
+4 GiB of float output) and refuses a header past them. Since the layout report
+landed, that refusal names the limit on stderr. Run `pulp audio inspect` first
+on any large or suspicious file: it reads the header window only and tells you
+whether the decoder would accept the layout and which ceiling it would hit.
+The CHOC WAV path behind `read_audio_file` has no ceiling of its own and
+allocates whatever the header declares; a WAV declaring 2^30+1 frames crashes
+`summarize` with a bus error instead of refusing. Inspect it, do not decode it.
+
 ## Latency evidence lives in the analysis lib, not the scene
 
 If a headless scene needs to prove a processor's *reported* latency against the
@@ -362,3 +375,25 @@ AU v2, AU v3 and standalone adapters service requests too, but LV2, AAX and the
 web adapters do not (`panic_capabilities().serviced` is false there), and a
 headless result says nothing about how a DAW routes the MIDI that comes out. Test:
 `test/test_midi_panic_processor.cpp`.
+
+## Look at the capture: `pulp audio spectrogram` / `pulp audio waveform`
+
+Once a scene or probe has written a WAV, an agent can see it instead of
+reading summaries: `pulp audio spectrogram out.wav --png out.png --scale log`
+and `pulp audio waveform out.wav --png wave.png` draw a PNG with axes and a
+burned-in footer (basename, SHA-256 prefix, settings, tool version) and write
+a `pulp.audio.image.v1` sidecar beside it. The rasterizers are in
+`tools/audio/analysis` (`spectrogram_raster.hpp`, `waveform_raster.hpp`) and
+every stage is a pure function, so a test can assert on a grid or a column
+without rendering a file.
+
+Two rules that keep this honest:
+
+- **Display only, never a gate.** The sidecar says `display_only: true` and
+  nothing in it is read by an analyzer, a detector or a verdict. A bright
+  pixel is a peak-hold over bins and frames through the window's leakage
+  skirt; for a number, use the spectral analyzers above.
+- **Nothing is normalized.** Float above 0 dBFS draws clamped with a red
+  marker and the sidecar's `true_peak` carries the unclamped sample peak, so a
+  hot capture is visible as hot rather than quietly rescaled.
+

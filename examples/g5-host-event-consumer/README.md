@@ -7,11 +7,11 @@ bounded graph-authored producer/consumer lane through one two-frame block and
 two one-frame blocks. The two partitions must produce the same ordered trace
 and counters.
 
-The executable includes planted negatives for stale and duplicate host records,
-late records, transactional output-capacity refusal, stale graph epochs,
-accepted-event overflow, and the per-sample attempt limit. It does not claim
-SignalGraph wiring, adapter timestamp projection, or graph-authored voice
-delivery; those remain separate runtime contracts.
+The executable also constructs the public `SignalGraph` host-ingress adapter.
+It checks exact MIDI sample tuples and feed-forward audio tuples through
+partition schedules containing 1, 32, 64, 127, and 256 frame blocks. The graph
+lane includes missing-edge, one-sample boundary, reversed-tie, and payload
+mismatch negatives. Hosted plugin voice delivery remains outside this slice.
 
 Build against a freshly installed SDK from the same source revision:
 
@@ -26,5 +26,5 @@ ctest --test-dir build-g5-host-event-consumer --output-on-failure
 Expected receipt:
 
 ```text
-g5-host-event-contract PASS checks=79 host_mpe_events=3 graph_events=9 planted_negative=1
+g5-host-event-contract PASS checks=231 host_mpe_events=3 graph_events=9 graph_ingress_events=5 partitions=1,32,64,127,256 planted_negative=5
 ```

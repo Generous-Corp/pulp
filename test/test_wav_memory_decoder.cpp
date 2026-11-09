@@ -2,6 +2,8 @@
 
 #include <pulp/audio/wav_decoder.hpp>
 
+#include "support/wav_fixture_builders.hpp"
+
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -9,95 +11,7 @@
 #include <span>
 #include <vector>
 
-namespace {
-
-using Bytes = std::vector<std::uint8_t>;
-
-void append_id(Bytes& bytes, const char (&id)[5]) {
-    for (std::size_t i = 0; i < 4u; ++i)
-        bytes.push_back(static_cast<std::uint8_t>(id[i]));
-}
-
-void append_u16(Bytes& bytes, std::uint16_t value) {
-    bytes.push_back(static_cast<std::uint8_t>(value));
-    bytes.push_back(static_cast<std::uint8_t>(value >> 8u));
-}
-
-void append_u32(Bytes& bytes, std::uint32_t value) {
-    for (unsigned shift = 0; shift < 32u; shift += 8u)
-        bytes.push_back(static_cast<std::uint8_t>(value >> shift));
-}
-
-void set_u32(Bytes& bytes, std::size_t offset, std::uint32_t value) {
-    for (unsigned shift = 0; shift < 32u; shift += 8u)
-        bytes[offset + shift / 8u] = static_cast<std::uint8_t>(value >> shift);
-}
-
-void append_chunk(Bytes& bytes, const char (&id)[5], std::span<const std::uint8_t> payload) {
-    append_id(bytes, id);
-    append_u32(bytes, static_cast<std::uint32_t>(payload.size()));
-    bytes.insert(bytes.end(), payload.begin(), payload.end());
-    if ((payload.size() & 1u) != 0u)
-        bytes.push_back(0u);
-}
-
-Bytes make_format(std::uint16_t encoding, std::uint16_t channels, std::uint32_t sample_rate,
-                  std::uint16_t bits) {
-    Bytes format;
-    const auto align = static_cast<std::uint16_t>(channels * (bits / 8u));
-    append_u16(format, encoding);
-    append_u16(format, channels);
-    append_u32(format, sample_rate);
-    append_u32(format, sample_rate * align);
-    append_u16(format, align);
-    append_u16(format, bits);
-    return format;
-}
-
-Bytes make_extensible_pcm_format(std::uint16_t channels, std::uint32_t sample_rate,
-                                 std::uint16_t bits) {
-    auto format = make_format(0xfffeu, channels, sample_rate, bits);
-    append_u16(format, 22u);
-    append_u16(format, bits);
-    append_u32(format, channels == 1u ? 0x4u : 0x3u);
-    const Bytes pcm_guid{0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x10u, 0x00u,
-                         0x80u, 0x00u, 0x00u, 0xaau, 0x00u, 0x38u, 0x9bu, 0x71u};
-    format.insert(format.end(), pcm_guid.begin(), pcm_guid.end());
-    return format;
-}
-
-Bytes make_wav(const Bytes& format, const Bytes& data, bool data_first = false,
-               bool odd_junk = false) {
-    Bytes bytes;
-    append_id(bytes, "RIFF");
-    append_u32(bytes, 0u);
-    append_id(bytes, "WAVE");
-    if (odd_junk) {
-        const Bytes junk{0x55u};
-        append_chunk(bytes, "JUNK", junk);
-    }
-    if (data_first)
-        append_chunk(bytes, "data", data);
-    append_chunk(bytes, "fmt ", format);
-    if (!data_first)
-        append_chunk(bytes, "data", data);
-    set_u32(bytes, 4u, static_cast<std::uint32_t>(bytes.size() - 8u));
-    return bytes;
-}
-
-template <typename T> void append_sample(Bytes& bytes, T value) {
-    if constexpr (sizeof(T) == 2u) {
-        append_u16(bytes, std::bit_cast<std::uint16_t>(value));
-    } else if constexpr (sizeof(T) == 4u) {
-        append_u32(bytes, std::bit_cast<std::uint32_t>(value));
-    } else {
-        const auto bits = std::bit_cast<std::uint64_t>(value);
-        append_u32(bytes, static_cast<std::uint32_t>(bits));
-        append_u32(bytes, static_cast<std::uint32_t>(bits >> 32u));
-    }
-}
-
-} // namespace
+using namespace pulp_test::wav;
 
 const char* consumer_drwav_version();
 
@@ -124,6 +38,54 @@ TEST_CASE("byte-span WAV decoder inspects and deinterleaves PCM16", "[audio][wav
     REQUIRE(decoded->channels.size() == 2u);
     CHECK(decoded->channels[0] == std::vector<float>{-1.0f, 32767.0f / 32768.0f});
     CHECK(decoded->channels[1] == std::vector<float>{0.5f, -0.5f});
+}
+
+TEST_CASE("byte-span WAV decoder returns a zero-frame file as no audio, not a failure",
+          "[audio][wav-decoder][zero-frames]") {
+    const auto format = make_format(1u, 2u, 48'000u, 16u);
+
+    SECTION("empty data chunk") {
+        const auto wav = make_wav(format, Bytes{});
+        const auto info = pulp::audio::inspect_wav(wav);
+        REQUIRE(info);
+        CHECK(info->sample_rate == 48'000u);
+        CHECK(info->num_channels == 2u);
+        CHECK(info->num_frames == 0u);
+        CHECK(info->duration_seconds == 0.0);
+
+        const auto decoded = pulp::audio::decode_wav(wav);
+        REQUIRE(decoded);
+        CHECK(decoded->sample_rate == 48'000u);
+        REQUIRE(decoded->channels.size() == 2u);
+        CHECK(decoded->channels[0].empty());
+        CHECK(decoded->channels[1].empty());
+        CHECK(decoded->num_frames() == 0u);
+        CHECK(decoded->empty());
+    }
+    SECTION("empty data chunk ahead of fmt") {
+        const auto wav = make_wav(format, Bytes{}, true);
+        const auto decoded = pulp::audio::decode_wav(wav);
+        REQUIRE(decoded);
+        CHECK(decoded->num_channels() == 2u);
+        CHECK(decoded->num_frames() == 0u);
+    }
+    SECTION("the channel ceiling still applies with no frames to allocate") {
+        const auto wav = make_wav(format, Bytes{});
+        pulp::audio::WavDecodeLimits limits;
+        limits.max_channels = 1u;
+        CHECK_FALSE(pulp::audio::decode_wav(wav, limits));
+        // A zero frame ceiling is refused as a configuration error before any
+        // header is read, so it says nothing about zero-frame files; the
+        // channel ceiling above is the one this file can reach.
+        limits = {};
+        limits.max_frames = 0u;
+        CHECK_FALSE(pulp::audio::decode_wav(wav, limits));
+    }
+    SECTION("a zero channel count is still a defect") {
+        const auto wav = make_wav(make_format(1u, 0u, 48'000u, 16u), Bytes{});
+        CHECK_FALSE(pulp::audio::inspect_wav(wav));
+        CHECK_FALSE(pulp::audio::decode_wav(wav));
+    }
 }
 
 TEST_CASE("byte-span WAV decoder supports PCM and float sample widths", "[audio][wav-decoder]") {

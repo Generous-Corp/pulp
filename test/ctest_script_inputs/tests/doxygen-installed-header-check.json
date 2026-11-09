@@ -1,0 +1,24 @@
+{
+ "name": "doxygen-installed-header-check",
+ "record": {
+  "entry": "tools/scripts/doxygen_installed_header_check.py",
+  "inputs": [
+   "core/runtime/CMakeLists.txt",
+   "core/runtime/include/pulp/runtime/build_info.hpp.in",
+   "core/view/audio/include",
+   "inspect/include",
+   "inspect/include/pulp",
+   "inspect/include/pulp/inspect",
+   "tools/audio/analysis/include",
+   "tools/audio/analysis/include/pulp",
+   "tools/cli/gpu_health/include",
+   "tools/cli/gpu_health/include/pulp_tooling",
+   "tools/cli/gpu_health/include/pulp_tooling/gpu_health",
+   "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_result.hpp",
+   "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+   "tools/cmake/PulpInstallRules.cmake",
+   "tools/scripts/doxygen_installed_header_check.py"
+  ],
+  "kind": "python"
+ }
+}

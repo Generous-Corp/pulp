@@ -164,6 +164,9 @@ endif()
 if(TARGET pulp-inspect-standalone-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-standalone-runtime)
 endif()
+if(TARGET pulp-inspect-agent-toolkit)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-agent-toolkit)
+endif()
 if(TARGET pulp-inspect-ui-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-ui-runtime)
 endif()
@@ -400,6 +403,7 @@ elseif(TARGET pulp-inspect-protocol)
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_manifest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_protocol.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_registry_digest.inc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_vendor_operations.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/inspector_delivery.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/protocol_methods.inc"
@@ -457,6 +461,7 @@ elseif(TARGET pulp-inspect-protocol)
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_write_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_timeline_document_session_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_trace_session_executor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_vendor_operation_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
@@ -471,6 +476,11 @@ elseif(TARGET pulp-inspect-protocol)
     if(TARGET pulp-inspect-standalone-runtime)
         install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_standalone_host.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
+    if(TARGET pulp-inspect-agent-toolkit)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_agent_toolkit.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
     endif()
     if(TARGET pulp-inspect-authoring)
@@ -868,6 +878,8 @@ install(FILES
     # Included by PulpUtils.cmake: pulp_add_sparkle() for standalone apps.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSparkle.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpEmbedData.cmake"
+    # Included by PulpAppTargets.cmake: pulp_add_wgsl_shaders().
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWgslShaders.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFonts.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateMacIcns.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateWindowsIcon.ps1"
@@ -907,6 +919,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDocumentTypes.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
+    # Read by pulp_control_agent_toolkit_declaration() beside its module.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/control_agent_toolkit_operations.json.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_control_shipping_artifact.cmake"
     # Read by check_control_shipping_artifact.cmake relative to its own
@@ -983,6 +997,7 @@ install(FILES
 # so find_package(Pulp) consumers can use the function.
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/encode_binary_data.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/embed_wgsl.py"
     # pulp_add_js_bytecode() builds its generator from this source against
     # the installed Pulp libraries, so the bytecode matches the product's engine.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/pulp_js_bytecode_main.cpp"

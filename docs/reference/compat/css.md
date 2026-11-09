@@ -449,6 +449,14 @@ mapping, evidence, and caveat text.
     / `__pseudo_active` / `__pseudo_disabled`); the note is kept for
     the original triage rationale.
 
+- **`:focus-visible` and `:focus-within`** — supported in stylesheet rules and
+  selector matching. `:focus-visible` matches a focused element whose focus came
+  from the keyboard or from code, never from a pointer press. `:focus-within`
+  matches an element that holds focus or contains the element that does. Both
+  are driven by the native focus events described in the HTML compat page
+  (`_setupPseudoFocusVisible` and `_setupPseudoFocusWithin` in
+  `web-compat-document.js`).
+
 - **CSS `clip-path` + `mask` cluster** —
   Three catalog items flipped `missing` → `partial`.
   * **`css/clipPath`** — bridge fn `setClipPath(id, svg_path_d)`

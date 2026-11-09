@@ -109,6 +109,12 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
         target_sources(${target}_Standalone PRIVATE "${_control_factory_source}")
         target_link_libraries(${target}_Standalone PRIVATE
             ${_PULP_CONTROL_STANDALONE_TARGET})
+        if(PULP_${target}_CONTROL_VENDOR_SOURCES)
+            target_sources(${target}_Standalone PRIVATE ${PULP_${target}_CONTROL_VENDOR_SOURCES})
+            if(_PULP_CONTROL_AGENT_TOOLKIT_TARGET)
+                target_link_libraries(${target}_Standalone PRIVATE ${_PULP_CONTROL_AGENT_TOOLKIT_TARGET})
+            endif()
+        endif()
 
         if("dev.pulp.ui/capture@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES OR
            "dev.pulp.ui/input@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
@@ -156,6 +162,12 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
             "${_control_host_entry}")
         target_link_libraries(${target}_ControlHost PRIVATE
             ${target}_Core ${_standalone_target} ${_PULP_CONTROL_STANDALONE_TARGET})
+        if(PULP_${target}_CONTROL_VENDOR_SOURCES)
+            target_sources(${target}_ControlHost PRIVATE ${PULP_${target}_CONTROL_VENDOR_SOURCES})
+            if(_PULP_CONTROL_AGENT_TOOLKIT_TARGET)
+                target_link_libraries(${target}_ControlHost PRIVATE ${_PULP_CONTROL_AGENT_TOOLKIT_TARGET})
+            endif()
+        endif()
         if("dev.pulp.graph/modulation-route.edit@1" IN_LIST PULP_${target}_CONTROL_CAPABILITIES)
             target_sources(${target}_ControlHost PRIVATE
                 "${_control_graph_authority_factory_source}")
@@ -216,11 +228,13 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
         else()
             set(_pulp_control_broker_prefix "${CMAKE_INSTALL_PREFIX}")
         endif()
-        set(_control_install_script
-            "${CMAKE_CURRENT_BINARY_DIR}/${target}_install_control_host_$<CONFIG>.cmake")
-        file(GENERATE OUTPUT "${_control_install_script}" CONTENT
-            "set(PULP_CONTROL_HOST_ID \"${_pulp_control_host_id}\")\nset(PULP_CONTROL_HOST_SOURCE \"$<TARGET_FILE:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_MANIFEST \"$<TARGET_FILE_DIR:${target}_ControlHost>/${target}.inspector-capabilities.json\")\nset(PULP_CONTROL_HOST_RUNTIME_DIR \"$<TARGET_FILE_DIR:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_ROOT \"\$ENV{DESTDIR}${_pulp_control_broker_prefix}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/control-hosts\")\ninclude(\"${CMAKE_CURRENT_FUNCTION_LIST_DIR}/install_control_host.cmake\")\n")
-        install(SCRIPT "${_control_install_script}" COMPONENT Runtime)
+        if(NOT PULP_SKIP_CONTROL_HOST_INSTALL)
+            set(_control_install_script
+                "${CMAKE_CURRENT_BINARY_DIR}/${target}_install_control_host_$<CONFIG>.cmake")
+            file(GENERATE OUTPUT "${_control_install_script}" CONTENT
+                "set(PULP_CONTROL_HOST_ID \"${_pulp_control_host_id}\")\nset(PULP_CONTROL_HOST_SOURCE \"$<TARGET_FILE:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_MANIFEST \"$<TARGET_FILE_DIR:${target}_ControlHost>/${target}.inspector-capabilities.json\")\nset(PULP_CONTROL_HOST_RUNTIME_DIR \"$<TARGET_FILE_DIR:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_ROOT \"\$ENV{DESTDIR}${_pulp_control_broker_prefix}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/control-hosts\")\ninclude(\"${CMAKE_CURRENT_FUNCTION_LIST_DIR}/install_control_host.cmake\")\n")
+            install(SCRIPT "${_control_install_script}" COMPONENT Runtime)
+        endif()
         add_custom_target(${target}_RemoveControlHost
             COMMAND "${CMAKE_COMMAND}"
                 -DPULP_CONTROL_HOST_ID=${_pulp_control_host_id}
@@ -336,6 +350,10 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpDocumentTypes.cmake")
 # Pulp targets exist. The function definition is unchanged; this PulpUtils
 # include() preserves the existing public surface of `include(PulpUtils)`.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpEmbedData.cmake")
+
+# pulp_add_wgsl_shaders(): embed .wgsl files as string constants and validate
+# them at build time where the host can run Dawn.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpWgslShaders.cmake")
 
 # pulp_register_font() — public font-registration macro for plugin authors.
 # Lives in its own file so SDK consumers who only want

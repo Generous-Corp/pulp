@@ -18,6 +18,7 @@ target_sources(pulp-state PRIVATE
     src/state_tree.cpp
     src/state_tree_sync.cpp
     src/properties_file.cpp
+    src/midi_learn_persistence.cpp
 )
 
 target_link_libraries(pulp-state PUBLIC pulp::runtime)

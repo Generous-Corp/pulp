@@ -199,7 +199,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SaturatorT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:5f3e39f13efe4c52be18675c58fb85a23a8dff283eb5abefadd0e5304df0073b"
+                    "sha256:667d9d469664030330fd147b71a092407d327a5338fc6e09018c943a2f919e6e"
                 ),
             )
         ],
@@ -361,7 +361,7 @@ EXPORTS = [
                 qualified_name="pulp::midi::MpeVoiceTracker",
                 target="Pulp::midi",
                 header_fingerprint=(
-                    "sha256:aca221889b5e62dd37fe9890c1d8009f7d8479a0b83f4a49986bde3fa2a6dbdc"
+                    "sha256:c90be261b57145983c90b269c2d4512b9d3211f492032dbc55885c197cfb6299"
                 ),
             )
         ],

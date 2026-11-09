@@ -867,12 +867,54 @@ def _canonical_sha256(value: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _github_json(url: str, token: str) -> dict[str, Any]:
+_DIAGNOSTIC_HEADERS = (
+    "x-ratelimit-remaining",
+    "x-ratelimit-resource",
+    "retry-after",
+    "x-github-sso",
+    "x-github-request-id",
+)
+
+
+def _http_error_detail(exc: Exception, token: str) -> str:
+    """Diagnostic suffix for an HTTP failure: body prefix and selected headers.
+
+    Diagnostics only; the caller still fails closed. The token is never
+    emitted, even if the response body were to echo it.
+    """
+    if not isinstance(exc, urllib.error.HTTPError):
+        return ""
+    try:
+        body = exc.read(500).decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 - diagnostics must not mask the failure
+        body = "<unreadable>"
+    headers = exc.headers
+    parts = []
+    for name in _DIAGNOSTIC_HEADERS:
+        value = headers.get(name) if headers is not None else None
+        if value is not None:
+            parts.append(f"{name}={value}")
+    detail = f" [body={body[:500]!r}"
+    if parts:
+        detail += "; " + ", ".join(parts)
+    detail += "]"
+    if token:
+        detail = detail.replace(token, "<redacted>")
+    return detail
+
+
+def _github_json(
+    url: str, token: str, *, allow_anonymous: bool = False, expected: type = dict
+) -> Any:
     request = urllib.request.Request(
         url,
         headers={
             "Accept": "application/vnd.github+json",
-            "Authorization": "Bearer " + token,
+            **(
+                {"Authorization": "Bearer " + token}
+                if token or not allow_anonymous
+                else {}
+            ),
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
@@ -881,12 +923,48 @@ def _github_json(url: str, token: str) -> dict[str, Any]:
             value = json.load(response)
     except (urllib.error.URLError, json.JSONDecodeError) as exc:
         endpoint = urllib.parse.urlsplit(url).path
+        detail = _http_error_detail(exc, token)
         raise FreezeError(
-            f"cannot verify Vellum authority at {endpoint}: {exc}"
+            f"cannot verify Vellum authority at {endpoint}: {exc}{detail}"
         ) from exc
-    if not isinstance(value, dict):
-        raise FreezeError("Vellum verification returned a non-object")
+    # Each endpoint has one JSON shape (an object, or an array for list
+    # endpoints); any other shape fails closed.
+    if not isinstance(value, expected):
+        raise FreezeError(
+            "Vellum verification returned a non-object" if expected is dict
+            else f"Vellum verification returned a non-{expected.__name__}"
+        )
     return value
+
+
+def _public_github_json(
+    url: str, token: str, fallback_token: str | None, *, expected: type = dict
+) -> Any:
+    """Read a public Vellum object, retrying a 403 with the workflow's own token.
+
+    The shared reader-App installation token has one rate bucket for every
+    concurrent run; when it is refused (403/429), the same read is repeated under
+    ``fallback_token`` (the workflow's GITHUB_TOKEN, a separate bucket) or
+    anonymously. Only the credential changes: the caller still compares the
+    returned blob SHA with the pinned copy, and any other failure, or a failed
+    retry, raises.
+    """
+    try:
+        return _github_json(url, token, expected=expected)
+    except FreezeError as exc:
+        cause = exc.__cause__
+        if not (isinstance(cause, urllib.error.HTTPError) and cause.code in (403, 429)):
+            raise
+        first = str(exc)
+    endpoint = urllib.parse.urlsplit(url).path
+    print(
+        f"::warning::vellum-freeze: reader App token was refused for {endpoint}; "
+        "FALLBACK read of this public path with "
+        + ("the workflow GITHUB_TOKEN" if fallback_token else "no credential")
+        + f" (first failure: {first})",
+        file=sys.stderr,
+    )
+    return _github_json(url, fallback_token or "", allow_anonymous=True, expected=expected)
 
 
 def _git_blob(repo: pathlib.Path, revision: str, path: str) -> str:
@@ -937,7 +1015,7 @@ def _verify_vellum_trust(
     if (
         repository.get("id") != EXPECTED_FRAMEWORK_REPOSITORY_ID
         or repository.get("full_name") != EXPECTED_FRAMEWORK_REPOSITORY
-        or repository.get("private") is not True
+        or not isinstance(repository.get("private"), bool)
         or repository.get("archived") is not False
     ):
         raise FreezeError("Vellum repository identity or state differs")
@@ -1287,11 +1365,19 @@ def _receipt_mode(args: argparse.Namespace) -> int:
     token = os.environ.get("VELLUM_READER_TOKEN")
     report["receipt_source"] = "unchecked: no Vellum reader token"
     if token and report["state"] == "active":
-        try:
-            problems = receipt.receipt_copy_problems(
-                repo, (base, args.head),
-                lambda path: _github_json(f"https://api.github.com/{path}", token),
+        def fetch(path: str, expected: type = dict) -> Any:
+            return _public_github_json(
+                f"https://api.github.com/{path}",
+                token,
+                os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
+                expected=expected,
             )
+
+        try:
+            problems = receipt.receipt_copy_problems(repo, (base, args.head), fetch)
+            # The framework-transfer record must be Vellum's transfer record at
+            # its framework_commit, a commit on Vellum's main.
+            problems += receipt.transfer_copy_problems(repo, (base, args.head), fetch)
         except (receipt.ReceiptDriftError, FreezeError, OSError) as exc:
             print(f"vellum-freeze receipt mode: {exc}", file=sys.stderr)
             return 1

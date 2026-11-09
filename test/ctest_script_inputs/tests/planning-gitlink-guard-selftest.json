@@ -1,0 +1,10 @@
+{
+ "name": "planning-gitlink-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_planning_gitlink_guard.py",
+  "inputs": [
+   "tools/scripts/test_planning_gitlink_guard.py"
+  ],
+  "kind": "python"
+ }
+}

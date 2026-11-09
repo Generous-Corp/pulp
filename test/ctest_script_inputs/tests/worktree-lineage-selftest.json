@@ -1,0 +1,11 @@
+{
+ "name": "worktree-lineage-selftest",
+ "record": {
+  "entry": "tools/scripts/test_worktree_lineage.sh",
+  "inputs": [
+   "tools/scripts/test_worktree_lineage.sh",
+   "tools/scripts/worktree_lineage.sh"
+  ],
+  "kind": "shell"
+ }
+}

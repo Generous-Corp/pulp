@@ -68,8 +68,17 @@
 /// `group_delay_samples()` reports it exactly. `adaa2` (second order) suppresses
 /// aliases further for one more `F2` evaluation, at one whole sample of delay
 /// — reported, and matched on the dry path — and a steeper top-octave
-/// roll-off. `oversample_2x` keeps the house half-band path available for
-/// chains that must stay phase-coherent with another oversampled stage; it
+/// roll-off. `adaa_iir` replaces the finite averaging kernel of the
+/// antiderivative methods with a low-pass IIR kernel (a fourth-order Butterworth
+/// at 0.3 of the sample rate by default, see antiderivative_iir.hpp): it cuts
+/// aliases of heavily driven signals several dB below `adaa2` (about 7 dB for
+/// tanh at +30 dB drive) and reports its group delay of about 1.4 samples. Its
+/// frequency response is flatter than `adaa2`'s below a quarter of the sample
+/// rate (-0.2 dB against -1.2 dB at 0.2 of the rate) and then much steeper
+/// (-10 dB against -5 dB at 0.4 of the rate, -18 dB against -8 dB at Nyquist),
+/// so the wet path is a lowpass near 0.3 of the sample rate; keep that in mind
+/// when mixing it with a bright dry signal. `oversample_2x` keeps the house
+/// half-band path available for chains that must stay phase-coherent with another oversampled stage; it
 /// reports its latency exactly rather than estimating. `off` exists only for
 /// tests and the CPU floor.
 ///
@@ -117,8 +126,11 @@
 /// curve). Arfib, JAES 27(10), 1979, and Le Brun, JAES 27(4), 1979, for the
 /// waveshaping method. Parker, Zavalishin & Le Bivic, DAFx-16, and Bilbao,
 /// Esqueda, Parker & Välimäki, IEEE SPL 24(7), 2017, for antiderivative
-/// antialiasing. RBJ "Audio EQ Cookbook" for the shelf topology family.
+/// antialiasing. La Pastina, D'Angelo & Gabrielli, "Arbitrary-Order IIR
+/// Antiderivative Antialiasing", DAFx 2021, for the IIR kernel option. RBJ
+/// "Audio EQ Cookbook" for the shelf topology family.
 
+#include <pulp/signal/antiderivative_iir.hpp>
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/oversampling.hpp>
@@ -146,6 +158,7 @@ enum class SaturatorAliasPolicy : std::uint8_t {
     oversample_2x, ///< House linear-phase half-band pair. Latency reported exactly.
     off,           ///< Raw per-sample evaluation. Tests and the CPU floor only.
     adaa2,         ///< Second-order antiderivative antialiasing. One sample of delay.
+    adaa_iir,      ///< IIR-kernel antiderivative antialiasing. Group delay of the kernel.
 };
 
 namespace detail {
@@ -553,8 +566,24 @@ public:
         adaa2_history_[0] = input_history_[0];
         adaa2_history_[1] = input_history_[1];
         reseed_adaa();
+        reseed_iir();
     }
     AliasPolicy alias_policy() const { return alias_policy_; }
+
+    /// The antialiasing kernel `adaa_iir` uses. A control-thread call: it
+    /// restarts the kernel's state. Group delay beyond 31 samples is not
+    /// accepted (the dry-path alignment ring holds 127). Returns false, and
+    /// keeps the current kernel, for a rejected kernel.
+    bool set_adaa_iir_kernel(const AntiderivativeIirKernel& kernel) {
+        if (kernel.size() == 0 || kernel.group_delay_samples() > 31.0)
+            return false;
+        adaa_iir_.set_kernel(kernel);
+        reseed_iir();
+        return true;
+    }
+    const AntiderivativeIirKernel& adaa_iir_kernel() const {
+        return adaa_iir_.kernel();
+    }
 
     void set_mix(double wet01) {
         if (!std::isfinite(wet01)) return;
@@ -568,15 +597,21 @@ public:
 
     /// The integer delay the host should compensate, matched on the dry path.
     /// One sample for `adaa2`, whose three-point stencil is centred one sample
-    /// back; the composed oversampler's own reported latency for
-    /// `oversample_2x`; zero for `off`, and zero for `adaa`, whose half sample
-    /// is below what an integer delay can express (`group_delay_samples()`).
+    /// back; the whole samples of the IIR kernel's group delay for `adaa_iir`
+    /// (1 for the default kernel, whose delay is about 1.4 samples: the
+    /// remaining fraction is not compensated, so a 50 percent dry/wet mix dips
+    /// by about 1.8 dB at Nyquist); the composed oversampler's own reported
+    /// latency for `oversample_2x`; zero for `off`, and zero for `adaa`, whose
+    /// half sample is below what an integer delay can express
+    /// (`group_delay_samples()`).
     int latency_samples() const noexcept {
         switch (alias_policy_) {
         case AliasPolicy::oversample_2x:
             return oversample_latency_;
         case AliasPolicy::adaa2:
             return 1;
+        case AliasPolicy::adaa_iir:
+            return static_cast<int>(adaa_iir_.kernel().group_delay_samples());
         case AliasPolicy::adaa:
         case AliasPolicy::off:
             return 0;
@@ -585,14 +620,17 @@ public:
     }
 
     /// The wet path's exact delay on the linear part of the curve, in samples:
-    /// 0.5 for `adaa` (its two-tap average), 1 for `adaa2`, the oversampler's
-    /// exact figure for `oversample_2x`, 0 for `off`.
+    /// 0.5 for `adaa` (its two-tap average), 1 for `adaa2`, the kernel's
+    /// low-frequency group delay for `adaa_iir`, the oversampler's exact figure
+    /// for `oversample_2x`, 0 for `off`.
     double group_delay_samples() const noexcept {
         switch (alias_policy_) {
         case AliasPolicy::oversample_2x:
             return oversampler_.latency().exact_input_samples;
         case AliasPolicy::adaa2:
             return 1.0;
+        case AliasPolicy::adaa_iir:
+            return adaa_iir_.kernel().group_delay_samples();
         case AliasPolicy::adaa:
             return 0.5;
         case AliasPolicy::off:
@@ -607,6 +645,7 @@ public:
         adaa2_history_[0] = adaa2_history_[1] = 0.0;
         input_history_[0] = input_history_[1] = 0.0;
         reseed_adaa();
+        reseed_iir();
         pre_filter_.reset();
         de_filter_.reset();
         oversampler_.reset();
@@ -639,6 +678,9 @@ public:
                 break;
             case AliasPolicy::adaa2:
                 wet = shaped_adaa2(x);
+                break;
+            case AliasPolicy::adaa_iir:
+                wet = adaa_iir_.process(ShaperCurve{this}, x);
                 break;
             case AliasPolicy::oversample_2x:
                 wet = oversampler_.process(static_cast<SampleType>(x), [this](SampleType s) {
@@ -683,6 +725,7 @@ private:
         adaa2_history_[0] = adaa2_history_[1] = 0.0;
         input_history_[0] = input_history_[1] = 0.0;
         reseed_adaa();
+        reseed_iir();
         pre_filter_.reset();
         de_filter_.reset();
         oversampler_.reset();
@@ -732,6 +775,13 @@ private:
     /// Rebuilds both ADAA paths' cached antiderivatives from the input history
     /// under the current shape, drive and bias, so one antiderivative per
     /// sample suffices and a parameter change never mixes two settings.
+    /// The IIR kernel's memory is the filtered curve history, which stays valid
+    /// across a parameter change, so it is restarted only when the path starts
+    /// or the history is discarded: from the steady state of the latest input.
+    void reseed_iir() {
+        adaa_iir_.reseed(input_history_[0], shaped(input_history_[0]));
+    }
+
     void reseed_adaa() {
         adaa_previous_antiderivative_ = antiderivative(adaa_previous_);
         adaa2_.reset(shape_, drive_ * adaa2_history_[0] + bias_,
@@ -825,6 +875,30 @@ private:
     double adaa_previous_ = 0.0;
     double adaa_previous_antiderivative_ = 0.0;
     double adaa2_history_[2] = {0.0, 0.0};
+    // The shaper as a curve for the IIR-kernel path: its value, the kinks of
+    // the cubic's clip boundary, and the width over which it bends.
+    struct ShaperCurve {
+        static constexpr bool piecewise_linear = false;
+        const SaturatorT* self;
+        double operator()(double x) const noexcept {
+            return self->shaped(x);
+        }
+        double length_scale() const noexcept {
+            return 1.0 / self->drive_;
+        }
+        int breakpoints(double lo, double hi, double* out, int capacity) const noexcept {
+            if (self->shape_ != Shape::cubic_soft)
+                return 0;
+            int n = 0;
+            for (const double edge : {-1.0, 1.0}) {
+                const double x = (edge - self->bias_) / self->drive_;
+                if (n < capacity && x > lo && x < hi)
+                    out[n++] = x;
+            }
+            return n;
+        }
+    };
+    AntiderivativeIir adaa_iir_{AntiderivativeIirKernel::butterworth(4, 0.30)};
     // The two most recent shaper inputs, whatever the policy; a policy switch
     // seeds the ADAA paths from them.
     double input_history_[2] = {0.0, 0.0};

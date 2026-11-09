@@ -116,6 +116,8 @@ on:
       - 'tools/scripts/fetch_skia_for_release.py'
       - 'tools/scripts/test_fetch_skia_for_release.py'
       - 'tools/scripts/test_fetch_skia_for_release_extra.py'
+      - 'tools/scripts/download_retry.py'
+      - 'tools/scripts/test_download_retry.py'
       - 'tools/scripts/verify_skia_m153_capabilities.py'
       - 'tools/scripts/test_verify_skia_m153_capabilities.py'
       - 'tools/build-skia.sh'
@@ -265,6 +267,8 @@ on:
       - 'tools/scripts/fetch_skia_for_release.py'
       - 'tools/scripts/test_fetch_skia_for_release.py'
       - 'tools/scripts/test_fetch_skia_for_release_extra.py'
+      - 'tools/scripts/download_retry.py'
+      - 'tools/scripts/test_download_retry.py'
       - 'tools/scripts/verify_skia_m153_capabilities.py'
       - 'tools/scripts/test_verify_skia_m153_capabilities.py'
       - 'tools/build-skia.sh'
@@ -416,7 +420,6 @@ jobs:
           python3 tools/scripts/test_control_shipping_native_workflow.py
           python3 tools/scripts/test_codecov_upload_contract.py
           python3 tools/scripts/test_coverage_surface_contract.py
-          python3 tools/scripts/test_generated_version_bump_check.py
 
       - name: View-audio archive producer contract
         shell: bash
@@ -537,6 +540,7 @@ jobs:
           python3 tools/scripts/test_checkout_preflight.py
           python3 tools/scripts/test_fetch_skia_for_release.py
           python3 tools/scripts/test_fetch_skia_for_release_extra.py
+          python3 tools/scripts/test_download_retry.py
           python3 tools/scripts/test_verify_skia_m153_capabilities.py
           python3 tools/scripts/test_build_skia_source_pin.py
           python3 tools/deps/test_validate_render_update.py
@@ -605,3 +609,28 @@ jobs:
           shellcheck: false
           pyflakes: false
           flags: ''
+
+  # The version-bump fast-path suite builds dozens of fixture clones and takes
+  # 6-8 minutes on a hosted runner (every other contract here finishes in
+  # about two minutes combined). Run on its own clock so it can neither starve
+  # the lint job's 10-minute budget nor be cancelled by it.
+  generated-version-bump-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: generated version-bump fast-path contract
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Generated version-bump fast-path contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'pyyaml>=6'
+          python3 tools/scripts/test_generated_version_bump_check.py

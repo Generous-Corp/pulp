@@ -394,12 +394,12 @@ commands:
 
   - name: graph
     status: usable
-    summary: Inspect, validate, explain, format, render, and probe saved graphs offline.
+    summary: Inspect, validate, explain, format, render, probe, and report on saved graphs offline.
     args:
       - name: operation
         kind: positional
         required: true
-        description: inspect, validate, explain, render, probe, fmt, or canonicalize
+        description: inspect, validate, explain, render, probe, report, fmt, or canonicalize
       - name: file
         kind: positional
         required: true
@@ -428,6 +428,18 @@ commands:
       - name: --block-frames
         kind: option
         description: Probe block size from 1 to 4096 frames (default 64)
+      - name: --sample-rate
+        kind: option
+        description: Report preparation sample rate (default 48000)
+      - name: --max-block-size
+        kind: option
+        description: Report preparation maximum block size from 1 to 16384 (default 512)
+      - name: --block-size
+        kind: option
+        description: Block size the report verdict is made for (default the prepared maximum)
+      - name: --measure-blocks
+        kind: option
+        description: Blocks rendered for the report's measured pass, 0 to skip (default 16)
     docs: reference/cli.md#graph
 
   - name: bake
@@ -2371,7 +2383,7 @@ commands:
 
   - name: audio
     status: experimental
-    summary: Repo-level audio analysis and sampler asset tooling. Manage offline audio model metadata, read reproducible WAV-first excerpt bundles, build streamed-sampler mip sidecars, and run live/offline Audio Scope analysis.
+    summary: Repo-level audio analysis and sampler asset tooling. Manage offline audio model metadata, read reproducible WAV-first excerpt bundles, build streamed-sampler mip sidecars, run live/offline Audio Scope analysis, and render display-only spectrogram and waveform PNGs with sidecars.
     subcommands:
       - name: model list
         summary: List registered audio models with backend and tags
@@ -2406,6 +2418,11 @@ commands:
             kind: flag
       - name: read-bundle
         summary: Pretty-print a previously emitted excerpt bundle
+      - name: formats
+        summary: List the audio file readers and writers this build registers, with extensions, bit depths, sample rates, channel limits and encoder settings
+        args:
+          - name: --json
+            kind: flag
       - name: sampler-mip build
         summary: Build and atomically publish a self-verified 140 dB streamed-sampler mip sidecar with hash-addressed payloads
         args:
@@ -2464,6 +2481,40 @@ commands:
             kind: option
           - name: --block-size
             kind: option
+      - name: inspect
+        summary: "Report an audio file's byte layout without decoding it: regions with offsets and sizes, parsed header fields, stream facts, specification-violation warnings, and the in-memory decoder's verdict; bounded reads only"
+        args:
+          - name: file
+            kind: positional
+            required: true
+            description: Audio file (WAV/RF64/W64, AIFF/AIFC, FLAC, Ogg, MP3, MP4/M4A, or raw PCM with --raw)
+          - name: --json
+            kind: flag
+            description: Emit pulp.audio.file_inspect.v1 JSON
+          - name: --include-metadata-text
+            kind: flag
+            description: Lift free text from metadata regions into metadata.text (off by default)
+          - name: --absolute-paths
+            kind: flag
+            description: Report input.name as the path given instead of its basename
+          - name: --raw
+            kind: flag
+            description: "Treat the file as headerless PCM; requires --format, --channels, --rate, --endian and --offset"
+          - name: --format
+            kind: option
+            description: "Raw PCM sample format: s8, u8, s16, s24, s32, f32, f64"
+          - name: --channels
+            kind: option
+            description: Raw PCM channel count
+          - name: --rate
+            kind: option
+            description: Raw PCM sample rate in Hz
+          - name: --endian
+            kind: option
+            description: "Raw PCM byte order: little or big"
+          - name: --offset
+            kind: option
+            description: Byte offset where raw PCM sample data begins
       - name: scope
         summary: Capture Audio Scope JSON from a live standalone target or speakerless offline WAV input; offline mode can also emit a PNG trace artifact.
         args:
@@ -2491,11 +2542,90 @@ commands:
           - name: --channel
             kind: option
             required: false
+      - name: spectrogram
+        summary: Render a display-only spectrogram PNG of an audio file through memory-mapped windows, with a pulp.audio.image.v1 sidecar (input SHA-256, decoder, time range, settings, unclamped sample peak); never a gate
+        args:
+          - name: file
+            kind: positional
+            required: true
+          - name: --png
+            kind: option
+            required: true
+          - name: --json
+            kind: option
+            required: false
+          - name: --fft
+            kind: option
+            required: false
+          - name: --hop
+            kind: option
+            required: false
+          - name: --window
+            kind: option
+            required: false
+          - name: --scale
+            kind: option
+            required: false
+          - name: --db-range
+            kind: option
+            required: false
+          - name: --start
+            kind: option
+            required: false
+          - name: --end
+            kind: option
+            required: false
+          - name: --channel
+            kind: option
+            required: false
+          - name: --width
+            kind: option
+            required: false
+          - name: --height
+            kind: option
+            required: false
+          - name: --absolute-paths
+            kind: flag
+      - name: waveform
+        summary: Render a display-only peak waveform PNG from WaveformOverview levels with red clip markers at or above full scale, plus a pulp.audio.image.v1 sidecar reporting the unclamped sample peak; never a gate
+        args:
+          - name: file
+            kind: positional
+            required: true
+          - name: --png
+            kind: option
+            required: true
+          - name: --json
+            kind: option
+            required: false
+          - name: --select
+            kind: option
+            required: false
+          - name: --start
+            kind: option
+            required: false
+          - name: --end
+            kind: option
+            required: false
+          - name: --channel
+            kind: option
+            required: false
+          - name: --width
+            kind: option
+            required: false
+          - name: --height
+            kind: option
+            required: false
+          - name: --absolute-paths
+            kind: flag
       - name: validate summarize
-        summary: Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/pitch); --json emits machine output
+        summary: "Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/pitch); --json emits pulp.audio.summarize.v1 with the input named by basename unless --absolute-paths"
         args:
           - name: --json
             kind: flag
+          - name: --absolute-paths
+            kind: flag
+            description: Report the input path as given instead of its basename
       - name: validate doctor
         summary: Offline Audio Doctor over a WAV — THD/THD+N (--thd) and/or spectrum magnitude at checkpoints (--response f1,f2,...); writes a JSON curve artifact
         args:

@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-au-v2-param-display",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_au_v2_param_display.mm"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

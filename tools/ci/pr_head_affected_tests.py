@@ -283,17 +283,18 @@ def inventory_tests(build: Path) -> dict[str, set[str]]:
 _UNOWNED = re.compile(r"^(?:source not owned by any configured target|"
                       r"header without an owning target): (.+)$")
 _HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
-SCRIPT_INPUTS_LIST = Path("test") / "ctest_script_inputs.json"
+SCRIPT_INPUTS_LIST = Path("test/ctest_script_inputs")
 
 
 def script_input_tests(paths: list[str], root: Path = REPO_ROOT) -> list[str]:
     """Script-driven ctests whose declared inputs the diff touches.
 
-    test/ctest_script_inputs.json records what each script test reads (its
+    test/ctest_script_inputs/ records what each script test reads (its
     imports, fixtures, the files it parses), which the build graph cannot see.
     """
+    import script_inputs_store
     try:
-        document = json.loads((root / SCRIPT_INPUTS_LIST).read_text(encoding="utf-8"))
+        document = script_inputs_store.load(root) or {}
     except (OSError, ValueError):
         return []
     picked = []
@@ -769,7 +770,8 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
 
 # Checks that block only drift the change reaches; each must carry
 # PULP_DIFF_SCOPED where it is registered, or its base re-run is believed.
-DIFF_SCOPED_TESTS = ("script-test-inputs-drift", "changed-surface-script-families-drift")
+DIFF_SCOPED_TESTS = ("script-test-inputs-drift", "changed-surface-script-families-drift",
+                     "hotspot-edit-guard")
 NOT_COMPARABLE = ("base verdict not comparable (diff-scoped check): its base re-run sees an "
                   "empty diff and passes by construction")
 

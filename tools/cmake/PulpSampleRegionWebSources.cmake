@@ -19,6 +19,10 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/host/src/signal_graph_live_swap.cpp"
         "${ROOT}/core/host/src/signal_graph_reference_walk.cpp"
         "${ROOT}/core/host/src/signal_graph_executor_routing.cpp"
+        # The trigger graph owns a runtime MPE tracker in this isolated web
+        # profile; keep its implementation in the curated non-library source
+        # closure so wasm-ld sees the tracker methods it calls.
+        "${ROOT}/core/midi/src/mpe_voice_tracker.cpp"
         "${ROOT}/core/host/src/graph_serializer.cpp"
         "${ROOT}/core/runtime/src/durable_file_replacement.cpp"
         "${ROOT}/core/host/src/processor_restore.cpp"

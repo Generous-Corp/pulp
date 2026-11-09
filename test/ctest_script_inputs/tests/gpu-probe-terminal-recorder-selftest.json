@@ -1,0 +1,14 @@
+{
+ "name": "gpu-probe-terminal-recorder-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gpu_probe_acceptance.py",
+  "inputs": [
+   "test/fixtures/gpu-ux/pass-hardware.json",
+   "tools/cli/gpu_artifact_publication.cpp",
+   "tools/cli/gpu_artifact_publication.hpp",
+   "tools/scripts/gpu_trace_overhead_acceptance.py",
+   "tools/scripts/test_gpu_probe_acceptance.py"
+  ],
+  "kind": "python"
+ }
+}

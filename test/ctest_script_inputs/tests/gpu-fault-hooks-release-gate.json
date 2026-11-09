@@ -1,0 +1,10 @@
+{
+ "name": "gpu-fault-hooks-release-gate",
+ "record": {
+  "entry": "tools/scripts/gpu_fault_hooks_release_gate.py",
+  "inputs": [
+   "tools/scripts/gpu_fault_hooks_release_gate.py"
+  ],
+  "kind": "python"
+ }
+}

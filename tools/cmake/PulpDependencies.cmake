@@ -49,6 +49,9 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPatchChoc.cmake)
 pulp_patch_choc_v8("${choc_SOURCE_DIR}")
 pulp_patch_choc_json_number_exponent("${choc_SOURCE_DIR}")
 pulp_patch_choc_file_watcher("${choc_SOURCE_DIR}")
+pulp_patch_choc_wav_extensible_container_bits("${choc_SOURCE_DIR}")
+pulp_patch_choc_wav_block_align_bounds("${choc_SOURCE_DIR}")
+pulp_patch_choc_wav_bounded_metadata_reads("${choc_SOURCE_DIR}")
 
 # WebGPU (Dawn) — cross-platform GPU abstraction (BSD-3-Clause)
 # Uses eliemichel/WebGPU-distribution for CMake-friendly integration
@@ -209,6 +212,12 @@ unset(_pulp_declare_wgpu)
 # offline builds that intend a CG-only fallback). Desktop only (Android/iOS
 # Skia comes from their own build scripts / bundled libs).
 option(PULP_SKIA_AUTOFETCH "Auto-fetch pinned Skia into a shared cache when missing" ON)
+# Skia (and the Dawn archive in its slice) is provisioned by a script, not by
+# find_package() or FetchContent, so tell the dependency request recorder
+# (tools/ci/dependency_request_recorder.cmake) when this configure asks for it.
+if(PULP_ENABLE_GPU AND COMMAND dependency_request_recorder_note)
+    dependency_request_recorder_note(PULP_PROVISION Skia)
+endif()
 if(PULP_ENABLE_GPU AND PULP_SKIA_AUTOFETCH AND NOT SKIA_DIR
         AND NOT DEFINED ENV{SKIA_DIR} AND NOT ANDROID
         AND NOT (CMAKE_SYSTEM_NAME STREQUAL "iOS"))

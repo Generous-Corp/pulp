@@ -1,0 +1,17 @@
+{
+ "name": "playback-negative-capability-selftest",
+ "record": {
+  "entry": "tools/scripts/negative_capability_check.py",
+  "inputs": [
+   "core/host/include/pulp/host/timeline_graph_binding.hpp",
+   "core/playback/include/pulp/playback/program_compiler.hpp",
+   "core/playback/src/program_compiler.cpp",
+   "core/playback/src/sequence_content_lowerer.cpp",
+   "core/timeline/include/pulp/timeline",
+   "core/timeline/schema/timeline_schema.json",
+   "tools/scripts/negative_capability_allowlist.json",
+   "tools/scripts/negative_capability_check.py"
+  ],
+  "kind": "python"
+ }
+}

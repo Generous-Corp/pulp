@@ -38,6 +38,14 @@ add_test(NAME evidence-archive-selftest
         "${CMAKE_SOURCE_DIR}/tools/ci/test_evidence_archive.py")
 set_tests_properties(evidence-archive-selftest PROPERTIES TIMEOUT 60)
 
+# The Android fixture lane decides pass or fail from device output; this drives
+# the real script through a fake adb, including a runner that prints its pass
+# marker before a large output (the SIGPIPE-under-pipefail case).
+add_test(NAME android-fixture-lane-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_android_fixture_lane.py")
+set_tests_properties(android-fixture-lane-selftest PROPERTIES TIMEOUT 120)
+
 # W17 toolchain tests are source-only and belong to the same required lane.
 add_test(NAME toolchain-test_generate-selftest
     COMMAND ${Python3_EXECUTABLE}
@@ -89,6 +97,11 @@ add_test(NAME icu-data-subset-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/cmake/scripts/test_icu_data_subset.py")
 set_tests_properties(icu-data-subset-selftest PROPERTIES TIMEOUT 60)
+# pulp_add_wgsl_shaders' header generator.
+add_test(NAME embed-wgsl-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/cmake/scripts/test_embed_wgsl.py")
+set_tests_properties(embed-wgsl-selftest PROPERTIES TIMEOUT 60)
 add_test(NAME plugin-footprint-check-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_plugin_footprint_check.py")

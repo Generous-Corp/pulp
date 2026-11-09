@@ -21,21 +21,16 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 from typing import Any
+
+from .external_tools import resolve_env_binary
 
 AUBIO_ENV = "PULP_AUBIO_BIN"
 
 
 def _resolve(env_var: str) -> tuple[str | None, str]:
-    path = os.environ.get(env_var, "").strip()
-    if not path:
-        return None, f"{env_var} not set (opt-in MIR oracle; skipping)"
-    resolved = shutil.which(path) or (path if os.path.exists(path) else None)
-    if not resolved:
-        return None, f"{env_var}={path} not found on disk/PATH; skipping"
-    return resolved, ""
+    return resolve_env_binary(env_var, "MIR oracle")
 
 
 def count_onsets(text: str) -> int:

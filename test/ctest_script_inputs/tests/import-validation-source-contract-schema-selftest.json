@@ -1,0 +1,10 @@
+{
+ "name": "import-validation-source-contract-schema-selftest",
+ "record": {
+  "entry": "tools/import-validation/test_source_contract_schema.py",
+  "inputs": [
+   "tools/import-validation/test_source_contract_schema.py"
+  ],
+  "kind": "python"
+ }
+}

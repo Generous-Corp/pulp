@@ -1,0 +1,10 @@
+{
+ "name": "pulp-mcp-binary-smoke",
+ "record": {
+  "entry": "test/test_pulp_mcp_binary_smoke.py",
+  "inputs": [
+   "test/test_pulp_mcp_binary_smoke.py"
+  ],
+  "kind": "python"
+ }
+}

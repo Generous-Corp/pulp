@@ -367,7 +367,10 @@ class EveryExternalRowTests(unittest.TestCase):
         self.assertTrue(any("recompute" in v for v in self.check(forged_label)))
         replay = row["patch_recipe"]["replay"]
         self.assertEqual(replay["functions"], ["pulp_patch_choc_v8", "pulp_patch_choc_json_number_exponent",
-                                              "pulp_patch_choc_file_watcher"])
+                                              "pulp_patch_choc_file_watcher",
+                                              "pulp_patch_choc_wav_extensible_container_bits",
+                                              "pulp_patch_choc_wav_block_align_bounds",
+                                              "pulp_patch_choc_wav_bounded_metadata_reads"])
         reordered = {**row, "patch_recipe": {**row["patch_recipe"], "replay": {**replay, "functions": list(reversed(replay["functions"]))}}}
         self.assertTrue(any("in order" in v for v in self.check(reordered)))
         other_blob = {**row, "patch_recipe": {**row["patch_recipe"], "replay": {**replay, "patch_set_blob": "0" * 40}}}
@@ -1292,6 +1295,13 @@ class ClosureMentionTests(unittest.TestCase):
         for name in ("core/x/a.hh", "core/x/a.hxx", "core/x/a.hpp.in", "tools/x.py", "ui/x.mjs"):
             self.assertEqual(self.scan("uses pulp::audio here\n", name),
                              [f"mirror-product-symbol mention {name}:1: pulp::audio"], name)
+
+    def test_wgsl_shaders_are_scanned_as_text(self):
+        # pulp-render embeds core/render/shaders/*.wgsl, so a WGSL file in a
+        # closure is read for edges instead of refused as unclassified.
+        self.assertEqual(self.scan("@fragment fn fs() {}\n", "core/render/shaders/a.wgsl"), [])
+        self.assertEqual(self.scan("// mirrors pulp::audio here\n", "core/render/shaders/a.wgsl"),
+                         ["mirror-product-symbol mention core/render/shaders/a.wgsl:1: pulp::audio"])
 
     def test_an_unclassified_suffix_is_refused(self):
         found = self.scan("int x;\n", "core/x/a.weird")

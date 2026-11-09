@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-spectral-codec",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_spectral_frame_codec.cpp"
+  ],
+  "inputs": [
+   "test/fixtures/spectral-frame-codec/asymmetric.hex",
+   "test/fixtures/spectral-frame-codec/zero.hex"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_spectral_frame_codec.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

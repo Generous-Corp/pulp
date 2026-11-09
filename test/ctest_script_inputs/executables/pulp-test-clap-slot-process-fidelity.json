@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-clap-slot-process-fidelity",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_clap_slot_process_fidelity.cpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}
