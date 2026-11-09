@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -13,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPTS = pathlib.Path(__file__).resolve().parent
 REPO = SCRIPTS.parents[1]
@@ -794,6 +796,34 @@ class FrameworkTransferTests(unittest.TestCase):
                          ("pass", None, []))
 
 
+class NoRecordIsInertTests(unittest.TestCase):
+    """With no transfer record, every PR shape the existing tests cover is judged exactly as before."""
+
+    def test_every_existing_receipt_mode_case_is_untouched(self):
+        seen: list[dict] = []
+        real_check = drift.check
+
+        def check(repo, base, head):
+            report = real_check(repo, base, head)
+            seen.append(report)
+            # The transfer machinery reads nothing and changes nothing.
+            if report.get("transfer") is not None or report.get("inherited_after_transfer"):
+                raise AssertionError(f"the transfer guard acted with no record: {report}")
+            return report
+
+        suite = unittest.TestSuite()
+        for case in (ReceiptDriftTests, FrozenCliTests):
+            suite.addTests(unittest.TestLoader().loadTestsFromTestCase(case))
+        with mock.patch.object(drift, "check", check), \
+                mock.patch.object(drift, "transfer_copy_problems",
+                                  side_effect=AssertionError("no record, so nothing is fetched")):
+            result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+        self.assertTrue(result.wasSuccessful(), result.failures + result.errors)
+        # Control: the existing cases ran through the wrapper (38 complete a
+        # report today; the rest raise before one, or run the CLI in a subprocess).
+        self.assertGreaterEqual(len(seen), 30)
+
+
 class TransferSourceTests(unittest.TestCase):
     """The framework-transfer record must be Vellum main's transfer record."""
 
@@ -864,6 +894,36 @@ class TransferSourceTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("1 differ", problems[0])
 
+
+    def test_an_unreachable_vellum_never_reads_as_a_match(self):
+        with self.assertRaises(OSError):
+            self.problems(self.served(None))
+
+    def test_an_unreachable_framework_commit_fails_closed(self):
+        # The compare read itself fails (a 404 for an unknown commit raises in
+        # the reader): the error propagates and nothing reads as a match.
+        def fetch(path: str):
+            if "/compare/" in path:
+                raise OSError("404 Not Found: no common ancestor or unknown commit")
+            return self.served(self.vellum)(path)
+        with self.assertRaises(OSError):
+            self.problems(fetch)
+        # A reader that returns GitHub's error object instead of raising.
+        def not_found(path: str):
+            if "/compare/" in path:
+                return {"message": "Not Found"}
+            return self.served(self.vellum)(path)
+        problems = self.problems(not_found)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is not on main", problems[0])
+
+    def test_a_commit_force_pushed_away_from_main_is_refused(self):
+        # A force-push leaves the commit reachable by sha but not from main:
+        # compare reports diverged, never ahead or identical.
+        problems = self.problems(self.served(self.vellum, status="diverged"))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is not on main (compare status 'diverged')", problems[0])
+        self.assertFalse(any("/contents/" in path for path in self.asked), self.asked)
 
     def test_cli_refuses_a_record_whose_commit_main_does_not_contain(self):
         local = self.fixture.git("rev-parse", f"{self.fixture.base}:{drift.PIN_DIRECTORY}/{EXPORT_ID}.json")
