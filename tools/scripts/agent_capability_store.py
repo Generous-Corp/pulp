@@ -595,6 +595,32 @@ def read_at(root: pathlib.Path, comparison: Any, legacy: pathlib.Path) -> Any:
     return replace(comparison, path=legacy.as_posix(), content=text, status="available", stderr="")
 
 
+def reset_to(root: pathlib.Path, rev: str) -> list[str]:
+    """Make the surface and history directories hold exactly what `rev` holds.
+
+    Reads either layout at `rev` and writes fragments (an older revision's
+    single files are split), removing any fragment `rev` lacks and any retired
+    single file. This is the reset to a base that `git checkout <rev> -- <dir>`
+    cannot do, since a checkout leaves files the revision does not have.
+    A history `rev` holds in the retired inline schema is not converted here;
+    run `agent_capability_manifest.py --write` for that. Raises StoreError."""
+    root = pathlib.Path(root)
+    texts = {legacy: text_at(root, rev, legacy) for legacy in (SURFACE_LEGACY, HISTORY_LEGACY)}
+    missing = [str(legacy) for legacy, text in texts.items() if text is None]
+    if missing:
+        raise StoreError(f"{rev} holds no {', '.join(missing)} in either layout")
+    try:
+        surface_files = split_surface(json.loads(texts[SURFACE_LEGACY]))
+        history_files = split_history(json.loads(texts[HISTORY_LEGACY]))
+    except json.JSONDecodeError as error:
+        raise StoreError(f"{rev}: {error}") from error
+    replace_directory(root, SURFACE_DIR, surface_files)
+    replace_directory(root, HISTORY_DIR, history_files)
+    for legacy in (SURFACE_LEGACY, HISTORY_LEGACY):
+        (root / legacy).unlink(missing_ok=True)
+    return [f"{SURFACE_DIR}/ ({len(surface_files)} files)", f"{HISTORY_DIR}/ ({len(history_files)} files)"]
+
+
 def migrate(root: pathlib.Path) -> list[str]:
     """Split the single surface and history files in place; return what moved.
 
@@ -627,7 +653,7 @@ def migrate(root: pathlib.Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    """`agent_capability_store.py [--repo-root R] {show-surface|show-history} [REV] | migrate`"""
+    """`agent_capability_store.py [--repo-root R] {show-surface|show-history} [REV] | reset REV | migrate`"""
     import argparse
     import sys
 
@@ -641,12 +667,19 @@ def main(argv: list[str]) -> int:
         show.set_defaults(legacy=legacy)
     sub.add_parser("migrate", allow_abbrev=False,
                    help="split the single surface and history files into fragments")
+    reset = sub.add_parser("reset", allow_abbrev=False,
+                           help="make the surface and history directories hold exactly REV's records")
+    reset.add_argument("rev")
     args = parser.parse_args(argv[1:])
     root = pathlib.Path(args.repo_root)
     try:
         if args.command == "migrate":
             for line in migrate(root) or ["nothing to migrate"]:
                 print(f"agent-capability-store: {line}")
+            return 0
+        if args.command == "reset":
+            for line in reset_to(root, args.rev):
+                print(f"agent-capability-store: reset {line} to {args.rev}")
             return 0
         if args.rev:
             text = text_at(root, args.rev, args.legacy)

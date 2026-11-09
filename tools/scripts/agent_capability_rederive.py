@@ -374,21 +374,8 @@ def _restore_generated_artifacts(
     if completed.returncode == 0:
         restored.append(str(history.SNAPSHOT))
     try:
-        surface_text = store.text_at(root, tip, surface.SURFACE_SNAPSHOT)
-        history_text = store.text_at(root, tip, history.HISTORY_FILE)
-        if surface_text is None or history_text is None:
-            return restored
-        base_history = history.json.loads(history_text)
-        if base_history.get("schema") != history.HISTORY_SCHEMA:
-            base_history = history.history_document(history.history_entries(base_history))
-        for directory, files in (
-            (store.SURFACE_DIR, store.split_surface(history.json.loads(surface_text))),
-            (store.HISTORY_DIR, store.split_history(base_history)),
-        ):
-            store.replace_directory(root, directory, files)
-            restored.append(str(directory))
-    except (store.StoreError, history.HistoryFormatError,
-            history.json.JSONDecodeError, OSError):
+        restored.extend(store.reset_to(root, tip))
+    except (store.StoreError, OSError):
         return restored
     return restored
 

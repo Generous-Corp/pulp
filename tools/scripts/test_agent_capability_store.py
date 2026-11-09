@@ -180,6 +180,29 @@ class LosslessTests(unittest.TestCase):
             self.assertEqual(store.text_at(root, "HEAD", store.SURFACE_LEGACY), surface_text)
             self.assertEqual(store.text_at(root, "HEAD~1", store.SURFACE_LEGACY), surface_text)
 
+    def test_reset_makes_the_directories_hold_exactly_a_revision(self) -> None:
+        """A reset to a base drops a branch's extra fragment, which a checkout keeps."""
+        surface_document = current_surface()
+        history_document = current_history()
+        with tempfile.TemporaryDirectory(prefix="pulp-capability-store-") as temp:
+            root = pathlib.Path(temp)
+            git(root, "init", "-q", "-b", "main")
+            write_files(root, {store.SURFACE_LEGACY.as_posix(): store.render_surface(surface_document),
+                               store.HISTORY_LEGACY.as_posix(): store.render_history(history_document)})
+            git(root, "add", "-A")
+            git(root, "commit", "-qm", "base in the single-file layout")
+            store.migrate(root)
+            extra = root / store.SURFACE_DIR / "headers/pulp/audio/zz_extra.hpp.json"
+            extra.write_text("{}\n")
+            # A checkout of the base would keep the extra record; the reset does not.
+            store.reset_to(root, "HEAD")
+            self.assertFalse(extra.exists())
+            self.assertFalse((root / store.SURFACE_LEGACY).exists())
+            self.assertEqual(store.load_surface(root), surface_document)
+            self.assertEqual(store.load_history(root), history_document)
+            with self.assertRaises(store.StoreError):
+                store.reset_to(root, "HEAD:nonexistent")
+
 
 class CanonicalTests(unittest.TestCase):
     def test_a_stray_file_a_reformatted_record_and_a_retired_file_are_reported(self) -> None:
