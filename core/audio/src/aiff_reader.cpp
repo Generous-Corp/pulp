@@ -1,5 +1,6 @@
 // AIFF reader/writer — Audio Interchange File Format
-// Supports AIFF and AIFF-C (compressed) with 8/16/24/32-bit PCM.
+// Reads AIFF and the plain-PCM AIFF-C spellings (`NONE` and `twos` big-endian,
+// `sowt` little-endian) at 8/16/24/32-bit; writes 16-bit AIFF.
 // Critical for Logic Pro projects and sample libraries.
 
 #include <pulp/audio/format_registry.hpp>
@@ -124,8 +125,22 @@ std::optional<AiffLayout> parse_aiff_layout(std::istream& stream,
             layout.info.sample_rate = static_cast<uint32_t>(sample_rate);
             layout.info.duration_seconds = static_cast<double>(layout.info.num_frames)
                                          / layout.info.sample_rate;
-            pcm_supported = !is_aifc ||
-                (chunk_size >= 22 && std::memcmp(comm + 18, "NONE", 4) == 0);
+            // AIFF-C names plain PCM three ways: `NONE` and `twos` are the
+            // big-endian order AIFF itself uses, `sowt` is the same sample
+            // points stored little-endian (what macOS tools and afconvert
+            // write). Anything else is a real codec this reader does not
+            // decode.
+            if (is_aifc) {
+                const bool big_endian_pcm =
+                    chunk_size >= 22 && (std::memcmp(comm + 18, "NONE", 4) == 0 ||
+                                         std::memcmp(comm + 18, "twos", 4) == 0);
+                const bool little_endian_pcm =
+                    chunk_size >= 22 && std::memcmp(comm + 18, "sowt", 4) == 0;
+                pcm_supported = big_endian_pcm || little_endian_pcm;
+                layout.little_endian = little_endian_pcm;
+            } else {
+                pcm_supported = true;
+            }
             has_comm = true;
         } else if (std::memcmp(chunk_header, "SSND", 4) == 0) {
             if (chunk_size >= 8) {
@@ -150,8 +165,9 @@ std::optional<AiffLayout> parse_aiff_layout(std::istream& stream,
 
     if (chunk_offset != form_end || !has_comm) return std::nullopt;
     if (!require_pcm_data) return layout;
+    // A zero-frame COMM with an SSND chunk is a valid, empty file: it decodes
+    // to its channel count and rate with no samples, as a zero-frame WAV does.
     if (!pcm_supported || !has_sound || invalid_sound_offset ||
-        layout.info.num_frames == 0 ||
         (layout.info.bits_per_sample != 8 && layout.info.bits_per_sample != 16 &&
          layout.info.bits_per_sample != 24 && layout.info.bits_per_sample != 32)) {
         return std::nullopt;
@@ -168,21 +184,19 @@ std::optional<AiffLayout> parse_aiff_layout(std::istream& stream,
     return layout;
 }
 
-float decode_aiff_pcm_sample(const uint8_t* bytes, uint32_t bits_per_sample) {
+float decode_aiff_pcm_sample(const uint8_t* bytes, uint32_t bits_per_sample, bool little_endian) {
     if (bits_per_sample == 8)
         return static_cast<float>(static_cast<int8_t>(bytes[0])) / 128.0f;
-    if (bits_per_sample == 16) {
-        const auto value = static_cast<int16_t>(
-            (static_cast<uint16_t>(bytes[0]) << 8) | bytes[1]);
-        return static_cast<float>(value) / 32768.0f;
+    // Assemble the sample point most-significant byte first regardless of the
+    // stored order, left-justified in 32 bits, so every width scales by one
+    // constant and `sowt` differs from `twos` only in which byte is read first.
+    const uint32_t byte_count = bits_per_sample / 8;
+    uint32_t raw = 0;
+    for (uint32_t i = 0; i < byte_count; ++i) {
+        const uint8_t byte = little_endian ? bytes[byte_count - 1 - i] : bytes[i];
+        raw |= static_cast<uint32_t>(byte) << (24 - 8 * i);
     }
-    if (bits_per_sample == 24) {
-        const uint32_t raw = (static_cast<uint32_t>(bytes[0]) << 24) |
-                             (static_cast<uint32_t>(bytes[1]) << 16) |
-                             (static_cast<uint32_t>(bytes[2]) << 8);
-        return static_cast<float>(static_cast<int32_t>(raw)) / 2147483648.0f;
-    }
-    return static_cast<float>(static_cast<int32_t>(read_be32(bytes))) / 2147483648.0f;
+    return static_cast<float>(static_cast<int32_t>(raw)) / 2147483648.0f;
 }
 
 }  // namespace detail
@@ -285,7 +299,7 @@ public:
             for (uint32_t c = 0; c < layout->info.num_channels; ++c) {
                 data.channels[c][f] = detail::decode_aiff_pcm_sample(
                     frame.data() + static_cast<size_t>(c) * layout->bytes_per_sample,
-                    layout->info.bits_per_sample);
+                    layout->info.bits_per_sample, layout->little_endian);
             }
         }
 

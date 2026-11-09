@@ -509,6 +509,14 @@ ExcerptFindResult run_excerpt_find(const ExcerptFindRequest& request,
             }
             auto start_frame = static_cast<uint64_t>(std::llround(item.start_ms * audio->sample_rate / 1000.0));
             auto end_frame = static_cast<uint64_t>(std::llround(item.end_ms * audio->sample_rate / 1000.0));
+            // The window was found on an earlier read of this path; the file
+            // may have shrunk (or emptied) since, so bound the slice by the
+            // frames actually decoded now rather than indexing past them.
+            if (audio->empty() || end_frame < start_frame || end_frame > audio->num_frames()) {
+                result.error =
+                    "source audio no longer covers the excerpt window: " + item.source_file;
+                return result;
+            }
             auto excerpt = slice_excerpt(*audio, start_frame, end_frame - start_frame);
             if (!pulp::audio::write_wav_file((result.bundle_path / item.excerpt_file).string(), excerpt)) {
                 result.error = "failed to write excerpt file: " + (result.bundle_path / item.excerpt_file).string();

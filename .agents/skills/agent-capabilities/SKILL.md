@@ -95,6 +95,13 @@ headers). A legacy header whose bytes change (`wav_decoder.hpp` gaining
 kind of row; `--write` then reports it as reviewed and the baseline count
 shrinks by one.
 
+The fingerprint is over the header's bytes, so a comment-only edit to a covered
+header costs the same row and inventory bump as a signature change; when a
+contract note or a behavior fix can live in the `.cpp`, put it there. A
+header-only class (`sample_resource.hpp`, 2026-11-08: a zero-frame decode
+became a load failure) has no `.cpp` to hide in, so its fix takes the row and
+the bump; say so in the commit rather than reverting the fix to dodge the gate.
+
 ## Public-header fingerprint refresh
 
 Change the reviewed fingerprint in `agent_capability_registry.py` only, bump
