@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import io
 import json
@@ -859,7 +860,8 @@ class TransferSourceTests(unittest.TestCase):
         self.fixture.write(drift.TRANSFER_PATH,
                            transfer_value(transfer_record_sha256=hashlib.sha256(self.vellum).hexdigest()))
         self.head = self.fixture.commit("record the framework transfer")
-        self.pulls = [{"number": 257, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z"}]
+        self.pulls = [{"number": 257, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z",
+                       "merge_commit_sha": FRAMEWORK_COMMIT}]
 
     def tearDown(self) -> None:
         self.fixture.close()
@@ -868,7 +870,7 @@ class TransferSourceTests(unittest.TestCase):
         """Vellum as the reader sees it: the record at FRAMEWORK_COMMIT, and main's position."""
         self.asked = []
 
-        def fetch(path: str):
+        def fetch(path: str, expected=dict):
             self.asked.append(path)
             if data is None:
                 raise OSError("unreachable")
@@ -928,11 +930,18 @@ class TransferSourceTests(unittest.TestCase):
 
     def test_the_commit_must_be_the_merge_of_the_named_pull_request(self):
         refused = {
-            "another pull request": [{"number": 999, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z"}],
-            "not merged": [{"number": 257, "base": {"ref": "main"}, "merged_at": None}],
-            "another base": [{"number": 257, "base": {"ref": "release"}, "merged_at": "2026-11-09T05:00:00Z"}],
+            "another pull request": [{"number": 999, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z",
+                                      "merge_commit_sha": FRAMEWORK_COMMIT}],
+            "not merged": [{"number": 257, "base": {"ref": "main"}, "merged_at": None,
+                            "merge_commit_sha": FRAMEWORK_COMMIT}],
+            "another base": [{"number": 257, "base": {"ref": "release"}, "merged_at": "2026-11-09T05:00:00Z",
+                              "merge_commit_sha": FRAMEWORK_COMMIT}],
             "none": [],
             "not a list": {"message": "Not Found"},
+            # A commit from the pull request's own branch is associated with it
+            # too; only the merge commit is the pull request's merge.
+            "branch commit": [{"number": 257, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z",
+                               "merge_commit_sha": "d" * 40}],
         }
         for case, pulls in refused.items():
             with self.subTest(case=case):
@@ -940,11 +949,12 @@ class TransferSourceTests(unittest.TestCase):
                 problems = self.problems(self.served(self.vellum))
                 self.assertEqual(problems, [f"Generous-Corp/vellum commit {FRAMEWORK_COMMIT[:12]} is not the merge "
                                             "of pull request #257 into main"])
-        def failing(path: str):
+        def failing(path: str, expected=dict):
             if path.endswith("/pulls"):
                 raise OSError("pulls read failed")
-            return self.served(self.vellum)(path)
-        self.pulls = [{"number": 257, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z"}]
+            return self.served(self.vellum)(path, expected)
+        self.pulls = [{"number": 257, "base": {"ref": "main"}, "merged_at": "2026-11-09T05:00:00Z",
+                       "merge_commit_sha": FRAMEWORK_COMMIT}]
         with self.assertRaises(OSError):
             self.problems(failing)
 
@@ -956,10 +966,10 @@ class TransferSourceTests(unittest.TestCase):
                 self.assertIn("is unreadable", problems[0])
 
     def test_a_non_dict_compare_result_is_refused(self):
-        def fetch(path: str):
+        def fetch(path: str, expected=dict):
             if "/compare/" in path:
                 return ["not", "a", "comparison"]
-            return self.served(self.vellum)(path)
+            return self.served(self.vellum)(path, expected)
         problems = self.problems(fetch)
         self.assertEqual(len(problems), 1)
         self.assertIn("is not on main (compare status None)", problems[0])
@@ -967,17 +977,17 @@ class TransferSourceTests(unittest.TestCase):
     def test_an_unreachable_framework_commit_fails_closed(self):
         # The compare read itself fails (a 404 for an unknown commit raises in
         # the reader): the error propagates and nothing reads as a match.
-        def fetch(path: str):
+        def fetch(path: str, expected=dict):
             if "/compare/" in path:
                 raise OSError("404 Not Found: no common ancestor or unknown commit")
-            return self.served(self.vellum)(path)
+            return self.served(self.vellum)(path, expected)
         with self.assertRaises(OSError):
             self.problems(fetch)
         # A reader that returns GitHub's error object instead of raising.
-        def not_found(path: str):
+        def not_found(path: str, expected=dict):
             if "/compare/" in path:
                 return {"message": "Not Found"}
-            return self.served(self.vellum)(path)
+            return self.served(self.vellum)(path, expected)
         problems = self.problems(not_found)
         self.assertEqual(len(problems), 1)
         self.assertIn("is not on main", problems[0])
@@ -990,6 +1000,56 @@ class TransferSourceTests(unittest.TestCase):
         self.assertIn("is not on main (compare status 'diverged')", problems[0])
         self.assertFalse(any("/contents/" in path for path in self.asked), self.asked)
 
+    def test_trusted_reads_through_the_real_github_reader(self):
+        # Only urlopen is replaced: the real _github_json and _public_github_json
+        # parse each endpoint's real JSON shape (an object for compare and
+        # contents, an array for commits/<sha>/pulls).
+        import urllib.parse
+        import vellum_freeze_check as freeze
+        local = self.fixture.git("rev-parse", f"{self.fixture.base}:{drift.PIN_DIRECTORY}/{EXPORT_ID}.json")
+        served_record = {"bytes": self.vellum}
+        asked: list[str] = []
+
+        def urlopen(request, timeout=None):
+            url = urllib.parse.urlsplit(request.full_url)
+            path, query = url.path, url.query
+            asked.append(path + ("?" + query if query else ""))
+            receipt = f"/repos/Generous-Corp/vellum/contents/provenance/mirror/receipts/{EXPORT_ID}.json"
+            if path == receipt:
+                body = {"type": "file", "path": receipt.split("/contents/")[1], "sha": local}
+            elif path == f"/repos/Generous-Corp/vellum/compare/{FRAMEWORK_COMMIT}...main":
+                body = {"status": "ahead", "ahead_by": 3, "behind_by": 0, "commits": []}
+            elif path == f"/repos/Generous-Corp/vellum/commits/{FRAMEWORK_COMMIT}/pulls":
+                body = [{"number": 257, "state": "closed", "base": {"ref": "main"},
+                         "merged_at": "2026-11-09T05:00:00Z", "merge_commit_sha": FRAMEWORK_COMMIT}]
+            elif path == "/repos/Generous-Corp/vellum/contents/provenance/framework/transfer.json":
+                self.assertEqual(query, f"ref={FRAMEWORK_COMMIT}")
+                encoded = base64.encodebytes(served_record["bytes"]).decode()  # GitHub wraps at 60 columns
+                body = {"type": "file", "path": "provenance/framework/transfer.json",
+                        "encoding": "base64", "content": encoded}
+            else:
+                raise AssertionError(f"unexpected read {path}?{query}")
+            return io.BytesIO(json.dumps(body).encode())
+
+        def run(base: str, head: str) -> int:
+            with tempfile.TemporaryDirectory() as out, \
+                    mock.patch.object(freeze.urllib.request, "urlopen", urlopen), \
+                    mock.patch.dict(os.environ, {"VELLUM_READER_TOKEN": "t"}), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                return freeze.main(["--receipt-mode", "--repo", str(self.fixture.root), "--base", base,
+                                    "--head", head, "--output", str(pathlib.Path(out) / "r.json")])
+
+        # No record anywhere in the range: only the receipt copy is read.
+        self.assertEqual(run(self.fixture.base, self.fixture.base), 0)
+        self.assertFalse(any("framework" in path or "/pulls" in path for path in asked), asked)
+        # The record matches Vellum's at its commit: every trusted read passes.
+        asked.clear()
+        self.assertEqual(run(self.fixture.base, self.head), 0)
+        self.assertTrue(any(path.endswith("/pulls") for path in asked), asked)
+        # Vellum's record at that commit differs: refused.
+        served_record["bytes"] = self.vellum + b" "
+        self.assertEqual(run(self.fixture.base, self.head), 1)
+
     def test_cli_refuses_a_record_whose_commit_main_does_not_contain(self):
         local = self.fixture.git("rev-parse", f"{self.fixture.base}:{drift.PIN_DIRECTORY}/{EXPORT_ID}.json")
         script = (
@@ -997,11 +1057,12 @@ class TransferSourceTests(unittest.TestCase):
             f"sys.path.insert(0, {str(SCRIPTS)!r})\n"
             "import vellum_freeze_check as f\n"
             "local, record = sys.argv[1], sys.argv[2]\n"
-            "def serve(url, token):\n"
+            "def serve(url, token, **_):\n"
             "    if '/compare/' in url:\n"
             "        return {'status': 'diverged' if record == '-' else 'ahead'}\n"
             "    if url.endswith('/pulls'):\n"
-            "        return [{'number': 257, 'base': {'ref': 'main'}, 'merged_at': '2026-11-09T05:00:00Z'}]\n"
+            "        return [{'number': 257, 'base': {'ref': 'main'}, 'merged_at': '2026-11-09T05:00:00Z',\n"
+            f"                 'merge_commit_sha': {FRAMEWORK_COMMIT!r}}}]\n"
             "    path = url.split('/contents/')[1].split('?')[0]\n"
             "    if path.startswith('provenance/mirror/'):\n"
             "        return {'type': 'file', 'path': path, 'sha': local}\n"
@@ -1090,7 +1151,7 @@ class ReceiptSourceTests(unittest.TestCase):
             f"sys.path.insert(0, {str(SCRIPTS)!r})\n"
             "import vellum_freeze_check as f\n"
             "served = sys.argv[1]\n"
-            "f._github_json = lambda url, token: {'type': 'file', 'path': url.split('/contents/')[1].split('?')[0], 'sha': served}\n"
+            "f._github_json = lambda url, token, **_: {'type': 'file', 'path': url.split('/contents/')[1].split('?')[0], 'sha': served}\n"
             "sys.argv = [sys.argv[0]] + sys.argv[2:]\n"
             "raise SystemExit(f.main())\n"
         )

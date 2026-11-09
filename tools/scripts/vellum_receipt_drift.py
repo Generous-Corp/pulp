@@ -283,8 +283,8 @@ def transfer_copy_problems(
     fetch failure propagates, so an unreachable Vellum never reads as a match.
     The record names ``framework_commit``, the Vellum commit that landed the
     transfer, and ``framework_pull_request``. The commit must be on Vellum's
-    main, the named pull request must be associated with it, based on main and
-    merged, and the record must equal ``provenance/framework/transfer.json`` at
+    main and be that pull request's merge into main (merged, based on main, its
+    ``merge_commit_sha``), and the record must equal ``provenance/framework/transfer.json`` at
     that commit (its SHA-256 and its ``pulp_path`` set). Reading at an immutable commit, not at main, means a later
     Vellum edit to its record cannot invalidate Pulp's, which cannot be edited.
     """
@@ -303,13 +303,16 @@ def transfer_copy_problems(
             status = compared.get("status") if isinstance(compared, dict) else None
             problems.append(f"{FRAMEWORK_REPOSITORY} commit {at[:12]} is not on main (compare status {status!r})")
             continue
-        # The commit must be the merge of the named pull request into main.
-        pulls = fetch(f"repos/{FRAMEWORK_REPOSITORY}/commits/{at}/pulls")
+        # The commit must be the merge of the named pull request into main:
+        # the pull request is merged, based on main, and its merge_commit_sha
+        # is this commit. A commit from the pull request's own branch is also
+        # associated with it, so association alone does not prove the merge.
+        pulls = fetch(f"repos/{FRAMEWORK_REPOSITORY}/commits/{at}/pulls", expected=list)
         merged = [
             pull for pull in (pulls if isinstance(pulls, list) else [])
             if isinstance(pull, dict) and pull.get("number") == transfer.pull_request
             and isinstance(pull.get("base"), dict) and pull["base"].get("ref") == "main"
-            and pull.get("merged_at")
+            and pull.get("merged_at") and pull.get("merge_commit_sha") == at
         ]
         if not merged:
             problems.append(
