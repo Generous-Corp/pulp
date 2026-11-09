@@ -59,6 +59,35 @@ or the same parameter and returns them in `replaced`.
 `learn_state()` reports `idle`, `listening` or `bound` for the UI, and a listen
 gives up after `timeout_ms`.
 
+## Feedback to the controller
+
+A mapping with `feedback = true` sends its parameter's value back to the
+controller (a motorised fader, an LED ring, a display). The processor makes one
+call per block:
+
+```cpp
+format::midi_learn_process_block(learn_, state(), midi_in, midi_out,
+    format::midi_feedback_capabilities(format::MidiLearnFormat::vst3, descriptor()));
+```
+
+It adopts new mappings, routes the block's input, and writes feedback into
+`midi_out`. A mapping sends when its parameter has moved by at least half a step
+of the controller's resolution; the first block after a mapping appears sends
+its current value so the controller can sync; and a value the controller itself
+just wrote is never echoed back. 14-bit and NRPN mappings send their whole
+message sequence; program change is a trigger and is never sent.
+
+`midi_feedback_capabilities()` reports, per format, which source kinds the
+adapter can carry. VST3, CLAP, AU v2 and AU v3 write a plug-in's MIDI output to
+the host when its descriptor declares `produces_midi`; LV2, AAX and the
+standalone app are not claimed. The flag describes what the adapter writes, not
+what a host does with it.
+
+Register the engine with `format::MidiLearnHandle` (declared after the engine
+member). VST3 then offers `IMidiLearn`, and a controller move the host reports
+binds the parameter being learned without waiting for a burst
+(`MidiLearnEngine::host_reported_controller`).
+
 ## Saving and loading
 
 Mappings belong to the controller, not the sound, so by default they are saved

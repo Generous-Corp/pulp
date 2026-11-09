@@ -242,6 +242,15 @@ if(APPLE AND NOT PULP_IOS)
         "-framework AppKit"
         "-framework CoreFoundation")
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # Asynchronous alerts, file panels and open_url, including real NSAlert and
+    # NSOpenPanel sheets on an offscreen window. Own process: the cases pump
+    # the main run loop and hold sheets on a window.
+    pulp_add_test_suite(pulp-test-platform-async-dialogs
+        SOURCES test_platform_async_dialogs.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-async-dialogs PRIVATE "-framework Cocoa")
+endif()
 if(APPLE)
     # Per-binary unique Objective-C class names. The fixture dylib links its own
     # copy of pulp-platform, standing in for a second plug-in in the process.
@@ -259,13 +268,12 @@ if(APPLE)
     pulp_test_spawns(pulp-test-platform-objc-unique-class pulp-test-objc-unique-fixture)
 endif()
 if(APPLE AND NOT PULP_IOS)
-    # Asynchronous alerts, file panels and open_url, including real NSAlert and
-    # NSOpenPanel sheets on an offscreen window. Own process: the cases pump
-    # the main run loop and hold sheets on a window.
-    pulp_add_test_suite(pulp-test-platform-async-dialogs
-        SOURCES test_platform_async_dialogs.mm
+    # Outbound file drags: validation, the recorder seam automation uses, the
+    # operation mapping, the drag image, event anchoring and the drag source.
+    pulp_add_test_suite(pulp-test-platform-file-drag
+        SOURCES test_platform_file_drag.mm
         LIBRARIES pulp::platform)
-    target_link_libraries(pulp-test-platform-async-dialogs PRIVATE "-framework Cocoa")
+    target_link_libraries(pulp-test-platform-file-drag PRIVATE "-framework Cocoa")
 endif()
 if(APPLE AND NOT PULP_IOS)
     # Anchored menus: the NSMenu built from a model, selection reporting for the
@@ -305,4 +313,13 @@ if(TARGET pulp-native)
     target_link_libraries(pulp-test-native-input PRIVATE
         pulp::native Catch2::Catch2WithMain "-framework AppKit")
     catch_discover_tests(pulp-test-native-input)
+endif()
+if(TARGET pulp-native)
+    # integrations/pulp-native: input reaching the surface's view (pointer,
+    # wheel, host-first keys, text and marked text, focus, cursors, drops).
+    add_executable(pulp-test-native-surface-input test_native_surface_input.mm)
+    target_compile_options(pulp-test-native-surface-input PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-native-surface-input PRIVATE
+        pulp::native Catch2::Catch2WithMain "-framework AppKit" "-framework Metal")
+    catch_discover_tests(pulp-test-native-surface-input)
 endif()
