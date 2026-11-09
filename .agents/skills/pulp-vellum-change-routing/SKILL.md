@@ -485,6 +485,11 @@ Traps:
   from the pin at the tip of `--base` (default `origin/main`), not from the
   fork point, so an event written on a branch that forked before a re-pin is
   born with the id CI checks.
+- `test_vellum_watch_preflight.py` counts the lines of `.githooks/pre-push` and
+  `gates.sh` that name `vellum_watch_preflight`, and requires each to pass
+  `--enforce`. A label or message in the hook that mentions the script name
+  (for example a failed-gate label) counts as an invocation and fails it; name
+  the check in words instead.
 - A frozen path (the pin's `frozen_paths`: the transferred slices' paths
   minus the paths recorded with an owner ruling in
   `.github/vellum-export-receipt/owner-unfreezes.json`) owes no
