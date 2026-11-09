@@ -5,6 +5,7 @@
   "inputs": [],
   "kind": "compiled",
   "runtime_targets": [
+   "AgentToolkitSynth_ControlHost",
    "pulp-cli",
    "pulp-control-vendor-product-fixture",
    "pulp-mcp"

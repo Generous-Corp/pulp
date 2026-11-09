@@ -70,7 +70,7 @@ if (!file.loaded()) {
 ```
 
 The file path admits only true ranged readers: WAV, uncompressed AIFF/AIFF-C
-`NONE`, FLAC, MP3 and Ogg Vorbis, at one or two channels and no more than
+(`NONE`, `twos` or `sowt`), FLAC, MP3 and Ogg Vorbis, at one or two channels and no more than
 192 kHz. The compressed formats seek inside the encoded stream, so a long FLAC
 streams without being decoded whole. A file that can only be decoded whole (a
 FLAC or Ogg stream whose header gives no length, or a format read through the

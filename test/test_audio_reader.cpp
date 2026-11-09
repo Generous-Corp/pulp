@@ -100,6 +100,111 @@ AudioFileData make_signal() {
     return data;
 }
 
+void append_be16(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
+    bytes.push_back(static_cast<std::uint8_t>(value >> 8));
+    bytes.push_back(static_cast<std::uint8_t>(value));
+}
+
+void append_be32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
+    for (int shift = 24; shift >= 0; shift -= 8)
+        bytes.push_back(static_cast<std::uint8_t>(value >> shift));
+}
+
+void append_le16(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
+    bytes.push_back(static_cast<std::uint8_t>(value));
+    bytes.push_back(static_cast<std::uint8_t>(value >> 8));
+}
+
+void append_le32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
+    for (int shift = 0; shift < 32; shift += 8)
+        bytes.push_back(static_cast<std::uint8_t>(value >> shift));
+}
+
+// 80-bit IEEE extended, the AIFF sample-rate encoding.
+void append_extended(std::vector<std::uint8_t>& bytes, double value) {
+    int exponent = 0;
+    const double mantissa = std::frexp(value, &exponent);
+    exponent += 16383 - 1;
+    const auto m = static_cast<std::uint64_t>(mantissa * std::pow(2.0, 64));
+    bytes.push_back(static_cast<std::uint8_t>((exponent >> 8) & 0x7F));
+    bytes.push_back(static_cast<std::uint8_t>(exponent & 0xFF));
+    for (int shift = 56; shift >= 0; shift -= 8)
+        bytes.push_back(static_cast<std::uint8_t>((m >> shift) & 0xFF));
+}
+
+void append_iff_chunk(std::vector<std::uint8_t>& bytes, const char (&id)[5],
+                      const std::vector<std::uint8_t>& payload) {
+    bytes.insert(bytes.end(), id, id + 4);
+    append_be32(bytes, static_cast<std::uint32_t>(payload.size()));
+    bytes.insert(bytes.end(), payload.begin(), payload.end());
+    if (payload.size() & 1u)
+        bytes.push_back(0);
+}
+
+// FORM/AIFC holding `pcm16` (interleaved 16-bit words, already in the byte
+// order the compression type names) under a four-character compression type
+// and an empty compression name.
+std::vector<std::uint8_t> make_aifc(std::string_view compression, std::uint16_t channels,
+                                    std::uint32_t frames, const std::vector<std::uint8_t>& pcm16) {
+    REQUIRE(compression.size() == 4);
+    std::vector<std::uint8_t> comm;
+    append_be16(comm, channels);
+    append_be32(comm, frames);
+    append_be16(comm, 16);
+    append_extended(comm, kRate);
+    comm.insert(comm.end(), compression.begin(), compression.end());
+    comm.push_back(0); // empty pstring
+    comm.push_back(0); // pad to even
+    std::vector<std::uint8_t> ssnd;
+    append_be32(ssnd, 0);
+    append_be32(ssnd, 0);
+    ssnd.insert(ssnd.end(), pcm16.begin(), pcm16.end());
+    std::vector<std::uint8_t> body{'A', 'I', 'F', 'C'};
+    append_iff_chunk(body, "COMM", comm);
+    append_iff_chunk(body, "SSND", ssnd);
+    std::vector<std::uint8_t> bytes{'F', 'O', 'R', 'M'};
+    append_be32(bytes, static_cast<std::uint32_t>(body.size()));
+    bytes.insert(bytes.end(), body.begin(), body.end());
+    return bytes;
+}
+
+// The fixture signal quantized the way the registry's AIFF writer quantizes,
+// interleaved, in the requested byte order.
+std::vector<std::uint8_t> signal_pcm16(bool little_endian) {
+    const auto signal = make_signal();
+    std::vector<std::uint8_t> pcm;
+    for (std::uint64_t i = 0; i < kFrames; ++i) {
+        for (std::uint32_t ch = 0; ch < 2; ++ch) {
+            const float sample = std::clamp(signal.channels[ch][i], -1.0f, 1.0f);
+            const auto value =
+                static_cast<std::uint16_t>(static_cast<std::int16_t>(sample * 32767.0f));
+            if (little_endian)
+                append_le16(pcm, value);
+            else
+                append_be16(pcm, value);
+        }
+    }
+    return pcm;
+}
+
+// RIFF/WAVE, 16-bit PCM at kRate, with an empty data chunk.
+std::vector<std::uint8_t> make_zero_frame_wav(std::uint16_t channels) {
+    std::vector<std::uint8_t> bytes{'R', 'I', 'F', 'F'};
+    append_le32(bytes, 36);
+    bytes.insert(bytes.end(), {'W', 'A', 'V', 'E', 'f', 'm', 't', ' '});
+    append_le32(bytes, 16);
+    append_le16(bytes, 1);
+    append_le16(bytes, channels);
+    append_le32(bytes, kRate);
+    append_le32(bytes, kRate * channels * 2u);
+    append_le16(bytes, static_cast<std::uint16_t>(channels * 2u));
+    append_le16(bytes, 16);
+    bytes.insert(bytes.end(), {'d', 'a', 't', 'a'});
+    append_le32(bytes, 0);
+    REQUIRE(bytes.size() == 44u);
+    return bytes;
+}
+
 // A byte source that serves a vector through the abstract interface only, so
 // the reader cannot take a memory fast path.
 class VectorSource final : public AudioByteSource {
@@ -284,6 +389,112 @@ TEST_CASE("AudioReader matches the registry's whole-file decode", "[audio][audio
                     REQUIRE(std::fabs(ranged.channels[ch][i] - whole->channels[ch][i]) <=
                             tolerance);
         }
+    }
+}
+
+TEST_CASE("AudioReader agrees with the registry on AIFF-C byte orders",
+          "[audio][audio-reader][aifc-pcm]") {
+    // `NONE` and `twos` are the same big-endian words; `sowt` is the same
+    // words little-endian. Every spelling must decode, through the registry
+    // and through the reader, to the identical floats.
+    TempDir dir;
+    const auto big_endian = signal_pcm16(false);
+    const auto little_endian = signal_pcm16(true);
+    for (const char* compression : {"NONE", "twos", "sowt"}) {
+        SECTION(compression) {
+            const bool sowt = std::string_view(compression) == "sowt";
+            const auto bytes = make_aifc(compression, 2, static_cast<std::uint32_t>(kFrames),
+                                         sowt ? little_endian : big_endian);
+            const auto path = dir.path / (std::string(compression) + ".aifc");
+            write_bytes(path, bytes);
+            auto whole = pulp::audio::FormatRegistry::instance().read(path.string());
+            REQUIRE(whole.has_value());
+            REQUIRE(whole->num_frames() == kFrames);
+            // Not silence, and exactly the 16-bit quantized fixture sample.
+            const auto quantized = static_cast<std::int16_t>(
+                std::clamp(expected_sample(100, 0), -1.0f, 1.0f) * 32767.0f);
+            REQUIRE(quantized != 0);
+            REQUIRE(whole->channels[0][100] == static_cast<float>(quantized) / 32768.0f);
+
+            auto reader = AudioReader::open_file(path.string());
+            REQUIRE(reader);
+            REQUIRE(reader->info().num_frames == kFrames);
+            const auto ranged = full_decode(*reader);
+            REQUIRE(ranged.channels == whole->channels);
+            check_ranges(*reader, *whole);
+
+            auto memory = AudioReader::open_memory(bytes, ".aifc");
+            REQUIRE(memory);
+            REQUIRE(full_decode(*memory).channels == whole->channels);
+        }
+    }
+}
+
+TEST_CASE("AudioReader agrees with the registry that a zero-frame file is valid and empty",
+          "[audio][audio-reader][zero-frames]") {
+    TempDir dir;
+    struct Case {
+        const char* name;
+        const char* extension;
+        std::vector<std::uint8_t> bytes;
+    };
+    const Case cases[] = {
+        {"WAV", ".wav", make_zero_frame_wav(2)},
+        {"AIFF", ".aiff",
+         [] {
+             auto bytes = make_aifc("NONE", 2, 0, {});
+             std::memcpy(bytes.data() + 8, "AIFF", 4); // plain AIFF: strip the compression type
+             return bytes;
+         }()},
+        {"AIFF-C sowt", ".aifc", make_aifc("sowt", 2, 0, {})},
+    };
+    for (const auto& item : cases) {
+        SECTION(item.name) {
+            const auto path = dir.path / (std::string("empty") + item.extension);
+            write_bytes(path, item.bytes);
+            auto whole = pulp::audio::FormatRegistry::instance().read(path.string());
+            REQUIRE(whole.has_value());
+            REQUIRE(whole->sample_rate == kRate);
+            REQUIRE(whole->num_channels() == 2);
+            REQUIRE(whole->num_frames() == 0);
+
+            for (const auto fallback :
+                 {AudioReaderFallback::DecodeOnce, AudioReaderFallback::Refuse}) {
+                auto reader = AudioReader::open_file(path.string(), {}, fallback);
+                REQUIRE(reader);
+                REQUIRE(reader->info().sample_rate == kRate);
+                REQUIRE(reader->info().num_channels == 2);
+                REQUIRE(reader->info().num_frames == 0);
+                REQUIRE(reader->info().duration_seconds == 0.0);
+                std::vector<std::vector<float>> out(2, std::vector<float>(16, 9.0f));
+                float* pointers[2] = {out[0].data(), out[1].data()};
+                REQUIRE(reader->read(0, pointers, 2, 16) == 0);
+                for (std::uint32_t ch = 0; ch < 2; ++ch)
+                    for (float sample : out[ch])
+                        REQUIRE(sample == 0.0f);
+                const auto all = reader->read(0, 16);
+                REQUIRE(all.has_value());
+                REQUIRE(all->num_frames() == 0);
+                REQUIRE(all->num_channels() == 2);
+            }
+            auto memory = AudioReader::open_memory(item.bytes, item.extension);
+            REQUIRE(memory);
+            REQUIRE(memory->info().num_frames == 0);
+        }
+    }
+    SECTION("a data claim the file does not hold is still refused") {
+        // Same 44 bytes, but the data chunk claims 4 GiB that is not there.
+        // choc clamps that to zero frames; neither reader may call it empty.
+        auto lying = make_zero_frame_wav(2);
+        lying[40] = 0xF0;
+        lying[41] = 0xFF;
+        lying[42] = 0xFF;
+        lying[43] = 0xFF;
+        const auto path = dir.path / "lying.wav";
+        write_bytes(path, lying);
+        REQUIRE_FALSE(pulp::audio::FormatRegistry::instance().read(path.string()).has_value());
+        REQUIRE_FALSE(AudioReader::open_file(path.string()));
+        REQUIRE_FALSE(AudioReader::open_memory(lying, ".wav"));
     }
 }
 
@@ -683,17 +894,17 @@ TEST_CASE("AudioReader bounds an RF64 length claim by the bytes present", "[audi
     CHECK(data->num_frames() == kFrames);
 }
 
-TEST_CASE("AudioReader refuses empty streams and survives extreme offsets",
+TEST_CASE("AudioReader opens a zero-frame WAV and survives extreme offsets",
           "[audio][audio-reader]") {
     TempDir dir;
-    AudioFileData empty;
-    empty.sample_rate = kRate;
-    empty.channels.assign(2, {});
-    const auto wav_path = dir.path / "empty.wav";
-    pulp::audio::write_wav_file(wav_path.string(), empty);
-    if (fs::exists(wav_path)) {
-        const auto empty_bytes = read_bytes(wav_path);
-        CHECK_FALSE(AudioReader::open_memory(empty_bytes, ".wav"));
+    // A zero-frame WAV is a valid empty file, not an empty stream: it opens
+    // with zero frames (the registry decodes it the same way). The WAV writer
+    // refuses to write one, so the bytes are built by hand.
+    {
+        const auto empty_bytes = make_zero_frame_wav(2);
+        auto empty = AudioReader::open_memory(empty_bytes, ".wav");
+        REQUIRE(empty);
+        CHECK(empty->info().num_frames == 0);
     }
 
     for (auto& format : make_formats(dir)) {

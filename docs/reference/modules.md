@@ -583,7 +583,7 @@ therefore counts it twice.
 | Format | Read | Write | Backend |
 |--------|:----:|:-----:|---------|
 | AAC | macOS, Windows | macOS, Windows, ✓* | Read through ExtAudioFile on macOS and Media Foundation on Windows. Written by the system codec writer (M4A or ADTS on macOS, M4A at 44.1 or 48 kHz on Windows) or optional FDK AAC (`pulp add fdk-aac --accept-license FDK-AAC`). FDK AAC writes an ADTS stream for both `.aac` and `.m4a`, so a `.m4a` it writes is not an MPEG-4 file and some players refuse it |
-| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian); the system codec writer adds 24- and 32-bit AIFF on macOS |
+| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit integer PCM; AIFF-C `NONE`/`twos` big-endian and `sowt` little-endian; writes 16-bit AIFF); the system codec writer adds 24- and 32-bit AIFF on macOS |
 | ALAC | macOS | macOS, ✓* | Read through ExtAudioFile on macOS. Written by the system codec writer on macOS or optional Apple ALAC (`pulp add alac`) |
 | CAF | macOS | macOS | Read and written through ExtAudioFile on macOS (AAC, ALAC or PCM inside) |
 | FLAC | ✓ | ✓* | dr_flac / libflac (`pulp add libflac`) |
