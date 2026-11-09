@@ -284,11 +284,21 @@ TEST_CASE("the outside click that closes a popup does not reach the editor",
     g_probe_mouse_downs = 0;
     editor.post_click(NSMakePoint(200, 150));
     REQUIRE(pump_until([&] { return g_probe_mouse_downs == 1; }));
+    // The control click starts activating the application, and the window
+    // server finishes that asynchronously: on a slow or headless host the key
+    // window then moves back to the editor and would close a popup that was
+    // opened in between. Let the activation settle before opening the popup.
+    pump_until([] { return NSApp.isActive; }, 1000ms);
+    dispatch_events(150ms);
 
     std::optional<PopupDismissReason> reason;
     auto popup =
         PopupWindow::open(scope, options_for(editor), [&](PopupDismissReason r) { reason = r; });
     REQUIRE(popup != nullptr);
+    dispatch_events(150ms);
+    INFO("popup closed before the click with reason "
+         << (reason ? pulp::platform::to_string(*reason) : "none"));
+    REQUIRE(popup->is_open());
     g_probe_mouse_downs = 0;
     editor.post_click(NSMakePoint(200, 150));
     REQUIRE(pump_until([&] { return reason.has_value(); }));
