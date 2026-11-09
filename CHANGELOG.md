@@ -9,6 +9,13 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1880"></a>
+## [1.88.0] - 2026-11-07
+
+- release/version bump ([#11742](https://github.com/Generous-Corp/pulp/pull/11742))
+- fix/inspect int max include 20261107 ([#11732](https://github.com/Generous-Corp/pulp/pull/11732))
+- codex/linux host scheduling 20261107 ([#11740](https://github.com/Generous-Corp/pulp/pull/11740))
+
 <a id="v1870"></a>
 ## [1.87.0] - 2026-11-07
 
@@ -12463,6 +12470,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.88.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.88.0
 [1.87.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.87.0
 [1.85.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.85.0
 [1.84.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.84.0
