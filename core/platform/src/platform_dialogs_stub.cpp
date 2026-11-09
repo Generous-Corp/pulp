@@ -1,6 +1,7 @@
 // Platforms without native asynchronous dialogs, alerts or a URL opener:
 // every backend reports that it cannot show anything, and the common code
-// delivers the empty or "unavailable" result asynchronously.
+// delivers the empty or "unavailable" result: posted on platforms with a
+// main-thread backend, inline on those without one.
 
 #include "dialog_internal.hpp"
 
