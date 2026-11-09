@@ -242,6 +242,15 @@ if(APPLE AND NOT PULP_IOS)
         "-framework AppKit"
         "-framework CoreFoundation")
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # Asynchronous alerts, file panels and open_url, including real NSAlert and
+    # NSOpenPanel sheets on an offscreen window. Own process: the cases pump
+    # the main run loop and hold sheets on a window.
+    pulp_add_test_suite(pulp-test-platform-async-dialogs
+        SOURCES test_platform_async_dialogs.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-async-dialogs PRIVATE "-framework Cocoa")
+endif()
 if(APPLE)
     # Per-binary unique Objective-C class names. The fixture dylib links its own
     # copy of pulp-platform, standing in for a second plug-in in the process.
