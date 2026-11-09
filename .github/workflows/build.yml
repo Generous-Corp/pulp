@@ -3131,7 +3131,7 @@ jobs:
       - name: Upload the affected-test summary (pull request head)
         # The macos leg only: an artifact name is unique per run, so a second
         # leg's upload would fail. Never fails the required check itself.
-        if: always() && matrix.key == 'macos' && steps.pr_affected_tests.outcome != 'skipped'
+        if: always() && github.event_name == 'pull_request' && matrix.key == 'macos' && steps.pr_affected_tests.outcome != 'skipped'
         continue-on-error: true
         uses: actions/upload-artifact@v7.0.2
         with:

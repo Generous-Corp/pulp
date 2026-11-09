@@ -460,15 +460,15 @@ class WorkflowContractTests(unittest.TestCase):
                 "name: pr-head-affected-tests-a${{ github.run_attempt }}",
                 "name: pr-head-affected-tests")),
             "upload only on success": dict(build=b.replace(
-                "if: always() && matrix.key == 'macos' && steps.pr_affected_tests.outcome != 'skipped'",
-                "if: matrix.key == 'macos' && steps.pr_affected_tests.outcome == 'success'")),
+                "if: always() && github.event_name == 'pull_request' && matrix.key == 'macos' && steps.pr_affected_tests.outcome != 'skipped'",
+                "if: github.event_name == 'pull_request' && matrix.key == 'macos' && steps.pr_affected_tests.outcome == 'success'")),
             "affected step non-gating": dict(build=b.replace(
                 "        id: pr_affected_tests\n",
                 "        id: pr_affected_tests\n        continue-on-error: true\n")),
             "budget dropped": dict(build=b.replace("--budget-secs 600 --jobs 4", "--jobs 4")),
             "every leg uploads": dict(build=b.replace(
-                "if: always() && matrix.key == 'macos' && steps.pr_affected_tests.outcome",
-                "if: always() && steps.pr_affected_tests.outcome")),
+                "if: always() && github.event_name == 'pull_request' && matrix.key == 'macos' && steps.pr_affected_tests.outcome",
+                "if: always() && github.event_name == 'pull_request' && steps.pr_affected_tests.outcome")),
             "upload can redden macos": dict(build=b.replace(
                 "        continue-on-error: true\n        uses: actions/upload-artifact@v7.0.2\n        with:\n          name: pr-head-affected-tests-a",
                 "        uses: actions/upload-artifact@v7.0.2\n        with:\n          name: pr-head-affected-tests-a")),
