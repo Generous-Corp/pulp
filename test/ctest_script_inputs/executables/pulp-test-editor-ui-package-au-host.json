@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-editor-ui-package-au-host",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "PulpEditorUiA_AU",
+   "PulpEditorUiNone_AU"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/fixtures/editor_ui_package/editor_ui_package_au_host.mm"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

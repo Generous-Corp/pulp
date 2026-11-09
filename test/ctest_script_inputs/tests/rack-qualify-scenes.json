@@ -1,0 +1,14 @@
+{
+ "name": "rack-qualify-scenes",
+ "record": {
+  "entry": "tools/rack/test_qualify_scenes.py",
+  "inputs": [
+   "examples/forge-modular/binary_identity.py",
+   "tools/rack",
+   "tools/rack/file_lock.py",
+   "tools/rack/qualify_scenes.py",
+   "tools/rack/test_qualify_scenes.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "token-coverage-ratchet",
+ "record": {
+  "entry": "tools/scripts/token_coverage_check.py",
+  "inputs": [
+   "tools/scripts/token_coverage_check.py"
+  ],
+  "kind": "python"
+ }
+}

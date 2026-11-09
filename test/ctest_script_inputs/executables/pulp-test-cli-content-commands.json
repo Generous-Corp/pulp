@@ -1,0 +1,32 @@
+{
+ "name": "pulp-test-cli-content-commands",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_cli_content_commands.cpp"
+  ],
+  "inputs": [
+   "fixtures/packages/basic-content-pack"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [
+   "test/test_cli_content_commands.cpp",
+   "tools/cli/cli_fs_util.cpp",
+   "tools/cli/content_commands.cpp",
+   "tools/cli/kit_commands.cpp",
+   "tools/cli/kit_manifest_validation.cpp",
+   "tools/cli/kit_policy.cpp",
+   "tools/cli/kit_profile_verification.cpp",
+   "tools/cli/package_registry.cpp",
+   "tools/cli/package_registry_trust.cpp"
+  ],
+  "spawning_sources": [
+   "tools/cli/kit_profile_verification.cpp",
+   "tools/cli/package_registry.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

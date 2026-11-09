@@ -104,7 +104,7 @@ def live_reachability() -> tuple[Path, list[str], dict, set[str]]:
     if not _LIVE:
         root = Path(__file__).resolve().parents[2]
         tracked = families.tracked_files(root)
-        declared = json.loads((root / families.SCRIPT_INPUTS).read_text(encoding="utf-8"))["tests"]
+        declared = families.script_inputs_store.load(root)["tests"]
         scripts = families.top_level_scripts(tracked)
         reached = families.native_reachable(scripts, tracked, {e.get("entry") for e in declared.values()},
                                             lambda rel: families.read_text(root, rel))

@@ -1,0 +1,16 @@
+{
+ "name": "pulp-fixture-runner",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [
+   "test/fixtures/timeline"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "core/interchange/tools/fixture_runner_main.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

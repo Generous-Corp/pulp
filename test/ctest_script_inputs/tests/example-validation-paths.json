@@ -1,0 +1,40 @@
+{
+ "name": "example-validation-paths",
+ "record": {
+  "entry": "tools/scripts/test_example_validation_paths.py",
+  "inputs": [
+   ".github/actions/install-linux-build-deps",
+   ".github/actions/install-linux-build-deps/action.yml",
+   ".github/workflows/examples-validation.yml",
+   "core/format",
+   "core/format/src/clap_adapter.cpp",
+   "core/playback/PulpPlaybackSources.cmake",
+   "core/playback/include/pulp/playback/transport.hpp",
+   "core/signal/include/pulp/signal/fft.hpp",
+   "core/state/include",
+   "core/state/include/pulp/state/parameter.hpp",
+   "core/timeline/PulpTimelineSources.cmake",
+   "core/view/cmake/PulpViewSources.cmake",
+   "core/view/include/pulp/view/view.hpp",
+   "examples/PulpTempoSampler/CMakeLists.txt",
+   "external/miniz/miniz.h",
+   "test/au_bundle_lifecycle.cpp",
+   "test/clap_bundle_lifecycle.cpp",
+   "test/cmake/quality_tests.cmake",
+   "test/vst3_bundle_lifecycle.cpp",
+   "tools/ci/governed-build.sh",
+   "tools/ci/install_linux_build_deps.py",
+   "tools/ci/lib/auval-exec-check.sh",
+   "tools/ci/linux_build_deps.json",
+   "tools/ci/run-auval-component.sh",
+   "tools/cmake",
+   "tools/cmake/PulpUtils.cmake",
+   "tools/deps",
+   "tools/deps/manifest.json",
+   "tools/scripts/example_validation_paths.py",
+   "tools/scripts/fetch_skia_for_release.py",
+   "tools/scripts/test_example_validation_paths.py"
+  ],
+  "kind": "python"
+ }
+}

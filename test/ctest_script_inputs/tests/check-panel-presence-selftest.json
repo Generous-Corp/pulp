@@ -1,0 +1,10 @@
+{
+ "name": "check-panel-presence-selftest",
+ "record": {
+  "entry": "tools/import-validation/test_check_panel_presence.py",
+  "inputs": [
+   "tools/import-validation/test_check_panel_presence.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,28 @@
+{
+ "name": "pulp-test-design-import",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_design_import_ir.cpp",
+   "test/test_design_import_native_fonts.cpp",
+   "test/test_recognition_resolver.cpp"
+  ],
+  "inputs": [
+   "external/fonts/FunnelDisplay-VariableFont_wght.ttf",
+   "external/fonts/Inter-Regular.ttf",
+   "test/fixtures/design-ir-observe/variable-font-label",
+   "test/fixtures/import-fidelity/assets/knob_ref.png",
+   "test/fixtures/imports/claude/vite-assets.html",
+   "test/fixtures/imports/figma-plugin/synthetic-knob.png",
+   "tools/figma-plugin/library-manifest.json"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_design_import_ir.cpp",
+   "test/test_design_import_native_fonts.cpp",
+   "test/test_recognition_resolver.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

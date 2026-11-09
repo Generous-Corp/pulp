@@ -1,0 +1,10 @@
+{
+ "name": "import-montage",
+ "record": {
+  "entry": "test/test_import_montage.py",
+  "inputs": [
+   "test/test_import_montage.py"
+  ],
+  "kind": "python"
+ }
+}

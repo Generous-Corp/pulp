@@ -1,0 +1,28 @@
+{
+ "name": "diff-cover-targets-selftest",
+ "record": {
+  "entry": "tools/scripts/test_diff_cover_targets.py",
+  "inputs": [
+   ".githooks/pre-push",
+   "core/runtime",
+   "core/state",
+   "core/state/include/pulp/state/store.hpp",
+   "core/state/src/param_json.cpp",
+   "core/state/src/store.cpp",
+   "core/view",
+   "core/view/src/view.cpp",
+   "test/cmake/test_installed_sdk_runtime_staging.cmake",
+   "test/test_cli_shellout.cpp",
+   "test/test_runtime.cpp",
+   "test/test_state.cpp",
+   "test/test_view.cpp",
+   "tools/ci/governed-build.sh",
+   "tools/cli",
+   "tools/scripts/diff_cover_targets.py",
+   "tools/scripts/gate_host_policy.sh",
+   "tools/scripts/local_diff_cover.sh",
+   "tools/scripts/test_diff_cover_targets.py"
+  ],
+  "kind": "python"
+ }
+}

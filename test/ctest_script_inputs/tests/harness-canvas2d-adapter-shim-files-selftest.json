@@ -1,0 +1,10 @@
+{
+ "name": "harness-canvas2d-adapter-shim-files-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_canvas2d_adapter_shim_files.py",
+  "inputs": [
+   "tools/harness/tests/test_canvas2d_adapter_shim_files.py"
+  ],
+  "kind": "python"
+ }
+}

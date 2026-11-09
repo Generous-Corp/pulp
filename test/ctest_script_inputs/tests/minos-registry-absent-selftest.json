@@ -1,0 +1,10 @@
+{
+ "name": "minos-registry-absent-selftest",
+ "record": {
+  "entry": "tools/scripts/test_minos_registry_absent.py",
+  "inputs": [
+   "tools/scripts/test_minos_registry_absent.py"
+  ],
+  "kind": "python"
+ }
+}

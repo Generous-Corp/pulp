@@ -1,0 +1,19 @@
+{
+ "name": "gpu-clean-agent-journey-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gpu_clean_agent_journey.py",
+  "inputs": [
+   "docs/status/gpu-recipes.schema.json",
+   "docs/status/gpu-recipes.yaml",
+   "test/cmake/gpu_clean_agent_journey_test.cmake",
+   "tools/scripts/gpu_clean_agent_isolation.py",
+   "tools/scripts/gpu_clean_agent_journey.py",
+   "tools/scripts/gpu_clean_agent_trust.py",
+   "tools/scripts/json_schema_lite.py",
+   "tools/scripts/sdk_capability_handoff.py",
+   "tools/scripts/sdk_provenance.py",
+   "tools/scripts/test_gpu_clean_agent_journey.py"
+  ],
+  "kind": "python"
+ }
+}

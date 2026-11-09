@@ -1,0 +1,14 @@
+{
+ "name": "agent-capability-installed-sdk-helper-selftest",
+ "record": {
+  "entry": "tools/scripts/test_agent_capability_installed_sdk_helpers.py",
+  "inputs": [
+   "tools/scripts/agent_capability_installed_sdk_consumers.py",
+   "tools/scripts/agent_capability_manifest.py",
+   "tools/scripts/json_schema_lite.py",
+   "tools/scripts/test_agent_capability_installed_sdk.py",
+   "tools/scripts/test_agent_capability_installed_sdk_helpers.py"
+  ],
+  "kind": "python"
+ }
+}

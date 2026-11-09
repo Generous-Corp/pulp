@@ -1,0 +1,11 @@
+{
+ "name": "gpu-device-link-closure",
+ "record": {
+  "entry": "tools/scripts/gpu_device_link_closure_check.py",
+  "inputs": [
+   "core/render/include",
+   "tools/scripts/gpu_device_link_closure_check.py"
+  ],
+  "kind": "python"
+ }
+}

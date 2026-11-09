@@ -1,0 +1,12 @@
+{
+ "name": "prepush-gate-output",
+ "record": {
+  "entry": "tools/scripts/test_prepush_gate_output.py",
+  "inputs": [
+   ".githooks/lib/gate-output.sh",
+   ".githooks/pre-push",
+   "tools/scripts/test_prepush_gate_output.py"
+  ],
+  "kind": "python"
+ }
+}

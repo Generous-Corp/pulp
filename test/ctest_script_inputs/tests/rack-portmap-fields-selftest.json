@@ -1,0 +1,10 @@
+{
+ "name": "rack-portmap-fields-selftest",
+ "record": {
+  "entry": "tools/rack/test_portmap_fields.py",
+  "inputs": [
+   "tools/rack/test_portmap_fields.py"
+  ],
+  "kind": "python"
+ }
+}

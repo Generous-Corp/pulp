@@ -1,0 +1,10 @@
+{
+ "name": "decisions-contract-validate",
+ "record": {
+  "entry": "tools/scripts/decisions_contract.py",
+  "inputs": [
+   "tools/scripts/decisions_contract.py"
+  ],
+  "kind": "python"
+ }
+}

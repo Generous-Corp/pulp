@@ -1,0 +1,18 @@
+{
+ "name": "pulp-test-coreaudio-input-only",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_coreaudio_input_only.mm"
+  ],
+  "inputs": [
+   "core/audio/platform/mac/coreaudio_device.mm"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_coreaudio_input_only.mm"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

@@ -1,0 +1,14 @@
+{
+ "name": "foundation-include-lint-negative-contract",
+ "record": {
+  "entry": "tools/scripts/test_foundation_include_lint.py",
+  "inputs": [
+   "core/audio/platform/android/demo_synth.hpp",
+   "core/platform/include/pulp/platform/platform.hpp",
+   "core/platform/src/android/jni_bridge.cpp",
+   "core/platform/src/platform.cpp",
+   "tools/scripts/test_foundation_include_lint.py"
+  ],
+  "kind": "python"
+ }
+}
