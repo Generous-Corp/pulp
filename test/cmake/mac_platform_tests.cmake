@@ -305,3 +305,12 @@ if(TARGET pulp-native)
         pulp::native Catch2::Catch2WithMain "-framework AppKit")
     catch_discover_tests(pulp-test-native-input)
 endif()
+if(TARGET pulp-native)
+    # integrations/pulp-native: input reaching the surface's view (pointer,
+    # wheel, host-first keys, text and marked text, focus, cursors, drops).
+    add_executable(pulp-test-native-surface-input test_native_surface_input.mm)
+    target_compile_options(pulp-test-native-surface-input PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-native-surface-input PRIVATE
+        pulp::native Catch2::Catch2WithMain "-framework AppKit" "-framework Metal")
+    catch_discover_tests(pulp-test-native-surface-input)
+endif()
