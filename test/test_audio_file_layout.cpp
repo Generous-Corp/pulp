@@ -140,6 +140,8 @@ TEST_CASE("layout report agrees with inspect_wav on every decoder fixture",
             CHECK(report.stream->channels == info->num_channels);
             CHECK(report.stream->bits_per_sample == info->bits_per_sample);
             CHECK(report.stream->frames == info->num_frames);
+            CHECK(report.stream->declared_frames == info->declared_frames);
+            CHECK(report.decode->truncated == info->truncated);
         } else {
             ++rejected;
             CHECK_FALSE(report.decode->reason.empty());
@@ -150,9 +152,10 @@ TEST_CASE("layout report agrees with inspect_wav on every decoder fixture",
     const auto valid = make_wav(make_format(1u, 1u, 48'000u, 16u), two_frames_mono16());
     for (std::size_t length = 0u; length < valid.size(); ++length)
         check("prefix " + std::to_string(length), std::span(valid).first(length));
-    // The sweep must have exercised both outcomes or it proved nothing.
-    CHECK(accepted >= 9u);
-    CHECK(rejected >= 50u);
+    // The sweep must have exercised both outcomes, recovery included, or it
+    // proved nothing: the two prefixes holding one whole frame decode.
+    CHECK(accepted >= 20u);
+    CHECK(rejected >= 45u);
 }
 
 TEST_CASE("interpret_wav_format reproduces the decoder's facts from a fmt payload",
@@ -251,9 +254,8 @@ TEST_CASE("standard headers classify standard with no warning", "[audio][file-la
         REQUIRE(ds64);
         CHECK(ds64->kind == LayoutRegionKind::envelope);
         REQUIRE(report.decode);
-        CHECK_FALSE(report.decode->decodable);
-        CHECK_THAT(report.decode->reason,
-                   Catch::Matchers::ContainsSubstring("RIFF envelopes only"));
+        CHECK(report.decode->decodable);
+        CHECK_FALSE(report.decode->truncated);
     }
     SECTION("Wave64") {
         const auto report =
@@ -287,9 +289,11 @@ TEST_CASE("specification violations each raise exactly their warning",
         const auto report = inspect_audio_file_layout(bytes);
         CHECK(has_warning(report, LayoutWarningKind::missing_pad_byte));
         CHECK(report.warnings.size() == 1u);
+        // A missing pad byte after the data costs nothing: the file decodes.
         REQUIRE(report.decode);
-        CHECK_FALSE(report.decode->decodable);
-        CHECK_FALSE(inspect_wav(bytes));
+        CHECK(report.decode->decodable);
+        CHECK_FALSE(report.decode->truncated);
+        CHECK(inspect_wav(bytes));
     }
     SECTION("duplicate fmt") {
         const auto report =
@@ -298,6 +302,16 @@ TEST_CASE("specification violations each raise exactly their warning",
         CHECK(report.warnings.size() == 1u);
         REQUIRE(report.decode);
         CHECK(report.decode->decodable);
+    }
+    SECTION("duplicate fmt that contradicts the first") {
+        const auto bytes =
+            make_wav_with_chunks(format, data, {{"fmt ", make_format(1u, 2u, 48'000u, 16u)}});
+        const auto report = inspect_audio_file_layout(bytes);
+        CHECK(has_warning(report, LayoutWarningKind::duplicate_fmt));
+        REQUIRE(report.decode);
+        CHECK_FALSE(report.decode->decodable);
+        CHECK_THAT(report.decode->reason, Catch::Matchers::ContainsSubstring("contradicts"));
+        CHECK_FALSE(inspect_wav(bytes));
     }
     SECTION("fmt after data") {
         const auto bytes = make_wav(format, data, true);
@@ -314,8 +328,13 @@ TEST_CASE("specification violations each raise exactly their warning",
         const auto report = inspect_audio_file_layout(bytes);
         CHECK(has_warning(report, LayoutWarningKind::truncated_data));
         CHECK_FALSE(has_warning(report, LayoutWarningKind::chunk_past_eof));
+        // The two frames present decode; the 200 declared are reported.
         REQUIRE(report.decode);
-        CHECK_FALSE(report.decode->decodable);
+        CHECK(report.decode->decodable);
+        CHECK(report.decode->truncated);
+        REQUIRE(report.stream);
+        CHECK(report.stream->frames == 2u);
+        CHECK(report.stream->declared_frames == 200u);
         const auto* region = find_region(report, "data");
         REQUIRE(region);
         CHECK(region->declared_size == 400u);
@@ -353,16 +372,25 @@ TEST_CASE("specification violations each raise exactly their warning",
         set_u32(bytes, 40u, 0xffffffffu);
         const auto report = inspect_audio_file_layout(bytes);
         CHECK(has_warning(report, LayoutWarningKind::sentinel_size_without_ds64));
+        // Nothing resolves the sentinel, so the data runs to the end of the
+        // file: decoded, and reported truncated against the size it states.
         REQUIRE(report.decode);
-        CHECK_FALSE(report.decode->decodable);
-        CHECK_FALSE(inspect_wav(bytes));
+        CHECK(report.decode->decodable);
+        CHECK(report.decode->truncated);
+        const auto info = inspect_wav(bytes);
+        REQUIRE(info);
+        CHECK(info->truncated);
+        CHECK(info->num_frames == 2u);
     }
-    SECTION("RF64 ds64 data size overlapping the following chunk") {
+    SECTION("RF64 ds64 data size contradicting the data chunk") {
         const auto bytes = make_rf64(format, data, static_cast<std::uint32_t>(data.size()),
                                      data.size() + 8u, {{"JUNK", Bytes{1u, 2u, 3u, 4u}}});
         const auto report = inspect_audio_file_layout(bytes);
         CHECK(has_warning(report, LayoutWarningKind::chunk_overlap));
         REQUIRE(find_region(report, "JUNK"));
+        REQUIRE(report.decode);
+        CHECK_FALSE(report.decode->decodable);
+        CHECK_FALSE(inspect_wav(bytes));
     }
     SECTION("extensible channel mask disagreeing with the channel count") {
         const auto report = inspect_audio_file_layout(
@@ -414,31 +442,47 @@ TEST_CASE("specification violations each raise exactly their warning",
     }
 }
 
-TEST_CASE("declared frames past the decode limit are a fact, not an error",
+TEST_CASE("decode limits bind the frames present, not the frames declared",
           "[audio][file-layout][limits]") {
     // 100,000,001 mono 16-bit frames declared by the header of a file that
-    // holds none of them. The limit fires on the declaration.
-    auto bytes = make_wav(make_format(1u, 1u, 48'000u, 16u), Bytes{});
+    // holds two of them. The declaration is a fact; the limit sees the two.
+    auto bytes = make_wav(make_format(1u, 1u, 48'000u, 16u), two_frames_mono16());
     set_u32(bytes, 40u, 200'000'002u);
     const auto report = inspect_audio_file_layout(bytes);
     REQUIRE(report.stream);
-    CHECK(report.stream->frames == 100'000'001u);
+    CHECK(report.stream->frames == 2u);
+    CHECK(report.stream->declared_frames == 100'000'001u);
     REQUIRE(report.decode_limits);
-    CHECK(report.decode_limits->exceeds());
-    CHECK(report.decode_limits->exceeds_frames);
-    CHECK_FALSE(report.decode_limits->exceeds_channels);
-    CHECK_FALSE(report.decode_limits->exceeds_output_bytes);
-    REQUIRE(report.decode_limits->exceeded_names().size() == 1u);
-    CHECK(report.decode_limits->exceeded_names()[0] == "max_frames");
-    CHECK(report.decode_limits->describe() == "max_frames=100000000");
-    CHECK(report.decode_limits->limits.max_frames == 100'000'000u);
+    CHECK_FALSE(report.decode_limits->exceeds());
+    CHECK(report.decode_limits->describe().empty());
+    REQUIRE(report.decode);
+    CHECK(report.decode->decodable);
+    CHECK(report.decode->truncated);
     CHECK(report.error.empty());
-    // One frame fewer is within the limit.
-    set_u32(bytes, 40u, 200'000'000u);
-    const auto within = inspect_audio_file_layout(bytes);
-    REQUIRE(within.decode_limits);
-    CHECK_FALSE(within.decode_limits->exceeds());
-    CHECK(within.decode_limits->describe().empty());
+
+    // Frames present past a ceiling do exceed it, and the fact names it.
+    LayoutInspectOptions options;
+    options.decode_limits.max_frames = 1u;
+    const auto capped = inspect_audio_file_layout(bytes, options);
+    REQUIRE(capped.decode_limits);
+    CHECK(capped.decode_limits->exceeds_frames);
+    CHECK_FALSE(capped.decode_limits->exceeds_channels);
+    CHECK_FALSE(capped.decode_limits->exceeds_output_bytes);
+    REQUIRE(capped.decode_limits->exceeded_names().size() == 1u);
+    CHECK(capped.decode_limits->exceeded_names()[0] == "max_frames");
+    CHECK(capped.decode_limits->describe() == "max_frames=1");
+
+    // The same header over no frame at all is refused: zero frames are
+    // valid only when the data chunk declares zero bytes.
+    auto empty = make_wav(make_format(1u, 1u, 48'000u, 16u), Bytes{});
+    set_u32(empty, 40u, 200'000'002u);
+    const auto refused = inspect_audio_file_layout(empty);
+    REQUIRE(refused.decode);
+    CHECK_FALSE(refused.decode->decodable);
+    CHECK_THAT(refused.decode->reason, Catch::Matchers::ContainsSubstring("no whole frame"));
+    REQUIRE(refused.stream);
+    CHECK(refused.stream->frames == 0u);
+    CHECK(refused.stream->declared_frames == 100'000'001u);
 }
 
 TEST_CASE("sparse multi-gigabyte WAV costs only header reads", "[audio][file-layout][memory]") {
@@ -487,14 +531,19 @@ TEST_CASE("sizes past 4 GiB survive the RF64 arithmetic", "[audio][file-layout][
     const auto bytes = make_rf64(format, Bytes{}, 0xffffffffu, 5'000'000'000ull);
     const auto report = inspect_audio_file_layout(bytes);
     REQUIRE(report.stream);
-    CHECK(report.stream->frames == 1'250'000'000ull);
+    CHECK(report.stream->declared_frames == 1'250'000'000ull);
+    CHECK(report.stream->frames == 0u);
     CHECK(has_warning(report, LayoutWarningKind::truncated_data));
     const auto* data = find_region(report, "data");
     REQUIRE(data);
     CHECK(data->declared_size == 5'000'000'000ull);
     CHECK(data->actual_size == 0u);
+    // None of the declared bytes is present, so nothing is allocated and the
+    // file is refused.
+    REQUIRE(report.decode);
+    CHECK_FALSE(report.decode->decodable);
     REQUIRE(report.decode_limits);
-    CHECK(report.decode_limits->exceeds());
+    CHECK_FALSE(report.decode_limits->exceeds());
 }
 
 TEST_CASE("hostile headers are reported, never guessed around", "[audio][file-layout][hostile]") {
@@ -516,9 +565,10 @@ TEST_CASE("hostile headers are reported, never guessed around", "[audio][file-la
         set_u32(bytes, 4u, 0u);
         const auto report = inspect_audio_file_layout(bytes);
         CHECK(has_warning(report, LayoutWarningKind::envelope_size_mismatch));
+        // A wrong RIFF size is a warning only; the walk still finds the
+        // chunks the file holds.
         REQUIRE(report.decode);
-        CHECK_FALSE(report.decode->decodable);
-        // The walk still finds the chunks the file holds.
+        CHECK(report.decode->decodable);
         REQUIRE(find_region(report, "data"));
         REQUIRE(report.stream);
         CHECK(report.stream->frames == 2u);
@@ -548,9 +598,13 @@ TEST_CASE("hostile headers are reported, never guessed around", "[audio][file-la
         const auto report = inspect_audio_file_layout(bytes);
         CHECK(has_warning(report, LayoutWarningKind::missing_pad_byte));
         CHECK(has_warning(report, LayoutWarningKind::truncated_data));
+        // One whole frame decodes; the partial one is reported.
         REQUIRE(report.decode);
-        CHECK_FALSE(report.decode->decodable);
-        CHECK_FALSE(inspect_wav(bytes));
+        CHECK(report.decode->decodable);
+        CHECK(report.decode->truncated);
+        const auto info = inspect_wav(bytes);
+        REQUIRE(info);
+        CHECK(info->num_frames == 1u);
     }
     SECTION("unprintable chunk id") {
         auto bytes = make_wav_with_chunks(format, data, {{"JUNK", Bytes{1u, 2u}}});
@@ -783,8 +837,11 @@ TEST_CASE("file bytes that are not JSON text are escaped, never fatal",
     }
 }
 
-TEST_CASE("a short fact chunk before data stops the decoder, and the report says so",
+TEST_CASE("a fact chunk of any size is stepped over by its declared size",
           "[audio][file-layout][parity]") {
+    // The walk steps every chunk by its own size field and the decoder
+    // reads a canonical header, so a short fact chunk neither stops it nor
+    // feeds it a sample count.
     const auto format = make_format(1u, 1u, 48'000u, 16u);
     const auto data = two_frames_mono16();
     for (std::size_t fact_size = 0u; fact_size <= 5u; ++fact_size) {
@@ -792,16 +849,12 @@ TEST_CASE("a short fact chunk before data stops the decoder, and the report says
         const auto bytes = make_wav_with_chunks(format, data, {{"fact", Bytes(fact_size, 0u)}});
         const auto report = inspect_audio_file_layout(bytes);
         REQUIRE(report.decode);
-        const bool decoder_accepts = inspect_wav(bytes).has_value();
-        CHECK(report.decode->decodable == decoder_accepts);
-        // dr_wav reads four bytes from any fact chunk: sizes 0, 1 and 2 leave
-        // it off the next header, 3 lands back on it through the pad byte.
-        CHECK(decoder_accepts == (fact_size >= 3u));
-        if (!decoder_accepts)
-            CHECK_THAT(report.decode->reason,
-                       Catch::Matchers::ContainsSubstring("fact chunk shorter than 4 bytes"));
+        const auto info = inspect_wav(bytes);
+        CHECK(report.decode->decodable == info.has_value());
+        REQUIRE(info);
+        CHECK(info->num_frames == 2u);
+        CHECK(report.is_standard());
     }
-    // After data the decoder never reads the fact chunk, so its size is moot.
     const auto after = make_wav_with_chunks(format, data, {}, {{"fact", Bytes(2u, 0u)}});
     REQUIRE(inspect_audio_file_layout(after).decode);
     CHECK(inspect_audio_file_layout(after).decode->decodable == inspect_wav(after).has_value());

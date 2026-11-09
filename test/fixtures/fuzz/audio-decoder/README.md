@@ -74,9 +74,12 @@ path or timestamp (the m4a `mvhd`/`tkhd`/`mdhd` times are zeroed).
 | `wav-bwf-bext-before-data.wav` | 2292 | Python | Valid BWF: 640-byte `bext` (602-byte fixed part plus coding history) placed before `data`. |
 | `wav-list-info-heavy.wav` | 1916 | Python | Valid: eight-entry `LIST`/`INFO` before `data` and a second two-entry list after it. |
 | `wav-rf64-ds64.wav` | 1680 | Python | Valid RF64: `RF64` tag, RIFF size and `data` size both 0xFFFFFFFF, `ds64` carries the real sizes and sample count. |
+| `wav-bw64-ds64.wav` | 1680 | Python | Valid BW64 (ITU-R BS.2088): the RF64 seed under the `BW64` tag, same `ds64` layout. |
+| `wav-rf64-ds64-data-past-eof.wav` | 613 | Python | Malformed: the RF64 seed cut after one third of its samples; `ds64` still declares the full data size. |
 | `wav-w64-pcm16-mono.wav` | 1704 | Python | Valid Sony Wave64 (`riff` GUID envelope, kept under `.wav`): 16-byte GUID chunk ids, 64-bit sizes that include the 24-byte chunk header, 8-byte alignment. |
 | `wav-odd-chunk-eof-no-pad.wav` | 1643 | Python | Malformed: 1599-byte `data` chunk (odd, one partial frame) at EOF with no pad byte. |
 | `wav-duplicate-fmt.wav` | 1668 | Python | Malformed: two `fmt ` chunks that disagree (mono 8 kHz 16-bit, then stereo 44.1 kHz 8-bit). |
+| `wav-duplicate-fmt-identical.wav` | 1668 | Python | Edge: the `fmt ` chunk repeated byte for byte before `data`. |
 | `wav-fmt-after-data.wav` | 1644 | Python | Malformed: `data` first, `fmt ` after it. |
 | `wav-data-past-eof.wav` | 577 | Python | Malformed: canonical base cut after one third of its samples; `data` and RIFF sizes still declare the full length. |
 | `wav-data-size-zero.wav` | 44 | Python | Edge: complete 44-byte header, `data` size 0. |
@@ -153,6 +156,9 @@ differential tests exist to surface.
 | all 11 valid WAV seeds | decode clean, 0.1 s; `wav-extensible-pcm24in32-stereo.wav` is reported as `pcm_f24le`, 0.133 s (reads the 32-bit container as packed 24-bit) | agree except the extensible seed, read as Int32 stereo 0.1 s (the spec reading) |
 | `wav-odd-chunk-eof-no-pad.wav` | decodes 0.099875 s, complains about the 1-byte partial frame | 0.099875 s, no complaint |
 | `wav-duplicate-fmt.wav` | uses the first `fmt ` (mono 8 kHz 16-bit) | uses the last `fmt ` (stereo 44.1 kHz 8-bit, 0.018 s) |
+| `wav-duplicate-fmt-identical.wav` | decodes clean, 0.1 s | agree |
+| `wav-bw64-ds64.wav` | decodes clean, 0.1 s | agree |
+| `wav-rf64-ds64-data-past-eof.wav` | 0.033375 s then a decoding error on the partial frame | 0.03325 s, no complaint |
 | `wav-fmt-after-data.wav` | decodes 0.1 s | decodes 0.1 s |
 | `wav-data-past-eof.wav` | 0.033 s then a decoding error on the partial frame | 0.03325 s, no complaint |
 | `wav-data-size-zero.wav` | accepted, duration N/A | accepted, 0 s |

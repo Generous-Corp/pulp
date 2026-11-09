@@ -48,11 +48,16 @@ EXPECTED_ACCEPTANCE_SPLITS: dict[str, tuple[bool, bool, str]] = {
     "wav-w64-pcm16-mono.wav": (
         False, True, "Sony Wave64 envelope; Pulp registers no Wave64 reader"),
     "wav-block-align-smaller-than-frame.wav": (
-        False, True, "nBlockAlign smaller than channels x sample width; the registry refuses a "
-        "frame layout the header contradicts, libsndfile derives the stride"),
-    "wav-duplicate-fmt.wav": (
-        True, False, "two fmt chunks: the registry decodes by the last one, libsndfile refuses; "
-        "tracked in Generous-Corp/pulp issue 11788"),
+        False, True, "nBlockAlign smaller than channels x sample width; Pulp refuses a frame "
+        "layout the fmt chunk contradicts, libsndfile derives the stride"),
+    "wav-bw64-ds64.wav": (
+        True, False, "BW64 envelope (ITU-R BS.2088); libsndfile does not recognise the tag"),
+    "wav-fmt-after-data.wav": (
+        True, False, "fmt chunk after the data chunk; Pulp accepts it with a warning, "
+        "libsndfile looks for fmt first"),
+    "wav-duplicate-fmt-identical.wav": (
+        True, False, "a fmt chunk repeated byte for byte; Pulp accepts it with a warning, "
+        "libsndfile refuses any second fmt"),
 }
 
 

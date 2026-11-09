@@ -1,12 +1,13 @@
 #include <pulp/audio/wav_decoder.hpp>
 
+#include "wav_frame_reader.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
 #include <limits>
 #include <optional>
-#include <vector>
 
 #define DRWAV_API [[maybe_unused]] static
 #define DRWAV_PRIVATE static
@@ -19,148 +20,103 @@ namespace pulp::audio {
 namespace {
 
 constexpr std::size_t kInterleavedChunkSamples = 4'096u;
+constexpr std::uint16_t kTagExtensible = 0xFFFEu;
 
-struct RiffLayout {
-    std::size_t format_offset = 0u;
-    std::size_t format_extent = 0u;
-    std::size_t data_offset = 0u;
-    std::size_t data_size = 0u;
+std::uint16_t u16(const std::uint8_t* p) noexcept {
+    return static_cast<std::uint16_t>(p[0] | (p[1] << 8u));
+}
+
+// The stream dr_wav reads: a canonical header, then `data_bytes` of the
+// file's data payload starting at `data_offset`. Nothing else of the file
+// is ever presented, so dr_wav's chunk walk sees one fmt and one data chunk.
+struct CanonicalStream {
+    CanonicalWaveHeader header;
+    WaveByteCursor source;
+    std::uint64_t data_offset = 0u;
+    std::uint64_t data_bytes = 0u;
+    std::uint64_t position = 0u;
+
+    std::uint64_t size() const noexcept {
+        return header.size + data_bytes;
+    }
 };
 
-struct RiffReader {
-    std::array<std::span<const std::uint8_t>, 4u> fragments{};
-    std::size_t fragment_count = 0u;
-    std::size_t size = 0u;
-    std::size_t position = 0u;
-};
-
-std::uint32_t read_u32(std::span<const std::uint8_t> bytes, std::size_t offset) noexcept {
-    return static_cast<std::uint32_t>(bytes[offset]) |
-           (static_cast<std::uint32_t>(bytes[offset + 1u]) << 8u) |
-           (static_cast<std::uint32_t>(bytes[offset + 2u]) << 16u) |
-           (static_cast<std::uint32_t>(bytes[offset + 3u]) << 24u);
-}
-
-bool has_id(std::span<const std::uint8_t> bytes, std::size_t offset, const char (&id)[5]) noexcept {
-    if (offset > bytes.size() || bytes.size() - offset < 4u)
-        return false;
-    for (std::size_t i = 0; i < 4u; ++i) {
-        if (bytes[offset + i] != static_cast<std::uint8_t>(id[i]))
-            return false;
-    }
-    return true;
-}
-
-std::optional<RiffLayout> inspect_riff_layout(std::span<const std::uint8_t> bytes) noexcept {
-    if (bytes.size() < 12u || !has_id(bytes, 0u, "RIFF") || !has_id(bytes, 8u, "WAVE"))
-        return std::nullopt;
-    const auto declared_end = static_cast<std::uint64_t>(read_u32(bytes, 4u)) + 8u;
-    if (declared_end < 12u || declared_end != bytes.size())
-        return std::nullopt;
-
-    RiffLayout layout;
-    bool found_format = false;
-    bool found_data = false;
-    std::size_t offset = 12u;
-    const auto end = static_cast<std::size_t>(declared_end);
-    while (offset < end) {
-        if (end - offset < 8u)
-            return std::nullopt;
-        const auto chunk_size = static_cast<std::size_t>(read_u32(bytes, offset + 4u));
-        const auto payload = offset + 8u;
-        if (chunk_size > end - payload)
-            return std::nullopt;
-        const auto chunk_end = payload + chunk_size;
-        const auto padding = chunk_size & 1u;
-        if (padding > end - chunk_end)
-            return std::nullopt;
-        if (!found_format && has_id(bytes, offset, "fmt ")) {
-            layout.format_offset = offset;
-            layout.format_extent = 8u + chunk_size + padding;
-            found_format = true;
-        } else if (!found_data && has_id(bytes, offset, "data")) {
-            layout.data_offset = offset;
-            layout.data_size = chunk_size;
-            found_data = true;
-        }
-        offset = chunk_end + padding;
-    }
-    if (!found_format || !found_data)
-        return std::nullopt;
-    return layout;
-}
-
-RiffReader make_riff_reader(std::span<const std::uint8_t> bytes,
-                            const RiffLayout& layout) noexcept {
-    RiffReader reader;
-    reader.size = bytes.size();
-    if (layout.data_offset < layout.format_offset) {
-        // dr_wav stops at the first data chunk unless metadata parsing is
-        // enabled. Present fmt first through spans instead of allocating a
-        // reordered copy or enabling metadata allocation for hostile input.
-        const auto format_end = layout.format_offset + layout.format_extent;
-        reader.fragments[0] = bytes.first(12u);
-        reader.fragments[1] = bytes.subspan(layout.format_offset, layout.format_extent);
-        reader.fragments[2] = bytes.subspan(12u, layout.format_offset - 12u);
-        reader.fragments[3] = bytes.subspan(format_end);
-        reader.fragment_count = 4u;
-    } else {
-        reader.fragments[0] = bytes;
-        reader.fragment_count = 1u;
-    }
-    return reader;
-}
-
-std::size_t read_riff(void* user_data, void* output, std::size_t requested) noexcept {
-    auto& reader = *static_cast<RiffReader*>(user_data);
-    if (reader.position > reader.size)
-        return 0u;
-    const auto available = reader.size - reader.position;
-    const auto to_read = std::min(requested, available);
-    auto* destination = static_cast<std::uint8_t*>(output);
+std::size_t read_stream(void* user, void* output, std::size_t requested) noexcept {
+    auto& stream = *static_cast<CanonicalStream*>(user);
+    auto* out = static_cast<std::uint8_t*>(output);
     std::size_t copied = 0u;
-    std::size_t fragment_start = 0u;
-    for (std::size_t i = 0u; i < reader.fragment_count && copied < to_read; ++i) {
-        const auto fragment = reader.fragments[i];
-        const auto fragment_end = fragment_start + fragment.size();
-        if (reader.position + copied < fragment_end) {
-            const auto local_offset = reader.position + copied - fragment_start;
-            const auto count = std::min(to_read - copied, fragment.size() - local_offset);
-            std::memcpy(destination + copied, fragment.data() + local_offset, count);
-            copied += count;
+    while (copied < requested && stream.position < stream.size()) {
+        const auto wanted = requested - copied;
+        std::size_t got = 0u;
+        if (stream.position < stream.header.size) {
+            got = std::min<std::size_t>(wanted, stream.header.size -
+                                                    static_cast<std::size_t>(stream.position));
+            std::memcpy(out + copied, stream.header.bytes.data() + stream.position, got);
+        } else {
+            const auto into_data = stream.position - stream.header.size;
+            const auto count = static_cast<std::size_t>(
+                std::min<std::uint64_t>(wanted, stream.data_bytes - into_data));
+            got = stream.source.read(stream.data_offset + into_data, out + copied, count);
+            if (got == 0u)
+                break;
         }
-        fragment_start = fragment_end;
+        copied += got;
+        stream.position += got;
     }
-    reader.position += copied;
     return copied;
 }
 
-drwav_bool32 seek_riff(void* user_data, int offset, drwav_seek_origin origin) noexcept {
-    auto& reader = *static_cast<RiffReader*>(user_data);
-    if (offset < 0)
+drwav_bool32 seek_stream(void* user, int offset, drwav_seek_origin origin) noexcept {
+    auto& stream = *static_cast<CanonicalStream*>(user);
+    std::int64_t base = 0;
+    if (origin == DRWAV_SEEK_CUR)
+        base = static_cast<std::int64_t>(stream.position);
+    else if (origin == DRWAV_SEEK_END)
+        base = static_cast<std::int64_t>(stream.size());
+    const auto target = base + offset;
+    if (target < 0 || static_cast<std::uint64_t>(target) > stream.size())
         return DRWAV_FALSE;
-    const auto base = origin == DRWAV_SEEK_SET ? 0u : reader.position;
-    const auto distance = static_cast<std::size_t>(offset);
-    if (base > reader.size || distance > reader.size - base)
-        return DRWAV_FALSE;
-    reader.position = base + distance;
+    stream.position = static_cast<std::uint64_t>(target);
     return DRWAV_TRUE;
 }
 
-class WavSession {
-  public:
-    WavSession(std::span<const std::uint8_t> bytes, const RiffLayout& layout) noexcept
-        : reader_(make_riff_reader(bytes, layout)),
-          initialized_(drwav_init(&wav_, read_riff, seek_riff, nullptr, &reader_, nullptr) !=
-                       DRWAV_FALSE) {}
+// The formats whose every frame dr_wav decodes. It would open others and
+// then read them as silence or not at all, so they are refused up front.
+bool decoder_reads(drwav& wav) noexcept {
+    const auto tag = wav.translatedFormatTag;
+    const auto channels = static_cast<std::uint32_t>(wav.channels);
+    if (channels == 0u)
+        return true; // reported as zero channels, a refusal of its own
+    if (tag == DR_WAVE_FORMAT_ADPCM || tag == DR_WAVE_FORMAT_DVI_ADPCM)
+        return channels <= 2u;
+    const auto frame = drwav_get_bytes_per_pcm_frame(&wav);
+    if (frame == 0u || frame % channels != 0u)
+        return false;
+    const auto sample = frame / channels;
+    if (tag == DR_WAVE_FORMAT_PCM)
+        return sample >= 1u && sample <= 4u;
+    if (tag == DR_WAVE_FORMAT_IEEE_FLOAT)
+        return sample == 4u || sample == 8u;
+    if (tag == DR_WAVE_FORMAT_ALAW || tag == DR_WAVE_FORMAT_MULAW)
+        return sample == 1u;
+    return false;
+}
 
-    ~WavSession() {
+bool is_adpcm(std::uint16_t translated) noexcept {
+    return translated == DR_WAVE_FORMAT_ADPCM || translated == DR_WAVE_FORMAT_DVI_ADPCM;
+}
+
+class DrWavSession {
+  public:
+    explicit DrWavSession(CanonicalStream& stream) noexcept
+        : initialized_(drwav_init(&wav_, read_stream, seek_stream, nullptr, &stream, nullptr) !=
+                       DRWAV_FALSE) {}
+    ~DrWavSession() {
         if (initialized_)
             drwav_uninit(&wav_);
     }
-
-    WavSession(const WavSession&) = delete;
-    WavSession& operator=(const WavSession&) = delete;
+    DrWavSession(const DrWavSession&) = delete;
+    DrWavSession& operator=(const DrWavSession&) = delete;
 
     explicit operator bool() const noexcept {
         return initialized_;
@@ -170,24 +126,9 @@ class WavSession {
     }
 
   private:
-    RiffReader reader_;
     drwav wav_{};
     bool initialized_ = false;
 };
-
-bool has_complete_frames(drwav& wav, const RiffLayout& layout) noexcept {
-    const auto format = wav.translatedFormatTag;
-    if (format == DR_WAVE_FORMAT_ADPCM || format == DR_WAVE_FORMAT_DVI_ADPCM)
-        return true;
-    const auto bytes_per_frame = drwav_get_bytes_per_pcm_frame(&wav);
-    return bytes_per_frame != 0u && layout.data_size % bytes_per_frame == 0u;
-}
-
-// A zero frame count is not a defect: an empty data chunk is a valid WAV that
-// decodes to its channel count and rate with no samples.
-bool valid_properties(const drwav& wav) noexcept {
-    return wav.channels != 0u && wav.sampleRate != 0u;
-}
 
 bool checked_output_bytes(std::uint64_t frames, std::uint32_t channels,
                           std::uint64_t& bytes) noexcept {
@@ -203,143 +144,201 @@ bool checked_output_bytes(std::uint64_t frames, std::uint32_t channels,
 
 } // namespace
 
-std::optional<AudioFileInfo> inspect_wav(std::span<const std::uint8_t> bytes) {
-    const auto layout = inspect_riff_layout(bytes);
-    if (!layout)
-        return std::nullopt;
+// ── Probe and frame reader ──────────────────────────────────────────────────
 
-    WavSession session(bytes, *layout);
-    if (!session)
-        return std::nullopt;
-    auto& wav = session.wav();
-    if (!valid_properties(wav) || !has_complete_frames(wav, *layout)) {
-        return std::nullopt;
+namespace detail {
+
+WavProbe probe_wav(const WaveByteCursor& cursor) {
+    WavProbe probe;
+    probe.layout = walk_wave_layout(cursor);
+    // The fmt chunk alone decides the format; the frame counts come from the
+    // data chunk through decide_wave, so no data size is passed here.
+    if (probe.layout.refusal == WaveRefusal::none)
+        probe.facts = interpret_wav_format(probe.layout.fmt.bytes(), 0u);
+    probe.decision = decide_wave(probe.layout, probe.facts);
+    if (probe.facts) {
+        probe.facts->total_frames = probe.decision.recoverable_frames;
+        probe.facts->declared_frames = probe.decision.declared_frames;
+        probe.facts->truncated = probe.decision.truncated;
     }
+    return probe;
+}
 
+AudioFileInfo wav_file_info(const WavProbe& probe) {
     AudioFileInfo info;
-    info.sample_rate = wav.sampleRate;
-    info.num_channels = wav.channels;
-    info.num_frames = wav.totalPCMFrameCount;
-    info.bits_per_sample = wav.bitsPerSample;
+    if (!probe.facts)
+        return info;
+    info.sample_rate = probe.facts->sample_rate;
+    info.num_channels = probe.facts->channels;
+    info.num_frames = probe.decision.recoverable_frames;
+    info.bits_per_sample = probe.facts->bits_per_sample;
     info.format = "WAV";
-    info.duration_seconds =
-        static_cast<double>(wav.totalPCMFrameCount) / static_cast<double>(wav.sampleRate);
+    info.duration_seconds = info.sample_rate != 0u ? static_cast<double>(info.num_frames) /
+                                                         static_cast<double>(info.sample_rate)
+                                                   : 0.0;
+    info.truncated = probe.decision.truncated;
+    info.declared_frames = probe.decision.declared_frames;
     return info;
+}
+
+struct WavFrameReader::Impl {
+    CanonicalStream stream;
+    drwav wav{};
+    bool initialized = false;
+    std::uint64_t frames = 0u;
+    std::uint64_t next_frame = 0u;
+
+    Impl() = default;
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+    ~Impl() {
+        if (initialized)
+            drwav_uninit(&wav);
+    }
+};
+
+WavFrameReader::WavFrameReader() = default;
+WavFrameReader::~WavFrameReader() = default;
+
+bool WavFrameReader::open(const WaveByteCursor& cursor, const WavProbe& probe) {
+    impl_.reset();
+    if (!probe.accepted() || !probe.facts)
+        return false;
+    auto impl = std::make_unique<Impl>();
+    impl->stream.header =
+        canonical_wave_header(probe.layout, probe.decision.recoverable_data_bytes);
+    impl->stream.source = cursor;
+    impl->stream.data_offset = probe.layout.data_offset;
+    impl->stream.data_bytes = probe.decision.recoverable_data_bytes;
+    impl->initialized = drwav_init(&impl->wav, read_stream, seek_stream, nullptr, &impl->stream,
+                                   nullptr) != DRWAV_FALSE;
+    // The decoder must count exactly the frames the policy decided on; a
+    // disagreement is a defect in one of them, refused rather than guessed.
+    if (!impl->initialized || impl->wav.channels != probe.facts->channels ||
+        impl->wav.totalPCMFrameCount != probe.decision.recoverable_frames)
+        return false;
+    impl->frames = probe.decision.recoverable_frames;
+    impl_ = std::move(impl);
+    return true;
+}
+
+std::uint32_t WavFrameReader::channels() const noexcept {
+    return impl_ ? impl_->wav.channels : 0u;
+}
+
+std::uint64_t WavFrameReader::frames() const noexcept {
+    return impl_ ? impl_->frames : 0u;
+}
+
+std::uint64_t WavFrameReader::read_interleaved(std::uint64_t frame, std::uint64_t count,
+                                               float* interleaved) {
+    if (!impl_ || frame >= impl_->frames || count == 0u)
+        return 0u;
+    auto& impl = *impl_;
+    if (frame != impl.next_frame) {
+        if (drwav_seek_to_pcm_frame(&impl.wav, frame) == DRWAV_FALSE)
+            return 0u;
+        impl.next_frame = frame;
+    }
+    const auto wanted = std::min(count, impl.frames - frame);
+    const auto got = drwav_read_pcm_frames_f32(&impl.wav, wanted, interleaved);
+    impl.next_frame += got;
+    return got;
+}
+
+} // namespace detail
+
+// ── Public surface ──────────────────────────────────────────────────────────
+
+std::optional<AudioFileInfo> inspect_wav(std::span<const std::uint8_t> bytes) {
+    const auto probe = detail::probe_wav(WaveByteCursor::over(bytes));
+    if (!probe.accepted())
+        return std::nullopt;
+    return detail::wav_file_info(probe);
 }
 
 std::optional<WavFormatFacts> interpret_wav_format(std::span<const std::uint8_t> fmt_payload,
                                                    std::uint64_t data_size,
                                                    std::optional<std::uint64_t> fact_sample_count) {
-    // dr_wav needs only the first 40 bytes of a fmt payload; a larger one is
-    // copied up to this cap and declared at the copied length so the
-    // synthetic file stays self-consistent.
-    constexpr std::size_t kMaxFormatCopy = 1024u;
-    constexpr std::uint64_t kRiffSizeSentinel = 0xFFFFFFFFu;
-    const auto format_copy = std::min(fmt_payload.size(), kMaxFormatCopy);
-    const bool rf64 = data_size >= kRiffSizeSentinel;
+    (void)fact_sample_count;
+    if (fmt_payload.size() < 16u)
+        return std::nullopt;
+    const auto tag = u16(fmt_payload.data());
+    if (tag == kTagExtensible && fmt_payload.size() < 40u)
+        return std::nullopt; // no sub-format to translate
+    const auto translated = tag == kTagExtensible ? u16(fmt_payload.data() + 24u) : tag;
+    // dr_wav divides an ADPCM data size by the block align while it opens.
+    if (is_adpcm(translated) && u16(fmt_payload.data() + 12u) == 0u)
+        return std::nullopt;
 
-    // Build the smallest file dr_wav accepts for these headers: envelope,
-    // ds64 when the data size needs 64 bits, fmt, optional fact, and the data
-    // chunk header. dr_wav stops at the data header, so no payload is needed.
-    std::vector<std::uint8_t> synthetic;
-    synthetic.reserve(96u + format_copy);
-    auto put_id = [&](const char (&id)[5]) {
-        for (std::size_t i = 0; i < 4u; ++i)
-            synthetic.push_back(static_cast<std::uint8_t>(id[i]));
-    };
-    auto put_u32 = [&](std::uint32_t value) {
-        for (unsigned shift = 0; shift < 32u; shift += 8u)
-            synthetic.push_back(static_cast<std::uint8_t>(value >> shift));
-    };
-    auto put_u64 = [&](std::uint64_t value) {
-        for (unsigned shift = 0; shift < 64u; shift += 8u)
-            synthetic.push_back(static_cast<std::uint8_t>(value >> shift));
-    };
-
-    put_id(rf64 ? "RF64" : "RIFF");
-    const auto riff_size_slot = synthetic.size();
-    put_u32(0u);
-    put_id("WAVE");
-    if (rf64) {
-        put_id("ds64");
-        put_u32(28u);
-        put_u64(0u); // riff size, patched below
-        put_u64(data_size);
-        put_u64(fact_sample_count.value_or(0u));
-        put_u32(0u); // no table entries
-    }
-    put_id("fmt ");
-    put_u32(static_cast<std::uint32_t>(format_copy));
-    synthetic.insert(synthetic.end(), fmt_payload.begin(),
-                     fmt_payload.begin() + static_cast<std::ptrdiff_t>(format_copy));
-    if ((format_copy & 1u) != 0u)
-        synthetic.push_back(0u);
-    if (fact_sample_count) {
-        put_id("fact");
-        put_u32(4u);
-        put_u32(
-            static_cast<std::uint32_t>(std::min<std::uint64_t>(*fact_sample_count, 0xFFFFFFFFu)));
-    }
-    put_id("data");
-    put_u32(static_cast<std::uint32_t>(rf64 ? kRiffSizeSentinel : data_size));
-
-    const auto header_bytes = static_cast<std::uint64_t>(synthetic.size()) - 8u;
-    const auto riff_size = header_bytes + data_size;
-    const auto riff_size32 =
-        static_cast<std::uint32_t>(std::min<std::uint64_t>(riff_size, kRiffSizeSentinel));
-    for (unsigned shift = 0; shift < 32u; shift += 8u)
-        synthetic[riff_size_slot + shift / 8u] = static_cast<std::uint8_t>(riff_size32 >> shift);
-    if (rf64) {
-        const auto ds64_riff_slot = 20u;
-        for (unsigned shift = 0; shift < 64u; shift += 8u)
-            synthetic[ds64_riff_slot + shift / 8u] = static_cast<std::uint8_t>(riff_size >> shift);
-    }
-
-    RiffLayout layout;
-    WavSession session(synthetic, layout);
+    // The header alone: dr_wav stops at the data chunk header, so the
+    // payload it declares need not be present.
+    CanonicalStream stream;
+    stream.header = canonical_wave_header(fmt_payload, data_size);
+    DrWavSession session(stream);
     if (!session)
         return std::nullopt;
     auto& wav = session.wav();
+    if (!decoder_reads(wav))
+        return std::nullopt;
+
     WavFormatFacts facts;
     facts.format_tag = wav.fmt.formatTag;
     facts.translated_format_tag = wav.translatedFormatTag;
     facts.channels = wav.channels;
     facts.sample_rate = wav.sampleRate;
     facts.bits_per_sample = wav.bitsPerSample;
-    facts.bytes_per_frame = drwav_get_bytes_per_pcm_frame(&wav);
+    facts.bytes_per_frame =
+        is_adpcm(wav.translatedFormatTag) ? 0u : drwav_get_bytes_per_pcm_frame(&wav);
     facts.total_frames = wav.totalPCMFrameCount;
+    facts.declared_frames = facts.total_frames;
+
+    // A partial last frame or block: decide over a layout holding exactly
+    // these headers, the arithmetic a walked file gets.
+    WaveLayout layout;
+    layout.has_fmt = true;
+    layout.has_data = true;
+    layout.fmt.payload_size = static_cast<std::uint32_t>(
+        std::min<std::size_t>(fmt_payload.size(), WaveFormatChunk::kMaxPayload));
+    std::memcpy(layout.fmt.payload.data(), fmt_payload.data(), layout.fmt.payload_size);
+    layout.data_declared = data_size;
+    layout.data_present = data_size;
+    const auto decision = decide_wave(layout, facts);
+    if (decision.accepted() || decision.refusal == WaveRefusal::no_whole_frame) {
+        facts.declared_frames = decision.declared_frames;
+        facts.truncated = decision.truncated;
+    }
     return facts;
 }
 
 std::optional<AudioFileData> decode_wav(std::span<const std::uint8_t> bytes,
                                         WavDecodeLimits limits) {
-    const auto layout = inspect_riff_layout(bytes);
-    if (!layout || limits.max_frames == 0u || limits.max_channels == 0u ||
-        limits.max_output_bytes == 0u)
+    if (limits.max_frames == 0u || limits.max_channels == 0u || limits.max_output_bytes == 0u)
         return std::nullopt;
-
-    WavSession session(bytes, *layout);
-    if (!session)
+    const auto cursor = WaveByteCursor::over(bytes);
+    const auto probe = detail::probe_wav(cursor);
+    if (!probe.accepted())
         return std::nullopt;
-    auto& wav = session.wav();
-    if (!valid_properties(wav) || !has_complete_frames(wav, *layout) ||
-        wav.totalPCMFrameCount > limits.max_frames || wav.channels > limits.max_channels ||
-        wav.channels > kInterleavedChunkSamples) {
+    const auto total = probe.decision.recoverable_frames;
+    const auto channel_count = probe.facts->channels;
+    if (total > limits.max_frames || channel_count > limits.max_channels ||
+        channel_count > kInterleavedChunkSamples)
         return std::nullopt;
-    }
-
     std::uint64_t output_bytes = 0u;
-    if (!checked_output_bytes(wav.totalPCMFrameCount, wav.channels, output_bytes) ||
+    if (!checked_output_bytes(total, channel_count, output_bytes) ||
         output_bytes > limits.max_output_bytes ||
         output_bytes > std::numeric_limits<std::size_t>::max() ||
-        wav.totalPCMFrameCount > std::numeric_limits<std::size_t>::max()) {
+        total > std::numeric_limits<std::size_t>::max())
         return std::nullopt;
-    }
 
-    const auto frames = static_cast<std::size_t>(wav.totalPCMFrameCount);
-    const auto channels = static_cast<std::size_t>(wav.channels);
+    detail::WavFrameReader reader;
+    if (!reader.open(cursor, probe))
+        return std::nullopt;
+
+    const auto frames = static_cast<std::size_t>(total);
+    const auto channels = static_cast<std::size_t>(channel_count);
     AudioFileData decoded;
-    decoded.sample_rate = wav.sampleRate;
+    decoded.sample_rate = probe.facts->sample_rate;
     decoded.channels.resize(channels);
     for (auto& channel : decoded.channels)
         channel.resize(frames);
@@ -347,13 +346,11 @@ std::optional<AudioFileData> decode_wav(std::span<const std::uint8_t> bytes,
     std::array<float, kInterleavedChunkSamples> interleaved{};
     const auto chunk_frames = kInterleavedChunkSamples / channels;
     std::uint64_t frame_offset = 0u;
-    while (frame_offset < wav.totalPCMFrameCount) {
-        const auto remaining = wav.totalPCMFrameCount - frame_offset;
-        const auto requested = remaining < chunk_frames ? remaining : chunk_frames;
-        const auto read = drwav_read_pcm_frames_f32(&wav, requested, interleaved.data());
-        if (read != requested) {
+    while (frame_offset < total) {
+        const auto requested = std::min<std::uint64_t>(total - frame_offset, chunk_frames);
+        const auto read = reader.read_interleaved(frame_offset, requested, interleaved.data());
+        if (read != requested)
             return std::nullopt;
-        }
         for (std::size_t frame = 0; frame < static_cast<std::size_t>(read); ++frame) {
             for (std::size_t channel = 0; channel < channels; ++channel) {
                 decoded.channels[channel][static_cast<std::size_t>(frame_offset) + frame] =
@@ -362,7 +359,6 @@ std::optional<AudioFileData> decode_wav(std::span<const std::uint8_t> bytes,
         }
         frame_offset += read;
     }
-
     return decoded;
 }
 

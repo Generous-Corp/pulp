@@ -78,7 +78,7 @@ std::unique_ptr<FormatWriter> create_system_audio_writer();
 std::unique_ptr<FormatReader> create_media_foundation_reader();
 #endif
 
-// ── WAV Reader/Writer (via CHOC) ────────────────────────────────────────
+// ── WAV Reader (shared WAV policy + dr_wav) / Writer (CHOC) ─────────────
 
 class WavReader : public FormatReader {
 public:

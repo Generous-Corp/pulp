@@ -1,6 +1,7 @@
 // libFuzzer entry point over the audio container readers that ship their own
-// decoder: WAV (CHOC), AIFF (in-house), FLAC (dr_flac), MP3 (dr_mp3) and Ogg
-// Vorbis (stb_vorbis). Each input reaches exactly one reader.
+// decoder: WAV (dr_wav behind Pulp's chunk walk), AIFF (in-house), FLAC
+// (dr_flac), MP3 (dr_mp3) and Ogg Vorbis (stb_vorbis). Each input reaches
+// exactly one reader.
 // approach after SimZhou/vscode-audiolens c5c5a24; re-authored
 //
 // Routing: the container magic is sniffed first, so a plain seed file (and
