@@ -1,0 +1,10 @@
+{
+ "name": "harness-status-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_status.py",
+  "inputs": [
+   "tools/harness/tests/test_status.py"
+  ],
+  "kind": "python"
+ }
+}

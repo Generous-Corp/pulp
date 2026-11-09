@@ -1,0 +1,11 @@
+{
+ "name": "create-templates-verify",
+ "record": {
+  "entry": "tools/scripts/test_verify_create_templates.py",
+  "inputs": [
+   "tools/scripts/test_verify_create_templates.py",
+   "tools/scripts/verify_create_templates.py"
+  ],
+  "kind": "python"
+ }
+}

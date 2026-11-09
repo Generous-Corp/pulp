@@ -1,0 +1,14 @@
+{
+ "name": "prepush-format-gate-wiring",
+ "record": {
+  "entry": "tools/scripts/test_prepush_format_gate.py",
+  "inputs": [
+   ".githooks/pre-push",
+   ".github/workflows/format-changed-check.yml",
+   "tools/scripts/format_changed.sh",
+   "tools/scripts/gates.sh",
+   "tools/scripts/test_prepush_format_gate.py"
+  ],
+  "kind": "python"
+ }
+}

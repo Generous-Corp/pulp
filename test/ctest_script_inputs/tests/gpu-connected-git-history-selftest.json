@@ -1,0 +1,12 @@
+{
+ "name": "gpu-connected-git-history-selftest",
+ "record": {
+  "entry": "tools/scripts/test_connected_git_history.py",
+  "inputs": [
+   "docs/status/gpu-vellum-handoff.yaml",
+   "tools/scripts/connected_git_history.py",
+   "tools/scripts/test_connected_git_history.py"
+  ],
+  "kind": "python"
+ }
+}

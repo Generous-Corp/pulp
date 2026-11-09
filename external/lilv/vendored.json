@@ -1,0 +1,40 @@
+{
+  "download_base": "https://download.drobilla.net",
+  "libraries": {
+    "lilv": {
+      "version": "0.28.0",
+      "tarball_sha256": "8dcb70adb5cf072335115a6b091f4113710bdc73abaadaa3f9e9c1e55957b149",
+      "omitted": [],
+      "tree_sha256": "bf3cff789273569d317579f31fbeb25d9495a68e8ac54d0c44e2966cd2b93fc9"
+    },
+    "serd": {
+      "version": "0.32.10",
+      "tarball_sha256": "b0e93b49e52f01a049475b7886ef140407115a32d3b1e5dc5f95141c88275d1c",
+      "omitted": [
+        "src/serdi.c"
+      ],
+      "tree_sha256": "af1fe521f1fe814c9d837d4a79c4e0387a3dce5144f6e113a47e4c1b2e057d65"
+    },
+    "sord": {
+      "version": "0.16.22",
+      "tarball_sha256": "bb23b34b216579136795d518cffa73d91cf205594ce9accebfd408afb839173f",
+      "omitted": [
+        "src/sord_validate.c",
+        "src/sordi.c"
+      ],
+      "tree_sha256": "b916060157f388809f058a1b736086e1da5b5e261275314fe9f76345dfdeacd4"
+    },
+    "sratom": {
+      "version": "0.6.22",
+      "tarball_sha256": "0209b7d0f22c96abb416722ed735b0933be47931ecff4aa4b26ded7760b4f252",
+      "omitted": [],
+      "tree_sha256": "2b16d608d1aac416e8138ac9431ccdfb6d519ddfbbefe1d6cbe2124184c4ddb2"
+    },
+    "zix": {
+      "version": "0.8.2",
+      "tarball_sha256": "4c73aab0f8cbbfe56b00c8c6d648316021e699c5ae6cbf254391ef309047e67b",
+      "omitted": [],
+      "tree_sha256": "e4804cd827bc69fb8af123c52e2b69f22b10b4e28756e5c9ea44834cc1ba94bb"
+    }
+  }
+}

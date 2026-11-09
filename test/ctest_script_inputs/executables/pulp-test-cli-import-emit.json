@@ -1,0 +1,26 @@
+{
+ "name": "pulp-test-cli-import-emit",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [
+   "tools/packages/tool-registry.json"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli"
+  ],
+  "sources": [
+   "test/test_cli_import_emit.cpp",
+   "tools/cli/import_detect.cpp",
+   "tools/cli/import_emit.cpp",
+   "tools/cli/import_emit_scan.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_import_emit.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

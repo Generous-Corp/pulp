@@ -1,0 +1,11 @@
+{
+ "name": "ccache-job-delta-selftest",
+ "record": {
+  "entry": "tools/ci/test_ccache_job_delta.py",
+  "inputs": [
+   "tools/ci/ccache_job_delta.py",
+   "tools/ci/test_ccache_job_delta.py"
+  ],
+  "kind": "python"
+ }
+}

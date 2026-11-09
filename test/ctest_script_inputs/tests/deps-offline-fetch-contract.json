@@ -1,0 +1,13 @@
+{
+ "name": "deps-offline-fetch-contract",
+ "record": {
+  "entry": "tools/deps/audit.py",
+  "inputs": [
+   "tools/ci/tart-provision.sh",
+   "tools/cmake/PulpGpuRuntime.cmake",
+   "tools/deps/audit.py",
+   "tools/packages/test-stubs"
+  ],
+  "kind": "python"
+ }
+}

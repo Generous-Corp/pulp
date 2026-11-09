@@ -304,6 +304,21 @@ pulp_add_test_suite(pulp-test-simd-parity
     SOURCES test_simd_parity.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::audio pulp::audio-analysis)
 
+# Complex kernels (interleaved and split multiply, conjugate multiply,
+# multiply-accumulate, magnitude, phase, power spectrum) on every compiled
+# backend against the scalar reference, and the reference against long double.
+pulp_add_test_suite(pulp-test-simd-complex
+    SOURCES test_simd_complex.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+
+# Vector math (exp, log, sin, cos, sincos, tanh, sqrt, wrap_phase) and the
+# precise / fast accuracy tiers: measured error against the documented bounds on
+# every compiled backend, special values, position independence and no
+# allocation. "pulp-test-simd-math [accuracy-report]" prints the measured maxima.
+pulp_add_test_suite(pulp-test-simd-math
+    SOURCES test_simd_math.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+
 # The header's inline scalar fallback for builds that list sources by hand:
 # only the include directory, deliberately no pulp::simd link.
 add_executable(pulp-test-simd-header-fallback test_simd_header_fallback.cpp)
@@ -406,6 +421,11 @@ pulp_add_test_suite(pulp-test-analysis-frontends
 pulp_add_test_suite(pulp-test-modulation-language
     SOURCES test_modulation_language.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+# Sustain point, release and legato retrigger of the breakpoint envelope, and
+# their interaction with loops.
+pulp_add_test_suite(pulp-test-signal-breakpoint-sustain
+    SOURCES test_signal_breakpoint_sustain.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-units GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-signal-mod-events GROUP pulp-test-group-core-signal
@@ -439,6 +459,10 @@ pulp_add_test_suite(pulp-test-routing-primitives
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
 pulp_add_test_suite(pulp-test-signal-filters GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+# Every response of the multi-output state-variable filter against the analytic
+# prototype.
+pulp_add_test_suite(pulp-test-signal-svf-outputs GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
 # TptFilter and the lockstep voice banks (LadderBank, SvfBank), split from
 # the signal filter tests above.
@@ -1209,6 +1233,11 @@ pulp_add_test_suite(pulp-test-screenshot-capture GROUP pulp-test-group-core-stan
 # STFT and audio visualization signal tests
 pulp_add_test_suite(pulp-test-stft GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)
+# Log-frequency column mapping and the display spectrum analyzer
+pulp_add_test_suite(pulp-test-spectrum-bin-mapping GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-spectrum-analyzer GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Visualization bridge and widget tests
 pulp_add_test_suite(pulp-test-visualization
     SOURCES test_visualization.cpp harness/rt_allocation_probe.cpp
@@ -1248,6 +1277,15 @@ pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform
 # FileDialog backend-registration tests
 pulp_add_test_suite(pulp-test-file-dialog GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)
+
+# How asynchronous dialogs deliver their completion: posted with a main-thread
+# backend, inline without one, dropped once the scope is gone. Portable, so it
+# covers the platforms with no main-thread backend. Reads the platform's
+# internal delivery helper.
+pulp_add_test_suite(pulp-test-platform-dialog-delivery
+    LIBRARIES pulp::platform)
+target_include_directories(pulp-test-platform-dialog-delivery PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/platform/src)
 
 # D-Bus client + Linux xdg-desktop-portal file-dialog backend
 pulp_add_test_suite(pulp-test-dbus GROUP pulp-test-group-core-platform
@@ -1365,6 +1403,14 @@ if(CMAKE_NM)
             -P "${CMAKE_CURRENT_LIST_DIR}/check_no_exported_drwav.cmake"
         COMMENT "Checking pulp-audio does not export private dr_wav symbols")
 endif()
+
+# Byte-level audio file layout report: decoder parity, profiles, warnings,
+# bounded reads, raw PCM, redaction, and the checked-in container fixtures.
+pulp_add_test_suite(pulp-test-audio-file-layout
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-audio-file-layout-containers
+    LIBRARIES pulp::audio)
+pulp_test_data(pulp-test-audio-file-layout-containers PATHS test/fixtures/audio/inspect)
 
 # Phase-vocoder offline time-stretch / pitch-shift.
 pulp_add_test_suite(pulp-test-phase-vocoder GROUP pulp-test-group-core-signal

@@ -1,0 +1,11 @@
+{
+ "name": "shipyard-merge-gate-evidence-selftest",
+ "record": {
+  "entry": "tools/scripts/test_shipyard_merge_gate_evidence.py",
+  "inputs": [
+   "tools/scripts/shipyard_merge_gate_evidence.py",
+   "tools/scripts/test_shipyard_merge_gate_evidence.py"
+  ],
+  "kind": "python"
+ }
+}

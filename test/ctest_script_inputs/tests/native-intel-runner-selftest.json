@@ -1,0 +1,10 @@
+{
+ "name": "native-intel-runner-selftest",
+ "record": {
+  "entry": "tools/ci/test_native_intel_runner.py",
+  "inputs": [
+   "tools/ci/test_native_intel_runner.py"
+  ],
+  "kind": "python"
+ }
+}

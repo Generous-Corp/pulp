@@ -8,7 +8,9 @@
 /// thread, unless the MainThreadScope is destroyed first, in which case the
 /// sheet is closed and `done` is dropped. Platforms without a native backend,
 /// and a parent with no window (or one already showing a sheet), report
-/// AlertResult::unavailable, also asynchronously.
+/// AlertResult::unavailable, also asynchronously. On platforms without a
+/// main-thread backend (main_thread_supported() is false) there is nothing to
+/// post to, so `done` runs inline, before show_alert_async returns.
 
 #include <pulp/platform/dialog_session.hpp>
 #include <pulp/platform/main_thread.hpp>

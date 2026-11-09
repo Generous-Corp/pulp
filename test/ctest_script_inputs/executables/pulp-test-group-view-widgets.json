@@ -1,0 +1,25 @@
+{
+ "name": "pulp-test-group-view-widgets",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_widget_bridge_style_reset.cpp"
+  ],
+  "inputs": [
+   "packages/pulp-react/test/fixtures/style-reset-toggle.json",
+   "tools/bridge/generated_editor_bridge.ts"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [
+   "test/test_editor_bridge.cpp",
+   "test/test_widget_bridge_style_reset.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_editor_bridge.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

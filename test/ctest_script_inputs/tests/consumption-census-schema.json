@@ -1,0 +1,13 @@
+{
+ "name": "consumption-census-schema",
+ "record": {
+  "entry": "tools/scripts/consumption_census.py",
+  "inputs": [
+   "docs/status/consumption-profiles.json",
+   "docs/status/consumption-profiles.schema.json",
+   "tools/scripts/consumption_census.py",
+   "tools/scripts/json_schema_lite.py"
+  ],
+  "kind": "python"
+ }
+}

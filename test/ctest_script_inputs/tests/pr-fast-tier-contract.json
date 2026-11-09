@@ -1,0 +1,10 @@
+{
+ "name": "pr-fast-tier-contract",
+ "record": {
+  "entry": "tools/scripts/pr_fast_tier_check.py",
+  "inputs": [
+   "tools/scripts/pr_fast_tier_check.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "cmake-examples-reorder-init-guard",
+ "record": {
+  "entry": "test/cmake/test_examples_reorder_init_guard.sh",
+  "inputs": [
+   "test/cmake/test_examples_reorder_init_guard.sh"
+  ],
+  "kind": "shell"
+ }
+}

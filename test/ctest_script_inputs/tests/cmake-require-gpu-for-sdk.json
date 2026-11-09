@@ -1,0 +1,10 @@
+{
+ "name": "cmake-require-gpu-for-sdk",
+ "record": {
+  "entry": "test/cmake/test_require_gpu_for_sdk.sh",
+  "inputs": [
+   "test/cmake/test_require_gpu_for_sdk.sh"
+  ],
+  "kind": "shell"
+ }
+}

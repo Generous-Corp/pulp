@@ -1,0 +1,11 @@
+{
+ "name": "confirm-failure-harness",
+ "record": {
+  "entry": "tools/scripts/test_confirm_failure.sh",
+  "inputs": [
+   "tools/scripts/confirm_failure.sh",
+   "tools/scripts/test_confirm_failure.sh"
+  ],
+  "kind": "shell"
+ }
+}

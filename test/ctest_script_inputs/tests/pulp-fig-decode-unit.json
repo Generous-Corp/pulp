@@ -1,0 +1,19 @@
+{
+ "name": "pulp-fig-decode-unit",
+ "record": {
+  "entry": "tools/import-design/fig/fig.test.mjs",
+  "inputs": [
+   "tools/import-design/fig/container.mjs",
+   "tools/import-design/fig/fig.test.mjs",
+   "tools/import-design/fig/fonts.mjs",
+   "tools/import-design/fig/kiwi.mjs",
+   "tools/import-design/fig/paths-layout-stroke.test.mjs",
+   "tools/import-design/fig/paths.mjs",
+   "tools/import-design/fig/paths.test.mjs",
+   "tools/import-design/fig/scene.mjs",
+   "tools/import-design/material_audit.mjs",
+   "tools/import-design/material_audit.test.mjs"
+  ],
+  "kind": "node"
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "name": "import-design-ir-observe-provider-boundary",
+ "record": {
+  "entry": "test/test_design_ir_observe_provider_boundary.py",
+  "inputs": [
+   "test/test_design_ir_observe_provider_boundary.py",
+   "tools/import-design/design_ir_observe.cpp"
+  ],
+  "kind": "python"
+ }
+}

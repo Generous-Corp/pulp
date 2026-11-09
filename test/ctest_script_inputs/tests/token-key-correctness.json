@@ -1,0 +1,15 @@
+{
+ "name": "token-key-correctness",
+ "record": {
+  "entry": "tools/scripts/token_key_check.py",
+  "inputs": [
+   "core/view/audio/src",
+   "core/view/audio/src/widgets",
+   "core/view/src",
+   "core/view/src/theme_presets.cpp",
+   "core/view/src/widgets",
+   "tools/scripts/token_key_check.py"
+  ],
+  "kind": "python"
+ }
+}

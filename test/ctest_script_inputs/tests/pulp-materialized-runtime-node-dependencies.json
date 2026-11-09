@@ -1,0 +1,14 @@
+{
+ "name": "pulp-materialized-runtime-node-dependencies",
+ "record": {
+  "entry": "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs",
+  "inputs": [
+   "tools/import-design/browser_capture/vendor_payload.mjs",
+   "tools/import-design/jsx-runtime/jsx-contract-audit.mjs",
+   "tools/import-design/jsx-runtime/jsx-contract-audit.test.mjs",
+   "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+   "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.test.mjs"
+  ],
+  "kind": "node"
+ }
+}

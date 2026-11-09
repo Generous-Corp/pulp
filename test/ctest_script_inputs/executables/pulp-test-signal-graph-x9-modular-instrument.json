@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-signal-graph-x9-modular-instrument",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_signal_graph_x9_modular_instrument.cpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

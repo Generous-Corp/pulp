@@ -1,0 +1,15 @@
+{
+ "name": "overlay-dismissal-wiring",
+ "record": {
+  "entry": "tools/scripts/overlay_dismissal_wiring_guard.py",
+  "inputs": [
+   "core/view/include/pulp/view/overlay_dismissal.hpp",
+   "core/view/include/pulp/view/platform",
+   "core/view/include/pulp/view/web",
+   "core/view/platform",
+   "core/view/src/overlay_dismissal.cpp",
+   "tools/scripts/overlay_dismissal_wiring_guard.py"
+  ],
+  "kind": "python"
+ }
+}

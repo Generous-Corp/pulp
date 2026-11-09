@@ -1,0 +1,12 @@
+{
+ "name": "mlx-named-model-harness-selftest",
+ "record": {
+  "entry": "tools/validation/test_mlx_named_model_harness.py",
+  "inputs": [
+   "test/fixtures/neural/example.nam",
+   "tools/validation/mlx_named_model_harness.py",
+   "tools/validation/test_mlx_named_model_harness.py"
+  ],
+  "kind": "python"
+ }
+}

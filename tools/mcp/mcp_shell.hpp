@@ -7,7 +7,10 @@
 
 #pragma once
 
+#include <array>
+#include <charconv>
 #include <cstdio>
+#include <optional>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -76,6 +79,18 @@ inline std::string exec(const std::string& cmd) {
     if (result.failed() && result.output.empty())
         result.output = "Command failed with status " + std::to_string(result.status);
     return result.output;
+}
+
+/// Shortest round-trippable decimal form of a double for a CLI argument.
+/// std::to_string fixes six decimals and silently floors a small value
+/// (1e-4 → "0.000100", 1e-7 → "0.000000"); this keeps every digit the CLI
+/// needs to parse the same number back. Empty when the value is not finite.
+inline std::optional<std::string> format_double_arg(double value) {
+    std::array<char, 32> buf{};
+    auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+    if (ec != std::errc())
+        return std::nullopt;
+    return std::string(buf.data(), ptr);
 }
 
 inline std::string shell_quote(const std::string& value) {

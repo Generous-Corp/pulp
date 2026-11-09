@@ -1,0 +1,11 @@
+{
+ "name": "scene3d-cmake-boundary",
+ "record": {
+  "entry": "tools/scene3d/verify_scene3d_cmake_boundary.py",
+  "inputs": [
+   "core/scene",
+   "tools/scene3d/verify_scene3d_cmake_boundary.py"
+  ],
+  "kind": "python"
+ }
+}

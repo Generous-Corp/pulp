@@ -533,6 +533,15 @@ public:
             for (auto& completion : completions) {
                 if (completion.cancelled) {
                     ++stats_.cancelled;
+                } else if (completion.data && completion.data->empty()) {
+                    // A zero-frame file decodes successfully with no samples.
+                    // Nothing can play it, so it is a load failure with a
+                    // reason, not a Loaded snapshot that is never ready().
+                    if (completion.target) {
+                        completion.target->publish_missing(completion.path,
+                                                           "file contains no audio frames");
+                    }
+                    ++stats_.decode_failures;
                 } else if (completion.data) {
                     auto shared = std::make_shared<AudioFileData>(std::move(*completion.data));
                     const auto cached = shared;

@@ -1,0 +1,20 @@
+{
+ "name": "capability-contract-gate-wiring",
+ "record": {
+  "entry": "tools/scripts/test_capability_contract_gate.py",
+  "inputs": [
+   ".github/workflows/build.yml",
+   "core/format/include/pulp/format/processor.hpp",
+   "core/midi/include/pulp/midi/message.hpp",
+   "docs/status/agent-capabilities.json",
+   "docs/status/agent-capability-surface.json",
+   "test/test_au_plugin_state.mm",
+   "tools/agent-capabilities/legacy-unreviewed-baseline.json",
+   "tools/scripts/agent_capability_manifest.py",
+   "tools/scripts/agent_capability_registry.py",
+   "tools/scripts/gates.sh",
+   "tools/scripts/test_capability_contract_gate.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "rack-pack-links-selftest",
+ "record": {
+  "entry": "tools/rack/test_pack_links.py",
+  "inputs": [
+   "tools/rack/test_pack_links.py"
+  ],
+  "kind": "python"
+ }
+}

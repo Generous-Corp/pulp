@@ -1,0 +1,12 @@
+{
+ "name": "pulp-materialized-runtime-conformance",
+ "record": {
+  "entry": "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs",
+  "inputs": [
+   "tools/import-design/browser_capture/vendor_payload.mjs",
+   "tools/import-design/jsx-runtime/materialized_runtime_canonicalization.mjs",
+   "tools/import-design/jsx-runtime/materialized_runtime_conformance.mjs"
+  ],
+  "kind": "node"
+ }
+}

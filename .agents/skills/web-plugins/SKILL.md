@@ -347,6 +347,22 @@ turn. For browser file/drop imports, prefer the page's `AudioContext.decodeAudio
 when session-rate resampling is wanted, then transfer the resulting PCM through
 plugin state or another explicitly bounded handoff.
 
+**Gotcha: a zero-frame WAV is a successful decode, not a failure.** An empty
+`data` chunk is a valid file (libsndfile and CoreAudio agree), so `decode_wav`
+returns an `AudioFileData` with the right `sample_rate`, the right channel
+count and empty channel vectors; `inspect_wav` reports `num_frames == 0`. Any
+consumer that indexes `channels[c][0]`, calls `.front()`/`.back()`, or divides
+by `num_frames()` right after a successful decode will fault on such a file.
+Check `data.empty()` and treat it as "no audio" — `decode_wav` itself returns
+the empty asset, and the playback pool refuses it at `create()` with
+`InvalidAsset` (clip compile refuses it again); `pulp-test-wav-memory-decoder`'s
+`[zero-frames]` case is the fixture to copy. The AIFF reader and the seekable
+`AudioReader` follow the same rule (a zero-frame WAV or AIFF opens with
+`info().num_frames == 0`; only a streaming codec's zero means "no length
+claim"), so the contract is per decoder output, not per container. Only an envelope or format fault
+(RIFF size, zero channels, zero rate, a short last frame) is a `nullopt`;
+"nothing to play" is a present value with `empty()` true.
+
 - The WAM adapter marks the processor dirty on a control write and services it
   **once per render turn**, right after the render call (`WamStage::service_non_realtime`
   / `mark_non_realtime_dirty`). A knob drag delivers many control messages in one
@@ -497,6 +513,16 @@ will tell you when you have not.
 
 ## Browser-host rules
 
+### Modifier keys are reported from `handle_key`, not from a separate listener
+
+`WebInputRouter::handle_key` (`web_event_translate.hpp`) reports a change in the
+held modifier keys when a `keydown` or `keyup` for Shift, Control, Alt or Meta
+arrives and it is not an auto-repeat. The browser's own modifier flags on that
+event already describe the state after the key, so the router passes them
+straight to `deliver_modifier_keys_changed`. The router does not track which
+view a pointer press is captured by, so on this host only the focused view
+hears the change.
+
 ### Local demo HTTP servers are loopback-only, canonical, and non-reflecting
 
 Browser fixtures need real HTTP headers, but they are still test harnesses rather
@@ -614,6 +640,17 @@ per-ABI entry point for it.** Go through the plugin's own state:
   include paths; both `PulpWam.cmake` and `PulpWclap.cmake` consume those lists.
   Keep that shared manifest aligned with `core/audio/CMakeLists.txt` so native
   and browser builds cannot silently diverge.
+
+  The portable list is `wav_decoder.cpp` alone. The layout report
+  (`core/audio/src/audio_file_layout*.cpp`, behind `pulp audio inspect`) sits in
+  `pulp-audio` only and is deliberately NOT portable: it opens files with
+  positional reads and pulls in the AIFF, FLAC, Ogg, MP3 and MP4 walkers.
+  `wav_decoder.hpp` exposes `interpret_wav_format` for it, which runs dr_wav
+  over a synthetic header built from a `fmt ` payload and a data size; that
+  function IS portable (no I/O, no allocation beyond a small vector) and is the
+  only seam the report may take from the decoder. Do not make `decode_wav` or
+  `inspect_wav` call back into the report, or the wasm lane grows five
+  container parsers it has no file to run them on.
 
 - The timebase, timeline, and playback engines are part of both production DSP
   builds. `PulpWam.cmake` and `PulpWclap.cmake` own their curated source lists,
@@ -1492,3 +1529,8 @@ symbol` in the `Build WebCLAP module` step of the required
 (keep it free of view-layer dependencies; the editor prewarm is a no-op here
 because no view scheduler is installed). There is no local wasm toolchain on
 the Macs by default, so this gate is usually first seen in CI.
+
+The wasi-sdk and Skia wasm archives are downloaded with
+`python3 tools/scripts/download_retry.py URL DEST` (6 attempts, jittered
+backoff on 5xx/timeouts, immediate failure on 4xx), then sha256-verified as
+before. Do not reintroduce a bare `curl -fsSL` for these.

@@ -239,6 +239,17 @@ pulp_add_test_suite(pulp-test-live-swap-admission GROUP pulp-test-group-sampler-
 pulp_add_test_suite(pulp-test-signal-graph-live-swap-staging GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_live_swap_staging.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+# Latency semantics: intentional delay is never compensated, artifact latency
+# is compensated only where paths reconverge, multi-output nodes and multiple
+# outputs are equalised, and a latency change needs a re-prepare.
+pulp_add_test_suite(pulp-test-signal-graph-latency-semantics GROUP pulp-test-group-sampler-host-graph
+    SOURCES test_signal_graph_latency_semantics.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
+# Static per-node / per-graph realtime report (declared contracts + measured work).
+pulp_add_test_suite(pulp-test-graph-rt-report
+    SOURCES test_graph_rt_report.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 pulp_add_test_suite(pulp-test-signal-graph-executor-parity
     SOURCES test_signal_graph_executor_parity.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph
@@ -472,6 +483,13 @@ pulp_add_test_suite(pulp-test-loop-analysis GROUP pulp-test-group-sampler-audio
 pulp_add_test_suite(pulp-test-onset-slice-analysis GROUP pulp-test-group-sampler-audio
     LIBRARIES pulp::audio)
 
+# SuperFlux onset detection: the streaming novelty function, the offline
+# detector, vibrato suppression and the slice analyzer's detection option.
+# Its own executable: the allocation probe replaces global operator new.
+pulp_add_test_suite(pulp-test-superflux-onset
+    SOURCES test_superflux_onset.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+
 # Analysis provider descriptors, package availability policy, and provenance sidecars.
 pulp_add_test_suite(pulp-test-analyzer-provider GROUP pulp-test-group-sampler-audio
     LIBRARIES pulp::audio)
@@ -577,4 +595,9 @@ pulp_add_test_suite(pulp-test-graph-identity
 # digest, fixed eight-slot bound, and fail-closed malformed target controls.
 pulp_add_test_suite(pulp-test-voice-identity
     SOURCES test_voice_identity.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+
+# G-4 public voice-bank binding schema, atomic persistence, and refusal controls.
+pulp_add_test_suite(pulp-test-voice-template
+    SOURCES test_voice_template.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)

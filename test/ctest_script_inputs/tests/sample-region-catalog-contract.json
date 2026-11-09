@@ -1,0 +1,15 @@
+{
+ "name": "sample-region-catalog-contract",
+ "record": {
+  "entry": "tools/scripts/test_sample_region_catalogs.py",
+  "inputs": [
+   "core/host/include/pulp/host/forge_catalog_export.hpp",
+   "docs/status/dsp-capabilities.json",
+   "docs/status/forge-catalog.json",
+   "tools/scripts/dsp_capability_registry.py",
+   "tools/scripts/json_schema_lite.py",
+   "tools/scripts/test_sample_region_catalogs.py"
+  ],
+  "kind": "python"
+ }
+}

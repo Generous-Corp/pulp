@@ -1,0 +1,13 @@
+{
+ "name": "rack-adjudicate-scenes",
+ "record": {
+  "entry": "tools/rack/test_adjudicate_scenes.py",
+  "inputs": [
+   "tools/rack/adjudicate_scenes.py",
+   "tools/rack/file_lock.py",
+   "tools/rack/qualify_scenes.py",
+   "tools/rack/test_adjudicate_scenes.py"
+  ],
+  "kind": "python"
+ }
+}

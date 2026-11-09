@@ -24,6 +24,7 @@ add_library(pulp-inspect-protocol
     src/control_protocol.cpp
     src/control_protocol_codec.cpp
     src/control_protocol_fields.cpp
+    src/control_vendor_operations.cpp
     src/main_thread_rpc.cpp
     src/protocol.cpp
     src/session.cpp
@@ -137,6 +138,7 @@ add_library(pulp-inspect-runtime
     src/control_main_thread_executor.cpp
     src/control_sequencer_transport_executor.cpp
     src/control_trace_session_executor.cpp
+    src/control_vendor_operation_executor.cpp
     src/trace_inspector.cpp)
 add_library(pulp::inspect-runtime ALIAS pulp-inspect-runtime)
 target_include_directories(pulp-inspect-runtime
@@ -214,6 +216,18 @@ if(TARGET pulp::host)
     target_link_libraries(pulp-inspect-standalone-runtime
         PUBLIC pulp::inspect-sample-region-runtime pulp-inspect-graph-runtime)
 endif()
+
+# Opt-in semantic vendor operations (presets, patch, offline render). Only a
+# target that declares vendor operations links it, through
+# CONTROL_VENDOR_SOURCES.
+add_library(pulp-inspect-agent-toolkit src/control_agent_toolkit.cpp)
+add_library(pulp::inspect-agent-toolkit ALIAS pulp-inspect-agent-toolkit)
+target_include_directories(pulp-inspect-agent-toolkit
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-agent-toolkit
+    PUBLIC pulp::inspect-runtime pulp::format pulp::state)
 
 # Exact-target UI capture/input remains an optional adapter so the common
 # control runtime does not acquire a renderer dependency.

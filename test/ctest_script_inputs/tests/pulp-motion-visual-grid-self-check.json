@@ -1,0 +1,10 @@
+{
+ "name": "pulp-motion-visual-grid-self-check",
+ "record": {
+  "entry": "tools/motion/visual/test_grid_overlay.py",
+  "inputs": [
+   "tools/motion/visual/test_grid_overlay.py"
+  ],
+  "kind": "python"
+ }
+}

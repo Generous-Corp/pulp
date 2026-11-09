@@ -28,6 +28,10 @@
       "why": "reads the configured registrations' scheduling properties"
     },
     {
+      "name": "hotspot-edit-guard",
+      "why": "refuses a direct edit to a registered shared aggregate (tools/scripts/hotspot_edit_guard.json); listed so it survives a tier change"
+    },
+    {
       "name": "ios-compile-gate-legs",
       "why": "Apple-only registration; not registered on a Linux configure"
     },
@@ -41,7 +45,7 @@
     },
     {
       "name": "script-test-inputs-drift",
-      "why": "test/ctest_script_inputs.json against the configured registrations"
+      "why": "test/ctest_script_inputs/ (one fragment per entry) against the configured registrations"
     },
     {
       "name": "source-selftest-lane-contract",

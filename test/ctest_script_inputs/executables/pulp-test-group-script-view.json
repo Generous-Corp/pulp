@@ -1,0 +1,14 @@
+{
+ "name": "pulp-test-group-script-view",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [],
+  "kind": "compiled",
+  "sources": [
+   "test/test_threejs_resources.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

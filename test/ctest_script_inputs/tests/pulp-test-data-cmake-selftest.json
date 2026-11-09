@@ -1,0 +1,11 @@
+{
+ "name": "pulp-test-data-cmake-selftest",
+ "record": {
+  "entry": "tools/scripts/test_pulp_test_data_cmake.py",
+  "inputs": [
+   "test/CMakeLists.txt",
+   "tools/scripts/test_pulp_test_data_cmake.py"
+  ],
+  "kind": "python"
+ }
+}
