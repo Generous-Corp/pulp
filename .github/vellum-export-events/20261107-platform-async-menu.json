@@ -3,7 +3,7 @@
   "event_id": "20261107-platform-async-menu",
   "kind": "exported-path-change",
   "created_at": "2026-11-08T00:00:00Z",
-  "receipt_export_id": "20261102-0f616a440cec",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
   "paths": [
     "core/platform/include/pulp/platform/popup_menu.hpp",
     "core/platform/platform/mac/popup_menu_mac.mm",
