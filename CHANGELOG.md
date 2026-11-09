@@ -9,6 +9,76 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1890"></a>
+## [1.89.0] - 2026-11-09
+
+- release/version bump ([#11747](https://github.com/Generous-Corp/pulp/pull/11747))
+- feature/graph latency semantics rt report 20261106 ([#11719](https://github.com/Generous-Corp/pulp/pull/11719))
+- feature/host auv3 oop 20261107 ([#11827](https://github.com/Generous-Corp/pulp/pull/11827))
+- feature/vellum 5c refreeze 20261107 ([#11783](https://github.com/Generous-Corp/pulp/pull/11783))
+- feature/native surface metal ([#11775](https://github.com/Generous-Corp/pulp/pull/11775))
+- feature/agent capability conflict free ([#11818](https://github.com/Generous-Corp/pulp/pull/11818))
+- feature/platform main thread ([#11760](https://github.com/Generous-Corp/pulp/pull/11760))
+- fix/download retry policy ([#11823](https://github.com/Generous-Corp/pulp/pull/11823))
+- codex/g7 standalone publication 20261108 ([#11813](https://github.com/Generous-Corp/pulp/pull/11813))
+- codex/sequencer checker guard 20261108 ([#11833](https://github.com/Generous-Corp/pulp/pull/11833))
+- feature/platform objc unique class ([#11765](https://github.com/Generous-Corp/pulp/pull/11765))
+- ci/dependency requests no network ([#11804](https://github.com/Generous-Corp/pulp/pull/11804))
+- feature/audio seekable readers system codecs 20261107 ([#11754](https://github.com/Generous-Corp/pulp/pull/11754))
+- feature/midi learn engine ([#11757](https://github.com/Generous-Corp/pulp/pull/11757))
+- feature/view spectrum log axis 20261106 ([#11746](https://github.com/Generous-Corp/pulp/pull/11746))
+- fix/host transport setting atomic 20261108 ([#11831](https://github.com/Generous-Corp/pulp/pull/11831))
+- docs/ui stack choice ([#11750](https://github.com/Generous-Corp/pulp/pull/11750))
+- feature/control vendor operations 20261107 ([#11759](https://github.com/Generous-Corp/pulp/pull/11759))
+- fix/skia fallback retry test 20261108 ([#11824](https://github.com/Generous-Corp/pulp/pull/11824))
+- feature/clean main merge guard ([#11825](https://github.com/Generous-Corp/pulp/pull/11825))
+- feature/simd kernel breadth 20261106 ([#11720](https://github.com/Generous-Corp/pulp/pull/11720))
+- feature/signal va filters adaa onsets 20261106 ([#11721](https://github.com/Generous-Corp/pulp/pull/11721))
+- codex/graph stall guard 20261108 ([#11814](https://github.com/Generous-Corp/pulp/pull/11814))
+- feature/host slot process fidelity 20261106 ([#11717](https://github.com/Generous-Corp/pulp/pull/11717))
+- codex/g11 recording publication 20261107 ([#11734](https://github.com/Generous-Corp/pulp/pull/11734))
+- fix/census stale build guard ([#11798](https://github.com/Generous-Corp/pulp/pull/11798))
+- ci/workflow lint split ([#11805](https://github.com/Generous-Corp/pulp/pull/11805))
+- fix/skia provisioning fallback 20261108 ([#11819](https://github.com/Generous-Corp/pulp/pull/11819))
+- feature/audio system codec writers 20261107 ([#11766](https://github.com/Generous-Corp/pulp/pull/11766))
+- repair/pulp 11799 inventory current 20261108 ([#11815](https://github.com/Generous-Corp/pulp/pull/11815))
+- feature/view input contracts 20261106 ([#11744](https://github.com/Generous-Corp/pulp/pull/11744))
+- fix/g4 sdk consumer sanitizer flags 20261108 ([#11817](https://github.com/Generous-Corp/pulp/pull/11817))
+- feature/audio format capabilities 20261107 ([#11761](https://github.com/Generous-Corp/pulp/pull/11761))
+- fix/wasi durable replace android lane pipe 20261107 ([#11748](https://github.com/Generous-Corp/pulp/pull/11748))
+- feature/host auv3 oop lv2 lilv 20261107 ([#11771](https://github.com/Generous-Corp/pulp/pull/11771))
+- fix/capability history compaction 20261108 ([#11809](https://github.com/Generous-Corp/pulp/pull/11809))
+- feature/audio spectrogram waveform png 20261107 ([#11789](https://github.com/Generous-Corp/pulp/pull/11789))
+- feature/midi panic button ([#11751](https://github.com/Generous-Corp/pulp/pull/11751))
+- fix/android fixture lane sigpipe ([#11786](https://github.com/Generous-Corp/pulp/pull/11786))
+- fix/vellum trust accept public ([#11797](https://github.com/Generous-Corp/pulp/pull/11797))
+- feature/native surface extension ([#11764](https://github.com/Generous-Corp/pulp/pull/11764))
+- fix/gpu runtime boundary hardening ([#11756](https://github.com/Generous-Corp/pulp/pull/11756))
+- codex/g4 slot binding 20261106 ([#11731](https://github.com/Generous-Corp/pulp/pull/11731))
+- feature/midi learn decoders ([#11752](https://github.com/Generous-Corp/pulp/pull/11752))
+- feature/audio file inspect 20261107 ([#11790](https://github.com/Generous-Corp/pulp/pull/11790))
+- codex/a9 installed consumer 20261107 ([#11794](https://github.com/Generous-Corp/pulp/pull/11794))
+- repair/diff cover selector m1 20261107 ([#11795](https://github.com/Generous-Corp/pulp/pull/11795))
+- feature/dependency request recorder ([#11770](https://github.com/Generous-Corp/pulp/pull/11770))
+- fix/vellum freeze 403 diagnostics ([#11778](https://github.com/Generous-Corp/pulp/pull/11778))
+- codex/g7 residual qualification 20261107 ([#11781](https://github.com/Generous-Corp/pulp/pull/11781))
+- feature/preset file schema v2 ([#11755](https://github.com/Generous-Corp/pulp/pull/11755))
+- codex/linux host frame trace 20261107 ([#11763](https://github.com/Generous-Corp/pulp/pull/11763))
+- feature/render gpu pass api 20261106 ([#11713](https://github.com/Generous-Corp/pulp/pull/11713))
+- feature/midi mpe reconnect conformance 20261106 ([#11718](https://github.com/Generous-Corp/pulp/pull/11718))
+- repair/g2 web linkage successor 20261106 ([#11722](https://github.com/Generous-Corp/pulp/pull/11722))
+- fix/sanitizer clap odr midi timestamp align 20261107 ([#11753](https://github.com/Generous-Corp/pulp/pull/11753))
+- codex/a9 qualification harness 20261106 ([#11728](https://github.com/Generous-Corp/pulp/pull/11728))
+- ci/merge group hold breaker main base ([#11613](https://github.com/Generous-Corp/pulp/pull/11613))
+- feature/format presets auv3 standalone state 20261106 ([#11716](https://github.com/Generous-Corp/pulp/pull/11716))
+
+<a id="v1880"></a>
+## [1.88.0] - 2026-11-07
+
+- release/version bump ([#11742](https://github.com/Generous-Corp/pulp/pull/11742))
+- fix/inspect int max include 20261107 ([#11732](https://github.com/Generous-Corp/pulp/pull/11732))
+- codex/linux host scheduling 20261107 ([#11740](https://github.com/Generous-Corp/pulp/pull/11740))
+
 <a id="v1870"></a>
 ## [1.87.0] - 2026-11-07
 
@@ -12463,6 +12533,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.89.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.89.0
+[1.88.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.88.0
 [1.87.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.87.0
 [1.85.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.85.0
 [1.84.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.84.0

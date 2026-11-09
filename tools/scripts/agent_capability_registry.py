@@ -211,7 +211,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/plugin_slot.hpp',
-        'fingerprint': 'sha256:b36cbc93f6fcad7b30941c958f17b5d72821d96bdc0a5e7b0e957aa13aae4f7b',
+        'fingerprint': 'sha256:69927dee51b495256394c0561f8e31be2abac5cf73dbd462a310565d637a92bb',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema.',
@@ -325,6 +325,40 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "infrastructure that sample, impulse-response and offline-render "
             "capabilities consume; it is not an independently selected "
             "generator-facing capability in the installed contract."
+        ),
+    },
+    {
+        "include": "pulp/audio/mmap_reader.hpp",
+        "fingerprint": "sha256:e690b373b06a9a9b87d68702f1c6b31e1bfc2f6c8df565194c325bc38cf71478",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Memory-mapped, snapshot-backed ranged audio file reading is host "
+            "infrastructure that sample streaming consumes; it is not an "
+            "independently selected generator-facing capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/streaming_sample_source_file.hpp",
+        "fingerprint": "sha256:2e0b805a65e4e5c0197bb41c9c196214e67dd064b7e07d394bacbf2472ac8f90",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Binding a memory-mapped file to a StreamingSampleSource frame reader "
+            "is host infrastructure for sampler playback; it is not an "
+            "independently selected generator-facing capability."
+        ),
+    },
+    {
+        "include": "pulp/audio/audio_reader.hpp",
+        "fingerprint": "sha256:33c68086a43d7c58391f312a37d363aa1401f8cc9ce2e288baf4382f7bd680ac",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Ranged audio file decoding (AudioReader over a path, memory or byte "
+            "source, bounded by DecodeLimits) is host infrastructure that sample "
+            "streaming and file playback consume; it is not an independently "
+            "selected generator-facing capability."
         ),
     },
     {

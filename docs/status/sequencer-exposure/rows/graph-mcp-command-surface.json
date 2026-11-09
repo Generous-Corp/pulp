@@ -36,7 +36,7 @@
     },
     "offline_timeline_mcp": {
       "disposition": "exposed",
-      "rationale": "The graph MCP command exposes inspect, validate, explain, and a bounded offline render through the CLI; formatting and WAV file writes remain CLI-only so this row records no MCP mutation surface.",
+      "rationale": "The graph MCP command exposes inspect, validate, explain, a bounded offline render, and the read-only realtime report through the CLI; formatting and WAV file writes remain CLI-only so this row records no MCP mutation surface.",
       "evidence": [
         {
           "kind": "mcp_definition",

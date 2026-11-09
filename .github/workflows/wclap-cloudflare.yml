@@ -297,7 +297,7 @@ jobs:
           url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${ver}/wasi-sdk-${ver}.0-x86_64-linux.tar.gz"
           dest="${RUNNER_TEMP:?}/wasi-sdk"
           rm -rf "$dest" "${RUNNER_TEMP}/wasi-sdk.tar.gz"
-          curl -fsSL "$url" -o "${RUNNER_TEMP}/wasi-sdk.tar.gz"
+          python3 tools/scripts/download_retry.py "$url" "${RUNNER_TEMP}/wasi-sdk.tar.gz"
           mkdir -p "$dest"
           tar -xzf "${RUNNER_TEMP}/wasi-sdk.tar.gz" -C "$dest" --strip-components=1
           echo "WASI_SDK_PREFIX=$dest" >> "$GITHUB_ENV"
@@ -405,7 +405,7 @@ jobs:
           trap 'rm -f "$archive.$$"' EXIT
           verify() { echo "$SKIA_WASM_SHA256  $1" | shasum -a 256 -c -; }
           if [ ! -f "$archive" ] || ! verify "$archive"; then
-            curl -fsSL "$SKIA_WASM_URL" -o "$archive.$$"
+            python3 tools/scripts/download_retry.py "$SKIA_WASM_URL" "$archive.$$"
             verify "$archive.$$"
             mv -f "$archive.$$" "$archive"
           fi

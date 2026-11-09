@@ -650,6 +650,11 @@ status in `isError` and uses bounded child execution. Keep the public consumer,
 actual installed CLI/MCP parity test, and source-before-PDC/mixing semantics
 together when changing the probe report.
 
+The graph `report` operation prints the `pulp.graph.rt-report` JSON from
+`pulp/host/graph_rt_report.hpp`. It prepares the graph with plugins unloaded,
+so it never runs hosted plugin code, and it is read-only through MCP. Keep the
+schema version, verdict names, and the shellout test in sync when changing it.
+
 `pulp bake <input.pulpgraph> -o <output.pulpbake> --sign-key <file>` loads and
 prepares the graph, lowers it to the bounded baked-plan format, and writes the
 Ed25519-signed artifact atomically. `pulp bake verify <artifact> --trust <file>`
@@ -4269,3 +4274,8 @@ rules when touching it:
   selected, after product filtering, never the whole build dir (test binaries
   legitimately carry every marker).
 
+# G-7 graph probe parity
+
+The `pulp graph probe` command and MCP `pulp_graph` tool expose bounded audio,
+control, and event edge observations. Keep their `edge_kind` and
+`destination_param` schemas aligned when changing graph probe diagnostics.

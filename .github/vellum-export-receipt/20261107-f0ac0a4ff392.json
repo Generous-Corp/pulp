@@ -1,13 +1,13 @@
 {
   "commit_map": {
-    "path": "provenance/mirror/commit-maps/20261102-0f616a440cec.txt",
-    "sha256": "e7bee6731d689fd6a5f88f10b9eab62a682b7082f9b1d44e542d38908045a02a"
+    "path": "provenance/mirror/commit-maps/20261107-f0ac0a4ff392.txt",
+    "sha256": "f7650fdaf1e3bde986346fc8e67a9d9c397de8e95295c09de156cf77e665ab1e"
   },
-  "created_at": "2026-11-02T21:52:52Z",
-  "export_id": "20261102-0f616a440cec",
+  "created_at": "2026-11-07T18:44:57Z",
+  "export_id": "20261107-f0ac0a4ff392",
   "files": [
     {
-      "blob": "b15f328515094ae15f286dcc27ef2e482ddd5874",
+      "blob": "8381c20e74f72da3ba90b3254ec507c8df46bde3",
       "mirror_path": "mirror/core/canvas/CMakeLists.txt",
       "mode": "100644",
       "pulp_path": "core/canvas/CMakeLists.txt"
@@ -445,7 +445,7 @@
       "pulp_path": "core/canvas/src/font_options.cpp"
     },
     {
-      "blob": "cd1f83766be106d1894b32909c7a57cf2930a15a",
+      "blob": "79ad0af65cd0e62e2df6a3d290231eaecbb3e402",
       "mirror_path": "mirror/core/canvas/src/font_registry_stubs.cpp",
       "mode": "100644",
       "pulp_path": "core/canvas/src/font_registry_stubs.cpp"
@@ -751,6 +751,84 @@
       "pulp_path": "core/canvas/src/text_shaper.cpp"
     },
     {
+      "blob": "8f38e51d0e3724fa745d06d531881b25868d1011",
+      "mirror_path": "mirror/core/dataplane/include/pulp/dataplane/fwd.hpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/include/pulp/dataplane/fwd.hpp"
+    },
+    {
+      "blob": "7eb6f1b78f7cd52aec0862fabfdcd69ae97436dc",
+      "mirror_path": "mirror/core/dataplane/include/pulp/dataplane/host_param_surface.hpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/include/pulp/dataplane/host_param_surface.hpp"
+    },
+    {
+      "blob": "a3bf257221db3cca1e7a0306684dc80a578927e2",
+      "mirror_path": "mirror/core/dataplane/include/pulp/dataplane/host_surfaces.hpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/include/pulp/dataplane/host_surfaces.hpp"
+    },
+    {
+      "blob": "3c80cf0d3aa4aa59094aa0eeca0543d52145445d",
+      "mirror_path": "mirror/core/dataplane/include/pulp/dataplane/value_channel_json.hpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/include/pulp/dataplane/value_channel_json.hpp"
+    },
+    {
+      "blob": "16e78dd729b3cd4731fef1ceafab4c9d11b3a43a",
+      "mirror_path": "mirror/core/dataplane/include/pulp/dataplane/value_channel_set.hpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/include/pulp/dataplane/value_channel_set.hpp"
+    },
+    {
+      "blob": "dd8361e8d39f6e0203e14cc6003a90f8db3a721d",
+      "mirror_path": "mirror/core/dataplane/include/pulp/dataplane/value_channel_telemetry.hpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/include/pulp/dataplane/value_channel_telemetry.hpp"
+    },
+    {
+      "blob": "87ef99678fdad38d35acdc89ba6b37c40bbf5272",
+      "mirror_path": "mirror/core/dataplane/include/pulp/dataplane/value_source.hpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/include/pulp/dataplane/value_source.hpp"
+    },
+    {
+      "blob": "a20293e31b335b116c136b89639e67444331b9cc",
+      "mirror_path": "mirror/core/dataplane/src/host_param_surface.cpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/src/host_param_surface.cpp"
+    },
+    {
+      "blob": "8dcf333496ed55448b1cde6d7f2ae09460460a29",
+      "mirror_path": "mirror/core/dataplane/src/host_surfaces.cpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/src/host_surfaces.cpp"
+    },
+    {
+      "blob": "076ec319407d6e082c827db8b4aae75bc0a72b23",
+      "mirror_path": "mirror/core/dataplane/src/value_channel_json.cpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/src/value_channel_json.cpp"
+    },
+    {
+      "blob": "bff708c4b2947cb86640114f2eabc3d060c43a08",
+      "mirror_path": "mirror/core/dataplane/src/value_channel_set.cpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/src/value_channel_set.cpp"
+    },
+    {
+      "blob": "c71ab313fbf75a9ba6ed0b6e00fb4da7cb8f0be7",
+      "mirror_path": "mirror/core/dataplane/src/value_channel_telemetry.cpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/src/value_channel_telemetry.cpp"
+    },
+    {
+      "blob": "be98e62a4ec90e0ac1e3358308d15ddb8aed9d40",
+      "mirror_path": "mirror/core/dataplane/src/value_source.cpp",
+      "mode": "100644",
+      "pulp_path": "core/dataplane/src/value_source.cpp"
+    },
+    {
       "blob": "40dd75653929fb75b3aa1965585fecbc5fe4e78d",
       "mirror_path": "mirror/core/events/include/pulp/events/child_process_manager.hpp",
       "mode": "100644",
@@ -931,7 +1009,7 @@
       "pulp_path": "core/platform/include/pulp/platform/android/motion_bridge.h"
     },
     {
-      "blob": "433b8d2cb832b8d662e4e0ca90f3c78b8ebcdca7",
+      "blob": "203f98e623de77c0e07c9c9710d6bf2d01668b07",
       "mirror_path": "mirror/core/platform/include/pulp/platform/child_process.hpp",
       "mode": "100644",
       "pulp_path": "core/platform/include/pulp/platform/child_process.hpp"
@@ -967,10 +1045,16 @@
       "pulp_path": "core/platform/include/pulp/platform/environment.hpp"
     },
     {
-      "blob": "0b0900850ae01af691f3a29ab5c483095f8e8bab",
+      "blob": "57b8a62d7a35f706f077182bb58e4ec7e0f967d5",
       "mirror_path": "mirror/core/platform/include/pulp/platform/file_dialog.hpp",
       "mode": "100644",
       "pulp_path": "core/platform/include/pulp/platform/file_dialog.hpp"
+    },
+    {
+      "blob": "8cdb02766b6739f1ec1f6e6aa4ebdaae5e9c1b07",
+      "mirror_path": "mirror/core/platform/include/pulp/platform/gpu_fwd.hpp",
+      "mode": "100644",
+      "pulp_path": "core/platform/include/pulp/platform/gpu_fwd.hpp"
     },
     {
       "blob": "a2d513084df44d83100fbe0e172dbe3afacd9610",
@@ -1003,6 +1087,18 @@
       "pulp_path": "core/platform/include/pulp/platform/progress_parser.hpp"
     },
     {
+      "blob": "d54937cc3690a0675e2cb13f1a2c6d78b700576d",
+      "mirror_path": "mirror/core/platform/include/pulp/platform/reveal_in_file_manager.hpp",
+      "mode": "100644",
+      "pulp_path": "core/platform/include/pulp/platform/reveal_in_file_manager.hpp"
+    },
+    {
+      "blob": "c09ee7a1018ba35663b61b395280da8a87f77b45",
+      "mirror_path": "mirror/core/platform/include/pulp/platform/special_dir.hpp",
+      "mode": "100644",
+      "pulp_path": "core/platform/include/pulp/platform/special_dir.hpp"
+    },
+    {
       "blob": "698cf7540356d8388bdd37c7b96ed40668f0782f",
       "mirror_path": "mirror/core/platform/include/pulp/platform/win/registry.hpp",
       "mode": "100644",
@@ -1027,7 +1123,7 @@
       "pulp_path": "core/platform/platform/mac/environment_mac.mm"
     },
     {
-      "blob": "845900065cba36d7005a234dc1e1431cf28d539a",
+      "blob": "debfcc0baa4e8b2fadc25e1ad64be4263add9175",
       "mirror_path": "mirror/core/platform/platform/mac/file_dialog_mac.mm",
       "mode": "100644",
       "pulp_path": "core/platform/platform/mac/file_dialog_mac.mm"
@@ -1039,7 +1135,13 @@
       "pulp_path": "core/platform/platform/mac/popup_menu_mac.mm"
     },
     {
-      "blob": "ba63d66643daa3f4f8028776fd277827bf4f5aa9",
+      "blob": "fe0d71bc83722208200b79c3ed1c37ce50602989",
+      "mirror_path": "mirror/core/platform/platform/mac/reveal_mac.mm",
+      "mode": "100644",
+      "pulp_path": "core/platform/platform/mac/reveal_mac.mm"
+    },
+    {
+      "blob": "be9595ffe299fec4b3ed7fe4d5563257f0afae83",
       "mirror_path": "mirror/core/platform/platform/posix/child_process_posix.cpp",
       "mode": "100644",
       "pulp_path": "core/platform/platform/posix/child_process_posix.cpp"
@@ -1063,7 +1165,7 @@
       "pulp_path": "core/platform/src/environment.cpp"
     },
     {
-      "blob": "5871f6bc0691c6349d6df70d069de79f7d439f8a",
+      "blob": "e0f1df2668489c1a746da5c923456c2ed220d948",
       "mirror_path": "mirror/core/platform/src/file_dialog_stub.cpp",
       "mode": "100644",
       "pulp_path": "core/platform/src/file_dialog_stub.cpp"
@@ -1093,7 +1195,19 @@
       "pulp_path": "core/platform/src/registry.cpp"
     },
     {
-      "blob": "d197a8d6674aae8f86f83e2f0ff187ceb04a365e",
+      "blob": "c33b40d6f11c9256d3f47324a0254dacb8f899eb",
+      "mirror_path": "mirror/core/platform/src/reveal_in_file_manager.cpp",
+      "mode": "100644",
+      "pulp_path": "core/platform/src/reveal_in_file_manager.cpp"
+    },
+    {
+      "blob": "13ee5809f55e493ab2fdd6857e351f6c3b60b956",
+      "mirror_path": "mirror/core/platform/src/special_dir.cpp",
+      "mode": "100644",
+      "pulp_path": "core/platform/src/special_dir.cpp"
+    },
+    {
+      "blob": "2831800672e4b3113bb5754f2f1649a6074b4cf0",
       "mirror_path": "mirror/core/render/include/pulp/render/bench/perf_counters.hpp",
       "mode": "100644",
       "pulp_path": "core/render/include/pulp/render/bench/perf_counters.hpp"
@@ -1111,37 +1225,25 @@
       "pulp_path": "core/render/include/pulp/render/draco_decoder.hpp"
     },
     {
-      "blob": "063261cbbbb96d1fd827e4b753c2d4c5205c880f",
-      "mirror_path": "mirror/core/render/include/pulp/render/gpu_compute.hpp",
-      "mode": "100644",
-      "pulp_path": "core/render/include/pulp/render/gpu_compute.hpp"
-    },
-    {
-      "blob": "9537d92432d276b5c019a0a01a2e07b68d74879c",
+      "blob": "9440588c39ee256d88e72bb3f361af6e82782add",
       "mirror_path": "mirror/core/render/include/pulp/render/gpu_diagnostics.hpp",
       "mode": "100644",
       "pulp_path": "core/render/include/pulp/render/gpu_diagnostics.hpp"
     },
     {
-      "blob": "e292c936de1bed594396dc3914d301e924aff01f",
-      "mirror_path": "mirror/core/render/include/pulp/render/gpu_proc_installer.hpp",
-      "mode": "100644",
-      "pulp_path": "core/render/include/pulp/render/gpu_proc_installer.hpp"
-    },
-    {
-      "blob": "6404e31ad2cbacded166a51559e81096ccf5ef1a",
+      "blob": "da94d2e4dca3b5cf519cc067751b6abf377ec7e2",
       "mirror_path": "mirror/core/render/include/pulp/render/gpu_render_time.hpp",
       "mode": "100644",
       "pulp_path": "core/render/include/pulp/render/gpu_render_time.hpp"
     },
     {
-      "blob": "17128ce1ad10f36cba84f333be09a81807e8a13e",
+      "blob": "5679b551120f930eaa24280928df804a1eaec705",
       "mirror_path": "mirror/core/render/include/pulp/render/gpu_startup_report.hpp",
       "mode": "100644",
       "pulp_path": "core/render/include/pulp/render/gpu_startup_report.hpp"
     },
     {
-      "blob": "47966ae61d17540e2a70ba1067ea7972270eae2f",
+      "blob": "cc6e29196b137cff4f5c029936a8b66d07806351",
       "mirror_path": "mirror/core/render/include/pulp/render/gpu_surface.hpp",
       "mode": "100644",
       "pulp_path": "core/render/include/pulp/render/gpu_surface.hpp"
@@ -1195,52 +1297,10 @@
       "pulp_path": "core/render/src/draco_decoder.cpp"
     },
     {
-      "blob": "ce47bda1a9f28fef9e018f88149da1168b126016",
-      "mirror_path": "mirror/core/render/src/gpu_compute.cpp",
+      "blob": "1aa079ce7f1c7d067c711e6bc79f700ff33a27d7",
+      "mirror_path": "mirror/core/render/src/gpu_runtime_hooks.cpp",
       "mode": "100644",
-      "pulp_path": "core/render/src/gpu_compute.cpp"
-    },
-    {
-      "blob": "9683668c3777fe717569aafbcc283bfe1ec89c86",
-      "mirror_path": "mirror/core/render/src/gpu_compute_pool.hpp",
-      "mode": "100644",
-      "pulp_path": "core/render/src/gpu_compute_pool.hpp"
-    },
-    {
-      "blob": "24fb9c690b46ff16c8b431ea13cf4841af23584b",
-      "mirror_path": "mirror/core/render/src/gpu_diagnostics.cpp",
-      "mode": "100644",
-      "pulp_path": "core/render/src/gpu_diagnostics.cpp"
-    },
-    {
-      "blob": "e54c3bf8537f603d6f87cbaa60d701d8456601a5",
-      "mirror_path": "mirror/core/render/src/gpu_proc_installer.cpp",
-      "mode": "100644",
-      "pulp_path": "core/render/src/gpu_proc_installer.cpp"
-    },
-    {
-      "blob": "13b25c4963c98f301d648b99c8d2eeb259ecec1d",
-      "mirror_path": "mirror/core/render/src/gpu_proc_installer_native.cpp",
-      "mode": "100644",
-      "pulp_path": "core/render/src/gpu_proc_installer_native.cpp"
-    },
-    {
-      "blob": "33891b9df4a6e087e0505c3f810665bac8bd2e0e",
-      "mirror_path": "mirror/core/render/src/gpu_proc_installer_registry.hpp",
-      "mode": "100644",
-      "pulp_path": "core/render/src/gpu_proc_installer_registry.hpp"
-    },
-    {
-      "blob": "c8dde2dd97661ff088c8c7191c9b80cc3ea9388f",
-      "mirror_path": "mirror/core/render/src/gpu_startup_report.cpp",
-      "mode": "100644",
-      "pulp_path": "core/render/src/gpu_startup_report.cpp"
-    },
-    {
-      "blob": "7e5bfd44625006b6fa90bc6ce5e4c3a13279f6f8",
-      "mirror_path": "mirror/core/render/src/gpu_surface_dawn.cpp",
-      "mode": "100644",
-      "pulp_path": "core/render/src/gpu_surface_dawn.cpp"
+      "pulp_path": "core/render/src/gpu_runtime_hooks.cpp"
     },
     {
       "blob": "c0e9ea3483ea570f4b2fa4fdcda3ab518077c68a",
@@ -1261,18 +1321,6 @@
       "pulp_path": "core/render/src/ktx2_decoder.cpp"
     },
     {
-      "blob": "f6748a9518f512e16699b9473ad8e1437e69a25e",
-      "mirror_path": "mirror/core/render/src/metal_surface_mac.mm",
-      "mode": "100644",
-      "pulp_path": "core/render/src/metal_surface_mac.mm"
-    },
-    {
-      "blob": "c33ab8dcb779e772a853b870908079b8672d5a5c",
-      "mirror_path": "mirror/core/render/src/pulp_render_objc_names.h",
-      "mode": "100644",
-      "pulp_path": "core/render/src/pulp_render_objc_names.h"
-    },
-    {
       "blob": "ca6123f669836b3d594457b1769b3f5687e271a6",
       "mirror_path": "mirror/core/render/src/render_loop.cpp",
       "mode": "100644",
@@ -1291,7 +1339,7 @@
       "pulp_path": "core/render/src/render_observer.cpp"
     },
     {
-      "blob": "d13363911a4c646c2324f30dd3b696df2ed02970",
+      "blob": "09357f0dd383c52ac7a479d03401234529597729",
       "mirror_path": "mirror/core/render/src/render_observer_private.hpp",
       "mode": "100644",
       "pulp_path": "core/render/src/render_observer_private.hpp"
@@ -1321,13 +1369,7 @@
       "pulp_path": "core/render/src/texture_atlas.cpp"
     },
     {
-      "blob": "e63be33f8814dc01ecd8c75dbc5d4aaebfc5cf41",
-      "mirror_path": "mirror/core/render/src/wavenet_layer_wgsl.hpp",
-      "mode": "100644",
-      "pulp_path": "core/render/src/wavenet_layer_wgsl.hpp"
-    },
-    {
-      "blob": "0d42f281edcbe925679d5f95e20ebb01e08e77a8",
+      "blob": "939ef983379259c70cc4be7d1be3c6f7c2546c01",
       "mirror_path": "mirror/core/runtime/CMakeLists.txt",
       "mode": "100644",
       "pulp_path": "core/runtime/CMakeLists.txt"
@@ -1357,13 +1399,13 @@
       "pulp_path": "core/runtime/include/pulp/runtime/assert.hpp"
     },
     {
-      "blob": "9315357887d51faba653b2ae96bbfad6668d39a2",
+      "blob": "5fe5c280d53915c493b9965f766b698edba3be8f",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/async_stream.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/async_stream.hpp"
     },
     {
-      "blob": "648ca35693d1039fa48f1465bfd6a0286d3c0aea",
+      "blob": "a8514b02b62a4c3bb7b6234feeb3f42480d70a45",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/background_job.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/background_job.hpp"
@@ -1391,6 +1433,12 @@
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/build_info.hpp.in",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/build_info.hpp.in"
+    },
+    {
+      "blob": "6329ea9e8689c33b745b135c17fd91753efc9642",
+      "mirror_path": "mirror/core/runtime/include/pulp/runtime/cancel.hpp",
+      "mode": "100644",
+      "pulp_path": "core/runtime/include/pulp/runtime/cancel.hpp"
     },
     {
       "blob": "42928d4065627aef60bef0f03338491b4f9b1f3a",
@@ -1447,6 +1495,12 @@
       "pulp_path": "core/runtime/include/pulp/runtime/file_search_path.hpp"
     },
     {
+      "blob": "35764b4a341887b5e2e431b95cdf3eb2a16af650",
+      "mirror_path": "mirror/core/runtime/include/pulp/runtime/fixed_function.hpp",
+      "mode": "100644",
+      "pulp_path": "core/runtime/include/pulp/runtime/fixed_function.hpp"
+    },
+    {
       "blob": "560ed1cd30003b3af9a1cb11e3a8553b3efa9f9d",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/high_resolution_timer.hpp",
       "mode": "100644",
@@ -1495,10 +1549,16 @@
       "pulp_path": "core/runtime/include/pulp/runtime/license.hpp"
     },
     {
-      "blob": "bb3b0ad0147aa2640f900de56c390bff1b76bc26",
+      "blob": "1ad78f8a10ac4d8936b6ff985b73ae8275ab89a2",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/log.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/log.hpp"
+    },
+    {
+      "blob": "38396e7ba56cf62caa63c135adb4e817ceebbe99",
+      "mirror_path": "mirror/core/runtime/include/pulp/runtime/log_sink.hpp",
+      "mode": "100644",
+      "pulp_path": "core/runtime/include/pulp/runtime/log_sink.hpp"
     },
     {
       "blob": "e0af8fce908dac5d77307599e2ea2107981d0d85",
@@ -1525,7 +1585,7 @@
       "pulp_path": "core/runtime/include/pulp/runtime/message_channel.hpp"
     },
     {
-      "blob": "b6b853d3276d1a2a10629c70a231d700dd9ad0bf",
+      "blob": "0a4de94d69636411260e2a3e98895c03ca66db98",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/model_download.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/model_download.hpp"
@@ -1537,7 +1597,7 @@
       "pulp_path": "core/runtime/include/pulp/runtime/model_registry.hpp"
     },
     {
-      "blob": "790ecc709be7f9879d87f9984515f8423702e343",
+      "blob": "95b2216a9fedfbce4443622b22e37abba941406a",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/model_store.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/model_store.hpp"
@@ -1579,7 +1639,7 @@
       "pulp_path": "core/runtime/include/pulp/runtime/result.hpp"
     },
     {
-      "blob": "72fffe6a6d006d4fa94576f24b1522389ff79117",
+      "blob": "d88becb891cd082ee5b8febf1cdbc6c36248c9cb",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/runtime.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/runtime.hpp"
@@ -1603,7 +1663,7 @@
       "pulp_path": "core/runtime/include/pulp/runtime/scoped_no_alloc.hpp"
     },
     {
-      "blob": "5176a649bee905cebe73a482e33e898bebbd4e25",
+      "blob": "0f457778c29812e9ec439a12873055eccf56dac6",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/search_index.hpp",
       "mode": "100644",
       "pulp_path": "core/runtime/include/pulp/runtime/search_index.hpp"
@@ -1705,6 +1765,12 @@
       "pulp_path": "core/runtime/include/pulp/runtime/url.hpp"
     },
     {
+      "blob": "29df07a06fa79eb67cb4e431c1c426e54a1692cc",
+      "mirror_path": "mirror/core/runtime/include/pulp/runtime/wake_signal.hpp",
+      "mode": "100644",
+      "pulp_path": "core/runtime/include/pulp/runtime/wake_signal.hpp"
+    },
+    {
       "blob": "d0800365c8a145941955d4236fd672b59ab158e6",
       "mirror_path": "mirror/core/runtime/include/pulp/runtime/websocket_channel.hpp",
       "mode": "100644",
@@ -1729,13 +1795,13 @@
       "pulp_path": "core/runtime/src/analytics.cpp"
     },
     {
-      "blob": "f899b8784a8d01b717e37773edbdfa3804582997",
+      "blob": "ed70d11a39417cf6f3914be80dcebb95227ca026",
       "mirror_path": "mirror/core/runtime/src/async_stream.cpp",
       "mode": "100644",
       "pulp_path": "core/runtime/src/async_stream.cpp"
     },
     {
-      "blob": "050c1da46e6d5a08012ca5de5f6ea663c4a74ee9",
+      "blob": "8a7e6036335db1da765e04e0cba7a8127d5e673c",
       "mirror_path": "mirror/core/runtime/src/background_job.cpp",
       "mode": "100644",
       "pulp_path": "core/runtime/src/background_job.cpp"
@@ -1751,6 +1817,12 @@
       "mirror_path": "mirror/core/runtime/src/big_integer.cpp",
       "mode": "100644",
       "pulp_path": "core/runtime/src/big_integer.cpp"
+    },
+    {
+      "blob": "3720bc3ab4a33d4dd69bc29cb2c843d6bf36d188",
+      "mirror_path": "mirror/core/runtime/src/cancel.cpp",
+      "mode": "100644",
+      "pulp_path": "core/runtime/src/cancel.cpp"
     },
     {
       "blob": "02f00818603d5962014a438c762406fa00b169ab",
@@ -1831,10 +1903,22 @@
       "pulp_path": "core/runtime/src/json_rpc.cpp"
     },
     {
-      "blob": "dbbd31a87749c67ff06d5cc01945bb99b011fb31",
+      "blob": "7a8db493abb39f0ce60b0d54485d7a17e46813a9",
       "mirror_path": "mirror/core/runtime/src/license.cpp",
       "mode": "100644",
       "pulp_path": "core/runtime/src/license.cpp"
+    },
+    {
+      "blob": "120288e12e261d8456c2cdef248d4f372875e657",
+      "mirror_path": "mirror/core/runtime/src/license_v2_drbg.hpp",
+      "mode": "100644",
+      "pulp_path": "core/runtime/src/license_v2_drbg.hpp"
+    },
+    {
+      "blob": "22683247765008c1173db7e2449908f654acf45a",
+      "mirror_path": "mirror/core/runtime/src/log_sink.cpp",
+      "mode": "100644",
+      "pulp_path": "core/runtime/src/log_sink.cpp"
     },
     {
       "blob": "306bf4ccd7100fd60664080ae185da451247ebfe",
@@ -1855,7 +1939,7 @@
       "pulp_path": "core/runtime/src/memory_message_channel.cpp"
     },
     {
-      "blob": "030d7910a2592db8a8be04c2342b90a453ec2b03",
+      "blob": "e6fb53bfe8d75e258f027823f8617727ca7ce121",
       "mirror_path": "mirror/core/runtime/src/model_download.cpp",
       "mode": "100644",
       "pulp_path": "core/runtime/src/model_download.cpp"
@@ -1867,7 +1951,7 @@
       "pulp_path": "core/runtime/src/model_registry.cpp"
     },
     {
-      "blob": "2a16697c03f949e019df8b5f6a95f7e51f5fd773",
+      "blob": "e08ec09f4a821d3404608615ef0b73fb37f5a70a",
       "mirror_path": "mirror/core/runtime/src/model_store.cpp",
       "mode": "100644",
       "pulp_path": "core/runtime/src/model_store.cpp"
@@ -1903,7 +1987,7 @@
       "pulp_path": "core/runtime/src/scoped_no_alloc.cpp"
     },
     {
-      "blob": "8d75f39efda0577dd523ad7a274cfab7bfb29822",
+      "blob": "672cc27f471693fae98b1799c9e5c18a3ae59348",
       "mirror_path": "mirror/core/runtime/src/search_index.cpp",
       "mode": "100644",
       "pulp_path": "core/runtime/src/search_index.cpp"
@@ -2041,7 +2125,7 @@
       "pulp_path": "core/state/include/pulp/state/parameter.hpp"
     },
     {
-      "blob": "9d8b3e978e82ff94a5085fc216e52b3d23ed215a",
+      "blob": "6114bad7f88e5bc3527dc37e5632a0dd85d7b38f",
       "mirror_path": "mirror/core/state/include/pulp/state/preset_manager.hpp",
       "mode": "100644",
       "pulp_path": "core/state/include/pulp/state/preset_manager.hpp"
@@ -2059,13 +2143,13 @@
       "pulp_path": "core/state/include/pulp/state/state_migration.hpp"
     },
     {
-      "blob": "813c28a575b6105397ec8a97a281f86d6500e1ba",
+      "blob": "0272926cae2ac4134e91fd9726ac2db3d7093d99",
       "mirror_path": "mirror/core/state/include/pulp/state/state_tree.hpp",
       "mode": "100644",
       "pulp_path": "core/state/include/pulp/state/state_tree.hpp"
     },
     {
-      "blob": "7e9b5bcb5540e9d067246a3d00b70e3f1ceb2071",
+      "blob": "bb3bad1c330b4549fcbe62499e74e77d7b942ba1",
       "mirror_path": "mirror/core/state/include/pulp/state/state_tree_sync.hpp",
       "mode": "100644",
       "pulp_path": "core/state/include/pulp/state/state_tree_sync.hpp"
@@ -2075,6 +2159,12 @@
       "mirror_path": "mirror/core/state/include/pulp/state/store.hpp",
       "mode": "100644",
       "pulp_path": "core/state/include/pulp/state/store.hpp"
+    },
+    {
+      "blob": "84dce25f51cbfe67e467cd5b7d8f009a4e397076",
+      "mirror_path": "mirror/core/state/include/pulp/state/undo_manager.hpp",
+      "mode": "100644",
+      "pulp_path": "core/state/include/pulp/state/undo_manager.hpp"
     },
     {
       "blob": "7cc08d061b40eda811719f67f9fa74431e78e914",
@@ -2089,13 +2179,13 @@
       "pulp_path": "core/state/src/param_json.cpp"
     },
     {
-      "blob": "8e3e26b5dad39cd7cbee1c89578dbc9cfb4df83a",
+      "blob": "515f95ee5bdf18e984881d1008b84fa2315eb3ee",
       "mirror_path": "mirror/core/state/src/preset_manager.cpp",
       "mode": "100644",
       "pulp_path": "core/state/src/preset_manager.cpp"
     },
     {
-      "blob": "a4fb7871bbb037f0aef9ab9543a68021f7a8cc88",
+      "blob": "a839d72b154faab87e049faf1bac2f189569727a",
       "mirror_path": "mirror/core/state/src/properties_file.cpp",
       "mode": "100644",
       "pulp_path": "core/state/src/properties_file.cpp"
@@ -2107,13 +2197,13 @@
       "pulp_path": "core/state/src/state_migration.cpp"
     },
     {
-      "blob": "22dca8bf381434caa76b818fbc48aab4d0f893af",
+      "blob": "39bf82098f85c0c9cd900725583f74a924e154f2",
       "mirror_path": "mirror/core/state/src/state_tree.cpp",
       "mode": "100644",
       "pulp_path": "core/state/src/state_tree.cpp"
     },
     {
-      "blob": "c14d0c1b133d097ec0af0838d5a5f57db4532466",
+      "blob": "234bc14e253132a70dc7dfba9777f57f8e3103c2",
       "mirror_path": "mirror/core/state/src/state_tree_sync.cpp",
       "mode": "100644",
       "pulp_path": "core/state/src/state_tree_sync.cpp"
@@ -2347,7 +2437,7 @@
       "pulp_path": "core/view/include/pulp/view/concertina_panel.hpp"
     },
     {
-      "blob": "096be2707000e338bb938bed5372bb47a3a3b244",
+      "blob": "7269ccb5eb1d518614b36439f24eb3e81451f311",
       "mirror_path": "mirror/core/view/include/pulp/view/context_menu.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/context_menu.hpp"
@@ -2461,7 +2551,7 @@
       "pulp_path": "core/view/include/pulp/view/design_line_metrics.hpp"
     },
     {
-      "blob": "301e00fedff9abdfb428153b5ecdc571f5cdb953",
+      "blob": "0d717e6f111aa68d55cc51996d72f499a25b20ea",
       "mirror_path": "mirror/core/view/include/pulp/view/design_param_binding.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/design_param_binding.hpp"
@@ -2593,7 +2683,7 @@
       "pulp_path": "core/view/include/pulp/view/host_frame_timing.hpp"
     },
     {
-      "blob": "ce1cc5ddc9eac922c31b8813e93468e4599b49d2",
+      "blob": "6a31d228ae8c31a3bf483b3fe86c7aa28269a66d",
       "mirror_path": "mirror/core/view/include/pulp/view/host_surfaces.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/host_surfaces.hpp"
@@ -2773,7 +2863,7 @@
       "pulp_path": "core/view/include/pulp/view/plugin_key_routing.hpp"
     },
     {
-      "blob": "42c6e8e8c04a9a8a680dccf7c340b745a887b630",
+      "blob": "b4b7b97da87a0f1e65216f7c58073f9337b33c55",
       "mirror_path": "mirror/core/view/include/pulp/view/plugin_view_host.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/plugin_view_host.hpp"
@@ -2809,7 +2899,7 @@
       "pulp_path": "core/view/include/pulp/view/property_panel_view.hpp"
     },
     {
-      "blob": "5c8d8b7daf930174ee243710169a2ed0b8838046",
+      "blob": "4183bb522a5dc48975cc473446ea3e6ca8293a3c",
       "mirror_path": "mirror/core/view/include/pulp/view/query_service.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/query_service.hpp"
@@ -2887,13 +2977,13 @@
       "pulp_path": "core/view/include/pulp/view/script_inspector_port.hpp"
     },
     {
-      "blob": "2e7f54fb79fa8f20d81ba73655442e5d23c0beaf",
+      "blob": "57377a3ccf6f5dcd7ec5f84e67da6bd068407417",
       "mirror_path": "mirror/core/view/include/pulp/view/scripted_editor_session.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/scripted_editor_session.hpp"
     },
     {
-      "blob": "153f1dde157a8698dbd5769177e9e9e9aca24ca3",
+      "blob": "67b59ff491eb6b9ac7231d11ce05d88ab4d83434",
       "mirror_path": "mirror/core/view/include/pulp/view/scripted_ui.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/scripted_ui.hpp"
@@ -3061,25 +3151,25 @@
       "pulp_path": "core/view/include/pulp/view/ui_components.hpp"
     },
     {
-      "blob": "5527004ce0c64f33ec7258ec4d3c3091b6f2c49c",
+      "blob": "fe3159c747ac08593c1c83253f51b97a24a02bdc",
       "mirror_path": "mirror/core/view/include/pulp/view/value_channel_json.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/value_channel_json.hpp"
     },
     {
-      "blob": "a5642ddfb9ac769500b8a8a0bcf8a259a1b81207",
+      "blob": "ae53f341069c0083536ad06aa4ffd2d04f4a08b9",
       "mirror_path": "mirror/core/view/include/pulp/view/value_channel_set.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/value_channel_set.hpp"
     },
     {
-      "blob": "9c08e70dc65f563be7485ce933e1e0199ad82c6d",
+      "blob": "c9678613ff66c0ccf67278d4a3986aad3b9dd78c",
       "mirror_path": "mirror/core/view/include/pulp/view/value_channel_telemetry.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/value_channel_telemetry.hpp"
     },
     {
-      "blob": "940cd1774598d86d26f14396c4fb4347753c01c2",
+      "blob": "ee743aa3fcd77dce1cf1b823d3d39c0a4083a4d3",
       "mirror_path": "mirror/core/view/include/pulp/view/value_source.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/value_source.hpp"
@@ -3091,7 +3181,7 @@
       "pulp_path": "core/view/include/pulp/view/value_source_binding.hpp"
     },
     {
-      "blob": "c2c622d8bedc4310902d4349784a6027973887d9",
+      "blob": "ce2441bfe2d5671261d3095c6703e09b34167545",
       "mirror_path": "mirror/core/view/include/pulp/view/view.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/view.hpp"
@@ -3133,7 +3223,7 @@
       "pulp_path": "core/view/include/pulp/view/w3c_tokens.hpp"
     },
     {
-      "blob": "107c17463d0081aa5e310a0c229ed2d206faf3f1",
+      "blob": "6abf5c87400892fd5b0bc635a5b5ec36296d21d5",
       "mirror_path": "mirror/core/view/include/pulp/view/widget_bridge.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/widget_bridge.hpp"
@@ -3187,7 +3277,7 @@
       "pulp_path": "core/view/include/pulp/view/window_classes.hpp"
     },
     {
-      "blob": "bb54a34dfbec577b49c70562f19831a35b22c433",
+      "blob": "9e221a754dd33e47a7207066848797c7ccba2a94",
       "mirror_path": "mirror/core/view/include/pulp/view/window_host.hpp",
       "mode": "100644",
       "pulp_path": "core/view/include/pulp/view/window_host.hpp"
@@ -3565,7 +3655,7 @@
       "pulp_path": "core/view/src/anchor_strategy.cpp"
     },
     {
-      "blob": "5b32d3c95c542b1bdb54a8122b9e18a66da0422b",
+      "blob": "e538d6879a24e9748c69d47010465b69ae695368",
       "mirror_path": "mirror/core/view/src/app_framework.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/app_framework.cpp"
@@ -3709,7 +3799,7 @@
       "pulp_path": "core/view/src/concertina_panel.cpp"
     },
     {
-      "blob": "4eec38e2b9dd66d2630e159a304a6c589448ed1c",
+      "blob": "ea531c452a8900c2ede1bc95df6649551a67b8db",
       "mirror_path": "mirror/core/view/src/context_menu.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/context_menu.cpp"
@@ -4189,12 +4279,6 @@
       "pulp_path": "core/view/src/host_frame_pump.cpp"
     },
     {
-      "blob": "b46451147d77a440a04c75ee4ea3dcf9d83398b0",
-      "mirror_path": "mirror/core/view/src/host_surfaces.cpp",
-      "mode": "100644",
-      "pulp_path": "core/view/src/host_surfaces.cpp"
-    },
-    {
       "blob": "a8cd88d14aac9ed94447d598e6233edf16db15d7",
       "mirror_path": "mirror/core/view/src/hot_reload.cpp",
       "mode": "100644",
@@ -4459,7 +4543,7 @@
       "pulp_path": "core/view/src/property_panel_view_svg.cpp"
     },
     {
-      "blob": "d89b24a808c19ce15695f1de64ce810e68f0fa3a",
+      "blob": "f6ca69d9bde26da993dad4c035fa43b4e81fa539",
       "mirror_path": "mirror/core/view/src/query_service.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/query_service.cpp"
@@ -4717,34 +4801,10 @@
       "pulp_path": "core/view/src/ui_components.cpp"
     },
     {
-      "blob": "a10b59120d7452cfd881bd126d205cd696f6e6b8",
+      "blob": "b5656754540067941812ff6e57e78d1eb4543aa6",
       "mirror_path": "mirror/core/view/src/user_data_paths.hpp",
       "mode": "100644",
       "pulp_path": "core/view/src/user_data_paths.hpp"
-    },
-    {
-      "blob": "4265a8f7b0df3629a644d66a4709f4a31bd8c034",
-      "mirror_path": "mirror/core/view/src/value_channel_json.cpp",
-      "mode": "100644",
-      "pulp_path": "core/view/src/value_channel_json.cpp"
-    },
-    {
-      "blob": "f1b800a21850d967ab7067107ecb482cbed1bd79",
-      "mirror_path": "mirror/core/view/src/value_channel_set.cpp",
-      "mode": "100644",
-      "pulp_path": "core/view/src/value_channel_set.cpp"
-    },
-    {
-      "blob": "1091c5dc7ca54b7c0c9b02f892484b3d70c5cc20",
-      "mirror_path": "mirror/core/view/src/value_channel_telemetry.cpp",
-      "mode": "100644",
-      "pulp_path": "core/view/src/value_channel_telemetry.cpp"
-    },
-    {
-      "blob": "37a988e2174c93e30a7722ad3d8e90d548ee080a",
-      "mirror_path": "mirror/core/view/src/value_source.cpp",
-      "mode": "100644",
-      "pulp_path": "core/view/src/value_source.cpp"
     },
     {
       "blob": "14abec41ac7c7c5b6ae315f1a03473d1d310b3f3",
@@ -4753,7 +4813,7 @@
       "pulp_path": "core/view/src/value_source_binding.cpp"
     },
     {
-      "blob": "75e6ffde77a5aaba03a560620bca36625a1c0285",
+      "blob": "70a679419d474c2eef4d850e20d33b55aa196f74",
       "mirror_path": "mirror/core/view/src/view.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/view.cpp"
@@ -4765,7 +4825,7 @@
       "pulp_path": "core/view/src/view_lifecycle.cpp"
     },
     {
-      "blob": "a01cc80d71326f23f5038d8e6496f56dd84ebd22",
+      "blob": "703cf60b85c6ed7d277623af036f1e7e52e3390b",
       "mirror_path": "mirror/core/view/src/view_paint.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/view_paint.cpp"
@@ -4775,6 +4835,12 @@
       "mirror_path": "mirror/core/view/src/view_pool.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/view_pool.cpp"
+    },
+    {
+      "blob": "61817a08c1b61069e1fe87e2050eaec6084a41bd",
+      "mirror_path": "mirror/core/view/src/view_raster_cache.hpp",
+      "mode": "100644",
+      "pulp_path": "core/view/src/view_raster_cache.hpp"
     },
     {
       "blob": "4cd2ee40975d7f8a638cf8e55181c655fb37c558",
@@ -5047,7 +5113,7 @@
       "pulp_path": "core/view/src/widget_bridge/style_storage_api.cpp"
     },
     {
-      "blob": "4562a4870cc19fcc9a2dc37730877d90e42482aa",
+      "blob": "82bee0cebeb611cb610d60e904714e0c0168d5dd",
       "mirror_path": "mirror/core/view/src/widget_bridge/style_visibility_api.cpp",
       "mode": "100644",
       "pulp_path": "core/view/src/widget_bridge/style_visibility_api.cpp"
@@ -5522,7 +5588,7 @@
         "core/runtime/CMakeLists.txt",
         "core/runtime/include/pulp/runtime/build_info.hpp.in"
       ],
-      "sha256": "93c3291a88bbc9f741f7fbc9a252d0d9f62ae684e4b9e3a07494db3b2412b467"
+      "sha256": "7e7887616b1197f273f9ecfdeccedf5358198912d95375c9bc44ca23972df85e"
     },
     {
       "path": "@build/core/view/web_compat_preludes_gen.cpp",
@@ -5542,28 +5608,28 @@
     }
   ],
   "mirror_ref": "refs/heads/mirror/pulp-framework",
-  "mirror_sha": "36a65f8018120b73bca100b97887947829a9a4f9",
+  "mirror_sha": "06fd282762ae17d38605d988beb0e0a47deeeb23",
   "mirror_source": {
     "proof": {
       "commit_map_rows": [
-        "0f616a440cecdbdaff6234be48f682eec1184587 0000000000000000000000000000000000000000",
-        "c5990b5016faa3487f55ca161fc6c2f1751edb25 36a65f8018120b73bca100b97887947829a9a4f9"
+        "f0ac0a4ff3927c50edf0e4e8a1c6ed1e8dd8e1e2 0000000000000000000000000000000000000000",
+        "a29d58fb3a2ea050f8bf4ae0e831b90f62c8887f 06fd282762ae17d38605d988beb0e0a47deeeb23"
       ],
-      "exported_blobs_sha256": "456e762cf2e952ee50fd928854c5a3519bb7638d097a0d2fc1eae1ada7fd42a6",
-      "exported_path_count": 900,
+      "exported_blobs_sha256": "0546dcc3742b2446aa6c43f70776d3d6542abb53391e1e88676c4378d0c87d1e",
+      "exported_path_count": 911,
       "exported_paths_equal": true,
-      "ref_map_row": "0f616a440cecdbdaff6234be48f682eec1184587 36a65f8018120b73bca100b97887947829a9a4f9 refs/heads/export-source",
+      "ref_map_row": "f0ac0a4ff3927c50edf0e4e8a1c6ed1e8dd8e1e2 06fd282762ae17d38605d988beb0e0a47deeeb23 refs/heads/export-source",
       "source_is_ancestor": true
     },
     "ref_map": {
-      "path": "provenance/mirror/ref-maps/20261102-0f616a440cec.txt",
-      "sha256": "9a9cc75bd7936d04c442bc5da521b305098b70e2b71836560dec51583bbff514"
+      "path": "provenance/mirror/ref-maps/20261107-f0ac0a4ff392.txt",
+      "sha256": "63daf22edcf2b9b9ff74cbe8cec5093126ab928747bb10be769cdfc8dc406fb7"
     },
-    "sha": "c5990b5016faa3487f55ca161fc6c2f1751edb25"
+    "sha": "a29d58fb3a2ea050f8bf4ae0e831b90f62c8887f"
   },
-  "mirror_tree": "d66bc7534fca6489d0ef31cbc53bf81b6e8e742c",
+  "mirror_tree": "0e4d9439ea509a3170cc2fbf5e4314f001e22dfb",
   "pulp_repository": "Generous-Corp/pulp",
-  "pulp_sha": "0f616a440cecdbdaff6234be48f682eec1184587",
+  "pulp_sha": "f0ac0a4ff3927c50edf0e4e8a1c6ed1e8dd8e1e2",
   "rename": {
     "from_prefix": "",
     "to_prefix": "mirror/"
@@ -5571,12 +5637,12 @@
   "schema": "pulp.vellum.export-receipt.v2",
   "tool": {
     "path": "tools/scripts/vellum_closure.py",
-    "pulp_blob": "3324f0eb7337bee1ef0ce6d41e3909366caf96fa"
+    "pulp_blob": "68c37fe5faa2b8fdc5efacf6975cfb8db4b3f1a3"
   },
   "units": [
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/foundation.json",
-      "closure_sha256": "c7033d7f45aa57fe97c08106fb61b87e008153194028353571e7d6a6f7e895e9",
+      "closure_manifest": "provenance/mirror/closures/20261107-f0ac0a4ff392/foundation.json",
+      "closure_sha256": "b146fb0d7f4b6589254f96847c8b7f2956746f0e10da282f2b68abbab31bbbd7",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5587,14 +5653,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
+        "options_sha256": "e0bd97eda1cc090dc938b2ae20b752f3ce3804e648107deca8c38a342f9a8231"
       },
       "name": "foundation",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/gpu-device-api.json",
-      "closure_sha256": "dbab538d28dd5f824644c255583c8da1a0a4a50ece7c8f09c0adecd96ea27a63",
+      "closure_manifest": "provenance/mirror/closures/20261107-f0ac0a4ff392/gpu-device-api.json",
+      "closure_sha256": "439b5542c607e89d635fc30aa5e8b9badc49a2b8fa92d9fdd38c7631b9d84705",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5605,14 +5671,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
+        "options_sha256": "e0bd97eda1cc090dc938b2ae20b752f3ce3804e648107deca8c38a342f9a8231"
       },
       "name": "gpu-device-api",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/canvas.json",
-      "closure_sha256": "1cc0d81a91233ca1263de65b61fa9db536d9173f00d1890f6ac6611a839883a9",
+      "closure_manifest": "provenance/mirror/closures/20261107-f0ac0a4ff392/canvas.json",
+      "closure_sha256": "29caa2009c105dbb07c3adc7a456aaf3b977678f22090d1b30361280d28d57d0",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5623,14 +5689,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
+        "options_sha256": "e0bd97eda1cc090dc938b2ae20b752f3ce3804e648107deca8c38a342f9a8231"
       },
       "name": "canvas",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/render-2d.json",
-      "closure_sha256": "8b173a8f52d31ac3fae3030797a557b6649fd10093500a59e7ce3e8c71411842",
+      "closure_manifest": "provenance/mirror/closures/20261107-f0ac0a4ff392/render-2d.json",
+      "closure_sha256": "8c396fbad257bc54a0a274e4059e8e2d07eedd339f3134d50ea4a3eaa6d4a8db",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5641,14 +5707,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
+        "options_sha256": "e0bd97eda1cc090dc938b2ae20b752f3ce3804e648107deca8c38a342f9a8231"
       },
       "name": "render-2d",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/state-core.json",
-      "closure_sha256": "c2c149097aacaf66ecd4b0bc648760269d1e09ed96f727c83f2bb20c60539972",
+      "closure_manifest": "provenance/mirror/closures/20261107-f0ac0a4ff392/state-core.json",
+      "closure_sha256": "e4023e67129b91ee747df2cbd6c08871100289168e5ce49a2503c6e8892dac88",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5659,14 +5725,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
+        "options_sha256": "e0bd97eda1cc090dc938b2ae20b752f3ce3804e648107deca8c38a342f9a8231"
       },
       "name": "state-core",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/view-core.json",
-      "closure_sha256": "066f784c8df9c01bcb962b3e91234d2b48fcc557857f6dea9cec68d33cc069e1",
+      "closure_manifest": "provenance/mirror/closures/20261107-f0ac0a4ff392/dataplane.json",
+      "closure_sha256": "56bc1d001205721d074674c5f6f6e6cfa9d7a7f2ce547b898f5fce77454fdcf4",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5677,14 +5743,32 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
+        "options_sha256": "e0bd97eda1cc090dc938b2ae20b752f3ce3804e648107deca8c38a342f9a8231"
+      },
+      "name": "dataplane",
+      "oracle_class": "identity"
+    },
+    {
+      "closure_manifest": "provenance/mirror/closures/20261107-f0ac0a4ff392/view-core.json",
+      "closure_sha256": "8846742bf3ee59061fdd459aa15f00da1d9c8d231da6bcb7a0da6691cb734cc3",
+      "configure": {
+        "identity": {
+          "build_type": "Release",
+          "gpu": true,
+          "processor": "arm64",
+          "skia": true,
+          "system": "Darwin",
+          "text_shaping": true
+        },
+        "label": "",
+        "options_sha256": "e0bd97eda1cc090dc938b2ae20b752f3ce3804e648107deca8c38a342f9a8231"
       },
       "name": "view-core",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/design-import.json",
-      "closure_sha256": "afbca51bf564099d0324015c292d1358def5368aae6a53f5dd0619bd75694abd",
+      "closure_manifest": "provenance/mirror/closures/20261107-f0ac0a4ff392/design-import.json",
+      "closure_sha256": "0acd7289c9f3c4b8fd8654dc690e24ac6a4d03011ef1959c66f2cbaeb420b4fe",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5695,14 +5779,14 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
+        "options_sha256": "e0bd97eda1cc090dc938b2ae20b752f3ce3804e648107deca8c38a342f9a8231"
       },
       "name": "design-import",
       "oracle_class": "identity"
     },
     {
-      "closure_manifest": "provenance/mirror/closures/20261102-0f616a440cec/view-script.json",
-      "closure_sha256": "b02e4c95ae2df54c2c5eee57a330abee09106be0aec0b6df13ed60b43f453c01",
+      "closure_manifest": "provenance/mirror/closures/20261107-f0ac0a4ff392/view-script.json",
+      "closure_sha256": "cb37fe3ed7ab266739ca4e9fad7cf4d8802232c5320dab108febf266d22e3c36",
       "configure": {
         "identity": {
           "build_type": "Release",
@@ -5713,7 +5797,7 @@
           "text_shaping": true
         },
         "label": "",
-        "options_sha256": "b1d95f98e0bc21ce7eb11f90f74b7bf3b5cae5d657cf7ed6e59f54e063d83b73"
+        "options_sha256": "e0bd97eda1cc090dc938b2ae20b752f3ce3804e648107deca8c38a342f9a8231"
       },
       "name": "view-script",
       "oracle_class": "identity"
