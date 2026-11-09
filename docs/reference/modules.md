@@ -596,7 +596,7 @@ therefore counts it twice.
 | FLAC | ✓ | ✓* | dr_flac / libflac (`pulp add libflac`) |
 | MP3 | ✓ | ✓* | dr_mp3 / LAME (`pulp add lame --accept-license LGPL-2.0`) |
 | OGG Vorbis | ✓ | — | stb_vorbis |
-| WAV | ✓ | ✓ | Read through one chunk walk and dr_wav (RIFF, RF64, BW64); written by CHOC and StreamingWriter |
+| WAV | ✓ | ✓ | Read through one chunk walk and dr_wav (RIFF, RF64, BW64): integer PCM of any width in a 1- to 4-byte container, 32- and 64-bit float, A-law, mu-law, MS and IMA ADPCM, up to 256 channels. Written by CHOC and StreamingWriter |
 | WMA | Windows | — | Read through Media Foundation on Windows |
 
 *\*Write via optional `pulp add` packages. Those packages do not add portable
