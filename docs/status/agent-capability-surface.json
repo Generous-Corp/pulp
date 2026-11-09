@@ -1181,7 +1181,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/graph_event_contract.hpp",
-      "fingerprint": "sha256:ae41b858a92bcc47ba3acd553af3a7b0cd7ab0f44fefbee1bfdf2ce919d3ba00",
+      "fingerprint": "sha256:fc9b29b8b65fb8336c846ba08acbd45563bf351ba0c1cd5b6ad6d29a67cb3da8",
       "include": "pulp/host/graph_event_contract.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1290,7 +1290,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:cba42261e80c0a2b734c17ad883c777d93a18f5de00e4b0fad3be5d4a46b1cf9",
+      "fingerprint": "sha256:18a656271d2371678a12712b64019d70250186fe260bb6ffd61d352f8ff25be0",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
