@@ -1,0 +1,11 @@
+{
+ "name": "seed-build-dir-selftest",
+ "record": {
+  "entry": "tools/scripts/test_seed_build_dir.py",
+  "inputs": [
+   "tools/scripts/seed_build_dir.py",
+   "tools/scripts/test_seed_build_dir.py"
+  ],
+  "kind": "python"
+ }
+}

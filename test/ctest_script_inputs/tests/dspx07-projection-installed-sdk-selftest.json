@@ -1,0 +1,11 @@
+{
+ "name": "dspx07-projection-installed-sdk-selftest",
+ "record": {
+  "entry": "tools/validation/test_dspx07_projection_installed_sdk.py",
+  "inputs": [
+   "core/format/include/pulp/format/projection_capability.hpp",
+   "tools/validation/test_dspx07_projection_installed_sdk.py"
+  ],
+  "kind": "python"
+ }
+}

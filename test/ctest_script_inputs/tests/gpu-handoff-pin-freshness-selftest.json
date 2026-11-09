@@ -1,0 +1,17 @@
+{
+ "name": "gpu-handoff-pin-freshness-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gpu_handoff_pin_freshness.py",
+  "inputs": [
+   ".githooks/pre-push",
+   ".github/workflows",
+   "core/view/src/view.cpp",
+   "docs/status/gpu-vellum-handoff.yaml",
+   "tools/scripts/gate_common.py",
+   "tools/scripts/gates.sh",
+   "tools/scripts/gpu_handoff_pin_freshness.py",
+   "tools/scripts/test_gpu_handoff_pin_freshness.py"
+  ],
+  "kind": "python"
+ }
+}

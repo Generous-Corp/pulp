@@ -1,0 +1,11 @@
+{
+ "name": "rack-param-units",
+ "record": {
+  "entry": "tools/rack/test_param_units.py",
+  "inputs": [
+   "tools/rack/param_units.py",
+   "tools/rack/test_param_units.py"
+  ],
+  "kind": "python"
+ }
+}

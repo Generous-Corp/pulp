@@ -1,0 +1,11 @@
+{
+ "name": "import-realtime-contract",
+ "record": {
+  "entry": "tools/import-design/test_realtime_contract.py",
+  "inputs": [
+   "tools/import-design/realtime_contract.py",
+   "tools/import-design/test_realtime_contract.py"
+  ],
+  "kind": "python"
+ }
+}

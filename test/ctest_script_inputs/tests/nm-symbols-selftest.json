@@ -1,0 +1,11 @@
+{
+ "name": "nm-symbols-selftest",
+ "record": {
+  "entry": "tools/scripts/test_nm_symbols.py",
+  "inputs": [
+   "tools/scripts/nm_symbols.py",
+   "tools/scripts/test_nm_symbols.py"
+  ],
+  "kind": "python"
+ }
+}

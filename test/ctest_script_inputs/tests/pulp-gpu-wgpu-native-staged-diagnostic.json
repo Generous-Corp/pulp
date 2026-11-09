@@ -1,0 +1,11 @@
+{
+ "name": "pulp-gpu-wgpu-native-staged-diagnostic",
+ "record": {
+  "entry": "tools/diagnostics/verify_wgpu_native_staged.py",
+  "inputs": [
+   "tools/deps/manifest.json",
+   "tools/diagnostics/verify_wgpu_native_staged.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "name": "install-sh-platform-detect",
+ "record": {
+  "entry": "test/test_install_platform_detect.sh",
+  "inputs": [
+   "test/test_install_platform_detect.sh",
+   "tools/install/install.sh"
+  ],
+  "kind": "shell"
+ }
+}

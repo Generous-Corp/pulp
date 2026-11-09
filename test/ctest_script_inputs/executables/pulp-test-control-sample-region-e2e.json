@@ -1,0 +1,23 @@
+{
+ "name": "pulp-test-control-sample-region-e2e",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli",
+   "pulp-control-sample-region-proof-host",
+   "pulp-mcp",
+   "sample-region-allpass-control-editable",
+   "sample-region-allpass-control-frozen"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "inspect/src/control_broker_daemon.cpp",
+   "test/support/control_sample_region_e2e.hpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

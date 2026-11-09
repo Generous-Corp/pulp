@@ -1,0 +1,22 @@
+{
+ "name": "gpu-trace-overhead-acceptance-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+  "inputs": [
+   "core/render",
+   "core/view/platform/mac/window_host_mac.mm",
+   "core/view/src/editor_bridge.cpp",
+   "core/view/src/plugin_frame_renderer.cpp",
+   "core/view/src/view.cpp",
+   "core/view/src/widget_bridge.cpp",
+   "core/view/src/widget_bridge/bridge_dispatch.cpp",
+   "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+   "inspect/src/control_gpu_health_provider.cpp",
+   "test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace",
+   "tools/cli/gpu_probe/src/dpr_measurement_session.cpp",
+   "tools/scripts/git_read_memo.py",
+   "tools/scripts/test_gpu_trace_overhead_acceptance.py"
+  ],
+  "kind": "python"
+ }
+}

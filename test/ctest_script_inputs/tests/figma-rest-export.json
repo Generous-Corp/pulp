@@ -1,0 +1,10 @@
+{
+ "name": "figma-rest-export",
+ "record": {
+  "entry": "test/test_figma_rest_export.py",
+  "inputs": [
+   "test/test_figma_rest_export.py"
+  ],
+  "kind": "python"
+ }
+}

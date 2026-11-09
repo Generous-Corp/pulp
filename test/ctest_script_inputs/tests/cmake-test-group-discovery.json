@@ -1,0 +1,14 @@
+{
+ "name": "cmake-test-group-discovery",
+ "record": {
+  "entry": "tools/scripts/test_pulp_test_group.py",
+  "inputs": [
+   "tools/cmake/PulpCatch.cmake",
+   "tools/cmake/PulpCatchAddTests.cmake",
+   "tools/cmake/PulpTestSuite.cmake",
+   "tools/scripts/pch_wiring_check.py",
+   "tools/scripts/test_pulp_test_group.py"
+  ],
+  "kind": "python"
+ }
+}

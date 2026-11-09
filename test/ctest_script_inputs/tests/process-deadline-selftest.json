@@ -1,0 +1,10 @@
+{
+ "name": "process-deadline-selftest",
+ "record": {
+  "entry": "tools/ci/test_run_with_deadline.py",
+  "inputs": [
+   "tools/ci/test_run_with_deadline.py"
+  ],
+  "kind": "python"
+ }
+}

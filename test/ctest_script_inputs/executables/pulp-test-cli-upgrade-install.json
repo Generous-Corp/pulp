@@ -1,0 +1,21 @@
+{
+ "name": "pulp-test-cli-upgrade-install",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_cli_upgrade_install.cpp"
+  ],
+  "inputs": [
+   "tools/cli/cli_sdk.cpp",
+   "tools/cli/cmd_upgrade.cpp",
+   "tools/import-design/browser_capture",
+   "tools/import-design/jsx-runtime/materialized_binding_contract.mjs"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_cli_upgrade_install.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

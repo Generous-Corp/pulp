@@ -1,0 +1,10 @@
+{
+ "name": "pr-batch-advisor",
+ "record": {
+  "entry": "tools/scripts/test_pr_batch_advisor.py",
+  "inputs": [
+   "tools/scripts/test_pr_batch_advisor.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "tools-registry-check",
+ "record": {
+  "entry": "tools/scripts/tools_registry_check.py",
+  "inputs": [
+   "tools/scripts/tools_registry_check.py"
+  ],
+  "kind": "python"
+ }
+}

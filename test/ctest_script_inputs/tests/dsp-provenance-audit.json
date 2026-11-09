@@ -1,0 +1,19 @@
+{
+ "name": "dsp-provenance-audit",
+ "record": {
+  "entry": "tools/scripts/dsp_provenance_audit.py",
+  "inputs": [
+   "core/dsl/include/pulp/dsl/faust_base.hpp",
+   "docs/status/cmake-functions.yaml",
+   "examples/faust-filter/reference_filter.hpp",
+   "examples/faust-gain/CMakeLists.txt",
+   "examples/faust-gain/reference_gain.hpp",
+   "examples/faust-tremolo/CMakeLists.txt",
+   "examples/faust-tremolo/reference_tremolo.hpp",
+   "tools/cmake/PulpFaust.cmake",
+   "tools/scripts/cmajor_external.py",
+   "tools/scripts/dsp_provenance_audit.py"
+  ],
+  "kind": "python"
+ }
+}

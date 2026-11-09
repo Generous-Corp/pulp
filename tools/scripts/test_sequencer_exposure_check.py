@@ -1142,6 +1142,12 @@ def main() -> int:
         ):
             if not is_sequencer_owned_path(watched_path):
                 raise AssertionError(f"semantic watcher missed {watched_path}")
+        # A generated input fragment named after a timeline test is accounting,
+        # not a surface; the registration and the test source still are.
+        if is_sequencer_owned_path("test/ctest_script_inputs/executables/pulp-test-timeline-journal.json"):
+            raise AssertionError("a generated script-input fragment was treated as a sequencer surface")
+        if not is_sequencer_owned_path("test/test_timeline_journal.cpp"):
+            raise AssertionError("control: a timeline test source must stay sequencer-owned")
         semantic_base = git(rename_root, "rev-parse", "HEAD")
         semantic_path = "core/state/include/pulp/state/new_control.hpp"
         write(rename_root, semantic_path, "class SequencerStateChannelAdapter {};")
