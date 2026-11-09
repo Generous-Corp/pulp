@@ -528,11 +528,13 @@ macOS.
 
 ## A clean merge of main takes the contract lane (row 31, shadow first)
 
-Independent of `PULP_MACOS_PR_GATING`. A `synchronize` head that is exactly a
+Independent of `PULP_MACOS_PR_GATING`, and inert while it is `true` (every
+`synchronize` head is then the contract lane already). A `synchronize` head that is exactly a
 conflict-free merge of a base-branch commit into the previous head
 (`github.event.before`), whose tree equals `git merge-tree --write-tree` of
-those two parents, and whose previous head's newest same-repository
-`build.yml` `pull_request` `macos` check was a full-lane success (`Build`
+those two parents, and whose previous head's newest `macos` check from this
+repository's workflows (any event; a newer red is never skipped) is a
+same-repository `build.yml` `pull_request` full-lane success (`Build`
 succeeded, tier `fast` or `full`), runs only configure, `pr-fast` (minus
 `needs-build`) and `pr-guard`, with tier `clean-merge`.
 `tools/ci/clean_merge_lane.py` decides in the step `Decide the clean-merge lane

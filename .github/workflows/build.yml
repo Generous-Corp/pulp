@@ -2130,14 +2130,15 @@ jobs:
         shell: bash
         env:
           CLEAN_MERGE_MODE: ${{ vars.PULP_CLEAN_MERGE_LANE_MODE || 'shadow' }}
-          CLEAN_MERGE_TOKEN: ${{ github.token }}
+          # Read from the environment, never argv, so `ps` on the VM cannot see it.
+          GITHUB_TOKEN: ${{ github.token }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_BEFORE_SHA: ${{ github.event.before }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_EVENT_ACTION: ${{ github.event.action }}
         run: |
           python3 tools/ci/clean_merge_lane.py decide --repo "$GITHUB_WORKSPACE" \
-            --repository "$GITHUB_REPOSITORY" --token "$CLEAN_MERGE_TOKEN" \
+            --repository "$GITHUB_REPOSITORY" \
             --head "$PR_HEAD_SHA" --before "$PR_BEFORE_SHA" --base-ref "$PR_BASE_REF" \
             --action "$PR_EVENT_ACTION" --mode "$CLEAN_MERGE_MODE" \
             --github-output "$GITHUB_OUTPUT"

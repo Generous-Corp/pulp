@@ -160,9 +160,21 @@ class DecideTest(unittest.TestCase):
         older_red = full_lane_check(check_run_id=100, conclusion="failure")
         self.assertEqual(lane(previous=[older_red, full_lane_check(check_run_id=200)])["lane"],
                          "clean-merge")
-        # An untrusted newer check is not "the newest trusted".
-        fork = full_lane_check(check_run_id=300, app="other-app", conclusion="failure")
-        self.assertEqual(lane(previous=[older_green, fork])["lane"], "clean-merge")
+        # Another app's `macos` check is not this repository's.
+        other_app = full_lane_check(check_run_id=300, app="other-app", conclusion="failure")
+        self.assertEqual(lane(previous=[older_green, other_app])["lane"], "clean-merge")
+
+    def test_a_newer_red_from_another_event_or_workflow_is_not_passed_over(self) -> None:
+        older_green = full_lane_check(check_run_id=100)
+        for run in ({"event": "workflow_dispatch"}, {"path": ".github/workflows/build-macos.yml"},
+                    {"head_repository": "someone/fork"}):
+            with self.subTest(run=run):
+                newer = full_lane_check(check_run_id=200, conclusion="failure",
+                                        run={**full_lane_check()["run"], **run})
+                self.assertEqual(lane(previous=[older_green, newer])["lane"], "full")
+                # Even green, a newer non-pull_request check is not the carried lane.
+                newer_green = full_lane_check(check_run_id=200, run={**full_lane_check()["run"], **run})
+                self.assertEqual(lane(previous=[older_green, newer_green])["lane"], "full")
 
 
 class ModeTest(unittest.TestCase):
@@ -197,7 +209,7 @@ class ModeTest(unittest.TestCase):
                     mock.patch("sys.stdout") as stdout:
                 self.assertEqual(cml.cmd_decide(args), 0)
             printed = "".join(c.args[0] for c in stdout.write.call_args_list)
-            values = dict(line.split("=", 1) for line in out.read_text().splitlines())
+            values = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
             return values, printed
 
     def test_shadow_annotates_and_runs_the_full_lane(self) -> None:
@@ -231,7 +243,7 @@ class ModeTest(unittest.TestCase):
             with mock.patch.object(cml, "gather_git", side_effect=OSError("boom")), \
                     mock.patch("sys.stdout"):
                 self.assertEqual(cml.cmd_decide(args), 0)
-            self.assertIn("lane=full", out.read_text())
+            self.assertIn("lane=full", out.read_text(encoding="utf-8"))
 
     def test_an_api_failure_is_full(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -245,7 +257,7 @@ class ModeTest(unittest.TestCase):
                     mock.patch.object(cml, "gather_previous", side_effect=OSError("HTTP 502")), \
                     mock.patch("sys.stdout"):
                 cml.cmd_decide(args)
-            self.assertIn("lane=full", out.read_text())
+            self.assertIn("lane=full", out.read_text(encoding="utf-8"))
 
 
 def _git(repo, *args):
@@ -253,7 +265,7 @@ def _git(repo, *args):
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
     return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True,
-                          text=True, env=env).stdout.strip()
+                          text=True, encoding="utf-8", env=env).stdout.strip()
 
 
 class RealGitTest(unittest.TestCase):
@@ -266,14 +278,14 @@ class RealGitTest(unittest.TestCase):
         self.origin = root / "origin"
         self.origin.mkdir()
         _git(self.origin, "init", "-q", "-b", "main")
-        (self.origin / "a.txt").write_text("one\ntwo\nthree\n")
-        (self.origin / "b.txt").write_text("b\n")
+        (self.origin / "a.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+        (self.origin / "b.txt").write_text("b\n", encoding="utf-8")
         _git(self.origin, "add", ".")
         _git(self.origin, "commit", "-q", "-m", "base")
         self.work = root / "work"
         _git(root, "clone", "-q", str(self.origin), str(self.work))
         _git(self.work, "checkout", "-q", "-b", "feature")
-        (self.work / "a.txt").write_text("one\ntwo\nthree\nfeature\n")
+        (self.work / "a.txt").write_text("one\ntwo\nthree\nfeature\n", encoding="utf-8")
         _git(self.work, "commit", "-q", "-am", "feature")
         self.before = _git(self.work, "rev-parse", "HEAD")
 
@@ -281,7 +293,7 @@ class RealGitTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def _advance_main(self, path="b.txt", text="b\nmain\n"):
-        (self.origin / path).write_text(text)
+        (self.origin / path).write_text(text, encoding="utf-8")
         _git(self.origin, "commit", "-q", "-am", "main moves")
         _git(self.work, "fetch", "-q", "origin")
 
@@ -301,7 +313,7 @@ class RealGitTest(unittest.TestCase):
     def test_a_merge_with_a_hand_edit_is_full(self) -> None:
         self._advance_main()
         _git(self.work, "merge", "-q", "--no-commit", "--no-ff", "origin/main")
-        (self.work / "b.txt").write_text("b\nmain\nsneaked in\n")
+        (self.work / "b.txt").write_text("b\nmain\nsneaked in\n", encoding="utf-8")
         _git(self.work, "add", "b.txt")
         _git(self.work, "commit", "-q", "--no-edit")
         decision = self._decide(_git(self.work, "rev-parse", "HEAD"))
@@ -311,8 +323,8 @@ class RealGitTest(unittest.TestCase):
     def test_a_resolved_conflict_is_full(self) -> None:
         self._advance_main("a.txt", "one\ntwo\nthree\nmain\n")
         subprocess.run(["git", "merge", "-q", "origin/main"], cwd=self.work,
-                       capture_output=True, check=False)
-        (self.work / "a.txt").write_text("one\ntwo\nthree\nfeature\nmain\n")
+                       capture_output=True, text=True, encoding="utf-8", check=False)
+        (self.work / "a.txt").write_text("one\ntwo\nthree\nfeature\nmain\n", encoding="utf-8")
         _git(self.work, "add", "a.txt")
         _git(self.work, "commit", "-q", "--no-edit")
         decision = self._decide(_git(self.work, "rev-parse", "HEAD"))
@@ -322,7 +334,7 @@ class RealGitTest(unittest.TestCase):
     def test_a_merge_of_a_side_branch_is_full(self) -> None:
         # The merged parent is not on main's first-parent chain.
         _git(self.origin, "checkout", "-q", "-b", "side")
-        (self.origin / "c.txt").write_text("side\n")
+        (self.origin / "c.txt").write_text("side\n", encoding="utf-8")
         _git(self.origin, "add", "c.txt")
         _git(self.origin, "commit", "-q", "-m", "side")
         _git(self.origin, "checkout", "-q", "main")
@@ -333,7 +345,7 @@ class RealGitTest(unittest.TestCase):
         self.assertIn("first-parent chain", decision["reason"])
 
     def test_an_ordinary_commit_is_full(self) -> None:
-        (self.work / "a.txt").write_text("changed\n")
+        (self.work / "a.txt").write_text("changed\n", encoding="utf-8")
         _git(self.work, "commit", "-q", "-am", "edit")
         decision = self._decide(_git(self.work, "rev-parse", "HEAD"))
         self.assertEqual(decision["lane"], "full")
@@ -388,29 +400,72 @@ class GatherPreviousTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
-    def test_counts_the_window_and_flags_a_would_take_head_that_failed(self) -> None:
+    def _fetch(self, listed=None):
+        seen = []
+
         def fetch(url, token):
+            seen.append(url)
             if "/workflows/build.yml/runs" in url:
-                return {"workflow_runs": [{"id": 1, "head_sha": "1" * 40},
-                                          {"id": 2, "head_sha": "2" * 40}]}
+                if "created=2026-11-01" in url:
+                    runs = [{"id": 1, "head_sha": "1" * 40}, {"id": 2, "head_sha": "2" * 40}]
+                    return {"total_count": listed or 2, "workflow_runs": runs}
+                return {"total_count": 0, "workflow_runs": []}
             if "/runs/1/jobs" in url:
                 return {"jobs": [{"name": "macos", "check_run_url": "https://x/check-runs/10",
                                   "steps": [{"name": "Build", "conclusion": "success"}]}]}
             if "/runs/2/jobs" in url:
-                return {"jobs": [{"name": "macos", "check_run_url": "https://x/check-runs/20",
-                                  "steps": [{"name": "Build", "conclusion": "failure"}]},
-                                 {"name": "linux", "check_run_url": "https://x/check-runs/21"}]}
+                return {"jobs": [
+                    {"name": "macos", "check_run_url": "https://x/check-runs/20",
+                     "steps": [{"name": "Build", "conclusion": "success"},
+                               {"name": "Test (non-Windows)", "conclusion": "failure"}]},
+                    {"name": "linux", "check_run_url": "https://x/check-runs/21"}]}
             if "/check-runs/10/annotations" in url or "/check-runs/20/annotations" in url:
                 return [{"title": "pulp-clean-merge-lane", "message": '{"verdict":"would_take"}'}]
             raise AssertionError(url)
+        return fetch, seen
 
+    def test_counts_the_window_and_flags_a_would_take_head_that_failed(self) -> None:
+        fetch, seen = self._fetch()
         result = cml.report(REPO, "t", "2026-11-01", fetch=fetch, today=dt.date(2026, 11, 9))
         self.assertEqual(result["would_take"], 2)
+        self.assertEqual(result["would_take_heads"], 2)
         self.assertEqual(result["days"], 8)
         self.assertEqual(len(result["would_take_failed"]), 1)
-        self.assertEqual(result["would_take_failed"][0]["failed_steps"], ["Build"])
+        self.assertEqual(result["would_take_failed"][0]["failed_steps"], ["Test (non-Windows)"])
         self.assertFalse(result["ready_to_enforce"])
+        # One listing per day, every attempt's jobs.
+        self.assertEqual(sum("/workflows/build.yml/runs" in u for u in seen), 9)
+        self.assertTrue(all("filter=all" in u for u in seen if "/jobs" in u))
 
+    def test_a_rerun_counts_its_head_once(self) -> None:
+        def fetch(url, token):
+            if "/workflows/build.yml/runs" in url:
+                runs = [{"id": 1, "head_sha": "1" * 40}] if "created=2026-11-09" in url else []
+                return {"total_count": len(runs), "workflow_runs": runs}
+            if "/runs/1/jobs" in url:
+                job = {"name": "macos", "steps": [{"name": "Build", "conclusion": "success"}]}
+                return {"jobs": [{**job, "check_run_url": "https://x/check-runs/10"},
+                                 {**job, "check_run_url": "https://x/check-runs/11"}]}
+            if "/annotations" in url:
+                return [{"title": "pulp-clean-merge-lane", "message": '{"verdict":"would_take"}'}]
+            raise AssertionError(url)
+        result = cml.report(REPO, "t", "2026-11-09", fetch=fetch, today=dt.date(2026, 11, 9))
+        self.assertEqual(result["would_take"], 2)
+        self.assertEqual(result["would_take_heads"], 1)
+
+    def test_a_truncated_listing_is_refused(self) -> None:
+        fetch, _ = self._fetch(listed=1500)
+        with self.assertRaises(RuntimeError):
+            cml.report(REPO, "t", "2026-11-01", fetch=fetch, today=dt.date(2026, 11, 9))
+
+    def test_annotations_are_paginated(self) -> None:
+        pages = {1: [{"title": "x", "message": ""}] * 100,
+                 2: [{"title": "shipyard-test-tier", "message": '{"tier":"fast"}'}]}
+
+        def fetch(url, token):
+            return pages.get(int(url.rsplit("page=", 1)[1]), [])
+        items = cml._annotations(REPO, "t", 5, fetch)
+        self.assertEqual(len(items), 101)
 
 if __name__ == "__main__":
     unittest.main()

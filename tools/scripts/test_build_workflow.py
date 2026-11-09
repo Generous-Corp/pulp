@@ -1032,6 +1032,9 @@ class CleanMergeLaneTest(unittest.TestCase):
         self.assertEqual(step["env"]["PR_HEAD_SHA"], "${{ github.event.pull_request.head.sha }}")
         self.assertIn("tools/ci/clean_merge_lane.py decide", step["run"])
         self.assertIn('--github-output "$GITHUB_OUTPUT"', step["run"])
+        # The token reaches the module through the environment, never argv.
+        self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
+        self.assertNotIn("--token", step["run"])
 
     def test_every_contract_lane_site_also_reads_the_clean_merge_lane(self) -> None:
         sites = {}
@@ -1086,7 +1089,7 @@ class CleanMergeLaneTest(unittest.TestCase):
         script = script[:script.index("else\n")]
         script = script.replace('elif [ "$PULP_CLEAN_MERGE_LANE" = clean-merge ]; then', "", 1)
         out = subprocess.run(
-            ["bash", "-c", script], capture_output=True, text=True, check=True,
+            ["bash", "-c", script], capture_output=True, text=True, encoding="utf-8", check=True,
             env={**os.environ, "PULP_CLEAN_MERGE_FROM": "b" * 40, "GITHUB_STEP_SUMMARY": "/dev/null"})
         notice = out.stdout.strip().split("::", 2)[2]
         self.assertEqual(json.loads(notice), {

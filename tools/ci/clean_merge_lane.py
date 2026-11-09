@@ -72,6 +72,7 @@ GIT_TIMEOUT = 180
 # A `pr-fast` red does not count: the clean-merge lane runs that tier.
 FULL_LANE_PROOF_STEPS = (
     "Build",
+    "Test (non-Windows)",
     "Test what this pull request reaches (pull request head)",
     "Test installed SDK capability contract (affected changes)",
     "Install and publish exact GPU-audio SDK (macOS ARM64)",
@@ -141,21 +142,27 @@ def decide(
     if previous is None:
         return _full("the previous head's macos checks could not be read")
 
-    trusted = []
+    # The newest `macos` check this repository's workflows produced on
+    # `before` decides, whatever its event or workflow: a later red (a fleet
+    # dispatch of the merge ref, another workflow) must not be passed over for
+    # an older green. It must itself be a trusted pull_request run.
+    actions_checks = []
     for check in previous:
-        run = check.get("run")
         if check.get("app") != ACTIONS_APP:
             continue
-        if run is None:
+        if check.get("run") is None:
             return _full(f"the workflow run of macos check run {check.get('check_run_id')} could not be read")
-        if (run.get("path") == WORKFLOW_PATH and run.get("event") == "pull_request"
-                and run.get("repository") == repository
-                and run.get("head_repository") == repository
-                and run.get("head_sha") == before):
-            trusted.append(check)
-    if not trusted:
-        return _full("the previous head has no macos check from this repository's build.yml pull_request runs")
-    latest = max(trusted, key=lambda c: int(c.get("check_run_id") or 0))
+        actions_checks.append(check)
+    if not actions_checks:
+        return _full("the previous head has no macos check from this repository's workflows")
+    latest = max(actions_checks, key=lambda c: int(c.get("check_run_id") or 0))
+    run = latest["run"]
+    if not (run.get("path") == WORKFLOW_PATH and run.get("event") == "pull_request"
+            and run.get("repository") == repository
+            and run.get("head_repository") == repository
+            and run.get("head_sha") == before):
+        return _full("the previous head's newest macos check is not from this repository's "
+                     f"build.yml same-repository pull_request runs ({run.get('event')}, {run.get('path')})")
     if latest.get("status") != "completed" or latest.get("conclusion") != "success":
         return _full(f"the previous head's latest macos check is {latest.get('status')}/{latest.get('conclusion')}, not a success")
     steps = latest.get("steps")
@@ -249,8 +256,15 @@ def _api(repository: str, path: str) -> str:
 
 
 def _annotations(repository: str, token: str, check_run_id: int, fetch: Fetch) -> List[Dict[str, Any]]:
-    page = fetch(_api(repository, f"check-runs/{check_run_id}/annotations?per_page=100"), token)
-    return page if isinstance(page, list) else []
+    items: List[Dict[str, Any]] = []
+    for page_no in range(1, 51):
+        page = fetch(_api(repository, f"check-runs/{check_run_id}/annotations?per_page=100&page={page_no}"),
+                     token)
+        page = page if isinstance(page, list) else []
+        items.extend(page)
+        if len(page) < 100:
+            break
+    return items
 
 
 def _tiers_and_verdicts(annotations: List[Dict[str, Any]]):
@@ -357,15 +371,33 @@ def report(repository: str, token: str, since: str, fetch: Optional[Fetch] = Non
     fetch = fetch or _fetch_json
     counts = {"would_take": 0, "took": 0, "full": 0}
     would_take_failed: List[Dict[str, Any]] = []
-    took_heads: List[str] = []
-    page_no = 1
-    while True:
-        query = urllib.parse.urlencode({"event": "pull_request", "created": f">={since}",
-                                        "per_page": 100, "page": page_no})
-        page = fetch(_api(repository, f"actions/workflows/build.yml/runs?{query}"), token)
-        runs = (page or {}).get("workflow_runs", [])
+    # Verdicts count per job attempt (a rerun is another attempt); the
+    # enforcement threshold counts distinct heads.
+    heads: Dict[str, set] = {verdict: set() for verdict in counts}
+    today = today or _dt.datetime.now(_dt.timezone.utc).date()
+    start = _dt.date.fromisoformat(since)
+    # One day per listing: a filtered workflow-run listing returns at most
+    # 1,000 runs, and a listing that stops short of total_count is refused.
+    day = start
+    while day <= today:
+        runs: List[Dict[str, Any]] = []
+        total = None
+        page_no = 1
+        while True:
+            query = urllib.parse.urlencode({"event": "pull_request", "created": day.isoformat(),
+                                            "per_page": 100, "page": page_no})
+            page = fetch(_api(repository, f"actions/workflows/build.yml/runs?{query}"), token) or {}
+            batch = page.get("workflow_runs", [])
+            total = page.get("total_count", total)
+            runs.extend(batch)
+            if len(batch) < 100:
+                break
+            page_no += 1
+        if isinstance(total, int) and total != len(runs):
+            raise RuntimeError(f"{day}: listed {len(runs)} of {total} runs; the report would undercount")
         for run in runs:
-            jobs = fetch(_api(repository, f"actions/runs/{run['id']}/jobs?filter=latest&per_page=100"), token)
+            # Every attempt: a first-attempt red healed by a rerun still counts.
+            jobs = fetch(_api(repository, f"actions/runs/{run['id']}/jobs?filter=all&per_page=100"), token)
             for job in (jobs or {}).get("jobs", []):
                 if job.get("name") != CHECK_NAME:
                     continue
@@ -378,6 +410,7 @@ def report(repository: str, token: str, since: str, fetch: Optional[Fetch] = Non
                     if verdict not in counts:
                         continue
                     counts[verdict] += 1
+                    heads[verdict].add(run.get("head_sha") or "")
                     if verdict == "would_take":
                         failed = [s.get("name") for s in job.get("steps") or []
                                   if s.get("name") in FULL_LANE_PROOF_STEPS
@@ -385,17 +418,14 @@ def report(repository: str, token: str, since: str, fetch: Optional[Fetch] = Non
                         if failed:
                             would_take_failed.append({"run_id": run["id"], "head_sha": run.get("head_sha"),
                                                       "failed_steps": failed})
-                    elif verdict == "took":
-                        took_heads.append(run.get("head_sha") or "")
-        if len(runs) < 100:
-            break
-        page_no += 1
-    today = today or _dt.datetime.now(_dt.timezone.utc).date()
-    days = (today - _dt.date.fromisoformat(since)).days
-    window_met = days >= ENFORCE_AFTER_DAYS or counts["would_take"] >= ENFORCE_AFTER_HEADS
+        day += _dt.timedelta(days=1)
+    days = (today - start).days
+    would_take_heads = len(heads["would_take"])
+    window_met = days >= ENFORCE_AFTER_DAYS or would_take_heads >= ENFORCE_AFTER_HEADS
     return {"schema": SCHEMA, "since": since, "days": days, **counts,
-            "would_take_failed": would_take_failed, "took_heads": took_heads,
-            "ready_to_enforce": window_met and counts["would_take"] > 0 and not would_take_failed}
+            "would_take_heads": would_take_heads,
+            "would_take_failed": would_take_failed, "took_heads": sorted(heads["took"]),
+            "ready_to_enforce": window_met and would_take_heads > 0 and not would_take_failed}
 
 
 def main(argv: List[str]) -> int:
@@ -404,7 +434,8 @@ def main(argv: List[str]) -> int:
     d = sub.add_parser("decide")
     d.add_argument("--repo", default=".")
     d.add_argument("--repository", required=True)
-    d.add_argument("--token", default=os.environ.get("GITHUB_TOKEN", ""))
+    d.add_argument("--token", default=os.environ.get("GITHUB_TOKEN", ""),
+                   help="defaults to $GITHUB_TOKEN; prefer the environment over argv")
     d.add_argument("--head", default="")
     d.add_argument("--before", default="")
     d.add_argument("--base-ref", default="main")

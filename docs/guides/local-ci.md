@@ -4299,8 +4299,9 @@ workflow does nothing. `pr-guard` keeps running on the full lane.
 **Shadow by default.** The repository variable `PULP_CLEAN_MERGE_LANE_MODE`
 reads `shadow` when unset: the leg decides, annotates `would_take`, and runs the
 full lane anyway. `enforce` takes the lane; `off` decides nothing and is the
-rollback. It is independent of `PULP_MACOS_PR_GATING` (with gating on, every
-`synchronize` head is already on the contract lane, so this decision never runs).
+rollback. It is independent of `PULP_MACOS_PR_GATING`, but inert while that is
+`true`: every `synchronize` head is then already on the contract lane, so the
+decision step never runs and no `pulp-clean-merge-lane` notice appears.
 
 **Trigger.** A `pull_request` `synchronize` head on the macOS leg's full lane
 takes the clean-merge lane only when every one of these is read and holds;
@@ -4311,10 +4312,18 @@ anything unreadable is the full lane:
   time;
 - `git merge-tree --write-tree <before> <base parent>` exits 0 and its tree is
   the head's tree, so the merge carries no conflict resolution or hand edit;
-- the newest `macos` check run on `before` from this repository's `build.yml`
-  on a same-repository `pull_request` run concluded `success`, its `Build` step
-  succeeded, and its `shipyard-test-tier` is `fast` or `full`. A previous green
-  that was itself a contract or clean-merge lane does not count (no chaining).
+- the newest `macos` check run this repository's workflows produced on
+  `before`, whatever its event, is from `build.yml` on a same-repository
+  `pull_request` run, concluded `success`, its `Build` step succeeded, and its
+  `shipyard-test-tier` is `fast` or `full`. A newer red (a fleet `pr_number`
+  dispatch, another workflow) is never passed over for an older green. A
+  previous green that was itself a contract or clean-merge lane does not count
+  (no chaining).
+
+Expect fewer hits than the audit's 8.2 clean merges a day: a fleet-dispatched
+full-lane green on `before` never counts (only `pull_request` runs do), and a
+quick merge of main often cancels `before`'s own `pull_request` run first. Both
+are deliberate in this version; the shadow window measures the real rate.
 
 **What runs.** The contract lane's steps: configure, `pr-fast` (minus
 `needs-build`) and `pr-guard`. No Build, no affected tests, no installed-SDK
