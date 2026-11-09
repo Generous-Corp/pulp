@@ -628,14 +628,26 @@ def gh_cli() -> str:
     return (os.environ.get(GH_CLI_ENV) or "").strip() or "ghapp"
 
 
+# A hung API call must not hold a required job: every read is bounded and a
+# timeout reads as "could not read".
+GH_TIMEOUT_SECS = 120
+
+
 def gh(path: str, jq: str | None = None) -> str | None:
     cmd = [gh_cli(), "api", path] + (["--jq", jq] if jq else [])
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                              timeout=GH_TIMEOUT_SECS)
+    except subprocess.TimeoutExpired:
+        return None
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
 def gh_bytes(path: str) -> bytes | None:
-    proc = subprocess.run([gh_cli(), "api", path], capture_output=True)
+    try:
+        proc = subprocess.run([gh_cli(), "api", path], capture_output=True, timeout=GH_TIMEOUT_SECS)
+    except subprocess.TimeoutExpired:
+        return None
     return proc.stdout if proc.returncode == 0 and proc.stdout else None
 
 

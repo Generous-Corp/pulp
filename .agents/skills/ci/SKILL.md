@@ -3377,6 +3377,12 @@ pr-fast/drift-fast, is not touched by `compare/main...<sha>`, and is not a
 build failure, with ctest exit 8 and `LastTestsFailed.log` matching the
 report. It then runs the tests `--stop-on-failure` skipped and judges the
 union. Gotchas:
+- Corroboration reads only FULL-SUITE head runs (`Test (non-Windows)` ran;
+  `ctest.junit.xml`). A PR head's `LastTestsFailed.log` usually comes from the
+  pr-fast, pr-guard or affected tiers, which run that PR's own tests, so a
+  failure there is the PR breaking the test, not a flake signal. A
+  corroborating run whose head carries a group PR's head, or whose PR diff
+  touches the test, does not count either.
 - `pull_requests` is empty on App-opened PR runs; the PR comes from
   `commits/<head_sha>/pulls`, and a commit on two PRs counts as none.
 - ctest's JUnit omits tests a stopped run never started, and an all-pass ctest

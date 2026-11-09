@@ -116,6 +116,10 @@ def parse_issue(issue: dict) -> Quarantine | None:
     test = data.get("test")
     if not isinstance(test, str) or not test or start is None or end is None or end <= start:
         return None
+    # The marker sits in an editable body: a span past the rule's 14 days is
+    # not a quarantine this tool wrote.
+    if end - start > dt.timedelta(days=QUARANTINE_DAYS):
+        return None
     return Quarantine(number=int(issue.get("number") or 0), test=test, state=issue.get("state") or "",
                       labels=frozenset(l.get("name", "") for l in issue.get("labels") or []),
                       author=((issue.get("user") or {}).get("login") or ""),
@@ -276,7 +280,8 @@ def issue_body(test: str, start: dt.datetime, runs: Iterable[str], repo: str) ->
 
 def gh_write(method: str, path: str, payload: dict) -> bool:
     proc = subprocess.run([bpd.gh_cli(), "api", "-X", method, path, "--input", "-"],
-                          input=json.dumps(payload), capture_output=True, text=True)
+                          input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8",
+                          timeout=60)
     if proc.returncode != 0:
         print(f"flake-quarantine: {method} {path} failed: {proc.stderr.strip()[:300]}", file=sys.stderr)
     return proc.returncode == 0

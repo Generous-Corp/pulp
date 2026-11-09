@@ -5,7 +5,8 @@ All GitHub reads and writes are stubbed. What must hold:
 - 3 excusals of a test in 7 days quarantine it; 2 do not, and an excusal older
   than 7 days does not count; one run excusing a test twice counts once;
 - a quarantine is active only while its issue is open, labelled, opened by the
-  bot, and inside [start, start + 14 days): it expires after 14 days, a closed
+  bot, and inside [start, start + 14 days); a marker edited to a longer span
+  is not a quarantine: it expires after 14 days, a closed
   issue or a removed label ends it, and a non-bot issue never activates one;
 - an expired, still-labelled issue is swept: comment and label removal;
 - excusals before a test's latest quarantine began never count again, so a
@@ -109,6 +110,13 @@ class ExpiryTests(unittest.TestCase):
         self.assertEqual(fq.active_tests([issue(7, FLAKY, 1, labels=(fq.FLAKE_LABEL,))], NOW), set())
         self.assertEqual(fq.active_tests([issue(7, FLAKY, 1, author="someone")], NOW), set())
 
+    def test_a_marker_edited_past_fourteen_days_is_not_a_quarantine(self) -> None:
+        long = issue(7, FLAKY, 1)
+        long["body"] = fq.marker(FLAKY, NOW - dt.timedelta(days=1), days=400)
+        self.assertEqual(fq.active_tests([long], NOW), set())
+        future = issue(7, FLAKY, -1)
+        self.assertEqual(fq.active_tests([future], NOW), set())
+
     def test_a_body_without_a_valid_marker_is_ignored(self) -> None:
         bad = issue(7, FLAKY, 1)
         bad["body"] = "<!-- pulp-flake-quarantine/v1 {not json} -->"
@@ -145,7 +153,7 @@ class ActiveCommandTests(unittest.TestCase):
                                out_dir=str(self.root / "out"), mode=mode, bot_login=fq.BOT_LOGIN)
         scope = scope or fx.Scope(frozenset(), frozenset({"core/x.cpp"}))
         fq.cmd_active(a, issues_fn=lambda: issues, scope_fn=lambda: scope, now=NOW)
-        return ((self.root / "out/names.txt").read_text(), (self.root / "out/exclude.regex").read_text(encoding="utf-8"))
+        return ((self.root / "out/names.txt").read_text(encoding="utf-8"), (self.root / "out/exclude.regex").read_text(encoding="utf-8"))
 
     def test_active_writes_names_and_an_escaped_anchored_fragment(self) -> None:
         names, regex = self.run_active([issue(7, FLAKY, 1), issue(8, "other.test", 1)])

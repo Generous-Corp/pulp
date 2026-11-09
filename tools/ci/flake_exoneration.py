@@ -171,6 +171,7 @@ class Scope:
     prs: frozenset[int]
     files: frozenset[str]
     reason: str = ""
+    pr_heads: frozenset[str] = frozenset()
 
     @property
     def read(self) -> bool:
@@ -190,16 +191,20 @@ def scope_from_compare(payload: dict | None, pr_number: int | None = None) -> Sc
     if len(files) >= COMPARE_FILE_CAP:
         return Scope(frozenset(), frozenset(), f"compare listed {len(files)} files (the cap)")
     prs = set() if pr_number is None else {pr_number}
+    heads = set()
     for c in commits:
         m = MERGE_SUBJECT_RE.match(((c.get("commit") or {}).get("message") or ""))
         if m:
             prs.add(int(m.group(1)))
+            parents = c.get("parents") or []
+            if len(parents) >= 2 and parents[1].get("sha"):
+                heads.add(parents[1]["sha"])
     paths = set()
     for f in files:
         for key in ("filename", "previous_filename"):
             if f.get(key):
                 paths.add(f[key])
-    return Scope(frozenset(prs), frozenset(paths))
+    return Scope(frozenset(prs), frozenset(paths), pr_heads=frozenset(heads))
 
 
 def read_scope(repo: str, sha: str, pr_number: int | None = None) -> Scope:
@@ -361,27 +366,133 @@ def recent_pr_runs(repo: str, hours: int, now: dt.datetime | None = None,
     return out
 
 
+FULL_SUITE_STEP = "Test (non-Windows)"
+MACOS_JOB_RE = re.compile(r"^mac", re.IGNORECASE)
+
+
+def full_suite_ran(jobs: list[dict]) -> bool:
+    """Whether a run's macOS job executed the full-suite ctest step (not the pr-fast or affected tiers)."""
+    for job in jobs:
+        if not MACOS_JOB_RE.match(job.get("name") or ""):
+            continue
+        for step in job.get("steps") or []:
+            if step.get("name") == FULL_SUITE_STEP and step.get("conclusion") in ("success", "failure"):
+                return True
+    return False
+
+
+def failing_names_from_junit_bytes(blob: bytes) -> tuple[str, ...]:
+    out = []
+    for case in ET.fromstring(blob).iter("testcase"):
+        if case.get("name") and any(c.tag in ("failure", "error") for c in case):
+            out.append(case.get("name"))
+    return tuple(out)
+
+
+def full_suite_failures(repo: str, run_id: str) -> tuple[str, ...]:
+    """Tests the run's FULL suite failed, from its `ctest.junit.xml`; empty unless that suite ran.
+
+    `LastTestsFailed.log` on an ordinary pull-request head comes from the
+    pr-fast, pr-guard and affected-test tiers, which run the pull request's
+    OWN tests: a failure there is usually that pull request breaking the test,
+    not independent evidence of a flake.
+    """
+    raw = bpd.gh(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100")
+    try:
+        jobs = json.loads(raw).get("jobs", []) if raw else []
+    except json.JSONDecodeError:
+        return ()
+    if not full_suite_ran(jobs):
+        return ()
+    blob = read_artifact_member(repo, run_id, f"{bpd.CTEST_ARTIFACT_PREFIX}macos", MAIN_JUNIT_MEMBER)
+    if not blob:
+        return ()
+    try:
+        return failing_names_from_junit_bytes(blob)
+    except ET.ParseError:
+        return ()
+
+
+def contains_any(repo: str, head: str, ancestors: Iterable[str]) -> bool | None:
+    """Whether `head` already contains any of `ancestors`; None when a compare is unreadable."""
+    for anc in ancestors:
+        raw = bpd.gh(f"repos/{repo}/compare/{anc}...{head}", ".status")
+        if raw is None:
+            return None
+        if raw.strip().strip('"') in ("ahead", "identical"):
+            return True
+    return False
+
+
+def pr_files(repo: str, number: int) -> frozenset[str] | None:
+    raw = bpd.gh(f"repos/{repo}/pulls/{number}/files?per_page=100", "[.[]|.filename,(.previous_filename//empty)]")
+    try:
+        files = json.loads(raw) if raw else None
+    except json.JSONDecodeError:
+        return None
+    if files is None or len(files) >= 100:
+        return None
+    return frozenset(files)
+
+
 def failures_by_pr(repo: str, runs: list[dict], exclude: Iterable[int], interesting: Iterable[str],
                    failing_fn: Callable[[str, str], Iterable[str]] | None = None,
-                   lookup: Callable[[str], list[dict] | None] | None = None) -> dict[str, set[int]]:
-    """test name -> other pull requests whose own head run failed it (for the tests asked about)."""
-    failing_fn = failing_fn or bpd.artifact_failing_tests
+                   lookup: Callable[[str], list[dict] | None] | None = None,
+                   independent: Callable[[dict, int, str], bool] | None = None,
+                   min_other_prs: int = MIN_OTHER_PRS) -> dict[str, set[int]]:
+    """test name -> other pull requests whose own full-suite head run failed it.
+
+    A corroborating pull request counts only when `independent(run, pr, test)`
+    holds: its head does not already carry a pull request of this group, and
+    its own diff does not touch the test. Reading stops once every asked-about
+    test has enough corroboration.
+    """
+    failing_fn = failing_fn or full_suite_failures
     lookup = lookup if lookup is not None else commit_pulls(repo)
     excluded = set(exclude)
     wanted = set(interesting)
     table: dict[str, set[int]] = {}
     for r in runs:
+        if wanted and all(len(table.get(n, ())) >= min_other_prs for n in wanted):
+            break
         if r.get("conclusion") not in ("failure", "timed_out"):
-            continue
-        hits = wanted.intersection(failing_fn(repo, str(r["id"])))
-        if not hits:
             continue
         pr = run_pr(r, lookup)
         if pr is None or pr in excluded:
             continue
-        for name in hits:
+        hits = wanted.intersection(failing_fn(repo, str(r["id"])))
+        for name in sorted(hits):
+            if pr in table.get(name, ()):
+                continue
+            if independent is not None and not independent(r, pr, name):
+                continue
             table.setdefault(name, set()).add(pr)
     return table
+
+
+def independence_check(repo: str, scope: "Scope", source_root: Path,
+                       script_inputs: dict[str, list[str]], commands: dict[str, list[str]]):
+    """A corroborating run is independent of this group: it does not carry a
+    group pull request's head, and its own pull request does not touch the test.
+    Anything unreadable counts as dependent."""
+    files_cache: dict[int, frozenset[str] | None] = {}
+
+    def check(run: dict, pr: int, test: str) -> bool:
+        head = str(run.get("head_sha") or "")
+        if not head:
+            return False
+        if scope.pr_heads:
+            carried = contains_any(repo, head, sorted(scope.pr_heads))
+            if carried is not False:
+                return False
+        if pr not in files_cache:
+            files_cache[pr] = pr_files(repo, pr)
+        files = files_cache[pr]
+        if files is None:
+            return False
+        touched = touched_tests([test], Scope(frozenset(), files), source_root, script_inputs, commands)
+        return test not in touched
+    return check
 
 
 # --------------------------------------------------------------------------
@@ -504,8 +615,6 @@ def read_last_failed(build_dir: Path) -> tuple[str, ...] | None:
     path = build_dir / bpd.LAST_TESTS_FAILED_MEMBER
     try:
         return bpd.parse_last_tests_failed(path.read_text(encoding="utf-8", errors="replace"))
-    except FileNotFoundError:
-        return ()
     except OSError:
         return None
 
@@ -553,6 +662,22 @@ def summary_markdown(result: dict, mode: str) -> str:
 
 
 def run_ctest_remainder(names: list[str], a: argparse.Namespace, workdir: Path) -> int:
+    """Run the skipped tests; the first run's LastTest.log (the excused output) is kept beside it."""
+    log = Path(a.build_dir) / "Testing/Temporary/LastTest.log"
+    saved = workdir / "LastTest.first.log"
+    if log.is_file():
+        saved.write_bytes(log.read_bytes())
+    try:
+        return _run_ctest_remainder(names, a, workdir)
+    finally:
+        if saved.is_file():
+            remainder_log = log.with_name("LastTest.remainder.log")
+            if log.is_file():
+                remainder_log.write_bytes(log.read_bytes())
+            log.write_bytes(saved.read_bytes())
+
+
+def _run_ctest_remainder(names: list[str], a: argparse.Namespace, workdir: Path) -> int:
     listing = workdir / "remainder.txt"
     listing.write_text("".join(n + "\n" for n in names), encoding="utf-8")
     cmd = ["ctest", "--test-dir", a.build_dir, "--output-on-failure", "--repeat", "until-pass:2",
@@ -597,6 +722,7 @@ def cmd_gate(a: argparse.Namespace, *, collect=None, run_remainder=None, write_s
         return verdict(ev, a.min_other_prs)
 
     result = judge(report, last_failed)
+    result["remainder_unrun"] = len(remainder(selected, report.ran)) if selected is not None else None
     write_summary = write_summary or _append_summary
     if result["excused"] and mode == MODE_ENFORCE:
         rest = remainder(selected, report.ran)
@@ -653,10 +779,15 @@ def _append_summary(text: str) -> None:
 def collect_evidence(a: argparse.Namespace, report: RunReport, selected: dict | None) -> dict:
     scope = read_scope(a.repo, a.merge_sha)
     runs = recent_pr_runs(a.repo, a.hours) if report.failing else []
-    by_pr = failures_by_pr(a.repo, runs, scope.prs, report.failing) if scope.read else {}
+    script_inputs = load_script_inputs(Path(a.source_root))
+    commands = command_paths(selected, Path(a.source_root))
+    by_pr = (failures_by_pr(a.repo, runs, scope.prs, report.failing,
+                            independent=independence_check(a.repo, scope, Path(a.source_root),
+                                                           script_inputs, commands),
+                            min_other_prs=a.min_other_prs)
+             if scope.read else {})
     return {"scope": scope, "by_pr": by_pr, "main": main_passes(a.repo),
-            "script_inputs": load_script_inputs(Path(a.source_root)),
-            "commands": command_paths(selected, Path(a.source_root))}
+            "script_inputs": script_inputs, "commands": commands}
 
 
 def build_parser() -> argparse.ArgumentParser:

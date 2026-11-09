@@ -1714,12 +1714,16 @@ unchanged as controls.
 The **enforced** verdict is a stricter rule in `tools/ci/flake_exoneration.py`,
 run inside the ctest step of the merge-group `macos` leg. A failed run passes
 only when every failing test failed on 2 or more OTHER pull requests in the
-last 24 hours, counted by pull request number from their own head runs
-(`pull_request` runs whose base is main; the run's commit resolves the pull
-request when GitHub leaves `pull_requests` empty; a commit shared by two pull
-requests counts as none), never a pull request in this group, and never a
-merge-group run (a broken entry fails every group it joins under a different
-tip); passed in main's tip gate run by name (its `ctest.junit.xml`, so a test
+last 24 hours, counted by pull request number from their own FULL-SUITE head
+runs (`pull_request` runs whose base is main and whose `Test (non-Windows)`
+step ran, read from `ctest.junit.xml`; the pr-fast, pr-guard and affected-test
+tiers run a pull request's own tests, so their failures are not independent;
+the run's commit resolves the pull request when GitHub leaves `pull_requests`
+empty, and a commit shared by two pull requests counts as none), never a pull
+request in this group, never a run whose head already carries a group pull
+request's head, never a pull request whose own diff touches the test, and
+never a merge-group run (a broken entry fails every group it joins under a
+different tip); passed in main's tip gate run by name (its `ctest.junit.xml`, so a test
 new in the group never qualifies); is not `pr-fast` or drift-fast; is not
 touched by the group (its name in a changed file, or a changed declared input
 or command path, from `compare/main...<sha>`, unread when truncated); and is
@@ -1727,7 +1731,9 @@ not a build failure (a "not run" test other than a deliberate skip, or
 compiler, linker or CMake errors in the output). ctest must have exited 8 and
 `LastTestsFailed.log` must name nothing the JUnit report does not. An excused
 run first runs the tests `--stop-on-failure` skipped (`--tests-from-file`) and
-judges the union. The exit-code evidence keeps ctest's own status, so no
+judges the union. Known residual: a corroborating failure from a window in
+which main itself was briefly red still counts; the next group after a bad
+landing then fails on main's tip, which stops further excusals. The exit-code evidence keeps ctest's own status, so no
 receipt claims an excused run passed. Every excusal is a
 `::warning title=flake-exoneration::` annotation, a job-summary table, and a
 `flake-excusals-macos` artifact (`pulp-flake-excusal/v1`, kept 90 days); a

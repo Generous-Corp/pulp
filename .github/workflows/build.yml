@@ -3364,6 +3364,7 @@ jobs:
           name: flake-excusals-macos
           path: ${{ runner.temp }}/flake-exoneration/record/flake-excusal.json
           if-no-files-found: ignore
+          overwrite: true
           retention-days: 90
 
       # The advisory lane for quarantined flakes: runs them, reports, never

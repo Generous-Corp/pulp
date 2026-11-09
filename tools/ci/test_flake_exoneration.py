@@ -178,6 +178,12 @@ class ScopeAndTouchTests(unittest.TestCase):
         self.assertEqual(s.prs, {11001})
         self.assertEqual(s.files, {"a.cpp", "b.cpp", "old.cpp"})
 
+    def test_compare_records_each_group_prs_head(self) -> None:
+        s = fx.scope_from_compare({"total_commits": 1, "files": [], "commits": [
+            {"commit": {"message": "Merge pull request #11001 from x/y"},
+             "parents": [{"sha": "base"}, {"sha": "prhead"}]}]})
+        self.assertEqual(s.pr_heads, {"prhead"})
+
     def test_truncated_compare_is_unread(self) -> None:
         self.assertFalse(fx.scope_from_compare({"total_commits": 300, "commits": [{}] * 250, "files": []}).read)
         self.assertFalse(fx.scope_from_compare({"total_commits": 1, "commits": [{}],
@@ -212,9 +218,32 @@ class CorroborationTests(unittest.TestCase):
         runs = [self.run_(1, 11001), self.run_(2, 11001), self.run_(3, 11002), self.run_(4, 11000),
                 self.run_(5, 11003, base="release"), self.run_(6, None), self.run_(7, 11004, conclusion="success")]
         table = fx.failures_by_pr("o/r", runs, {11000}, [FLAKY], failing_fn=lambda repo, rid: [FLAKY, "x"],
-                                  lookup=lambda sha: None)
+                                  lookup=lambda sha: None, min_other_prs=99)
         self.assertEqual(table[FLAKY], {11001, 11002})
         self.assertNotIn("x", table)
+
+    def test_a_dependent_corroborating_pr_does_not_count(self) -> None:
+        runs = [self.run_(1, 11001), self.run_(2, 11002), self.run_(3, 11003)]
+        table = fx.failures_by_pr("o/r", runs, set(), [FLAKY], failing_fn=lambda repo, rid: [FLAKY],
+                                  lookup=lambda sha: None, independent=lambda r, pr, t: pr != 11002,
+                                  min_other_prs=99)
+        self.assertEqual(table[FLAKY], {11001, 11003})
+
+    def test_reading_stops_once_corroborated(self) -> None:
+        reads = []
+        runs = [self.run_(i, 11000 + i) for i in range(1, 6)]
+        fx.failures_by_pr("o/r", runs, set(), [FLAKY], lookup=lambda sha: None,
+                          failing_fn=lambda repo, rid: reads.append(rid) or [FLAKY])
+        self.assertEqual(reads, ["1", "2"])
+
+    def test_only_a_full_suite_run_corroborates(self) -> None:
+        ran = [{"name": "macos", "steps": [{"name": fx.FULL_SUITE_STEP, "conclusion": "failure"}]}]
+        skipped = [{"name": "macos", "steps": [{"name": fx.FULL_SUITE_STEP, "conclusion": "skipped"}]},
+                   {"name": "Linux (x64)", "steps": [{"name": fx.FULL_SUITE_STEP, "conclusion": "failure"}]}]
+        self.assertTrue(fx.full_suite_ran(ran))
+        self.assertFalse(fx.full_suite_ran(skipped))
+        blob = junit(case("a", "fail"), case("b")).encode()
+        self.assertEqual(fx.failing_names_from_junit_bytes(blob), ("a",))
 
     def test_a_run_without_its_pr_list_is_resolved_from_its_head_commit(self) -> None:
         run = dict(self.run_(1, None), head_sha="h1")
@@ -326,6 +355,26 @@ class GateTests(unittest.TestCase):
     def test_passing_run_is_untouched(self) -> None:
         self.assertEqual(self.gate(self.args(ctest_exit=0), {}), 0)
         self.assertEqual(self.summaries, [])
+
+    def test_missing_last_tests_failed_is_unread(self) -> None:
+        (self.build / "Testing/Temporary/LastTestsFailed.log").unlink()
+        self.assertIsNone(fx.read_last_failed(self.build))
+        run, _ = self.remainder_run([case("later-1"), case("later-2")])
+        self.assertEqual(self.gate(self.args(), {FLAKY: {11001, 11002}}, run), 8)
+
+    def test_remainder_keeps_the_excused_output_log(self) -> None:
+        log = write(self.build / "Testing/Temporary/LastTest.log", "first run output")
+        a = self.args()
+        work = self.root / "work"
+        work.mkdir(parents=True, exist_ok=True)
+        real = fx._run_ctest_remainder
+        fx._run_ctest_remainder = lambda names, a, w: (log.write_text("remainder", encoding="utf-8"), 0)[1]
+        try:
+            self.assertEqual(fx.run_ctest_remainder(["later-1"], a, work), 0)
+        finally:
+            fx._run_ctest_remainder = real
+        self.assertEqual(log.read_text(encoding="utf-8"), "first run output")
+        self.assertEqual(log.with_name("LastTest.remainder.log").read_text(encoding="utf-8"), "remainder")
 
     def test_cli_error_fails_as_before(self) -> None:
         argv = ["flake_exoneration.py"] + [x for x in [
