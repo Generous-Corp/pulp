@@ -171,6 +171,7 @@ lowercase names for serialization and the JS bridge.
 | `SidePanel` (`Sidebar`) | Slide-in edge panel | edge, extent, animated open/close, slide offset, state callback | `side_panel.hpp` |
 | `ContextMenu` (`PopupMenu`) | View-tree popup menu | items (id/label/enabled/checked/separator), anchor, keyboard nav, outside/Esc dismiss | `context_menu.hpp` |
 | `ContextMenu::show_modulation` | Shared two-lane modulation popup | LFO 1/LFO 2 enabled toggles, waveform choices, rate/depth sliders, arrow/Return selection, outside/Esc dismiss, reset callback | `context_menu.hpp` |
+| `MidiLearnOverlay` | MIDI Learn state decoration over a parameter control | listening outline and chip, bind confirmation, mapped dot; hidden when MIDI Learn is unavailable; not hit-testable | `midi_learn_menu.hpp` |
 
 ## Indicators & feedback
 
