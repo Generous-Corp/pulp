@@ -353,15 +353,15 @@ returns an `AudioFileData` with the right `sample_rate`, the right channel
 count and empty channel vectors; `inspect_wav` reports `num_frames == 0`. Any
 consumer that indexes `channels[c][0]`, calls `.front()`/`.back()`, or divides
 by `num_frames()` right after a successful decode will fault on such a file.
-Check `data.empty()` and treat it as "no audio" — `decode_wav` itself returns
+Check `data.empty()` and treat it as "no audio". `decode_wav` itself returns
 the empty asset, and the playback pool refuses it at `create()` with
 `InvalidAsset` (clip compile refuses it again); `pulp-test-wav-memory-decoder`'s
 `[zero-frames]` case is the fixture to copy. The AIFF reader and the seekable
 `AudioReader` follow the same rule (a zero-frame WAV or AIFF opens with
 `info().num_frames == 0`; only a streaming codec's zero means "no length
-claim"), so the contract is per decoder output, not per container. Only an envelope or format fault
-(RIFF size, zero channels, zero rate, a short last frame) is a `nullopt`;
-"nothing to play" is a present value with `empty()` true.
+claim"), so the contract is per decoder output, not per container. Only an
+envelope or format fault (RIFF size, zero channels, zero rate, a short last
+frame) is a `nullopt`; "nothing to play" is a present value with `empty()` true.
 
 - The WAM adapter marks the processor dirty on a control write and services it
   **once per render turn**, right after the render call (`WamStage::service_non_realtime`
@@ -643,7 +643,7 @@ per-ABI entry point for it.** Go through the plugin's own state:
 
   The portable list is `wav_decoder.cpp` alone. The layout report
   (`core/audio/src/audio_file_layout*.cpp`, behind `pulp audio inspect`) sits in
-  `pulp-audio` only and is deliberately NOT portable: it opens files with
+  `pulp-audio` only and is not portable: it opens files with
   positional reads and pulls in the AIFF, FLAC, Ogg, MP3 and MP4 walkers.
   `wav_decoder.hpp` exposes `interpret_wav_format` for it, which runs dr_wav
   over a synthetic header built from a `fmt ` payload and a data size; that

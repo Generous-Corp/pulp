@@ -282,9 +282,9 @@ can still be wrong. `test/test_store_lifetime.cpp` pins the ordering.
 
 `validate summarize` decodes through `read_audio_file`; for FLAC/MP3/Ogg that
 path enforces the format registry's `DecodeLimits` (2^30 frames, 64 channels,
-4 GiB of float output) and refuses a header past them. Since the layout report
-landed, that refusal names the limit on stderr. Run `pulp audio inspect` first
-on any large or suspicious file: it reads the header window only and tells you
+4 GiB of float output) and refuses a header past them, naming the limit on
+stderr. Run `pulp audio inspect` first on any large or suspicious file: it
+reads the header window only and tells you
 whether the decoder would accept the layout and which ceiling it would hit.
 The CHOC WAV path behind `read_audio_file` has no ceiling of its own and
 allocates whatever the header declares; a WAV declaring 2^30+1 frames crashes
@@ -387,7 +387,7 @@ a `pulp.audio.image.v1` sidecar beside it. The rasterizers are in
 every stage is a pure function, so a test can assert on a grid or a column
 without rendering a file.
 
-Two rules that keep this honest:
+Two rules:
 
 - **Display only, never a gate.** The sidecar says `display_only: true` and
   nothing in it is read by an analyzer, a detector or a verdict. A bright
