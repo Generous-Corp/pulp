@@ -1,0 +1,11 @@
+{
+ "name": "vellum-inheritance-ledger-negative-contract",
+ "record": {
+  "entry": "tools/scripts/test_vellum_inheritance_ledger_check.py",
+  "inputs": [
+   "test/cmake/quality_tests.cmake",
+   "tools/scripts/test_vellum_inheritance_ledger_check.py"
+  ],
+  "kind": "python"
+ }
+}

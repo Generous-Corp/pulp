@@ -1,4 +1,5 @@
 #include "harness/rt_allocation_probe.hpp"
+#include "support/thread_progress.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -6,7 +7,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <thread>
+#include <vector>
 
 using namespace pulp::audio;
 
@@ -387,6 +393,58 @@ TEST_CASE("SampleResourceService prefetch caches decoded data for later publish"
     REQUIRE(stats.submitted_prefetches == 1);
     REQUIRE(stats.submitted_loads == 1);
     REQUIRE(stats.cache_hits == 2);
+}
+
+TEST_CASE("SampleResourceService reports a zero-frame WAV as a load failure with a reason",
+          "[audio][sample-resource][service][missing][zero-frames]") {
+    // A 44-byte RIFF/WAVE: 16-byte PCM fmt (mono, 44.1 kHz, 16-bit) and an
+    // empty data chunk. The decoder returns it as a successful decode with no
+    // samples; the service must not cache that as a Loaded sample.
+    const std::vector<std::uint8_t> wav = {
+        'R',  'I', 'F', 'F', 36, 0, 0,   0,   'W', 'A',  'V',  'E', 'f', 'm',  't',
+        ' ',  16,  0,   0,   0,  1, 0,   1,   0,   0x44, 0xAC, 0,   0,   0x88, 0x58,
+        0x01, 0,   2,   0,   16, 0, 'd', 'a', 't', 'a',  0,    0,   0,   0,
+    };
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("pulp_test_sample_resource_zero_frames_" +
+                       std::to_string(reinterpret_cast<std::uintptr_t>(&wav)) + ".wav");
+    {
+        std::ofstream file(path, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(wav.data()),
+                   static_cast<std::streamsize>(wav.size()));
+        REQUIRE(file.good());
+    }
+
+    SampleResourceService service;
+    SampleResourceHandle handle;
+    auto job = service.load_async(path.string(), handle);
+    REQUIRE(job.valid());
+    REQUIRE(pulp::test::wait_for_condition([&] { return job.is_finished(); }));
+    REQUIRE(service.drain_completions() == 1);
+
+    const auto snap = handle.snapshot();
+    REQUIRE(snap.status == SampleResourceStatus::Missing);
+    REQUIRE_FALSE(snap.ready());
+    REQUIRE(snap.data == nullptr);
+
+    const auto diag = handle.diagnostics();
+    REQUIRE(diag.status == SampleResourceStatus::Missing);
+    REQUIRE(diag.path == path.string());
+    REQUIRE(diag.reason == "file contains no audio frames");
+
+    const auto stats = service.stats();
+    REQUIRE(stats.decode_failures == 1);
+    REQUIRE(stats.decode_successes == 0);
+
+    // The empty buffer was not cached: a second load decodes again.
+    SampleResourceHandle second;
+    auto again = service.load_async(path.string(), second);
+    REQUIRE(again.valid());
+    REQUIRE(pulp::test::wait_for_condition([&] { return again.is_finished(); }));
+    REQUIRE(service.drain_completions() == 1);
+    REQUIRE(second.snapshot().status == SampleResourceStatus::Missing);
+    REQUIRE(service.stats().decode_failures == 2);
+    std::filesystem::remove(path);
 }
 
 TEST_CASE("SampleResourceService publishes missing diagnostics on decode failure",

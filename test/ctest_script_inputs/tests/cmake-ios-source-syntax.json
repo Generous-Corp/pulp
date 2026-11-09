@@ -1,0 +1,10 @@
+{
+ "name": "cmake-ios-source-syntax",
+ "record": {
+  "entry": "test/cmake/test_ios_source_syntax.sh",
+  "inputs": [
+   "test/cmake/test_ios_source_syntax.sh"
+  ],
+  "kind": "shell"
+ }
+}

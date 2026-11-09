@@ -140,6 +140,42 @@ class Fixture(unittest.TestCase):
 
 
 class PlanTests(Fixture):
+    def test_build_closure_includes_command_artifacts_of_selected_g3_test(self) -> None:
+        backup = dict(TARGETS)
+        try:
+            TARGETS.update({
+                "negative-control-archive": (
+                    "STATIC_LIBRARY", "test", [], [],
+                    "test/libnegative-control.a"),
+                "sdk-probe": (
+                    "EXECUTABLE", "test", [], [], "test/sdk-probe"),
+                "fixture-binary": (
+                    "EXECUTABLE", "test", [], [], "test/fixture-binary"),
+            })
+            shutil.rmtree(self.build)
+            write_codemodel(self.build, self.root)
+            b = self.build
+            ctest_json = {"tests": [{"name": "graph G3", "command": [
+                str(b / "test/pulp-test-state"), "--forbidden",
+                str(b / "test/libnegative-control.a"),
+                f"-DSDK_PROBE={b / 'test/sdk-probe'}",
+                f"FIXTURES={b / 'test/fixture-binary'}",
+            ]}]}
+            shim_dir = self.root / "shim"
+            shim_dir.mkdir()
+            ctest = shim_dir / "ctest"
+            ctest.write_text("#!/bin/sh\ncat <<'JSON'\n" + json.dumps(ctest_json) + "\nJSON\n",
+                             encoding="utf-8")
+            ctest.chmod(0o755)
+            self._write("core/state/src/param_json.cpp", "int f() { return 2; }\n")
+            plan = self.plan({"PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"})
+            for target in ("negative-control-archive", "sdk-probe", "fixture-binary"):
+                self.assertIn(target, plan["targets"], plan)
+                self.assertIn(target, plan["closure_targets"], plan)
+        finally:
+            TARGETS.clear()
+            TARGETS.update(backup)
+
     def test_core_cpp_change_maps_to_owner_and_its_consumers(self) -> None:
         self._write("core/state/src/param_json.cpp", "int f() { return 2; }\n")
         plan = self.plan()
@@ -305,6 +341,28 @@ class PlanTests(Fixture):
 class TestSelectionTests(Fixture):
     """`tests` keeps only CTests whose command runs a built target."""
 
+    def setUp(self) -> None:
+        super().setUp()
+        self._targets_backup = dict(TARGETS)
+
+    def tearDown(self) -> None:
+        TARGETS.clear()
+        TARGETS.update(self._targets_backup)
+        super().tearDown()
+
+    def _add_command_artifact_targets(self) -> None:
+        TARGETS.update({
+            "negative-control-archive": (
+                "STATIC_LIBRARY", "test", [], [],
+                "test/libnegative-control.a"),
+            "sdk-probe": (
+                "EXECUTABLE", "test", [], [], "test/sdk-probe"),
+            "fixture-binary": (
+                "EXECUTABLE", "test", [], [], "test/fixture-binary"),
+        })
+        shutil.rmtree(self.build)
+        write_codemodel(self.build, self.root)
+
     def test_selects_tests_by_artifact_and_placeholder(self) -> None:
         b = self.build
         ctest_json = {"tests": [
@@ -336,6 +394,119 @@ class TestSelectionTests(Fixture):
             "state reads", "cli help", "cli version",
             "pulp-test-state_NOT_BUILT-0123abc",
         ])
+
+    def test_command_artifacts_include_negative_controls_and_sdk_fixtures(self) -> None:
+        self._add_command_artifact_targets()
+        b = self.build
+        ctest_json = {"tests": [
+            {"name": "graph G3", "command": [
+                str(b / "test/pulp-test-state"), "--forbidden",
+                str(b / "test/libnegative-control.a"),
+                f"-DSDK_PROBE={b / 'test/sdk-probe'}",
+                f"FIXTURES={b / 'test/fixture-binary'}|{b / 'test/sdk-probe'}",
+            ]},
+        ]}
+        shim_dir = self.root / "shim"
+        shim_dir.mkdir()
+        ctest = shim_dir / "ctest"
+        ctest.write_text("#!/bin/sh\ncat <<'JSON'\n" + json.dumps(ctest_json) + "\nJSON\n",
+                         encoding="utf-8")
+        ctest.chmod(0o755)
+
+        plan_file = self.root / "plan.json"
+        plan_file.write_text(json.dumps({"targets": ["pulp-test-state"]}), encoding="utf-8")
+        out = self.root / "selected.txt"
+        result = subprocess.run(
+            [sys.executable, str(HELPER), "tests", "--build-dir", str(b),
+             "--plan", str(plan_file), "--out", str(out)],
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(out.read_text(encoding="utf-8").splitlines(), ["graph G3"])
+
+    def test_not_built_placeholder_requires_a_planned_artifact(self) -> None:
+        self._add_command_artifact_targets()
+        b = self.build
+        ctest_json = {"tests": [
+            {"name": "pulp-test-state_NOT_BUILT-0123abc", "properties": []},
+            {"name": "docs-gen_NOT_BUILT-0123abc", "properties": []},
+            {"name": "fixture-binary_NOT_BUILT-0123abc", "properties": []},
+        ]}
+        shim_dir = self.root / "shim"
+        shim_dir.mkdir()
+        ctest = shim_dir / "ctest"
+        ctest.write_text("#!/bin/sh\ncat <<'JSON'\n" + json.dumps(ctest_json) + "\nJSON\n",
+                         encoding="utf-8")
+        ctest.chmod(0o755)
+        plan_file = self.root / "plan.json"
+        plan_file.write_text(json.dumps({"targets": ["pulp-test-state", "docs-gen"]}),
+                             encoding="utf-8")
+        out = self.root / "selected.txt"
+        result = subprocess.run(
+            [sys.executable, str(HELPER), "tests", "--build-dir", str(b),
+             "--plan", str(plan_file), "--out", str(out)],
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(out.read_text(encoding="utf-8").splitlines(),
+                         ["pulp-test-state_NOT_BUILT-0123abc"])
+
+
+class TestArtifactClosure(Fixture):
+    """The pre-CTest guard catches install-script artifacts before execution."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        TARGETS["negative-control-archive"] = (
+            "STATIC_LIBRARY", "test", [], [], "test/libnegative-control.a")
+        shutil.rmtree(self.build)
+        write_codemodel(self.build, self.root)
+
+    def tearDown(self) -> None:
+        TARGETS.pop("negative-control-archive", None)
+        super().tearDown()
+
+    def test_missing_install_artifact_is_receipted_and_clears_after_build(self) -> None:
+        b = self.build
+        archive = b / "test/libnegative-control.a"
+        (b / "cmake_install.cmake").write_text(
+            f'file(INSTALL DESTINATION "lib" TYPE STATIC_LIBRARY FILES "{archive}")\n',
+            encoding="utf-8")
+        ctest_json = {"tests": [{
+            "name": "sdk staging",
+            "command": [
+                "/usr/bin/cmake", f"-DPULP_BUILD_DIR={b}",
+                str(self.root / "test/cmake/test_installed_sdk_runtime_staging.cmake"),
+            ],
+        }]}
+        shim_dir = self.root / "shim"
+        shim_dir.mkdir()
+        ctest = shim_dir / "ctest"
+        ctest.write_text("#!/bin/sh\ncat <<'JSON'\n" + json.dumps(ctest_json) + "\nJSON\n",
+                         encoding="utf-8")
+        ctest.chmod(0o755)
+        plan = self.root / "plan.json"
+        plan.write_text(json.dumps({"targets": ["pulp-test-state"]}), encoding="utf-8")
+        receipt = self.root / "receipt.json"
+        env = {**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"}
+        cmd = [sys.executable, str(HELPER), "artifacts", "--build-dir", str(b),
+               "--plan", str(plan), "--receipt", str(receipt), "--regex", "sdk staging"]
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                encoding="utf-8", env=env)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        report = json.loads(receipt.read_text(encoding="utf-8"))
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(report["missing_targets"], ["negative-control-archive"])
+        self.assertEqual(report["missing"][0]["path"], str(archive.resolve()))
+
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        archive.write_bytes(b"fixture")
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                encoding="utf-8", env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["status"], "ok")
 
 
 class ShellWiringTests(unittest.TestCase):

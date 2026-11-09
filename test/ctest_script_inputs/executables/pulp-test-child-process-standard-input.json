@@ -1,0 +1,18 @@
+{
+ "name": "pulp-test-child-process-standard-input",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-child-process-input-fixture"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_child_process_standard_input.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

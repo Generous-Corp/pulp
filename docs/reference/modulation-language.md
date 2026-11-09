@@ -36,6 +36,21 @@ passes through the selected loop range. An all-zero-duration infinite loop has
 no observable time, so it quiesces immediately instead of consuming unbounded
 audio-callback work.
 
+A sustain point turns the program into a gated envelope.
+`set_sustain_point(i)` makes the envelope hold point `i`'s value from the
+moment it arrives there until `release()`, which continues through the
+remaining segments with their authored times and curves, so the release starts
+exactly at the held level. `trigger()` opens the gate at point zero;
+`trigger_legato()` opens it without a jump (a gated envelope is left running,
+a releasing or finished one replays its first segment from the current value).
+Releasing before the sustain point is reached cancels the hold with no jump. A
+loop repeats only while the gate is on and `release()` stops further repeats,
+so an endless loop with no sustain point means "loop while held". When a
+sustain point sits at or inside a loop the hold is taken first and the loop
+does not repeat while it holds; a sustain point after the loop is reached once
+the loop's repeats are done. The full rules are in the header comment of
+`breakpoint_envelope.hpp`; `holding()` and `gate()` report the state.
+
 `RiseFallGeneratorT` is a three-point specialization of the breakpoint engine,
 not a separate envelope implementation. Rise and fall times are milliseconds,
 levels retain their caller-owned unit, and optional infinite looping is

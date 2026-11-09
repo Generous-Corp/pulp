@@ -53,6 +53,11 @@ struct TriggerController {
     std::atomic<const void*> active{nullptr};
     std::atomic<std::size_t> generations{0};
     std::unique_ptr<TriggerArena> arena;
+    HostEventIngress<SignalGraph::kHostEventIngressCapacity> host_ingress;
+    SignalGraph::HostEventProjection host_projection;
+    std::array<HostEventRecord, SignalGraph::kHostEventIngressCapacity> host_trace{};
+    std::size_t host_trace_size = 0;
+    SignalGraph::HostEventIngressCounters host_counters{};
     std::uint64_t epoch = 0;
     bool reserve(std::size_t bytes) noexcept {
         auto used = generations.load(std::memory_order_relaxed);
@@ -66,6 +71,11 @@ struct TriggerController {
         } while (!generations.compare_exchange_weak(used, used + bytes, std::memory_order_acq_rel,
                                                     std::memory_order_relaxed));
         return true;
+    }
+    void clear_host_trace() noexcept {
+        host_trace_size = 0;
+        host_counters = {};
+        host_counters.epoch = epoch;
     }
 };
 struct TriggerState {
@@ -95,8 +105,12 @@ struct TriggerState {
     static constexpr std::size_t reservation() noexcept {
         // One charged page includes state, the candidate's two one-entry
         // factory maps, edge descriptor, snapshot ownership and alignment.
-        static_assert(sizeof(TriggerState) + owner_overhead < 4096);
-        return 4096;
+        // Host ingress also reserves its fixed projection/scratch storage in
+        // every compiled generation. Keep the charge conservative so the
+        // existing resource accounting remains fail-closed for replacements.
+        constexpr std::size_t host_ingress_storage = 64 * 1024;
+        static_assert(sizeof(TriggerState) + owner_overhead < host_ingress_storage);
+        return host_ingress_storage;
     }
     ~TriggerState() {
         controller->generations.fetch_sub(reserved_bytes, std::memory_order_acq_rel);
@@ -450,10 +464,10 @@ TriggerPreparation SignalGraph::prepare_trigger_plan(double sample_rate, int max
         if (node.type == NodeType::Custom && node.id != edge.producer && node.id != edge.consumer &&
             !trigger_audio_.contains(node.id))
             return fail(TriggerGraphResult::UnsupportedProducer);
-        // First typed publication owns fresh bounded builtin/Gain/audio state. Hosted
-        // Processor and MIDI ingress lifecycles need their own admission.
-        if (node.type == NodeType::Plugin || node.type == NodeType::MidiInput ||
-            node.type == NodeType::MidiOutput)
+        // G-5 admits the existing routed MIDI source/sink lane alongside the
+        // typed trigger pair.  Hosted Processor nodes still require their own
+        // lifecycle admission and remain refused here.
+        if (node.type == NodeType::Plugin)
             return fail(TriggerGraphResult::Mode);
     }
     if (!has_producer || !has_consumer)
@@ -468,8 +482,9 @@ TriggerPreparation SignalGraph::prepare_trigger_plan(double sample_rate, int max
             connection.dest_node == edge.producer || connection.dest_node == edge.consumer;
         if (from_pair && to_pair)
             return fail(TriggerGraphResult::DependencyCycle);
-        if (connection.midi || connection.automation || connection.audio_rate_modulation ||
-            connection.sidechain)
+        if (connection.midi && (from_pair || to_pair))
+            return fail(TriggerGraphResult::Payload);
+        if (connection.automation || connection.audio_rate_modulation || connection.sidechain)
             return fail(TriggerGraphResult::Payload);
     }
     // Charge the whole candidate, including duplicate compiler/runtime scratch,
@@ -492,7 +507,7 @@ TriggerPreparation SignalGraph::prepare_trigger_plan(double sample_rate, int max
         reservation += amount;
         return true;
     };
-    std::size_t ports = 0, feedback = 0;
+    std::size_t ports = 0, feedback = 0, midi_scratch_nodes = 0;
     for (const auto& node : nodes_) {
         if (node.id == edge.consumer)
             continue;
@@ -503,6 +518,8 @@ TriggerPreparation SignalGraph::prepare_trigger_plan(double sample_rate, int max
         if (inputs < 0 || outputs < 0 || inputs > 64 || outputs > 64)
             return fail(TriggerGraphResult::Budget);
         ports += static_cast<std::size_t>(inputs + outputs);
+        if (node.type == NodeType::MidiInput || node.type == NodeType::MidiOutput)
+            ++midi_scratch_nodes;
         if (!charge(1, sizeof(NodeRuntime) + 32768) || !charge(node.name.size(), 8) ||
             !charge(node.custom_type_id.size(), 8))
             return fail(TriggerGraphResult::Budget);
@@ -512,6 +529,12 @@ TriggerPreparation SignalGraph::prepare_trigger_plan(double sample_rate, int max
     if (!charge(trigger_audio_.size(), sizeof(detail::TriggerState::AudioState)) ||
         !charge(connections_.size(), 4096) ||
         !charge(ports + feedback, static_cast<std::size_t>(max_frames) * sizeof(float) * 2))
+        return fail(TriggerGraphResult::Budget);
+    // GraphRuntimeMidiScratch allocates one fixed MIDI/UMP/MPE slot per
+    // executable node when any MIDI edge is present. Charge that bounded
+    // storage before constructing the candidate (the envelope is folded into
+    // the trigger producer and is absent from the executable plan).
+    if (midi_scratch_nodes != 0 && !charge(nodes_.size() - 1, 64 * 1024))
         return fail(TriggerGraphResult::Budget);
     try {
         if (!trigger_controller_)
@@ -589,6 +612,8 @@ SignalGraph::try_install_prepared_trigger_plan(std::unique_ptr<PreparedTriggerPl
     if (!canonical_executor_routing_enabled() || parallel_routing_enabled() ||
         anticipation_enabled() || in_swap_edit_)
         return TriggerGraphResult::Mode;
+    if (trigger_controller_->host_ingress.active())
+        return TriggerGraphResult::Busy;
     if (trigger_controller_->epoch == std::numeric_limits<std::uint64_t>::max())
         return TriggerGraphResult::ClockExhausted;
     try {
@@ -597,7 +622,11 @@ SignalGraph::try_install_prepared_trigger_plan(std::unique_ptr<PreparedTriggerPl
         return TriggerGraphResult::Budget;
     }
     auto graph = std::move(prepared.graph);
+    graph->host_event_projection = &trigger_controller_->host_projection;
     graph->trigger_state->reset(++trigger_controller_->epoch);
+    graph->host_event_epoch = trigger_controller_->epoch;
+    (void)trigger_controller_->host_ingress.reset(trigger_controller_->epoch);
+    trigger_controller_->clear_host_trace();
     reset_trigger_audio_(*graph);
     trigger_controller_->active.store(graph.get(), std::memory_order_release);
     publish_prepared_stats_locked_(*graph);
@@ -624,6 +653,13 @@ void SignalGraph::reset_trigger_audio_(CompiledGraph& graph) noexcept {
         std::fill(runtime.output_data.begin(), runtime.output_data.end(), 0.0f);
         std::fill(runtime.input_data.begin(), runtime.input_data.end(), 0.0f);
     }
+    if (graph.host_event_projection != nullptr) {
+        graph.host_event_projection->host_event_tracker.reset();
+        graph.host_event_projection->midi.clear();
+        graph.host_event_projection->ump.clear();
+        graph.host_event_projection->mpe.clear();
+        graph.host_event_projection->count = 0;
+    }
     for (auto& edge : graph.connection_delays) {
         std::fill(edge.feedback_prev.begin(), edge.feedback_prev.end(), 0.0f);
         if (edge.state) {
@@ -644,11 +680,248 @@ TriggerGraphResult SignalGraph::try_reset_events() noexcept {
     if (!pin || !pin->trigger_state ||
         trigger_controller_->active.load(std::memory_order_acquire) != pin.get())
         return TriggerGraphResult::StaleGeneration;
+    if (trigger_controller_->host_ingress.active())
+        return TriggerGraphResult::Busy;
     if (trigger_controller_->epoch == std::numeric_limits<std::uint64_t>::max())
         return TriggerGraphResult::ClockExhausted;
     pin->trigger_state->reset(++trigger_controller_->epoch);
+    (void)trigger_controller_->host_ingress.reset(trigger_controller_->epoch);
+    trigger_controller_->clear_host_trace();
     reset_trigger_audio_(*pin);
     return TriggerGraphResult::Accepted;
+}
+
+HostEventResult SignalGraph::begin_host_event_block(std::uint64_t epoch, std::uint64_t sample_start,
+                                                    std::size_t frames) noexcept {
+    if (!trigger_controller_)
+        return HostEventResult::Unbound;
+    detail::Gate gate(trigger_controller_->gate);
+    if (!gate)
+        return HostEventResult::Busy;
+    auto pin = live_slot_.read();
+    if (!pin || !pin->trigger_state ||
+        trigger_controller_->active.load(std::memory_order_acquire) != pin.get())
+        return HostEventResult::StaleEpoch;
+    const auto current_epoch = trigger_controller_->epoch;
+    if (epoch != current_epoch)
+        return HostEventResult::StaleEpoch;
+    const auto cursor = pin->trigger_state->counters.cursor;
+    if (sample_start < cursor)
+        return HostEventResult::Late;
+    // HostEventResult predates a distinct Future value. OutOfRange is the
+    // fail-closed representation for a block that would move the graph clock
+    // ahead of its checked serial cursor.
+    if (sample_start > cursor)
+        return HostEventResult::OutOfRange;
+    const auto result = trigger_controller_->host_ingress.begin_block(epoch, sample_start, frames);
+    if (result == HostEventResult::Accepted) {
+        trigger_controller_->host_counters.epoch = epoch;
+    } else {
+        ++trigger_controller_->host_counters.refused;
+    }
+    return result;
+}
+
+HostEventResult SignalGraph::publish_host_event(const HostEventRecord& event) noexcept {
+    if (!trigger_controller_)
+        return HostEventResult::Unbound;
+    detail::Gate gate(trigger_controller_->gate);
+    if (!gate)
+        return HostEventResult::Busy;
+    auto pin = live_slot_.read();
+    if (!pin || !pin->trigger_state ||
+        trigger_controller_->active.load(std::memory_order_acquire) != pin.get())
+        return HostEventResult::StaleEpoch;
+    const auto result = trigger_controller_->host_ingress.publish(event);
+    if (result == HostEventResult::Accepted) {
+        if (trigger_controller_->host_trace_size < trigger_controller_->host_trace.size())
+            trigger_controller_->host_trace[trigger_controller_->host_trace_size++] = event;
+        ++trigger_controller_->host_counters.accepted;
+    } else {
+        ++trigger_controller_->host_counters.refused;
+        if (result == HostEventResult::Overflow)
+            ++trigger_controller_->host_counters.overflow;
+    }
+    return result;
+}
+
+HostEventResult SignalGraph::reset_host_event_ingress(std::uint64_t epoch) noexcept {
+    if (!trigger_controller_)
+        return HostEventResult::Unbound;
+    detail::Gate gate(trigger_controller_->gate);
+    if (!gate)
+        return HostEventResult::Busy;
+    auto pin = live_slot_.read();
+    if (!pin || !pin->trigger_state ||
+        trigger_controller_->active.load(std::memory_order_acquire) != pin.get())
+        return HostEventResult::StaleEpoch;
+    if (epoch != trigger_controller_->epoch)
+        return HostEventResult::StaleEpoch;
+    if (trigger_controller_->host_ingress.active()) {
+        ++trigger_controller_->host_counters.refused;
+        return HostEventResult::Busy;
+    }
+    trigger_controller_->host_ingress.reset(epoch);
+    trigger_controller_->clear_host_trace();
+    return HostEventResult::Accepted;
+}
+
+HostEventResult
+SignalGraph::host_event_counters(HostEventIngressCounters& counters) const noexcept {
+    if (!trigger_controller_)
+        return HostEventResult::Unbound;
+    detail::Gate gate(trigger_controller_->gate);
+    if (!gate)
+        return HostEventResult::Busy;
+    auto pin = live_slot_.read();
+    if (!pin || !pin->trigger_state ||
+        trigger_controller_->active.load(std::memory_order_acquire) != pin.get())
+        return HostEventResult::StaleEpoch;
+    counters = trigger_controller_->host_counters;
+    return HostEventResult::Accepted;
+}
+
+std::span<const HostEventRecord> SignalGraph::host_event_trace() const noexcept {
+    if (!trigger_controller_)
+        return {};
+    detail::Gate gate(trigger_controller_->gate);
+    if (!gate)
+        return {};
+    auto pin = live_slot_.read();
+    if (!pin || !pin->trigger_state ||
+        trigger_controller_->active.load(std::memory_order_acquire) != pin.get())
+        return {};
+    return {trigger_controller_->host_trace.data(), trigger_controller_->host_trace_size};
+}
+
+HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph, std::uint64_t sample_start,
+                                                  std::size_t frames) noexcept {
+    if (!trigger_controller_ || !trigger_controller_->host_ingress.active())
+        return HostEventResult::Accepted;
+
+    // A rejected projection must always seal the ingress block.  Leaving the
+    // fixed ingress active after a malformed/stale/capacity-limited block
+    // turns the next begin_host_event_block() into a permanent Busy refusal.
+    struct EndIngressBlock {
+        HostEventIngress<SignalGraph::kHostEventIngressCapacity>* ingress;
+        ~EndIngressBlock() noexcept {
+            if (ingress != nullptr && ingress->active())
+                (void)ingress->end_block();
+        }
+    } end_ingress{&trigger_controller_->host_ingress};
+
+    bool projected_records = false;
+    const auto refuse = [&](HostEventResult result) noexcept {
+        if (projected_records) {
+            // project() removes the current window from the fixed staging
+            // area before sorting it.  Any later refusal must put the exact
+            // insertion order back before the RAII block seal, otherwise a
+            // retry either loses records or reorders equal-time events.
+            trigger_controller_->host_ingress.rollback_projection();
+            projected_records = false;
+        }
+        ++trigger_controller_->host_counters.refused;
+        if (result == HostEventResult::Overflow || result == HostEventResult::OutputCapacity)
+            ++trigger_controller_->host_counters.overflow;
+        return result;
+    };
+    if (graph.host_event_epoch != trigger_controller_->epoch)
+        return refuse(HostEventResult::StaleEpoch);
+    if (graph.host_event_projection == nullptr)
+        return refuse(HostEventResult::StaleEpoch);
+    // begin_host_event_block() fixed the projection window. A block of a
+    // different length would project records past its own end (offsets >=
+    // frames) while the cursor advances by fewer frames, delivering them
+    // early. Refuse before projecting so the staged records stay retryable.
+    if (trigger_controller_->host_ingress.frames() != frames)
+        return refuse(HostEventResult::OutOfRange);
+    if (graph.host_event_midi_input == 0 && trigger_controller_->host_ingress.pending() == 0) {
+        const auto end_result = trigger_controller_->host_ingress.end_block();
+        if (end_result != HostEventResult::Accepted)
+            return refuse(end_result);
+        end_ingress.ingress = nullptr;
+        return HostEventResult::Accepted;
+    }
+    if (graph.host_event_midi_input == 0)
+        return refuse(HostEventResult::Unbound);
+    auto& projection = *graph.host_event_projection;
+    std::size_t count = 0;
+    const auto result = trigger_controller_->host_ingress.project(
+        std::span<HostEventRecord>(projection.records.data(), projection.records.size()), count);
+    if (result != HostEventResult::Accepted)
+        return refuse(result);
+    projected_records = true;
+    projection.count = count;
+    projection.incomplete = false;
+    projection.midi.clear();
+    projection.midi.clear_sysex();
+    projection.ump.clear();
+    projection.mpe.clear();
+    for (std::size_t i = 0; i < count; ++i) {
+        auto& event = projection.records[i];
+        const auto absolute = static_cast<std::uint64_t>(event.absolute_sample);
+        const auto offset = static_cast<std::int32_t>(absolute - sample_start);
+        if (event.midi.size() != 0) {
+            event.midi.sample_offset = offset;
+            projection.incomplete = !projection.midi.add(event.midi) || projection.incomplete;
+        }
+        if (event.has_ump)
+            projection.incomplete = !projection.ump.add(event.ump, offset) || projection.incomplete;
+    }
+    if (projection.incomplete)
+        return refuse(HostEventResult::Overflow);
+    projection.midi.sort();
+    projection.ump.sort();
+    // The mailbox copy is another bounded transaction. Check the fixed
+    // destination capacities before deriving MPE or publishing the mailbox;
+    // set_from_midi() clears its writer scratch before it reports a failed
+    // copy, so calling it speculatively would make a retry observe partial
+    // output even after the ingress records are restored.
+    const auto runtime_it = graph.runtime.find(graph.host_event_midi_input);
+    if (runtime_it == graph.runtime.end() || !runtime_it->second.midi_input_mailbox)
+        return refuse(HostEventResult::Unbound);
+    const auto& destination = runtime_it->second.midi_input_mailbox->writer_scratch;
+    if (projection.midi.size() > destination.events.event_capacity() ||
+        projection.midi.sysex().size() > destination.events.sysex_capacity() ||
+        projection.ump.size() > destination.ump.capacity())
+        return refuse(HostEventResult::OutputCapacity);
+
+    // derive_mpe() feeds bounded tracker callbacks while walking the
+    // projected records. A full sidecar can therefore mutate tracker state
+    // and append a prefix of expression events before reporting Overflow.
+    // Refusal restores the host ingress records, so preflight the same
+    // conservative fan-out bound here before touching either MPE object.
+    constexpr auto kMpeRecordsPerSource = midi::MpeVoiceTracker::kMaxNotes + 2;
+    const auto event_mpe = count > std::numeric_limits<std::size_t>::max() / kMpeRecordsPerSource
+                               ? std::numeric_limits<std::size_t>::max()
+                               : count * kMpeRecordsPerSource;
+    const auto pending_mpe = projection.host_event_tracker.pending_note_off_count();
+    const auto required_mpe = pending_mpe > std::numeric_limits<std::size_t>::max() - event_mpe
+                                  ? std::numeric_limits<std::size_t>::max()
+                                  : pending_mpe + event_mpe;
+    const auto projection_mpe_available =
+        projection.mpe.capacity() - std::min(projection.mpe.capacity(), projection.mpe.size());
+    const auto destination_mpe_available =
+        destination.mpe.capacity() - std::min(destination.mpe.capacity(), destination.mpe.size());
+    if (required_mpe > projection_mpe_available || required_mpe > destination_mpe_available)
+        return refuse(HostEventResult::OutputCapacity);
+
+    const auto mpe_result =
+        derive_mpe(std::span<const HostEventRecord>(projection.records.data(), count), sample_start,
+                   projection.host_event_tracker, projection.mpe);
+    if (mpe_result != HostEventResult::Accepted)
+        return refuse(mpe_result);
+    // Publish through the graph-owned MidiInput mailbox.  The routed bridge
+    // then gathers the same fixed MIDI/UMP/MPE payload into the graph scratch
+    // before dispatch, preserving the ordinary graph event-edge semantics.
+    if (!inject_midi_into_snapshot_(graph, graph.host_event_midi_input, projection.midi,
+                                    &projection.mpe))
+        return refuse(HostEventResult::Overflow);
+    const auto end_result = trigger_controller_->host_ingress.end_block();
+    if (end_result != HostEventResult::Accepted)
+        return refuse(end_result);
+    end_ingress.ingress = nullptr;
+    return HostEventResult::Accepted;
 }
 TriggerGraphResult SignalGraph::process_checked(audio::BufferView<float>& output,
                                                 const audio::BufferView<const float>& input,
@@ -705,7 +978,14 @@ TriggerGraphResult SignalGraph::process_trigger_snapshot_(
     // All refusals above precede command draining, telemetry and output writes.
     state.trace_size = state.sample_begin = 0;
     const auto failures = routed_only_execution_failures_.load(std::memory_order_relaxed);
-    process_snapshot_impl(exact_output, exact_input, frames, transport, graph, true);
+    HostEventResult host_event_result = HostEventResult::Accepted;
+    graph->host_event_sample_start = state.counters.cursor;
+    process_snapshot_impl(exact_output, exact_input, frames, transport, graph, true,
+                          &host_event_result);
+    if (host_event_result != HostEventResult::Accepted)
+        return host_event_result == HostEventResult::StaleEpoch
+                   ? TriggerGraphResult::StaleGeneration
+                   : TriggerGraphResult::ProcessingFailure;
     state.counters.cursor += count;
     if (routed_only_execution_failures_.load(std::memory_order_relaxed) != failures)
         return TriggerGraphResult::ProcessingFailure;

@@ -1,0 +1,16 @@
+{
+ "name": "gpu-first-visible-trace-producer-overhead-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+  "inputs": [
+   "core/view/platform/mac/window_host_mac.mm",
+   "core/view/src/editor_bridge.cpp",
+   "core/view/src/view.cpp",
+   "core/view/src/widget_bridge.cpp",
+   "core/view/src/widget_bridge/bridge_dispatch.cpp",
+   "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+   "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py"
+  ],
+  "kind": "python"
+ }
+}

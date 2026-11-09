@@ -1010,6 +1010,11 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ci/test_build_dir_lock.py")
         set_tests_properties(checkout-location-guard-selftest build-dir-lock-selftest
             PROPERTIES TIMEOUT 120)
+        # Pass-marker detection in the Android fixture lane must survive large
+        # runner output under pipefail.
+        add_test(NAME android-fixture-marker-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_android_fixture_marker.py")
+        set_tests_properties(android-fixture-marker-selftest PROPERTIES TIMEOUT 120)
         add_test(NAME pulp-worktree-creation-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_pulp_worktree_creation.py")
         set_tests_properties(pulp-worktree-creation-selftest PROPERTIES TIMEOUT 120)
@@ -1038,6 +1043,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME dependency-pins-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_dependency_pins.py")
     set_tests_properties(dependency-pins-selftest PROPERTIES TIMEOUT 60)
+
+    # external/lilv is the unmodified upstream release: tree digests against
+    # external/lilv/vendored.json, and the checker's own failure cases.
+    add_test(NAME vendored-lilv-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/deps/test_verify_vendored_lilv.py")
+    set_tests_properties(vendored-lilv-selftest PROPERTIES TIMEOUT 60)
 
     # The selection over a key manifest: would-skip set, seeded sample, and
     # the tests and build targets left to run, as canonical bytes.
@@ -1592,7 +1603,7 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME unregistered-tests-check-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_unregistered_tests_check.py")
         # The generated script families in .shipyard/config.toml must match
-        # test/ctest_script_inputs.json and the tree. The selector is declared
+        # test/ctest_script_inputs/ and the tree. The selector is declared
         # for the macOS target only, and the script-inputs list is written
         # from the macOS configuration.
         if(APPLE)
@@ -1680,7 +1691,7 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_migration_note_guard.py")
 
     # The build-free pre-push stand-in for script-test-inputs-drift: a new
-    # script-driven add_test needs a ctest_script_inputs.json entry.
+    # script-driven add_test needs a test/ctest_script_inputs/ entry.
     add_test(NAME script-inputs-precheck-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_inputs_precheck.py")
 

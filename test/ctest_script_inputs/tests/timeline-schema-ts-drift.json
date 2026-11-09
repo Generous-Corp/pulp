@@ -1,0 +1,11 @@
+{
+ "name": "timeline-schema-ts-drift",
+ "record": {
+  "entry": "tools/scripts/schema_drift_check.py",
+  "inputs": [
+   "core/timeline/schema/timeline_types.d.ts",
+   "tools/scripts/schema_drift_check.py"
+  ],
+  "kind": "python"
+ }
+}

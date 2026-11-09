@@ -159,7 +159,9 @@ public:
     // once; `done` runs later, exactly once, on the main thread, unless the
     // MainThreadScope is destroyed first, which closes the panel and drops
     // `done`. Cancelling gives an empty result. Without a native or async
-    // backend the empty result is delivered asynchronously too.
+    // backend the empty result is delivered asynchronously too, except where
+    // there is no main-thread backend at all (main_thread_supported() is
+    // false): then `done` runs inline, before the call returns.
 
     struct OpenRequest {
         std::string title = "Open";

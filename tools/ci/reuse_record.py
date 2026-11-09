@@ -118,7 +118,7 @@ CONFIGURE_ENV = ("CC", "CFLAGS", "CXX", "CXXFLAGS", "DEVELOPER_DIR", "LDFLAGS",
 # What configure made of the above, from CMakeCache.txt.
 EFFECTIVE_CACHE = ("CMAKE_C_COMPILER", "CMAKE_CXX_COMPILER", "CMAKE_C_FLAGS", "CMAKE_CXX_FLAGS",
                    "CMAKE_EXE_LINKER_FLAGS", "CMAKE_OSX_SYSROOT", "CMAKE_OSX_DEPLOYMENT_TARGET")
-SCRIPT_INPUTS_LIST = "test/ctest_script_inputs.json"
+SCRIPT_INPUTS_LIST = "test/ctest_script_inputs"
 SYSTEM_PREFIXES = ("/usr/lib/", "/System/")
 
 
@@ -980,7 +980,10 @@ def cmd_write(a: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001 - results are still worth writing
             problems.append(f"registration projection unavailable: {exc}")
 
-    script_inputs_blob = _git(source_root, "rev-parse", f"HEAD:{SCRIPT_INPUTS_LIST}") if source_root else None
+    # The fragment directory's tree id (or, at a revision older than the
+    # fragments, the single file's blob id): either changes exactly when the list does.
+    import script_inputs_store
+    script_inputs_blob = script_inputs_store.ref_identity(source_root, "HEAD") if source_root else None
     job = {
         "schema": SCHEMA, **ctx,
         "job": env.get("GITHUB_JOB") or None, "runner_name": env.get("RUNNER_NAME") or None,

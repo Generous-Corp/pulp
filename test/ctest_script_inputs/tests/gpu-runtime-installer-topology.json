@@ -1,0 +1,10 @@
+{
+ "name": "gpu-runtime-installer-topology",
+ "record": {
+  "entry": "test/verify_gpu_runtime_topology.py",
+  "inputs": [
+   "test/verify_gpu_runtime_topology.py"
+  ],
+  "kind": "python"
+ }
+}

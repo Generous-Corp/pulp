@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-baked-graph-processor-parity",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_baked_graph_processor_parity.cpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

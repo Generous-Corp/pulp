@@ -1,0 +1,10 @@
+{
+ "name": "harness-auto-discover-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_auto_discover.py",
+  "inputs": [
+   "tools/harness/tests/test_auto_discover.py"
+  ],
+  "kind": "python"
+ }
+}

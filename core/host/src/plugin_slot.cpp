@@ -6,11 +6,37 @@
 // by PULP_HOST_HAS_<FORMAT> compile definitions in core/host/CMakeLists.txt.
 
 #include <pulp/host/plugin_slot.hpp>
+#if PULP_HOST_HAS_AU
+#include <pulp/host/plugin_slot_auv3.hpp>
+#endif
 #include <pulp/host/timeline_device_resolver.hpp>
 #include <pulp/runtime/log.hpp>
 #include <choc/text/choc_JSON.h>
 
+#include <mutex>
+
 namespace pulp::host {
+
+namespace {
+std::mutex& host_identity_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+PluginHostIdentity& host_identity_storage() {
+    static PluginHostIdentity identity;
+    return identity;
+}
+} // namespace
+
+void set_plugin_host_identity(PluginHostIdentity identity) {
+    std::lock_guard<std::mutex> lock(host_identity_mutex());
+    host_identity_storage() = std::move(identity);
+}
+
+PluginHostIdentity plugin_host_identity() {
+    std::lock_guard<std::mutex> lock(host_identity_mutex());
+    return host_identity_storage();
+}
 
 #if PULP_HOST_HAS_CLAP
 std::unique_ptr<PluginSlot> load_clap_plugin(const PluginInfo& info);
@@ -37,8 +63,15 @@ std::unique_ptr<PluginSlot> PluginSlot::load(const PluginInfo& requested) {
             runtime::log_warn("PluginSlot::load: CLAP loader not compiled in");
             return nullptr;
 #endif
-        case PluginFormat::AudioUnit:
         case PluginFormat::AudioUnitV3:
+#if PULP_HOST_HAS_AU
+            // AUAudioUnit, out of process by default.
+            return load_auv3_plugin(info);
+#else
+            runtime::log_warn("PluginSlot::load: AU loader only available on macOS");
+            return nullptr;
+#endif
+        case PluginFormat::AudioUnit:
 #if PULP_HOST_HAS_AU
             return load_au_plugin(info);
 #else

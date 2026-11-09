@@ -33,9 +33,32 @@ struct DialogSessionState {
     std::uint64_t teardown_id = 0;
 };
 
-// A completion that runs `done` once: the first call wins, from any thread,
-// and the result is posted through the scope, so it reaches `done` on the main
-// thread and never after the scope is gone.
+// How one completion reached its caller.
+enum class Delivery {
+    posted,            // queued on the main thread through the scope
+    inline_no_backend, // the scope exists but has no main-thread backend
+    dropped,           // the scope is gone
+};
+
+// Hand `task` to `post`. When the post is refused while `alive()` still holds,
+// the platform has no main-thread backend (off Apple), so the task runs here,
+// inline, rather than never; when the scope is gone it is dropped.
+template <typename Post, typename Alive>
+Delivery deliver_or_inline(const std::function<void()>& task, Post&& post, Alive&& alive) {
+    if (post(task))
+        return Delivery::posted;
+    if (alive()) {
+        task();
+        return Delivery::inline_no_backend;
+    }
+    return Delivery::dropped;
+}
+
+// A completion that runs `done` once: the first call wins, from any thread.
+// With a main-thread backend the result is posted through the scope, so it
+// reaches `done` on the main thread, after the opening call has returned, and
+// never after the scope is gone. Without one (off Apple) `done` runs inline,
+// in the call that finished the dialog.
 template <typename Result>
 std::function<void(Result)> make_finisher(MainThreadScope& scope,
                                           std::shared_ptr<DialogSessionState> state,
@@ -45,7 +68,8 @@ std::function<void(Result)> make_finisher(MainThreadScope& scope,
     return [handle, owner, state, done = std::move(done)](Result result) {
         if (state->finished.exchange(true))
             return;
-        handle.post([owner, state, done, result = std::move(result)]() mutable {
+        auto box = std::make_shared<Result>(std::move(result));
+        std::function<void()> task = [owner, state, done, box]() {
             // Runs only while the scope is alive, so `owner` is valid.
             if (state->teardown_id != 0)
                 owner->remove_teardown(state->teardown_id);
@@ -54,8 +78,11 @@ std::function<void(Result)> make_finisher(MainThreadScope& scope,
             state->close = nullptr;
             state->resources = nullptr;
             if (done)
-                done(std::move(result));
-        });
+                done(std::move(*box));
+        };
+        deliver_or_inline(
+            task, [&](std::function<void()> t) { return handle.post(std::move(t)); },
+            [&] { return handle.alive(); });
     };
 }
 

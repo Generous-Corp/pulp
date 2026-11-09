@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-cli-gpu-artifact-publication",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_cli_gpu_artifact_publication.cpp"
+  ],
+  "inputs": [
+   "tools/cli/gpu_artifact_publication.cpp"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_cli_gpu_artifact_publication.cpp",
+   "tools/cli/gpu_artifact_publication.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

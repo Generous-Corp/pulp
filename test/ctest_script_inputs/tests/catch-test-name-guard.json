@@ -1,0 +1,10 @@
+{
+ "name": "catch-test-name-guard",
+ "record": {
+  "entry": "tools/scripts/catch_test_name_guard.py",
+  "inputs": [
+   "tools/scripts/catch_test_name_guard.py"
+  ],
+  "kind": "python"
+ }
+}

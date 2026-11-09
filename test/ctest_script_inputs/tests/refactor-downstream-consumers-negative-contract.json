@@ -1,0 +1,12 @@
+{
+ "name": "refactor-downstream-consumers-negative-contract",
+ "record": {
+  "entry": "tools/scripts/verify_downstream_consumers_contract.py",
+  "inputs": [
+   "test/fixtures/refactor-baselines/downstream-consumers.json",
+   "tools/scripts/verify_downstream_consumers.py",
+   "tools/scripts/verify_downstream_consumers_contract.py"
+  ],
+  "kind": "python"
+ }
+}

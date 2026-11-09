@@ -133,3 +133,77 @@ disposition `framework-backport` (bringing a named Vellum commit back) or
 `emergency-exception`; a `pulp-only` event does not unfreeze it. Like the rest
 of the pin, `frozen_paths` is read at the base commit, so a freeze applies to
 the changes after the one that adds it.
+
+## Renamed units are Vellum-native
+
+Vellum's rename change renames the exported units from `pulp` to `vellum` and
+moves them out of its `mirror/` into the native root `framework/`, keeping the
+export's layout (Vellum Decision 0010, amendment of 2026-11-07). The ownership
+flip takes effect in Pulp when
+`.github/vellum-export-receipt/framework-transfer.json` lands here, naming the
+Vellum commit that merged that change; until then, the rules earlier in this
+contract apply unchanged. The integrator decision of
+2026-11-07 that ends the freeze-versus-mirror contradiction states three rules:
+the renamed units are Vellum-native and editable; "Pulp's frozen copies change
+only by `framework-backport` from a named Vellum commit"; and Pulp's copies are
+deleted at cutover. In Pulp they apply as follows.
+
+1. **The renamed units are Vellum-native and editable.** Generic work on them
+   originates in Vellum's `framework/` and is reviewed there. Vellum no longer
+   re-exports these paths from Pulp: its transfer record proves the one rename
+   commit against Pulp at the export's commit, and the proof does not follow
+   later edits on either side.
+2. **Pulp's frozen copies change only by `framework-backport`.** This is the
+   pin's `frozen_paths`, enforced by receipt mode as described above: a change
+   to a frozen path needs a change event with disposition `framework-backport`
+   naming the immutable Vellum commit it brings back, with destination tests,
+   or an `emergency-exception`.
+3. **The other transferred paths stay Pulp-editable until a pin freezes them,
+   and an edit to them is Pulp-only.** Most transferred paths are not in
+   `frozen_paths`. Pulp may still change them, but no re-export will carry the
+   change, so Vellum does not inherit it. If Vellum needs the same change, it
+   is made first in Vellum's `framework/` and, if Pulp also needs it, brought
+   back with `framework-backport`.
+   `.github/vellum-export-receipt/framework-transfer.json` records the
+   transfer: the Vellum pull request, the SHA-256 of its
+   `provenance/framework/transfer.json`, the export and its Pulp commit, and
+   the exact Pulp paths transferred. While it is present at a change's base
+   commit, receipt mode refuses `vellum_inherits: true` on every path it
+   judges, not only the transferred ones: an exported path of the pinned
+   receipt, a generated-input producer, a file under an exported source
+   directory, and any event covering a frozen path (a `framework-backport`
+   brings a Vellum commit back; it does not send one). The pinned receipt can
+   name paths the transfer's export dropped, and since neither is re-exported,
+   the refusal covers the union. `vellum_inherits: false` records the
+   Pulp-only edit.
+
+   The record is held to an immutable Vellum commit. It names
+   `framework_commit`, the commit that merged Vellum's transfer. In the
+   trusted lanes, where a Vellum reader token is present, receipt mode
+   requires that commit to be on Vellum's main (the compare API reports main
+   `ahead` of it or `identical`), requires that commit to be the merge of
+   the record's `framework_pull_request` into `main` (the pull request is
+   merged, based on `main`, and its `merge_commit_sha` is that commit), and
+   reads `provenance/framework/transfer.json`
+   at that commit: the record's `transfer_record_sha256` must equal that file's
+   SHA-256 and its `transferred_paths` that file's `pulp_path` set. A missing
+   file, a difference, a commit main does not contain, a commit that is
+   not that pull request's merge into main, or a failed read fails
+   the check. Because the comparison is at a fixed commit, a later Vellum edit
+   to its own record does not invalidate Pulp's. Like the pin, the record judges
+   only the changes after the one that adds it, and once it lands it can be
+   neither removed nor edited.
+
+   The trusted lanes run protected `main`'s scripts, so the rule and the record
+   land in that order, in separate changes. The change that ships the rule adds
+   no record, and receipt mode behaves exactly as before it. The record follows
+   in a later change, after Vellum's transfer has merged, carrying
+   `framework_commit`; that change's trusted run uses `main`'s scripts, which by
+   then hold the rule, so it cannot pass until the commit exists on Vellum's
+   main.
+4. **Pulp's copies are deleted at cutover.** When Pulp consumes Vellum, its
+   copies of the transferred paths are removed rather than kept in sync. Until
+   then they are Pulp's build inputs and keep the `pulp` spelling.
+
+Pulp-specific audio, plug-in, host, and legacy integration work stays
+`pulp-only` and is unaffected.

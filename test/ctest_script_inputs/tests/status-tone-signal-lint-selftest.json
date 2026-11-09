@@ -1,0 +1,12 @@
+{
+ "name": "status-tone-signal-lint-selftest",
+ "record": {
+  "entry": "tools/scripts/test_status_tone_signal_lint.py",
+  "inputs": [
+   "core/view/audio/src",
+   "core/view/src",
+   "tools/scripts/test_status_tone_signal_lint.py"
+  ],
+  "kind": "python"
+ }
+}

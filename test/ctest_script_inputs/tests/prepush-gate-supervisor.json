@@ -1,0 +1,10 @@
+{
+ "name": "prepush-gate-supervisor",
+ "record": {
+  "entry": "tools/scripts/test_prepush_gate_supervisor.py",
+  "inputs": [
+   "tools/scripts/test_prepush_gate_supervisor.py"
+  ],
+  "kind": "python"
+ }
+}

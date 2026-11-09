@@ -1,0 +1,11 @@
+{
+ "compiled": true,
+ "document": {
+  "executables_scanned_for": [
+   "data",
+   "spawns"
+  ],
+  "schema": "pulp-ctest-script-inputs/v1"
+ },
+ "layout": "pulp-ctest-script-inputs-fragments/v1"
+}

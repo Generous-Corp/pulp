@@ -1,0 +1,20 @@
+{
+ "name": "pulp-test-timeline-document-fuzz",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_timeline_document_fuzz.cpp"
+  ],
+  "inputs": [
+   "test/fixtures/timeline"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/fuzz/timeline_document_corpus.cpp",
+   "test/fuzz/timeline_document_oracle.cpp",
+   "test/test_timeline_document_fuzz.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

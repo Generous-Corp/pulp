@@ -119,6 +119,12 @@ inline int run_plugin_cli(format::ProcessorFactory factory, int argc, char* argv
         std::cerr << "Error: failed to read " << input_path << "\n";
         return 1;
     }
+    // A zero-frame WAV decodes successfully with no audio; there is nothing to
+    // process and the WAV writer refuses an empty file, so say so up front.
+    if (audio_data->empty()) {
+        std::cerr << "Error: " << input_path << " contains no audio frames\n";
+        return 1;
+    }
 
     int sr = sample_rate_override > 0 ? sample_rate_override : static_cast<int>(audio_data->sample_rate);
     int channels = static_cast<int>(audio_data->num_channels());

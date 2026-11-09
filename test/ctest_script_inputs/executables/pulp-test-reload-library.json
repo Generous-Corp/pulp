@@ -1,0 +1,14 @@
+{
+ "name": "pulp-test-reload-library",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [],
+  "kind": "compiled",
+  "sources": [
+   "test/test_reload_library.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

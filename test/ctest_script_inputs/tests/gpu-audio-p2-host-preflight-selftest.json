@@ -1,0 +1,13 @@
+{
+ "name": "gpu-audio-p2-host-preflight-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gpu_audio_p2_host_preflight.py",
+  "inputs": [
+   "tools/scripts/gpu_audio_p2_host_preflight.py",
+   "tools/scripts/host_vitals.sh",
+   "tools/scripts/p2_thermal_state.swift",
+   "tools/scripts/test_gpu_audio_p2_host_preflight.py"
+  ],
+  "kind": "python"
+ }
+}

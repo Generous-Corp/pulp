@@ -11,7 +11,6 @@
     "fingerprint_algorithm",
     "coverage_state",
     "roots",
-    "counts",
     "headers",
     "tombstones"
   ],
@@ -36,53 +35,6 @@
           },
           "source": { "type": "string", "minLength": 1 },
           "install_prefix": { "type": "string", "pattern": "^pulp/" }
-        }
-      }
-    },
-    "counts": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "public_headers",
-        "reviewed_headers",
-        "legacy_unreviewed_headers",
-        "unsupported_headers",
-        "by_disposition",
-        "by_domain"
-      ],
-      "properties": {
-        "public_headers": { "type": "integer" },
-        "reviewed_headers": { "type": "integer" },
-        "legacy_unreviewed_headers": { "type": "integer" },
-        "unsupported_headers": { "type": "integer" },
-        "by_disposition": {
-          "type": "object",
-          "minProperties": 1,
-          "additionalProperties": { "type": "integer" }
-        },
-        "by_domain": {
-          "type": "object",
-          "minProperties": 1,
-          "propertyNames": {
-            "type": "string",
-            "enum": ["audio", "host", "midi", "music", "playback", "sequence", "signal", "timebase"]
-          },
-          "additionalProperties": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "public_headers",
-              "reviewed_headers",
-              "legacy_unreviewed_headers",
-              "unsupported_headers"
-            ],
-            "properties": {
-              "public_headers": { "type": "integer" },
-              "reviewed_headers": { "type": "integer" },
-              "legacy_unreviewed_headers": { "type": "integer" },
-              "unsupported_headers": { "type": "integer" }
-            }
-          }
         }
       }
     },
