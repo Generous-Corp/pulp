@@ -170,6 +170,16 @@
             "subcommands": []
           },
           {
+            "name": "formats",
+            "arguments": [
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
             "name": "sampler-mip build",
             "arguments": [
               {
@@ -365,6 +375,136 @@
                 "name": "--channel",
                 "kind": "option",
                 "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "spectrogram",
+            "arguments": [
+              {
+                "name": "file",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--png",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--fft",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--hop",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--window",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--scale",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--db-range",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--start",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--end",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--channel",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--width",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--height",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--absolute-paths",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "waveform",
+            "arguments": [
+              {
+                "name": "file",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--png",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--select",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--start",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--end",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--channel",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--width",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--height",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--absolute-paths",
+                "kind": "flag"
               }
             ],
             "subcommands": []
@@ -2085,6 +2225,22 @@
           },
           {
             "name": "--block-frames",
+            "kind": "option"
+          },
+          {
+            "name": "--sample-rate",
+            "kind": "option"
+          },
+          {
+            "name": "--max-block-size",
+            "kind": "option"
+          },
+          {
+            "name": "--block-size",
+            "kind": "option"
+          },
+          {
+            "name": "--measure-blocks",
             "kind": "option"
           }
         ],
@@ -4813,6 +4969,10 @@
         "disposition": "candidate-shared-later"
       },
       {
+        "name": "rmlui",
+        "disposition": "candidate-shared-later"
+      },
+      {
         "name": "screenshot",
         "disposition": "candidate-shared-later"
       },
@@ -4944,6 +5104,14 @@
       },
       {
         "name": "pulp_audio_scope",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_spectrogram",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_waveform",
         "disposition": "excluded"
       },
       {
@@ -5119,7 +5287,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.510.3",
+        "version": "0.512.0",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -5134,13 +5302,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.510.3",
+        "catalog_version": "0.512.0",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.510.3",
+        "version": "0.512.0",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

@@ -1,0 +1,10 @@
+{
+ "name": "cmake-manifest-parse",
+ "record": {
+  "entry": "tools/scripts/test_cmake_manifest_parse.py",
+  "inputs": [
+   "tools/scripts/test_cmake_manifest_parse.py"
+  ],
+  "kind": "python"
+ }
+}

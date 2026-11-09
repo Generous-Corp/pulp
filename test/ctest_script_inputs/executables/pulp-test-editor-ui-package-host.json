@@ -1,0 +1,21 @@
+{
+ "name": "pulp-test-editor-ui-package-host",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "PulpEditorUiA_CLAP",
+   "PulpEditorUiB_CLAP",
+   "PulpEditorUiNone_CLAP",
+   "PulpEditorUiPlain_CLAP"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/fixtures/editor_ui_package/editor_ui_package_host.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

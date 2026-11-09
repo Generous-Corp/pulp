@@ -1,0 +1,15 @@
+{
+ "name": "shipping-macro-guard-negative-contract",
+ "record": {
+  "entry": "tools/scripts/test_shipping_macro_guard.py",
+  "inputs": [
+   ".github/workflows/build.yml",
+   "core/format/src/au_v2_cocoa_view.mm",
+   "core/format/src/au_v2_common.cpp",
+   "test/cmake/format_reload_tests.cmake",
+   "tools/cmake/PulpPluginFormats.cmake",
+   "tools/scripts/test_shipping_macro_guard.py"
+  ],
+  "kind": "python"
+ }
+}

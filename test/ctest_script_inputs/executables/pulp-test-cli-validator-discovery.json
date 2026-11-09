@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-cli-validator-discovery",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "tools/cli/validator_discovery.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

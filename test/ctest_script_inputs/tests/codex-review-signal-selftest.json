@@ -1,0 +1,10 @@
+{
+ "name": "codex-review-signal-selftest",
+ "record": {
+  "entry": "tools/scripts/test_codex_review_signal.sh",
+  "inputs": [
+   "tools/scripts/test_codex_review_signal.sh"
+  ],
+  "kind": "shell"
+ }
+}

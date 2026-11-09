@@ -1,0 +1,10 @@
+{
+ "name": "timeline-sync-hardware-soak",
+ "record": {
+  "entry": "tools/scripts/verify_timeline_sync_soak.py",
+  "inputs": [
+   "tools/scripts/verify_timeline_sync_soak.py"
+  ],
+  "kind": "python"
+ }
+}

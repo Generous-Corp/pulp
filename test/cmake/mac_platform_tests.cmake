@@ -231,6 +231,17 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_mac_held_button_cursor.mm
         LIBRARIES pulp::view)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # MainThreadScope / MainThreadTimer: posting, owner-gone drops, and firing
+    # inside the menu-tracking and modal-panel run-loop modes. Its own process,
+    # because the cases measure the main run loop's wake-ups.
+    pulp_add_test_suite(pulp-test-platform-main-thread
+        SOURCES test_platform_main_thread.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-main-thread PRIVATE
+        "-framework AppKit"
+        "-framework CoreFoundation")
+endif()
 if(APPLE)
     # Per-binary unique Objective-C class names. The fixture dylib links its own
     # copy of pulp-platform, standing in for a second plug-in in the process.
@@ -259,6 +270,15 @@ if(TARGET pulp-native)
     catch_discover_tests(pulp-test-native-metal-surface)
 endif()
 if(TARGET pulp-native)
+    # integrations/pulp-native: FramePump on the real display link (no link
+    # until started, rate cap, one-shot, off-screen pause, delivery thread,
+    # no queued frames, start/stop churn).
+    add_executable(pulp-test-native-frame-pump test_native_frame_pump.mm)
+    target_compile_options(pulp-test-native-frame-pump PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-native-frame-pump PRIVATE
+        pulp::native Catch2::Catch2WithMain "-framework Foundation")
+    catch_discover_tests(pulp-test-native-frame-pump)
+
     # integrations/pulp-native: AppKit event translation (pointer, wheel, key,
     # modifier-only keys, cursors) and the key-routing rule, from synthetic
     # NSEvents and CGEvents.

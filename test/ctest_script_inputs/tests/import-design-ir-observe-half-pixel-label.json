@@ -1,0 +1,10 @@
+{
+ "name": "import-design-ir-observe-half-pixel-label",
+ "record": {
+  "entry": "test/test_design_ir_observe_half_pixel_label.py",
+  "inputs": [
+   "test/test_design_ir_observe_half_pixel_label.py"
+  ],
+  "kind": "python"
+ }
+}

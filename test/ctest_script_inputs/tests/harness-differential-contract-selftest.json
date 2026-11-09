@@ -1,0 +1,12 @@
+{
+ "name": "harness-differential-contract-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_differential_contract.py",
+  "inputs": [
+   "test/fixtures/import-differential/canvas-svg-manifest.json",
+   "tools/harness/differential/contract.py",
+   "tools/harness/tests/test_differential_contract.py"
+  ],
+  "kind": "python"
+ }
+}

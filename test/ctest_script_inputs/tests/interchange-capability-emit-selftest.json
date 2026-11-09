@@ -1,0 +1,11 @@
+{
+ "name": "interchange-capability-emit-selftest",
+ "record": {
+  "entry": "core/interchange/tools/test_capability_emit.py",
+  "inputs": [
+   "core/interchange/tools/capability_emit.py",
+   "core/interchange/tools/test_capability_emit.py"
+  ],
+  "kind": "python"
+ }
+}

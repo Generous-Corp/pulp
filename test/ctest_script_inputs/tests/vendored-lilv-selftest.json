@@ -1,0 +1,12 @@
+{
+ "name": "vendored-lilv-selftest",
+ "record": {
+  "entry": "tools/deps/test_verify_vendored_lilv.py",
+  "inputs": [
+   "external/lilv",
+   "tools/deps/test_verify_vendored_lilv.py",
+   "tools/deps/verify_vendored_lilv.py"
+  ],
+  "kind": "python"
+ }
+}

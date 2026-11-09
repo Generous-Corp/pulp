@@ -1,0 +1,10 @@
+{
+ "name": "cmake-ios-hostapp-bundle-guard",
+ "record": {
+  "entry": "test/cmake/test_ios_hostapp_bundle_guard.sh",
+  "inputs": [
+   "test/cmake/test_ios_hostapp_bundle_guard.sh"
+  ],
+  "kind": "shell"
+ }
+}

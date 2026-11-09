@@ -111,7 +111,7 @@ jobs:
           set -euo pipefail
           ver=25
           url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${ver}/wasi-sdk-${ver}.0-x86_64-linux.tar.gz"
-          curl -fsSL "$url" -o /tmp/wasi-sdk.tar.gz
+          python3 tools/scripts/download_retry.py "$url" /tmp/wasi-sdk.tar.gz
           mkdir -p "$HOME/wasi-sdk"
           tar -xzf /tmp/wasi-sdk.tar.gz -C "$HOME/wasi-sdk" --strip-components=1
           echo "WASI_SDK_PREFIX=$HOME/wasi-sdk" >> "$GITHUB_ENV"
@@ -223,7 +223,7 @@ jobs:
           trap 'rm -f "$archive.$$"' EXIT
           verify() { echo "$SKIA_WASM_SHA256  $1" | shasum -a 256 -c -; }
           if [ ! -f "$archive" ] || ! verify "$archive"; then
-            curl -fsSL "$SKIA_WASM_URL" -o "$archive.$$"
+            python3 tools/scripts/download_retry.py "$SKIA_WASM_URL" "$archive.$$"
             verify "$archive.$$"
             mv -f "$archive.$$" "$archive"
           fi
@@ -357,7 +357,7 @@ jobs:
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/wasi-sdk-33.0-x86_64-linux.tar.gz"
-          curl -fsSL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-x86_64-linux.tar.gz -o "$archive"
+          python3 tools/scripts/download_retry.py https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-x86_64-linux.tar.gz "$archive"
           echo "0ba8b5bfaeb2adf3f29bab5841d76cf5318ab8e1642ea195f88baba1abd47bce  $archive" | sha256sum --check --strict
           mkdir -p "$RUNNER_TEMP/wasi-sdk33-region"
           tar -xzf "$archive" -C "$RUNNER_TEMP/wasi-sdk33-region" --strip-components=1
@@ -536,7 +536,7 @@ jobs:
           url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${ver}/wasi-sdk-${ver}.0-arm64-macos.tar.gz"
           dest="${RUNNER_TEMP:?}/wasi-sdk-macos"
           rm -rf "$dest" "${RUNNER_TEMP}/wasi-sdk.tar.gz"
-          curl -fsSL "$url" -o "${RUNNER_TEMP}/wasi-sdk.tar.gz"
+          python3 tools/scripts/download_retry.py "$url" "${RUNNER_TEMP}/wasi-sdk.tar.gz"
           mkdir -p "$dest"
           tar -xzf "${RUNNER_TEMP}/wasi-sdk.tar.gz" -C "$dest" --strip-components=1
           echo "WASI_SDK_PREFIX=$dest" >> "$GITHUB_ENV"
@@ -621,7 +621,7 @@ jobs:
           trap 'rm -f "$archive.$$"' EXIT
           verify() { echo "$SKIA_WASM_SHA256  $1" | shasum -a 256 -c -; }
           if [ ! -f "$archive" ] || ! verify "$archive"; then
-            curl -fsSL "$SKIA_WASM_URL" -o "$archive.$$"
+            python3 tools/scripts/download_retry.py "$SKIA_WASM_URL" "$archive.$$"
             verify "$archive.$$"
             mv -f "$archive.$$" "$archive"
           fi

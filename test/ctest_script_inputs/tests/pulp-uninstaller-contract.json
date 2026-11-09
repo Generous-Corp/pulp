@@ -1,0 +1,10 @@
+{
+ "name": "pulp-uninstaller-contract",
+ "record": {
+  "entry": "tools/scripts/test_pulp_uninstall.py",
+  "inputs": [
+   "tools/scripts/test_pulp_uninstall.py"
+  ],
+  "kind": "python"
+ }
+}

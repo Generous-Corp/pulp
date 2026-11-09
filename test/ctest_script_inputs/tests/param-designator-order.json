@@ -1,0 +1,11 @@
+{
+ "name": "param-designator-order",
+ "record": {
+  "entry": "tools/scripts/test_param_designator_order.py",
+  "inputs": [
+   "tools/scripts/repo_source_scan.py",
+   "tools/scripts/test_param_designator_order.py"
+  ],
+  "kind": "python"
+ }
+}

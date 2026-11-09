@@ -1,0 +1,11 @@
+{
+ "name": "retry-git-clone",
+ "record": {
+  "entry": "test/test_retry_git_clone.sh",
+  "inputs": [
+   "setup.sh",
+   "test/test_retry_git_clone.sh"
+  ],
+  "kind": "shell"
+ }
+}

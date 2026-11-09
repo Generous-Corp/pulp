@@ -1,0 +1,11 @@
+{
+ "name": "audio-glitch-trace-selftest",
+ "record": {
+  "entry": "tools/audio/test_glitch_trace.py",
+  "inputs": [
+   "tools/audio/glitch_trace.py",
+   "tools/audio/test_glitch_trace.py"
+  ],
+  "kind": "python"
+ }
+}

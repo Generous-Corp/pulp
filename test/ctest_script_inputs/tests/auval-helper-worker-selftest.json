@@ -1,0 +1,10 @@
+{
+ "name": "auval-helper-worker-selftest",
+ "record": {
+  "entry": "tools/ci/test_run_auval_component.py",
+  "inputs": [
+   "tools/ci/test_run_auval_component.py"
+  ],
+  "kind": "python"
+ }
+}

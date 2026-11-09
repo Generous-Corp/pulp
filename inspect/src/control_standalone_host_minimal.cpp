@@ -193,4 +193,14 @@ create_standalone_sample_region_target(format::Processor&, state::StateStore&,
 
 } // namespace detail
 
+// The reduced adapter accepts no vendor capability, so no handler can run.
+bool install_standalone_vendor_operations_factory(StandaloneVendorOperationsFactory) noexcept {
+    return false;
+}
+
+std::shared_ptr<const ControlVendorOperationHandlers>
+create_standalone_vendor_operations(format::Processor&, state::StateStore&) {
+    return {};
+}
+
 } // namespace pulp::inspect

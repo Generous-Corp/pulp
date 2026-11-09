@@ -25,15 +25,23 @@ temporary directory, and maps that immutable snapshot for the callback's
 lifetime. The copy is bounded by `maximum_mapped_bytes`, uses disk rather than
 decoded-audio RAM, and is removed on close. A later in-place overwrite or
 truncate of the source path therefore cannot change playback or fault the
-mapping. WAV and uncompressed AIFF/AIFF-C `NONE` files use bounded ranged decode
-from the snapshot bytes; they are not decoded completely before playback.
+mapping. WAV, uncompressed AIFF/AIFF-C (`NONE`, `twos` or `sowt`), FLAC, MP3
+and Ogg Vorbis files use bounded ranged decode from the snapshot bytes; they are
+not decoded completely before playback. The compressed formats seek inside the encoded
+stream through `AudioReader`, so a long FLAC, MP3 or Ogg file streams with the
+same memory as a short one. Time differs by format. FLAC and Ogg seek directly,
+but MP3 has no frame index: opening an MP3 without a Xing or Info header reads
+every frame header once, and a backward seek, such as a loop restart, decodes
+forward from the start of the file while the reader's lock is held. Prefer FLAC
+or Ogg for long looped material.
 Concurrent non-RT reads on one reader are serialized internally; open, close,
 move, and destruction still require quiescent reads.
 
 The adapter reports `supports_ranged_read`. A false value means the active file
-format uses `MemoryMappedAudioReader`'s decode-once fallback. FLAC currently
-falls into that category: the general audio-file layer can decode it, but this
-adapter does not claim ranged FLAC reads. Applications with a strict
+format uses `MemoryMappedAudioReader`'s decode-once fallback. Formats read
+through the platform decoder (AAC, ALAC and CAF on macOS) and FLAC or Ogg
+streams whose header gives no length fall into that category. Applications
+with a strict
 streaming-memory contract should reject that source transactionally, preserving
 the previously published source, or import it into a streamable representation
 before note-on. `PulpSampler` uses that strict policy.

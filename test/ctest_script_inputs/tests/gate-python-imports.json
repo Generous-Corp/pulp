@@ -1,0 +1,14 @@
+{
+ "name": "gate-python-imports",
+ "record": {
+  "entry": "tools/scripts/gate_python_imports_check.py",
+  "inputs": [
+   ".github/workflows/build.yml",
+   "tools/ci/install_visual_python_deps.sh",
+   "tools/ci/source_selftests.json",
+   "tools/motion/visual/requirements.lock",
+   "tools/scripts/gate_python_imports_check.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "name": "test-link-determinism",
+ "record": {
+  "entry": "tools/ci/test_link_determinism.py",
+  "inputs": [
+   "tools/ci/test_link_determinism.py",
+   "tools/cmake/PulpTestSuite.cmake"
+  ],
+  "kind": "python"
+ }
+}

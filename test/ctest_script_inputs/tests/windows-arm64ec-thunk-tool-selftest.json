@@ -1,0 +1,10 @@
+{
+ "name": "windows-arm64ec-thunk-tool-selftest",
+ "record": {
+  "entry": "tools/windows/test_build_arm64ec_stl_thunks.py",
+  "inputs": [
+   "tools/windows/test_build_arm64ec_stl_thunks.py"
+  ],
+  "kind": "python"
+ }
+}

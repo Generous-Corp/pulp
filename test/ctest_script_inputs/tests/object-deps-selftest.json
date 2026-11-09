@@ -1,0 +1,11 @@
+{
+ "name": "object-deps-selftest",
+ "record": {
+  "entry": "tools/ci/test_object_deps.py",
+  "inputs": [
+   "tools/ci/object_deps.py",
+   "tools/ci/test_object_deps.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,16 @@
+{
+ "name": "pulp-ui-clean-output-lint-negative-contract",
+ "record": {
+  "entry": "tools/ui-build/lint/test_clean_output_lint.py",
+  "inputs": [
+   "test/fixtures/imports/claude/2024.10",
+   "test/fixtures/imports/claude/2024.10/example.html",
+   "tools/scripts/gates.sh",
+   "tools/ui-build/lint/clean_output_lint.py",
+   "tools/ui-build/lint/fixtures/generated",
+   "tools/ui-build/lint/test_clean_output_lint.py",
+   "tools/ui-build/ui_build.py"
+  ],
+  "kind": "python"
+ }
+}

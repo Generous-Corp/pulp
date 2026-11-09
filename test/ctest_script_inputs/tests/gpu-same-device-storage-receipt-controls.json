@@ -1,0 +1,11 @@
+{
+ "name": "gpu-same-device-storage-receipt-controls",
+ "record": {
+  "entry": "test/test_verify_gpu_same_device_storage.py",
+  "inputs": [
+   "test/test_verify_gpu_same_device_storage.py",
+   "test/verify_gpu_same_device_storage.py"
+  ],
+  "kind": "python"
+ }
+}

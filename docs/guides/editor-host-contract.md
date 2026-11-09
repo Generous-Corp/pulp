@@ -26,6 +26,21 @@ until they do.
 Roles are `editor`, `inspector` and `settings`; several editors, of one role or
 several, can be alive at once over one processor.
 
+## Choosing a UI stack
+
+The contract is toolkit-neutral, but Pulp has one default answer:
+
+| Stack | When | Cost to a build that does not use it |
+|---|---|---|
+| **Vellum on Skia/Dawn** (default) | Every new editor, imported design and generated UI, unless one of the rows below applies. | — |
+| **RmlUi** (opt-in Vellum component, its `rmlui/` subproject) | A product that already ships RML/RCSS skins or Lua skin scripts, or a developer who asks for it. | None: off unless enabled, and it needs neither Skia nor Dawn. |
+| **Native surface** (bring your own renderer) | An existing Metal or GL renderer that draws into the editor's window. It will be reached through `query_extension()`. Pulp does not ship one yet. | None: it needs system frameworks only. |
+
+The rows are alternatives, not rivals. Do not mix two stacks in one editor
+without a stated reason, and never put a Dawn device and a privately owned GPU
+device in the same editor. The `rmlui` agent skill
+(`.agents/skills/rmlui/SKILL.md`) says where RmlUi work lives.
+
 ## How a plug-in gets its default editor
 
 A plug-in's editor is wired per plug-in, never by a process-wide registration.
@@ -45,7 +60,30 @@ instead: the id is a stable, versioned string naming an interface, the host
 returns a pointer to it (owned by the host, valid while the context lives) or
 null when it does not offer it, and the default returns null. The GPU device is
 not one of these: an editor acquires it from the shared GPU runtime with a
-role tag.
+role tag. `tools/scripts/node_abi_gate.py` holds `Editor`, `EditorContext` and
+`EditorFactory` frozen.
+
+### Native surfaces
+
+`dev.pulp.native_surface/1` (`pulp/format/native_surface_host.hpp`) is for an
+editor that brings its own renderer and presents into a native layer. Look it
+up with `native_surface_host(context)`. It reports what the host knows about the
+editor's window: the display, the backing scale the host set, a nominal refresh
+rate, and whether the host shows or hid the window. Each field reads as unknown
+until the host says otherwise, and an observer hears every change on the main
+thread. `ContractEditorSession` offers it to every editor, fed from `set_scale()`
+and `visibility_changed()`; an adapter that knows the display publishes it
+through `ContractEditorSession::native_surface_host()`.
+
+Two rules come with it:
+
+- **The editor owns its GPU device.** This is the one exception to the
+  shared-runtime rule above, and such an editor never uses the shared runtime
+  as well.
+- **A render thread presents, nothing more.** It may acquire and present its own
+  drawables, but it never calls the context, the extension, or
+  `ParamPort::begin` / `set` / `end`. The editor stops it before `detach()` or
+  `invalidate()` returns.
 
 ## Threading
 

@@ -1,0 +1,10 @@
+{
+ "name": "forge-modular-release-package-selftest",
+ "record": {
+  "entry": "examples/forge-modular/test_release_package.py",
+  "inputs": [
+   "examples/forge-modular/test_release_package.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "palette-health-selftest",
+ "record": {
+  "entry": "tools/import-validation/test_check_palette_health.py",
+  "inputs": [
+   "tools/import-validation/test_check_palette_health.py"
+  ],
+  "kind": "python"
+ }
+}
