@@ -48,6 +48,7 @@
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/state/midi_decode.hpp>
+#include <pulp/state/midi_feedback.hpp>
 #include <pulp/state/midi_learn.hpp>
 #include <pulp/state/midi_learn_persistence.hpp>
 #include <pulp/state/midi_map_scale.hpp>
@@ -220,6 +221,7 @@ class MidiLearnEngine {
     /// progress. `now_ms` is the caller's monotonic time in milliseconds.
     void begin_learn(ParamID id, uint64_t now_ms, MidiLearnOptions options = {}) {
         drain_learn_queue();
+        host_learn_pending_.store(0, std::memory_order_release);
         burst_.clear();
         learn_options_ = options;
         learn_started_ms_ = now_ms;
@@ -228,9 +230,21 @@ class MidiLearnEngine {
         learning_.store(true, std::memory_order_release);
     }
 
+    /// A host told the plug-in which controller the user just moved (VST3
+    /// IMidiLearn). While a learn is listening this binds on the next
+    /// `poll_learn()`, ahead of any burst classification. Safe from any thread.
+    void host_reported_controller(const MidiSource& source) {
+        if (!learning_.load(std::memory_order_acquire))
+            return;
+        const uint32_t packed = kHostLearnValid | (static_cast<uint32_t>(source.kind) << 24) |
+                                (static_cast<uint32_t>(source.channel) << 16) | source.number;
+        host_learn_pending_.store(packed, std::memory_order_release);
+    }
+
     /// Stop listening without binding.
     void cancel_learn() {
         learning_.store(false, std::memory_order_release);
+        host_learn_pending_.store(0, std::memory_order_release);
         burst_.clear();
         state_ = {};
     }
@@ -239,6 +253,20 @@ class MidiLearnEngine {
     std::optional<MidiLearnOutcome> poll_learn(uint64_t now_ms) {
         if (state_.phase != MidiLearnState::Phase::listening)
             return std::nullopt;
+        if (const uint32_t packed = host_learn_pending_.exchange(0, std::memory_order_acq_rel)) {
+            LearnResult r;
+            r.valid = true;
+            r.source.kind = static_cast<MidiSourceKind>((packed >> 24) & 0x7F);
+            r.source.channel = static_cast<uint8_t>((packed >> 16) & 0xFF);
+            r.source.number = static_cast<uint16_t>(packed & 0xFFFF);
+            r.confidence = 0.9f;
+            MidiMapping probe;
+            probe.source = r.source;
+            if (is_valid_midi_mapping(probe)) {
+                burst_.clear();
+                return finish_learn(r);
+            }
+        }
         if (drain_learn_queue())
             last_event_ms_ = now_ms;
 
@@ -255,6 +283,11 @@ class MidiLearnEngine {
 
     MidiLearnState learn_state() const {
         return state_;
+    }
+
+    /// True while a learn is listening. Safe from any thread.
+    bool learning() const {
+        return learning_.load(std::memory_order_acquire);
     }
 
     /// Messages the audio thread could not queue for learn (queue full).
@@ -298,6 +331,56 @@ class MidiLearnEngine {
                 driven |= dispatch(store, d);
         }
         return driven;
+    }
+
+    /// Send each feedback-enabled mapping's current value back to its
+    /// controller. Call once per block on the audio thread, after the block's
+    /// routing and processing; `emit` receives each `RawMidi` to place in the
+    /// processor's MIDI output. `emittable` names the source kinds the host
+    /// format can carry (see `midi_feedback_capabilities` in core/format); other
+    /// kinds are skipped.
+    ///
+    /// A mapping is sent when its parameter has moved by at least half a step
+    /// of the controller's resolution since the last send, and never for a
+    /// value the controller itself just wrote (that suppression lasts one
+    /// call; a later return to the same value is sent). The first call after a mapping
+    /// appears sends its current value, so a controller can sync. At most one
+    /// update per mapping per call.
+    template <typename Emit>
+    void emit_feedback(const StateStore& store, MidiSourceKindMask emittable, Emit&& emit) {
+        if (!active_)
+            return;
+        for (uint32_t i = 0; i < active_->count; ++i) {
+            const MidiMapping& m = active_->items[i];
+            if (!m.feedback || !emittable.has(m.source.kind) ||
+                !kFeedbackEncodableKinds.has(m.source.kind))
+                continue;
+            const float current = store.get_normalized(m.id);
+            if (has_echo_[i]) {
+                // The echo guard covers only the first pass after the
+                // controller's own write. Clear it either way, so a later
+                // return to the same value (reset, preset recall, automation)
+                // is still sent and the controller does not stay stale.
+                has_echo_[i] = 0;
+                if (std::fabs(current - echo_[i]) <= kEchoEpsilon) {
+                    sent_[i] = current;
+                    has_sent_[i] = 1;
+                    continue;
+                }
+            }
+            const float quantum = 0.5f / static_cast<float>(feedback_resolution(m.source.kind));
+            if (has_sent_[i] && std::fabs(current - sent_[i]) < quantum)
+                continue;
+            const auto position = controller_position(m, current);
+            if (!position)
+                continue;
+            RawMidi messages[kMaxFeedbackMessages];
+            const int n = encode_feedback(m, *position, messages);
+            for (int k = 0; k < n; ++k)
+                emit(messages[k]);
+            sent_[i] = current;
+            has_sent_[i] = 1;
+        }
     }
 
   private:
@@ -443,6 +526,10 @@ class MidiLearnEngine {
         std::array<float, kMaxMidiMappings> nout{};
         std::array<uint8_t, kMaxMidiMappings> nhas{};
         std::array<uint32_t, kMaxMidiMappings> nuid{};
+        std::array<float, kMaxMidiMappings> necho{};
+        std::array<uint8_t, kMaxMidiMappings> nhas_echo{};
+        std::array<float, kMaxMidiMappings> nsent{};
+        std::array<uint8_t, kMaxMidiMappings> nhas_sent{};
         for (uint32_t i = 0; i < t.count; ++i) {
             nuid[i] = t.items[i].uid;
             for (uint32_t j = 0; j < active_count_; ++j) {
@@ -450,6 +537,10 @@ class MidiLearnEngine {
                     ns[i] = takeover_[j];
                     nout[i] = last_out_[j];
                     nhas[i] = has_out_[j];
+                    necho[i] = echo_[j];
+                    nhas_echo[i] = has_echo_[j];
+                    nsent[i] = sent_[j];
+                    nhas_sent[i] = has_sent_[j];
                     break;
                 }
             }
@@ -457,6 +548,10 @@ class MidiLearnEngine {
         takeover_ = ns;
         last_out_ = nout;
         has_out_ = nhas;
+        echo_ = necho;
+        has_echo_ = nhas_echo;
+        sent_ = nsent;
+        has_sent_ = nhas_sent;
         uids_ = nuid;
         active_count_ = t.count;
         active_ = &t;
@@ -471,9 +566,9 @@ class MidiLearnEngine {
                 continue;
             driven = true;
             if (d.kind == DecodedMidi::Kind::step) {
-                apply_ticks(store, m, d.step);
+                apply_ticks(store, m, i, d.step);
             } else if (m.mode != RelativeMode::absolute && m.source.kind == MidiSourceKind::cc7) {
-                apply_ticks(store, m, decode_relative(m.mode, static_cast<uint8_t>(d.raw)));
+                apply_ticks(store, m, i, decode_relative(m.mode, static_cast<uint8_t>(d.raw)));
             } else {
                 apply_absolute(store, m, i, d.normalized());
             }
@@ -496,9 +591,10 @@ class MidiLearnEngine {
         store.set_normalized_rt(m.id, r.value);
         last_out_[i] = r.value;
         has_out_[i] = 1;
+        note_echo(store, m, i);
     }
 
-    void apply_ticks(StateStore& store, const MidiMapping& m, int ticks) {
+    void apply_ticks(StateStore& store, const MidiMapping& m, uint32_t i, int ticks) {
         if (ticks == 0)
             return;
         const bool inverted = m.scale.min > m.scale.max;
@@ -508,15 +604,26 @@ class MidiLearnEngine {
         const float next =
             std::clamp(apply_relative(current, inverted ? -ticks : ticks, m.relative), lo, hi);
         store.set_normalized_rt(m.id, next);
+        note_echo(store, m, i);
+    }
+
+    // Remember what a controller just wrote, as the store holds it, so feedback
+    // does not send the controller its own value back.
+    void note_echo(const StateStore& store, const MidiMapping& m, uint32_t i) {
+        echo_[i] = store.get_normalized(m.id);
+        has_echo_[i] = 1;
     }
 
     static constexpr float kExternalMoveEpsilon = 0.01f;
+    static constexpr float kEchoEpsilon = 1e-6f;
 
     // Shared between threads.
     runtime::TripleBuffer<Table> table_buffer_;
     runtime::SpscQueue<RawMidi, 256> learn_queue_;
     std::atomic<bool> learning_{false};
     std::atomic<uint64_t> learn_overflow_{0};
+    std::atomic<uint32_t> host_learn_pending_{0};
+    static constexpr uint32_t kHostLearnValid = 0x80000000u;
 
     // UI thread.
     std::unique_ptr<Table> ui_;
@@ -536,6 +643,10 @@ class MidiLearnEngine {
     std::array<TakeoverState, kMaxMidiMappings> takeover_{};
     std::array<float, kMaxMidiMappings> last_out_{};
     std::array<uint8_t, kMaxMidiMappings> has_out_{};
+    std::array<float, kMaxMidiMappings> echo_{}; // last value a controller wrote
+    std::array<uint8_t, kMaxMidiMappings> has_echo_{};
+    std::array<float, kMaxMidiMappings> sent_{}; // last value sent as feedback
+    std::array<uint8_t, kMaxMidiMappings> has_sent_{};
     Cc14Decoder cc14_;
     NrpnDecoder nrpn_;
 };

@@ -35,6 +35,9 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
+
+#include <pulp/native/input.hpp>
 
 namespace pulp::native {
 
@@ -102,6 +105,59 @@ struct SurfaceEvent {
     SurfaceEventKind kind = SurfaceEventKind::geometry_changed;
     SurfaceGeometry geometry;
     OnScreenState visibility;
+};
+
+/// Why focus moved.
+enum class FocusReason : std::uint8_t {
+    /// The surface's view became or stopped being first responder.
+    responder = 0,
+    /// Its window became or stopped being the key window.
+    window = 1,
+    /// The application became or stopped being active.
+    application = 2,
+};
+
+struct FocusEvent {
+    bool focused = false;
+    FocusReason reason = FocusReason::responder;
+};
+
+enum class DropPhase : std::uint8_t {
+    enter = 0,
+    move = 1,
+    exit = 2,
+    drop = 3,
+};
+
+/// A file drag over the surface, in logical points from its top-left.
+struct DropEvent {
+    DropPhase phase = DropPhase::enter;
+    double x = 0.0;
+    double y = 0.0;
+    /// The dragged files, as POSIX paths.
+    std::vector<std::string> paths;
+};
+
+/// What the surface delivers to its client, on the main thread. Any member
+/// may be empty.
+struct InputHandler {
+    std::function<void(const PointerEvent&)> pointer;
+    /// Unset: wheel events go on to the host, so a host scroll view keeps
+    /// working.
+    std::function<void(const WheelEvent&)> wheel;
+    /// Offered only when `route_key` says the client goes first. Return true
+    /// when consumed; an unconsumed key goes on to the host (or, while text
+    /// focus is held, to text input).
+    std::function<bool(const KeyEvent&)> key;
+    /// Committed text, separate from key identity, UTF-8.
+    std::function<void(const std::string&)> text;
+    /// Text an input method is still composing, and the caret within it in
+    /// UTF-16 units. An empty string ends the composition.
+    std::function<void(const std::string&, std::size_t)> marked_text;
+    std::function<void(const FocusEvent&)> focus;
+    /// Return true to accept the drag (on enter and every move); the drop
+    /// itself arrives only for an accepted drag.
+    std::function<bool(const DropEvent&)> drop;
 };
 
 /// A drawable handed out by `MetalSurface::acquire_drawable()`. It keeps the
@@ -210,6 +266,19 @@ class MetalSurface {
     /// Called on the main thread at the start of teardown. It must return only
     /// after the client has stopped acquiring and using drawables.
     void set_release_handler(std::function<void()> handler);
+
+    /// Where pointer, wheel, key, text, focus and drop events go. Main thread.
+    void set_input_handler(InputHandler handler);
+    /// The cursor shown while the pointer is over the surface; the arrow is
+    /// restored when it leaves. Main thread.
+    void set_cursor(Cursor cursor);
+    /// Hold keyboard focus for text entry (a click into a text field), or give
+    /// it back. While held the view is first responder and keys are offered to
+    /// the client first; otherwise the host keeps the keyboard. A host that
+    /// takes first responder ends the hold. False when the view is in no
+    /// window or AppKit refused the change. Main thread.
+    bool set_text_focus(bool held);
+    bool text_focus() const noexcept;
 
     /// The Objective-C class of the surface's view. Its name is unique to the
     /// binary that contains this library.

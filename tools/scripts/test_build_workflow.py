@@ -981,6 +981,122 @@ for key, answer in fixture.items():
 """
 
 
+class CleanMergeLaneTest(unittest.TestCase):
+    """A clean merge of main into a full-lane-green head takes the contract
+    lane's steps (decisions contract row 31, tools/ci/clean_merge_lane.py).
+
+    The decision runs on the head, after hydration and before anything it
+    gates; every build-fed step reads it beside the contract lane through one
+    expression, and a skipped or failed decision leaves the full lane.
+    """
+
+    NAME = "Decide the clean-merge lane (pull request head)"
+    CONDITION = "matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'"
+    FULL = {"github.event_name": "pull_request", "github.event.action": "synchronize",
+            "runner.os": "macOS", "matrix.key": "macos", "matrix.lane": "full",
+            "runner.environment": "self-hosted",
+            "needs.classify.outputs.agent_capability_installed_sdk_required": "true",
+            "vars.PULP_INTEL_CANARY": "1", "success()": True, "failure()": False}
+    CLEAN = {**FULL, "steps.clean_merge.outputs.lane": "clean-merge"}
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.steps = _build_steps()
+        cls.order = [step.get("name") for step in _workflow()["jobs"]["build"]["steps"]]
+
+    def test_the_decision_runs_after_hydration_and_before_every_reader(self) -> None:
+        at = self.order.index(self.NAME)
+        self.assertEqual(self.order[at - 1], "Hydrate bounded GPU provenance commits")
+        self.assertEqual(self.steps[self.NAME]["id"], "clean_merge")
+        readers = [i for i, step in enumerate(_workflow()["jobs"]["build"]["steps"])
+                   if "steps.clean_merge." in json.dumps(step)]
+        self.assertTrue(readers)
+        self.assertGreater(min(readers), at)
+        self.assertLess(at, self.order.index("Configure"))
+
+    def test_the_decision_runs_only_on_a_full_lane_synchronize_head(self) -> None:
+        condition = self.steps[self.NAME]["if"]
+        self.assertTrue(_evaluate_if(condition, self.FULL))
+        for off in ({"github.event.action": "opened"}, {"github.event_name": "merge_group"},
+                    {"github.event_name": "workflow_dispatch"}, {"matrix.lane": "contract"},
+                    {"runner.os": "Linux", "matrix.key": "linux"}):
+            with self.subTest(off=off):
+                self.assertFalse(_evaluate_if(condition, {**self.FULL, **off}))
+
+    def test_the_decision_never_fails_the_job_and_defaults_to_shadow(self) -> None:
+        step = self.steps[self.NAME]
+        self.assertIs(step["continue-on-error"], True)
+        self.assertEqual(step["env"]["CLEAN_MERGE_MODE"],
+                         "${{ vars.PULP_CLEAN_MERGE_LANE_MODE || 'shadow' }}")
+        self.assertEqual(step["env"]["PR_BEFORE_SHA"], "${{ github.event.before }}")
+        self.assertEqual(step["env"]["PR_HEAD_SHA"], "${{ github.event.pull_request.head.sha }}")
+        self.assertIn("tools/ci/clean_merge_lane.py decide", step["run"])
+        self.assertIn('--github-output "$GITHUB_OUTPUT"', step["run"])
+        # The token reaches the module through the environment, never argv.
+        self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
+        self.assertNotIn("--token", step["run"])
+
+    def test_every_contract_lane_site_also_reads_the_clean_merge_lane(self) -> None:
+        sites = {}
+        for name, step in self.steps.items():
+            condition = str(step.get("if", ""))
+            if "matrix.lane" in condition and name != self.NAME:
+                sites[name] = condition
+        gated = {name for name, cond in sites.items() if "matrix.lane != 'contract'" in cond}
+        self.assertEqual(set(MacosApprovalGateTest.BUILD_FED)
+                         | {"Intel canary — lint + x86_64 GPU-off compile"}, gated)
+        for name in gated:
+            with self.subTest(step=name):
+                self.assertIn(self.CONDITION, sites[name])
+        # The contract lane's own arm refusal is the only other reader.
+        self.assertEqual(set(sites) - gated, {"Refuse a head armed before approval (contract lane)"})
+
+    def test_the_clean_merge_lane_skips_the_build_and_what_it_feeds(self) -> None:
+        for name in (*MacosApprovalGateTest.BUILD_FED, "Intel canary — lint + x86_64 GPU-off compile"):
+            with self.subTest(step=name):
+                self.assertFalse(_evaluate_if(self.steps[name]["if"], self.CLEAN))
+        # Control: shadow mode, a `full` decision, or a skipped decision builds.
+        for lane in ("full", ""):
+            with self.subTest(lane=lane):
+                self.assertTrue(_evaluate_if(self.steps["Build"]["if"],
+                                             {**self.FULL, "steps.clean_merge.outputs.lane": lane}))
+
+    def test_the_clean_merge_lane_still_configures_and_runs_both_cheap_tiers(self) -> None:
+        for name in ("Configure", "Test fast deterministic tier (pull request head)",
+                     "Test merge-queue ejection guards (pull request head)"):
+            with self.subTest(step=name):
+                self.assertTrue(_evaluate_if(self.steps[name].get("if", True), self.CLEAN))
+        self.assertFalse(_evaluate_if(
+            self.steps["Refuse a head armed before approval (contract lane)"]["if"],
+            {**self.CLEAN, "vars.PULP_MACOS_PR_GATING": "true"}))
+
+    def test_the_clean_merge_lanes_green_says_so(self) -> None:
+        step = self.steps["Test fast deterministic tier (pull request head)"]
+        self.assertEqual(step["env"]["PULP_CLEAN_MERGE_LANE"], "${{ steps.clean_merge.outputs.lane }}")
+        self.assertEqual(step["env"]["PULP_CLEAN_MERGE_FROM"],
+                         "${{ steps.clean_merge.outputs.carried_from }}")
+        body = step["run"]
+        self.assertIn('[ "$PULP_MACOS_LANE" = contract ] || [ "$PULP_CLEAN_MERGE_LANE" = clean-merge ]',
+                      body)
+        self.assertIn('\\"tier\\":\\"clean-merge\\"', body)
+        self.assertIn('\\"carried_from\\":\\"$PULP_CLEAN_MERGE_FROM\\"', body)
+        # One tier notice per lane: deferred, clean-merge, or fast.
+        self.assertEqual(body.count("title=shipyard-test-tier::"), 3)
+
+    def test_the_tier_notice_is_valid_json(self) -> None:
+        body = self.steps["Test fast deterministic tier (pull request head)"]["run"]
+        script = body[body.index('elif [ "$PULP_CLEAN_MERGE_LANE" = clean-merge ]'):]
+        script = script[:script.index("else\n")]
+        script = script.replace('elif [ "$PULP_CLEAN_MERGE_LANE" = clean-merge ]; then', "", 1)
+        out = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, encoding="utf-8", check=True,
+            env={**os.environ, "PULP_CLEAN_MERGE_FROM": "b" * 40, "GITHUB_STEP_SUMMARY": "/dev/null"})
+        notice = out.stdout.strip().split("::", 2)[2]
+        self.assertEqual(json.loads(notice), {
+            "schema": "shipyard-test-tier/v1", "tier": "clean-merge", "selector": "pr-fast+pr-guard",
+            "carried_from": "b" * 40, "full_suite_runs_in": "merge_group"})
+
+
 class MacosDeferredDisarmTest(unittest.TestCase):
     """A pull request armed before its checks ran is disarmed on a deferred green.
 
