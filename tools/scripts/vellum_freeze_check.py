@@ -1369,8 +1369,8 @@ def _receipt_mode(args: argparse.Namespace) -> int:
 
         try:
             problems = receipt.receipt_copy_problems(repo, (base, args.head), fetch)
-            # The framework-transfer record must be Vellum main's transfer
-            # record, so it cannot take effect before Vellum's transfer merges.
+            # The framework-transfer record must be Vellum's transfer record at
+            # its framework_commit, a commit on Vellum's main.
             problems += receipt.transfer_copy_problems(repo, (base, args.head), fetch)
         except (receipt.ReceiptDriftError, FreezeError, OSError) as exc:
             print(f"vellum-freeze receipt mode: {exc}", file=sys.stderr)

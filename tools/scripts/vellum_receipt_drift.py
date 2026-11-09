@@ -46,8 +46,8 @@ frozen path; the pinned receipt and the transfer's export may differ, and
 neither is re-exported. ``vellum_inherits: false`` records a Pulp-only edit;
 a change Vellum needs is made first in Vellum's ``framework/``. The record
 cannot be removed or edited once it lands, and where a Vellum reader is
-available, ``transfer_copy_problems`` proves it equals the transfer record on
-Vellum's main.
+available, ``transfer_copy_problems`` proves it equals Vellum's transfer record
+at the immutable ``framework_commit``, a commit on Vellum's main.
 
 The pin, the receipt copy and the slice map are always read at the BASE
 commit, so a change cannot exempt itself by editing them; a re-pin takes effect
@@ -81,7 +81,7 @@ PIN_PATH = f"{PIN_DIRECTORY}/pin.json"
 TRANSFER_PATH = f"{PIN_DIRECTORY}/framework-transfer.json"
 TRANSFER_KEYS = {
     "schema_version", "framework_repository", "framework_pull_request", "transfer_record",
-    "transfer_record_sha256", "export_id", "pulp_sha", "transferred_paths",
+    "transfer_record_sha256", "framework_commit", "export_id", "pulp_sha", "transferred_paths",
 }
 EXPORT_EVENT_DIRECTORY = ".github/vellum-export-events"
 CHANGE_EVENT_DIRECTORY = ".github/vellum-change-events"
@@ -125,6 +125,7 @@ class Transfer:
     export_id: str
     paths: frozenset[str]
     record_sha256: str
+    framework_commit: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -257,6 +258,9 @@ def parse_transfer(raw: bytes) -> Transfer:
     digest = value["transfer_record_sha256"]
     if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
         raise ReceiptDriftError(f"{TRANSFER_PATH}: transfer_record_sha256 must be a sha256 hex digest")
+    framework_commit = value["framework_commit"]
+    if not isinstance(framework_commit, str) or not SHA40_RE.fullmatch(framework_commit):
+        raise ReceiptDriftError(f"{TRANSFER_PATH}: framework_commit must be the 40-hex Vellum commit of the transfer")
     export_id = value["export_id"]
     if not isinstance(export_id, str) or not EXPORT_ID_RE.fullmatch(export_id):
         raise ReceiptDriftError(f"{TRANSFER_PATH}: export_id is malformed")
@@ -266,35 +270,43 @@ def parse_transfer(raw: bytes) -> Transfer:
     paths = _sorted_unique(value["transferred_paths"], f"{TRANSFER_PATH}.transferred_paths", allow_empty=False)
     for index, path in enumerate(paths):
         _safe_path(path, f"{TRANSFER_PATH}.transferred_paths[{index}]")
-    return Transfer(export_id, frozenset(paths), digest)
+    return Transfer(export_id, frozenset(paths), digest, framework_commit)
 
 
 def transfer_copy_problems(
     repo: pathlib.Path, commits: Iterable[str], fetch: Callable[[str], Any]
 ) -> list[str]:
-    """Each framework-transfer record that is not Vellum main's transfer record.
+    """Each framework-transfer record that is not Vellum's transfer record at its commit.
 
     Like ``receipt_copy_problems``: ``fetch`` reads the GitHub REST API and a
     fetch failure propagates, so an unreachable Vellum never reads as a match.
-    The record must name the SHA-256 of Vellum main's
-    ``provenance/framework/transfer.json`` and list exactly its ``pulp_path``
-    set, so the record cannot be introduced before Vellum's transfer merges.
+    The record names ``framework_commit``, the Vellum commit that landed the
+    transfer. The record must equal ``provenance/framework/transfer.json`` at
+    that commit (its SHA-256 and its ``pulp_path`` set), and the commit must be
+    on Vellum's main. Reading at an immutable commit, not at main, means a later
+    Vellum edit to its record cannot invalidate Pulp's, which cannot be edited.
     """
     problems: list[str] = []
-    seen: set[str] = set()
+    seen: set[bytes] = set()
+    source = "provenance/framework/transfer.json"
     for commit in commits:
         raw = _blob(repo, commit, TRANSFER_PATH, MAX_RECEIPT_BYTES)
         if raw is None or raw in seen:
             continue
         seen.add(raw)
         transfer = parse_transfer(raw)
-        source = "provenance/framework/transfer.json"
-        remote = fetch(f"repos/{FRAMEWORK_REPOSITORY}/contents/{source}?ref=main")
+        at = transfer.framework_commit
+        compared = fetch(f"repos/{FRAMEWORK_REPOSITORY}/compare/{at}...main?per_page=1")
+        if not isinstance(compared, dict) or compared.get("status") not in ("ahead", "identical"):
+            status = compared.get("status") if isinstance(compared, dict) else None
+            problems.append(f"{FRAMEWORK_REPOSITORY} commit {at[:12]} is not on main (compare status {status!r})")
+            continue
+        remote = fetch(f"repos/{FRAMEWORK_REPOSITORY}/contents/{source}?ref={at}")
         if not isinstance(remote, dict) or remote.get("type") != "file" or remote.get("path") != source:
-            problems.append(f"{FRAMEWORK_REPOSITORY} main has no file {source}")
+            problems.append(f"{FRAMEWORK_REPOSITORY} commit {at[:12]} has no file {source}")
             continue
         if remote.get("encoding") != "base64" or not isinstance(remote.get("content"), str):
-            problems.append(f"{FRAMEWORK_REPOSITORY} main's {source} came back without its content")
+            problems.append(f"{FRAMEWORK_REPOSITORY}@{at[:12]}:{source} came back without its content")
             continue
         import base64  # noqa: PLC0415  (only the trusted lanes read Vellum)
         try:
@@ -302,18 +314,18 @@ def transfer_copy_problems(
             record = json.loads(data)
             paths = {row["pulp_path"] for row in record["records"]}
         except (ValueError, KeyError, TypeError) as exc:
-            problems.append(f"{FRAMEWORK_REPOSITORY} main's {source} is unreadable: {exc}")
+            problems.append(f"{FRAMEWORK_REPOSITORY}@{at[:12]}:{source} is unreadable: {exc}")
             continue
         if hashlib.sha256(data).hexdigest() != transfer.record_sha256:
             problems.append(
                 f"{commit[:12]}:{TRANSFER_PATH} names transfer record "
-                f"{transfer.record_sha256[:12]}, but {FRAMEWORK_REPOSITORY} main's {source} is "
+                f"{transfer.record_sha256[:12]}, but {FRAMEWORK_REPOSITORY}@{at[:12]}:{source} is "
                 f"{hashlib.sha256(data).hexdigest()[:12]}"
             )
         if paths != set(transfer.paths):
             problems.append(
                 f"{commit[:12]}:{TRANSFER_PATH} lists {len(transfer.paths)} paths, but "
-                f"{FRAMEWORK_REPOSITORY} main's {source} transfers {len(paths)} "
+                f"{FRAMEWORK_REPOSITORY}@{at[:12]}:{source} transfers {len(paths)} "
                 f"({len(set(transfer.paths) ^ paths)} differ)"
             )
     return problems

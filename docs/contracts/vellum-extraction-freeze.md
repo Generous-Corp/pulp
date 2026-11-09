@@ -139,10 +139,10 @@ the changes after the one that adds it.
 Vellum's rename change renames the exported units from `pulp` to `vellum` and
 moves them out of its `mirror/` into the native root `framework/`, keeping the
 export's layout (Vellum Decision 0010, amendment of 2026-11-07). The ownership
-flip takes effect when that change has merged in Vellum and
-`.github/vellum-export-receipt/framework-transfer.json`, which names it, has
-landed here; until both hold, the rules earlier in this contract apply
-unchanged. The integrator decision of
+flip takes effect in Pulp when
+`.github/vellum-export-receipt/framework-transfer.json` lands here, naming the
+Vellum commit that merged that change; until then, the rules earlier in this
+contract apply unchanged. The integrator decision of
 2026-11-07 that ends the freeze-versus-mirror contradiction states three rules:
 the renamed units are Vellum-native and editable; "Pulp's frozen copies change
 only by `framework-backport` from a named Vellum commit"; and Pulp's copies are
@@ -177,15 +177,26 @@ deleted at cutover. In Pulp they apply as follows.
    the refusal covers the union. `vellum_inherits: false` records the
    Pulp-only edit.
 
-   The record is held to Vellum. In the trusted lanes, where a Vellum reader
-   token is present, receipt mode reads Vellum main's
-   `provenance/framework/transfer.json` and requires the record's
-   `transfer_record_sha256` to equal that file's SHA-256 and its
-   `transferred_paths` to equal that file's `pulp_path` set; a missing file, a
-   difference, or a failed read fails the check. So the record cannot land
-   before Vellum's transfer has merged. Like the pin, it judges only the
-   changes after the one that adds it, and once it lands it can be neither
-   removed nor edited.
+   The record is held to an immutable Vellum commit. It names
+   `framework_commit`, the commit that merged Vellum's transfer. In the
+   trusted lanes, where a Vellum reader token is present, receipt mode
+   requires that commit to be on Vellum's main (the compare API reports main
+   `ahead` of it or `identical`), and reads `provenance/framework/transfer.json`
+   at that commit: the record's `transfer_record_sha256` must equal that file's
+   SHA-256 and its `transferred_paths` that file's `pulp_path` set. A missing
+   file, a difference, a commit main does not contain, or a failed read fails
+   the check. Because the comparison is at a fixed commit, a later Vellum edit
+   to its own record does not invalidate Pulp's. Like the pin, the record judges
+   only the changes after the one that adds it, and once it lands it can be
+   neither removed nor edited.
+
+   The trusted lanes run protected `main`'s scripts, so the rule and the record
+   land in that order, in separate changes. The change that ships the rule adds
+   no record, and receipt mode behaves exactly as before it. The record follows
+   in a later change, after Vellum's transfer has merged, carrying
+   `framework_commit`; that change's trusted run uses `main`'s scripts, which by
+   then hold the rule, so it cannot pass until the commit exists on Vellum's
+   main.
 4. **Pulp's copies are deleted at cutover.** When Pulp consumes Vellum, its
    copies of the transferred paths are removed rather than kept in sync. Until
    then they are Pulp's build inputs and keep the `pulp` spelling.
