@@ -1,0 +1,11 @@
+{
+ "name": "forced-restore-lint",
+ "record": {
+  "entry": "tools/scripts/forced_restore_lint.py",
+  "inputs": [
+   "tools/scripts/forced_restore_lint.py",
+   "tools/scripts/test_forced_restore_lint.py"
+  ],
+  "kind": "python"
+ }
+}

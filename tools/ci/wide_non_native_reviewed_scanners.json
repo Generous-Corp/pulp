@@ -9,7 +9,7 @@
     "tools/scripts/gate_python_imports_check.py": "reads the configured ctest inventory; runs in the pr-fast tier on the native gate",
     "tools/scripts/gpu_audio_p2_campaign.py": "authenticates the canonical tracked campaign driver with git ls-files; it does not walk tools/ payloads or scan non-native source trees",
     "tools/scripts/script_test_inputs.py": "reads the configured ctest inventory and follows each script test's imports from there; script-test-inputs-drift runs in the pr-fast tier on the native gate",
-    "tools/scripts/changed_surface_script_families.py": "reads the configured ctest inventory, test/ctest_script_inputs.json and the tracked tree; changed-surface-script-families-drift runs in the native gate's full suite",
+    "tools/scripts/changed_surface_script_families.py": "reads the configured ctest inventory, test/ctest_script_inputs/ and the tracked tree; changed-surface-script-families-drift runs in the native gate's full suite",
     "tools/scripts/agent_capability_manifest.py": "reads core/*/include; its tools/scripts inputs route to the native build through AGENT_CAPABILITY_INSTALLED_SDK_PATTERNS",
     "tools/scripts/consumption_census.py": "counts installed headers under build roots",
     "tools/scripts/consumption_census_contract.py": "runs consumption_census.py by name",

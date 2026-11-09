@@ -62,6 +62,7 @@ class SpectralRuntimeBank;
 
 namespace detail {
 struct ExactParameterIngressOwner;
+class OutputPortLatencyEqualiser;
 // Mints an exact-parameter ingress ownership token. The type stays defined in
 // the signal-graph translation unit so its identity is owned here, not by the
 // timeline binding that claims nodes with it.
@@ -137,6 +138,16 @@ class SignalGraph : public format::AudioWorkgroupClient {
         NodeId node_id = 0;
         std::int64_t input_latency_samples = 0;
         std::int64_t output_latency_samples = 0;
+        // The node's own compensated (artifact) latency: lookahead, filter or
+        // framing delay. output_latency_samples == input + artifact.
+        std::int64_t artifact_latency_samples = 0;
+        // Declared intentional delay (an echo the author asked for). Reported
+        // only: it is never compensated and never part of any total.
+        std::int64_t intentional_delay_samples = 0;
+        // Declared per-output-port artifact latency before equalisation. Empty
+        // unless the node declares per-port latency; artifact_latency_samples
+        // is then the maximum and every port leaves the node at that value.
+        std::vector<std::int64_t> output_port_latency_samples;
     };
 
     struct PreparedConnectionDelay {
@@ -146,6 +157,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
 
     struct PreparedLatencySnapshot {
         std::int64_t total_latency_samples = 0;
+        double sample_rate = 0.0;
+        int max_block_size = 0;
         std::vector<PreparedNodeLatency> nodes;
         std::vector<PreparedConnectionDelay> connections;
 
@@ -494,6 +507,12 @@ class SignalGraph : public format::AudioWorkgroupClient {
     void abort_swap_edit();
     void release();
 
+    // Hosted-plugin restart requests and process mode (docs/guides/hosting.md).
+    bool plugin_restart_pending() const; // control thread
+    bool apply_plugin_restarts();        // re-prepare when pending; prepare() contract
+    void set_hosted_plugin_process_mode(format::ProcessMode mode); // at next prepare()
+    format::ProcessMode hosted_plugin_process_mode() const;
+
     bool set_node_live_swap_policy(NodeId id, NodeLiveSwapPolicy policy);
     bool set_node_hosted_editor_open(NodeId id, bool open);
     PluginCatalogToken register_scanned_plugin(const PluginInfo& info);
@@ -564,6 +583,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
         NodeId destination = 0;
         PortIndex source_port = 0;
         PortIndex destination_port = 0;
+        std::uint32_t parameter_id = 0;
     };
     // One ordinary audio edge, observed at its source before PDC/mixing. Attach
     // and detach are control-thread lifecycle operations: stop process() and
@@ -580,6 +600,27 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::uint64_t audio_edge_probe_dropped() const;
     EdgeProbeStatus audio_edge_probe_status() const;
     EdgeProbeIdentity audio_edge_probe_identity() const;
+    // Control probes observe one prepared sparse automation edge after its
+    // per-edge source mapping and slew, before destination mixing and bounds
+    // clamping. The destination is identified by NodeId + public parameter id
+    // because automation edges do not have a destination audio port.
+    EdgeProbeStatus attach_control_edge_probe(const PortHandle& source, NodeId destination,
+                                              std::uint32_t parameter_id);
+    void detach_control_edge_probe();
+    bool read_control_edge_probe(graph::GraphRuntimeProbeSample& sample);
+    std::uint64_t control_edge_probe_dropped() const;
+    EdgeProbeStatus control_edge_probe_status() const;
+    EdgeProbeIdentity control_edge_probe_identity() const;
+    // Event probes observe one bounded MIDI edge after source publication and
+    // before destination consumption. Only the count and first event metadata
+    // are copied into the fixed-size probe record.
+    EdgeProbeStatus attach_event_edge_probe(const PortHandle& source,
+                                            const PortHandle& destination);
+    void detach_event_edge_probe();
+    bool read_event_edge_probe(graph::GraphRuntimeProbeSample& sample);
+    std::uint64_t event_edge_probe_dropped() const;
+    EdgeProbeStatus event_edge_probe_status() const;
+    EdgeProbeIdentity event_edge_probe_identity() const;
     std::vector<NodeLoadReport> node_loads() const;
     // true times nodes before any read; false stops until the next node_loads().
     void set_node_load_monitoring(bool enabled) noexcept;
@@ -1191,6 +1232,19 @@ class SignalGraph : public format::AudioWorkgroupClient {
         // sample rate and clamped into the declared range. Shared by the legacy
         // PDC pass and the routed snapshot builder.
         std::unordered_map<NodeId, int> custom_latency_samples;
+        // Declared intentional (authored) delay per resolved Custom node.
+        // Reported only; never feeds PDC or the host latency.
+        std::unordered_map<NodeId, int> custom_intentional_delay_samples;
+        // Declared per-output-port artifact latency for Custom nodes that use
+        // CustomNodeType::output_port_latency_samples. The node's scalar entry
+        // in custom_latency_samples is the maximum; the equaliser below delays
+        // the other ports up to it inside the node binding.
+        std::unordered_map<NodeId, std::vector<int>> custom_output_port_latency_samples;
+        // Prepared per-node port equalisers, shared by every callback variant
+        // of the node and carried across a gap-free swap when the declared
+        // port latencies are unchanged so delayed ports keep their history.
+        std::unordered_map<NodeId, std::shared_ptr<detail::OutputPortLatencyEqualiser>>
+            custom_output_port_equalisers;
         // Bound param-aware custom callbacks (bake-layer injection). Populated for
         // any Custom node whose type declared baked_params +
         // process_instance_baked_param. Consumed only by bake(); the live routed
@@ -1345,6 +1399,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
         RoutedPaths routed;
         std::unique_ptr<format::GraphRuntimeAudioEdgeProbe> audio_edge_probe;
         EdgeProbeIdentity audio_edge_probe_identity;
+        std::unique_ptr<format::GraphRuntimeControlEdgeProbe> control_edge_probe;
+        EdgeProbeIdentity control_edge_probe_identity;
+        std::unique_ptr<format::GraphRuntimeEventEdgeProbe> event_edge_probe;
+        EdgeProbeIdentity event_edge_probe_identity;
 
         // Anticipative rendering for this snapshot (built only when anticipation is
         // enabled at compile time AND the routed plan has an eligible latent
@@ -1409,6 +1467,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::uint64_t authoring_generation_{0};
     NodeId next_id_ = 1;
     NodeId last_prepare_custom_failure_node_ = 0;
+    format::ProcessMode hosted_plugin_process_mode_ = format::ProcessMode::Realtime;
+    double last_plugin_prepare_rate_ = 0.0;
+    int last_plugin_prepare_block_ = 0;
     GraphLimits limits_;
 
     // 2.2b prerequisite (planning/2026-07-07-signalgraph-swap-and-bake-implementation-plan.md,
@@ -1424,6 +1485,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::vector<HostParamInfo> parameters;
         int latency_samples = 0;
         bool wants_transport = false;
+        std::uint64_t restart_requests = 0; // PluginSlot::restart_request_count()
     };
     // Captured once per prepare() (cleared + rebuilt); read by compile_ / the
     // routing build / edit-time param validation instead of the live PluginSlot.

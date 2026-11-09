@@ -18,7 +18,7 @@ Key (per ctest entry), `KEY_VERSION` + sha256 over:
 - the bytes of the executable (a compiled test binary, or the interpreter of
   a script test) and of every file the command line names;
 - a script test: the git blob ids of its declared inputs in
-  `test/ctest_script_inputs.json` (a directory input covers every tracked
+  `test/ctest_script_inputs/` (a directory input covers every tracked
   file under it); a script test without an entry has no key;
 - a compiled test: the RUNTIME SURFACE — git blob ids of every tracked file a
   compiled test can read at run time that its own bytes do not capture

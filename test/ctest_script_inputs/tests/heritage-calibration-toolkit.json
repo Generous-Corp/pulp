@@ -1,0 +1,11 @@
+{
+ "name": "heritage-calibration-toolkit",
+ "record": {
+  "entry": "tools/audio/heritage-calibration/test_heritage_calibration.py",
+  "inputs": [
+   "tools/audio/heritage-calibration/heritage_calibration.py",
+   "tools/audio/heritage-calibration/test_heritage_calibration.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -41,6 +41,32 @@ registry and no plug-in-per-file hooks; adding a format means:
 
 Everything else — tests, scanner, graph wiring — is format-agnostic.
 
+### One process request per block
+
+A backend does not implement the three `PluginSlot::process()` overloads. It
+derives from `detail::RequestDrivenSlot` (`core/host/src/plugin_slot_process_request.hpp`),
+which implements them once and hands `process_request()` a single
+`SlotProcessRequest`: every host bus, MIDI in/out, parameter events, the host
+transport (or null), and the prepared process mode. The same header holds the
+pieces every backend needs the same answer for: `SlotBusBinder` (host buses to
+the plugin's declared buses, with prepared scratch and 64-bit conversion),
+`ParameterEditInbox` (plugin edits back to the host from audio and control
+threads), `PendingHostEdits` (host edits to the plugin, swap-drained), and the
+MIDI view (`decode_short_midi`, `for_each_midi_in_time_order`). Keep format
+translation in the backend and shared policy in that header; a second copy of
+bus matching or edit queuing in a backend is a review finding. The CLAP and
+VST3 slots are built this way; see `test_hosted_slot_process_request.cpp`,
+`test_clap_slot_process_fidelity.cpp`, and `test_vst3_slot_process_fidelity.cpp`.
+
+Those suites drive fake plugins. To check behavior from inside a real bundle,
+use the Pulp Host Probe fixture (`test/fixtures/host_probe`): it is built as a
+VST3 and a CLAP bundle, reports what its host delivered through read-only
+parameters, and on command edits its own parameter or changes its latency.
+`test_host_probe_bundles.cpp` loads both bundles through `PluginSlot::load`.
+Catch2 test names with commas are split into several filters by
+`catch_discover_tests`, so such a case runs nothing under ctest and still
+passes; keep host test names comma-free.
+
 ### SignalGraph determinism and replay
 
 When changing `SignalGraph` topology or its runtime plan, preserve canonical
@@ -405,8 +431,10 @@ suites after moving a method across these translation units.
 `int` either way and so cannot separate "this device reports zero" from "this
 backend has no way to ask". Ask the query first and fail closed on
 `Unsupported` / `QueryFailed`; coercing an unanswered query to zero is what a
-later alignment proof would then certify. The hosted LV2 backend really does
-return `Unsupported`, so this is not hypothetical.
+later alignment proof would then certify. The LV2 backend used to return
+`Unsupported`; it now reads `lv2:reportsLatency` (running one silent block in
+`prepare()` so the value exists before the graph asks), so do not assume every
+backend answers.
 
 Read it on the CONTROL THREAD, at admission, exactly once, and cache it into the
 prepared snapshot. The metadata accessors reach into the live plugin object
@@ -421,6 +449,18 @@ mid-stream is **not observable** until the next control-thread relatch. Two
 consequences: a mid-stream change cannot be refused (there is nothing to refuse
 on), and any test of change-handling needs a synthetic latency source rather
 than a real backend.
+
+### Artifact latency is compensated; intentional delay never is
+
+A hosted plugin's reported latency is always artifact latency: the graph
+compensates it where parallel paths reconverge and adds it to the host total.
+Custom nodes may also declare `intentional_delay_samples` (an echo), which is
+reported in `prepared_latency_snapshot()` and the realtime report but never
+compensated. Per-output-port latency is equalised inside the node binding, and
+every `AudioOutput` is aligned to the one reported total because outputs sum
+into the same host buffer. Do not "fix" a dry path that stays undelayed beside
+an echo node; that is the contract. See `docs/reference/signal-graph.md`
+(latency semantics) and `pulp/host/graph_rt_report.hpp`.
 
 The timeline binding builds on this to schedule compensated event streams; the
 contract, including why an event-to-audio device contributes nothing to the
@@ -1446,20 +1486,55 @@ rate change.
   `component_->getBusCount(kAudio, kInput)` and ignores `setBusArrangements`'
   status ("missing buses degrade gracefully"); CLAP and VST3 both size
   `ProcessData` from the caller's view. AU was the outlier.
-- **The LV2 slot cannot safely host an instrument — and it fails as UB, not
-  cleanly.** Port discovery keeps only `lv2:AudioPort`/`lv2:ControlPort` stanzas
-  (`plugin_slot_lv2.cpp`, `if (!is_audio && !is_control) continue;`), so atom /
-  event / CV ports are never seen and never `connect_port`'d — yet `run()` is
-  called anyway. The LV2 spec requires **every** port be connected before
-  `run()` unless it is `lv2:connectionOptional`; running with unconnected ports
-  is undefined behavior and commonly segfaults. Every LV2 instrument has an atom
-  MIDI input port, and many effects carry atom ports for transport. There is
-  also no MIDI delivery path for LV2 at all. Unlike the AU trap above this does
-  not fail loudly — so **do not claim "Pulp hosts instruments" unqualified**:
-  AU yes, VST3/CLAP plausibly, LV2 no. Fixing it means an atom-sequence input
-  buffer + MIDI mapping; the minimum stopgap is to detect non-audio/non-control
-  input ports at discovery and refuse `prepare()` loudly unless
-  `connectionOptional`.
+- **LV2 goes through lilv now; keep it that way.** `plugin_slot_lv2.cpp`
+  reads bundles with the vendored lilv in `external/lilv` (manifest first, then
+  `rdfs:seeAlso`), and connects every port before `run()`: audio, control, CV
+  (silence), and atom. A required port of an unknown kind is refused at
+  `load()`. The old regex TTL reader skipped atom ports, which made running an
+  instrument undefined behavior; do not reintroduce a hand-rolled reader.
+- **LV2 audio thread: no URID mapping, no shared floats.** `UridMap::map()`
+  takes a mutex, and `lv2_atom_forge_init()` maps a dozen URIs, so the slot's
+  forge is initialised once in the constructor and the audio thread only calls
+  `lv2_atom_forge_set_buffer()`. Control ports are connected to
+  `control_values_`, which only the thread running the instance touches;
+  `set_parameter()`/`get_parameter()` go through the atomic `control_shadow_`,
+  pulled into the ports at block start and published from outputs after
+  `run()`. Calls that run the instance off the audio thread hold
+  `state_mutex_`; the audio thread only try-locks it.
+- **A transport-sensitive slot in a graph needs the routed executor.** The
+  default reference walk never passes `ProcessContext` to a plugin. Call
+  `set_canonical_executor_routing_enabled(true)`, and give `process()` an input
+  view whose frame count matches the block: an empty input view fails
+  `ProcessBlock::validate()`, the block silently falls back to the walk, and
+  only `routed_walk_fallbacks()` shows it. `test/test_lv2_host_slot.cpp`
+  asserts that counter stays zero.
+- **LV2 sequence overflow hides behind a 24-byte rhythm.** Every event the
+  slot forges is a multiple of 24 bytes, so a 16384-byte port (16368 after the
+  header) fills exactly and even unchecked forging stops cleanly. The torn
+  event (timestamp and header written, body not) only shows at the default
+  8192 bytes, which leave 16. `append_event()` checks the room before writing
+  and rolls back offset, sequence size, and frame stack; the fixture's
+  `malformed_events` port is what catches a regression, since a torn body
+  reads as zeros and counts as nothing.
+- **patch:Set carries the range's atom type.** Plugins compare
+  `value->type` with their URID and ignore anything else, so forge Int, Long,
+  Bool, Double, or Float from `Lv2PatchParameter::range`. The fixture accepts
+  only the declared type; keep it strict, or the test cannot fail.
+- **An LV2 save shares the lock with run().** `state_mutex_` is a
+  `shared_mutex`: run() try-locks it shared, save takes it shared plus
+  `save_mutex_`, and prepare, release, and restore take it exclusive. A save
+  reads control inputs from `control_shadow_`, never from the ports.
+- **`lilv_plugin_verify()` gates load.** It refuses parse errors, no ports,
+  and no `doap:name` (which LV2 requires), so hand-written test bundles need
+  a `doap:name`.
+- **An allocation-probe control must not be elidable.** Clang removes an
+  unused `std::vector`, so a "does the probe see an allocation" control that
+  builds one proves nothing; call `::operator new` directly.
+- **The LV2 fixture is a real bundle.** `test/fixtures/lv2_host_instrument`
+  builds an instrument module plus `manifest.ttl`/`plugin.ttl` and reports
+  what it observed (time:Position fields, options, worker answers, patch
+  values) on output control ports, which the test reads through
+  `get_parameter(port index)`. Extend it rather than mocking lilv.
 - **Test hosts against a real *instrument*, not just a real effect.** The
   effect-only integration test in `test/test_plugin_slot_au.mm` passed happily
   through the bug above. Apple's bundled `DLSMusicDevice`
@@ -1630,6 +1705,20 @@ rules:
 - **Thread rules doc.** `docs/reference/host-thread-rules.md` is the
   canonical reference.
 
+## Slot settings and parameter queues on the audio thread
+
+- `PluginHostSettings::deliver_transport` is the one setting the audio thread
+  reads live: `RequestDrivenSlot` mirrors it in an atomic written by
+  `set_host_settings()`. Any other setting a future change reads from
+  `process()` needs the same treatment; the plain `settings_` copy is for
+  `prepare()`.
+- VST3 parameter queues are bounded, not allocation-free. The SDK reserves 5
+  points per queue and `setMaxParameters()` preallocates max(parameter count,
+  16) queues; more points for one parameter in a block, or more distinct
+  parameters, grows a vector on the audio thread once. Clear
+  `in_param_changes_` every block (it is, at the top of `process_request()`)
+  so the growth stops at the busiest block.
+
 ## Hosted plugin editors
 
 `EditorAttachment::create(slot, window)` embeds a hosted plugin's own GUI.
@@ -1724,14 +1813,15 @@ audio-thread snapshot contracts:
   state save/load via a `VectorStream` IBStream implementation.
 - **AU**: `AudioUnitScheduleParameters` per block from
   ParameterEventQueue — sample-accurate AUv2 automation.
-- **LV2**: control-port discovery extended into the regex TTL parser
-  (lv2:ControlPort + name/default/min/max), per-port float scratch in
-  `control_values_`, `connect_port` wired at process() block start,
-  param_events apply last-write-wins.
+- **LV2**: control input ports are parameters by port index (read at block
+  start, last event wins); `patch:writable`/`patch:readable` properties are
+  parameters from `0x40000000`, sent as sample-accurate `patch:Set` and
+  updated from the plugin's own `patch:Set`.
 - LV2 bundle discovery has a private test seam in
-  `core/host/src/lv2_discovery.hpp`; keep TTL port/binary parsing tests in
-  `test/test_lv2_host_discovery.cpp` rather than reaching through real
-  plug-in binaries for deterministic coverage.
+  `core/host/src/lv2_discovery.hpp` (lilv-backed); keep port/binary parsing
+  tests in `test/test_lv2_host_discovery.cpp`. Bundles there need a
+  `manifest.ttl`, and binary paths come back through the `/var` symlink on
+  macOS, so compare with `fs::canonical` on both sides.
 
 Param domain: **plain values** at the PluginSlot boundary (not
 normalized). Loaders convert internally if they natively normalize
@@ -1745,6 +1835,75 @@ sample-at-block-start so the offset-(N-1) value wins.
 
 MixMode::Replace is the default; second Replace edge to the same
 (node, param) is rejected. MixMode::Add sums then clamps.
+
+## The AUAudioUnit slot (`PluginFormat::AudioUnitV3`)
+
+`plugin_slot_auv3.mm` hosts AU v3 extensions and AU v2 components through
+`AUAudioUnit`, out of process by default (`load_auv3_plugin()` takes
+`AuV3LoadOptions` for in-process). Traps found getting it to pass against
+Apple's units and the host probe:
+
+- **Out of process, input buses start disabled.** A disabled bus is never
+  pulled and every render returns `kAudioUnitErr_NoConnection` (-10876). The
+  slot sets `bus.enabled = YES` on every bus it configures.
+- **The pull-input block may get null `mData`.** Hand the unit slot-owned
+  scratch, never the host's const input; the unit may process in place.
+- **A plugin's own parameter edits arrive on the main run loop.** AU v2
+  components post them with `AUEventListenerNotify`, and the bridge delivers
+  them to `AUParameterTree` observers there. Tests must pump the main loop
+  while draining edits (`collect_edits()` in `test_host_probe_bundles.cpp`);
+  `get_parameter()` also lags until then.
+- **Disposing a bridged AU v2 unit with events still queued crashes** inside
+  `AUEventListener::MessagesAreAvailable` on the `AUAudioUnitV2Bridge.eventListener`
+  queue. The slot drops its last reference to the unit after a short delay on a
+  background queue; without that the probe suite crashed on about half its runs.
+- **A remote editor needs a launched app.** Out of process,
+  `requestViewControllerWithCompletionHandler` builds an `NSRemoteView`, which
+  throws "invoked too early" unless `NSApplication` has finished launching.
+  The slot refuses without `NSApp` and catches the exception; tests call
+  `[NSApp finishLaunching]` first.
+- **Big parameter addresses and repeated names.** AUMultiChannelMixer's
+  addresses exceed 32 bits (scope and element are packed in), so ids become
+  list positions, and its many "Gain" parameters get their key path appended.
+- **Out of process needs a registered binary.** `AudioComponentRegister` makes
+  a component findable in this process only, so in-process loading works
+  without an install, but out of process needs the component in
+  `~/Library/Audio/Plug-Ins/Components` (or an AU v3 extension registered
+  through its app). The probe's opt-in out-of-process run is
+  `PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` with the component installed; remove
+  it afterwards. Confirm the process boundary by finding the component mapped
+  in the `AUHostingService` process with `lsof`.
+- **A unit republishes its parameter tree after a bus format change.** About
+  2 ms after `setFormat:` (AUDelay, AUPeakLimiter; not DLSMusicDevice or the
+  mixer), and only if the host has already read `parameterTree`. A warm
+  out-of-process allocation returns in about 2 ms, so the republish can land
+  after `prepare()`. The old tree's objects are then disconnected: writes to
+  them never reach the unit, though a new proxy can show the written value
+  locally. So `prepare()` settles (25 ms quiet, 250 ms cap), every tree change
+  is adopted, host writes since the last tree are replayed unconditionally,
+  and `set_parameter()` also queues the value for the next block's
+  `scheduleParameterBlock`. Keeping a same-address tree's old objects made
+  every AUDelay run fail; replaying only differing values left 1 in 60.
+- **The audio thread reads a published `ParameterMapping` through an atomic
+  pointer**, never `mapping_mutex_`; old mappings are kept until the slot
+  dies. A try-lock there dropped 91 of 2000 automation events while a control
+  thread read parameters (the "never drops automation" test).
+- **Every system callback goes through `PulpHostAuV3Observer`.** It holds the
+  slot pointer under a lock that the destructor's `detach` takes first; blocks
+  and observers retain it, never the slot. A plugin that dies posts
+  `kAudioComponentInstanceInvalidationNotification`; the probe's command 4
+  aborts the extension to test it (opt-in, out of process only).
+- **Apple's AUDelay applies scheduled parameter events at the block start**,
+  in and out of process, so it cannot show sample offsets; DLSMusicDevice
+  starting a note at its MIDI offset can.
+- **A test `.mm` that uses `AVAudioFormat` must import AVFoundation.** With only
+  AudioToolbox the class is just forward-declared, the init returns nil, and
+  the failure shows up as a bus that will not build.
+- **What the probe's AU component cannot report:** it is an `aufx` effect, so
+  it receives no MIDI; the AU v2 adapter reads `CallHostTransportState`, which
+  has no recording flag; and the AU effect base has one output element, so no
+  aux bus. Those are plugin-side limits; cover MIDI with Apple's
+  `DLSMusicDevice` (`aumu:dls :appl`) instead.
 
 ## Bypass is a parameter in VST3/CLAP and a unit property in AU
 
@@ -2935,3 +3094,9 @@ invalid channel views before dereferencing pointers or mutating output, clock,
 or envelope state. The public consumer in
 `examples/g5-trigger-runtime-consumer` proves this bounded SDK seam; it does not
 establish complete G-5 coverage or realtime timing qualification.
+# G-7 edge diagnostics
+
+SignalGraph control and event edge probes are serial routed diagnostics with
+fixed-capacity publication and explicit refusal in unsupported execution modes.
+Host lifecycle changes must preserve detach-on-reset and the source-edge event
+observation boundary.

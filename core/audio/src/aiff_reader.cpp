@@ -296,6 +296,13 @@ public:
         return ext == ".aiff" || ext == ".aif" || ext == ".aifc";
     }
     std::string format_name() const override { return "AIFF"; }
+    FormatCapabilities capabilities() const override {
+        // Uncompressed AIFF and AIFF-C marked NONE only.
+        return {.format_name = "AIFF",
+                .extensions = {".aiff", ".aif", ".aifc"},
+                .bit_depths = {8, 16, 24, 32},
+                .max_channels = 65535};
+    }
 };
 
 // ── AIFF Writer ─────────────────────────────────────────────────────────
@@ -376,6 +383,12 @@ public:
         return ext == ".aiff" || ext == ".aif";
     }
     std::string format_name() const override { return "AIFF"; }
+    FormatCapabilities capabilities() const override {
+        return {.format_name = "AIFF",
+                .extensions = {".aiff", ".aif"},
+                .bit_depths = {16},
+                .max_channels = 65535};
+    }
 };
 
 std::unique_ptr<FormatReader> create_aiff_reader() {

@@ -1,0 +1,10 @@
+{
+ "name": "pulp-motion-frame-stamp-decode-cpp-frames",
+ "record": {
+  "entry": "tools/motion/visual/test_frame_stamp_decode.py",
+  "inputs": [
+   "tools/motion/visual/test_frame_stamp_decode.py"
+  ],
+  "kind": "python"
+ }
+}

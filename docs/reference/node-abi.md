@@ -340,6 +340,13 @@ are append-only:
 virtual declarations against the PR base. A middle insert, removal, reorder, or
 signature change fails; appending at the tail passes.
 
+The editor-host interfaces (`Editor`, `EditorContext` and `EditorFactory` in
+`editor_host.hpp`, and the `NativeSurfaceHost` extension) are held to a
+stricter rule: their virtual set is frozen. A UI package and a format adapter
+are separate binaries, so even an appended virtual breaks a prebuilt peer. The
+same gate fails any change to those classes. New host capabilities ship as new
+`EditorContext::query_extension()` ids instead.
+
 ## Optional Capabilities
 
 New optional node behavior should prefer additive capability bits over new
@@ -373,6 +380,24 @@ a plain fallback because graph PDC cannot vary with per-block transport
 presence. Changing latency requires re-registration/re-prepare and should bump
 the custom type `version` whenever serialized graphs must distinguish the old
 timing contract.
+
+The latency declarations above are artifact latency: delay the node adds as a
+side effect of how it computes, which the graph compensates. Two appended
+declarations complete the vocabulary:
+
+- `intentional_delay_samples(sample_rate)` declares the musical delay the author
+  asked for, such as an echo. It is reported in the prepared latency snapshot
+  and the realtime report and is never compensated or reported to the host.
+- `output_port_latency_samples(sample_rate, port)` declares a different artifact
+  latency per output port. The node's latency is the maximum, and the graph
+  delays the other ports to it inside the node binding. It cannot be combined
+  with `latency_samples`, `latency_samples_for_block` or `lowerable`.
+
+`rt_contract` (`CustomNodeRtContract`) declares the node's realtime-safety
+class, whether it is allocation-free, a worst-case counted-work function per
+block size, and a loop-bound note. The graph realtime report shows these as
+declared, never as measured; see
+[Signal Graph: Realtime report](signal-graph.md#realtime-report).
 
 The node type enum only appends `NodeType::Custom`; built-in enum values stay
 stable. Serialized graphs store the custom `type_id` and `version`, and loads

@@ -1,0 +1,11 @@
+{
+ "name": "pulp-cli-autoupdate-hook",
+ "record": {
+  "entry": "test/test_pulp_cli_autoupdate.sh",
+  "inputs": [
+   "hooks/scripts/pulp-cli-autoupdate.sh",
+   "test/test_pulp_cli_autoupdate.sh"
+  ],
+  "kind": "shell"
+ }
+}

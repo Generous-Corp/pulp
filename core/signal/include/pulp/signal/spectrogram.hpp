@@ -15,6 +15,8 @@ namespace pulp::signal {
 /// RGBA color for spectrogram pixels.
 struct SpectrogramColor {
     uint8_t r = 0, g = 0, b = 0, a = 255;
+
+    friend bool operator==(const SpectrogramColor&, const SpectrogramColor&) = default;
 };
 
 /// Predefined color ramp types for spectrogram rendering.
@@ -124,6 +126,45 @@ public:
         scale_ = scale;
         num_bins_ = fft_size / 2 + 1;
         nyquist_ = sample_rate / 2.0f;
+        low_hz_ = scale == FrequencyScale::logarithmic ? 1.0 : 0.0;
+    }
+
+    /// Lowest frequency the double-precision mapping places at position 0.
+    /// `configure()` resets it to the float mapping's implicit floor (1 Hz for
+    /// logarithmic, 0 Hz otherwise); an offline renderer may raise it, for
+    /// example to the first non-DC bin so a log axis has no empty decades
+    /// below the data. Must be below Nyquist.
+    void set_low_frequency(double low_hz) {
+        low_hz_ = low_hz;
+    }
+    double low_frequency() const {
+        return low_hz_;
+    }
+
+    /// Map Hz to a normalized display position in double precision, honoring
+    /// `low_frequency()`: position 0 is the floor, 1 is Nyquist. Values outside
+    /// [floor, Nyquist] extrapolate so a caller can clamp or cull as it sees fit.
+    double hz_to_display(double hz) const {
+        const double lo = transform(low_hz_);
+        const double hi = transform(static_cast<double>(nyquist_));
+        if (!(hi > lo))
+            return 0.0;
+        return (transform(hz) - lo) / (hi - lo);
+    }
+
+    /// Inverse of the double-precision `hz_to_display`.
+    double display_to_hz(double pos) const {
+        const double lo = transform(low_hz_);
+        const double hi = transform(static_cast<double>(nyquist_));
+        return inverse(lo + pos * (hi - lo));
+    }
+
+    /// HTK mel scale, `2595 log10(1 + hz / 700)`, exact inverses of each other.
+    static double hz_to_mel(double hz) {
+        return 2595.0 * std::log10(1.0 + hz / 700.0);
+    }
+    static double mel_to_hz(double mel) {
+        return 700.0 * (std::pow(10.0, mel / 2595.0) - 1.0);
     }
 
     /// Map a frequency bin index to a normalized display position [0, 1].
@@ -187,6 +228,7 @@ private:
     FrequencyScale scale_ = FrequencyScale::logarithmic;
     int num_bins_ = 513;
     float nyquist_ = 22050.0f;
+    double low_hz_ = 1.0;
 
     static float hz_to_mel(float hz) {
         return 2595.0f * std::log10(1.0f + hz / 700.0f);
@@ -194,6 +236,33 @@ private:
 
     static float mel_to_hz(float mel) {
         return 700.0f * (std::pow(10.0f, mel / 2595.0f) - 1.0f);
+    }
+
+    // Axis transform for the double-precision mapping. log2 of a zero floor
+    // is clamped to the smallest normal so a misconfigured floor degrades to
+    // a very low frequency rather than -inf.
+    double transform(double hz) const {
+        switch (scale_) {
+        case FrequencyScale::linear:
+            return hz;
+        case FrequencyScale::logarithmic:
+            return std::log2(std::max(hz, 2.2250738585072014e-308));
+        case FrequencyScale::mel:
+            return hz_to_mel(std::max(hz, 0.0));
+        }
+        return hz;
+    }
+
+    double inverse(double value) const {
+        switch (scale_) {
+        case FrequencyScale::linear:
+            return value;
+        case FrequencyScale::logarithmic:
+            return std::exp2(value);
+        case FrequencyScale::mel:
+            return mel_to_hz(value);
+        }
+        return value;
     }
 };
 

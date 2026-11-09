@@ -1,0 +1,10 @@
+{
+ "name": "contributor-check",
+ "record": {
+  "entry": "tools/scripts/test_contributor_check.sh",
+  "inputs": [
+   "tools/scripts/test_contributor_check.sh"
+  ],
+  "kind": "shell"
+ }
+}

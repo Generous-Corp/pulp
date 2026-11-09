@@ -1,0 +1,10 @@
+{
+ "name": "control-authoring-examples",
+ "record": {
+  "entry": "test/test_control_authoring_examples.py",
+  "inputs": [
+   "test/test_control_authoring_examples.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,76 @@
+cmake_minimum_required(VERSION 3.24)
+if(NOT DEFINED PULP_BUILD_DIR OR NOT DEFINED PULP_SOURCE_DIR)
+    message(FATAL_ERROR "PULP_BUILD_DIR and PULP_SOURCE_DIR are required")
+endif()
+set(_root "${PULP_BUILD_DIR}/graph-control-event-probe-sdk")
+set(_prefix "${_root}/prefix")
+set(_source "${_root}/consumer")
+set(_build "${_root}/build")
+file(MAKE_DIRECTORY "${_source}")
+function(step label)
+    execute_process(COMMAND ${ARGN} WORKING_DIRECTORY "${_root}"
+        RESULT_VARIABLE _code OUTPUT_VARIABLE _out ERROR_VARIABLE _err TIMEOUT 240)
+    if(NOT label STREQUAL "install")
+        message(STATUS "${label} exit=${_code}\n${_out}\n${_err}")
+    endif()
+    if(NOT "${_code}" STREQUAL "0")
+        message(FATAL_ERROR "${label} failed: ${_err}")
+    endif()
+endfunction()
+execute_process(COMMAND "${CMAKE_COMMAND}" --install "${PULP_BUILD_DIR}" --prefix "${_prefix}" --config "${PULP_PARENT_BUILD_TYPE}" RESULT_VARIABLE _install)
+if(NOT _install EQUAL 0)
+    message(FATAL_ERROR "SDK install failed")
+endif()
+file(COPY "${PULP_SOURCE_DIR}/examples/graph-control-event-probe/CMakeLists.txt"
+     "${PULP_SOURCE_DIR}/examples/graph-control-event-probe/main.cpp" DESTINATION "${_source}")
+string(TOLOWER "${PULP_PARENT_BUILD_TYPE}" _build_type_lower)
+set(_consumer_cxx_flags "${PULP_PARENT_CXX_FLAGS}")
+set(_consumer_linker_flags "${PULP_PARENT_EXE_LINKER_FLAGS}")
+if(PULP_PARENT_INSTRUMENTATION_CXX_FLAGS)
+    string(APPEND _consumer_cxx_flags
+        " ${PULP_PARENT_INSTRUMENTATION_CXX_FLAGS}")
+endif()
+if(PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS)
+    string(APPEND _consumer_linker_flags
+        " ${PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS}")
+endif()
+string(STRIP "${_consumer_cxx_flags}" _consumer_cxx_flags)
+string(STRIP "${_consumer_linker_flags}" _consumer_linker_flags)
+set(_debug_sdk_arg)
+if(_build_type_lower STREQUAL "debug")
+    set(_debug_sdk_arg "-DPULP_ALLOW_DEBUG_SDK=ON")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${_source}" -B "${_build}" -G Ninja
+    "-DCMAKE_BUILD_TYPE=${PULP_PARENT_BUILD_TYPE}"
+    "-DCMAKE_CXX_COMPILER=${PULP_PARENT_CXX_COMPILER}"
+    "-DCMAKE_CXX_FLAGS=${_consumer_cxx_flags}"
+    "-DCMAKE_EXE_LINKER_FLAGS=${_consumer_linker_flags}"
+    "-DCMAKE_PREFIX_PATH=${_prefix}" "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
+    "-DCMAKE_OSX_ARCHITECTURES=${PULP_PARENT_OSX_ARCHITECTURES}"
+    "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}"
+    ${_debug_sdk_arg}
+    RESULT_VARIABLE _configure)
+if(NOT _configure EQUAL 0)
+    message(FATAL_ERROR "SDK consumer configure failed")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${_build}" RESULT_VARIABLE _build_result)
+if(NOT _build_result EQUAL 0)
+    message(FATAL_ERROR "SDK consumer build failed")
+endif()
+set(_expected_tests
+    graph-control-event-probe-consumer
+    graph-control-event-probe-planted-negative
+    graph-control-event-probe-event-planted-negative)
+execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}" -N
+    RESULT_VARIABLE _list_result OUTPUT_VARIABLE _list_output ERROR_VARIABLE _list_error)
+if(NOT _list_result EQUAL 0)
+    message(FATAL_ERROR "SDK consumer test discovery failed: ${_list_error}")
+endif()
+foreach(_test IN LISTS _expected_tests)
+    string(FIND "${_list_output}" "${_test}" _test_offset)
+    if(_test_offset LESS 0)
+        message(FATAL_ERROR "SDK consumer did not register ${_test}:\n${_list_output}")
+    endif()
+    step("${_test}" "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}"
+         --output-on-failure -R "^${_test}$")
+endforeach()

@@ -1,0 +1,18 @@
+{
+ "name": "pulp-test-widget-bridge-no-gpu-gates",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_widget_bridge_no_gpu_gates.cpp"
+  ],
+  "inputs": [
+   "core/view/src/widget_bridge.cpp"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_widget_bridge_no_gpu_gates.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

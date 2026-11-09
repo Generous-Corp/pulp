@@ -1,0 +1,11 @@
+{
+ "name": "gates-sh-fail-flag-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gates_lint_blocks.py",
+  "inputs": [
+   "tools/scripts/gates.sh",
+   "tools/scripts/test_gates_lint_blocks.py"
+  ],
+  "kind": "python"
+ }
+}

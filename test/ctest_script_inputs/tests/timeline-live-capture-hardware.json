@@ -1,0 +1,10 @@
+{
+ "name": "timeline-live-capture-hardware",
+ "record": {
+  "entry": "tools/scripts/verify_timeline_live_capture.py",
+  "inputs": [
+   "tools/scripts/verify_timeline_live_capture.py"
+  ],
+  "kind": "python"
+ }
+}

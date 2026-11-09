@@ -345,7 +345,36 @@ def build_surface_document(
         if include in removed and removed[include]["last_fingerprint"] != fingerprint:
             problems.append(f"surface tombstone fingerprint does not match baseline: {include}")
 
-    counts = {name: 0 for name in sorted(DISPOSITIONS)}
+    document = assemble_surface_document(records, removed.values(), inventory_version)
+    return document, problems
+
+
+def assemble_surface_document(
+    records: Any, tombstones: Any, inventory_version: int
+) -> dict[str, Any]:
+    """The committed ledger: one line-stable record per header, no aggregates.
+
+    Totals are deliberately not committed. Two branches that each add a header
+    would both rewrite the same total lines, so the second to land conflicted
+    (or, when both wrote the same number, merged cleanly to a wrong total).
+    Every total is a pure function of `headers`; read it from
+    `surface_counts()` instead.
+    """
+    return {
+        "$schema": "agent-capability-surface.schema.json",
+        "schema": SURFACE_SCHEMA,
+        "inventory_version": inventory_version,
+        "fingerprint_algorithm": "sha256-file-bytes",
+        "coverage_state": "partial",
+        "roots": [dict(item) for item in PUBLIC_ROOTS],
+        "headers": sorted(records, key=lambda item: item["include"]),
+        "tombstones": sorted(tombstones, key=lambda item: item["include"]),
+    }
+
+
+def surface_counts(headers: list[dict[str, Any]]) -> dict[str, Any]:
+    """Header totals by disposition and domain, derived from the ledger rows."""
+    by_disposition = {name: 0 for name in sorted(DISPOSITIONS)}
     by_domain: dict[str, dict[str, int]] = {}
     for domain in [root_["domain"] for root_ in PUBLIC_ROOTS] + [REVIEWED_HOST_DOMAIN]:
         by_domain[domain] = {
@@ -354,8 +383,8 @@ def build_surface_document(
             "legacy_unreviewed_headers": 0,
             "unsupported_headers": 0,
         }
-    for record in records:
-        counts[record["disposition"]] += 1
+    for record in headers:
+        by_disposition[record["disposition"]] += 1
         domain_counts = by_domain[record["domain"]]
         domain_counts["public_headers"] += 1
         if record["disposition"] == "legacy_unreviewed":
@@ -364,26 +393,14 @@ def build_surface_document(
             domain_counts["reviewed_headers"] += 1
         if record["disposition"] == "unsupported_capability":
             domain_counts["unsupported_headers"] += 1
-
-    document = {
-        "$schema": "agent-capability-surface.schema.json",
-        "schema": SURFACE_SCHEMA,
-        "inventory_version": inventory_version,
-        "fingerprint_algorithm": "sha256-file-bytes",
-        "coverage_state": "partial",
-        "roots": [dict(item) for item in PUBLIC_ROOTS],
-        "counts": {
-            "public_headers": len(records),
-            "reviewed_headers": len(records) - counts["legacy_unreviewed"],
-            "legacy_unreviewed_headers": counts["legacy_unreviewed"],
-            "unsupported_headers": counts["unsupported_capability"],
-            "by_disposition": counts,
-            "by_domain": by_domain,
-        },
-        "headers": records,
-        "tombstones": sorted(removed.values(), key=lambda item: item["include"]),
+    return {
+        "public_headers": len(headers),
+        "reviewed_headers": len(headers) - by_disposition["legacy_unreviewed"],
+        "legacy_unreviewed_headers": by_disposition["legacy_unreviewed"],
+        "unsupported_headers": by_disposition["unsupported_capability"],
+        "by_disposition": by_disposition,
+        "by_domain": by_domain,
     }
-    return document, problems
 
 
 def rendered(document: dict[str, Any]) -> str:

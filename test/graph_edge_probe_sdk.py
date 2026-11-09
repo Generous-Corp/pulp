@@ -67,6 +67,42 @@ def main():
         assert mirrored == report, (mirrored, report)
 
     compare(base, rows=expected)
+    event_base = dict(base, source_node='notes', destination_node='notes-out', edge_kind='event')
+    compare_event = dict(event_base)
+    cli = run([args.cli, 'graph', 'probe', compare_event['path'], '--json',
+               '--input', compare_event['input'], '--source-node', compare_event['source_node'],
+               '--source-port', compare_event['source_port'],
+               '--destination-node', compare_event['destination_node'],
+               '--destination-port', compare_event['destination_port'], '--edge-kind', 'event'], directory)
+    assert cli.returncode == 0, (cli.returncode, cli.stderr, cli.stdout)
+    event_report = json.loads(cli.stdout)
+    assert event_report['code'] == 'Attached' and event_report['edge_kind'] == 'event', event_report
+    assert event_report['observation'] == 'events_before_destination_consumer', event_report
+    assert len(event_report['records']) == 3, event_report
+    assert [row['payload_count'] for row in event_report['records']] == [1, 0, 0], event_report
+    assert [row['timestamp_samples'] for row in event_report['records']] == [0, 64, 128], event_report
+    assert all(row['kind'] == 2 and row['edge_index'] == 3 for row in event_report['records']), event_report
+    event_request = dict(jsonrpc='2.0', id=3, method='tools/call',
+                         params=dict(name='pulp_graph', arguments=event_base))
+    event_mcp = run([args.mcp], directory, json.dumps(event_request) + '\n')
+    assert event_mcp.returncode == 0, event_mcp.stderr
+    event_response = next(json.loads(line) for line in event_mcp.stdout.splitlines()
+                          if json.loads(line).get('id') == 3)['result']
+    assert not event_response.get('isError', False), event_response
+    assert json.loads(event_response['content'][0]['text'])['edge_kind'] == 'event', event_response
+    # Control selection is a distinct CLI/MCP argument pair even when this
+    # offline fixture has no plugin parameter destination. Exercise the same
+    # parser and schema path and require the typed missing-edge refusal rather
+    # than silently falling back to an audio probe.
+    control_request = dict(jsonrpc='2.0', id=4, method='tools/call',
+                           params=dict(name='pulp_graph', arguments=dict(
+                               base, edge_kind='control', destination_param=7)))
+    control_mcp = run([args.mcp], directory, json.dumps(control_request) + '\n')
+    assert control_mcp.returncode == 0, control_mcp.stderr
+    control_response = next(json.loads(line) for line in control_mcp.stdout.splitlines()
+                            if json.loads(line).get('id') == 4)['result']
+    assert control_response.get('isError', False), control_response
+    assert 'MissingEdge' in control_response['content'][0]['text'], control_response
     introspection = dict(base, plan=True, latency=True)
     compare(introspection, rows=expected)
     report = json.loads(run([args.cli, 'graph', 'probe', introspection['path'], '--json',

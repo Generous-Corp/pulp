@@ -1,0 +1,10 @@
+{
+ "name": "gpu-fault-hooks-release-gate-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gpu_fault_hooks_release_gate.py",
+  "inputs": [
+   "tools/scripts/test_gpu_fault_hooks_release_gate.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "name": "lane-reuse-record-selftest",
+ "record": {
+  "entry": "tools/ci/test_lane_reuse_record.py",
+  "inputs": [
+   "tools/ci/lane_reuse_record.py",
+   "tools/ci/test_lane_reuse_record.py"
+  ],
+  "kind": "python"
+ }
+}

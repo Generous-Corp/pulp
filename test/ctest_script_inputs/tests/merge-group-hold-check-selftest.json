@@ -1,0 +1,15 @@
+{
+ "name": "merge-group-hold-check-selftest",
+ "record": {
+  "entry": "tools/ci/test_merge_group_hold_check.py",
+  "inputs": [
+   ".github/workflows/build.yml",
+   "tools/ci/fixtures/merge_group_hold/pr-10114-verdicts.json",
+   "tools/ci/merge_group_hold_check.py",
+   "tools/ci/merge_queue_fixture.py",
+   "tools/ci/test_merge_group_hold_check.py",
+   "tools/scripts/resolve_classify_base.py"
+  ],
+  "kind": "python"
+ }
+}
