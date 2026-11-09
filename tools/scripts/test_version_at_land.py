@@ -2343,6 +2343,25 @@ class CapabilityCounterAssignTest(unittest.TestCase):
                 self.assertEqual(val.paths_outside_writer_allowlist(
                     load_config(Path(__file__).with_name("versioning.json")), [entry, meta]), [])
 
+    def test_an_assignment_that_rewrites_a_header_record_is_discarded(self):
+        """Drift on main is not the bump's to carry: the counters stay pending."""
+        record = "docs/status/agent-capability-surface/headers/pulp/a.hpp.json"
+        self.r.write(record, '{"fingerprint": "old"}\n')
+        self.r.commit("seed a header record")
+        self.r.write(val.CAPABILITY_SCRIPT,
+                     "import pathlib\n"
+                     f"pathlib.Path({self.SNAPSHOT!r}).write_text('{{\"manifest_revision\": 2}}\\n')\n"
+                     f"pathlib.Path({record!r}).write_text('{{\"fingerprint\": \"new\"}}\\n')\n")
+        self.r.commit("install stub that also rewrites a record")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            edited = val._write_plan(self.repo, CONFIG, self._sdk())
+        self.assertNotIn(self.SNAPSHOT, edited)
+        self.assertNotIn(record, edited)
+        self.assertIn('"old"', (self.repo / record).read_text(encoding="utf-8"))
+        self.assertIn('"manifest_revision": 1', (self.repo / self.SNAPSHOT).read_text(encoding="utf-8"))
+        self.assertIn("also rewrote " + record, err.getvalue())
+
     def test_control_a_bump_without_capability_edits_carries_no_skill_trailer(self):
         message = val._bump_message(self._sdk(), "a" * 40, "b" * 40, ["CMakeLists.txt"])
         self.assertNotIn("Skill-Update", message)

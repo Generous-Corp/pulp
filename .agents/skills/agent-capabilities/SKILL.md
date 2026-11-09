@@ -74,7 +74,10 @@ updated to the directories.
   directory holds the same bytes the single file did. A state is recorded by
   adding one file; no file is ever modified. Two states recorded after the
   same tip (a fork) merge without a conflict; `--check` reports
-  `capability history forks after <digest>` and `--write` re-chains them.
+  `capability history forks after <digest>`. On a branch, keep the base's
+  entries and drop your own (`agent_capability_store.py reset origin/main`,
+  then `agent_capability_rederive.py`); a bare `--write` orders the two sides by
+  digest, not by which is the base, and the append-only check then refuses it.
 - **Reset to a base with the store, not a checkout.** `git checkout origin/main
   -- docs/status/agent-capability-surface` keeps any record the base lacks.
   `python3 tools/scripts/agent_capability_store.py reset origin/main` makes both

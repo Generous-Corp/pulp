@@ -586,24 +586,42 @@ def _fold_migration_notes(repo: Path, plan: list[Assignment]) -> list[str]:
         return []
 
 
-# What `agent_capability_manifest.py --assign-pending` rewrites: the counter
-# constants and the generated records that carry them. The surface ledger's
-# counter lives in its meta file; an assignment adds one history entry file.
+# What `agent_capability_manifest.py --assign-pending` may rewrite: the counter
+# constants, the installed snapshot, the surface ledger's meta file (which holds
+# its counter), and new history entry files. Matched as fnmatch globs.
 CAPABILITY_SCRIPT = "tools/scripts/agent_capability_manifest.py"
 CAPABILITY_ASSIGNED_PATHS = (
     CAPABILITY_SCRIPT,
     "docs/status/agent-capabilities.json",
     "docs/status/agent-capability-surface/meta.json",
-    "tools/agent-capabilities/history",
+    "tools/agent-capabilities/history/*.json",
 )
-# Directories among CAPABILITY_ASSIGNED_PATHS whose new, untracked files a
-# failed assignment must remove as well as restore.
-CAPABILITY_ASSIGNED_DIRECTORIES = ("tools/agent-capabilities/history",)
+# Everything a capability `--write` can touch. An assignment that moved any of
+# these outside CAPABILITY_ASSIGNED_PATHS found drift on main (a header record
+# or fingerprint the tree no longer matches), which is not the bump's to carry:
+# it is discarded and the counters stay pending.
+CAPABILITY_RECORD_PATHS = (
+    CAPABILITY_SCRIPT,
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface",
+    "tools/agent-capabilities/history",
+    "tools/agent-capabilities/fingerprints",
+    "test/test_agent_capability_compile.cpp",
+)
 
 
 # --assign-pending regenerates the manifest, surface ledger and history, which
 # takes seconds; a hung run must not hold the bump that releases everything else.
 CAPABILITY_ASSIGN_TIMEOUT_SECS = 300
+
+
+def _restore_capability_records(repo: Path) -> None:
+    """Put every capability record back as HEAD has it, new files included."""
+    # One path at a time: a pathspec the tree does not track would make a
+    # combined checkout restore nothing.
+    for path in CAPABILITY_RECORD_PATHS:
+        subprocess.run(["git", "checkout", "--", path], cwd=repo, capture_output=True)
+        subprocess.run(["git", "clean", "-fq", "--", path], cwd=repo, capture_output=True)
 
 
 def _assign_capability_counters(repo: Path, plan: list[Assignment]) -> list[str]:
@@ -627,17 +645,23 @@ def _assign_capability_counters(repo: Path, plan: list[Assignment]) -> list[str]
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
         print(f"version-at-land: could not assign pending capability counters; "
               f"they stay pending{_failure_tail(error)}", file=sys.stderr)
-        # One path at a time: a pathspec the tree does not track would make a
-        # combined checkout restore nothing.
-        for path in CAPABILITY_ASSIGNED_PATHS:
-            subprocess.run(["git", "checkout", "--", path], cwd=repo, capture_output=True)
-        for path in CAPABILITY_ASSIGNED_DIRECTORIES:
-            subprocess.run(["git", "clean", "-fq", "--", path], cwd=repo, capture_output=True)
+        _restore_capability_records(repo)
         return []
-    moved = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all", "--",
-                            *CAPABILITY_ASSIGNED_PATHS],
-                           cwd=repo, capture_output=True, text=True, encoding="utf-8").stdout
-    return [line[3:] for line in moved.splitlines() if line.strip()]
+    status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all", "--",
+                             *CAPABILITY_RECORD_PATHS],
+                            cwd=repo, capture_output=True, text=True, encoding="utf-8").stdout
+    moved = [line[3:] for line in status.splitlines() if line.strip()]
+    stray = [path for path in moved
+             if not any(fnmatch.fnmatchcase(path, pattern) for pattern in CAPABILITY_ASSIGNED_PATHS)]
+    if stray:
+        print("version-at-land: could not assign pending capability counters; they stay "
+              "pending: the assignment also rewrote " + ", ".join(sorted(stray)[:5])
+              + (" ..." if len(stray) > 5 else "")
+              + ", which means main's capability records are not fresh "
+              "(run agent_capability_manifest.py --check on main)", file=sys.stderr)
+        _restore_capability_records(repo)
+        return []
+    return moved
 
 
 def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]:

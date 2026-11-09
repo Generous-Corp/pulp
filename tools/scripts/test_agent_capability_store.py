@@ -193,7 +193,7 @@ class LosslessTests(unittest.TestCase):
             git(root, "commit", "-qm", "base in the single-file layout")
             store.migrate(root)
             extra = root / store.SURFACE_DIR / "headers/pulp/audio/zz_extra.hpp.json"
-            extra.write_text("{}\n")
+            extra.write_text("{}\n", encoding="utf-8")
             # A checkout of the base would keep the extra record; the reset does not.
             store.reset_to(root, "HEAD")
             self.assertFalse(extra.exists())
@@ -212,9 +212,10 @@ class CanonicalTests(unittest.TestCase):
             store.replace_directory(root, store.SURFACE_DIR, store.split_surface(document))
             self.assertEqual(store.layout_problems(root, document, None, None), [])
             first = sorted((root / store.SURFACE_DIR / "headers").rglob("*.json"))[0]
-            first.write_text(json.dumps(json.loads(first.read_text()), indent=4) + "\n")
-            (root / store.SURFACE_DIR / "headers/pulp/extra.hpp.json").write_text("{}\n")
-            (root / store.SURFACE_LEGACY).write_text("{}\n")
+            first.write_text(json.dumps(json.loads(first.read_text(encoding="utf-8")), indent=4) + "\n",
+                             encoding="utf-8")
+            (root / store.SURFACE_DIR / "headers/pulp/extra.hpp.json").write_text("{}\n", encoding="utf-8")
+            (root / store.SURFACE_LEGACY).write_text("{}\n", encoding="utf-8")
             problems = "\n".join(store.layout_problems(root, document, None, None))
             self.assertIn("is not in its rendered form", problems)
             self.assertIn("extra.hpp.json is not part of the generated record", problems)
@@ -276,14 +277,14 @@ class TransactionTests(unittest.TestCase):
             fragments = root / "records"
             stale = fragments / "headers/pulp/old/gone.hpp.json"
             stale.parent.mkdir(parents=True)
-            stale.write_text("{}\n")
+            stale.write_text("{}\n", encoding="utf-8")
             fresh = fragments / "headers/pulp/newdomain/first.hpp.json"
             single = root / "snapshot.json"
             transaction.write_transaction(
                 {fresh: "new\n", single: "snapshot\n"}, root / "journal.json", root=root,
                 removals=[stale], allowed_directories=[fragments])
-            self.assertEqual(fresh.read_text(), "new\n")
-            self.assertEqual(single.read_text(), "snapshot\n")
+            self.assertEqual(fresh.read_text(encoding="utf-8"), "new\n")
+            self.assertEqual(single.read_text(encoding="utf-8"), "snapshot\n")
             self.assertFalse(stale.exists())
             self.assertFalse((root / "journal.json").exists())
 
@@ -295,22 +296,102 @@ class TransactionTests(unittest.TestCase):
             fragments = root / "records"
             fragments.mkdir()
             victim = root / "keep.txt"
-            victim.write_text("keep\n")
+            victim.write_text("keep\n", encoding="utf-8")
             journal = root / "journal.json"
             journal.write_text(json.dumps({"schema": transaction.TRANSACTION_SCHEMA, "entries": [
-                {"target": str(fragments / ".." / "keep.txt"), "remove": "yes"}]}))
+                {"target": str(fragments / ".." / "keep.txt"), "remove": "yes"}]}), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "do not match generated outputs"):
                 transaction.recover_transaction(journal, [], root=root,
                                                 allowed_directories=[fragments])
-            self.assertEqual(victim.read_text(), "keep\n")
+            self.assertEqual(victim.read_text(encoding="utf-8"), "keep\n")
             # Control: the same removal inside the directory is honoured.
             inside = fragments / "x.json"
-            inside.write_text("{}\n")
+            inside.write_text("{}\n", encoding="utf-8")
             journal.write_text(json.dumps({"schema": transaction.TRANSACTION_SCHEMA, "entries": [
-                {"target": str(inside), "remove": "yes"}]}))
+                {"target": str(inside), "remove": "yes"}]}), encoding="utf-8")
             self.assertTrue(transaction.recover_transaction(journal, [], root=root,
                                                             allowed_directories=[fragments]))
             self.assertFalse(inside.exists())
+
+
+class SymlinkTransactionTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
+    def test_a_removal_through_a_symlinked_subdirectory_is_refused(self) -> None:
+        import agent_capability_transaction as transaction
+
+        with tempfile.TemporaryDirectory(prefix="pulp-capability-txn-") as temp:
+            base = pathlib.Path(temp).resolve()
+            root = base / "repo"
+            fragments = root / "records"
+            fragments.mkdir(parents=True)
+            outside = base / "outside"
+            outside.mkdir()
+            (outside / "x.json").write_text("keep\n", encoding="utf-8")
+            (fragments / "sub").symlink_to(outside, target_is_directory=True)
+            journal = root / "journal.json"
+            journal.write_text(json.dumps({"schema": transaction.TRANSACTION_SCHEMA, "entries": [
+                {"target": str(fragments / "sub" / "x.json"), "remove": "yes"}]}), encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                transaction.recover_transaction(journal, [], root=root,
+                                                allowed_directories=[fragments])
+            self.assertEqual((outside / "x.json").read_text(encoding="utf-8"), "keep\n")
+
+
+class CatalogLiteralMigrationTests(unittest.TestCase):
+    """--migrate-fingerprints moves every literal layout and refuses a disagreement."""
+
+    DIGEST_A = "sha256:" + "a" * 64
+    DIGEST_B = "sha256:" + "b" * 64
+    SOURCE = (
+        'EXPORTS = [\n'
+        '    binding(\n'
+        '        include="pulp/x/own_line.hpp",\n'
+        '        target="T",\n'
+        f'        header_fingerprint="{DIGEST_A}",\n'
+        '    ),\n'
+        '    binding(include="pulp/x/wrapped.hpp", target="T",\n'
+        '            header_fingerprint=(\n'
+        f'                "{DIGEST_B}"\n'
+        '            ),\n'
+        '            address_expression="&x"),\n'
+        f'    [binding(include="pulp/x/closer.hpp", target="T", header_fingerprint="{DIGEST_A}")],\n'
+        ']\n'
+    )
+
+    def _root(self, temp: str, source: str) -> pathlib.Path:
+        root = pathlib.Path(temp)
+        write_files(root, {"tools/scripts/agent_capability_catalog_x.py": source})
+        return root
+
+    def test_every_layout_moves_and_the_rewrite_is_well_formed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pulp-capability-literals-") as temp:
+            root = self._root(temp, self.SOURCE)
+            rewritten, merged, problems = fingerprints.migrate_catalog_literals(root, {})
+            self.assertEqual(problems, [])
+            self.assertEqual(merged, {"pulp/x/own_line.hpp": self.DIGEST_A,
+                                      "pulp/x/wrapped.hpp": self.DIGEST_B,
+                                      "pulp/x/closer.hpp": self.DIGEST_A})
+            (text,) = rewritten.values()
+            self.assertNotIn("header_fingerprint", text)
+            self.assertIn('address_expression="&x"', text)
+            self.assertIn('target="T")],', text)
+            compile(text, "catalog", "exec")
+
+    def test_a_literal_that_disagrees_with_its_fragment_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pulp-capability-literals-") as temp:
+            root = self._root(temp, self.SOURCE)
+            _, _, problems = fingerprints.migrate_catalog_literals(
+                root, {"pulp/x/wrapped.hpp": self.DIGEST_A})
+            self.assertTrue(any("disagrees with its fragment" in p for p in problems), problems)
+
+    def test_a_form_feed_before_a_literal_does_not_shift_the_cut(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pulp-capability-literals-") as temp:
+            root = self._root(temp, "# page\x0cbreak\n" + self.SOURCE)
+            rewritten, merged, problems = fingerprints.migrate_catalog_literals(root, {})
+            self.assertEqual(problems, [])
+            (text,) = rewritten.values()
+            self.assertNotIn("header_fingerprint", text)
+            compile(text, "catalog", "exec")
 
 
 def _add_header(document: dict, include: str) -> dict:
@@ -402,16 +483,15 @@ class DisjointTests(unittest.TestCase):
             merged = git(root, "merge-tree", "--write-tree", "a", "b", check=False)
             self.assertEqual(merged.returncode, 0, merged.stdout)
             merged_tree = merged.stdout.split()[0]
-            git(root, "checkout", "-q", "--detach", "a")
-            git(root, "read-tree", "-u", "--reset", merged_tree)
-            joined = store.load_surface(root)
+            joined = store.join_surface(store.ref_files(root, merged_tree, store.SURFACE_DIR))
             includes = {row["include"] for row in joined["headers"]}
             self.assertTrue({self.INCLUDE_A, self.INCLUDE_B} <= includes)
-            self.assertEqual(set(store.load_fingerprints(root)),
-                             set(a[2]) | set(b[2]))
-            # Both branches recorded a state after the same tip; the merge holds
-            # both, reports the fork, and the next --write re-chains it.
-            _, problems = store.join_history(store.read_dir(root / store.HISTORY_DIR))
+            self.assertEqual(
+                set(store.join_fingerprints(store.ref_files(root, merged_tree, store.FINGERPRINT_DIR))),
+                set(a[2]) | set(b[2]))
+            # Both branches recorded a state after the same tip; the merged tree
+            # holds both and reports the fork rather than hiding one of them.
+            _, problems = store.join_history(store.ref_files(root, merged_tree, store.HISTORY_DIR))
             self.assertEqual(len(problems), 1, problems)
 
     def test_the_same_two_branches_conflict_in_the_single_file_layout(self) -> None:

@@ -1210,6 +1210,7 @@ def accept_fingerprints(root: pathlib.Path, includes: list[str]) -> int:
         reviewed = reviewed_fingerprints(root)
     except RuntimeError as error:
         return _print_problems([str(error)])
+    headers: dict[str, pathlib.Path] = {}
     for include in includes:
         if include not in named:
             problems.append(f"no capability binding names {include}; add the binding first")
@@ -1218,6 +1219,11 @@ def accept_fingerprints(root: pathlib.Path, includes: list[str]) -> int:
         if header is None:
             problems.append(f"binding header {include} must resolve exactly once under core/*/include")
             continue
+        headers[include] = header
+    if problems:
+        # Nothing is recorded unless every named header can be.
+        return _print_problems(problems)
+    for include, header in headers.items():
         value = surface.file_fingerprint(header)
         path = root / store.fingerprint_path(include)
         previous = reviewed.get(include)
@@ -1225,8 +1231,6 @@ def accept_fingerprints(root: pathlib.Path, includes: list[str]) -> int:
         path.write_text(store.fingerprint_text(include, value), encoding="utf-8")
         state = "unchanged" if previous == value else f"was {previous}" if previous else "new"
         print(f"agent-capabilities: {store.fingerprint_path(include)} = {value} ({state})")
-    if problems:
-        return _print_problems(problems)
     print("agent-capabilities: rerun --write to refresh the generated records")
     return 0
 

@@ -267,7 +267,10 @@ def join_history(files: dict[str, str]) -> tuple[dict[str, Any], list[str]]:
 
     A fork (two entries naming the same parent, which two branches that each
     record a state against one base produce) is not fatal here: the entries are
-    ordered deterministically, the fork is reported, and `--write` re-chains it.
+    ordered deterministically and the fork is reported.
+    The order follows sibling digests, not which side is the protected base,
+    so a forked history is reported rather than trusted; the fix is a reset to
+    the base and a re-derive, never a hand merge.
     Anything that cannot be ordered at all raises StoreError."""
     entries: dict[str, dict[str, Any]] = {}
     for rel in sorted(files):
@@ -307,7 +310,10 @@ def join_history(files: dict[str, str]) -> tuple[dict[str, Any], list[str]]:
         raise StoreError("history entries do not form one chain from its first entry")
     problems = [
         f"capability history forks after {parent}: {', '.join(sorted(kids))} share that "
-        "parent; run tools/scripts/agent_capability_manifest.py --write to re-chain it"
+        "parent. On a branch, keep the base's entries and drop your own: "
+        "`agent_capability_store.py reset origin/main`, then "
+        "`agent_capability_rederive.py`, which records the branch's state once after "
+        "the base's tip"
         for parent, kids in sorted(children.items(), key=lambda item: str(item[0]))
         if len(kids) > 1
     ]
@@ -373,7 +379,10 @@ def join_fingerprints(files: dict[str, str]) -> dict[str, str]:
 
 
 def load_fingerprints(root: pathlib.Path) -> dict[str, str]:
-    return join_fingerprints(read_dir(pathlib.Path(root) / FINGERPRINT_DIR))
+    try:
+        return join_fingerprints(read_dir(pathlib.Path(root) / FINGERPRINT_DIR))
+    except UnicodeDecodeError as error:
+        raise StoreError(f"{FINGERPRINT_DIR}: {error}") from error
 
 
 # ── Working tree ────────────────────────────────────────────────────────────
@@ -399,7 +408,7 @@ def load_surface(root: pathlib.Path) -> Any:
     if directory.is_dir():
         try:
             return join_surface(read_dir(directory))
-        except StoreError as error:
+        except (StoreError, UnicodeDecodeError) as error:
             return _invalid(error)
     return _load_legacy(pathlib.Path(root) / SURFACE_LEGACY)
 
@@ -410,7 +419,7 @@ def load_history(root: pathlib.Path) -> Any:
     if directory.is_dir():
         try:
             return join_history(read_dir(directory))[0]
-        except StoreError as error:
+        except (StoreError, UnicodeDecodeError) as error:
             return _invalid(error)
     return _load_legacy(pathlib.Path(root) / HISTORY_LEGACY)
 

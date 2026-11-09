@@ -67,9 +67,11 @@ def claims(exports: Iterable[dict[str, Any]], fingerprints: dict[str, str]) -> l
 
 def _offsets(text: str) -> list[int]:
     """Character offset of the start of each 1-based line."""
+    # Split on "\n" only: ast counts lines that way, while str.splitlines
+    # also breaks on form feeds and Unicode separators.
     starts = [0, 0]
-    for line in text.splitlines(keepends=True):
-        starts.append(starts[-1] + len(line))
+    for line in text.split("\n")[:-1]:
+        starts.append(starts[-1] + len(line) + 1)
     return starts
 
 

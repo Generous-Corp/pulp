@@ -33,7 +33,6 @@
         "docs/status/agent-capabilities.json",
         "docs/status/agent-capabilities.schema.json",
         "docs/status/agent-capability-handoff.schema.json",
-        "docs/status/agent-capability-surface.json",
         "docs/status/agent-capability-surface/**",
         "docs/status/agent-capability-surface.schema.json",
         "docs/status/authority-navigation.json",

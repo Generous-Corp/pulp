@@ -369,7 +369,7 @@ def _restore_generated_artifacts(
         return restored
     completed = subprocess.run(
         ["git", "checkout", tip, "--", str(history.SNAPSHOT)],
-        cwd=root, capture_output=True, text=True,
+        cwd=root, capture_output=True, text=True, encoding="utf-8",
     )
     if completed.returncode == 0:
         restored.append(str(history.SNAPSHOT))

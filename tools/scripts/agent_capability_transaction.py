@@ -185,7 +185,16 @@ def recover_transaction(
     # Avoid zip(strict=...) so the recovery path also works with Pulp's
     # supported Python 3.9 tooling runtime.
     for entry, target in zip(entries, actual):
+        # The journal lives in the working tree, so re-validate every target:
+        # a parent that now resolves elsewhere (a symlinked subdirectory) must
+        # not redirect a replacement or a removal out of the repository.
+        if target.parent.exists() and _validated_target(target, root) != target:
+            raise RuntimeError(f"capability write transaction target moved: {target}")
         if "remove" in entry:
+            if not any(directory in target.parent.resolve().parents
+                       or directory == target.parent.resolve() for directory in directories) \
+                    and target not in expected_target_set:
+                raise RuntimeError(f"capability removal escapes its directory: {target}")
             continue
         staged = pathlib.Path(entry["staged"])
         prefix = f".{target.name}."
