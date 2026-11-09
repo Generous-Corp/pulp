@@ -254,6 +254,74 @@ run_gate_captured "$2" -c \
             print("FAIL: captured gate logs were not cleaned on exit", file=sys.stderr)
             return 1
 
+    # A failing gate must be NAMED in the closing summary, not only buried in
+    # the replayed output above it.
+    with tempfile.TemporaryDirectory(prefix="pulp-prepush-summary-test-") as temp:
+        gate_dir = Path(temp) / "gates"
+        noisy = Path(temp) / "format_changed_stub.py"
+        noisy.write_text(
+            "import sys\n"
+            "for i in range(300):\n"
+            "    print(f'ok: gate {i} passed', file=sys.stderr)\n"
+            "print('format_changed: touched lines are not clang-format clean', file=sys.stderr)\n"
+            "print('  Fix: tools/scripts/format_changed.sh', file=sys.stderr)\n"
+            "sys.exit(1)\n",
+            encoding="utf-8",
+        )
+        quiet = Path(temp) / "skipped_lane_stub.py"
+        quiet.write_text("import sys\nsys.exit(4)\n", encoding="utf-8")
+        summary_script = f"""
+set -u
+PREPUSH_GATE_LOG_DIR={str(gate_dir)!r}
+mkdir -p "$PREPUSH_GATE_LOG_DIR"
+trap 'rm -rf -- "$PREPUSH_GATE_LOG_DIR"' EXIT
+source "$1"
+fail=0
+run_gate_captured "$2" "$3"; rc=$?
+[ "$rc" -eq 0 ] || prepush_fail
+# A gate that exits non-zero but that the hook does not treat as a failure
+# (a skipped lane) is not named: the hook never calls prepush_fail for it.
+run_gate_captured "$2" "$4"; rc=$?
+echo "fail=$fail"
+prepush_print_failed_gates
+"""
+        summary = subprocess.run(
+            ("bash", "-c", summary_script, "gate-output-test", str(GATE_OUTPUT_HELPER),
+             sys.executable, str(noisy), str(quiet)),
+            text=True, capture_output=True, check=False, timeout=30,
+        )
+        tail = summary.stderr.splitlines()[-4:]
+        if "fail=1" not in summary.stdout:
+            print("FAIL: prepush_fail did not mark the push as failing", file=sys.stderr)
+            return 1
+        if not any("FAILED GATE(S)" in line for line in tail + summary.stderr.splitlines()[-6:]):
+            print("FAIL: the closing summary does not list the failed gates", file=sys.stderr)
+            return 1
+        named = [line for line in summary.stderr.splitlines()
+                 if line.startswith("[pre-push]   - ")]
+        if len(named) != 1 or "format_changed_stub.py (exit 1)" not in named[0] \
+                or "not clang-format clean" not in named[0] \
+                or "Fix: tools/scripts/format_changed.sh" not in named[0]:
+            print(f"FAIL: summary did not name the failing gate and why: {named!r}", file=sys.stderr)
+            return 1
+        if "skipped_lane_stub" in "".join(named):
+            print("FAIL: a gate the hook did not fail was named as failed", file=sys.stderr)
+            return 1
+        # The summary is the LAST thing printed, so it is not 300 lines up.
+        if summary.stderr.splitlines().index(named[0]) < len(summary.stderr.splitlines()) - 4:
+            print("FAIL: the failed-gate summary is not at the end of the output", file=sys.stderr)
+            return 1
+
+    # No bare `fail=1` may remain in the hook: every failure site goes through
+    # prepush_fail so it is named. A new one added the old way would bring the
+    # unnamed "gate failure(s) above" verdict back.
+    bare = [line for line in prepush_source.splitlines()
+            if "fail=1" in line.replace("diff_cover_failed=1", "").replace("compat_flip_failed=1", "")
+            and not line.lstrip().startswith("#")]
+    if bare:
+        print(f"FAIL: pre-push has failure sites that bypass prepush_fail: {bare[:3]!r}", file=sys.stderr)
+        return 1
+
     print("prepush-gate-output: ok")
     return 0
 
