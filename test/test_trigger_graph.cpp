@@ -245,6 +245,35 @@ TEST_CASE("Host ingress projection refusal seals the active block",
     CHECK(fixture.graph.process_checked(block.out, block.in, 1) == TriggerGraphResult::Accepted);
 }
 
+TEST_CASE("Host ingress refuses a render-size mismatch without dropping future records",
+          "[trigger][g5][host-ingress][negative-control]") {
+    Fixture fixture{2, 8, true};
+    Block block;
+    HostEventRecord event;
+    event.epoch = 1;
+    event.absolute_sample = 6;
+    event.producer_sequence = 1;
+    event.producer = fixture.producer;
+    event.midi = pulp::midi::MidiEvent::note_on(1, 60, 100);
+
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 8) == HostEventResult::Accepted);
+    REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 4) ==
+          TriggerGraphResult::ProcessingFailure);
+
+    // The mismatched render must leave the record staged. Re-open the same
+    // eight-frame window and prove the original absolute offset is delivered.
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 8) == HostEventResult::Accepted);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 8) ==
+            TriggerGraphResult::Accepted);
+    pulp::midi::MidiBuffer delivered;
+    delivered.reserve(4);
+    delivered.set_realtime_capacity_limit(true);
+    REQUIRE(fixture.graph.extract_midi(fixture.midi_out, delivered));
+    REQUIRE(delivered.size() == 1);
+    CHECK(delivered[0].sample_offset == 6);
+}
+
 TEST_CASE("Host ingress preflights MPE fanout and retries without tracker mutation",
           "[trigger][g5][host-ingress][mpe][negative-control]") {
     Fixture fixture{2, 8, true};

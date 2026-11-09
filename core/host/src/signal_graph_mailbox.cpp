@@ -67,14 +67,6 @@ bool SignalGraph::inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
     }
 
     auto& mailbox = *it->second.midi_input_mailbox;
-    // set_from_midi() clears writer_scratch before copying.  Reject a
-    // capacity mismatch before that mutation so callers can retry the same
-    // staged block without observing a partially published mailbox.
-    if (events.size() > mailbox.writer_scratch.events.event_capacity() ||
-        events.sysex().size() > mailbox.writer_scratch.events.sysex_capacity() ||
-        (events.ump() != nullptr && events.ump()->size() > mailbox.writer_scratch.ump.capacity()) ||
-        (mpe != nullptr && mpe->size() > mailbox.writer_scratch.mpe.capacity()))
-        return false;
     const uint64_t sequence = next_nonzero_mailbox_sequence(mailbox.next_sequence);
     const bool copied_all = mpe != nullptr
                                 ? mailbox.writer_scratch.set_from_midi(events, *mpe, sequence)

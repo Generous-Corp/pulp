@@ -215,6 +215,9 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
     std::size_t pending() const noexcept {
         return size_;
     }
+    std::size_t frames() const noexcept {
+        return frames_;
+    }
     bool active() const noexcept {
         return active_;
     }

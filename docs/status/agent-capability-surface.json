@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 209,
+  "inventory_version": 210,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -1244,7 +1244,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/graph_event_contract.hpp",
-      "fingerprint": "sha256:edf30e0200f48972611b5253942f684befdc8133e10dbcde43fe0a045eb2032d",
+      "fingerprint": "sha256:8b38c0cacc035910f6fa6c12767e64e19a7e03fbce72defaebc472ae13b73f8f",
       "include": "pulp/host/graph_event_contract.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1353,7 +1353,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:b075f352b7d8ba54fdb4ee39d5170f8249b22983e11e95faea593822dff6addb",
+      "fingerprint": "sha256:01afea93d3b0351da04a34fce7d924dddad2bdb769662f1c35dff632e1878b39",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
