@@ -6,12 +6,15 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_
     # must not add a product install script to the producer SDK install. SDK
     # consumer tests stage that install under an unprivileged prefix; leaving
     # the fixture's install rule enabled makes it try to create the default
-    # /usr/local/libexec catalog on macOS.
-    set(_pulp_saved_skip_install_rules "${CMAKE_SKIP_INSTALL_RULES}")
-    set(CMAKE_SKIP_INSTALL_RULES TRUE)
+    # /usr/local/libexec catalog on macOS. Keep normal CMake install-script
+    # generation enabled; suppress only this host's product install step.
+    set(_pulp_saved_skip_control_host_install
+        "${PULP_SKIP_CONTROL_HOST_INSTALL}")
+    set(PULP_SKIP_CONTROL_HOST_INSTALL TRUE)
     add_subdirectory("${CMAKE_SOURCE_DIR}/examples/agent-toolkit-synth"
         "${CMAKE_BINARY_DIR}/test/agent-toolkit-synth")
-    set(CMAKE_SKIP_INSTALL_RULES "${_pulp_saved_skip_install_rules}")
+    set(PULP_SKIP_CONTROL_HOST_INSTALL
+        "${_pulp_saved_skip_control_host_install}")
     # The broker-launched host is built as a file named `host`, a name test
     # sources use as an ordinary word, so the test-input scanner would read it
     # as a program those tests spawn. Install renames the host to `host` under

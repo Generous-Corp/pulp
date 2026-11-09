@@ -228,11 +228,13 @@ function(_pulp_add_standalone target name bundle_id version processor_factory)
         else()
             set(_pulp_control_broker_prefix "${CMAKE_INSTALL_PREFIX}")
         endif()
-        set(_control_install_script
-            "${CMAKE_CURRENT_BINARY_DIR}/${target}_install_control_host_$<CONFIG>.cmake")
-        file(GENERATE OUTPUT "${_control_install_script}" CONTENT
-            "set(PULP_CONTROL_HOST_ID \"${_pulp_control_host_id}\")\nset(PULP_CONTROL_HOST_SOURCE \"$<TARGET_FILE:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_MANIFEST \"$<TARGET_FILE_DIR:${target}_ControlHost>/${target}.inspector-capabilities.json\")\nset(PULP_CONTROL_HOST_RUNTIME_DIR \"$<TARGET_FILE_DIR:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_ROOT \"\$ENV{DESTDIR}${_pulp_control_broker_prefix}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/control-hosts\")\ninclude(\"${CMAKE_CURRENT_FUNCTION_LIST_DIR}/install_control_host.cmake\")\n")
-        install(SCRIPT "${_control_install_script}" COMPONENT Runtime)
+        if(NOT PULP_SKIP_CONTROL_HOST_INSTALL)
+            set(_control_install_script
+                "${CMAKE_CURRENT_BINARY_DIR}/${target}_install_control_host_$<CONFIG>.cmake")
+            file(GENERATE OUTPUT "${_control_install_script}" CONTENT
+                "set(PULP_CONTROL_HOST_ID \"${_pulp_control_host_id}\")\nset(PULP_CONTROL_HOST_SOURCE \"$<TARGET_FILE:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_MANIFEST \"$<TARGET_FILE_DIR:${target}_ControlHost>/${target}.inspector-capabilities.json\")\nset(PULP_CONTROL_HOST_RUNTIME_DIR \"$<TARGET_FILE_DIR:${target}_ControlHost>\")\nset(PULP_CONTROL_HOST_ROOT \"\$ENV{DESTDIR}${_pulp_control_broker_prefix}/${CMAKE_INSTALL_LIBEXECDIR}/pulp/control-hosts\")\ninclude(\"${CMAKE_CURRENT_FUNCTION_LIST_DIR}/install_control_host.cmake\")\n")
+            install(SCRIPT "${_control_install_script}" COMPONENT Runtime)
+        endif()
         add_custom_target(${target}_RemoveControlHost
             COMMAND "${CMAKE_COMMAND}"
                 -DPULP_CONTROL_HOST_ID=${_pulp_control_host_id}
