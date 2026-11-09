@@ -142,10 +142,7 @@ if(PULP_ENABLE_FUZZING)
         ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(pulp-fuzz-control-protocol PRIVATE
         pulp::inspect-protocol)
-    target_compile_options(pulp-fuzz-control-protocol PRIVATE
-        -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
-    target_link_options(pulp-fuzz-control-protocol PRIVATE
-        -fsanitize=${PULP_FUZZ_SANITIZERS})
+    pulp_fuzz_instrument_target(pulp-fuzz-control-protocol)
 
     # A scripted UI document (ui.js) evaluated through the widget bridge in a
     # QuickJS realm with no effectful capabilities granted. The smoke keeps a

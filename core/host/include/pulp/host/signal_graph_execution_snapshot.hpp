@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/host/signal_graph_runtime.hpp>
+#include <pulp/host/prepared_description.hpp>
 
 namespace pulp::host {
 
@@ -26,6 +27,8 @@ class SignalGraph::ExecutionSnapshot {
     explicit operator bool() const noexcept { return snapshot_ != nullptr; }
     std::uint64_t sample_region_binding_generation() const noexcept;
     std::vector<SampleRegionRuntimeReceipt> sample_region_runtime_receipts() const;
+    /// Return a detached value-owned description of this exact prepared path.
+    PreparedDescriptionResult export_prepared_description() const;
 
     bool inject_midi(NodeId midi_input_node,
                      const midi::MidiBuffer& events) const noexcept;
