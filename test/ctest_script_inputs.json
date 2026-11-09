@@ -2820,6 +2820,13 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-voice-template": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "sources": [],
+   "undeclared_sources": []
+  },
   "pulp-test-vst3-slot-process-fidelity": {
    "data": "none",
    "inputs": [],
@@ -2830,13 +2837,6 @@
     "test/test_vst3_slot_process_fidelity.cpp"
    ],
    "spawns": "undeclared",
-   "undeclared_sources": []
-  },
-  "pulp-test-voice-template": {
-   "data": "none",
-   "inputs": [],
-   "kind": "compiled",
-   "sources": [],
    "undeclared_sources": []
   },
   "pulp-test-widget-bridge-api-contracts": {
@@ -3418,6 +3418,7 @@
   "pulp-test-param-host-sync",
   "pulp-test-parameter-event-queue",
   "pulp-test-parametric-eq",
+  "pulp-test-platform-main-thread",
   "pulp-test-platform-objc-unique-class",
   "pulp-test-playback-audio-renderer",
   "pulp-test-playback-automation-cursor",
@@ -3809,6 +3810,7 @@
     "tools/scripts/agent_capability_evolution.py",
     "tools/scripts/agent_capability_history.py",
     "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/agent_capability_rederive.py",
     "tools/scripts/agent_capability_registry.py",
     "tools/scripts/agent_capability_registry_types.py",
     "tools/scripts/agent_capability_surface.py",
