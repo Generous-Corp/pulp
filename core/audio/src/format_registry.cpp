@@ -1,5 +1,6 @@
 #include <pulp/audio/format_registry.hpp>
 #include "decode_limits_detail.hpp"
+#include "format_capabilities_detail.hpp"
 #include <filesystem>
 #include <algorithm>
 #include <array>
@@ -71,6 +72,12 @@ std::unique_ptr<FormatWriter> create_aac_writer();
 std::unique_ptr<FormatWriter> create_alac_writer();
 #endif
 
+std::unique_ptr<FormatWriter> create_system_audio_writer();
+
+#ifdef _WIN32
+std::unique_ptr<FormatReader> create_media_foundation_reader();
+#endif
+
 // ── WAV Reader/Writer (via CHOC) ────────────────────────────────────────
 
 class WavReader : public FormatReader {
@@ -98,6 +105,13 @@ public:
         return ext == ".wav" || ext == ".wave";
     }
     std::string format_name() const override { return "WAV"; }
+    FormatCapabilities capabilities() const override {
+        return {.format_name = "WAV",
+                .extensions = {".wav", ".wave"},
+                .bit_depths = {8, 16, 24, 32},
+                .float_samples = true,
+                .max_channels = 65535};
+    }
 };
 
 class WavWriter : public FormatWriter {
@@ -109,9 +123,25 @@ public:
         return ext == ".wav" || ext == ".wave";
     }
     std::string format_name() const override { return "WAV"; }
+    FormatCapabilities capabilities() const override {
+        // write() stores 16-bit integer PCM; write_wav_file() with a
+        // WavBitDepth also offers 24-bit and float.
+        return {.format_name = "WAV",
+                .extensions = {".wav", ".wave"},
+                .bit_depths = {16},
+                .max_channels = 65535};
+    }
 };
 
 // ── FLAC Reader (via dr_flac) ───────────────────────────────────────────
+
+// FLAC allows every integer depth from 4 to 32 bits; dr_flac decodes them all.
+static std::vector<std::uint32_t> flac_bit_depths() {
+    std::vector<std::uint32_t> depths;
+    for (std::uint32_t bits = 4; bits <= 32; ++bits)
+        depths.push_back(bits);
+    return depths;
+}
 
 class FlacReader : public FormatReader {
 public:
@@ -139,41 +169,15 @@ public:
                                       const DecodeLimits& limits) override {
         drflac* flac = drflac_open_file(path.c_str(), nullptr);
         if (!flac) return std::nullopt;
-
-        // STREAMINFO's total sample count is a 36-bit untrusted claim (zero
-        // means unknown); refuse before any output allocation.
-        const uint64_t claimed_frames = flac->totalPCMFrameCount;
-        const uint32_t channels = flac->channels;
-        if (channels == 0 ||
-            !detail::within_decode_limits("FLAC", claimed_frames, channels, limits)) {
-            drflac_close(flac);
-            return std::nullopt;
-        }
-
-        AudioFileData data;
-        data.sample_rate = flac->sampleRate;
-        data.channels.resize(channels);
-        detail::reserve_planar(data.channels, claimed_frames);
-
-        std::vector<float> interleaved(static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
-        uint64_t frames_read = 0;
-        bool within_limits = true;
-        for (;;) {
-            const uint64_t got =
-                drflac_read_pcm_frames_f32(flac, detail::kDecodeChunkFrames, interleaved.data());
-            if (got == 0)
-                break;
-            if (!detail::within_decode_limits("FLAC", frames_read + got, channels, limits)) {
-                within_limits = false;
-                break;
-            }
-            detail::append_deinterleaved(data.channels, interleaved.data(), got, channels);
-            frames_read += got;
-        }
+        // STREAMINFO's total sample count is a 36-bit untrusted claim, zero
+        // when the encoder did not know it; decode_chunked holds it to the
+        // limits and to what the stream delivers.
+        auto data = detail::decode_chunked("FLAC", flac->sampleRate, flac->channels,
+                                           flac->totalPCMFrameCount, limits,
+                                           [flac](float* out, uint64_t frames) {
+                                               return drflac_read_pcm_frames_f32(flac, frames, out);
+                                           });
         drflac_close(flac);
-
-        if (!within_limits || frames_read == 0)
-            return std::nullopt;
         return data;
     }
 
@@ -181,6 +185,13 @@ public:
         return ext == ".flac";
     }
     std::string format_name() const override { return "FLAC"; }
+    FormatCapabilities capabilities() const override {
+        return {.format_name = "FLAC",
+                .extensions = {".flac"},
+                .bit_depths = flac_bit_depths(),
+                .max_channels = 8,
+                .compressed = true};
+    }
 };
 
 // ── MP3 Reader (via dr_mp3) ─────────────────────────────────────────────
@@ -195,7 +206,17 @@ public:
         AudioFileInfo info;
         info.sample_rate = mp3.sampleRate;
         info.num_channels = mp3.channels;
-        info.num_frames = drmp3_get_pcm_frame_count(&mp3);
+        // With a Xing/Info header the count is the header's, net of the
+        // encoder delay and padding, which is what read() checks the decode
+        // against. Without one the stream declares nothing, and dr_mp3's
+        // header scan can count a frame the decoder then rejects, so the
+        // count is taken by decoding: it is then the count read() delivers.
+        info.num_frames =
+            mp3.totalPCMFrameCount != DRMP3_UINT64_MAX
+                ? drmp3_get_pcm_frame_count(&mp3)
+                : detail::count_decoded_frames(mp3.channels, [&mp3](float* out, uint64_t frames) {
+                      return drmp3_read_pcm_frames_f32(&mp3, frames, out);
+                  });
         info.bits_per_sample = 16;  // MP3 is always decoded to 16-bit equivalent
         info.format = "MP3";
         info.duration_seconds = static_cast<double>(info.num_frames) / info.sample_rate;
@@ -213,38 +234,17 @@ public:
         drmp3 mp3;
         if (!drmp3_init_file(&mp3, path.c_str(), nullptr))
             return std::nullopt;
-
-        // MP3 carries no trustworthy frame count, so the running decoded
-        // size is the only check; decode in chunks so allocation follows it.
-        const uint32_t channels = mp3.channels;
-        if (channels == 0 || !detail::within_decode_limits("MP3", 0, channels, limits)) {
-            drmp3_uninit(&mp3);
-            return std::nullopt;
-        }
-
-        AudioFileData data;
-        data.sample_rate = mp3.sampleRate;
-        data.channels.resize(channels);
-
-        std::vector<float> interleaved(static_cast<size_t>(detail::kDecodeChunkFrames) * channels);
-        uint64_t frames_read = 0;
-        bool within_limits = true;
-        for (;;) {
-            const uint64_t got =
-                drmp3_read_pcm_frames_f32(&mp3, detail::kDecodeChunkFrames, interleaved.data());
-            if (got == 0)
-                break;
-            if (!detail::within_decode_limits("MP3", frames_read + got, channels, limits)) {
-                within_limits = false;
-                break;
-            }
-            detail::append_deinterleaved(data.channels, interleaved.data(), got, channels);
-            frames_read += got;
-        }
+        // A Xing/Info header declares a frame count, which dr_mp3 reports net
+        // of the encoder delay and padding it also trims from the decode;
+        // without one the field stays at its maximum and the stream declares
+        // nothing. The count comes from the header only, never from a scan.
+        const uint64_t claimed_frames =
+            mp3.totalPCMFrameCount == DRMP3_UINT64_MAX ? 0u : drmp3_get_pcm_frame_count(&mp3);
+        auto data = detail::decode_chunked("MP3", mp3.sampleRate, mp3.channels, claimed_frames,
+                                           limits, [&mp3](float* out, uint64_t frames) {
+                                               return drmp3_read_pcm_frames_f32(&mp3, frames, out);
+                                           });
         drmp3_uninit(&mp3);
-
-        if (!within_limits || frames_read == 0)
-            return std::nullopt;
         return data;
     }
 
@@ -252,6 +252,14 @@ public:
         return ext == ".mp3";
     }
     std::string format_name() const override { return "MP3"; }
+    FormatCapabilities capabilities() const override {
+        return {.format_name = "MP3",
+                .extensions = {".mp3"},
+                .sample_rates = detail::mp3_sample_rates(),
+                .max_channels = 2,
+                .compressed = true,
+                .lossless = false};
+    }
 };
 
 // ── Registry ────────────────────────────────────────────────────────────
@@ -290,6 +298,14 @@ FormatRegistry::FormatRegistry() {
 #ifdef PULP_HAS_ALAC
     register_writer(create_alac_writer());
 #endif
+
+#ifdef _WIN32
+    register_reader(create_media_foundation_reader());
+#endif
+
+    // Registered last so an installed optional encoder keeps its extensions.
+    // Null (and skipped) where the platform has no system codec.
+    register_writer(create_system_audio_writer());
 }
 
 void FormatRegistry::register_reader(std::unique_ptr<FormatReader> reader) {
@@ -350,6 +366,22 @@ bool FormatRegistry::write(const std::string& path, const AudioFileData& data) c
 
 std::vector<std::string> FormatRegistry::supported_read_extensions() const {
     return collect_supported_extensions(readers_);
+}
+
+std::vector<FormatCapabilities> FormatRegistry::reader_capabilities() const {
+    std::vector<FormatCapabilities> result;
+    result.reserve(readers_.size());
+    for (const auto& reader : readers_)
+        result.push_back(reader->capabilities());
+    return result;
+}
+
+std::vector<FormatCapabilities> FormatRegistry::writer_capabilities() const {
+    std::vector<FormatCapabilities> result;
+    result.reserve(writers_.size());
+    for (const auto& writer : writers_)
+        result.push_back(writer->capabilities());
+    return result;
 }
 
 std::vector<std::string> FormatRegistry::supported_write_extensions() const {

@@ -1,0 +1,25 @@
+{
+ "name": "pulp.vellum-view-core-pulp-kept",
+ "record": {
+  "entry": "tools/scripts/vellum_view_core_pulp_kept_check.py",
+  "inputs": [
+   "core/platform",
+   "core/platform/include",
+   "core/runtime",
+   "core/runtime/include",
+   "core/simd",
+   "core/simd/include",
+   "core/view",
+   "core/view/audio",
+   "core/view/include",
+   "core/view/include/pulp/view/widgets.hpp",
+   "core/view/src/reload_exports.cpp",
+   "tools/scripts/include_boundary.py",
+   "tools/scripts/vellum_d3_units.json",
+   "tools/scripts/vellum_policy.json",
+   "tools/scripts/vellum_policy.py",
+   "tools/scripts/vellum_view_core_pulp_kept_check.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "sdk-plist-templates-installed",
+ "record": {
+  "entry": "tools/scripts/test_sdk_plist_templates_installed.py",
+  "inputs": [
+   "tools/scripts/test_sdk_plist_templates_installed.py"
+  ],
+  "kind": "python"
+ }
+}

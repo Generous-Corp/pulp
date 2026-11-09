@@ -231,6 +231,26 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_mac_held_button_cursor.mm
         LIBRARIES pulp::view)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # MainThreadScope / MainThreadTimer: posting, owner-gone drops, and firing
+    # inside the menu-tracking and modal-panel run-loop modes. Its own process,
+    # because the cases measure the main run loop's wake-ups.
+    pulp_add_test_suite(pulp-test-platform-main-thread
+        SOURCES test_platform_main_thread.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-main-thread PRIVATE
+        "-framework AppKit"
+        "-framework CoreFoundation")
+endif()
+if(APPLE AND NOT PULP_IOS)
+    # Asynchronous alerts, file panels and open_url, including real NSAlert and
+    # NSOpenPanel sheets on an offscreen window. Own process: the cases pump
+    # the main run loop and hold sheets on a window.
+    pulp_add_test_suite(pulp-test-platform-async-dialogs
+        SOURCES test_platform_async_dialogs.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-async-dialogs PRIVATE "-framework Cocoa")
+endif()
 if(APPLE)
     # Per-binary unique Objective-C class names. The fixture dylib links its own
     # copy of pulp-platform, standing in for a second plug-in in the process.
@@ -247,6 +267,14 @@ if(APPLE)
         PULP_OBJC_UNIQUE_FIXTURE_PATH="$<TARGET_FILE:pulp-test-objc-unique-fixture>")
     pulp_test_spawns(pulp-test-platform-objc-unique-class pulp-test-objc-unique-fixture)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # Outbound file drags: validation, the recorder seam automation uses, the
+    # operation mapping, the drag image, event anchoring and the drag source.
+    pulp_add_test_suite(pulp-test-platform-file-drag
+        SOURCES test_platform_file_drag.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-file-drag PRIVATE "-framework Cocoa")
+endif()
 if(TARGET pulp-native)
     # integrations/pulp-native: the Metal surface on the real system device in
     # offscreen windows (device, client-presented drawables, sizing, geometry
@@ -259,6 +287,15 @@ if(TARGET pulp-native)
     catch_discover_tests(pulp-test-native-metal-surface)
 endif()
 if(TARGET pulp-native)
+    # integrations/pulp-native: FramePump on the real display link (no link
+    # until started, rate cap, one-shot, off-screen pause, delivery thread,
+    # no queued frames, start/stop churn).
+    add_executable(pulp-test-native-frame-pump test_native_frame_pump.mm)
+    target_compile_options(pulp-test-native-frame-pump PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-native-frame-pump PRIVATE
+        pulp::native Catch2::Catch2WithMain "-framework Foundation")
+    catch_discover_tests(pulp-test-native-frame-pump)
+
     # integrations/pulp-native: AppKit event translation (pointer, wheel, key,
     # modifier-only keys, cursors) and the key-routing rule, from synthetic
     # NSEvents and CGEvents.
@@ -276,25 +313,4 @@ if(TARGET pulp-native)
     target_link_libraries(pulp-test-native-surface-input PRIVATE
         pulp::native Catch2::Catch2WithMain "-framework AppKit" "-framework Metal")
     catch_discover_tests(pulp-test-native-surface-input)
-endif()
-if(APPLE AND NOT PULP_IOS)
-    # MainThreadScope / MainThreadTimer: posting, owner-gone drops, and firing
-    # inside the menu-tracking and modal-panel run-loop modes. Its own process,
-    # because the cases measure the main run loop's wake-ups.
-    pulp_add_test_suite(pulp-test-platform-main-thread
-        SOURCES test_platform_main_thread.mm
-        LIBRARIES pulp::platform)
-    target_link_libraries(pulp-test-platform-main-thread PRIVATE
-        "-framework AppKit"
-        "-framework CoreFoundation")
-endif()
-if(TARGET pulp-native)
-    # integrations/pulp-native: FramePump on the real display link (no link
-    # until started, rate cap, one-shot, off-screen pause, delivery thread,
-    # no queued frames, start/stop churn).
-    add_executable(pulp-test-native-frame-pump test_native_frame_pump.mm)
-    target_compile_options(pulp-test-native-frame-pump PRIVATE -fobjc-arc)
-    target_link_libraries(pulp-test-native-frame-pump PRIVATE
-        pulp::native Catch2::Catch2WithMain "-framework Foundation")
-    catch_discover_tests(pulp-test-native-frame-pump)
 endif()

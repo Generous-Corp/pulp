@@ -142,10 +142,7 @@ if(PULP_ENABLE_FUZZING)
         ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(pulp-fuzz-control-protocol PRIVATE
         pulp::inspect-protocol)
-    target_compile_options(pulp-fuzz-control-protocol PRIVATE
-        -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
-    target_link_options(pulp-fuzz-control-protocol PRIVATE
-        -fsanitize=${PULP_FUZZ_SANITIZERS})
+    pulp_fuzz_instrument_target(pulp-fuzz-control-protocol)
 
     # A scripted UI document (ui.js) evaluated through the widget bridge in a
     # QuickJS realm with no effectful capabilities granted. The smoke keeps a
@@ -594,6 +591,16 @@ catch_discover_tests(pulp-test-control-health
 pulp_add_test_suite(pulp-test-control-inspector-client GROUP pulp-test-group-control-core
     LIBRARIES pulp::inspect-client
     LABELS "inspect;control;client;trace")
+
+pulp_add_test_suite(pulp-test-control-agent-toolkit
+    LIBRARIES pulp::inspect-agent-toolkit pulp::inspect-control
+    LABELS "inspect;control;vendor;toolkit")
+pulp_test_data(pulp-test-control-agent-toolkit
+    PATHS tools/cmake/control_agent_toolkit_operations.json.in)
+
+pulp_add_test_suite(pulp-test-control-vendor-operations GROUP pulp-test-group-control-executors
+    LIBRARIES pulp::inspect-runtime pulp::inspect-control
+    LABELS "inspect;control;vendor;broker;executor")
 
 pulp_add_test_suite(pulp-test-control-main-thread-executor GROUP pulp-test-group-control-executors
     LIBRARIES pulp::inspect-runtime pulp::inspect-control

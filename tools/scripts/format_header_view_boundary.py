@@ -65,6 +65,7 @@ VIEW_HEADERS = {
     "pulp/format/editor_idle_pump.hpp",
     "pulp/format/editor_ui.hpp",
     "pulp/format/gpu_host_select.hpp",
+    "pulp/format/panic_target.hpp",
     "pulp/format/reload/pack_build.hpp",
     "pulp/format/reload/reloadable_shell.hpp",
     "pulp/format/reload/remote_update.hpp",

@@ -35,32 +35,56 @@ was a single integer every open branch raced for; one merge staled the rest.
 The sections below that say "increase the counter" describe the hand-bump
 flow that branches no longer need; leave the constants alone instead.
 
-Exception: a change is pending only against the last state the history
-recorded under the SAME counter. When `--status` reports `inventory_version`
-as `assigned` (the history's last entry is an older counter), a header-byte
-change cannot be pending: `--write` refuses it with "public surface changed
-without an inventory_version increase". Then bump `SURFACE_INVENTORY_VERSION`
-by hand, past any integer an open PR already claims (the loop below), and
-`--write` again.
+## Why open PRs no longer conflict on these files
 
-## Picking the next `SURFACE_INVENTORY_VERSION` on a busy day
+Before 2026-11-08 nearly every capability PR went DIRTY against `main` on the
+same lines: the hand-bumped `SURFACE_INVENTORY_VERSION` constant, the matching
+`inventory_version` line in `agent-capability-surface.json`, and the ledger's
+aggregate `counts` block. Each PR moved a shared total, so whichever landed
+second conflicted, and the strict up-to-date rule turned each conflict into
+another full macOS gate. Two rules remove the shared lines:
 
-When `--status` says `inventory_version` is `assigned`, a new or changed public
-header needs a hand bump, and the integer you pick is the one that collides.
-Check three places before writing it, in this order:
+- **The ledger commits no totals.** `agent-capability-surface.json` holds one
+  sorted record per header and nothing derived from them. Totals come from
+  `agent_capability_surface.surface_counts(headers)`. A ledger carrying
+  `counts` fails the schema. (Two PRs that both wrote the same total used to
+  merge cleanly to a WRONG number that only `--check` on main noticed.)
+- **The history's last entry is always the current assigned state.** An
+  assigned state is recorded the moment `--write` produces it, which is
+  normally the version-at-land bump. A branch change is then always pending
+  against it, so no branch bumps a counter. A state assigned before this rule
+  (a hand bump) is recorded by the first branch that changes it; every branch
+  appends byte-identical text at the same place, which git merges cleanly.
+  `agent_capability_rederive.py` reads the base's history and leaves a moved
+  counter at the base value whenever it can be pending.
 
-```bash
-git fetch -q origin main
-git show origin/main:tools/scripts/agent_capability_manifest.py | grep '^SURFACE_INVENTORY_VERSION'
-for d in "$(dirname "$(git rev-parse --show-toplevel)")"/pulp-*/; do
-  printf '%s ' "$d"; grep -h '^SURFACE_INVENTORY_VERSION' "$d/tools/scripts/agent_capability_manifest.py" 2>/dev/null || echo
-done | sort -u -k2
-```
+What still conflicts, correctly: two PRs that edit the same header's row, or
+that insert headers at the same sorted position, and two PRs that add
+capabilities (`agent-capabilities.json` keeps its installed `counts`, which
+consumers read). The capability counter lines themselves never move on a branch.
 
-The sibling worktrees on the same machine are the open PRs you can see without
-an API call; on 2026-11-07 main held 200 and a sibling branch already held 201,
-so the audio layout report took 202. A same-integer bump on two branches
-auto-merges cleanly and the second one to land fails `--check` on main.
+One case still needs a hand bump: a **mixed** base, where one counter is
+pending and the other is an assigned state the history never recorded
+(`counters_that_can_stay` returns False for that side; `--write` refuses with
+"public surface changed without an inventory_version increase"). Re-derive;
+it bumps only that side. The next version-at-land bump records the state and
+ends the case; `--assign-pending` also records an unrecorded assigned state
+when nothing is pending. Do not hand-bump in any other case, since that brings
+back the race. `--check` enforces it: past the protected base, the history may
+gain only the base's own state or its `--assign-pending` assignment (the base
+material with each pending counter + 1), so a branch that records its own
+hand bump fails with "neither the protected base's own state nor its
+version-at-land assignment". A mixed-base hand bump stays pending and records
+nothing, so it is unaffected.
+
+**`main` is a mixed base right now (2026-11-08)**: `manifest_revision` 91 is
+pending, `inventory_version` is assigned (209 at the time of writing; branches still hand-bump it), and the history's last entry is
+still at inventory 200. Until the next `chore: bump versions` runs
+`--assign-pending` (which records the state), a branch that touches a public
+header still needs a hand bump of `SURFACE_INVENTORY_VERSION`: re-derive, and
+pick past any integer an open PR already holds. The recording rule must merge
+before that next release bump so the bump is the one that heals `main`; once
+`--status` shows `main` fully recorded, this paragraph is history.
 
 A new header that is not a generator-facing capability takes an
 `infrastructure` row in `agent_capability_registry.py` with the
@@ -71,7 +95,24 @@ headers). A legacy header whose bytes change (`wav_decoder.hpp` gaining
 kind of row; `--write` then reports it as reviewed and the baseline count
 shrinks by one.
 
+The fingerprint is over the header's bytes, so a comment-only edit to a covered
+header costs the same row and inventory bump as a signature change; when a
+contract note or a behavior fix can live in the `.cpp`, put it there. A
+header-only class (`sample_resource.hpp`, 2026-11-08: a zero-frame decode
+became a load failure) has no `.cpp` to hide in, so its fix takes the row and
+the bump; say so in the commit rather than reverting the fix to dodge the gate.
+
 ## Public-header fingerprint refresh
+
+Change the reviewed fingerprint in `agent_capability_registry.py` only, bump
+`SURFACE_INVENTORY_VERSION`, and let `--write` regenerate
+`docs/status/agent-capability-surface.json`. Hand-editing the hash in the
+surface file as well makes `--write` see no surface change and refuse with
+"surface inventory_version changed without a surface change". Host headers are
+covered only when they appear in `REVIEWED_HOST_HEADERS`. A new `pulp/host/`
+header outside that list is untracked: `--check` stays green while it is, and
+a registry row for it fails with "reviewed public header is missing" until it
+is added to that list.
 
 When a SignalGraph or other covered public header changes bytes while its
 consumer capability remains the same, refresh the reviewed SHA-256 in the
@@ -98,6 +139,17 @@ Maintain three related artifacts:
 - `tools/agent-capabilities/contract-history.json` is the repository-only,
   append-only evolution history checked against the protected Git tip. Shallow
   GitHub Actions checkouts fetch the immutable event base SHA when necessary.
+  It stores each repeated object once, keyed by its SHA-256 digest; `entries`
+  lists entry digests, not material. Read entries with
+  `agent_capability_history.history_entries(document)`, which expands them in
+  full. Never edit the file by hand: `--check` re-encodes it and refuses any
+  difference.
+
+The append-only history is generated as compact JSON. Keep every parsed entry
+and its provenance, but avoid repeating indentation across the full snapshots:
+the artifact must stay below GitHub's 100 MiB blob limit. After a regeneration,
+verify the parsed entries are unchanged and check the byte count with
+`wc -c tools/agent-capabilities/contract-history.json`.
 
 The consumer manifest, its schema, and the handoff schema install into the SDK.
 Official release packaging stamps `agent-capability-handoff.json` only after
@@ -170,6 +222,11 @@ evidence to the specific API or header fingerprint, not a literal global
 `SURFACE_INVENTORY_VERSION`; an unrelated inventory update must not invalidate
 that evidence. None of these source checks establishes installed execution.
 
+The G-7 control and event edge probe API is runtime diagnostics plumbing. Keep
+its public header fingerprint and surface inventory current when probe members
+change, but do not advertise probe attachment or live edge observation as a
+generator-facing capability.
+
 ### A legacy header that changes bytes cannot be re-fingerprinted
 
 `tools/agent-capabilities/legacy-unreviewed-baseline.json` is FROZEN: it may
@@ -212,6 +269,16 @@ For a new public header or symbol:
    durable rationale. Never grow the frozen `legacy_unreviewed` baseline.
 4. Leave `SURFACE_INVENTORY_VERSION` and `MANIFEST_REVISION` at the base
    value; the version-at-land bump assigns them (see the top of this skill).
+
+Worked example (2026-11-07): extending `pulp/signal/spectrogram.hpp`
+(FrequencyAxis double overloads) changed the bytes of a header the ledger held
+as frozen `legacy_unreviewed`. The fix was step 3, not a fingerprint refresh:
+add an `infrastructure` row for it in `agent_capability_registry.py` with the
+measured digest and a rationale, then `--write` with the counters left at the
+base. (That day it took a hand-picked 203 past three taken integers; the
+recorded-history rule above removed that step.) Plain
+`--write` keeps refusing with "public header fingerprint changed" until the
+classification exists; that refusal is the gate working, not a tool fault.
 
 For overloaded C++ free functions, keep the public `qualified_name` as the real
 API name and give each overload a distinct binding role. Use private generator
@@ -321,9 +388,9 @@ For an existing capability change:
   fingerprint and a durable rationale, and leave the baseline untouched. The
   reviewed branch is consulted ahead of the baseline, so the stale baseline
   entry is simply no longer read; dozens of headers already sit in both.
-- `--write` appends a full snapshot to
-  `tools/agent-capabilities/contract-history.json` (tens of thousands of lines)
-  only when the change moves `MANIFEST_REVISION` or `SURFACE_INVENTORY_VERSION`.
+- `--write` appends a snapshot to
+  `tools/agent-capabilities/contract-history.json` (only the changed objects,
+  typically a few kilobytes) only when the change moves `MANIFEST_REVISION` or `SURFACE_INVENTORY_VERSION`.
   The snapshot is the previous published state, so a refresh that leaves both
   counters alone (a catalog binding's `header_fingerprint`) appends nothing,
   and the next counter move records the state it started from. `--check` never
@@ -687,9 +754,10 @@ deletion-free. Compare entry counts:
 ```bash
 python3 -c "
 import json,subprocess
-c=json.load(open('tools/agent-capabilities/contract-history.json'))['entries']
-b=json.loads(subprocess.run(['git','show','origin/main:tools/agent-capabilities/contract-history.json'],
-                            capture_output=True,text=True,check=True).stdout)['entries']
+import sys; sys.path.insert(0,'tools/scripts'); from agent_capability_history import history_entries
+c=history_entries(json.load(open('tools/agent-capabilities/contract-history.json')))
+b=history_entries(json.loads(subprocess.run(['git','show','origin/main:tools/agent-capabilities/contract-history.json'],
+                            capture_output=True,text=True,check=True).stdout))
 print('delta', len(c)-len(b), 'prefix-identical', c[:len(b)]==b)"
 ```
 
@@ -743,7 +811,7 @@ python3 tools/scripts/agent_capability_manifest.py --write
 
 ### Dropping `contract-history.json` is safe for a NEW capability, not for a changed one
 
-Dropping the ~18k-line history snapshot keeps a capability PR reviewable, and it
+Dropping the history change keeps a capability PR reviewable, and it
 is correct when you are only *introducing* a capability. It is **wrong** on a
 change that moves an existing capability's `contract_version`: `--check` reads
 the history as its new-capability oracle, so without an entry the capability
@@ -884,9 +952,8 @@ same mismatch with the old digest, which reads as "regeneration is broken"
 rather than "one more literal to edit". Grep the old digest across
 `tools/` and `docs/` and replace every hit.
 
-`--write` then also appends a full manifest snapshot to
-`tools/agent-capabilities/contract-history.json` — tens of thousands of lines
-recording the (`manifest_revision`, `inventory_version`) pair. That append is
+`--write` then also appends a manifest snapshot to
+`tools/agent-capabilities/contract-history.json`, recording the (`manifest_revision`, `inventory_version`) pair. That append is
 not required for freshness: `--check` reports `fresh` on the three-file edit
 alone, so discard the history hunk unless the change is one whose lineage the
 history is meant to carry. Confirm with `--check` rather than assuming either
@@ -1762,8 +1829,9 @@ appends nothing, and still reports writing `contract-history.json`; `--check`
 says `fresh`. Moving the MIDI routers to major 2 showed it: from a base history
 the first `--write` left 84 entries ending at major 1, and a second `--write`
 produced 85 ending at major 2. Until the tool records the current manifest
-itself, confirm `entries[-1].manifest.capabilities[<key>].contract_version`
-shows the new version and that the file differs from the base by exactly one
+itself, confirm that the last expanded entry
+(`history_entries(document)[-1]["manifest"]["capabilities"]`) holds `<key>` at
+the new `contract_version`, and that the file differs from the base by exactly one
 entry before shipping.
 
 ## SignalGraph authoring contract header
@@ -1841,3 +1909,27 @@ an existing renderer or example, changing a widget label) adds no public header
 and changes no installed capability key. Run
 `python3 tools/docs_generate.py generate` so the generated limitations block
 follows the matrix, and do not touch the capability manifest for it.
+
+## G-5 host ingress header refresh
+
+The host-event ingress adapter changes `pulp/host/graph_event_contract.hpp`
+(reviewed as infrastructure) and `pulp/host/signal_graph_runtime.hpp`. Refresh
+the registry fingerprint and the `agent_capability_catalog_signal.py` binding
+fingerprints to the merged header bytes, then regenerate with
+`agent_capability_manifest.py --write`. Leave `SURFACE_INVENTORY_VERSION`
+alone: the surface change stays pending until version-at-land assigns it, and
+the history keeps main's line-per-entry storage rather than a compact rewrite.
+## Merging main into a branch that rewrote the contract history
+
+A branch older than the digest-keyed history format (see the top of this
+skill) may carry its own re-encoding of
+`tools/agent-capabilities/contract-history.json`, for example a one-line
+compact dump, and a `render_history()` helper to write it. On merge, take
+main's history file and generator (`git checkout origin/main --
+tools/agent-capabilities/contract-history.json
+tools/scripts/agent_capability_manifest.py`), drop the branch's helper and its
+tests, then re-apply only the branch's real counter or fingerprint changes and
+run `--write` and `--check`. Never keep the branch's history blob: it shows up
+as millions of deleted lines and replaces main's format. Worked example
+(2026-11-08, the G5 host-ingress adapter): after the merge, the diff against
+main shrank from -2,530,508 lines to the PR's own 15 files.

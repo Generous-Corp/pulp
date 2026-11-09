@@ -440,7 +440,11 @@ policy_paths = [
   "tools/scripts/changed_surface_inventory.py",
   "tools/scripts/changed_surface_script_families.py",
   "tools/scripts/test_changed_surface_policy.py",
+  # One fragment per entry (tools/scripts/script_inputs_store.py); the single
+  # file is what branches cut before the split still edit.
   "test/ctest_script_inputs.json",
+  "test/ctest_script_inputs/**",
+  "tools/scripts/script_inputs_store.py",
 ]
 # CTest registration. A Python test script's own body is not registration:
 # its edits select the ctests that run it, through the generated families.
@@ -449,7 +453,7 @@ test_topology_paths = [
   "**/CMakeLists.txt",
   "test/cmake/**",
 ]
-# Families generated from test/ctest_script_inputs.json for Python tool
+# Families generated from test/ctest_script_inputs/ for Python tool
 # scripts and skill docs (tools/scripts/changed_surface_script_families.py).
 # Shipyard reads the file from the protected base and treats it as a policy path.
 families_file = ".shipyard/changed-surface-families.toml"
@@ -601,6 +605,7 @@ derivation_paths = [
     "tools/scripts/protected_merge_receipt.py",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/script_test_inputs.py",
+    "tools/scripts/script_inputs_store.py",
     "tools/scripts/gate_common.py",
     "tools/scripts/run_changed_surface_tests.py",
 ]
@@ -878,8 +883,9 @@ exclude_paths = [
     "**/*notary*",
     "tools/scripts/sign-notarize-*",
 ]
+# test/ctest_script_inputs/ is not listed: it holds one fragment per entry, so
+# two PRs that add different tests touch different files.
 hot_files = [
-    "test/ctest_script_inputs.json",
     "**/SKILL.md",
     ".claude-plugin/**",
     "docs/status/*capabilit*.json",

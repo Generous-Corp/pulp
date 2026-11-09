@@ -1,0 +1,11 @@
+{
+ "name": "ctest-label-exclusion-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_ctest_label_exclusion_guard.py",
+  "inputs": [
+   "test/cmake/character_delay_tests.cmake",
+   "tools/scripts/test_ctest_label_exclusion_guard.py"
+  ],
+  "kind": "python"
+ }
+}

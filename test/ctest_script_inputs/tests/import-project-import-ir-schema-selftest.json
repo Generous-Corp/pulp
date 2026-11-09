@@ -1,0 +1,10 @@
+{
+ "name": "import-project-import-ir-schema-selftest",
+ "record": {
+  "entry": "tools/import/test_project_import_ir_schema.py",
+  "inputs": [
+   "tools/import/test_project_import_ir_schema.py"
+  ],
+  "kind": "python"
+ }
+}

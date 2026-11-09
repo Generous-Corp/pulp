@@ -1,0 +1,11 @@
+{
+ "name": "minblep-table-reproducible",
+ "record": {
+  "entry": "tools/scripts/generate_minblep_table.py",
+  "inputs": [
+   "core/signal/include/pulp/signal/osc/detail/minblep_table.hpp",
+   "tools/scripts/generate_minblep_table.py"
+  ],
+  "kind": "python"
+ }
+}

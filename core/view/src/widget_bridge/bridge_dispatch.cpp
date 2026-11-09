@@ -165,6 +165,15 @@ function __pulpDispatchUnbatched__(id, eventName) {
     // element.addEventListener(...). Without this, native platform events fire
     // the low-level on() callback but never re-enter the DOM bubble walk where
     // React-DOM's delegated root listener lives.
+    if (typeof __nativeElements__ !== 'undefined' &&
+        (eventName === 'focus' || eventName === 'blur') &&
+        typeof __pulpApplyNativeFocus__ === 'function') {
+        var focusEl = __nativeElements__[id];
+        if (focusEl) {
+            try { __pulpApplyNativeFocus__(focusEl, eventName === 'focus', args.length ? args[0] : {}); }
+            catch (e) { __pulpReportDispatchError__(id, eventName, e); }
+        }
+    }
     if (typeof __nativeElements__ !== 'undefined') {
         var el = __nativeElements__[id];
         // Materialized-state upgrades may replace a native View subtree while

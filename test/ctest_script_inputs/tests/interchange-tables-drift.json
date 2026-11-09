@@ -1,0 +1,11 @@
+{
+ "name": "interchange-tables-drift",
+ "record": {
+  "entry": "tools/scripts/schema_drift_check.py",
+  "inputs": [
+   "core/interchange/include/pulp/interchange/generated/capability_tables.hpp",
+   "tools/scripts/schema_drift_check.py"
+  ],
+  "kind": "python"
+ }
+}

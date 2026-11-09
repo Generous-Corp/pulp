@@ -1,0 +1,10 @@
+{
+ "name": "import-layout-parity",
+ "record": {
+  "entry": "test/test_layout_parity.py",
+  "inputs": [
+   "test/test_layout_parity.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -660,7 +660,20 @@ class Collector:
         be read. A run's checkout is a merge commit GitHub made, which the
         local clone has usually never fetched (and the collector never
         fetches), so a commit missing locally is read through the API."""
-        return self.json_at(rev, SCRIPT_INPUTS_PATH, "script-inputs")
+        # One fragment per entry since the list was split; a revision the
+        # local clone holds is read from the object store (either layout). A
+        # revision missing locally is read through the API, which serves the
+        # single file of older revisions; a fragment-layout revision it cannot
+        # assemble stays unread (its script tests count as run).
+        import script_inputs_store
+        fragments = script_inputs_store.FRAGMENT_DIR.as_posix()
+        listed = self._git("ls-tree", "-d", "--name-only", rev, "--", fragments, check=False)
+        if listed.returncode == 0 and listed.stdout.strip() == fragments:
+            try:
+                return script_inputs_store.load_ref(Path(self.repo), rev, env=self._git_env)
+            except script_inputs_store.StoreError:
+                return None
+        return self.json_at(rev, script_inputs_store.LEGACY_LIST.as_posix(), "script-inputs")
 
     def json_at(self, rev: str, path: str, cache: str) -> dict | None:
         """A checked-in JSON file at `rev` (local clone, then the API, cached
@@ -983,7 +996,7 @@ def _required_contexts(repo: Path) -> tuple[str, ...]:
 # reconstructs the verdict: the drift (files that differ between the two
 # checkouts) is propagated through a Ninja graph (sources, headers via the
 # recorded deps, archives, links) to the executables it rebuilds. A script
-# test is keyed on its own entry in test/ctest_script_inputs.json. Three
+# test is keyed on its own entry in test/ctest_script_inputs/. Three
 # variants are written per pair:
 #
 #   per-entry    a compiled test runs when one of its executables is
@@ -1189,8 +1202,9 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
     drift_set = set(drift)
     pins = bool(DEPENDENCY_PIN_PATHS & set(drift))
     cmake = any(_is_cmake(f) for f in drift) or pins
-    data = sorted(f for f in drift if surface(f) and not _is_cmake(f) and f != SCRIPT_INPUTS_PATH)
-    list_changed = SCRIPT_INPUTS_PATH in drift_set
+    import script_inputs_store
+    data = sorted(f for f in drift if surface(f) and not _is_cmake(f) and not script_inputs_store.is_store_path(f))
+    list_changed = bool(script_inputs_store.store_paths(drift_set))
     out: dict[str, dict] = {}
     counted = {e for name in group_tests for e in (test_map.get(name) or {}).get("executables") or []} & all_executables
     rekeyed, described = codemodel or (set(), set())

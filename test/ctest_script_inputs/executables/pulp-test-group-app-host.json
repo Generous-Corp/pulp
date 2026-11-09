@@ -1,0 +1,23 @@
+{
+ "name": "pulp-test-group-app-host",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_forge_descriptor_audit.cpp"
+  ],
+  "inputs": [
+   "docs/status/forge-catalog.json"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [
+   "test/test_forge_descriptor_audit.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_graph_serializer.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

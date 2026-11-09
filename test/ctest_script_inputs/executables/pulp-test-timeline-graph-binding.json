@@ -1,0 +1,20 @@
+{
+ "name": "pulp-test-timeline-graph-binding",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_sequence_processor.cpp",
+   "test/test_timeline_graph_automation_delivery.cpp",
+   "test/test_timeline_graph_binding.cpp",
+   "test/test_timeline_graph_binding_lifecycle.cpp",
+   "test/test_timeline_graph_binding_publication.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

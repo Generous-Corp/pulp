@@ -243,6 +243,15 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
                     std::max(assignment.total_latency_samples, max_upstream);
             }
         }
+        // One reported total: every audio output is aligned to it, so an output
+        // fed only by lower-latency paths is delayed on its inbound edges. This
+        // mirrors the host graph's legacy PDC pass.
+        for (std::size_t node_index = 0; node_index < node_count; ++node_index) {
+            if (plan.nodes[node_index].kind == GraphRuntimeNodeKind::AudioOutput) {
+                input_latency[node_index] = assignment.total_latency_samples;
+                output_latency[node_index] = assignment.total_latency_samples;
+            }
+        }
         for (std::size_t i = 0; i < plan.connections.size(); ++i) {
             const auto& conn = plan.connections[i];
             if (conn.feedback || is_event(conn) || is_spectral(conn) ||

@@ -1,0 +1,12 @@
+{
+ "name": "gpu-provenance-hydration-real-git-selftest",
+ "record": {
+  "entry": "tools/scripts/test_hydrate_real_git.py",
+  "inputs": [
+   "docs/status/gpu-vellum-handoff.yaml",
+   "tools/scripts/hydrate_gpu_provenance_commits.py",
+   "tools/scripts/test_hydrate_real_git.py"
+  ],
+  "kind": "python"
+ }
+}

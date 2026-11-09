@@ -1,0 +1,15 @@
+{
+ "name": "gpu-health-run-attestation",
+ "record": {
+  "entry": "tools/scripts/test_gpu_health_run_attestation.py",
+  "inputs": [
+   "test/fixtures/gpu-ux/pass-hardware.json",
+   "tools/scripts/gpu_health_contract.py",
+   "tools/scripts/gpu_health_run_attestation.py",
+   "tools/scripts/json_schema_lite.py",
+   "tools/scripts/test_gpu_health_run_attestation.py",
+   "tools/scripts/verify_gpu_health_run_attestation.py"
+  ],
+  "kind": "python"
+ }
+}

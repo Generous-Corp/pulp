@@ -1,0 +1,20 @@
+{
+ "name": "pulp-ui-script-editor-probe",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "PulpUiScriptFixture_AU",
+   "PulpUiScriptFixture_CLAP",
+   "PulpUiScriptFixture_VST3"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/fixtures/ui_script_plugin/editor_probe.mm"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

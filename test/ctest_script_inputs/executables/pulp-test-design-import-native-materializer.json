@@ -1,0 +1,38 @@
+{
+ "name": "pulp-test-design-import-native-materializer",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_design_import_native_materializer.cpp"
+  ],
+  "inputs": [
+   "core/audio/include",
+   "core/canvas/include",
+   "core/dataplane/include",
+   "core/events/include",
+   "core/host/include",
+   "core/midi/include",
+   "core/music/include/pulp/music/pitch.hpp",
+   "core/platform/include",
+   "core/runtime/include",
+   "core/signal/include",
+   "core/state/include",
+   "core/view/include",
+   "external/fonts/Jost-Regular.ttf",
+   "test/fixtures/import-fidelity/assets/fader_ref.png",
+   "test/fixtures/import-fidelity/scene.pulp.json",
+   "test/fixtures/v0-dev/audio-control-panel.tsx"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [
+   "test/test_design_import_native_materializer.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_design_import_native_materializer.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

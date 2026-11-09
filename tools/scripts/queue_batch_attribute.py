@@ -1171,8 +1171,10 @@ HISTORY_FLAKE = "flake"
 HISTORY_UNATTRIBUTED = "unattributed"
 HISTORY_INPUTS = "touched-inputs"
 
-# Declared inputs for script-driven ctests (tools/scripts/script_test_inputs.py).
-SCRIPT_INPUTS_LIST = "test/ctest_script_inputs.json"
+# Declared inputs for script-driven ctests (tools/scripts/script_test_inputs.py),
+# one fragment per entry; the single file is what older revisions hold.
+SCRIPT_INPUTS_LIST = "test/ctest_script_inputs"
+SCRIPT_INPUTS_LEGACY = "test/ctest_script_inputs.json"
 # The drift check compares every listed script's inputs, so any of them, or
 # the list itself, is an input to it.
 DRIFT_TEST = "script-test-inputs-drift"
@@ -1415,7 +1417,7 @@ def declared_inputs(test: str, document: dict) -> tuple[str, ...] | None:
     """The checkout paths (files or directories) a script-driven test reads."""
     tests = document.get("tests") or {}
     if test == DRIFT_TEST:
-        inputs = {SCRIPT_INPUTS_LIST}
+        inputs = {SCRIPT_INPUTS_LIST, SCRIPT_INPUTS_LEGACY}
         for entry in tests.values():
             inputs.update(entry.get("inputs") or [])
         return tuple(sorted(inputs))
@@ -2554,10 +2556,15 @@ def main(argv: list[str] | None = None) -> int:
                 for row in report:
                     print(f"    PR #{row['pr']}: {row['test']} (run {row['run_id']})")
             return 0
-        inputs_list = Path(args.source_root) / SCRIPT_INPUTS_LIST
-        if inputs_list.is_file():
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import script_inputs_store
+        try:
+            inputs_doc = script_inputs_store.load(Path(args.source_root))
+        except script_inputs_store.StoreError:
+            inputs_doc = None
+        if inputs_doc is not None:
             attribute_by_inputs(
-                histories, observations, json.loads(inputs_list.read_text(encoding="utf-8")),
+                histories, observations, inputs_doc,
                 lambda pr: [c.path for c in pr_files(args.repo, pr)])
         explained: list[str] = []
         if args.pr is not None:

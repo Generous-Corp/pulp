@@ -1,0 +1,13 @@
+{
+ "name": "silent-revert-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_silent_revert_guard.py",
+  "inputs": [
+   ".github/workflows",
+   "tools/scripts/gate_common.py",
+   "tools/scripts/silent_revert_guard.py",
+   "tools/scripts/test_silent_revert_guard.py"
+  ],
+  "kind": "python"
+ }
+}

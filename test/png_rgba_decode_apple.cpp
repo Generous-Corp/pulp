@@ -41,3 +41,35 @@ std::vector<uint8_t> decode_png_rgba_impl(const std::vector<uint8_t>& png, size_
 std::vector<uint8_t> decode_png_rgba(const std::vector<uint8_t>& png, size_t& w, size_t& h) {
     return decode_png_rgba_impl(png, w, h);
 }
+
+// RGBA8 -> PNG through ImageIO, for tests that regenerate golden images.
+std::vector<uint8_t> encode_png_rgba(const std::vector<uint8_t>& rgba, size_t w, size_t h) {
+    std::vector<uint8_t> out;
+    if (w == 0 || h == 0 || rgba.size() != w * h * 4)
+        return out;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx =
+        CGBitmapContextCreate(const_cast<uint8_t*>(rgba.data()), w, h, 8, w * 4, cs,
+                              static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedLast));
+    CGImageRef image = ctx ? CGBitmapContextCreateImage(ctx) : nullptr;
+    CFMutableDataRef data = CFDataCreateMutable(nullptr, 0);
+    CGImageDestinationRef dest =
+        (image && data) ? CGImageDestinationCreateWithData(data, CFSTR("public.png"), 1, nullptr)
+                        : nullptr;
+    if (dest) {
+        CGImageDestinationAddImage(dest, image, nullptr);
+        if (CGImageDestinationFinalize(dest)) {
+            const auto* bytes = CFDataGetBytePtr(data);
+            out.assign(bytes, bytes + CFDataGetLength(data));
+        }
+        CFRelease(dest);
+    }
+    if (data)
+        CFRelease(data);
+    if (image)
+        CGImageRelease(image);
+    if (ctx)
+        CGContextRelease(ctx);
+    CGColorSpaceRelease(cs);
+    return out;
+}

@@ -1,0 +1,10 @@
+{
+ "name": "apple-bundle-signing-check",
+ "record": {
+  "entry": "tools/scripts/test_check_apple_bundle_signing.py",
+  "inputs": [
+   "tools/scripts/test_check_apple_bundle_signing.py"
+  ],
+  "kind": "python"
+ }
+}

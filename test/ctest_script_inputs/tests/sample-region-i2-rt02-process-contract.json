@@ -1,0 +1,12 @@
+{
+ "name": "sample-region-i2-rt02-process-contract",
+ "record": {
+  "entry": "test/sample_region_i2/rt02_process_contract.py",
+  "inputs": [
+   "core/host/include/pulp/host/sample_region_runtime.hpp",
+   "core/host/src/sample_region_runtime.cpp",
+   "test/sample_region_i2/rt02_process_contract.py"
+  ],
+  "kind": "python"
+ }
+}

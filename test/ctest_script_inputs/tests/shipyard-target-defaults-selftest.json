@@ -1,0 +1,10 @@
+{
+ "name": "shipyard-target-defaults-selftest",
+ "record": {
+  "entry": "tools/ci/test_shipyard_target_defaults.py",
+  "inputs": [
+   "tools/ci/test_shipyard_target_defaults.py"
+  ],
+  "kind": "python"
+ }
+}
