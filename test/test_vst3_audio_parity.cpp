@@ -1241,3 +1241,232 @@ TEST_CASE("vst3 panic: without MIDI output a request resets voices and emits not
     CHECK(g_panic_vst->last_mode == pulp::format::PanicMode::release);
     CHECK(result.events.empty());
 }
+
+// ---------------------------------------------------------------------------
+// MIDI Learn: feedback reaches the host as LegacyMIDICCOutEvents, and the host's
+// IMidiLearn report drives a learn.
+// ---------------------------------------------------------------------------
+
+#include <pulp/format/midi_learn_support.hpp>
+#include <pulp/state/midi_learn_engine.hpp>
+
+#include <optional>
+
+namespace {
+
+constexpr pulp::state::ParamID kLearnCut = 1;
+constexpr pulp::state::ParamID kLearnBend = 2;
+constexpr pulp::state::ParamID kLearnPress = 3;
+
+class LearnVstProcessor : public pulp::format::Processor {
+  public:
+    explicit LearnVstProcessor(bool with_engine) {
+        if (with_engine)
+            handle_.emplace(*this, engine);
+    }
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "Vst3LearnTest",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.vst3.learn",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"In", 2}},
+            .output_buses = {{"Out", 2}},
+            .accepts_midi = true,
+            .produces_midi = true,
+        };
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        for (auto id : {kLearnCut, kLearnBend, kLearnPress})
+            store.add_parameter(
+                {.id = id, .name = "P", .unit = "", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer& midi_in, pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext&) override {
+        ++process_calls;
+        pulp::format::midi_learn_process_block(
+            engine, state(), midi_in, midi_out,
+            pulp::format::midi_feedback_capabilities(pulp::format::MidiLearnFormat::vst3,
+                                                     descriptor()));
+    }
+    int process_calls = 0;
+    pulp::state::MidiLearnEngine engine;
+
+  private:
+    std::optional<pulp::format::MidiLearnHandle> handle_;
+};
+
+LearnVstProcessor* g_learn_vst = nullptr;
+std::unique_ptr<pulp::format::Processor> make_learn_vst_engine() {
+    auto p = std::make_unique<LearnVstProcessor>(true);
+    g_learn_vst = p.get();
+    return p;
+}
+std::unique_ptr<pulp::format::Processor> make_learn_vst_plain() {
+    auto p = std::make_unique<LearnVstProcessor>(false);
+    g_learn_vst = p.get();
+    return p;
+}
+
+struct LearnVstRig {
+    explicit LearnVstRig(pulp::format::ProcessorFactory factory) : processor(factory) {
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        Steinberg::Vst::SpeakerArrangement in_arr[1] = {SpeakerArr::kStereo};
+        Steinberg::Vst::SpeakerArrangement out_arr[1] = {SpeakerArr::kStereo};
+        REQUIRE(processor.setBusArrangements(in_arr, 1, out_arr, 1) == Steinberg::kResultTrue);
+        Steinberg::Vst::ProcessSetup setup{};
+        setup.processMode = Steinberg::Vst::kRealtime;
+        setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+        setup.maxSamplesPerBlock = 64;
+        setup.sampleRate = 48000.0;
+        REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+        REQUIRE(processor.setActive(true) == Steinberg::kResultOk);
+    }
+    ~LearnVstRig() {
+        processor.setActive(false);
+        processor.terminate();
+    }
+    // The adapter may spend its first blocks warming up without running the Processor.
+    void settle() {
+        for (int i = 0; i < 16 && g_learn_vst->process_calls == 0; ++i)
+            run_vst_block(processor);
+        REQUIRE(g_learn_vst->process_calls > 0);
+    }
+    HostApp host_app;
+    vst3::PulpVst3Processor processor;
+};
+
+std::vector<Steinberg::Vst::Event> cc_out(const VstBlockResult& r) {
+    std::vector<Steinberg::Vst::Event> out;
+    for (const auto& e : r.events)
+        if (e.type == Steinberg::Vst::Event::kLegacyMIDICCOutEvent)
+            out.push_back(e);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("vst3 midi learn: feedback is written as legacy CC output events", "[vst3][midi-learn]") {
+    LearnVstRig rig(&make_learn_vst_engine);
+    REQUIRE(g_learn_vst != nullptr);
+    rig.settle();
+
+    using pulp::state::MidiMapping;
+    using pulp::state::MidiSource;
+    using pulp::state::MidiSourceKind;
+    auto add = [&](MidiSourceKind kind, uint8_t ch, uint16_t number, pulp::state::ParamID id) {
+        MidiMapping m;
+        m.source = {kind, ch, number};
+        m.id = id;
+        m.feedback = true;
+        REQUIRE(g_learn_vst->engine.set_mapping(m));
+    };
+    add(MidiSourceKind::cc7, 3, 74, kLearnCut);
+    add(MidiSourceKind::pitch_bend, 1, 0, kLearnBend);
+    add(MidiSourceKind::channel_pressure, 2, 0, kLearnPress);
+
+    // The first block after a mapping appears syncs the controller to the
+    // parameter's current value (0.5).
+    auto events = cc_out(run_vst_block(rig.processor));
+    REQUIRE(events.size() == 3);
+    auto find = [&](int control) {
+        for (const auto& e : events)
+            if (e.midiCCOut.controlNumber == control)
+                return e;
+        FAIL("no event for control " << control);
+        return events.front();
+    };
+    CHECK(find(74).midiCCOut.channel == 3);
+    CHECK(find(74).midiCCOut.value == 64);
+    CHECK(find(Steinberg::Vst::kPitchBend).midiCCOut.channel == 1);
+    // 0.5 -> 14-bit 8192: LSB 0, MSB 64.
+    CHECK(find(Steinberg::Vst::kPitchBend).midiCCOut.value == 0);
+    CHECK(find(Steinberg::Vst::kPitchBend).midiCCOut.value2 == 64);
+    CHECK(find(Steinberg::Vst::kAfterTouch).midiCCOut.channel == 2);
+    CHECK(find(Steinberg::Vst::kAfterTouch).midiCCOut.value == 64);
+
+    // Nothing moved: nothing sent.
+    CHECK(cc_out(run_vst_block(rig.processor)).empty());
+
+    // The parameter moves (as host automation would move it): feedback follows.
+    g_learn_vst->state().set_normalized(kLearnCut, 1.0f);
+    events = cc_out(run_vst_block(rig.processor));
+    REQUIRE(events.size() == 1);
+    CHECK(events[0].midiCCOut.controlNumber == 74);
+    CHECK(events[0].midiCCOut.channel == 3);
+    CHECK(events[0].midiCCOut.value == 127);
+}
+
+TEST_CASE("vst3 midi learn: a mapping without feedback sends nothing", "[vst3][midi-learn]") {
+    LearnVstRig rig(&make_learn_vst_engine);
+    rig.settle();
+    pulp::state::MidiMapping m;
+    m.source = {pulp::state::MidiSourceKind::cc7, 0, 74};
+    m.id = kLearnCut;
+    REQUIRE(g_learn_vst->engine.set_mapping(m));
+    run_vst_block(rig.processor);
+    g_learn_vst->state().set_normalized(kLearnCut, 1.0f);
+    CHECK(cc_out(run_vst_block(rig.processor)).empty());
+}
+
+TEST_CASE("vst3 midi learn: IMidiLearn is offered only with an engine", "[vst3][midi-learn]") {
+    {
+        LearnVstRig rig(&make_learn_vst_plain);
+        void* obj = nullptr;
+        CHECK(rig.processor.queryInterface(Steinberg::Vst::IMidiLearn::iid, &obj) !=
+              Steinberg::kResultOk);
+        CHECK(obj == nullptr);
+    }
+    LearnVstRig rig(&make_learn_vst_engine);
+    void* obj = nullptr;
+    REQUIRE(rig.processor.queryInterface(Steinberg::Vst::IMidiLearn::iid, &obj) ==
+            Steinberg::kResultOk);
+    REQUIRE(obj != nullptr);
+    static_cast<Steinberg::Vst::IMidiLearn*>(obj)->release();
+}
+
+TEST_CASE("vst3 midi learn: a host-reported controller drives a learn", "[vst3][midi-learn]") {
+    LearnVstRig rig(&make_learn_vst_engine);
+    auto& engine = g_learn_vst->engine;
+    Steinberg::Vst::IMidiLearn* learn = &rig.processor;
+
+    // Not listening: the report is declined.
+    CHECK(learn->onLiveMIDIControllerInput(0, 2, 74) != Steinberg::kResultTrue);
+
+    engine.begin_learn(kLearnCut, 0);
+    CHECK(learn->onLiveMIDIControllerInput(0, 2, 74) == Steinberg::kResultTrue);
+    auto out = engine.poll_learn(1);
+    REQUIRE(out.has_value());
+    CHECK(out->mapping.id == kLearnCut);
+    CHECK(out->mapping.source == pulp::state::MidiSource{pulp::state::MidiSourceKind::cc7, 2, 74});
+
+    engine.begin_learn(kLearnBend, 0);
+    CHECK(learn->onLiveMIDIControllerInput(0, 1, Steinberg::Vst::kPitchBend) ==
+          Steinberg::kResultTrue);
+    out = engine.poll_learn(1);
+    REQUIRE(out.has_value());
+    CHECK(out->mapping.source.kind == pulp::state::MidiSourceKind::pitch_bend);
+    CHECK(out->mapping.source.channel == 1);
+
+    engine.begin_learn(kLearnPress, 0);
+    CHECK(learn->onLiveMIDIControllerInput(0, 0, Steinberg::Vst::kAfterTouch) ==
+          Steinberg::kResultTrue);
+    out = engine.poll_learn(1);
+    REQUIRE(out.has_value());
+    CHECK(out->mapping.source.kind == pulp::state::MidiSourceKind::channel_pressure);
+
+    // Reports with no usable controller are declined and leave the listen running.
+    engine.begin_learn(kLearnCut, 0);
+    CHECK(learn->onLiveMIDIControllerInput(0, 16, 74) != Steinberg::kResultTrue); // bad channel
+    CHECK(learn->onLiveMIDIControllerInput(0, 0, Steinberg::Vst::kCtrlProgramChange) !=
+          Steinberg::kResultTrue);
+    CHECK(learn->onLiveMIDIControllerInput(0, 0, Steinberg::Vst::kCtrlPolyPressure) !=
+          Steinberg::kResultTrue);
+    CHECK(learn->onLiveMIDIControllerInput(0, 0, 200) != Steinberg::kResultTrue);
+    CHECK_FALSE(engine.poll_learn(2).has_value());
+    CHECK(engine.learning());
+    engine.cancel_learn();
+}

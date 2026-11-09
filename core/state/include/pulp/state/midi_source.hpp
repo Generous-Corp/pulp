@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <string>
 
 namespace pulp::state {
@@ -46,6 +47,26 @@ struct MidiSource {
     constexpr bool has_number() const {
         return kind != MidiSourceKind::pitch_bend && kind != MidiSourceKind::channel_pressure;
     }
+};
+
+/// A set of source kinds (e.g. the kinds a format can send back to a controller).
+struct MidiSourceKindMask {
+    uint16_t bits = 0;
+
+    static constexpr MidiSourceKindMask of(std::initializer_list<MidiSourceKind> kinds) {
+        MidiSourceKindMask m;
+        for (auto k : kinds)
+            m.bits = static_cast<uint16_t>(m.bits | (1u << static_cast<unsigned>(k)));
+        return m;
+    }
+    constexpr bool has(MidiSourceKind k) const {
+        return (bits >> static_cast<unsigned>(k)) & 1u;
+    }
+    constexpr bool empty() const {
+        return bits == 0;
+    }
+    friend constexpr bool operator==(const MidiSourceKindMask&,
+                                     const MidiSourceKindMask&) = default;
 };
 
 struct MidiSourceHash {

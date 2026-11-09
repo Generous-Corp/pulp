@@ -4,8 +4,9 @@
 This is intentionally small, line-oriented, and zero-dependency. It guards two
 surfaces:
 
-1. Evergreen docs and shared agent skills (public reference docs, SKILL.md).
-   The full markdown scope is scannable (changed lines by default, or --all).
+1. Evergreen docs and shared agent skills (public reference docs, SKILL.md,
+   the README, VISION.md and docs/getting-started). The full markdown scope is
+   scannable (changed lines by default, or --all).
 2. Source-tree comments and test tags under core/, examples/, tools/, test/,
    apple/, inspect/, and ship/. Source is scanned ONLY on changed/added lines
    (or explicit paths) — never in --all — so the huge historical backlog never
@@ -14,6 +15,9 @@ surfaces:
    C-family files only // and /* */ comment text is checked (plus string
    literals for `[tag]`-style Catch2 selectors), and for #-comment files only
    the comment text — so code, identifiers, and URLs in strings are not flagged.
+
+Both surfaces also flag em dashes and padding phrases (the crisp-writing
+standard) on changed lines.
 
 Both surfaces skip fenced code blocks (markdown), inline backtick spans, known
 external/spec references, and explicit per-line skip markers.
@@ -52,6 +56,9 @@ DEFAULT_SCAN_GLOBS = (
     "docs/reference/**/*.md",
     "docs/reference/**/*.yaml",
     ".agents/skills/**/SKILL.md",
+    "README.md",
+    "VISION.md",
+    "docs/getting-started/**/*.md",
 )
 
 # Source-tree scope. Comments and test tags under these roots are checked, but
@@ -128,7 +135,33 @@ class Rule:
     name: str
     pattern: re.Pattern[str]
     message: str
+    # Lines that name a stable external reference (a spec, a vendor) may carry
+    # issue-like ids, so most rules skip them. Prose-style rules do not.
+    external_exempt: bool = True
 
+
+# Prose style rules shared by docs and source comments (see the crisp-writing
+# standard): no em dashes, no padding. Lines that name an external spec or
+# vendor are not exempt, because the style applies to our own sentences.
+PROSE_STYLE_RULES = (
+    Rule(
+        "em-dash",
+        re.compile("\u2014"),
+        "use a period, comma, colon or parentheses instead of an em dash",
+        external_exempt=False,
+    ),
+    Rule(
+        "padding-phrase",
+        re.compile(
+            r"\b(?:it'?s worth noting|importantly,|in order to|this ensures that"
+            r"|seamless(?:ly)?|leverag(?:e|es|ing)|robust|comprehensive|cutting-edge"
+            r"|delve|game-changer|utiliz(?:e|es|ing))\b",
+            re.IGNORECASE,
+        ),
+        "cut the padding or use the plain word (use, so, to); say the specific thing",
+        external_exempt=False,
+    ),
+)
 
 RULES = (
     Rule(
@@ -188,7 +221,7 @@ RULES = (
         re.compile(r"\b(?:planning artifact|markdown artifact|compat pass)\b"),
         "workflow artifact phrases belong in planning/reports, not reference docs",
     ),
-)
+) + PROSE_STYLE_RULES
 
 
 # Rules for source COMMENT text (C-family // and /* */, or # comments). Kept
@@ -259,7 +292,7 @@ SOURCE_COMMENT_RULES = (
         re.compile(r"\bTODO\b.*#\d{2,}"),
         "issue-only TODOs should state the actual missing behavior",
     ),
-)
+) + PROSE_STYLE_RULES
 
 # Rules for Catch2-style selector tags. These live in string literals (the
 # second arg of TEST_CASE/SECTION), so they are matched against extracted string
@@ -305,6 +338,8 @@ def _path_in_default_scope(rel: str) -> bool:
     return (
         (rel.startswith("docs/reference/") and (rel.endswith(".md") or rel.endswith(".yaml")))
         or (rel.startswith(".agents/skills/") and rel.endswith("/SKILL.md"))
+        or rel in ("README.md", "VISION.md")
+        or (rel.startswith("docs/getting-started/") and rel.endswith(".md"))
     )
 
 
@@ -596,8 +631,11 @@ def _scan_source_file(
         if SOURCE_SKIP_MARKER_RE.search(original):
             continue
         matched = False
-        if comment.strip() and not _has_external_ref(comment):
+        if comment.strip():
+            external = _has_external_ref(comment)
             for rule in SOURCE_COMMENT_RULES:
+                if external and rule.external_exempt:
+                    continue
                 if rule.pattern.search(comment):
                     findings.append(Finding(rel, idx, rule, original.strip()))
                     matched = True
@@ -634,11 +672,12 @@ def scan_file(
             continue
         if SKIP_MARKER_RE.search(original):
             continue
-        if _has_external_ref(original):
-            continue
+        external = _has_external_ref(original)
 
         line = _strip_inline_code(original)
         for rule in RULES:
+            if external and rule.external_exempt:
+                continue
             if rule.pattern.search(line):
                 findings.append(Finding(rel, idx, rule, original.strip()))
                 break
