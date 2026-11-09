@@ -495,6 +495,126 @@ LOCALS=$( ( cd "$TMP/driver-locals" && "$UNDER_TEST" \
   ) >/dev/null 2>&1; echo $? )
 check "a driver sharing only local symbol names with the edited source is CONFIRMED" 0 "$LOCALS"
 
+# ── Driver-link detection reads the build graph, under both generators ──────
+#
+# Inline functions and template instantiations from a header the driver and the
+# edited source both include are emitted into both objects, and Mach-O nm
+# prints them as strong "T". A symbol comparison therefore saw a link that did
+# not exist and refused every CLI shell-out run. The link graph has no such
+# ambiguity; these cases hold it to both answers and to failing closed.
+make_graph_project() {
+    local root="$1" generator="$2" driver_links="$3"
+    mkdir -p "$root"
+    cat > "$root/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.20)
+project(confirm_failure_graph_fixture CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_library(fixture_lib value.cpp)
+add_executable(fixture_subject subject.cpp)
+target_link_libraries(fixture_subject PRIVATE fixture_lib)
+add_executable(fixture_driver driver.cpp)
+EOF
+    # The driver target builds the subject first, as a CLI shell-out suite's
+    # target builds the CLI it launches.
+    printf 'add_dependencies(fixture_driver fixture_subject)\n' >> "$root/CMakeLists.txt"
+    [ "$driver_links" = "links" ] &&
+        printf 'target_link_libraries(fixture_driver PRIVATE fixture_lib)\n' >> "$root/CMakeLists.txt"
+    cat > "$root/shared.hpp" <<'EOF'
+#include <string>
+#include <vector>
+template <typename T> struct Box { T v; __attribute__((noinline)) T get() const { return v; } };
+inline __attribute__((noinline)) int shared_helper(int x) { return x * 3; }
+inline int use_shared(const std::string& s) {
+    std::vector<std::string> v{s};
+    Box<int> b{shared_helper(static_cast<int>(v.size()))};
+    return b.get();
+}
+EOF
+    printf 'int answer();\n' > "$root/value.hpp"
+    cat > "$root/value.cpp" <<'EOF'
+#include "value.hpp"
+#include "shared.hpp"
+int answer() { return use_shared("x") == 3 ? 42 : 0; }
+EOF
+    printf '#include "value.hpp"\nint main() { return answer() == 42 ? 0 : 1; }\n' > "$root/subject.cpp"
+    cat > "$root/driver.cpp" <<'EOF'
+#include <cstdlib>
+#include "shared.hpp"
+int main() {
+    if (use_shared("y") != 3) return 2;
+    return std::system("./build/fixture_subject") == 0 ? 0 : 1;
+}
+EOF
+    ( cd "$root" \
+      && git init -q . \
+      && git config user.email t@example.com \
+      && git config user.name test \
+      && git add -A \
+      && git commit -qm fixture ) >/dev/null 2>&1
+    cmake -G "$generator" -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+    cmake --build "$root/build" -j 2 >/dev/null 2>&1
+}
+
+run_graph_under_test() {
+    local root="$1" target="$2"; shift 2
+    ( cd "$root" && "$UNDER_TEST" \
+        --file value.cpp --break "perl -pi -e 's/42 : 0/7 : 0/'" \
+        --build-dir build --target "$target" \
+        --subject ./build/fixture_subject \
+        --test ./build/fixture_driver --jobs 2 "$@" ) >/dev/null 2>&1
+    echo $?
+}
+
+GENERATORS="Unix Makefiles"
+if command -v ninja >/dev/null 2>&1; then
+    GENERATORS="$GENERATORS|Ninja"
+else
+    printf '  skip Ninja graph cases: no ninja on PATH\n'
+fi
+IFS='|' read -r -a GENERATOR_LIST <<< "$GENERATORS"
+for generator in "${GENERATOR_LIST[@]}"; do
+    tag="$(printf '%s' "$generator" | tr 'A-Z ' 'a-z-')"
+
+    make_graph_project "$TMP/graph-shared-$tag" "$generator" shared-header-only
+    # Control: the shape really is the one that fooled nm - on Mach-O the
+    # edited object and the driver both carry the header's definitions as
+    # strong text symbols (ELF marks them weak, so the control is Mach-O only).
+    shared_obj="$(find "$TMP/graph-shared-$tag/build" -name 'value.cpp.o' | head -1)"
+    if [ "$(uname -s)" != Darwin ]; then
+        printf '  skip (%s) the Mach-O shared-symbol control on %s\n' "$generator" "$(uname -s)"
+    elif [ -n "$shared_obj" ] &&
+       nm "$shared_obj" | grep -q ' T __Z13shared_helperi$' &&
+       nm "$TMP/graph-shared-$tag/build/fixture_driver" | grep -q ' [Tt] __Z13shared_helperi$'; then
+        printf '  ok   (%s) the edited object and the driver share header symbols (control)\n' "$generator"
+    else
+        printf '  FAIL (%s) the shared-header fixture does not share symbols (control)\n' "$generator"
+        FAILURES=$((FAILURES + 1))
+    fi
+    check "($generator) a driver sharing only header definitions with the edited source is CONFIRMED" 0 \
+        "$(run_graph_under_test "$TMP/graph-shared-$tag" fixture_subject)"
+
+    make_graph_project "$TMP/graph-links-$tag" "$generator" links
+    check "($generator) a driver that links the edited source, with a subject-only --target, is INCONCLUSIVE" 2 \
+        "$(run_graph_under_test "$TMP/graph-links-$tag" fixture_subject)"
+done
+
+if command -v ninja >/dev/null 2>&1; then
+    # A --target that rebuilds the driver makes the link harmless: the stale
+    # copy is relinked from the broken object, so the run gets a verdict.
+    check "(Ninja) a linking driver whose own target is --target is CONFIRMED" 0 \
+        "$(run_graph_under_test "$TMP/graph-links-ninja" fixture_driver)"
+    # No ninja to read build.ninja with: the question is unanswerable, so the
+    # run must refuse rather than assume the driver links nothing.
+    check "(Ninja) an unreadable graph (no ninja) is INCONCLUSIVE" 2 \
+        "$(CONFIRM_FAILURE_NINJA=/nonexistent/ninja \
+           run_graph_under_test "$TMP/graph-shared-ninja" fixture_subject)"
+fi
+# The Makefile lane fails closed too: without the driver's link.txt the graph
+# cannot say what it links.
+rm -f "$TMP/graph-shared-unix-makefiles/build/CMakeFiles/fixture_driver.dir/link.txt"
+check "(Unix Makefiles) an unreadable graph (no link.txt) is INCONCLUSIVE" 2 \
+    "$(run_graph_under_test "$TMP/graph-shared-unix-makefiles" fixture_subject)"
+
 # An INCONCLUSIVE exit must not leave the subject built from broken source.
 # Only the --test binary used to be invalidated on restore, so the next run's
 # "baseline" fingerprint was the contaminated artifact, the hash never moved

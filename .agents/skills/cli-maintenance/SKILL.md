@@ -278,6 +278,9 @@ selftest asserts the subject is gone after an INCONCLUSIVE run. An
 INCONCLUSIVE without `--subject` now says which file it fingerprinted and points
 here; it is not a coverage gap in the test and rerunning it will not change the
 answer. Interpreted tests (`python3 …`, `bash …`) take `--no-build` instead.
+Whether the driver also links the edited source is read from the build's link
+graph (`ninja -t query`, or the Makefile generator's `link.txt`), never from
+shared symbol names, and a build dir whose graph cannot be read is INCONCLUSIVE.
 
 ### `pulp status` reads `.shipyard/config.toml` line by line, not as TOML
 
@@ -3912,14 +3915,10 @@ Things that are easy to get wrong when touching them:
 - **Goldens live in `test/fixtures/audio/images/`** and are compared through
   ImageIO on macOS only (the required gate); regenerate with
   `PULP_AUDIO_IMAGE_WRITE_GOLDENS=1 ./build/test/pulp-test-audio-image-raster "[golden]"`.
-- **`confirm_failure.sh --subject build/tools/cli/pulp-cpp` is INCONCLUSIVE for
-  `cmd_audio_image_common.cpp`.** Its driver-links-the-edited-object check
-  compares strong `nm` symbols, and on this toolchain libc++ template
-  instantiations (`__ZNSt3__1...B9nqe220106...`) show up as strong `T` in the
-  object and in `pulp-test-cli-audio-image`, so it reports the driver as
-  linking the CLI source. Confirm the clamp behaviour at the unit level
-  (`waveform_raster.cpp`, no `--subject`) and confirm the lab's byte-identity
-  test with `--python`; the CLI-level loop needs the instrument fixed first.
+- **`confirm_failure.sh --subject build/tools/cli/pulp-cpp` covers
+  `cmd_audio_image_common.cpp`.** `pulp-test-cli-audio-image` shares libc++ and
+  header-inline definitions with the CLI source but does not link it; only
+  `pulp-cpp` does, so run the loop with `--target pulp-cli`.
 
 ## `audio heritage` owns sampler-profile interchange and evidence renders
 
