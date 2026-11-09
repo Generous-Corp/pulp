@@ -16,14 +16,16 @@ by the verifier:
 - a source consumer written against the old installed SDK surface, including a
   positional `CustomNodeType` initializer and existing C ABI entry point.
 
-The frozen `CustomNodeType` size is 608 bytes in this generation. The increases
+The frozen `CustomNodeType` size is 736 bytes in this generation. The increases
 over the original 512-byte C0 receipt are intentional and additive. 512 to 544
 added the block-aware `latency_samples_for_block` callback used by downstream GPU
 audio consumers such as Forge. 544 to 608 added the two event-aware process
 callbacks, `process_events` and `process_instance_events`, which let a Custom
-node read the inbound MIDI the graph already gathers for every node.
+node read the inbound MIDI the graph already gathers for every node. 608 to 736
+added `intentional_delay_samples`, `output_port_latency_samples` and the
+`rt_contract` declaration that feeds the static graph realtime report.
 
-Both increases append members after the historical callbacks, so positional
+All increases append members after the historical callbacks, so positional
 aggregate initializers written against an earlier generation still compile — a
 full-tree build is what proves that, not this receipt. The compatibility gate
 records each as a reviewed source-layout change while continuing to protect the

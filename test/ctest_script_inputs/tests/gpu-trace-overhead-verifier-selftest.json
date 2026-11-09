@@ -1,0 +1,15 @@
+{
+ "name": "gpu-trace-overhead-verifier-selftest",
+ "record": {
+  "entry": "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
+  "inputs": [
+   "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+   "test/fixtures/perfetto-gpu",
+   "test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace",
+   "tools/scripts/git_read_memo.py",
+   "tools/scripts/sdk_provenance.py",
+   "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py"
+  ],
+  "kind": "python"
+ }
+}

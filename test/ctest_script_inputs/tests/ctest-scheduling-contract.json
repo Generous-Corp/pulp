@@ -1,0 +1,11 @@
+{
+ "name": "ctest-scheduling-contract",
+ "record": {
+  "entry": "tools/scripts/test_ctest_scheduling_contract.py",
+  "inputs": [
+   "tools/scripts/ctest_scheduling_policy.py",
+   "tools/scripts/test_ctest_scheduling_contract.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,35 @@
+{
+ "name": "pulp-test-cli-kit-commands",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_cli_kit_commands.cpp"
+  ],
+  "inputs": [
+   "fixtures/packages",
+   "tools/kits/pulp-package.schema.json"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-fake-screenshot-tool"
+  ],
+  "sources": [
+   "test/test_cli_kit_commands.cpp",
+   "tools/cli/cli_fs_util.cpp",
+   "tools/cli/kit_commands.cpp",
+   "tools/cli/kit_manifest_validation.cpp",
+   "tools/cli/kit_policy.cpp",
+   "tools/cli/kit_profile_verification.cpp",
+   "tools/cli/package_registry.cpp",
+   "tools/cli/package_registry_trust.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_kit_commands.cpp",
+   "tools/cli/kit_profile_verification.cpp",
+   "tools/cli/package_registry.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

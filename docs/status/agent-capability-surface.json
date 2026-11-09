@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 210,
+  "inventory_version": 212,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -780,11 +780,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/sample_resource.hpp",
-      "fingerprint": "sha256:663954f691b0957447899d2b86ea92a9bad7edba92f736eb6806955df7b362ea",
+      "fingerprint": "sha256:4c733ef0cfae35564705ba3eea27f79c8c01d87600ba31a6c8d513fe0476a6a2",
       "include": "pulp/audio/sample_resource.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Background sample decode service and snapshot handle; reviewed when a zero-frame decode became a load failure with a reason instead of an empty Loaded snapshot. Host infrastructure behind the sampler capabilities, not a generator-facing capability."
     },
     {
       "domain": "audio",
@@ -1169,7 +1169,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/custom_node_type.hpp",
-      "fingerprint": "sha256:8a75edf4f7f08fede5f6607b1e52f21c427fb787d58d8eb933f7c7699ce2e068",
+      "fingerprint": "sha256:8cc51fc538c6415fd580a4d4bf4a45e3a6570435b7649581b3516f1074dd4df7",
       "include": "pulp/host/custom_node_type.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1181,7 +1181,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/graph_event_contract.hpp",
-      "fingerprint": "sha256:edf30e0200f48972611b5253942f684befdc8133e10dbcde43fe0a045eb2032d",
+      "fingerprint": "sha256:d2789bfded0544f831debed3b63433bb42ef21a6e801ca518d7facc819845a29",
       "include": "pulp/host/graph_event_contract.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1199,7 +1199,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/plugin_slot.hpp",
-      "fingerprint": "sha256:b36cbc93f6fcad7b30941c958f17b5d72821d96bdc0a5e7b0e957aa13aae4f7b",
+      "fingerprint": "sha256:69927dee51b495256394c0561f8e31be2abac5cf73dbd462a310565d637a92bb",
       "include": "pulp/host/plugin_slot.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1290,7 +1290,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:9ecf61084299ef0e15097304fdea9eeb6ff92b707fadd0134a307ef940e9c789",
+      "fingerprint": "sha256:b457fb780e34b1725d4cbf607a97255c0b7fd13cfd675e066c9aea997acd4b5e",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

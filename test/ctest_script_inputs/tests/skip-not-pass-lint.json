@@ -1,0 +1,10 @@
+{
+ "name": "skip-not-pass-lint",
+ "record": {
+  "entry": "tools/scripts/check_skip_not_pass.py",
+  "inputs": [
+   "tools/scripts/check_skip_not_pass.py"
+  ],
+  "kind": "python"
+ }
+}

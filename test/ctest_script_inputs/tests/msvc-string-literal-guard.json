@@ -1,0 +1,12 @@
+{
+ "name": "msvc-string-literal-guard",
+ "record": {
+  "entry": "tools/scripts/msvc_string_literal_guard.py",
+  "inputs": [
+   "examples/threejs-native-demo/main.cpp",
+   "tools/cli",
+   "tools/scripts/msvc_string_literal_guard.py"
+  ],
+  "kind": "python"
+ }
+}

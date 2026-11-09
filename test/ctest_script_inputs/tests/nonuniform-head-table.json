@@ -1,0 +1,11 @@
+{
+ "name": "nonuniform-head-table",
+ "record": {
+  "entry": "tools/scripts/nonuniform_head_check.py",
+  "inputs": [
+   "core/signal/include/pulp/signal/convolver_non_uniform.hpp",
+   "tools/scripts/nonuniform_head_check.py"
+  ],
+  "kind": "python"
+ }
+}

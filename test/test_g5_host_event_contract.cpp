@@ -116,6 +116,40 @@ TEST_CASE("G5 host ingress rejects output-capacity and sequence mutations",
     REQUIRE(ingress.pending() == 2);
 }
 
+TEST_CASE("G5 host ingress retries a refused projection without losing order",
+          "[host][graph][g5][events]") {
+    HostEventIngress<4> ingress;
+    REQUIRE(ingress.begin_block(1, 32, 4) == HostEventResult::Accepted);
+    const auto first = midi_event(1, 32, 9, 4, pulp::midi::MidiEvent::note_on(1, 60, 100));
+    const auto second = midi_event(1, 32, 3, 2, pulp::midi::MidiEvent::note_on(1, 61, 100));
+    REQUIRE(ingress.publish(first) == HostEventResult::Accepted);
+    REQUIRE(ingress.publish(second) == HostEventResult::Accepted);
+
+    std::array<HostEventRecord, 4> projected{};
+    std::size_t count = 0;
+    REQUIRE(ingress.project(projected, count) == HostEventResult::Accepted);
+    REQUIRE(count == 2);
+    REQUIRE(projected[0].producer == second.producer);
+    REQUIRE(projected[1].producer == first.producer);
+
+    // Simulate a downstream output-capacity refusal after project() has
+    // removed the current window.  The retry must see the original records,
+    // not an empty queue or a reordered tie.
+    ingress.rollback_projection();
+    REQUIRE(ingress.pending() == 2);
+    REQUIRE(ingress.end_block() == HostEventResult::Accepted);
+
+    REQUIRE(ingress.begin_block(1, 32, 4) == HostEventResult::Accepted);
+    REQUIRE(ingress.project(projected, count) == HostEventResult::Accepted);
+    REQUIRE(count == 2);
+    REQUIRE(projected[0].producer == second.producer);
+    REQUIRE(projected[0].producer_sequence == second.producer_sequence);
+    REQUIRE(projected[1].producer == first.producer);
+    REQUIRE(projected[1].producer_sequence == first.producer_sequence);
+    REQUIRE(ingress.end_block() == HostEventResult::Accepted);
+    REQUIRE(ingress.pending() == 0);
+}
+
 TEST_CASE("G5 host ingress drops staged records at an epoch boundary",
           "[host][graph][g5][events][negative-control]") {
     HostEventIngress<4> ingress;

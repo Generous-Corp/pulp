@@ -18,6 +18,7 @@ if str(HERE) not in sys.path:
 
 import script_inputs_precheck as precheck  # noqa: E402
 import script_test_inputs  # noqa: E402
+import script_inputs_store  # noqa: E402
 
 REPO = HERE.parent.parent
 
@@ -55,9 +56,8 @@ class PrecheckTests(unittest.TestCase):
         path.write_text(path.read_text(encoding="utf-8") + text, encoding="utf-8")
 
     def inputs(self, names: set[str]) -> None:
-        self.write(precheck.INPUTS_LIST, json.dumps(
-            {"tests": {name: {"entry": "x.py", "inputs": [], "kind": "python"}
-                       for name in sorted(names)}}))
+        doc = {"tests": {name: {"entry": "x.py", "inputs": [], "kind": "python"} for name in sorted(names)}}
+        script_inputs_store.write_path(self.root / precheck.INPUTS_LIST, doc)
 
     def commit(self, message: str) -> None:
         self.git("add", "-A")
@@ -207,7 +207,7 @@ class RepositoryTests(unittest.TestCase):
         is NOT CHECKED rather than failed: regenerating cannot add it."""
         import cmake_registration_impact as registrations
 
-        listed = set(json.loads((REPO / precheck.INPUTS_LIST).read_text(encoding="utf-8"))["tests"])
+        listed = set(script_inputs_store.load(REPO)["tests"])
         files = [path for path in subprocess.run(
             ["git", "-C", str(REPO), "ls-files"], capture_output=True, text=True,
             encoding="utf-8", check=True).stdout.splitlines() if precheck.is_cmake_file(path)]

@@ -1603,7 +1603,7 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME unregistered-tests-check-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_unregistered_tests_check.py")
         # The generated script families in .shipyard/config.toml must match
-        # test/ctest_script_inputs.json and the tree. The selector is declared
+        # test/ctest_script_inputs/ and the tree. The selector is declared
         # for the macOS target only, and the script-inputs list is written
         # from the macOS configuration.
         if(APPLE)
@@ -1691,7 +1691,7 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_migration_note_guard.py")
 
     # The build-free pre-push stand-in for script-test-inputs-drift: a new
-    # script-driven add_test needs a ctest_script_inputs.json entry.
+    # script-driven add_test needs a test/ctest_script_inputs/ entry.
     add_test(NAME script-inputs-precheck-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_inputs_precheck.py")
 

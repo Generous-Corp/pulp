@@ -1,0 +1,12 @@
+{
+ "name": "fleet-runner-policy-selftest",
+ "record": {
+  "entry": "tools/fleet/test_fleet_lib.py",
+  "inputs": [
+   "tools/fleet/fleet_lib.py",
+   "tools/fleet/test_fleet_lib.py",
+   "tools/scripts/script_argv.py"
+  ],
+  "kind": "python"
+ }
+}

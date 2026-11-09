@@ -1,0 +1,10 @@
+{
+ "name": "harness-canvas2d-adapter-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_canvas2d_adapter.py",
+  "inputs": [
+   "tools/harness/tests/test_canvas2d_adapter.py"
+  ],
+  "kind": "python"
+ }
+}

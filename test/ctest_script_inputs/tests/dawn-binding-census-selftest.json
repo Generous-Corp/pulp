@@ -1,0 +1,11 @@
+{
+ "name": "dawn-binding-census-selftest",
+ "record": {
+  "entry": "tools/scripts/test_dawn_binding_census.py",
+  "inputs": [
+   "tools/scripts/dawn_binding_census.py",
+   "tools/scripts/test_dawn_binding_census.py"
+  ],
+  "kind": "python"
+ }
+}

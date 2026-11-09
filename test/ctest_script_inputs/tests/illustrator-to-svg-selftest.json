@@ -1,0 +1,11 @@
+{
+ "name": "illustrator-to-svg-selftest",
+ "record": {
+  "entry": "tools/import-design/test_illustrator_to_svg.py",
+  "inputs": [
+   "tools/import-design/illustrator_to_svg.py",
+   "tools/import-design/test_illustrator_to_svg.py"
+  ],
+  "kind": "python"
+ }
+}

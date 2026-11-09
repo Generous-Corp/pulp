@@ -1,0 +1,12 @@
+{
+ "_comment": "Shared generated aggregates that a branch must never edit directly (tools/scripts/hotspot_edit_guard.py). Each was a top merge-conflict hotspot and now lives as one fragment per entry; a branch writes the fragment through `writer`, never the aggregate. Register a hotspot here only once its fragments exist, or every legitimate edit would be refused.",
+ "hotspots": [
+  {
+   "fragments": "test/ctest_script_inputs/",
+   "path": "test/ctest_script_inputs.json",
+   "why": "75 non-merge commits on main in one week, and the most conflicted file in the repository: every pull request that added or re-pointed a script test rewrote neighbouring lines of one generated document",
+   "writer": "python3 tools/scripts/script_test_inputs.py --build-dir <configured build dir> --write"
+  }
+ ],
+ "schema": "pulp-hotspot-edit-guard/v1"
+}

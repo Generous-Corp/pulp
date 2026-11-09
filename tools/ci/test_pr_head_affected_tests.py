@@ -745,12 +745,17 @@ class DirectEdgeTests(unittest.TestCase):
     def test_declared_script_inputs_match_files_and_directories(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "test").mkdir()
-            (root / step.SCRIPT_INPUTS_LIST).write_text(
-                '{"tests": {"census": {"inputs": ["docs/status/", "x.json"]},'
-                ' "other": {"inputs": ["y.json"]}}}')
+            import script_inputs_store
+            script_inputs_store.write_path(root / step.SCRIPT_INPUTS_LIST, {"tests": {
+                "census": {"inputs": ["docs/status/", "x.json"]}, "other": {"inputs": ["y.json"]}}})
             self.assertEqual(step.script_input_tests(["docs/status/a.yaml"], root), ["census"])
             self.assertEqual(step.script_input_tests(["docs/statusx"], root), [])
+            # A revision older than the fragments holds the single file; it still reads.
+            legacy = Path(tmp) / "legacy"
+            (legacy / "test").mkdir(parents=True)
+            (legacy / script_inputs_store.LEGACY_LIST).write_text(
+                '{"tests": {"census": {"inputs": ["docs/status/"]}}}', encoding="utf-8")
+            self.assertEqual(step.script_input_tests(["docs/status/a.yaml"], legacy), ["census"])
 
     def test_rebuilt_binary_output_reaches_its_registered_test(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

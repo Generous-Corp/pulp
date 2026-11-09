@@ -1,0 +1,11 @@
+{
+ "name": "evidence-archive-selftest",
+ "record": {
+  "entry": "tools/ci/test_evidence_archive.py",
+  "inputs": [
+   "tools/ci/evidence_archive.py",
+   "tools/ci/test_evidence_archive.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "name": "vst3-bundle-layout-selftest",
+ "record": {
+  "entry": "tools/cmake/scripts/test_check_vst3_bundle_layout.py",
+  "inputs": [
+   "tools/cmake/scripts/check_vst3_bundle_layout.py",
+   "tools/cmake/scripts/test_check_vst3_bundle_layout.py"
+  ],
+  "kind": "python"
+ }
+}

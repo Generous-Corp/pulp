@@ -1,0 +1,30 @@
+{
+ "name": "pulp-test-cli-shellout",
+ "record": {
+  "data": "whole_checkout",
+  "detected_sources": [
+   "test/test_cli_shellout.cpp"
+  ],
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli",
+   "pulp-import-design",
+   "pulp-sampler-cli-sidecar-probe",
+   "pulp-test-cli-run-fixture"
+  ],
+  "sources": [
+   "test/test_cli_audio_heritage.cpp",
+   "test/test_cli_fmt_shellout.cpp",
+   "test/test_cli_shellout.cpp",
+   "test/test_cli_timeline_render_shellout.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_shellout.cpp",
+   "test/test_cli_shellout_helpers.hpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

@@ -1,0 +1,21 @@
+{
+ "name": "toolchain-update-selftest",
+ "record": {
+  "entry": "tools/toolchain/test_update.py",
+  "inputs": [
+   "experimental/pulp-rs",
+   "experimental/pulp-rs/rust-toolchain.toml",
+   "tools/shipyard.toml",
+   "tools/toolchain",
+   "tools/toolchain/check_env.py",
+   "tools/toolchain/deps.py",
+   "tools/toolchain/expected.json",
+   "tools/toolchain/generate.py",
+   "tools/toolchain/manifest.toml",
+   "tools/toolchain/shipyard.sha256",
+   "tools/toolchain/test_update.py",
+   "tools/toolchain/update.py"
+  ],
+  "kind": "python"
+ }
+}
