@@ -353,7 +353,7 @@ returns an `AudioFileData` with the right `sample_rate`, the right channel
 count and empty channel vectors; `inspect_wav` reports `num_frames == 0`. Any
 consumer that indexes `channels[c][0]`, calls `.front()`/`.back()`, or divides
 by `num_frames()` right after a successful decode will fault on such a file.
-Check `data.empty()` and treat it as "no audio" — `decode_wav` itself returns
+Check `data.empty()` and treat it as "no audio". `decode_wav` itself returns
 the empty asset, and the playback pool refuses it at `create()` with
 `InvalidAsset` (clip compile refuses it again); `pulp-test-wav-memory-decoder`'s
 `[zero-frames]` case is the fixture to copy. The AIFF reader and the seekable
@@ -659,8 +659,8 @@ per-ABI entry point for it.** Go through the plugin's own state:
   The portable list is `wave_layout.cpp` (the chunk walk and acceptance
   policy, dependency-free) and `wav_decoder.cpp` (dr_wav over a canonical
   header). The layout report (`core/audio/src/audio_file_layout*.cpp`, behind
-  `pulp audio inspect`) sits in `pulp-audio` only and is deliberately NOT
-  portable: it opens files with positional reads and pulls in the AIFF, FLAC,
+  `pulp audio inspect`) sits in `pulp-audio` only and is not portable by
+  design: it opens files with positional reads and pulls in the AIFF, FLAC,
   Ogg, MP3 and MP4 walkers. It takes its WAV verdict from the decoder's own
   probe (`wav_frame_reader.hpp`) through a `WaveByteCursor` over its bounded
   reader, never the other way round. Do not make `decode_wav` or `inspect_wav`

@@ -98,9 +98,9 @@ shrinks by one.
 The fingerprint is over the header's bytes, so a comment-only edit to a covered
 header costs the same row and inventory bump as a signature change; when a
 contract note or a behavior fix can live in the `.cpp`, put it there. A
-header-only class (`sample_resource.hpp`, 2026-11-08: a zero-frame decode
-became a load failure) has no `.cpp` to hide in, so its fix takes the row and
-the bump; say so in the commit rather than reverting the fix to dodge the gate.
+header-only class such as `sample_resource.hpp` has no `.cpp` to hide in, so
+its fix takes the row and the bump; say so in the commit rather than reverting
+the fix to dodge the gate.
 
 Some header fingerprints are pinned outside this registry too, which raises
 the cost of a comment-only edit further. The sequencer exposure ledger carries
@@ -280,7 +280,7 @@ For a new public header or symbol:
 4. Leave `SURFACE_INVENTORY_VERSION` and `MANIFEST_REVISION` at the base
    value; the version-at-land bump assigns them (see the top of this skill).
 
-Worked example (2026-11-07): extending `pulp/signal/spectrogram.hpp`
+Worked example: extending `pulp/signal/spectrogram.hpp`
 (FrequencyAxis double overloads) changed the bytes of a header the ledger held
 as frozen `legacy_unreviewed`. The fix was step 3, not a fingerprint refresh:
 add an `infrastructure` row for it in `agent_capability_registry.py` with the

@@ -499,8 +499,8 @@ TEST_CASE("a declared length the stream does not deliver is refused, an undeclar
 
 TEST_CASE("an MP3 whose Xing header declares more frames than the stream delivers is refused",
           "[fuzz][audio][mp3]") {
-    // Found by the fuzzer as an info/decode disagreement (6400 declared, a
-    // few dozen decoded); this seed is the Xing VBR seed cut at 80%.
+    // The Xing VBR seed cut at 80%: the header declares 6400 frames and the
+    // stream delivers a few dozen.
     const auto path = corpus_dir() / "mp3-xing-declares-more-than-stream.mp3";
     REQUIRE(fs::exists(path));
     auto& registry = pulp::audio::FormatRegistry::instance();

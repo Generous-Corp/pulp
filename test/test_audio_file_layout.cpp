@@ -354,7 +354,7 @@ TEST_CASE("specification violations each raise exactly their warning",
         const auto report = inspect_audio_file_layout(bytes);
         REQUIRE(report.decode);
         // A zero-frame data chunk is a valid, empty file; the verdict follows
-        // the decoder, which now returns zero frames instead of refusing.
+        // the decoder, which returns zero frames.
         CHECK(report.decode->decodable);
         REQUIRE(report.stream);
         CHECK(report.stream->frames == 0u);

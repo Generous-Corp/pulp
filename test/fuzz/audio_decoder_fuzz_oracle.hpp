@@ -18,7 +18,7 @@
 // A format whose info is an estimate is not special-cased here: a
 // disagreement is reported, and whoever owns the reader decides.
 //
-// This header deliberately shares nothing with core/audio/src's
+// This header shares nothing with core/audio/src's
 // decode_limits_detail.hpp: an oracle that reused the code under test would
 // agree with its bugs.
 
@@ -171,8 +171,8 @@ inline void check_agreement(const std::string& path, const pulp::audio::AudioFil
 // Runs read_info and read(limits) on `path`, dispatching on the extension
 // through the global registry, and applies every property above, reporting
 // each failure through `fail`. Never throws; the caller decides whether a
-// failure traps (fuzzer) or fails a test case. A path no reader claims simply
-// fails both reads, so the caller that needs "a reader exists" checks
+// failure traps (fuzzer) or fails a test case. A path no reader claims fails
+// both reads, so the caller that needs "a reader exists" checks
 // find_reader itself.
 inline OracleOutcome check_registry(const std::string& path,
                                     const pulp::audio::DecodeLimits& limits,
