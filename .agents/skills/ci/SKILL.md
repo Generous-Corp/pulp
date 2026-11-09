@@ -13071,6 +13071,15 @@ real guard is `pr-fast-tier-contract`, which fails if the label selects fewer th
 50 tests or loses one of its pinned members. The tier writes `ctest-pr-fast.junit.xml`, never
 `ctest.junit.xml`: it is not merge test evidence and must never satisfy a protected receipt.
 
+The drift members that fail most heads (`script-test-inputs-drift`, the consumption-census
+drift checks, `agent-capability-manifest-check`) also carry `pr-fast-configure` and run
+between `Configure` and `Build`, so a stale manifest fails before the build; the post-build
+tier excludes that label only when the pre-build step passed. Add a member there only if it
+reads nothing a build produces (codemodel, `CTestTestfile.cmake` and configure-time facts
+are fine; a built binary or a Catch2 discovery file's contents are not). A test that needs
+the build belongs under `needs-build`, never under `pr-fast-configure`; the contract check
+refuses both labels on one test.
+
 Two consequences worth knowing:
 
 - **A green `macos` check on a pull request does not mean the full suite passed.** It means

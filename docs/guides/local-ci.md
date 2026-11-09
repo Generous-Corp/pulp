@@ -3906,6 +3906,24 @@ writes `ctest-pr-fast.junit.xml` rather than `ctest.junit.xml`: the tier is
 not the merge's test evidence and must never satisfy a protected-validation
 receipt.
 
+The generated-manifest drift members, labelled `pr-fast-configure` in the same
+file (`script-test-inputs-drift`, the consumption-census drift checks and
+`agent-capability-manifest-check`), run earlier, in `Test configure-only drift
+checks before the build (pull request head)`: between `Configure` and `Build`,
+selected with `ctest -L '^pr-fast$' -L '^pr-fast-configure$' --no-tests=error`.
+They read only the checkout and what the configure wrote (`CTestTestfile.cmake`,
+the file-API codemodel, the census facts), never a built artifact, and they were
+behind 27 of 30 sampled red pull-request heads whose fast tier failed (79
+such heads over 2026-11-02..09). A stale manifest now fails the required check
+before the build, about nine minutes sooner at the median, and frees the gate
+VM. When that step passed, the post-build tier excludes `^pr-fast-configure$`
+so each member runs once; when it was skipped (the contract lane, which never
+builds) the post-build step runs the whole tier as before. The step writes
+`ctest-pr-fast-configure.junit.xml`, uploaded with the other ctest logs and
+recorded as its own `pr-fast-configure` suite in the reuse record. `pr-fast-tier-contract` fails if a `pr-fast-configure` member is
+outside `pr-fast`, carries `needs-build`, or one of the four pinned drift checks
+loses the label, and if the step stops being the one immediately before `Build`.
+
 ## macOS on a pull request waits for approval
 
 **Off by default.** Everything in this section is behind the repository

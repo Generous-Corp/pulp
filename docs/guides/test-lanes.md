@@ -132,6 +132,15 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   current `main`): it also runs the full suite, non-gating, to issue the
   receipt a merge group of that one pull request can reuse (see the local CI
   guide, "Exact PR receipts on an unchanged merge-group candidate").
+- **`pr-fast-configure`** — a subset of `pr-fast`: the generated-manifest
+  drift checks that fail most pull-request heads (`script-test-inputs-drift`,
+  the consumption-census drift checks, `agent-capability-manifest-check`).
+  They read only the checkout and the configure, so the PR-head macOS leg runs
+  them between `Configure` and `Build` and a stale manifest fails before the
+  build, about nine minutes sooner at the median; the post-build `pr-fast` run
+  leaves them out when that step passed. A member must read nothing a build
+  produces and must never also carry `needs-build`; `pr-fast-tier-contract`
+  enforces both. It changes nothing on `merge_group` or push.
 - **`source-selftest`** — applied from `tools/ci/source_selftests.json`, never by
   hand: a Python registration that reads only the checkout. **Excluded from the
   required `macos` gate on gate events** and run instead by the build-free
