@@ -1,0 +1,11 @@
+{
+ "name": "refactor-downstream-consumers-manifest",
+ "record": {
+  "entry": "tools/scripts/verify_downstream_consumers.py",
+  "inputs": [
+   "test/fixtures/refactor-baselines/downstream-consumers.json",
+   "tools/scripts/verify_downstream_consumers.py"
+  ],
+  "kind": "python"
+ }
+}

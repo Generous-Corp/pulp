@@ -1,0 +1,11 @@
+{
+ "name": "spawn-closure-selftest",
+ "record": {
+  "entry": "tools/ci/test_spawn_closure.py",
+  "inputs": [
+   "tools/ci/spawn_closure.py",
+   "tools/ci/test_spawn_closure.py"
+  ],
+  "kind": "python"
+ }
+}

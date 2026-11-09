@@ -1,0 +1,19 @@
+{
+ "name": "pulp-view-audio-carve",
+ "record": {
+  "entry": "tools/scripts/test_view_audio_carve.py",
+  "inputs": [
+   "core/view/audio/include/pulp/view",
+   "core/view/audio/src",
+   "core/view/cmake/PulpViewSources.cmake",
+   "core/view/include/pulp/view",
+   "core/view/include/pulp/view/plugin_view_host.hpp",
+   "core/view/include/pulp/view/view_all.hpp",
+   "core/view/include/pulp/view/widgets.hpp",
+   "core/view/platform/mac/window_host_mac.mm",
+   "core/view/src",
+   "tools/scripts/test_view_audio_carve.py"
+  ],
+  "kind": "python"
+ }
+}

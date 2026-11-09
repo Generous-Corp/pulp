@@ -1,0 +1,21 @@
+{
+ "name": "pulp-test-control-phase15-aggregate-e2e",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli",
+   "pulp-control-trusted-host-e2e-fixture",
+   "pulp-mcp"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "inspect/src/control_broker_daemon.cpp",
+   "test/test_control_phase15_aggregate_e2e.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

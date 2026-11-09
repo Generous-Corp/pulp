@@ -1,0 +1,17 @@
+{
+ "name": "vellum-boundary-lint-negative-contract",
+ "record": {
+  "entry": "tools/scripts/test_vellum_boundary_lint.py",
+  "inputs": [
+   "core/view/audio/include",
+   "core/view/platform/mac/window_host_mac_internal.hpp",
+   "core/view/src/view.cpp",
+   "tools/import-design",
+   "tools/import-design/pulp-package.json",
+   "tools/scripts/test_vellum_boundary_lint.py",
+   "tools/ui-build",
+   "tools/ui-build/pulp-package.json"
+  ],
+  "kind": "python"
+ }
+}

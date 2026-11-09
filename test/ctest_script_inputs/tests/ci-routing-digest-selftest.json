@@ -1,0 +1,17 @@
+{
+ "name": "ci-routing-digest-selftest",
+ "record": {
+  "entry": "tools/scripts/test_ci_routing_digest.py",
+  "inputs": [
+   ".github/workflows",
+   "tools/scripts/ci_routing_digest.py",
+   "tools/scripts/runner_topology.json",
+   "tools/scripts/runner_topology_check.py",
+   "tools/scripts/runner_topology_static.py",
+   "tools/scripts/test_ci_routing_digest.py",
+   "tools/scripts/tools_registry_check.py",
+   "tools/scripts/workflow_runner_selector_audit.py"
+  ],
+  "kind": "python"
+ }
+}

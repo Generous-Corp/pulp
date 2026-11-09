@@ -3,7 +3,7 @@
 
 `script_test_inputs.py --check` (the `script-test-inputs-drift` ctest) fails a
 pull request whose new Python, shell or Node ctest has no entry in
-test/ctest_script_inputs.json, but it needs a configured build, so it ran only
+test/ctest_script_inputs/, but it needs a configured build, so it ran only
 in CI and every miss cost a round-trip. This reads the CMake files the range
 adds or edits, finds `add_test(NAME <name> COMMAND ...)` calls that are new at
 the head and run a script, and fails when a name has no entry.
@@ -41,8 +41,9 @@ sys.path.insert(0, str(HERE.parent / "ci"))
 
 import cmake_registration_impact as registrations  # noqa: E402
 import script_test_inputs  # noqa: E402
+import script_inputs_store  # noqa: E402
 
-INPUTS_LIST = "test/ctest_script_inputs.json"
+INPUTS_LIST = "test/ctest_script_inputs/"
 EXCLUSION = re.compile(r"#\s*script-inputs:\s*not-gated\b")
 # What the CMake variables a registration names expand to, for classifying the
 # unexpanded command with the configured check's own rule.
@@ -58,7 +59,7 @@ REGENERATE = (
     "    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=ON "
     "-DPULP_BUILD_EXAMPLES=OFF\n"
     "    python3 tools/scripts/script_test_inputs.py --build-dir build --write\n"
-    "    git add test/ctest_script_inputs.json\n"
+    "    git add test/ctest_script_inputs/\n"
     "  (on a gate host, configure on a TARTCI_ROLE=light host such as m1, or a VM)\n"
     "  If the gate configure deliberately leaves the test out (an option it turns off,\n"
     "  a platform guard), regenerating cannot add it: mark the call instead with\n"
@@ -192,7 +193,10 @@ def check(root: Path, base: str, head: str = "HEAD") -> tuple[list[str], list[st
     if not changed:
         return [], []
     merge_base = _git(root, "merge-base", base, head).strip()
-    listed = set((json.loads(_show(root, head, INPUTS_LIST) or "{}").get("tests") or {}))
+    try:
+        listed = set(((script_inputs_store.load_ref(root, head) or {}).get("tests") or {}))
+    except script_inputs_store.StoreError:
+        listed = set()
     missing: list[str] = []
     advisories: list[str] = []
     for path in changed:

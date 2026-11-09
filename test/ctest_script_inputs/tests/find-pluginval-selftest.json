@@ -1,0 +1,11 @@
+{
+ "name": "find-pluginval-selftest",
+ "record": {
+  "entry": "tools/ci/test_find_pluginval.py",
+  "inputs": [
+   "tools/ci/test_find_pluginval.py",
+   "tools/cmake/PulpFindPluginval.cmake"
+  ],
+  "kind": "python"
+ }
+}

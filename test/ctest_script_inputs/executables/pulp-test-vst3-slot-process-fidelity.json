@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-vst3-slot-process-fidelity",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_vst3_slot_process_fidelity.cpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

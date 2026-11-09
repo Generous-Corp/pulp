@@ -1,0 +1,11 @@
+{
+ "name": "rack-source-index",
+ "record": {
+  "entry": "tools/rack/test_source_index.py",
+  "inputs": [
+   "tools/rack/source_index.py",
+   "tools/rack/test_source_index.py"
+  ],
+  "kind": "python"
+ }
+}

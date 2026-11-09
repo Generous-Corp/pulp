@@ -1,0 +1,10 @@
+{
+ "name": "import-design-ir-observe-gpu",
+ "record": {
+  "entry": "test/test_design_ir_observe_gpu.py",
+  "inputs": [
+   "test/test_design_ir_observe_gpu.py"
+  ],
+  "kind": "python"
+ }
+}

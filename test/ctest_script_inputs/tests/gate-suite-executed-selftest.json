@@ -1,0 +1,11 @@
+{
+ "name": "gate-suite-executed-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gate_suite_executed.py",
+  "inputs": [
+   "tools/scripts/gate_suite_executed.py",
+   "tools/scripts/test_gate_suite_executed.py"
+  ],
+  "kind": "python"
+ }
+}

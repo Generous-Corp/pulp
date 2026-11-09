@@ -1,0 +1,10 @@
+{
+ "name": "ios-compile-gate-legs",
+ "record": {
+  "entry": "tools/scripts/test_ios_compile_gate_legs.py",
+  "inputs": [
+   "tools/scripts/test_ios_compile_gate_legs.py"
+  ],
+  "kind": "python"
+ }
+}

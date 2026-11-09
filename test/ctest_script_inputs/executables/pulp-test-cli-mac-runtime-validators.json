@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-cli-mac-runtime-validators",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "tools/cli/mac_runtime_validators.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

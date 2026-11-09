@@ -1,0 +1,15 @@
+{
+ "name": "runner-topology-static-selftest",
+ "record": {
+  "entry": "tools/scripts/test_runner_topology_static.py",
+  "inputs": [
+   ".github/workflows",
+   "tools/scripts/runner_topology.json",
+   "tools/scripts/runner_topology_check.py",
+   "tools/scripts/runner_topology_static.py",
+   "tools/scripts/test_runner_topology_static.py",
+   "tools/scripts/workflow_runner_selector_audit.py"
+  ],
+  "kind": "python"
+ }
+}

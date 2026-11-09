@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-audio-image-raster",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_audio_image_raster.cpp"
+  ],
+  "inputs": [
+   "test/fixtures/audio/images"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/png_rgba_decode_apple.cpp",
+   "test/test_audio_image_raster.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-group-core-gpu-audio-private",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_neural_model_manifest.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

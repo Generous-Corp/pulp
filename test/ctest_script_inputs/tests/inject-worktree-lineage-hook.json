@@ -1,0 +1,11 @@
+{
+ "name": "inject-worktree-lineage-hook",
+ "record": {
+  "entry": "test/test_inject_worktree_lineage_hook.sh",
+  "inputs": [
+   "hooks/scripts/inject-worktree-lineage.sh",
+   "test/test_inject_worktree_lineage_hook.sh"
+  ],
+  "kind": "shell"
+ }
+}

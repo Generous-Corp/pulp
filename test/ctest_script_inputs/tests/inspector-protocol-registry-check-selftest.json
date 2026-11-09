@@ -1,0 +1,15 @@
+{
+ "name": "inspector-protocol-registry-check-selftest",
+ "record": {
+  "entry": "tools/scripts/check_inspector_protocol_registry.py",
+  "inputs": [
+   "experimental/pulp-rs/src",
+   "inspect/include/pulp/inspect/protocol.hpp",
+   "inspect/include/pulp/inspect/protocol_methods.inc",
+   "tools/cli",
+   "tools/mcp",
+   "tools/scripts/check_inspector_protocol_registry.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,25 @@
+{
+ "name": "vellum-view-core-pulp-kept-negative-contract",
+ "record": {
+  "entry": "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
+  "inputs": [
+   "core/view/include/pulp/view/host_surfaces.hpp",
+   "core/view/include/pulp/view/plugin_frame_renderer.hpp",
+   "core/view/include/pulp/view/plugin_view_host.hpp",
+   "core/view/platform/ios/plugin_view_host_ios.mm",
+   "core/view/platform/linux/plugin_view_host_linux.cpp",
+   "core/view/platform/mac/plugin_view_host_mac.mm",
+   "core/view/platform/mac/plugin_view_host_mac_drag.mm",
+   "core/view/platform/mac/plugin_view_host_mac_script_keys.hpp",
+   "core/view/platform/mac/plugin_view_host_mac_text_input.mm",
+   "core/view/platform/mac/plugin_view_host_mac_view.h",
+   "core/view/platform/win/plugin_view_host_win.cpp",
+   "core/view/src/plugin_frame_renderer.cpp",
+   "core/view/src/plugin_view_host_stub.cpp",
+   "core/view/src/view.cpp",
+   "tools/scripts/test_vellum_view_core_pulp_kept_check.py",
+   "tools/scripts/vellum_d3_units.json"
+  ],
+  "kind": "python"
+ }
+}

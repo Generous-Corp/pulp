@@ -3,7 +3,7 @@
 
 A test-reuse selector may skip a compiled test whose build inputs did not
 change, trusting `pulp_test_data()` (tools/cmake/PulpTestData.cmake, folded
-into test/ctest_script_inputs.json) to name every checkout file the test reads
+into test/ctest_script_inputs/) to name every checkout file the test reads
 at run time. That declaration is derived from a static scan of the test's
 sources, so it can miss a read: a path assembled at run time, a fixture a
 helper library opens, a file a spawned tool reads. This audit measures the
@@ -51,13 +51,14 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from affected_tests_shadow import classify_changes, declared_hit, executable_name, is_binary_test  # noqa: E402
+import script_inputs_store  # noqa: E402  (affected_tests_shadow put tools/scripts on the path)
 
 SCHEMA = "pulp-read-audit/v1"
 # A manifest `data` value for a test that may read anything in the checkout (a
 # tree walker such as `pulp doctor`): the selector never skips it, so no read
 # of it is a finding.
 WHOLE_CHECKOUT = "whole_checkout"
-MANIFEST = Path("test") / "ctest_script_inputs.json"
+MANIFEST = Path("test/ctest_script_inputs")
 STRACE_FILTER = "trace=%file,%process,fchdir,getdents64"
 CONTROL_NAME = "read-audit-control"
 # The control's undeclared and declared reads. Both are tracked files every
@@ -523,7 +524,10 @@ def cmd_run(a: argparse.Namespace) -> int:
         return 2
     root = Path(a.source_root).resolve()
     build_dir = Path(a.build_dir).resolve()
-    manifest = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
+    manifest = script_inputs_store.load(root)
+    if manifest is None:
+        print(f"read-audit: no script-input list under {root / MANIFEST}", file=sys.stderr)
+        return 2
     inventory = json.loads(subprocess.run(["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
                                           capture_output=True, text=True, check=True).stdout)
     files = tracked_files(root)

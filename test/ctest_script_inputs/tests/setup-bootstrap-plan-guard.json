@@ -1,0 +1,10 @@
+{
+ "name": "setup-bootstrap-plan-guard",
+ "record": {
+  "entry": "tools/scripts/setup_bootstrap_plan_guard.py",
+  "inputs": [
+   "tools/scripts/setup_bootstrap_plan_guard.py"
+  ],
+  "kind": "python"
+ }
+}
