@@ -225,7 +225,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/graph_event_contract.hpp',
-        'fingerprint': 'sha256:d2789bfded0544f831debed3b63433bb42ef21a6e801ca518d7facc819845a29',
+        'fingerprint': 'sha256:ae41b858a92bcc47ba3acd553af3a7b0cd7ab0f44fefbee1bfdf2ce919d3ba00',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded host and graph-authored event boundary contract; it is not wired into SignalGraph admission or a generator-facing capability.',
@@ -246,7 +246,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/signal_graph_executor_routing.hpp',
-        'fingerprint': 'sha256:e77a455304bffa7e75d94903aee89f5d61ec9155b68281eaa107b8e6facd1088',
+        'fingerprint': 'sha256:e622cc962a04c4ec16c2941789c544f403f448f9eef91bb2dafef676f7a43b1f',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Existing executor lowering infrastructure with graph-owned opaque spectral resolver; no public native spectral-stage registration or notation capability.',
