@@ -307,11 +307,11 @@ class DocsNoiseLintTests(unittest.TestCase):
         self._write("docs/reference/noisy.md", "See #123.\n")
         self._write(".agents/skills/ci/SKILL.md", "See #456.\n")
         self._write("docs/reports/noisy.md", "See #456.\n")
-        self._write("README.md", "See #789.\n")
+        self._write("docs/guides/other.md", "See #789.\n")
 
         with mock.patch.object(noise, "_git_changed_line_map", return_value={
             ".agents/skills/ci/SKILL.md": None,
-            "README.md": None,
+            "docs/guides/other.md": None,
             "docs/reference/missing.md": None,
             "docs/reference/noisy.md": None,
             "docs/reports/noisy.md": None,
@@ -419,6 +419,63 @@ class DocsNoiseLintTests(unittest.TestCase):
         self.assertIn("source-future-version", self._rules("core/d.cpp"))
         self.assertIn("source-issue-cite-phrase", self._rules("core/e.cpp"))
         self.assertIn("source-phase-label", self._rules("tools/f.py"))
+
+    def test_prose_style_flags_em_dash_and_padding_in_docs(self) -> None:
+        dash = "\u2014"
+        self._write("docs/reference/dash.md", f"The cache is warm {dash} reads skip decoding.\n")
+        self._write("docs/reference/pad.md", "This ensures that frames render. It is robust and seamless.\n")
+        self.assertIn("em-dash", self._rules("docs/reference/dash.md"))
+        self.assertIn("padding-phrase", self._rules("docs/reference/pad.md"))
+        result = self._run("--mode=report")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("em-dash", result.stderr)
+        self.assertIn("padding-phrase", result.stderr)
+
+    def test_prose_style_ignores_code_spans_and_fences_and_skip_marker(self) -> None:
+        dash = "\u2014"
+        self._write(
+            "docs/reference/ok.md",
+            f"Use `a {dash} b` literally.\n"
+            "```\n"
+            f"echo {dash}  robust\n"
+            "```\n"
+            f"Kept on purpose {dash} <!-- docs-noise-lint: skip {dash} quoted source text -->\n",
+        )
+        self.assertEqual(self._rules("docs/reference/ok.md"), set())
+
+    def test_prose_style_is_not_exempted_by_an_external_reference(self) -> None:
+        dash = "\u2014"
+        self._write("docs/reference/skia.md", f"Skia draws the frame {dash} one pass.\n")
+        self.assertIn("em-dash", self._rules("docs/reference/skia.md"))
+
+    def test_prose_style_flags_source_comments_only(self) -> None:
+        dash = "\u2014"
+        self._write("core/a.cpp", f"// Flush here {dash} the host may read it\n")
+        self._write("core/b.cpp", "/* This leverages the cache. */\n")
+        self._write("tools/c.py", f"# Retry {dash} GitHub lists releases late\n")
+        self._write("core/d.cpp", f'const char* kText = "a {dash} b"; int robust = 1;\n')
+        self.assertIn("em-dash", self._rules("core/a.cpp"))
+        self.assertIn("padding-phrase", self._rules("core/b.cpp"))
+        self.assertIn("em-dash", self._rules("tools/c.py"))
+        self.assertEqual(self._rules("core/d.cpp"), set())
+
+    def test_prose_style_source_skip_marker_is_honored(self) -> None:
+        dash = "\u2014"
+        self._write("core/a.cpp", f"// quoted {dash} vendor text docs-noise-lint: skip vendor wording\n")
+        self.assertEqual(self._rules("core/a.cpp"), set())
+
+    def test_front_door_docs_are_in_the_default_scope(self) -> None:
+        dash = "\u2014"
+        for rel in ("README.md", "VISION.md", "docs/getting-started/install.md"):
+            self.assertTrue(noise._path_in_default_scope(rel), rel)
+        self._write("README.md", f"Pulp {dash} audio plugins.\n")
+        self._write("docs/getting-started/install.md", "A comprehensive guide.\n")
+        self._write("docs/guides/other.md", f"Not scanned {dash} by default.\n")
+        result = self._run("--mode=report")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("README.md:1", result.stderr)
+        self.assertIn("docs/getting-started/install.md:1", result.stderr)
+        self.assertNotIn("docs/guides/other.md", result.stderr)
 
     def test_catch2_workflow_tag_in_string_is_flagged(self) -> None:
         self._write("test/t.cpp", 'TEST_CASE("does x", "[phase3][rt-safety]") {}\n')

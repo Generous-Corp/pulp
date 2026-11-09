@@ -328,6 +328,11 @@ pulp_add_test_suite(pulp-test-midi-learn-engine
 pulp_add_test_suite(pulp-test-midi-learn-persistence GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 
+# Format-side MIDI Learn glue: per-format feedback capabilities, the per-block
+# helper, and the processor-to-engine handle.
+pulp_add_test_suite(pulp-test-midi-learn-support
+    LIBRARIES pulp::format pulp::state pulp::midi)
+
 # Cross-version parameter-ordering guard (host-facing ID + index stability).
 pulp_add_test_suite(pulp-test-param-ordering GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
