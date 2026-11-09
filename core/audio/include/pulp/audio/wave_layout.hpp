@@ -58,23 +58,31 @@ enum class LayoutWarningKind {
     chunk_past_eof,                   ///< a non-data region extends past end of file
     extensible_mask_channel_mismatch, ///< channel mask population differs from the channel count
     valid_bits_above_container,       ///< wValidBitsPerSample exceeds wBitsPerSample
+    ds64_size_mismatch,               ///< an RF64 data size field and its ds64 entry disagree
 };
 
 /// Random-access reads over the bytes being walked: a span, an
 /// AudioByteSource, or the layout report's bounded reader. `read_at` copies
 /// up to `count` bytes from `offset` and returns how many it copied, which
 /// is short only at the end of the input. It receives the cursor, so a
-/// reader keeps its state in `context` and may use `size`.
+/// reader keeps its state in `context` (or read-only memory in `memory`)
+/// and may use `size`.
 struct WaveByteCursor {
     using ReadAt = std::size_t (*)(const WaveByteCursor& cursor, std::uint64_t offset,
                                    std::uint8_t* out, std::size_t count) noexcept;
 
     void* context = nullptr;
+    const void* memory = nullptr;
     ReadAt read_at = nullptr;
     std::uint64_t size = 0u;
 
+    /// A cursor over `size` bytes of memory at `bytes`, which must outlive
+    /// the cursor.
+    [[nodiscard]] static WaveByteCursor over(const void* bytes, std::uint64_t size) noexcept;
     /// A cursor over an in-memory span, which must outlive the cursor.
-    [[nodiscard]] static WaveByteCursor over(std::span<const std::uint8_t> bytes) noexcept;
+    [[nodiscard]] static WaveByteCursor over(std::span<const std::uint8_t> bytes) noexcept {
+        return over(bytes.data(), bytes.size());
+    }
 
     /// Copy up to `count` bytes at `offset`; 0 past the end or without a reader.
     [[nodiscard]] std::size_t read(std::uint64_t offset, std::uint8_t* out,
@@ -171,14 +179,11 @@ struct WavFormatFacts {
     std::uint32_t sample_rate = 0u;
     std::uint32_t bits_per_sample = 0u; ///< container width (wBitsPerSample)
     std::uint32_t bytes_per_frame = 0u; ///< 0 for compressed formats
-    /// Whole frames the data size holds: the frames a decode produces.
+    /// Whole frames the `data_size` given to interpret_wav_format holds.
+    /// Deprecated: a file's frame counts are decisions, read them from
+    /// WaveDecision (decide_wave) or AudioFileInfo, which also account for
+    /// the bytes a file does not hold.
     std::uint64_t total_frames = 0u;
-    /// True when the data size declares more than `total_frames` whole frames
-    /// (a partial last frame); `walk_wave_layout` callers also count bytes the
-    /// file does not hold.
-    bool truncated = false;
-    /// Frames the data size declares, a partial last frame counted.
-    std::uint64_t declared_frames = 0u;
 };
 
 /// The acceptance decision for one walked file.
@@ -198,6 +203,14 @@ struct WaveDecision {
 /// interpretation of `layout.fmt` (nullopt when it has no reader for it).
 /// Pure: reads nothing.
 [[nodiscard]] WaveDecision decide_wave(const WaveLayout& layout,
+                                       const std::optional<WavFormatFacts>& facts) noexcept;
+
+/// The same decision for a fmt payload alone: `declared_bytes` is the data
+/// size the header states and `present_bytes` the part of it the file holds.
+/// Applies the format and frame rules only; the walk's own refusals (no fmt,
+/// conflicting chunks) need a layout.
+[[nodiscard]] WaveDecision decide_wave(std::span<const std::uint8_t> fmt_payload,
+                                       std::uint64_t declared_bytes, std::uint64_t present_bytes,
                                        const std::optional<WavFormatFacts>& facts) noexcept;
 
 /// A minimal RIFF (or, past 4 GiB of data, RF64) header: envelope, ds64

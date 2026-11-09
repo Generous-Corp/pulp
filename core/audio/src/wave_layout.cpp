@@ -44,7 +44,7 @@ std::size_t read_span(const WaveByteCursor& cursor, std::uint64_t offset, std::u
     if (offset >= cursor.size)
         return 0u;
     const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(count, cursor.size - offset));
-    std::memcpy(out, static_cast<const std::uint8_t*>(cursor.context) + offset, n);
+    std::memcpy(out, static_cast<const std::uint8_t*>(cursor.memory) + offset, n);
     return n;
 }
 
@@ -154,10 +154,10 @@ void set_u64(CanonicalWaveHeader& h, std::size_t at, std::uint64_t value) noexce
 
 } // namespace
 
-WaveByteCursor WaveByteCursor::over(std::span<const std::uint8_t> bytes) noexcept {
+WaveByteCursor WaveByteCursor::over(const void* bytes, std::uint64_t size) noexcept {
     WaveByteCursor cursor;
-    cursor.context = const_cast<std::uint8_t*>(bytes.data());
-    cursor.size = bytes.size();
+    cursor.memory = bytes;
+    cursor.size = size;
     cursor.read_at = read_span;
     return cursor;
 }
@@ -313,7 +313,8 @@ WaveLayout walk_wave_layout(const WaveByteCursor& cursor) {
                    layout.ds64_data_size != declared && !layout.has_data) {
             // RF64 under 4 GiB may carry real 32-bit sizes; a ds64 entry
             // naming a different size contradicts it.
-            warn(layout, LayoutWarningKind::chunk_overlap, offset, layout.ds64_data_size, declared);
+            warn(layout, LayoutWarningKind::ds64_size_mismatch, offset, layout.ds64_data_size,
+                 declared);
             layout.refusal = WaveRefusal::conflicting_data_size;
         }
 
@@ -384,31 +385,37 @@ WaveLayout walk_wave_layout(const WaveByteCursor& cursor) {
 
 WaveDecision decide_wave(const WaveLayout& layout,
                          const std::optional<WavFormatFacts>& facts) noexcept {
-    WaveDecision decision;
     if (layout.refusal != WaveRefusal::none) {
+        WaveDecision decision;
         decision.refusal = layout.refusal;
         return decision;
     }
+    return decide_wave(layout.fmt.bytes(), layout.data_declared, layout.data_present, facts);
+}
+
+WaveDecision decide_wave(std::span<const std::uint8_t> fmt_payload, std::uint64_t declared_bytes,
+                         std::uint64_t present_bytes,
+                         const std::optional<WavFormatFacts>& facts) noexcept {
+    WaveDecision decision;
+    const auto fmt = interpret(fmt_payload);
     if (!facts) {
         // The decoder declines these at open, so name the field rather than
         // reporting an unsupported format.
-        const auto raw = interpret(layout.fmt.bytes());
-        decision.refusal = raw.channels == 0u      ? WaveRefusal::zero_channels
-                           : raw.sample_rate == 0u ? WaveRefusal::zero_sample_rate
-                           : raw.channels > 256u   ? WaveRefusal::too_many_channels
+        decision.refusal = fmt.channels == 0u      ? WaveRefusal::zero_channels
+                           : fmt.sample_rate == 0u ? WaveRefusal::zero_sample_rate
+                           : fmt.channels > 256u   ? WaveRefusal::too_many_channels
                                                    : WaveRefusal::unsupported_format;
         return decision;
     }
-    if (facts->channels == 0u) {
-        decision.refusal = WaveRefusal::zero_channels;
-        return decision;
-    }
-    if (facts->sample_rate == 0u) {
-        decision.refusal = WaveRefusal::zero_sample_rate;
+
+    // dr_wav refuses both at open, so facts never carry them; the guard
+    // keeps the frame arithmetic below from dividing by a zero channel count.
+    if (facts->channels == 0u || facts->sample_rate == 0u) {
+        decision.refusal =
+            facts->channels == 0u ? WaveRefusal::zero_channels : WaveRefusal::zero_sample_rate;
         return decision;
     }
 
-    const auto fmt = interpret(layout.fmt.bytes());
     const auto translated = facts->translated_format_tag;
     const std::uint64_t block_align = fmt.block_align;
     if (is_adpcm(translated)) {
@@ -416,9 +423,9 @@ WaveDecision decide_wave(const WaveLayout& layout,
             decision.refusal = WaveRefusal::block_align_too_small;
             return decision;
         }
-        const auto whole_blocks = layout.data_present / block_align;
+        const auto whole_blocks = present_bytes / block_align;
         const auto declared_blocks =
-            layout.data_declared / block_align + (layout.data_declared % block_align != 0u);
+            declared_bytes / block_align + (declared_bytes % block_align != 0u);
         decision.recoverable_frames =
             adpcm_frames(translated, facts->channels, block_align, whole_blocks);
         decision.recoverable_data_bytes = whole_blocks * block_align;
@@ -431,15 +438,14 @@ WaveDecision decide_wave(const WaveLayout& layout,
             decision.refusal = WaveRefusal::block_align_too_small;
             return decision;
         }
-        decision.recoverable_frames = layout.data_present / frame;
+        decision.recoverable_frames = present_bytes / frame;
         decision.recoverable_data_bytes = decision.recoverable_frames * frame;
-        decision.declared_frames =
-            layout.data_declared / frame + (layout.data_declared % frame != 0u);
+        decision.declared_frames = declared_bytes / frame + (declared_bytes % frame != 0u);
     }
     decision.truncated = decision.recoverable_frames < decision.declared_frames;
     // Zero frames is a valid empty file only when the data chunk declares
     // zero bytes; bytes with no whole frame among them are refused.
-    if (decision.recoverable_frames == 0u && layout.data_declared != 0u) {
+    if (decision.recoverable_frames == 0u && declared_bytes != 0u) {
         decision.refusal = WaveRefusal::no_whole_frame;
         decision.recoverable_data_bytes = 0u;
     }

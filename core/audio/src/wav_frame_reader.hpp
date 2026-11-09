@@ -8,6 +8,7 @@
 // Implemented in wav_decoder.cpp so the portable web lanes carry it too.
 
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/audio/wav_decoder.hpp>
 #include <pulp/audio/wave_layout.hpp>
 
 #include <cstdint>
@@ -32,6 +33,10 @@ struct WavProbe {
 /// The AudioFileInfo every WAV reader reports for an accepted probe.
 [[nodiscard]] AudioFileInfo wav_file_info(const WavProbe& probe);
 
+/// Whether `decode_wav(bytes, limits)` admits a probed file: accepted, and
+/// admitted by wav_decode_admits.
+[[nodiscard]] bool wav_admits(const WavProbe& probe, const WavDecodeLimits& limits);
+
 /// dr_wav over [canonical header][the probe's recoverable data bytes].
 class WavFrameReader {
   public:
@@ -48,14 +53,20 @@ class WavFrameReader {
     [[nodiscard]] std::uint32_t channels() const noexcept;
     [[nodiscard]] std::uint64_t frames() const noexcept;
 
-    /// Decodes up to `count` frames from `frame` into `interleaved`
-    /// (count x channels floats). Returns the frames decoded, short only on
-    /// a decoder failure or at the end of the stream.
-    std::uint64_t read_interleaved(std::uint64_t frame, std::uint64_t count, float* interleaved);
+    /// Decodes up to `count` frames from `frame` into `channels()` planar
+    /// buffers of at least `count` floats each. Returns the frames decoded,
+    /// short only on a decoder failure or at the end of the stream.
+    std::uint64_t read_planar(std::uint64_t frame, std::uint64_t count, float* const* out);
 
   private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+/// Decodes every frame an accepted probe decided on. The caller has
+/// already applied its admission (limits or a predicate); nullopt when the
+/// decoder delivers fewer frames than decided.
+[[nodiscard]] std::optional<AudioFileData> decode_all(const WaveByteCursor& cursor,
+                                                      const WavProbe& probe);
 
 } // namespace pulp::audio::detail

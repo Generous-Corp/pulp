@@ -5,8 +5,13 @@
 // only when the request is not where the source already is, so the
 // decoder's sequential reads stay sequential on the source.
 
+#include "wav_frame_reader.hpp"
+
 #include <pulp/audio/audio_reader.hpp>
 #include <pulp/audio/wave_layout.hpp>
+
+#include <memory>
+#include <utility>
 
 namespace pulp::audio::detail {
 
@@ -23,5 +28,25 @@ inline WaveByteCursor cursor_over(AudioByteSource& source) noexcept {
     };
     return cursor;
 }
+
+// One WAV opened from a byte source: the source, the cursor over it and the
+// probe, the sequence every source-backed WAV reader starts with. The cursor
+// points into the source, which the unique_ptr keeps at a stable address, so
+// the object may move.
+struct WavSource {
+    std::unique_ptr<AudioByteSource> source;
+    WaveByteCursor cursor;
+    WavProbe probe;
+
+    // Takes the source and probes it; false when it is absent or refused.
+    bool open(std::unique_ptr<AudioByteSource> byte_source) {
+        source = std::move(byte_source);
+        if (!source)
+            return false;
+        cursor = cursor_over(*source);
+        probe = probe_wav(cursor);
+        return probe.accepted();
+    }
+};
 
 } // namespace pulp::audio::detail

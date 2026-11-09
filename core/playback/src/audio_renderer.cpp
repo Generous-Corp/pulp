@@ -428,9 +428,7 @@ DecodedAudioAssetPool::decode_wav(timeline::ItemId id, std::span<const std::uint
     // An asset renders against a timeline that assumes its declared length,
     // so a WAV whose header declares more frames than it holds is refused
     // here even though the decoder could recover the frames present.
-    const auto info = audio::inspect_wav(bytes);
-    if (!info || info->truncated)
-        return fail<DecodedAudioAsset>(AudioRendererErrorCode::InvalidAsset, id);
+    decode_limits.refuse_truncated = true;
     auto decoded = audio::decode_wav(bytes, decode_limits);
     if (!decoded)
         return fail<DecodedAudioAsset>(AudioRendererErrorCode::InvalidAsset, id);

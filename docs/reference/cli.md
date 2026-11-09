@@ -2355,7 +2355,7 @@ JSON fields:
 | `exceeds_decode_limits` | `exceeded`, `exceeded_by[]` (`max_frames`, `max_channels`, `max_output_bytes`), the `limits` in force and the `output_bytes` the declared stream would need. A fact, not an error |
 | `regions[]` | In file order: `offset`, `declared_size` (payload the header claims), `actual_size` (payload present), `id`, `kind` (`envelope`, `fmt`, `data`, `metadata`, `padding`, `unknown`), `fields` (what the specification defines for that region) and an optional `note` |
 | `regions_truncated` | The walk stopped at its region cap |
-| `warnings[]` | `kind`, `offset`, `detail`. Kinds are specification violations only: `envelope_size_mismatch`, `missing_pad_byte`, `duplicate_fmt`, `fmt_after_data`, `truncated_data`, `sentinel_size_without_ds64`, `chunk_overlap`, `chunk_past_eof`, `extensible_mask_channel_mismatch`, `valid_bits_above_container` |
+| `warnings[]` | `kind`, `offset`, `detail`. Kinds are specification violations only: `envelope_size_mismatch`, `missing_pad_byte`, `duplicate_fmt`, `fmt_after_data`, `truncated_data`, `sentinel_size_without_ds64`, `chunk_overlap`, `chunk_past_eof`, `extensible_mask_channel_mismatch`, `valid_bits_above_container`, `ds64_size_mismatch` (an RF64 data size field and its ds64 entry disagree) |
 | `metadata.present[]` | `id`, `offset`, `size` of every metadata region, always |
 | `metadata.text[]` | `region`, `key`, `text`; present only with `--include-metadata-text` |
 | `truncated_tail_bytes` | Raw mode only: bytes after the last whole frame |

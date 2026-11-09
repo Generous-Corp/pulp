@@ -386,7 +386,9 @@ TEST_CASE("specification violations each raise exactly their warning",
         const auto bytes = make_rf64(format, data, static_cast<std::uint32_t>(data.size()),
                                      data.size() + 8u, {{"JUNK", Bytes{1u, 2u, 3u, 4u}}});
         const auto report = inspect_audio_file_layout(bytes);
-        CHECK(has_warning(report, LayoutWarningKind::chunk_overlap));
+        CHECK(has_warning(report, LayoutWarningKind::ds64_size_mismatch));
+        CHECK_FALSE(has_warning(report, LayoutWarningKind::chunk_overlap));
+        CHECK_THAT(to_json(report), Catch::Matchers::ContainsSubstring("\"ds64_size_mismatch\""));
         REQUIRE(find_region(report, "JUNK"));
         REQUIRE(report.decode);
         CHECK_FALSE(report.decode->decodable);

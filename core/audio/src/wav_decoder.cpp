@@ -8,6 +8,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <vector>
 
 #define DRWAV_API [[maybe_unused]] static
 #define DRWAV_PRIVATE static
@@ -19,7 +20,8 @@
 namespace pulp::audio {
 namespace {
 
-constexpr std::size_t kInterleavedChunkSamples = 4'096u;
+// Interleaved samples decoded per dr_wav call: bounds the scratch buffer.
+constexpr std::size_t kInterleavedChunkSamples = 65'536u;
 constexpr std::uint16_t kTagExtensible = 0xFFFEu;
 
 std::uint16_t u16(const std::uint8_t* p) noexcept {
@@ -156,11 +158,6 @@ WavProbe probe_wav(const WaveByteCursor& cursor) {
     if (probe.layout.refusal == WaveRefusal::none)
         probe.facts = interpret_wav_format(probe.layout.fmt.bytes(), 0u);
     probe.decision = decide_wave(probe.layout, probe.facts);
-    if (probe.facts) {
-        probe.facts->total_frames = probe.decision.recoverable_frames;
-        probe.facts->declared_frames = probe.decision.declared_frames;
-        probe.facts->truncated = probe.decision.truncated;
-    }
     return probe;
 }
 
@@ -181,20 +178,16 @@ AudioFileInfo wav_file_info(const WavProbe& probe) {
     return info;
 }
 
+bool wav_admits(const WavProbe& probe, const WavDecodeLimits& limits) {
+    return probe.accepted() && probe.facts && wav_decode_admits(wav_file_info(probe), limits);
+}
+
 struct WavFrameReader::Impl {
     CanonicalStream stream;
-    drwav wav{};
-    bool initialized = false;
+    std::optional<DrWavSession> session; // opened once `stream` is filled in
     std::uint64_t frames = 0u;
     std::uint64_t next_frame = 0u;
-
-    Impl() = default;
-    Impl(const Impl&) = delete;
-    Impl& operator=(const Impl&) = delete;
-    ~Impl() {
-        if (initialized)
-            drwav_uninit(&wav);
-    }
+    std::vector<float> interleaved;
 };
 
 WavFrameReader::WavFrameReader() = default;
@@ -210,12 +203,11 @@ bool WavFrameReader::open(const WaveByteCursor& cursor, const WavProbe& probe) {
     impl->stream.source = cursor;
     impl->stream.data_offset = probe.layout.data_offset;
     impl->stream.data_bytes = probe.decision.recoverable_data_bytes;
-    impl->initialized = drwav_init(&impl->wav, read_stream, seek_stream, nullptr, &impl->stream,
-                                   nullptr) != DRWAV_FALSE;
+    impl->session.emplace(impl->stream);
     // The decoder must count exactly the frames the policy decided on; a
     // disagreement is a defect in one of them, refused rather than guessed.
-    if (!impl->initialized || impl->wav.channels != probe.facts->channels ||
-        impl->wav.totalPCMFrameCount != probe.decision.recoverable_frames)
+    if (!*impl->session || impl->session->wav().channels != probe.facts->channels ||
+        impl->session->wav().totalPCMFrameCount != probe.decision.recoverable_frames)
         return false;
     impl->frames = probe.decision.recoverable_frames;
     impl_ = std::move(impl);
@@ -223,27 +215,63 @@ bool WavFrameReader::open(const WaveByteCursor& cursor, const WavProbe& probe) {
 }
 
 std::uint32_t WavFrameReader::channels() const noexcept {
-    return impl_ ? impl_->wav.channels : 0u;
+    return impl_ ? impl_->session->wav().channels : 0u;
 }
 
 std::uint64_t WavFrameReader::frames() const noexcept {
     return impl_ ? impl_->frames : 0u;
 }
 
-std::uint64_t WavFrameReader::read_interleaved(std::uint64_t frame, std::uint64_t count,
-                                               float* interleaved) {
+std::uint64_t WavFrameReader::read_planar(std::uint64_t frame, std::uint64_t count,
+                                          float* const* out) {
     if (!impl_ || frame >= impl_->frames || count == 0u)
         return 0u;
     auto& impl = *impl_;
+    auto& wav = impl.session->wav();
     if (frame != impl.next_frame) {
-        if (drwav_seek_to_pcm_frame(&impl.wav, frame) == DRWAV_FALSE)
+        if (drwav_seek_to_pcm_frame(&wav, frame) == DRWAV_FALSE)
             return 0u;
         impl.next_frame = frame;
     }
+    const std::size_t channels = wav.channels;
+    const std::uint64_t chunk = std::max<std::size_t>(1u, kInterleavedChunkSamples / channels);
+    impl.interleaved.resize(static_cast<std::size_t>(chunk) * channels);
     const auto wanted = std::min(count, impl.frames - frame);
-    const auto got = drwav_read_pcm_frames_f32(&impl.wav, wanted, interleaved);
-    impl.next_frame += got;
-    return got;
+    std::uint64_t produced = 0u;
+    while (produced < wanted) {
+        const auto request = std::min(chunk, wanted - produced);
+        const auto got = drwav_read_pcm_frames_f32(&wav, request, impl.interleaved.data());
+        for (std::size_t ch = 0; ch < channels; ++ch) {
+            float* planar = out[ch] + produced;
+            for (std::size_t i = 0; i < static_cast<std::size_t>(got); ++i)
+                planar[i] = impl.interleaved[i * channels + ch];
+        }
+        produced += got;
+        impl.next_frame += got;
+        if (got < request)
+            break;
+    }
+    return produced;
+}
+
+std::optional<AudioFileData> decode_all(const WaveByteCursor& cursor, const WavProbe& probe) {
+    WavFrameReader reader;
+    if (!reader.open(cursor, probe) || reader.frames() > std::numeric_limits<std::size_t>::max())
+        return std::nullopt;
+    const auto frames = static_cast<std::size_t>(reader.frames());
+    AudioFileData decoded;
+    decoded.sample_rate = probe.facts->sample_rate;
+    decoded.channels.resize(reader.channels());
+    std::vector<float*> pointers;
+    for (auto& channel : decoded.channels) {
+        channel.resize(frames);
+        pointers.push_back(channel.data());
+    }
+    // A zero-frame file is a valid file with no audio: its channels stay
+    // empty (`AudioFileData::empty()` is true), the answer libsndfile gives.
+    if (frames != 0u && reader.read_planar(0u, frames, pointers.data()) != frames)
+        return std::nullopt;
+    return decoded;
 }
 
 } // namespace detail
@@ -257,10 +285,20 @@ std::optional<AudioFileInfo> inspect_wav(std::span<const std::uint8_t> bytes) {
     return detail::wav_file_info(probe);
 }
 
+bool wav_decode_admits(const AudioFileInfo& info, const WavDecodeLimits& limits) noexcept {
+    if (limits.refuse_truncated && info.truncated)
+        return false;
+    if (limits.max_frames == 0u || limits.max_channels == 0u || limits.max_output_bytes == 0u)
+        return false;
+    std::uint64_t output_bytes = 0u;
+    return info.num_frames <= limits.max_frames && info.num_channels <= limits.max_channels &&
+           checked_output_bytes(info.num_frames, info.num_channels, output_bytes) &&
+           output_bytes <= limits.max_output_bytes &&
+           output_bytes <= std::numeric_limits<std::size_t>::max();
+}
+
 std::optional<WavFormatFacts> interpret_wav_format(std::span<const std::uint8_t> fmt_payload,
-                                                   std::uint64_t data_size,
-                                                   std::optional<std::uint64_t> fact_sample_count) {
-    (void)fact_sample_count;
+                                                   std::uint64_t data_size) {
     if (fmt_payload.size() < 16u)
         return std::nullopt;
     const auto tag = u16(fmt_payload.data());
@@ -291,75 +329,22 @@ std::optional<WavFormatFacts> interpret_wav_format(std::span<const std::uint8_t>
     facts.bytes_per_frame =
         is_adpcm(wav.translatedFormatTag) ? 0u : drwav_get_bytes_per_pcm_frame(&wav);
     facts.total_frames = wav.totalPCMFrameCount;
-    facts.declared_frames = facts.total_frames;
-
-    // A partial last frame or block: decide over a layout holding exactly
-    // these headers, the arithmetic a walked file gets.
-    WaveLayout layout;
-    layout.has_fmt = true;
-    layout.has_data = true;
-    layout.fmt.payload_size = static_cast<std::uint32_t>(
-        std::min<std::size_t>(fmt_payload.size(), WaveFormatChunk::kMaxPayload));
-    std::memcpy(layout.fmt.payload.data(), fmt_payload.data(), layout.fmt.payload_size);
-    layout.data_declared = data_size;
-    layout.data_present = data_size;
-    const auto decision = decide_wave(layout, facts);
-    if (decision.accepted() || decision.refusal == WaveRefusal::no_whole_frame) {
-        facts.declared_frames = decision.declared_frames;
-        facts.truncated = decision.truncated;
-    }
     return facts;
+}
+
+std::optional<WavFormatFacts> interpret_wav_format(std::span<const std::uint8_t> fmt_payload,
+                                                   std::uint64_t data_size,
+                                                   std::optional<std::uint64_t>) {
+    return interpret_wav_format(fmt_payload, data_size);
 }
 
 std::optional<AudioFileData> decode_wav(std::span<const std::uint8_t> bytes,
                                         WavDecodeLimits limits) {
-    if (limits.max_frames == 0u || limits.max_channels == 0u || limits.max_output_bytes == 0u)
-        return std::nullopt;
     const auto cursor = WaveByteCursor::over(bytes);
     const auto probe = detail::probe_wav(cursor);
-    if (!probe.accepted())
+    if (!detail::wav_admits(probe, limits))
         return std::nullopt;
-    const auto total = probe.decision.recoverable_frames;
-    const auto channel_count = probe.facts->channels;
-    if (total > limits.max_frames || channel_count > limits.max_channels ||
-        channel_count > kInterleavedChunkSamples)
-        return std::nullopt;
-    std::uint64_t output_bytes = 0u;
-    if (!checked_output_bytes(total, channel_count, output_bytes) ||
-        output_bytes > limits.max_output_bytes ||
-        output_bytes > std::numeric_limits<std::size_t>::max() ||
-        total > std::numeric_limits<std::size_t>::max())
-        return std::nullopt;
-
-    detail::WavFrameReader reader;
-    if (!reader.open(cursor, probe))
-        return std::nullopt;
-
-    const auto frames = static_cast<std::size_t>(total);
-    const auto channels = static_cast<std::size_t>(channel_count);
-    AudioFileData decoded;
-    decoded.sample_rate = probe.facts->sample_rate;
-    decoded.channels.resize(channels);
-    for (auto& channel : decoded.channels)
-        channel.resize(frames);
-
-    std::array<float, kInterleavedChunkSamples> interleaved{};
-    const auto chunk_frames = kInterleavedChunkSamples / channels;
-    std::uint64_t frame_offset = 0u;
-    while (frame_offset < total) {
-        const auto requested = std::min<std::uint64_t>(total - frame_offset, chunk_frames);
-        const auto read = reader.read_interleaved(frame_offset, requested, interleaved.data());
-        if (read != requested)
-            return std::nullopt;
-        for (std::size_t frame = 0; frame < static_cast<std::size_t>(read); ++frame) {
-            for (std::size_t channel = 0; channel < channels; ++channel) {
-                decoded.channels[channel][static_cast<std::size_t>(frame_offset) + frame] =
-                    interleaved[frame * channels + channel];
-            }
-        }
-        frame_offset += read;
-    }
-    return decoded;
+    return detail::decode_all(cursor, probe);
 }
 
 } // namespace pulp::audio

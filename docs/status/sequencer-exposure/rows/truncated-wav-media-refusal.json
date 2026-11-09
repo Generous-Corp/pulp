@@ -16,7 +16,7 @@
     {
       "path": "core/playback/src/audio_renderer.cpp",
       "needles": [
-        "if (!info || info->truncated)"
+        "decode_limits.refuse_truncated = true;"
       ]
     },
     {

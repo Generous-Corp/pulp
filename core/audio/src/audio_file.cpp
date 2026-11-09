@@ -85,35 +85,26 @@ static bool can_write_wav(const AudioFileData& data) {
 
 namespace {
 
-// Frames decoded per call into the output; bounds the interleaved scratch so
-// memory follows the output, not the file.
-constexpr uint64_t kReadChunkFrames = 65536u;
-
-// One open of a WAV file: the byte source, the cursor over it, and the
-// probe (headers only). The cursor points into the source, which the
-// unique_ptr keeps at a stable address.
-struct OpenedWav {
-    std::unique_ptr<AudioByteSource> source;
-    WaveByteCursor cursor;
-    detail::WavProbe probe;
-};
-
-std::optional<OpenedWav> open_wav(const std::string& path) {
-    OpenedWav opened;
-    opened.source = make_file_byte_source(path);
-    if (!opened.source)
-        return std::nullopt;
-    opened.cursor = detail::cursor_over(*opened.source);
-    opened.probe = detail::probe_wav(opened.cursor);
-    if (!opened.probe.accepted())
+std::optional<detail::WavSource> open_wav(const std::string& path) {
+    detail::WavSource opened;
+    if (!opened.open(make_file_byte_source(path)))
         return std::nullopt;
     return opened;
 }
 
-} // namespace
+std::optional<AudioFileData>
+read_wav_admitted(const std::string& path, const std::function<bool(const AudioFileInfo&)>& admit) {
+    const auto opened = open_wav(path);
+    if (!opened)
+        return std::nullopt;
+    // The decode below reads through this same open, so what `admit` saw is
+    // what gets allocated and decoded.
+    if (!admit(detail::wav_file_info(opened->probe)))
+        return std::nullopt;
+    return detail::decode_all(opened->cursor, opened->probe);
+}
 
-static std::optional<AudioFileData>
-read_wav_admitted(const std::string& path, const std::function<bool(const AudioFileInfo&)>& admit);
+} // namespace
 
 std::optional<AudioFileInfo> read_audio_file_info(const std::string& path) {
     const auto opened = open_wav(path);
@@ -140,47 +131,6 @@ read_audio_file(const std::string& path, const std::function<bool(const AudioFil
     } catch (...) {
         return std::nullopt;
     }
-}
-
-static std::optional<AudioFileData>
-read_wav_admitted(const std::string& path, const std::function<bool(const AudioFileInfo&)>& admit) {
-    auto opened = open_wav(path);
-    if (!opened)
-        return std::nullopt;
-    // The decode below reads through this same open, so what `admit` saw is
-    // what gets allocated and decoded.
-    const auto info = detail::wav_file_info(opened->probe);
-    if (!admit(info) || info.num_frames > std::numeric_limits<std::size_t>::max())
-        return std::nullopt;
-
-    detail::WavFrameReader reader;
-    if (!reader.open(opened->cursor, opened->probe))
-        return std::nullopt;
-
-    AudioFileData data;
-    data.sample_rate = info.sample_rate;
-    data.channels.resize(info.num_channels);
-    // A zero-frame file is a valid file with no audio: it decodes to its
-    // channel count and rate with empty channels (`AudioFileData::empty()`
-    // is true), the same answer libsndfile gives.
-    const auto frames = static_cast<std::size_t>(info.num_frames);
-    for (auto& channel : data.channels)
-        channel.resize(frames);
-
-    const auto channels = static_cast<std::size_t>(info.num_channels);
-    std::vector<float> interleaved(
-        static_cast<std::size_t>(std::min<uint64_t>(info.num_frames, kReadChunkFrames)) * channels);
-    for (uint64_t start = 0; start < info.num_frames; start += kReadChunkFrames) {
-        const auto count = std::min<uint64_t>(kReadChunkFrames, info.num_frames - start);
-        if (reader.read_interleaved(start, count, interleaved.data()) != count)
-            return std::nullopt;
-        for (std::size_t ch = 0; ch < channels; ++ch) {
-            float* dest = data.channels[ch].data() + start;
-            for (std::size_t i = 0; i < static_cast<std::size_t>(count); ++i)
-                dest[i] = interleaved[i * channels + ch];
-        }
-    }
-    return data;
 }
 
 bool write_wav_stream(std::ostream& output, const AudioFileData& data, WavBitDepth bit_depth) {

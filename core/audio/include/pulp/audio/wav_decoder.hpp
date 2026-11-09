@@ -17,6 +17,10 @@ struct WavDecodeLimits {
     std::uint64_t max_frames = 100'000'000u;
     std::uint32_t max_channels = 64u;
     std::uint64_t max_output_bytes = 512u * 1024u * 1024u;
+    /// Refuse a file whose header declares more frames than it holds,
+    /// instead of decoding the whole frames present. For a caller that
+    /// compares the media against a length declared elsewhere.
+    bool refuse_truncated = false;
 };
 
 /// Inspect a complete in-memory RIFF/WAVE, RF64 or BW64 file without
@@ -26,22 +30,30 @@ struct WavDecodeLimits {
 [[nodiscard]] std::optional<AudioFileInfo> inspect_wav(
     std::span<const std::uint8_t> bytes);
 
+/// Whether `decode_wav(bytes, limits)` decodes the file `inspect_wav(bytes)`
+/// described as `info`: inside every ceiling, and not truncated when
+/// `limits.refuse_truncated` is set. The one rule for strict callers that
+/// inspect without decoding.
+[[nodiscard]] bool wav_decode_admits(const AudioFileInfo& info,
+                                     const WavDecodeLimits& limits) noexcept;
+
 /// Interpret a `fmt ` payload the way `inspect_wav` and `decode_wav` do,
-/// without any sample data present.
-///
-/// `data_size` is the `data` chunk payload size. `total_frames` is the whole
-/// frames it holds and `declared_frames` counts a partial last frame, with
-/// `truncated` set when they differ. `fact_sample_count` is accepted for a
-/// caller holding one; the frame count never depends on it. Returns nullopt
-/// when the decoder has no reader for the format.
+/// without any sample data present. `data_size` is the `data` chunk
+/// payload size; `total_frames` is the whole frames it holds. Returns
+/// nullopt when the decoder has no reader for the format.
 [[nodiscard]] std::optional<WavFormatFacts>
+interpret_wav_format(std::span<const std::uint8_t> fmt_payload, std::uint64_t data_size);
+
+/// The fact chunk's sample count never changes the interpretation.
+[[deprecated("the fact sample count is ignored; call interpret_wav_format(fmt_payload, "
+             "data_size)")]] [[nodiscard]] std::optional<WavFormatFacts>
 interpret_wav_format(std::span<const std::uint8_t> fmt_payload, std::uint64_t data_size,
-                     std::optional<std::uint64_t> fact_sample_count = std::nullopt);
+                     std::optional<std::uint64_t> fact_sample_count);
 
 /// Decode a complete in-memory RIFF/WAVE, RF64 or BW64 file into
 /// deinterleaved float channels: the whole frames present, as `inspect_wav`
-/// reports them, so a truncated file decodes the frames it holds. Callers
-/// that must refuse a truncated file check `inspect_wav(bytes)->truncated`.
+/// reports them, so a truncated file decodes the frames it holds unless
+/// `limits.refuse_truncated` is set.
 ///
 /// This surface performs no file I/O and compiles with exceptions disabled.
 /// It checks frame, channel, and decoded-byte ceilings before allocating

@@ -366,16 +366,17 @@ a non-zero data size is a `nullopt`; "nothing to play" is a present value with
 `empty()` true.
 
 **Gotcha: a truncated WAV decodes, and says so only in `AudioFileInfo`.** A
-header that declares more than the file holds (a cut-off download, a data or
-RIFF size past the end, an odd data chunk without its pad byte) decodes the
-whole frames present. `decode_wav` returns only `AudioFileData`, which carries
-no flag, so a caller that must have every declared frame calls `inspect_wav`
-(headers only, cheap) and refuses on `truncated`, as
-`DecodedAudioAssetPool::decode_wav` does. Comparing `num_frames()` against a
-length declared elsewhere is the other place this shows up. The authoring capsule's canonical PCM parser
-(`core/authoring_capsule/src/canonical_pcm.cpp`) is the one deliberate
-exception to the shared policy: it hashes the WAV bytes it seals, so it parses
-them strictly on its own and refuses what the readers would recover.
+header that declares more than the file holds (a cut-off download, a data
+size past the end, a partial last frame) decodes the whole frames present.
+`AudioFileData` carries no flag, so a caller that must have every declared
+frame sets `WavDecodeLimits::refuse_truncated`, as
+`DecodedAudioAssetPool::decode_wav` does, or checks an `inspect_wav` result
+with `wav_decode_admits`. Comparing `num_frames()` against a length declared
+elsewhere is the other place this shows up. The authoring capsule's
+canonical PCM parser (`core/authoring_capsule/src/canonical_pcm.cpp`) is the
+one deliberate exception to the shared policy: it hashes the WAV bytes it
+seals, so it parses them strictly on its own and refuses what the readers
+would recover.
 
 - The WAM adapter marks the processor dirty on a control write and services it
   **once per render turn**, right after the render call (`WamStage::service_non_realtime`

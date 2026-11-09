@@ -540,42 +540,21 @@ struct VorbisDecoder final : StreamingDecoder {
 
 struct WavDecoder final : Decoder {
     bool open(std::unique_ptr<AudioByteSource> byte_source) {
-        source = std::move(byte_source);
-        cursor = detail::cursor_over(*source);
-        const auto probe = detail::probe_wav(cursor);
-        if (!probe.accepted() || !reader.open(cursor, probe))
+        if (!wav.open(std::move(byte_source)) || !reader.open(wav.cursor, wav.probe))
             return false;
-        info = detail::wav_file_info(probe);
+        info = detail::wav_file_info(wav.probe);
         return true;
     }
 
     std::uint64_t decode(std::uint64_t frame_offset, float* const* out,
                          std::uint64_t frames) override {
-        const auto channels = info.num_channels;
-        interleaved.resize(static_cast<std::size_t>(kChunkFrames) * channels);
-        std::uint64_t produced = 0;
-        while (produced < frames) {
-            const auto count = std::min(frames - produced, kChunkFrames);
-            const auto got =
-                reader.read_interleaved(frame_offset + produced, count, interleaved.data());
-            for (std::uint32_t ch = 0; ch < channels; ++ch) {
-                float* planar = out[ch] + produced;
-                for (std::uint64_t i = 0; i < got; ++i)
-                    planar[i] = interleaved[static_cast<std::size_t>(i) * channels + ch];
-            }
-            produced += got;
-            if (got < count)
-                break;
-        }
-        return produced;
+        return reader.read_planar(frame_offset, frames, out);
     }
 
     // Declared in dependency order so the reader is destroyed before the
-    // cursor's source.
-    std::unique_ptr<AudioByteSource> source;
-    WaveByteCursor cursor;
+    // source its cursor reads.
+    detail::WavSource wav;
     detail::WavFrameReader reader;
-    std::vector<float> interleaved;
 };
 
 struct AiffDecoder final : Decoder {

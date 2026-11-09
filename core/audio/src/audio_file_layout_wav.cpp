@@ -347,27 +347,6 @@ WaveByteCursor cursor_over(Reader& reader) noexcept {
     return cursor;
 }
 
-// The warnings whose truth is the decoder's: the probe's walk is the one the
-// decoder reads by, so its list replaces whatever the presentation walk saw
-// of these kinds.
-bool decoder_owned(LayoutWarningKind kind) noexcept {
-    switch (kind) {
-    case LayoutWarningKind::envelope_size_mismatch:
-    case LayoutWarningKind::missing_pad_byte:
-    case LayoutWarningKind::duplicate_fmt:
-    case LayoutWarningKind::fmt_after_data:
-    case LayoutWarningKind::truncated_data:
-    case LayoutWarningKind::sentinel_size_without_ds64:
-    case LayoutWarningKind::chunk_overlap:
-    case LayoutWarningKind::chunk_past_eof:
-        return true;
-    case LayoutWarningKind::extensible_mask_channel_mismatch:
-    case LayoutWarningKind::valid_bits_above_container:
-        return false;
-    }
-    return false;
-}
-
 std::string chunk_id_at(Builder& b, std::uint64_t offset) {
     const auto raw = b.reader.read(offset, 4u);
     return raw.size() == 4u ? fourcc(raw.data()) : std::string("chunk");
@@ -395,14 +374,37 @@ std::string describe(Builder& b, const WaveWarning& w, const detail::WavProbe& p
         return w.offset == 0u
                    ? std::string("RF64 envelope without a leading ds64 chunk")
                    : chunk_id_at(b, w.offset) + " chunk size is 0xFFFFFFFF with no ds64 entry";
-    case LayoutWarningKind::chunk_overlap:
+    case LayoutWarningKind::ds64_size_mismatch:
         return "ds64 data size " + n(w.declared) + " disagrees with the data chunk size " +
                n(w.actual);
+    case LayoutWarningKind::chunk_overlap:
     case LayoutWarningKind::extensible_mask_channel_mismatch:
     case LayoutWarningKind::valid_bits_above_container:
         break;
     }
     return {};
+}
+
+// Stream facts from the decoder's interpretation and decision. `fmt` is the
+// presentation walk's first fmt chunk, which supplies the extensible valid
+// bits; without it the container width stands in.
+LayoutStreamFacts stream_facts(const WavFormatFacts& facts, const WaveDecision& decision,
+                               const FormatFields* fmt) {
+    LayoutStreamFacts stream;
+    stream.sample_rate = facts.sample_rate;
+    stream.channels = facts.channels;
+    stream.bits_per_sample = facts.bits_per_sample;
+    stream.valid_bits =
+        fmt && fmt->extensible && fmt->valid_bits != 0u ? fmt->valid_bits : facts.bits_per_sample;
+    stream.frames = decision.recoverable_frames;
+    stream.declared_frames = decision.declared_frames;
+    stream.duration_seconds =
+        facts.sample_rate != 0u
+            ? static_cast<double>(decision.recoverable_frames) / facts.sample_rate
+            : 0.0;
+    stream.encoding = encoding_name(facts.translated_format_tag);
+    stream.bytes_per_frame = facts.bytes_per_frame;
+    return stream;
 }
 
 void finish(Builder& b, const Envelope& env, Walk& walk) {
@@ -429,21 +431,11 @@ void finish(Builder& b, const Envelope& env, Walk& walk) {
         // No Pulp reader decodes Wave64, but its fmt chunk is the same
         // structure, so the stream it describes is still reported.
         if (walk.fmt && walk.data_seen) {
-            if (const auto facts = interpret_wav_format(walk.fmt->payload, walk.data_size)) {
-                LayoutStreamFacts stream;
-                stream.sample_rate = facts->sample_rate;
-                stream.channels = facts->channels;
-                stream.bits_per_sample = facts->bits_per_sample;
-                stream.valid_bits = facts->bits_per_sample;
-                stream.frames = facts->total_frames;
-                stream.declared_frames = facts->declared_frames;
-                stream.duration_seconds =
-                    facts->sample_rate != 0u
-                        ? static_cast<double>(facts->total_frames) / facts->sample_rate
-                        : 0.0;
-                stream.encoding = encoding_name(facts->translated_format_tag);
-                stream.bytes_per_frame = facts->bytes_per_frame;
-                report.stream = stream;
+            const auto facts = interpret_wav_format(walk.fmt->payload, walk.data_size);
+            if (facts) {
+                const auto decision =
+                    decide_wave(walk.fmt->payload, walk.data_size, walk.data_size, facts);
+                report.stream = stream_facts(*facts, decision, nullptr);
             }
         }
         LayoutDecodeVerdict verdict;
@@ -452,33 +444,16 @@ void finish(Builder& b, const Envelope& env, Walk& walk) {
         return;
     }
 
+    // The decoder's own walk raises every warning that bears on decoding;
+    // the presentation walk above raised none of them (report_chunk_faults).
     const auto probe = detail::probe_wav(cursor_over(b.reader));
-    auto& warnings = report.warnings;
-    warnings.erase(std::remove_if(warnings.begin(), warnings.end(),
-                                  [](const LayoutWarning& w) { return decoder_owned(w.kind); }),
-                   warnings.end());
     for (const auto& w : probe.layout.warnings)
         b.warn(w.kind, w.offset, describe(b, w, probe));
 
     const auto& decision = probe.decision;
     if (probe.facts) {
         const auto& facts = *probe.facts;
-        LayoutStreamFacts stream;
-        stream.sample_rate = facts.sample_rate;
-        stream.channels = facts.channels;
-        stream.bits_per_sample = facts.bits_per_sample;
-        stream.valid_bits = walk.fmt && walk.fmt->extensible && walk.fmt->valid_bits != 0u
-                                ? walk.fmt->valid_bits
-                                : facts.bits_per_sample;
-        stream.frames = decision.recoverable_frames;
-        stream.declared_frames = decision.declared_frames;
-        stream.duration_seconds =
-            facts.sample_rate != 0u
-                ? static_cast<double>(decision.recoverable_frames) / facts.sample_rate
-                : 0.0;
-        stream.encoding = encoding_name(facts.translated_format_tag);
-        stream.bytes_per_frame = facts.bytes_per_frame;
-        report.stream = stream;
+        report.stream = stream_facts(facts, decision, walk.fmt ? &*walk.fmt : nullptr);
         // The ceilings bind what a decode allocates: the frames present.
         b.set_decode_limits(decision.recoverable_frames, facts.channels);
         // Every byte present but a partial last frame (or block) is still
@@ -537,6 +512,8 @@ void inspect_wav_layout(Builder& b) {
                            : file_size;
 
     IffHooks hooks;
+    // Outside Wave64, the decoder's probe owns the chunk-fault warnings.
+    hooks.report_chunk_faults = env.w64;
     hooks.read_header = [&](std::uint64_t at) { return read_chunk_header(b, env, at); };
     hooks.classify = classify;
     // Region sizes only; the warnings these conditions raise are the
