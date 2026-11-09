@@ -14,3 +14,4 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING AND Python3_Interpreter_FOUND AND PULP_ENAB
     set_tests_properties(cmake-graph-edge-probe-sdk-consumer PROPERTIES
         LABELS "cmake;sdk;host;needs-build" TIMEOUT 600)
 endif()
+include("${CMAKE_CURRENT_LIST_DIR}/graph_control_event_probe_tests.cmake")

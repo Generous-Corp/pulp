@@ -589,6 +589,13 @@
       "timeout": 300.0
     },
     {
+      "name": "graph-stall-guard-selftest",
+      "argv": [
+        "{repo}/tools/graph/test_graph_stall_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "embed-wgsl-selftest",
       "argv": [
         "{repo}/tools/cmake/scripts/test_embed_wgsl.py"
@@ -1250,6 +1257,13 @@
       "argv": [
         "{repo}/tools/scripts/test_check_yoga_oracle_pin.py"
       ]
+    },
+    {
+      "name": "android-fixture-lane-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_android_fixture_lane.py"
+      ],
+      "timeout": 120.0
     }
   ]
 }

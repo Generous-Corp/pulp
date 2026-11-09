@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261108-skia-provisioning-fallback-20261108-watch",
+  "created_at": "2026-11-08T11:03:54Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "tools/scripts/fetch_skia_for_release.py gains a second download source for the pinned Skia release asset. When the GitHub release download URL fails after its retries, or answers 4xx, the fetcher looks up the same tag and asset name through the GitHub REST API and downloads it from the API asset endpoint. The pinned revision, the asset it resolves to, the sha256 that must match, the bytes written and the unpacked layout are all unchanged, so no Skia backend, render surface or captured output moves. A cached generation or host artifact cache entry is still used first. The other edits are new unit tests in tools/scripts/test_fetch_skia_for_release_extra.py and two SKILL.md notes. No design-import, Chromium, rendering or packaging authority moves; the disposition is watch-only.",
+  "tests": [
+    "python3 tools/scripts/test_fetch_skia_for_release_extra.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "vellum_inherits": false
+}

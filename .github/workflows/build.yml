@@ -2196,18 +2196,26 @@ jobs:
             echo "ccache already installed: $(ccache --version | head -n 1)"
             exit 0
           fi
-          delay="${PULP_BREW_RETRY_DELAY_SECS:-20}"
-          for attempt in 1 2 3; do
+          # 6 attempts, exponential backoff (base, 2x, 4x ... capped at 60s)
+          # with 75-125% jitter: about 2-3 minutes to ride out a short
+          # GitHub/CDN outage on the bottle download. Same policy as
+          # tools/scripts/download_retry.py.
+          base="${PULP_BREW_RETRY_DELAY_SECS:-5}"
+          attempts=6
+          for attempt in $(seq 1 "$attempts"); do
             if brew install ccache; then
               exit 0
             fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "::warning::brew install ccache attempt $attempt failed; retrying in $(( delay * attempt ))s"
-              sleep $(( delay * attempt ))
+            if [ "$attempt" -lt "$attempts" ]; then
+              nominal=$(( base * (1 << (attempt - 1)) ))
+              [ "$nominal" -gt 60 ] && nominal=60
+              wait_s=$(( nominal * (75 + RANDOM % 51) / 100 ))
+              echo "::warning::brew install ccache attempt $attempt failed; retrying in ${wait_s}s"
+              sleep "$wait_s"
               brew update --quiet || true
             fi
           done
-          echo "::error::brew install ccache failed after 3 attempts"
+          echo "::error::brew install ccache failed after $attempts attempts"
           exit 1
 
       # Ninja + cl from the developer environment, and ccache when the runner

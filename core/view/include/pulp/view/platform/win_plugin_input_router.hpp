@@ -216,7 +216,7 @@ public:
                 cancel_gesture();
                 return;
             }
-            if (!transfer_input_focus(root, drag_target)) {
+            if (!transfer_input_focus(root, drag_target, FocusCause::pointer)) {
                 if (accepts_original()) {
                     drag_target_.reset();
                     cancel_gesture();
@@ -399,7 +399,7 @@ public:
         event.is_repeat = is_repeat;
         bool consumed = false;
         if (focused->accepts_text_input()) {
-            consumed = focused->on_key_event(event);
+            consumed = pulp::view::deliver_key_event(*focused, event);
         } else if (focused->accepts_navigation_input()) {
             constexpr std::uint16_t kHostChordModifiers =
                 kModCtrl | kModAlt | kModMeta | kModCmd;
@@ -409,7 +409,7 @@ public:
                 key == KeyCode::home || key == KeyCode::end_ ||
                 key == KeyCode::enter || key == KeyCode::escape);
             if (!allowed) return false;
-            consumed = focused->on_key_event(event);
+            consumed = pulp::view::deliver_key_event(*focused, event);
             if (!consumed) {
                 consumed = script_events::dispatch_key_for_root(
                     host_.input_root(), static_cast<int>(key), modifiers, is_down);
@@ -419,6 +419,19 @@ public:
         }
         if (consumed) host_.input_request_repaint();
         return consumed;
+    }
+
+    /// A modifier virtual key (Shift, Ctrl, Alt, Windows) went down or up.
+    /// `modifiers` is the full set now held. Forwards the change to the
+    /// focused view and to any view a pointer press is captured by, so Shift
+    /// pressed mid-drag reaches the dragged control. Key auto-repeat must not
+    /// be reported here.
+    bool on_modifier_keys(std::uint16_t modifiers) {
+        const bool delivered =
+            pulp::view::deliver_modifier_keys_changed(host_.input_root(), modifiers);
+        if (delivered)
+            host_.input_request_repaint();
+        return delivered;
     }
 
     /// One UTF-16 code unit from `WM_CHAR`. Returns whether the unit was
@@ -445,7 +458,7 @@ public:
         }
         pending_high_surrogate_ = 0;
         if (text.empty()) return true;
-        focused->on_text_input(TextInputEvent{.text = text});
+        pulp::view::deliver_text_input(*focused, TextInputEvent{.text = text});
         host_.input_request_repaint();
         return true;
     }

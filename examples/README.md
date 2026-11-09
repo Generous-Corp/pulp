@@ -110,6 +110,7 @@ cmake -S examples/<dir> -B build/<dir> -DPulp_DIR=<sdk>/lib/cmake/Pulp
 | `graph-named-bus-cookbook` | Named buses through the format layer (**SDK project**) | Configure as an SDK project, then run `pulp-graph-named-bus-cookbook` |
 | `graph-spatial-cookbook` | Fixed left and right placement of a mono signal (**SDK project**) | Configure as an SDK project, then run `pulp-graph-spatial-cookbook` |
 | `g11-tuning-cookbook` | Asking the public tuning provider for a note's frequency (**SDK project**) | Configure as an SDK project, then run `pulp-graph-tuning-cookbook` |
+| `g11-recording-publication` | Capturing graph input and atomically publishing an immutable sample (**SDK project**) | Configure as an SDK project, then run `pulp-g11-recording-publication` |
 | `timeline-phase1` | Three arrangements: decoded audio, a step pattern, multitrack with automation | `pulp build --examples --target pulp-timeline-audio-player` |
 | `timeline-session` | Launch session, DAW-style project and project session, all headless | `pulp build --examples --target pulp-timeline-daw-project` |
 | `timeline-plugin-proof` | Loadable plugin that owns a timeline document and a piano roll editor | `pulp build --examples --target TimelinePluginProof_CLAP` |
@@ -154,6 +155,7 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `timeline-sdk-consumer` | Timeline SDK closure, cookbook and chord renderer from an installed SDK (**SDK project**) | `ctest -R cmake-timeline-sdk-consumer` | `test/consumers/timeline-sdk-consumer` |
 | `graph-agent-loop` | Bounded agent loop over the public graph API (**SDK project**) | Configure as an SDK project | `test/consumers/graph-agent-loop` |
 | `graph-edge-probe` | Graph edge kinds from an installed SDK (**SDK project**) | Configure as an SDK project | `test/consumers/graph-edge-probe` |
+| `graph-control-event-probe` | Bounded control/event edge publication and planted mutation (**SDK project**) | Configure as an SDK project | `test/consumers/graph-control-event-probe` |
 | `gpu-fault-continuity` | Plugin that injects GPU faults for the host smoke test; needs `PULP_GPU_AUDIO_FAULT_HOOKS` | `pulp build --examples --target PulpGpuFaultContinuity_CLAP` | `test/consumers/gpu-fault-continuity` |
 | `text-input-test` | Text editor widget in a window | `pulp build --examples --target pulp-text-input-test` | `test/consumers/text-input-test` |
 | `native-ui-phase-f-preview` | Preview of a generated native editor; builds only on macOS with the design-import option and a generated editor source present | `pulp build --examples --target pulp-native-ui-phase-f-preview` | `test/consumers/native-ui-phase-f-preview` |

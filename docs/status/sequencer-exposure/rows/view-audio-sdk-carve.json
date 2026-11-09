@@ -31,7 +31,7 @@
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "The public header names stay under pulp/view and the installed SDK copies the audio include tree. The separate view-audio target supplies their audio and signal dependencies and remains in the view umbrella; the timeline piano-roll ruler now consumes that target explicitly after the shared MIDI keyboard moved into the audio slice. Release and installed-consumer evidence remain pending.",
+      "rationale": "The public header names stay under pulp/view and the installed SDK copies the audio include tree. The separate view-audio target supplies their audio and signal dependencies and remains in the view umbrella; the timeline piano-roll ruler now consumes that target explicitly after the shared MIDI keyboard moved into the audio slice. EqCurveView now includes pulp/signal/spectrum_bin_mapping.hpp, a header-only signal header the installed SDK already ships and pulp::signal supplies to this target. Release and installed-consumer evidence remain pending.",
       "evidence": [
         {
           "kind": "sdk_header",

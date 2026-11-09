@@ -1,5 +1,5 @@
 {
-  "export_id": "20261102-0f616a440cec",
+  "export_id": "20261107-f0ac0a4ff392",
   "framework_repository": "Generous-Corp/vellum",
   "frozen_paths": [
     "core/canvas/include/pulp/canvas/affine_transform.hpp",
@@ -80,6 +80,8 @@
     "core/canvas/src/text_run_planner.cpp",
     "core/canvas/src/text_shaper.cpp",
     "core/render/include/pulp/render/dirty_tracker.hpp",
+    "core/render/include/pulp/render/gpu_render_time.hpp",
+    "core/render/include/pulp/render/gpu_surface.hpp",
     "core/render/include/pulp/render/headless_surface.hpp",
     "core/render/include/pulp/render/render_loop.hpp",
     "core/render/include/pulp/render/render_pass.hpp",
@@ -114,6 +116,7 @@
     "core/view/include/pulp/view/svg_fragment.hpp",
     "core/view/include/pulp/view/svg_path_widget.hpp",
     "core/view/include/pulp/view/widget_painter.hpp",
+    "core/view/include/pulp/view/window_host.hpp",
     "core/view/platform/mac/accessibility_mac.mm",
     "core/view/platform/mac/screenshot_mac.mm",
     "core/view/src/accessibility.cpp",
@@ -137,8 +140,8 @@
     "packages/pulp-import-ir/src/diff.ts",
     "packages/pulp-import-ir/src/tweaks.ts"
   ],
-  "receipt_path": ".github/vellum-export-receipt/20261102-0f616a440cec.json",
-  "receipt_sha256": "9a0f1fd7f0578b350a620c8c3cef222d9b32873f8b0671e3f8af2f609823cb63",
-  "receipt_source": "provenance/mirror/receipts/20261102-0f616a440cec.json",
+  "receipt_path": ".github/vellum-export-receipt/20261107-f0ac0a4ff392.json",
+  "receipt_sha256": "b503df9293c01c4d85d63eea6b7b04ca13e1b08f0a8ed1146897d5c29e770342",
+  "receipt_source": "provenance/mirror/receipts/20261107-f0ac0a4ff392.json",
   "schema_version": 1
 }
