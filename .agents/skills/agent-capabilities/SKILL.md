@@ -1902,3 +1902,18 @@ an existing renderer or example, changing a widget label) adds no public header
 and changes no installed capability key. Run
 `python3 tools/docs_generate.py generate` so the generated limitations block
 follows the matrix, and do not touch the capability manifest for it.
+
+## Merging main into a branch that rewrote the contract history
+
+A branch older than the digest-keyed history format (see the top of this
+skill) may carry its own re-encoding of
+`tools/agent-capabilities/contract-history.json`, for example a one-line
+compact dump, and a `render_history()` helper to write it. On merge, take
+main's history file and generator (`git checkout origin/main --
+tools/agent-capabilities/contract-history.json
+tools/scripts/agent_capability_manifest.py`), drop the branch's helper and its
+tests, then re-apply only the branch's real counter or fingerprint changes and
+run `--write` and `--check`. Never keep the branch's history blob: it shows up
+as millions of deleted lines and replaces main's format. Worked example
+(2026-11-08, the G5 host-ingress adapter): after the merge, the diff against
+main shrank from -2,530,508 lines to the PR's own 15 files.
