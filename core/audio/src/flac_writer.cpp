@@ -67,6 +67,16 @@ public:
     }
 
     std::string format_name() const override { return "FLAC"; }
+    FormatCapabilities capabilities() const override {
+        return {
+            .format_name = "FLAC",
+            .extensions = {".flac"},
+            .bit_depths = {16},
+            .max_channels = 8,
+            .compressed = true,
+            .quality_options = {{"compression_level",
+                                 "libFLAC compression level, 0 (fastest) to 8 (smallest)", "5"}}};
+    }
 };
 
 std::unique_ptr<FormatWriter> create_flac_writer() {

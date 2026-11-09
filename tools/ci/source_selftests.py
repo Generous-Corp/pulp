@@ -639,7 +639,7 @@ WORKFLOW_LOCAL_SKIPS = {
     "tools/scripts/test_generated_version_bump_check.py": (
         "35 fixtures each clone the checkout and let the check add a worktree, so "
         "the suite takes minutes on a loaded host even with its one-commit clone; "
-        "CI runs it in its own workflow-lint step"
+        "CI runs it in its own workflow-lint job"
     ),
     # ctest registrations (the --ctest-python lane) share this list.
     "rack-plugin-loads": (

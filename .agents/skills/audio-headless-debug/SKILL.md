@@ -375,3 +375,25 @@ AU v2, AU v3 and standalone adapters service requests too, but LV2, AAX and the
 web adapters do not (`panic_capabilities().serviced` is false there), and a
 headless result says nothing about how a DAW routes the MIDI that comes out. Test:
 `test/test_midi_panic_processor.cpp`.
+
+## Look at the capture: `pulp audio spectrogram` / `pulp audio waveform`
+
+Once a scene or probe has written a WAV, an agent can see it instead of
+reading summaries: `pulp audio spectrogram out.wav --png out.png --scale log`
+and `pulp audio waveform out.wav --png wave.png` draw a PNG with axes and a
+burned-in footer (basename, SHA-256 prefix, settings, tool version) and write
+a `pulp.audio.image.v1` sidecar beside it. The rasterizers are in
+`tools/audio/analysis` (`spectrogram_raster.hpp`, `waveform_raster.hpp`) and
+every stage is a pure function, so a test can assert on a grid or a column
+without rendering a file.
+
+Two rules that keep this honest:
+
+- **Display only, never a gate.** The sidecar says `display_only: true` and
+  nothing in it is read by an analyzer, a detector or a verdict. A bright
+  pixel is a peak-hold over bins and frames through the window's leakage
+  skirt; for a number, use the spectral analyzers above.
+- **Nothing is normalized.** Float above 0 dBFS draws clamped with a red
+  marker and the sidecar's `true_peak` carries the unclamped sample peak, so a
+  hot capture is visible as hot rather than quietly rescaled.
+

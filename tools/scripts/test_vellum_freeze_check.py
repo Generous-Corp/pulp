@@ -715,6 +715,36 @@ class FreezeUnitTests(unittest.TestCase):
                     [("backport.json", event)], "redacted-test-token"
                 )
 
+    def _trust(self, repo_patch=None):
+        responses = vellum_trust_responses()
+        key = "https://api.github.com/repos/Generous-Corp/vellum"
+        responses[key] = {**responses[key], **(repo_patch or {})}
+        with mock.patch.object(
+            freeze, "_github_json", side_effect=lambda url, _token: responses[url]
+        ):
+            freeze._verify_vellum_trust(
+                commit="b" * 40,
+                authority_ref="refs/tags/authority/native-design-kernel-v1",
+                token="redacted-test-token",
+                app_jwt="redacted-app-jwt",
+            )
+
+    def test_vellum_trust_accepts_public_and_private_repository(self):
+        self._trust({"private": False})
+        self._trust({"private": True})
+
+    def test_vellum_trust_still_refuses_wrong_repository_identity(self):
+        for patch in (
+            {"id": freeze.EXPECTED_FRAMEWORK_REPOSITORY_ID + 1},
+            {"full_name": "Generous-Corp/other"},
+            {"archived": True},
+            {"private": None},
+        ):
+            with self.subTest(patch=patch), self.assertRaisesRegex(
+                freeze.FreezeError, "identity or state differs"
+            ):
+                self._trust(patch)
+
     def test_vellum_trust_requires_exact_app_jwt_identity(self):
         responses = vellum_trust_responses()
         responses["https://api.github.com/app"] = {

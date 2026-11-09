@@ -2371,7 +2371,7 @@ commands:
 
   - name: audio
     status: experimental
-    summary: Repo-level audio analysis and sampler asset tooling. Manage offline audio model metadata, read reproducible WAV-first excerpt bundles, build streamed-sampler mip sidecars, and run live/offline Audio Scope analysis.
+    summary: Repo-level audio analysis and sampler asset tooling. Manage offline audio model metadata, read reproducible WAV-first excerpt bundles, build streamed-sampler mip sidecars, run live/offline Audio Scope analysis, and render display-only spectrogram and waveform PNGs with sidecars.
     subcommands:
       - name: model list
         summary: List registered audio models with backend and tags
@@ -2406,6 +2406,11 @@ commands:
             kind: flag
       - name: read-bundle
         summary: Pretty-print a previously emitted excerpt bundle
+      - name: formats
+        summary: List the audio file readers and writers this build registers, with extensions, bit depths, sample rates, channel limits and encoder settings
+        args:
+          - name: --json
+            kind: flag
       - name: sampler-mip build
         summary: Build and atomically publish a self-verified 140 dB streamed-sampler mip sidecar with hash-addressed payloads
         args:
@@ -2525,6 +2530,82 @@ commands:
           - name: --channel
             kind: option
             required: false
+      - name: spectrogram
+        summary: Render a display-only spectrogram PNG of an audio file through memory-mapped windows, with a pulp.audio.image.v1 sidecar (input SHA-256, decoder, time range, settings, unclamped sample peak); never a gate
+        args:
+          - name: file
+            kind: positional
+            required: true
+          - name: --png
+            kind: option
+            required: true
+          - name: --json
+            kind: option
+            required: false
+          - name: --fft
+            kind: option
+            required: false
+          - name: --hop
+            kind: option
+            required: false
+          - name: --window
+            kind: option
+            required: false
+          - name: --scale
+            kind: option
+            required: false
+          - name: --db-range
+            kind: option
+            required: false
+          - name: --start
+            kind: option
+            required: false
+          - name: --end
+            kind: option
+            required: false
+          - name: --channel
+            kind: option
+            required: false
+          - name: --width
+            kind: option
+            required: false
+          - name: --height
+            kind: option
+            required: false
+          - name: --absolute-paths
+            kind: flag
+      - name: waveform
+        summary: Render a display-only peak waveform PNG from WaveformOverview levels with red clip markers at or above full scale, plus a pulp.audio.image.v1 sidecar reporting the unclamped sample peak; never a gate
+        args:
+          - name: file
+            kind: positional
+            required: true
+          - name: --png
+            kind: option
+            required: true
+          - name: --json
+            kind: option
+            required: false
+          - name: --select
+            kind: option
+            required: false
+          - name: --start
+            kind: option
+            required: false
+          - name: --end
+            kind: option
+            required: false
+          - name: --channel
+            kind: option
+            required: false
+          - name: --width
+            kind: option
+            required: false
+          - name: --height
+            kind: option
+            required: false
+          - name: --absolute-paths
+            kind: flag
       - name: validate summarize
         summary: "Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/pitch); --json emits pulp.audio.summarize.v1 with the input named by basename unless --absolute-paths"
         args:

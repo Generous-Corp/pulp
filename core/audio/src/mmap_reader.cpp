@@ -1,5 +1,6 @@
 #include "aiff_parser.hpp"
 #include "sample_mip_sidecar_internal.hpp"
+#include <pulp/audio/audio_reader.hpp>
 #include <pulp/audio/format_registry.hpp>
 #include <pulp/audio/mmap_reader.hpp>
 
@@ -58,14 +59,19 @@ class MappedStreamBuf : public std::streambuf {
 } // namespace
 
 // Ranged decoder state over the mapped bytes. WAV uses a persistent choc reader;
-// uncompressed AIFF uses its parsed byte layout directly. Other formats fall
-// back to a one-time whole-file decode cached in `fallback`.
+// uncompressed AIFF uses its parsed byte layout directly; FLAC, MP3 and Ogg
+// Vorbis seek inside the compressed bytes through AudioReader. Other formats
+// fall back to a one-time whole-file decode cached in `fallback`.
 struct MemoryMappedAudioReader::RangedState {
     std::mutex mutex;
     MappedStreamBuf buf;
     std::shared_ptr<std::istream> stream;
     std::unique_ptr<choc::audio::AudioFileReader> reader;
     std::optional<detail::AiffLayout> aiff;
+    // Compressed decoder over the snapshot. Ranged for a stream with a length
+    // claim; a stream without one was decoded once on open, and that copy is
+    // the whole-file fallback.
+    std::unique_ptr<AudioReader> codec;
     std::optional<AudioFileData> fallback; // lazy whole-file decode (non-ranged path)
     // Planar scratch for channel-subset ranged reads (choc requires the view's
     // channel count to match the file exactly, so a mono-from-stereo read decodes
@@ -106,6 +112,11 @@ bool MemoryMappedAudioReader::open(std::string_view path) {
 }
 
 bool MemoryMappedAudioReader::open(std::string_view path, std::size_t maximum_mapped_bytes) {
+    return open(path, maximum_mapped_bytes, false);
+}
+
+bool MemoryMappedAudioReader::open(std::string_view path, std::size_t maximum_mapped_bytes,
+                                   bool ranged_only) {
     close();
     path_ = std::string(path);
 
@@ -166,6 +177,14 @@ bool MemoryMappedAudioReader::open(std::string_view path, std::size_t maximum_ma
         } else if (extension == ".aif" || extension == ".aiff" || extension == ".aifc") {
             ranged_->aiff =
                 detail::parse_aiff_layout(*ranged_->stream, backing_->snapshot.size(), true);
+        } else if (extension == ".flac" || extension == ".mp3" || extension == ".ogg" ||
+                   extension == ".oga") {
+            // The snapshot path was chosen by the user or host; the caller owns
+            // the bound.
+            ranged_->codec = AudioReader::open_memory(
+                {backing_->snapshot.data(), backing_->snapshot.size()}, extension,
+                DecodeLimits::unbounded(),
+                ranged_only ? AudioReaderFallback::Refuse : AudioReaderFallback::DecodeOnce);
         }
     }
     if (ranged_ && ranged_->reader) {
@@ -182,6 +201,8 @@ bool MemoryMappedAudioReader::open(std::string_view path, std::size_t maximum_ma
         info_.duration_seconds = static_cast<double>(props.numFrames) / props.sampleRate;
     } else if (ranged_ && ranged_->aiff) {
         info_ = ranged_->aiff->info;
+    } else if (ranged_ && ranged_->codec) {
+        info_ = ranged_->codec->info();
     } else {
         auto file_info = registered_reader->read_info(backing_->snapshot_path.string());
         if (!file_info) {
@@ -201,7 +222,8 @@ void MemoryMappedAudioReader::close() {
 }
 
 bool MemoryMappedAudioReader::supports_ranged_read() const {
-    return ranged_ && (ranged_->reader != nullptr || ranged_->aiff.has_value());
+    return ranged_ && (ranged_->reader != nullptr || ranged_->aiff.has_value() ||
+                       (ranged_->codec != nullptr && ranged_->codec->supports_ranged_read()));
 }
 
 bool MemoryMappedAudioReader::read_frames(float** dest_channels, uint32_t num_channels,
@@ -259,31 +281,38 @@ bool MemoryMappedAudioReader::read_frames_impl(float** dest_channels, uint32_t n
             return true;
         }
 
-        const auto fcount = static_cast<choc::buffer::FrameCount>(count);
-        if (ch_count == info_.num_channels) {
-            // Exact channel match: decode straight into the caller's buffers.
-            auto view =
-                choc::buffer::createChannelArrayView<float>(dest_channels, ch_count, fcount);
-            if (ranged_->reader->readFrames(start, view))
+        if (ranged_->codec) {
+            if (ranged_->codec->read(start, dest_channels, ch_count, count) == count)
                 return true;
+            // A corrupt frame mid-stream decodes short; fall through.
         } else {
-            // Channel subset (e.g. mono from a stereo file): choc requires the
-            // view's channel count to equal the file's, so decode all file
-            // channels into scratch then copy the requested prefix. Still a true
-            // ranged decode — no whole-file read, so supports_ranged_read() stays
-            // honest for sub-channel callers (a normal sample-library operation).
-            auto& rs = *ranged_;
-            const std::size_t fch = info_.num_channels;
-            rs.subset_scratch.assign(fch * static_cast<std::size_t>(count), 0.0f);
-            rs.subset_ptrs.resize(fch);
-            for (std::size_t c = 0; c < fch; ++c)
-                rs.subset_ptrs[c] = rs.subset_scratch.data() + c * static_cast<std::size_t>(count);
-            auto view = choc::buffer::createChannelArrayView<float>(rs.subset_ptrs.data(),
-                                                                    info_.num_channels, fcount);
-            if (rs.reader->readFrames(start, view)) {
-                for (uint32_t c = 0; c < ch_count; ++c)
-                    std::copy(rs.subset_ptrs[c], rs.subset_ptrs[c] + count, dest_channels[c]);
-                return true;
+            const auto fcount = static_cast<choc::buffer::FrameCount>(count);
+            if (ch_count == info_.num_channels) {
+                // Exact channel match: decode straight into the caller's buffers.
+                auto view =
+                    choc::buffer::createChannelArrayView<float>(dest_channels, ch_count, fcount);
+                if (ranged_->reader->readFrames(start, view))
+                    return true;
+            } else {
+                // Channel subset (e.g. mono from a stereo file): choc requires the
+                // view's channel count to equal the file's, so decode all file
+                // channels into scratch then copy the requested prefix. Still a true
+                // ranged decode — no whole-file read, so supports_ranged_read() stays
+                // honest for sub-channel callers (a normal sample-library operation).
+                auto& rs = *ranged_;
+                const std::size_t fch = info_.num_channels;
+                rs.subset_scratch.assign(fch * static_cast<std::size_t>(count), 0.0f);
+                rs.subset_ptrs.resize(fch);
+                for (std::size_t c = 0; c < fch; ++c)
+                    rs.subset_ptrs[c] =
+                        rs.subset_scratch.data() + c * static_cast<std::size_t>(count);
+                auto view = choc::buffer::createChannelArrayView<float>(rs.subset_ptrs.data(),
+                                                                        info_.num_channels, fcount);
+                if (rs.reader->readFrames(start, view)) {
+                    for (uint32_t c = 0; c < ch_count; ++c)
+                        std::copy(rs.subset_ptrs[c], rs.subset_ptrs[c] + count, dest_channels[c]);
+                    return true;
+                }
             }
         }
         // A seek/read failure may fall through to the compatibility path below.
@@ -291,6 +320,12 @@ bool MemoryMappedAudioReader::read_frames_impl(float** dest_channels, uint32_t n
 
     if (!allow_whole_file_fallback)
         return false;
+
+    if (ranged_->codec && !ranged_->codec->supports_ranged_read()) {
+        // Decoded once on open; the copy fills [0, count) and zeroes the rest.
+        ranged_->codec->read(start, dest_channels, ch_count, count);
+        return true;
+    }
 
     // Fallback: decode the whole file once, cache it, and serve ranges from it.
     if (!ranged_->fallback) {

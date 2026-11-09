@@ -1010,7 +1010,7 @@ def _verify_vellum_trust(
     if (
         repository.get("id") != EXPECTED_FRAMEWORK_REPOSITORY_ID
         or repository.get("full_name") != EXPECTED_FRAMEWORK_REPOSITORY
-        or repository.get("private") is not True
+        or not isinstance(repository.get("private"), bool)
         or repository.get("archived") is not False
     ):
         raise FreezeError("Vellum repository identity or state differs")
