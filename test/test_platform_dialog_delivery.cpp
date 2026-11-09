@@ -21,14 +21,13 @@
 #include <vector>
 
 using namespace pulp::platform;
-using detail::Delivery;
 using detail::deliver_or_inline;
+using detail::Delivery;
 
 namespace {
 
 // Runs the main run loop where there is one; elsewhere nothing is queued.
-template <typename Pred>
-bool pump_until(Pred done) {
+template <typename Pred> bool pump_until(Pred done) {
 #if defined(__APPLE__)
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (!done()) {
@@ -45,13 +44,12 @@ bool pump_until(Pred done) {
 TEST_CASE("an accepted post defers the completion", "[platform][dialog-delivery]") {
     int ran = 0;
     std::vector<std::function<void()>> queue;
-    const auto how = deliver_or_inline(
-        [&] { ++ran; },
-        [&](std::function<void()> t) {
-            queue.push_back(std::move(t));
-            return true;
-        },
-        [] { return true; });
+    const auto how = deliver_or_inline([&] { ++ran; },
+                                       [&](std::function<void()> t) {
+                                           queue.push_back(std::move(t));
+                                           return true;
+                                       },
+                                       [] { return true; });
     REQUIRE(how == Delivery::posted);
     REQUIRE(ran == 0);
     queue.front()();
@@ -61,8 +59,7 @@ TEST_CASE("an accepted post defers the completion", "[platform][dialog-delivery]
 TEST_CASE("a live scope with no main-thread backend runs the completion inline",
           "[platform][dialog-delivery]") {
     int ran = 0;
-    const auto how = deliver_or_inline([&] { ++ran; },
-                                       [](std::function<void()>) { return false; },
+    const auto how = deliver_or_inline([&] { ++ran; }, [](std::function<void()>) { return false; },
                                        [] { return true; });
     REQUIRE(how == Delivery::inline_no_backend);
     REQUIRE(ran == 1);
@@ -70,8 +67,7 @@ TEST_CASE("a live scope with no main-thread backend runs the completion inline",
 
 TEST_CASE("a completion for a scope that is gone is dropped", "[platform][dialog-delivery]") {
     int ran = 0;
-    const auto how = deliver_or_inline([&] { ++ran; },
-                                       [](std::function<void()>) { return false; },
+    const auto how = deliver_or_inline([&] { ++ran; }, [](std::function<void()>) { return false; },
                                        [] { return false; });
     REQUIRE(how == Delivery::dropped);
     REQUIRE(ran == 0);
@@ -107,7 +103,7 @@ TEST_CASE("a file panel with no backend reports an empty result exactly once",
     int calls = 0;
     std::vector<std::string> got{"sentinel"};
     FileDialog::OpenRequest request;
-    request.choose_files = false;  // nothing selectable: no panel on any platform
+    request.choose_files = false; // nothing selectable: no panel on any platform
     FileDialog::open_async(scope, nullptr, request, [&](std::vector<std::string> paths) {
         ++calls;
         got = std::move(paths);
