@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <limits>
 #include <optional>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/live_dsp_telemetry.hpp>
@@ -31,6 +32,7 @@
 #include <pulp/host/signal_graph_connection.hpp>
 #include <pulp/host/signal_graph_execution_status.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
+#include <pulp/host/prepared_description.hpp>
 #include <pulp/host/signal_graph_node.hpp>
 #include <pulp/host/trigger_graph.hpp>
 #include <pulp/host/spectral_graph.hpp>
@@ -57,6 +59,22 @@ class ProcessorNodeInstance;
 } // namespace pulp::format
 
 namespace pulp::host {
+
+namespace detail {
+
+// Selection generation is a process-local invalidation token. Saturating the
+// increment prevents an ABA after UINT64_MAX while retaining a lock-free,
+// control-side update for callers that flip routing policy before/after prepare.
+inline void
+advance_execution_selection_generation(std::atomic<std::uint64_t>& generation) noexcept {
+    auto current = generation.load(std::memory_order_relaxed);
+    while (current != std::numeric_limits<std::uint64_t>::max() &&
+           !generation.compare_exchange_weak(current, current + 1, std::memory_order_relaxed,
+                                             std::memory_order_relaxed)) {
+    }
+}
+
+} // namespace detail
 
 class GraphSerializer;
 class SignalGraph;
@@ -781,6 +799,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Pick a path before starting a feedback graph and keep it for the stream.
     void set_canonical_executor_routing_enabled(bool enabled) noexcept {
         canonical_executor_routing_enabled_.store(enabled, std::memory_order_relaxed);
+        detail::advance_execution_selection_generation(execution_selection_generation_);
     }
     // Returns the requested opt-in flag, not a promise that the current block
     // is taking the executor path. Actual dispatch also requires an eligible
@@ -800,6 +819,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // bit-identical across all three paths.
     void set_parallel_routing_enabled(bool enabled) noexcept {
         parallel_routing_enabled_.store(enabled, std::memory_order_relaxed);
+        detail::advance_execution_selection_generation(execution_selection_generation_);
     }
     bool parallel_routing_enabled() const noexcept {
         return parallel_routing_enabled_.load(std::memory_order_relaxed);
@@ -890,6 +910,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // transport-sensitive nodes that anticipation forced exterior.
     void set_anticipation_enabled(bool enabled) noexcept {
         anticipation_enabled_.store(enabled, std::memory_order_relaxed);
+        detail::advance_execution_selection_generation(execution_selection_generation_);
     }
     bool anticipation_enabled() const noexcept {
         return anticipation_enabled_.load(std::memory_order_relaxed);
@@ -1260,10 +1281,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
 
         std::shared_ptr<SpectralRuntimeBank> spectral;
         std::uint64_t execution_generation = 0;
+        std::shared_ptr<const PreparedDescriptionData> prepared_description;
         std::shared_ptr<int> legacy_processing_lifetime;
-        // Private executable topology. For ordinary graphs this is a copy of
-        // nodes_; region-bearing graphs replace each admitted region with one
-        // synthetic Custom anchor while leaving public authoring state intact.
+        // Private executable topology; region-bearing graphs use synthetic anchors.
         std::vector<GraphNode> executable_nodes;
         std::vector<NodeId> order;
         std::vector<Connection> connections;
@@ -1529,6 +1549,11 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Invalidates an outstanding PreparedTopologyEdit when any direct authoring
     // or lifecycle operation touches this graph. Guarded by graph_mutation_mutex_.
     std::uint64_t authoring_generation_{0};
+    // Monotonic control-side generation for execution-policy selection. Unlike
+    // the three policy bits, this does not return to its prior value when a
+    // caller toggles a setting away and back (ABA), so detached prepared
+    // receipts cannot be reused after a policy mutation.
+    std::atomic<std::uint64_t> execution_selection_generation_{0};
     NodeId next_id_ = 1;
     NodeId last_prepare_custom_failure_node_ = 0;
     format::ProcessMode hosted_plugin_process_mode_ = format::ProcessMode::Realtime;
