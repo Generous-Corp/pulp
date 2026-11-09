@@ -176,6 +176,30 @@ TEST_CASE("interpret_wav_format reproduces the decoder's facts from a fmt payloa
     CHECK_FALSE(interpret_wav_format(Bytes{1u, 0u, 1u, 0u}, 16u));
 }
 
+TEST_CASE("the deprecated fact-count overload of interpret_wav_format ignores the count",
+          "[audio][file-layout]") {
+    const auto format = make_format(1u, 2u, 48'000u, 16u);
+    const auto current = interpret_wav_format(format, 40u);
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const auto legacy = interpret_wav_format(format, 40u, std::uint64_t{999u});
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    REQUIRE(current);
+    REQUIRE(legacy);
+    CHECK(legacy->total_frames == current->total_frames);
+    CHECK(legacy->total_frames == 10u);
+    CHECK(legacy->bytes_per_frame == current->bytes_per_frame);
+}
+
 TEST_CASE("standard headers classify standard with no warning", "[audio][file-layout][profile]") {
     SECTION("44-byte PCM") {
         const auto report = inspect_audio_file_layout(
