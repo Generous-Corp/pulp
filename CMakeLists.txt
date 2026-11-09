@@ -522,6 +522,10 @@ if(NOT IOS)
 endif()
 add_subdirectory(core/dsl)
 
+# Optional integration packages (integrations/CMakeLists.txt). Core never links
+# them.
+add_subdirectory(integrations)
+
 # Wire Android-specific sources into subsystem targets (must come after add_subdirectory)
 if(ANDROID)
     pulp_wire_android_sources()
@@ -975,6 +979,7 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/render_provider_floor)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
+    add_subdirectory(test/fixtures/host_probe)
     add_subdirectory(test/fixtures/data_display_editor)
     add_subdirectory(test/fixtures/editor_ui_package)
     add_subdirectory(test/fixtures/linux_plugin_isolation)

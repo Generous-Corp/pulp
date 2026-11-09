@@ -447,11 +447,11 @@ echo "== all shared FetchContent registrations seeded by setup agree with CMake"
 
     seeded_names="$(grep -oE 'fetchcontent_cache_dir_name "[^"]+"' "$repo_root/setup.sh" \
         | cut -d'"' -f2 | grep -v '^\$' | sort -fu | tr '\n' ' ' | sed 's/ $//')"
-    check "$seeded_names" "AudioUnitSDK brotli catch2 choc clap highway lv2 mbedtls sdl3 sheenbidi threejs vst3sdk webgpu woff2 yaml-cpp yoga" \
+    check "$seeded_names" "AudioUnitSDK brotli catch2 choc clap highway lv2 mbedtls mufft sdl3 sheenbidi threejs vst3sdk webgpu woff2 yaml-cpp yoga" \
         "pin guard enumerates every statically named setup source seed"
     contract_names="$(tr ';' '\n' < "$contract" | sed -n 's/^\([^=]*\)=.*/\1/p' \
         | sort -fu | tr '\n' ' ' | sed 's/ $//')"
-    check "$contract_names" "ausdk brotli catch2 choc clap highway lv2 mbedtls sdl3 sheenbidi threejs vst3 webgpu wgpu-native woff2 yaml-cpp yoga" \
+    check "$contract_names" "ausdk brotli catch2 choc clap highway lv2 mbedtls mufft sdl3 sheenbidi threejs vst3 webgpu wgpu-native woff2 yaml-cpp yoga" \
         "dependency contract enumerates every provisioned source and runtime"
 
     # These two previously drifted while the three.js-only contract remained
@@ -523,12 +523,13 @@ echo "== configure-time dependencies are primed at CMake's exact GIT_TAG and cac
         'highway|google/highway\.git' \
         'mbedtls|Mbed-TLS/mbedtls\.git' \
         'SheenBidi|Tehreer/SheenBidi\.git' \
+        'mufft|Themaister/muFFT\.git' \
         'brotli|google/brotli\.git' \
         'woff2|google/woff2\.git' \
         'yaml-cpp|jbeder/yaml-cpp\.git'; do
         IFS='|' read -r name url <<< "$spec"
         lower="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
-        cmake_ref="$(sed -n "s/^pulp_register_fetchcontent_source(${name} REF \([^)]*\)).*/\1/p" "$deps" | head -1)"
+        cmake_ref="$(sed -n "s/^[[:space:]]*pulp_register_fetchcontent_source(${name} REF \([^)]*\)).*/\1/p" "$deps" | head -1)"
         cmake_tag="$(awk -v url="$url" '
             $0 ~ "GIT_REPOSITORY https://github.com/" url { found = 1; next }
             found && /GIT_TAG/ { print $2; exit }' "$deps")"

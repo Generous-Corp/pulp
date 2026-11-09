@@ -35,6 +35,7 @@ if(APPLE AND NOT IOS)
         platform/mac/popup_menu_mac.mm
         platform/mac/reveal_mac.mm
         platform/mac/environment_mac.mm
+        platform/mac/objc_unique_class_mac.mm
         platform/posix/child_process_posix.cpp
     )
     target_link_libraries(pulp-platform PRIVATE
@@ -50,6 +51,7 @@ elseif(IOS)
         platform/ios/clipboard_ios.mm
         platform/ios/environment_ios.mm
         platform/ios/permissions_ios.mm
+        platform/mac/objc_unique_class_mac.mm
         platform/posix/child_process_posix.cpp
     )
     # PUBLIC so downstream test binaries can branch on the same define as the
@@ -119,6 +121,7 @@ set(PULP_PLATFORM_UNIT_HEADERS
     include/pulp/platform/gpu_fwd.hpp
     include/pulp/platform/main_thread.hpp
     include/pulp/platform/native_handle.hpp
+    include/pulp/platform/objc_unique_class.hpp
     include/pulp/platform/open_url.hpp
     include/pulp/platform/permissions.hpp
     include/pulp/platform/platform.hpp

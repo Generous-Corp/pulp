@@ -8,6 +8,7 @@
 #if TARGET_OS_OSX
 
 #include <pulp/canvas/text_utf8.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
 
@@ -30,6 +31,9 @@ extern "C" void pulp_mac_text_input_client_category_anchor() {}
     // hasMarkedTextWithCompletionHandler:] on the next keypress.
     auto* fv = pulp::view::View::focused_input_;
     auto* te = dynamic_cast<pulp::view::TextEditor*>(fv);
+    // A disabled field takes no composition either.
+    if (te && !te->effectively_enabled())
+        return nullptr;
     return te;
 }
 
@@ -55,7 +59,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor() {}
             ? [(NSAttributedString*)string string] : (NSString*)string;
         pulp::view::TextInputEvent te;
         te.text = [str UTF8String];
-        fv->on_text_input(te);
+        pulp::view::deliver_text_input(*fv, te);
         [self setNeedsDisplay:YES];
     }
 }

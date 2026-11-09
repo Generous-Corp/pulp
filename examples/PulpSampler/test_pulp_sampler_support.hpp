@@ -667,14 +667,22 @@ struct TempSamplerWav {
 struct TempSamplerFlac {
     std::string path;
 
-    explicit TempSamplerFlac(const char* label) {
+    // `claims_length` false clears STREAMINFO's total-sample count, which
+    // FLAC allows for a stream encoded without knowing its length. Such a
+    // stream cannot be seeked by frame, so it reads through the decode-once
+    // fallback; one that claims its length reads ranged.
+    explicit TempSamplerFlac(const char* label, bool claims_length = true) {
         // A self-contained 32-frame, mono, 48 kHz, 16-bit silent FLAC. Keeping
         // the encoded bytes in the test makes this capability check portable:
         // no encoder executable or optional FLAC writer is needed at runtime.
         constexpr std::string_view kTinyFlacBase64 =
             "ZkxhQ4AAACIQABAAAAAMAAAMC7gA8AAAACA7XTx9IH433O7t0wHjXi5Y"
             "//hqCAAfegAAAPkU";
-        const auto decoded = runtime::base64_decode(kTinyFlacBase64);
+        constexpr std::string_view kTinyFlacNoLengthBase64 =
+            "ZkxhQ4AAACIQABAAAAAMAAAMC7gA8AAAAAA7XTx9IH433O7t0wHjXi5Y"
+            "//hqCAAfegAAAPkU";
+        const auto decoded =
+            runtime::base64_decode(claims_length ? kTinyFlacBase64 : kTinyFlacNoLengthBase64);
         REQUIRE(decoded.has_value());
 
         static std::atomic<std::uint64_t> sequence{0};
