@@ -188,9 +188,16 @@ std::string handle_graph(const std::string& params_json) {
                                         {"source_node", "--source-node"},
                                         {"source_port", "--source-port"},
                                         {"destination_node", "--destination-node"},
-                                        {"destination_port", "--destination-port"}}) {
-            const auto value = extract_string(params_json, key);
-            if (!value.empty()) {
+                                        {"destination_port", "--destination-port"},
+                                        {"edge_kind", "--edge-kind"},
+                                        {"destination_param", "--destination-param"}}) {
+            // MCP's destination_param is a JSON integer, while the process
+            // boundary consumes argv strings. Preserve its raw numeric token
+            // instead of treating it as a missing string and dropping the
+            // control-edge selector before invoking the sibling CLI.
+            const auto value = key == "destination_param" ? extract_raw(params_json, key)
+                                                          : extract_string(params_json, key);
+            if (!value.empty() && value != "null") {
                 arguments.emplace_back(flag);
                 arguments.push_back(value);
             }
