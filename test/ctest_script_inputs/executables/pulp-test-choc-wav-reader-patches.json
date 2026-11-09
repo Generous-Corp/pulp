@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-choc-wav-reader-patches",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [
+   "test/fixtures/fuzz/audio-decoder"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_choc_wav_reader_patches.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}
