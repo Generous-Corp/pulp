@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-audio-decoder-corpus",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [
+   "test/fixtures/fuzz/audio-decoder"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_audio_decoder_corpus.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

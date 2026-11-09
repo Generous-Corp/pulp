@@ -795,6 +795,72 @@ function(pulp_add_test_suite NAME)
     _pulp_test_data_register_suite(${NAME} ${_target} ${P_SOURCES})
 endfunction()
 
+# Proves, once per configure, that the toolchain can produce a libFuzzer
+# binary the way this build asks for one, so a missing runtime fails at
+# configure time with a named cause rather than at link time with a
+# missing-library error. Two shapes: the compiler ships the driver
+# (-fsanitize=fuzzer links), or PULP_FUZZ_RUNTIME_ARCHIVE names a driver
+# archive and the compiler only has to accept -fsanitize=fuzzer-no-link.
+function(pulp_check_libfuzzer_toolchain)
+    if(NOT PULP_ENABLE_FUZZING)
+        return()
+    endif()
+    # The probe result is cached by check_cxx_source_compiles, so it is only
+    # reused while it still describes this configure: the same archive path
+    # as last time, and that archive still on disk. A changed or removed
+    # PULP_FUZZ_RUNTIME_ARCHIVE re-probes instead of inheriting an old TRUE.
+    if(DEFINED PULP_HAVE_LIBFUZZER)
+        if(DEFINED PULP_HAVE_LIBFUZZER_ARCHIVE
+           AND "${PULP_HAVE_LIBFUZZER_ARCHIVE}" STREQUAL "${PULP_FUZZ_RUNTIME_ARCHIVE}"
+           AND (NOT PULP_FUZZ_RUNTIME_ARCHIVE OR EXISTS "${PULP_FUZZ_RUNTIME_ARCHIVE}"))
+            return()
+        endif()
+        unset(PULP_HAVE_LIBFUZZER CACHE)
+    endif()
+    include(CheckCXXSourceCompiles)
+    set(_entry "extern \"C\" int LLVMFuzzerTestOneInput(const unsigned char*, unsigned long) { return 0; }")
+    if(PULP_FUZZ_RUNTIME_ARCHIVE)
+        if(NOT EXISTS "${PULP_FUZZ_RUNTIME_ARCHIVE}")
+            message(FATAL_ERROR
+                "PULP_FUZZ_RUNTIME_ARCHIVE does not exist: ${PULP_FUZZ_RUNTIME_ARCHIVE}")
+        endif()
+        set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer-no-link")
+        set(CMAKE_REQUIRED_LIBRARIES "${PULP_FUZZ_RUNTIME_ARCHIVE}")
+        check_cxx_source_compiles("${_entry}" PULP_HAVE_LIBFUZZER)
+        unset(CMAKE_REQUIRED_LIBRARIES)
+        set(_hint "the compiler rejected -fsanitize=fuzzer-no-link or could not link ${PULP_FUZZ_RUNTIME_ARCHIVE}")
+    else()
+        set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer")
+        check_cxx_source_compiles("${_entry}" PULP_HAVE_LIBFUZZER)
+        set(_hint "Apple's clang omits libclang_rt.fuzzer; use an LLVM that ships it, or point PULP_FUZZ_RUNTIME_ARCHIVE at one (Homebrew llvm@<N>/lib/clang/<N>/lib/darwin/libclang_rt.fuzzer_osx.a)")
+    endif()
+    unset(CMAKE_REQUIRED_FLAGS)
+    set(PULP_HAVE_LIBFUZZER_ARCHIVE "${PULP_FUZZ_RUNTIME_ARCHIVE}" CACHE INTERNAL
+        "PULP_FUZZ_RUNTIME_ARCHIVE the libFuzzer toolchain probe ran against")
+    if(NOT PULP_HAVE_LIBFUZZER)
+        message(FATAL_ERROR
+            "PULP_ENABLE_FUZZING=ON but this toolchain cannot build a libFuzzer binary: ${_hint}.")
+    endif()
+endfunction()
+
+# Gives one executable the libFuzzer driver. The tree is already compiled
+# with the library-side list (coverage counters and the sanitizer, no driver);
+# the target is where the driver's main enters: from the compiler through
+# -fsanitize=fuzzer, or from PULP_FUZZ_RUNTIME_ARCHIVE when the compiler
+# ships none, in which case the target keeps the library-side flags so the
+# driver is not requested twice.
+function(pulp_fuzz_instrument_target NAME)
+    pulp_check_libfuzzer_toolchain()
+    if(PULP_FUZZ_RUNTIME_ARCHIVE)
+        list(JOIN PULP_FUZZ_LIBRARY_SANITIZERS "," _target_sanitizers)
+        target_link_libraries(${NAME} PRIVATE "${PULP_FUZZ_RUNTIME_ARCHIVE}")
+    else()
+        set(_target_sanitizers "${PULP_FUZZ_SANITIZERS}")
+    endif()
+    target_compile_options(${NAME} PRIVATE -fsanitize=${_target_sanitizers} -fno-omit-frame-pointer)
+    target_link_options(${NAME} PRIVATE -fsanitize=${_target_sanitizers})
+endfunction()
+
 # A libFuzzer target plus its bounded ctest smoke. Only meaningful under
 # PULP_ENABLE_FUZZING (the caller guards the call); the smoke runs the target
 # over its seed corpus for a fixed number of iterations so the required lane of
@@ -826,8 +892,7 @@ function(pulp_add_libfuzzer_target NAME)
     target_include_directories(${NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz ${P_INCLUDE_DIRECTORIES})
     target_link_libraries(${NAME} PRIVATE ${P_LIBRARIES})
-    target_compile_options(${NAME} PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
-    target_link_options(${NAME} PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS})
+    pulp_fuzz_instrument_target(${NAME})
     # libFuzzer writes every new interesting input into the first corpus
     # directory it is given, so the smoke gets a scratch directory first and
     # the seeds second; a checked-in seed corpus is never grown by a test run.
@@ -842,6 +907,49 @@ function(pulp_add_libfuzzer_target NAME)
     if(P_FIXTURES_REQUIRED)
         set_tests_properties(${NAME}-smoke PROPERTIES FIXTURES_REQUIRED "${P_FIXTURES_REQUIRED}")
     endif()
+endfunction()
+
+# A Quality Lab pytest file as a ctest, registered only when
+# PULP_AUDIO_QUALITY_LAB_GATE is on, where
+# PULP_AUDIO_QUALITY_LAB_PYTHON names an interpreter with numpy, soundfile,
+# quality_lab and pytest. Runs from the lab directory with its PYTHONPATH set;
+# FILTER is a pytest -k expression; ENV adds NAME=value pairs (generator
+# expressions allowed); LABELS extend "audio;quality-lab;dependency-gate".
+# TEST_FILE is the file's path from the checkout root, spelled out so the
+# unregistered-tests check, which reads manifests as text, sees it invoked.
+#
+#   pulp_add_quality_lab_pytest(<name>
+#       TEST_FILE tools/audio/quality-lab/tests/<file.py>
+#       [FILTER <pytest -k expression>]
+#       [ENV <NAME=value> ...]
+#       [LABELS <label> ...]
+#       [TIMEOUT <seconds>])            default 120
+function(pulp_add_quality_lab_pytest NAME)
+    cmake_parse_arguments(Q "" "TEST_FILE;FILTER;TIMEOUT" "ENV;LABELS" ${ARGN})
+    if(NOT PULP_AUDIO_QUALITY_LAB_GATE)
+        return()
+    endif()
+    if(NOT Q_TEST_FILE)
+        message(FATAL_ERROR "pulp_add_quality_lab_pytest(${NAME}): TEST_FILE is required")
+    endif()
+    if(NOT Q_TIMEOUT)
+        set(Q_TIMEOUT 120)
+    endif()
+    set(_lab_dir "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab")
+    set(_args "${CMAKE_SOURCE_DIR}/${Q_TEST_FILE}" -q)
+    if(Q_FILTER)
+        list(APPEND _args -k "${Q_FILTER}")
+    endif()
+    add_test(NAME ${NAME}
+        COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest ${_args})
+    set(_env "PYTHONPATH=${_lab_dir}" ${Q_ENV})
+    set(_labels audio quality-lab dependency-gate ${Q_LABELS})
+    list(REMOVE_DUPLICATES _labels)
+    set_tests_properties(${NAME} PROPERTIES
+        WORKING_DIRECTORY "${_lab_dir}"
+        ENVIRONMENT "${_env}"
+        LABELS "${_labels}"
+        TIMEOUT ${Q_TIMEOUT})
 endfunction()
 
 # The test directory compiles its shared support sources once (see

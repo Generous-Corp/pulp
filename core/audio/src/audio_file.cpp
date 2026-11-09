@@ -1,10 +1,13 @@
 #include <pulp/audio/audio_file.hpp>
+#include "decode_limits_detail.hpp"
+#include "pcm_float_scaling.hpp"
 #include <cmath>
 #include <cstring>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <optional>
 
 // CHOC audio file support
 #include <choc/audio/choc_AudioFileFormat_WAV.h>
@@ -140,7 +143,13 @@ std::optional<AudioFileInfo> read_audio_file_info(const std::string& path) {
 }
 
 std::optional<AudioFileData> read_audio_file(const std::string& path) {
-    return read_audio_file(path, [](const AudioFileInfo&) { return true; });
+    // The header's frame and channel counts size the allocation below, so a
+    // direct caller gets the same default ceilings the registry applies; a
+    // WAV declaring 2^30+1 frames is refused here instead of allocating.
+    return read_audio_file(path, [](const AudioFileInfo& info) {
+        return detail::within_decode_limits("WAV", info.num_frames, info.num_channels,
+                                            DecodeLimits{});
+    });
 }
 
 std::optional<AudioFileData>
@@ -172,16 +181,17 @@ read_audio_file(const std::string& path, const std::function<bool(const AudioFil
                        ? std::optional<AudioFileData>(std::move(data))
                        : std::nullopt;
 
-        choc::buffer::ChannelArrayBuffer<float> buffer(props.numChannels, frames);
-        if (!reader->readFrames(0, buffer.getView()))
-            return std::nullopt;
+        for (auto& channel : data.channels)
+            channel.resize(frames);
 
-        for (uint32_t ch = 0; ch < props.numChannels; ++ch) {
-            data.channels[ch].resize(frames);
-            auto channel_view = buffer.getView().getChannel(ch);
-            for (uint32_t i = 0; i < frames; ++i)
-                data.channels[ch][i] = channel_view.data.data[i];
-        }
+        std::vector<float*> planar(props.numChannels);
+        for (uint32_t ch = 0; ch < props.numChannels; ++ch)
+            planar[ch] = data.channels[ch].data();
+        // Pulp's integer scaling (pcm_float_scaling.hpp), shared with the
+        // streaming AudioReader so both WAV paths decode bit-identically.
+        if (!detail::read_pulp_float(*reader, props.bitDepth, 0, planar.data(), props.numChannels,
+                                     frames))
+            return std::nullopt;
 
         return data;
     } catch (...) {

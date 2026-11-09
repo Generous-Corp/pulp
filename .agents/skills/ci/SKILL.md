@@ -12403,6 +12403,16 @@ built unconditionally and run as a `FIXTURES_SETUP` ctest only in a fuzzing buil
 toolchain probe is the one in `timeline_tests.cmake`; it fails the whole configure, so a target
 registered in a manifest included earlier needs no probe of its own.
 
+The audio container readers are one such target: `pulp-fuzz-audio-decoder`
+(`test/fuzz/audio_decoder_fuzz_target.cpp`) routes each input to exactly one of the WAV, AIFF,
+FLAC, MP3 and Ogg Vorbis readers (container magic first, else the first byte selects the
+format) and checks `test/fuzz/audio_decoder_fuzz_oracle.hpp`; its seeds live in
+`test/fixtures/fuzz/audio-decoder/` as plain container files named
+`<format>-<description>.<ext>`. The same seeds and oracle run on every platform's required
+gate as `pulp-test-audio-decoder-corpus` (labels `fuzz;audio`), which is also the only lane
+that reaches the platform CoreAudio reader, since the fuzzer never writes a CoreAudio
+extension.
+
 Then add the target to **both** lists in `timeline-fuzz.yml`'s `libfuzzer` job — the
 `--target` build list and the `Fuzz` step — and raise `timeout-minutes` if the summed
 `-max_total_time` budget would otherwise exceed it. The `Smoke every libFuzzer target` step
