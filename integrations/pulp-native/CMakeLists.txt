@@ -4,6 +4,7 @@
 # Dawn, Vellum or RmlUi.
 
 add_library(pulp-native STATIC
+    src/frame_pump_mac.cpp
     src/input_mac.mm
     src/metal_surface_mac.mm)
 add_library(pulp::native ALIAS pulp-native)
@@ -17,5 +18,6 @@ target_link_libraries(pulp-native
         pulp::platform
     PRIVATE
         "-framework AppKit"
+        "-framework CoreVideo"
         "-framework Metal"
         "-framework QuartzCore")
