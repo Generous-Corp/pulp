@@ -123,6 +123,51 @@ function(_pulp_cache_control_vendor_operations target declaration)
     set(PULP_${target}_CONTROL_VENDOR_OPERATIONS "${_path}" CACHE INTERNAL "" FORCE)
 endfunction()
 
+set(_PULP_CONTROL_SHIPPING_DIR "${CMAKE_CURRENT_LIST_DIR}")
+
+# Writes the agent tool kit's vendor operation declaration for one vendor id
+# and returns its path, ready for CONTROL_VENDOR_OPERATIONS. EXCLUDE drops whole
+# operation groups the target does not bind (presets, patch, notes, render):
+#   pulp_control_agent_toolkit_declaration(_ops VENDOR com.acme EXCLUDE presets)
+# CONTROL_CAPABILITIES must then list exactly the tiers that remain.
+function(pulp_control_agent_toolkit_declaration output)
+    cmake_parse_arguments(PARSE_ARGV 1 _kit "" "VENDOR" "EXCLUDE")
+    if(NOT _kit_VENDOR MATCHES "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$")
+        message(FATAL_ERROR
+            "pulp_control_agent_toolkit_declaration: VENDOR must be a lowercase reverse-DNS id")
+    endif()
+    foreach(_group IN LISTS _kit_EXCLUDE)
+        if(NOT _group MATCHES "^(presets|patch|notes|render)$")
+            message(FATAL_ERROR
+                "pulp_control_agent_toolkit_declaration: unknown EXCLUDE group '${_group}'")
+        endif()
+    endforeach()
+    set(PULP_AGENT_TOOLKIT_VENDOR "${_kit_VENDOR}")
+    file(READ "${_PULP_CONTROL_SHIPPING_DIR}/control_agent_toolkit_operations.json.in" _template)
+    string(CONFIGURE "${_template}" _document @ONLY)
+    string(JSON _count LENGTH "${_document}" operations)
+    math(EXPR _index "${_count} - 1")
+    while(_index GREATER_EQUAL 0)
+        string(JSON _id GET "${_document}" operations ${_index} id)
+        foreach(_group IN LISTS _kit_EXCLUDE)
+            if(_id MATCHES "/${_group}\\.")
+                string(JSON _document REMOVE "${_document}" operations ${_index})
+                break()
+            endif()
+        endforeach()
+        math(EXPR _index "${_index} - 1")
+    endwhile()
+    string(JSON _count LENGTH "${_document}" operations)
+    if(_count EQUAL 0)
+        message(FATAL_ERROR "pulp_control_agent_toolkit_declaration: EXCLUDE removed every operation")
+    endif()
+    string(SHA256 _suffix "${_kit_EXCLUDE}")
+    string(SUBSTRING "${_suffix}" 0 12 _suffix)
+    set(_path "${CMAKE_CURRENT_BINARY_DIR}/pulp-agent-toolkit-${_kit_VENDOR}-${_suffix}.json")
+    file(CONFIGURE OUTPUT "${_path}" CONTENT "${_document}\n" @ONLY)
+    set(${output} "${_path}" PARENT_SCOPE)
+endfunction()
+
 # Reads the declaration and returns its manifest member, or empty. The exact
 # bytes are embedded as one JSON string so CMake and the broker produce the
 # same canonical manifest; the broker performs the complete validation.

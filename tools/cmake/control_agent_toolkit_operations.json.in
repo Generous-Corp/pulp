@@ -1,0 +1,660 @@
+{
+  "schema": "dev.pulp.control/vendor-operations@1",
+  "vendor": "@PULP_AGENT_TOOLKIT_VENDOR@",
+  "operations": [
+    {
+      "id": "dev.@PULP_AGENT_TOOLKIT_VENDOR@/presets.list@1",
+      "tier": "read",
+      "description": "List the factory and user presets and the current preset name.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "current": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "presets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "folder": {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "factory": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name",
+                "folder",
+                "factory"
+              ]
+            },
+            "maxItems": 1024
+          }
+        },
+        "required": [
+          "current",
+          "presets"
+        ]
+      }
+    },
+    {
+      "id": "dev.@PULP_AGENT_TOOLKIT_VENDOR@/presets.load@1",
+      "tier": "gesture",
+      "description": "Load one preset by name and optional folder.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "folder": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "id": "dev.@PULP_AGENT_TOOLKIT_VENDOR@/presets.save@1",
+      "tier": "destructive",
+      "description": "Save the current patch as a user preset, replacing one with the same name.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "folder": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "id": "dev.@PULP_AGENT_TOOLKIT_VENDOR@/patch.schema@1",
+      "tier": "read",
+      "description": "Describe every parameter: id, name, unit, range, default, and step.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "unit": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "min": {
+                  "type": "number"
+                },
+                "max": {
+                  "type": "number"
+                },
+                "default": {
+                  "type": "number"
+                },
+                "step": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "unit",
+                "min",
+                "max",
+                "default",
+                "step"
+              ]
+            },
+            "maxItems": 4096
+          }
+        },
+        "required": [
+          "parameters"
+        ]
+      }
+    },
+    {
+      "id": "dev.@PULP_AGENT_TOOLKIT_VENDOR@/patch.get@1",
+      "tier": "read",
+      "description": "Read parameter values, all of them or the listed ids.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "maxItems": 4096
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "value": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "value"
+              ]
+            },
+            "maxItems": 4096
+          }
+        },
+        "required": [
+          "values"
+        ]
+      }
+    },
+    {
+      "id": "dev.@PULP_AGENT_TOOLKIT_VENDOR@/patch.set@1",
+      "tier": "gesture",
+      "description": "Set parameter values in their plain ranges; values are clamped to each range.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "value": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "value"
+              ]
+            },
+            "maxItems": 256,
+            "minItems": 1
+          }
+        },
+        "required": [
+          "values"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "value": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "value"
+              ]
+            },
+            "maxItems": 4096
+          }
+        },
+        "required": [
+          "values"
+        ]
+      }
+    },
+    {
+      "id": "dev.@PULP_AGENT_TOOLKIT_VENDOR@/patch.randomize@1",
+      "tier": "gesture",
+      "description": "Move parameters toward seeded random values; the same seed and patch give the same result.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "amount": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "maxItems": 4096
+          }
+        },
+        "required": [
+          "seed"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "value": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "value"
+              ]
+            },
+            "maxItems": 4096
+          }
+        },
+        "required": [
+          "seed",
+          "values"
+        ]
+      }
+    },
+    {
+      "id": "dev.@PULP_AGENT_TOOLKIT_VENDOR@/notes.play@1",
+      "tier": "render",
+      "description": "Render a note list, with optional automation lanes, offline on a fresh instance holding the current patch, and summarize the audio.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "duration_seconds": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 30
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "note": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 127
+                },
+                "velocity": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 127
+                },
+                "channel": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 15
+                },
+                "start_seconds": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 30
+                },
+                "duration_seconds": {
+                  "type": "number",
+                  "minimum": 0.001,
+                  "maximum": 30
+                }
+              },
+              "required": [
+                "note",
+                "start_seconds",
+                "duration_seconds"
+              ]
+            },
+            "maxItems": 512
+          },
+          "lanes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "points": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "time_seconds": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 30
+                      },
+                      "value": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "time_seconds",
+                      "value"
+                    ]
+                  },
+                  "maxItems": 256,
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "id",
+                "points"
+              ]
+            },
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "duration_seconds",
+          "notes"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "frames": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sample_rate": {
+            "type": "number",
+            "minimum": 0
+          },
+          "channels": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "peak_dbfs": {
+            "type": "number"
+          },
+          "rms_dbfs": {
+            "type": "number"
+          },
+          "loudness_lufs_ungated": {
+            "type": "number"
+          },
+          "clipped_samples": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "spectral_centroid_hz": {
+            "type": "number",
+            "minimum": 0
+          },
+          "bands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "hz": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "level_db": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "hz",
+                "level_db"
+              ]
+            },
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "frames",
+          "sample_rate",
+          "channels",
+          "peak_dbfs",
+          "rms_dbfs",
+          "loudness_lufs_ungated",
+          "clipped_samples",
+          "spectral_centroid_hz",
+          "bands"
+        ]
+      }
+    },
+    {
+      "id": "dev.@PULP_AGENT_TOOLKIT_VENDOR@/render.analyze@1",
+      "tier": "render",
+      "description": "Render a test signal through a fresh instance holding the current patch, and summarize the audio.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "duration_seconds": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 30
+          },
+          "stimulus": {
+            "enum": [
+              "silence",
+              "impulse",
+              "sine",
+              "noise"
+            ]
+          },
+          "frequency_hz": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20000
+          },
+          "level_dbfs": {
+            "type": "number",
+            "minimum": -120,
+            "maximum": 0
+          },
+          "seed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        },
+        "required": [
+          "duration_seconds",
+          "stimulus"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "frames": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sample_rate": {
+            "type": "number",
+            "minimum": 0
+          },
+          "channels": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "peak_dbfs": {
+            "type": "number"
+          },
+          "rms_dbfs": {
+            "type": "number"
+          },
+          "loudness_lufs_ungated": {
+            "type": "number"
+          },
+          "clipped_samples": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "spectral_centroid_hz": {
+            "type": "number",
+            "minimum": 0
+          },
+          "bands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "hz": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "level_db": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "hz",
+                "level_db"
+              ]
+            },
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "frames",
+          "sample_rate",
+          "channels",
+          "peak_dbfs",
+          "rms_dbfs",
+          "loudness_lufs_ungated",
+          "clipped_samples",
+          "spectral_centroid_hz",
+          "bands"
+        ]
+      }
+    }
+  ]
+}
