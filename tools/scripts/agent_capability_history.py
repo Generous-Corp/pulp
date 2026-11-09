@@ -388,34 +388,83 @@ def updated_history_entries(
 ) -> list[dict[str, Any]]:
     """Return append-only entries, replacing the sole unpublished bootstrap.
 
-    The previous published state is appended only when this change moves a
-    counter (manifest_revision or the surface inventory_version). A refresh
-    that leaves both alone, such as a catalog binding's header fingerprint,
-    appends nothing: the next counter move records the state it started from.
+    Invariant: whenever no counter is pending, the last entry IS the current
+    assigned state. That is what lets every branch leave both counters alone:
+    a change is pending only against a recorded state under the same counter,
+    so the state a branch starts from must already be recorded.
+
+    - An assigned state is recorded the moment it is written. The
+      version-at-land bump (`--assign-pending`) is the usual writer, so the
+      assignment and its history entry land in one serialized commit.
+    - A pending state is never recorded: it names no contract identity, and
+      recording it would put two materials under one counter.
+    - An assigned state that predates this invariant (a hand-bumped counter)
+      is recorded by the first branch that changes it. Every branch that does
+      so appends byte-identical text at the same place, which git merges
+      without a conflict.
     """
     if initial_bootstrap or migrate_unpublished:
         return [history_entry(current_manifest, current_surface)]
     # Either schema is accepted here: a v1 history is converted, never lost.
     entries = list(_entries_or_none(history) or [])
     if isinstance(previous_manifest, dict) and isinstance(previous_surface, dict):
-        counters_moved = (
-            previous_manifest.get("manifest_revision")
-            != current_manifest.get("manifest_revision")
-            or previous_surface.get("inventory_version")
-            != current_surface.get("inventory_version")
-        )
-        previous_entry = history_entry(previous_manifest, previous_surface)
-        # A pending previous state was never assigned a counter, so it is not
-        # a contract identity: recording it would put two materials under one
-        # counter. The assigned state that follows records the change. A
-        # refresh that moves neither counter appends nothing.
-        if not entries or (counters_moved and entries[-1] != previous_entry and not any(
-                pending_counters(history_document(entries), previous_manifest,
-                                 previous_surface))):
-            entries.append(previous_entry)
-    if not entries:
-        entries.append(history_entry(current_manifest, current_surface))
+        _record_if_assigned(entries, previous_manifest, previous_surface)
+    _record_if_assigned(entries, current_manifest, current_surface)
     return entries
+
+
+def _record_if_assigned(
+    entries: list[dict[str, Any]], manifest_document: Any, surface_document: Any
+) -> None:
+    """Append this state unless it is already last or a counter is pending."""
+    entry = history_entry(manifest_document, surface_document)
+    if entries and (entries[-1] == entry or any(pending_counters(
+            history_document(entries), manifest_document, surface_document))):
+        return
+    entries.append(entry)
+
+
+def state_is_recorded(
+    history: Any, manifest_document: Any, surface_document: Any
+) -> bool:
+    """Whether the history's last entry is exactly this state."""
+    entries = _entries_or_none(history)
+    if not entries:
+        return False
+    try:
+        return entries[-1] == history_entry(manifest_document, surface_document)
+    except (KeyError, TypeError):
+        return False
+
+
+def counters_that_can_stay(
+    history: Any, manifest_document: Any, surface_document: Any
+) -> tuple[bool, bool]:
+    """(manifest, surface): may a branch on this base leave the counter alone?
+
+    True when a material change under the base's counter would be pending:
+    the base's side is already pending, or is recorded under that counter, or
+    the whole base is assigned (the branch's `--write` then records it first).
+    False only for a mixed base, one side pending and the other an unrecorded
+    hand bump; that side still needs a bump until the next version-at-land
+    assignment records the state."""
+    entries = _entries_or_none(history)
+    if (not entries
+            or not isinstance(manifest_document, dict)
+            or not isinstance(surface_document, dict)):
+        return False, False
+    pending = pending_counters(history, manifest_document, surface_document)
+    if not any(pending):
+        return True, True
+    last = entries[-1]
+    result = []
+    for index, (side, counter, document) in enumerate((
+            ("manifest", "manifest_revision", manifest_document),
+            ("surface", "inventory_version", surface_document))):
+        recorded = last.get(side, {}).get(counter) if isinstance(last.get(side), dict) else None
+        result.append(pending[index] or recorded == document.get(counter))
+    return result[0], result[1]
+
 
 def history_problems(
     history: Any,
@@ -550,6 +599,8 @@ def protected_base_problems(
     old_manifest, old_surface, old_history = parsed
     problems: list[str] = []
     problems.extend(append_only_history_problems(old_history, history))
+    problems.extend(recorded_beyond_base_problems(
+        old_history, history, old_manifest, old_surface))
     manifest_pending, surface_pending = pending_counters(
         history, current_manifest, current_surface)
     base_manifest_pending, base_surface_pending = pending_counters(
@@ -571,6 +622,51 @@ def protected_base_problems(
         )
     )
     return _deduplicate(problems)
+
+def recorded_beyond_base_problems(
+    base_history: Any, history: Any, base_manifest: Any, base_surface: Any
+) -> list[str]:
+    """Keep recording single-writer: only two entries may follow the base's.
+
+    A branch may append (a) the base's own state, which records a base an
+    older hand bump left unrecorded, or (b) the base's material with each of
+    its pending counters advanced by exactly one, which is what
+    `--assign-pending` writes. Anything else is a branch recording its own
+    hand-bumped counter as assigned: two such branches race for the same
+    integer, which is the conflict this rule exists to end. A hand bump on a
+    mixed base is still pending, so it is never recorded and is unaffected."""
+    old_entries = _entries_or_none(base_history)
+    new_entries = _entries_or_none(history)
+    if old_entries is None or new_entries is None:
+        return []  # append_only_history_problems names the unreadable side
+    appended = new_entries[len(old_entries):]
+    if not appended:
+        return []
+    try:
+        allowed = {history_entry(base_manifest, base_surface)["entry_digest"]}
+        manifest_pending, surface_pending = pending_counters(
+            base_history, base_manifest, base_surface)
+        if manifest_pending or surface_pending:
+            assigned_manifest = copy.deepcopy(base_manifest)
+            assigned_surface = copy.deepcopy(base_surface)
+            if manifest_pending:
+                assigned_manifest["manifest_revision"] += 1
+            if surface_pending:
+                assigned_surface["inventory_version"] += 1
+            allowed.add(history_entry(assigned_manifest, assigned_surface)["entry_digest"])
+    except (KeyError, TypeError):
+        return ["protected base capability snapshots cannot be read as a history entry"]
+    problems = []
+    for offset, entry in enumerate(appended):
+        if entry.get("entry_digest") not in allowed:
+            problems.append(
+                f"capability history entries[{len(old_entries) + offset}] records a state "
+                "that is neither the protected base's own state nor its version-at-land "
+                "assignment; a branch must leave MANIFEST_REVISION and "
+                "SURFACE_INVENTORY_VERSION at the base value (run "
+                "agent_capability_rederive.py) rather than record a hand bump")
+    return problems
+
 
 def append_only_history_problems(previous: Any, current: Any) -> list[str]:
     """Every protected entry is still recorded, unchanged and in order.
