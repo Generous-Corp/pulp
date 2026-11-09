@@ -45,6 +45,23 @@ foreach(_line IN LISTS _carriers)
     # `benchmark-only <target> <type> <names GPU_RUNTIME_BENCHMARK>`: a
     # target-local PULP_BENCHMARK must stay compile-only, and with gpu-runtime
     # it must select gpu-runtime's benchmark declarations itself.
+    if(_target STREQUAL "benchmark-interface")
+        list(GET _fields 1 _bench_target)
+        message(FATAL_ERROR
+            "${_bench_target} passes PULP_BENCHMARK on to its consumers while the global "
+            "PULP_BENCHMARK is off, so linked images would take the benchmark flavour")
+    elseif(_target STREQUAL "benchmark-unreadable")
+        list(GET _fields 1 _bench_target)
+        message(FATAL_ERROR
+            "${_bench_target} names PULP_BENCHMARK inside a generator expression, which "
+            "configure cannot read, so its benchmark flavour cannot be checked")
+    elseif(_target STREQUAL "benchmark-consumer")
+        list(GET _fields 1 _bench_consumer)
+        list(GET _fields 2 _bench_target)
+        message(FATAL_ERROR
+            "${_bench_consumer} links or takes the objects of ${_bench_target}, a "
+            "benchmark-only library, which must stay compile-only")
+    endif()
     if(_target STREQUAL "benchmark-only")
         list(GET _fields 1 _bench_target)
         list(GET _fields 2 _bench_type)

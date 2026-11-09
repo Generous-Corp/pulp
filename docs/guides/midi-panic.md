@@ -115,6 +115,29 @@ A bypassed AU v2 effect skips `process()`, so a request raised while bypassed
 is serviced on the first block after bypass is released. Formats not listed
 (LV2, AAX, web) do not service requests: `serviced` is false there.
 
+### A panic button
+
+`view::PanicButton` (`pulp/view/panic_button.hpp`) is the stock control. It
+knows nothing about processors: it calls a `view::PanicTarget`, two callbacks
+that raise the request and report what the host can do.
+`format::panic_target(processor)` (`pulp/format/panic_target.hpp`) builds one
+from `request_panic()` and `panic_capabilities()`:
+
+```cpp
+#include <pulp/format/panic_target.hpp>
+
+auto panic = std::make_unique<view::PanicButton>(format::panic_target(processor));
+panic->set_release_only(false); // true asks for the release panic (CC 123)
+root.add_child(std::move(panic));
+```
+
+When `serviced` is false the button hides itself and a click raises nothing;
+`set_hide_when_unavailable(false)` keeps it visible but disabled instead. It
+re-reads availability before every click and on `refresh()`, and its accessible
+label says what a click does ("Panic: stop all notes and send MIDI panic", or
+"Panic: stop all notes" without MIDI output). The target holds a reference to
+the processor, so the button must not outlive it.
+
 ### A panic bigger than one block's MIDI buffer
 
 A full panic is up to 80 channel messages plus one note-off per held note, and

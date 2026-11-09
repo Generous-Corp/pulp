@@ -81,6 +81,14 @@ import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
 try:
+    import download_retry
+except ImportError:  # imported as tools.scripts.*, or loaded by path
+    try:
+        from tools.scripts import download_retry
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import download_retry
+try:
     from process_liveness import pid_alive
 except ImportError:  # imported as tools.scripts.*, or copied without its sibling
     try:
@@ -597,97 +605,168 @@ def expected_dawn_library_path(
     return skia.with_name(dawn_name)
 
 
-# Statuses worth a second attempt. A 403/404 means a bad pin or a revoked
-# asset: retrying cannot fix it, and burning the backoff first buries the real
-# error under five minutes of silence.
-_RETRYABLE_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
-
-# A bare OSError is deliberately NOT transient. It is what a full disk raises
-# on the write side, and re-downloading ~500 MiB three more times to fill the
-# same disk turns a clear error into a slow one.
-_TRANSIENT_DOWNLOAD_ERRORS = (
-    urllib.error.URLError,
-    TimeoutError,
-    ConnectionError,
-    http.client.IncompleteRead,
-)
-
-_DOWNLOAD_ATTEMPTS = 4
-_DOWNLOAD_BACKOFF_SECONDS = 2.0
-_DOWNLOAD_BACKOFF_CAP_SECONDS = 30.0
+# Names the fallback layer below uses to decide what moves on to the next source.
+_TRANSIENT_DOWNLOAD_ERRORS = download_retry.TRANSIENT_ERRORS
+_DOWNLOAD_ATTEMPTS = download_retry.DEFAULT_ATTEMPTS
 
 
-def _download_backoff_seconds(attempt: int) -> float:
-    """Exponential backoff for `attempt` (1-based), capped."""
-    return min(_DOWNLOAD_BACKOFF_SECONDS * (2 ** (attempt - 1)),
-               _DOWNLOAD_BACKOFF_CAP_SECONDS)
-
-
-def _retry_after_seconds(error: BaseException, fallback: float) -> float:
-    """Honour a numeric Retry-After header when the server sends one."""
-    headers = getattr(error, "headers", None)
-    if headers is None:
-        return fallback
-    raw = headers.get("Retry-After")
-    if raw is None:
-        return fallback
-    try:
-        seconds = float(str(raw).strip())
-    except ValueError:
-        # The header also permits an HTTP-date. Parsing that buys little here,
-        # so fall back to our own schedule rather than guessing.
-        return fallback
-    if seconds < 0:
-        return fallback
-    return min(seconds, _DOWNLOAD_BACKOFF_CAP_SECONDS)
-
-
-def download_release_asset(url: str,
+def download_release_asset(url: "str | urllib.request.Request",
                            zip_path: Path,
                            *,
-                           attempts: int = _DOWNLOAD_ATTEMPTS,
+                           attempts: int = download_retry.DEFAULT_ATTEMPTS,
                            sleep=time.sleep) -> None:
-    """Download `url` into `zip_path`, retrying transient network failures.
+    """Download `url` into `zip_path` under the shared retry policy.
 
     The pinned Skia asset is a few hundred megabytes fetched from a release
-    CDN, and a single 502 on that request fails the required macOS gate and
-    ejects the pull request from the merge queue. Each attempt reopens the
-    file for writing, so a partially written body is truncated rather than
-    concatenated with the next one; the caller's sha256 check remains the
-    authority on integrity either way.
+    CDN, and a single 5xx on that request fails the required macOS gate and
+    ejects the pull request from the merge queue. The policy lives in
+    `download_retry`; the caller's sha256 check remains the authority on
+    integrity.
     """
-    last_error: BaseException | None = None
-    for attempt in range(1, attempts + 1):
+    download_retry.download(url, zip_path, attempts=attempts, sleep=sleep)
+
+
+# The browser download URL and the REST API asset endpoint are served by
+# different GitHub front ends, so an outage of one (a run of 504s on
+# github.com/.../releases/download/) does not take the other down with it.
+_RELEASE_DOWNLOAD_URL = re.compile(
+    r"^https://github\.com/(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)"
+    r"/releases/download/(?P<tag>.+)/(?P<name>[^/]+)$"
+)
+_GITHUB_API = "https://api.github.com"
+
+
+class AssetDownloadError(RuntimeError):
+    """Every source for the pinned asset failed; the message names each one."""
+
+
+def _github_token() -> str | None:
+    for name in ("GITHUB_TOKEN", "GH_TOKEN"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def _api_request(url: str, accept: str, token: str | None) -> urllib.request.Request:
+    request = urllib.request.Request(url, headers={
+        "Accept": accept,
+        "User-Agent": "pulp-fetch-skia",
+        "X-GitHub-Api-Version": "2022-11-28",
+    })
+    if token:
+        # Unredirected: the asset endpoint answers with a redirect to a signed
+        # storage URL, and the token must never travel to that host.
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    return request
+
+
+def download_via_github_api(url: str, zip_path: Path, *, sleep=None) -> str:
+    """Fetch the same release asset through the REST API asset endpoint.
+
+    Looks the release up by tag, picks the asset whose name matches the
+    download URL, and downloads it with `Accept: application/octet-stream`.
+    Uses GITHUB_TOKEN or GH_TOKEN when one is set and retries anonymously if
+    the token is refused; the asset is public either way. Returns the API URL
+    the bytes came from. The caller still checks the pinned SHA-256.
+    """
+    sleep = sleep or time.sleep
+    match = _RELEASE_DOWNLOAD_URL.match(url)
+    if match is None:
+        raise ValueError(f"not a GitHub release download URL: {url}")
+    owner, repo, tag, name = match.group("owner", "repo", "tag", "name")
+    release_url = f"{_GITHUB_API}/repos/{owner}/{repo}/releases/tags/{tag}"
+    token = _github_token()
+    meta_path = zip_path.with_name(zip_path.name + ".release.json")
+    try:
         try:
-            with urllib.request.urlopen(url) as resp, zip_path.open("wb") as fp:
-                # 1 MiB chunks; skia zips are ~250-500 MiB
-                while True:
-                    chunk = resp.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    fp.write(chunk)
-            return
+            download_release_asset(
+                _api_request(release_url, "application/vnd.github+json", token),
+                meta_path, sleep=sleep)
         except urllib.error.HTTPError as err:
-            if err.code not in _RETRYABLE_HTTP_STATUS:
+            # 401: a stale token. 403: a job token without access to this
+            # repository, or one whose own budget is spent. The asset is
+            # public, so one anonymous retry is strictly better than failing.
+            if not token or err.code not in (401, 403):
                 raise
-            last_error = err
-            delay = _retry_after_seconds(err, _download_backoff_seconds(attempt))
-        except _TRANSIENT_DOWNLOAD_ERRORS as err:
-            last_error = err
-            delay = _download_backoff_seconds(attempt)
+            token = None
+            download_release_asset(
+                _api_request(release_url, "application/vnd.github+json", None),
+                meta_path, sleep=sleep)
+        release = json.loads(meta_path.read_text(encoding="utf-8"))
+    finally:
+        meta_path.unlink(missing_ok=True)
+    if not isinstance(release, dict):
+        raise AssetDownloadError(
+            f"release lookup for {tag!r} returned {type(release).__name__}, not an object")
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        raise AssetDownloadError(f"release lookup for {tag!r} returned no asset list")
+    asset_ids = [asset.get("id") for asset in assets
+                 if isinstance(asset, dict) and asset.get("name") == name]
+    if len(asset_ids) != 1 or not isinstance(asset_ids[0], int):
+        raise AssetDownloadError(f"release {tag!r} has no single asset named {name!r}")
+    asset_url = f"{_GITHUB_API}/repos/{owner}/{repo}/releases/assets/{asset_ids[0]}"
+    download_release_asset(_api_request(asset_url, "application/octet-stream", token),
+                           zip_path, sleep=sleep)
+    return asset_url
 
-        if attempt == attempts:
-            break
-        print(
-            f"  transient download failure ({last_error}); retrying in "
-            f"{delay:.0f}s [attempt {attempt + 1} of {attempts}]",
-            flush=True,
-        )
-        sleep(delay)
 
-    assert last_error is not None
-    print(f"  download failed after {attempts} attempts: {last_error}", flush=True)
-    raise last_error
+def _describe_api_error(error: BaseException) -> str:
+    """Name a GitHub API rate limit instead of reporting a bare 403/429."""
+    if not isinstance(error, urllib.error.HTTPError) or error.code not in (403, 429):
+        return str(error)
+    headers = error.headers
+    if headers is None:
+        return str(error)
+    remaining = headers.get("X-RateLimit-Remaining")
+    retry_after = headers.get("Retry-After")
+    if str(remaining).strip() != "0" and retry_after is None:
+        return str(error)
+    reset = headers.get("X-RateLimit-Reset")
+    if reset is not None:
+        try:
+            when = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(str(reset).strip())))
+        except (ValueError, OverflowError, OSError):
+            when = str(reset)
+        detail = f"resets at {when}"
+    elif retry_after is not None:
+        detail = f"retry after {str(retry_after).strip()}s"
+    else:
+        detail = "no reset time given"
+    return (f"GitHub API rate limit reached (HTTP {error.code}; {detail}); "
+            "an anonymous caller gets 60 requests per hour per IP")
+
+
+def download_with_fallback(url: str, zip_path: Path, *, sleep=None) -> str:
+    """Download the pinned asset, falling back to a second source.
+
+    Order: the manifest's browser download URL (retried on 5xx, 429 and
+    dropped connections), then, for a GitHub release URL, the REST API asset
+    endpoint (same retries). A 4xx on the first source moves to the next at
+    once. A local error such as a full disk is raised immediately, because
+    another source would hit it too. Returns the URL that delivered the bytes;
+    the caller verifies their SHA-256 exactly as it does for the first source.
+    """
+    sleep = sleep or time.sleep
+    try:
+        download_release_asset(url, zip_path, sleep=sleep)
+        return url
+    except (urllib.error.HTTPError, *_TRANSIENT_DOWNLOAD_ERRORS) as primary_error:
+        if _RELEASE_DOWNLOAD_URL.match(url) is None:
+            raise
+        primary = primary_error
+    print(f"  release download URL failed ({primary}); trying the GitHub API "
+          "asset endpoint", flush=True)
+    try:
+        return download_via_github_api(url, zip_path, sleep=sleep)
+    except (urllib.error.HTTPError, *_TRANSIENT_DOWNLOAD_ERRORS, AssetDownloadError,
+            ValueError) as fallback_error:
+        raise AssetDownloadError(
+            "every Skia asset source failed: "
+            f"release download URL {url}: {primary}; "
+            f"GitHub API asset endpoint: {_describe_api_error(fallback_error)}"
+        ) from fallback_error
 
 
 def artifact_cache_blob(expected_sha: str) -> Path | None:
@@ -732,8 +811,8 @@ def obtain_release_asset(url: str, zip_path: Path, expected_sha: str) -> str:
                 return actual
             print(f"  host artifact cache entry {blob} hashes to {actual}; "
                   "downloading instead")
-    download_release_asset(url, zip_path)
-    print(f"Downloaded {zip_path.stat().st_size} bytes from {url}")
+    source = download_with_fallback(url, zip_path)
+    print(f"Downloaded {zip_path.stat().st_size} bytes from {source}")
     return _file_sha256(zip_path)
 
 

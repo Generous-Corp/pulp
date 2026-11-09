@@ -6,9 +6,12 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import math
+import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -17,6 +20,7 @@ from gate_common import (
     git_comparison_receipt,
     read_git_path,
     resolve_git_comparison,
+    set_git_probe_deadline,
     dependabot_uses_only_diff,
 )
 
@@ -951,11 +955,14 @@ def _read_commit_path(
     return read_git_path(repo_root, comparison, path)
 
 
-def validate_release_evidence(document: Any, repo_root: Path) -> list[str]:
-    """Bind every released evidence claim to the protected shipped snapshot."""
+def validate_release_evidence(
+    document: Any, repo_root: Path, *, timeout_seconds: float | None = None
+) -> list[str]:
+    """Bind every released evidence claim with one bounded Git object batch."""
     errors: list[str] = []
     if not isinstance(document, dict) or not isinstance(document.get("rows"), list):
         return errors
+    claims: list[tuple[int, str, str, list[Any], str]] = []
     for row_index, row in enumerate(document["rows"]):
         if not isinstance(row, dict) or row.get("delivery_state") != "released":
             continue
@@ -968,10 +975,25 @@ def validate_release_evidence(document: Any, repo_root: Path) -> list[str]:
             needles = item.get("needles")
             if not isinstance(path, str) or not isinstance(needles, list):
                 continue
+            claims.append((row_index, suffix, merge, needles, path))
+    if not claims:
+        return errors
+    facts = _GitProvenanceFacts(
+        repo_root, "HEAD",
+        PROVENANCE_TOTAL_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds,
+    )
+    try:
+        merges = {merge for _, _, merge, _, _ in claims}
+        objects = facts.commit_objects(merges)
+        blobs = facts.release_blobs({(merge, path) for _, _, merge, _, path in claims})
+        for row_index, suffix, merge, needles, path in claims:
             where = f"ledger.rows[{row_index}].{suffix}"
-            snapshot = _read_commit_path(
-                repo_root, merge, path, "sequencer_release_evidence"
-            )
+            if not objects.get(merge, False):
+                snapshot = _release_snapshot(merge, path, "history unavailable")
+            elif (merge, path) not in blobs:
+                snapshot = _release_snapshot(merge, path, "path absent")
+            else:
+                snapshot = _release_snapshot(merge, path, "available", blobs[(merge, path)])
             if snapshot.status == "path_absent":
                 errors.append(
                     f"{where}: evidence path was absent from released snapshot {merge}: {path}"
@@ -989,23 +1011,211 @@ def validate_release_evidence(document: Any, repo_root: Path) -> list[str]:
                         f"{where}: historical evidence {needle!r} was absent from "
                         f"{path} at released snapshot {merge}"
                     )
-    return errors
+        return errors
+    except _ProvenanceTimeout as timeout:
+        return [
+            "release evidence validation timed out: " + str(timeout)
+            + "; receipt=rerun with PULP_SEQUENCER_PROVENANCE_TIMEOUT_SECONDS="
+            + str(PROVENANCE_TOTAL_TIMEOUT_SECONDS * 2),
+        ]
+
+
+def _release_snapshot(
+    merge: str, path: str, status: str, content: str | None = None
+) -> GitComparisonProvenance:
+    resolved = GitComparisonProvenance(
+        merge, merge, "sequencer_release_evidence", merge, merge, merge,
+        "base_tip", "available", "", path, content,
+    )
+    if status == "path absent":
+        return dataclasses.replace(resolved, status="path_absent")
+    if status == "history unavailable":
+        return dataclasses.replace(
+            resolved, status="history_unavailable", stderr="commit object unavailable", content=None
+        )
+    return resolved
+
+
+PROVENANCE_COMMAND_TIMEOUT_SECONDS = 10.0
+PROVENANCE_DEFAULT_TIMEOUT_SECONDS = 120.0
+
+
+def _configured_provenance_timeout() -> tuple[float, str | None]:
+    raw = os.environ.get("PULP_SEQUENCER_PROVENANCE_TIMEOUT_SECONDS", "120")
+    try:
+        value = float(raw)
+    except ValueError:
+        return PROVENANCE_DEFAULT_TIMEOUT_SECONDS, (
+            "invalid PULP_SEQUENCER_PROVENANCE_TIMEOUT_SECONDS={!r}; "
+            "using the 120s safety limit; receipt=set a positive number"
+        ).format(raw)
+    if not math.isfinite(value) or value <= 0:
+        return PROVENANCE_DEFAULT_TIMEOUT_SECONDS, (
+            "invalid PULP_SEQUENCER_PROVENANCE_TIMEOUT_SECONDS={!r}; "
+            "using the 120s safety limit; receipt=set a positive number"
+        ).format(raw)
+    return value, None
+
+
+PROVENANCE_TOTAL_TIMEOUT_SECONDS, PROVENANCE_TIMEOUT_CONFIGURATION_ERROR = (
+    _configured_provenance_timeout()
+)
+_GIT_DEADLINE: float | None = None
+
+
+class _ProvenanceTimeout(RuntimeError):
+    pass
+
+
+@dataclasses.dataclass
+class _GitProvenanceFacts:
+    """Immutable facts shared by every released row in one validation run."""
+
+    repo_root: Path
+    head: str
+    timeout_seconds: float
+    started: float = dataclasses.field(default_factory=time.monotonic)
+    commands: int = 0
+    _cache: dict[tuple[str, ...], subprocess.CompletedProcess[str]] = dataclasses.field(
+        default_factory=dict
+    )
+    _binary_cache: dict[tuple[str, ...], subprocess.CompletedProcess[bytes]] = dataclasses.field(
+        default_factory=dict
+    )
+
+    def _check_budget(self) -> float:
+        remaining = self.timeout_seconds - (time.monotonic() - self.started)
+        if remaining <= 0:
+            raise _ProvenanceTimeout(
+                f"timed out after {self.timeout_seconds:.1f}s ({self.commands} git commands)"
+            )
+        return min(PROVENANCE_COMMAND_TIMEOUT_SECONDS, remaining)
+
+    def run(
+        self, *arguments: str, input_text: str | None = None, cache: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        key = tuple(arguments) + (("--input", input_text) if input_text is not None else ())
+        if cache:
+            cached = self._cache.get(key)
+            if cached is not None:
+                return cached
+        timeout = self._check_budget()
+        result = _git(
+            self.repo_root, *arguments, input_text=input_text, timeout_seconds=timeout
+        )
+        self.commands += 1
+        if result.returncode == 124 and "timed out" in result.stderr:
+            raise _ProvenanceTimeout(result.stderr.strip())
+        if cache:
+            self._cache[key] = result
+        return result
+
+    def clear_object_batch(self) -> None:
+        for key in tuple(self._cache):
+            if key and key[0] == "cat-file" and "--batch-check" in key:
+                del self._cache[key]
+
+    def commit_objects(self, revisions: set[str]) -> dict[str, bool]:
+        if not revisions:
+            return {}
+        expressions = [f"{revision}^{{commit}}" for revision in sorted(revisions)]
+        result = self.run(
+            "cat-file", "--batch-check", input_text="\n".join(expressions) + "\n"
+        )
+        lines = result.stdout.splitlines() if result.returncode == 0 else []
+        found = {
+            expression.removesuffix("^{commit}"): len(parts) > 1 and parts[1] != "missing"
+            for expression, line in zip(expressions, lines)
+            for parts in [line.split()]
+        }
+        return {revision: found.get(revision, False) for revision in revisions}
+
+    def commit_metadata(self, revisions: set[str]) -> dict[str, tuple[list[str], str] | None]:
+        if not revisions:
+            return {}
+        result = self.run(
+            "show", "-s", "--format=%H%x00%P%x00%B%x00", *sorted(revisions)
+        )
+        metadata: dict[str, tuple[list[str], str] | None] = {
+            revision: None for revision in revisions
+        }
+        if result.returncode != 0:
+            return metadata
+        fields = result.stdout.split("\0")
+        for offset in range(0, len(fields) - 2, 3):
+            revision, parents, message = fields[offset : offset + 3]
+            revision = revision.strip()
+            if revision in metadata:
+                metadata[revision] = (parents.split(), message)
+        return metadata
+
+    def reachable_commits(self) -> subprocess.CompletedProcess[str]:
+        return self.run("rev-list", self.head)
+
+    def release_blobs(self, claims: set[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        """Read all released evidence blobs through one binary cat-file batch."""
+        if not claims:
+            return {}
+        requests = sorted(claims)
+        input_bytes = "".join(f"{merge}:{path}\n" for merge, path in requests).encode()
+        result = self.run_binary("cat-file", "--batch", input_bytes=input_bytes)
+        if result.returncode != 0:
+            return {}
+        payload = result.stdout
+        offset = 0
+        blobs: dict[tuple[str, str], str] = {}
+        for claim in requests:
+            end = payload.find(b"\n", offset)
+            if end < 0:
+                break
+            header = payload[offset:end].split()
+            offset = end + 1
+            if len(header) < 3 or header[1] == b"missing":
+                continue
+            try:
+                size = int(header[2])
+            except ValueError:
+                break
+            content = payload[offset : offset + size]
+            offset += size
+            if offset < len(payload) and payload[offset : offset + 1] == b"\n":
+                offset += 1
+            if header[1] == b"blob":
+                blobs[claim] = content.decode("utf-8", errors="replace")
+        return blobs
+
+    def run_binary(
+        self, *arguments: str, input_bytes: bytes = b""
+    ) -> subprocess.CompletedProcess[bytes]:
+        key = tuple(arguments) + (("--input-bytes", input_bytes.hex()),)
+        cached = self._binary_cache.get(key)
+        if cached is not None:
+            return cached
+        timeout = self._check_budget()
+        result = _git_bytes(
+            self.repo_root, *arguments, input_bytes=input_bytes, timeout_seconds=timeout
+        )
+        self.commands += 1
+        if result.returncode == 124 and b"timed out" in result.stderr:
+            raise _ProvenanceTimeout(result.stderr.decode(errors="replace").strip())
+        self._binary_cache[key] = result
+        return result
 
 
 def validate_git_provenance(
-    document: Any, repo_root: Path, head: str = "HEAD"
+    document: Any, repo_root: Path, head: str = "HEAD",
+    *, timeout_seconds: float | None = None,
 ) -> list[str]:
-    """Prove released coordinates are real protected merge commits in this checkout."""
-    errors: list[str] = []
+    """Prove released coordinates using one bounded, cached Git fact pass."""
     if not isinstance(document, dict) or not isinstance(document.get("rows"), list):
-        return errors
+        return []
+    rows: list[tuple[int, dict[str, Any], dict[str, Any], str, str, str, int]] = []
     for index, row in enumerate(document["rows"]):
         if not isinstance(row, dict) or row.get("delivery_state") != "released":
             continue
         release = row.get("release")
         if not isinstance(release, dict):
             continue
-        where = f"ledger.rows[{index}].release"
         accepted = release.get("accepted_head")
         merge = release.get("merge_sha")
         mode = release.get("integration_mode")
@@ -1013,67 +1223,96 @@ def validate_git_provenance(
         if (not isinstance(accepted, str) or not isinstance(merge, str) or
                 mode not in {"merge", "squash"} or not isinstance(pr, int)):
             continue
-        merge_object = _git(repo_root, "cat-file", "-e", f"{merge}^{{commit}}")
-        if merge_object.returncode != 0:
-            errors.append(f"{where}.merge_sha: commit object is unavailable: {merge}")
-        accepted_object = _git(repo_root, "cat-file", "-e", f"{accepted}^{{commit}}")
-        if accepted_object.returncode != 0 and mode == "squash":
-            fetched = _git(
-                repo_root, "fetch", "--no-tags", "--quiet", "origin",
-                f"refs/pull/{pr}/head"
+        rows.append((index, row, release, accepted, merge, mode, pr))
+    if not rows:
+        return []
+
+    facts = _GitProvenanceFacts(
+        repo_root, head,
+        PROVENANCE_TOTAL_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds,
+    )
+    try:
+        revisions = {item[3] for item in rows} | {item[4] for item in rows}
+        objects = facts.commit_objects(revisions)
+        fetch_errors: dict[int, str] = {}
+        # A shallow/fresh checkout may not carry a squash PR head. Preserve the
+        # exact fetch proof, then invalidate the immutable object batch once.
+        for index, _row, _release, accepted, _merge, mode, pr in rows:
+            if mode != "squash" or objects.get(accepted, False):
+                continue
+            fetched = facts.run(
+                "fetch", "--no-tags", "--quiet", "origin", f"refs/pull/{pr}/head"
             )
-            fetched_head = _git(repo_root, "rev-parse", "FETCH_HEAD")
+            # FETCH_HEAD is rewritten by every fetch above, so never reuse a
+            # cached value from a prior squash row.
+            fetched_head = facts.run("rev-parse", "FETCH_HEAD", cache=False)
             if (fetched.returncode != 0 or fetched_head.returncode != 0 or
                     fetched_head.stdout.strip() != accepted):
                 detail = fetched.stderr.strip() or "pull ref did not match recorded head"
+                fetch_errors[index] = detail
+                objects[accepted] = False
+            facts.clear_object_batch()
+            objects.update(facts.commit_objects({accepted}))
+
+        metadata = facts.commit_metadata({item[4] for item in rows})
+        ancestry = facts.reachable_commits()
+        reachable = set(ancestry.stdout.splitlines()) if ancestry.returncode == 0 else set()
+        errors: list[str] = []
+        for index, row, _release, accepted, merge, mode, pr in rows:
+            where = f"ledger.rows[{index}].release"
+            if index in fetch_errors:
                 errors.append(
-                    f"{where}.accepted_head: exact refs/pull/{pr}/head fetch failed: {detail}"
+                    f"{where}.accepted_head: exact refs/pull/{pr}/head fetch failed: "
+                    f"{fetch_errors[index]}"
                 )
-            accepted_object = _git(repo_root, "cat-file", "-e", f"{accepted}^{{commit}}")
-        if accepted_object.returncode != 0:
-            errors.append(f"{where}.accepted_head: commit object is unavailable: {accepted}")
-        parents = _git(repo_root, "rev-list", "--parents", "-n", "1", merge)
-        parent_ids = parents.stdout.strip().split() if parents.returncode == 0 else []
-        if mode == "merge":
-            if len(parent_ids) != 3:
-                errors.append(f"{where}.merge_sha: merge mode requires exactly two parents")
-            elif parent_ids[2] != accepted:
-                errors.append(
-                    f"{where}: accepted_head is not the merge commit's second parent"
+            if not objects.get(merge, False):
+                errors.append(f"{where}.merge_sha: commit object is unavailable: {merge}")
+            if not objects.get(accepted, False):
+                errors.append(f"{where}.accepted_head: commit object is unavailable: {accepted}")
+            commit = metadata.get(merge)
+            parent_ids, message = commit if commit is not None else ([], "")
+            if mode == "merge":
+                if len(parent_ids) != 2:
+                    errors.append(f"{where}.merge_sha: merge mode requires exactly two parents")
+                elif parent_ids[1] != accepted:
+                    errors.append(f"{where}: accepted_head is not the merge commit's second parent")
+                subject = message.splitlines()[0] if message.splitlines() else ""
+                if not subject.startswith(f"Merge pull request #{pr} "):
+                    errors.append(f"{where}.merge_sha: merge commit message does not bind PR #{pr}")
+            else:
+                if len(parent_ids) != 1:
+                    errors.append(f"{where}.merge_sha: squash mode requires exactly one parent")
+                if f"(#{pr})" not in message:
+                    errors.append(f"{where}.merge_sha: squash commit message does not reference (#{pr})")
+                for path in row.get("owned_paths", []):
+                    if not isinstance(path, str):
+                        continue
+                    accepted_blob = facts.run("rev-parse", "--verify", f"{accepted}:{path}")
+                    merge_blob = facts.run("rev-parse", "--verify", f"{merge}:{path}")
+                    accepted_exists = accepted_blob.returncode == 0
+                    merge_exists = merge_blob.returncode == 0
+                    if accepted_exists != merge_exists:
+                        errors.append(f"{where}: squash deletion/presence mismatch for {path}")
+                    elif accepted_exists and accepted_blob.stdout.strip() != merge_blob.stdout.strip():
+                        errors.append(f"{where}: squash blob differs from accepted head for {path}")
+            if ancestry.returncode == 0:
+                if merge not in reachable:
+                    errors.append(f"{where}.merge_sha: merge is not an ancestor of HEAD")
+            else:
+                problem = _ancestry_problem(
+                    ancestry,
+                    f"{where}.merge_sha: merge is not an ancestor of HEAD",
+                    f"{where}.merge_sha: ancestry history unavailable",
                 )
-            message = _git(repo_root, "log", "-1", "--format=%B", merge)
-            subject = message.stdout.splitlines()[0] if message.stdout.splitlines() else ""
-            if (message.returncode != 0 or
-                    not subject.startswith(f"Merge pull request #{pr} ")):
-                errors.append(
-                    f"{where}.merge_sha: merge commit message does not bind PR #{pr}"
-                )
-        elif mode == "squash":
-            if len(parent_ids) != 2:
-                errors.append(f"{where}.merge_sha: squash mode requires exactly one parent")
-            message = _git(repo_root, "log", "-1", "--format=%B", merge)
-            if message.returncode != 0 or f"(#{pr})" not in message.stdout:
-                errors.append(f"{where}.merge_sha: squash commit message does not reference (#{pr})")
-            for path in row.get("owned_paths", []):
-                if not isinstance(path, str):
-                    continue
-                accepted_blob = _git(repo_root, "rev-parse", f"{accepted}:{path}")
-                merge_blob = _git(repo_root, "rev-parse", f"{merge}:{path}")
-                accepted_exists = accepted_blob.returncode == 0
-                merge_exists = merge_blob.returncode == 0
-                if accepted_exists != merge_exists:
-                    errors.append(f"{where}: squash deletion/presence mismatch for {path}")
-                elif accepted_exists and accepted_blob.stdout.strip() != merge_blob.stdout.strip():
-                    errors.append(f"{where}: squash blob differs from accepted head for {path}")
-        ancestry = _git(repo_root, "merge-base", "--is-ancestor", merge, head)
-        problem = _ancestry_problem(
-            ancestry,
-            f"{where}.merge_sha: merge is not an ancestor of HEAD",
-            f"{where}.merge_sha: ancestry history unavailable",
-        )
-        if problem:
-            errors.append(problem)
-    return errors
+                if problem:
+                    errors.append(problem)
+        return errors
+    except _ProvenanceTimeout as timeout:
+        return [
+            "git provenance validation timed out: " + str(timeout)
+            + "; receipt=rerun with PULP_SEQUENCER_PROVENANCE_TIMEOUT_SECONDS="
+            + str(PROVENANCE_TOTAL_TIMEOUT_SECONDS * 2),
+        ]
 
 
 def validate_tombstone_provenance(
@@ -1404,14 +1643,74 @@ def validate_transition(
     return errors
 
 
-def _git(repo_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo_root), *arguments],
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+def _git(
+    repo_root: Path,
+    *arguments: str,
+    input_text: str | None = None,
+    timeout_seconds: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    timeout = timeout_seconds or PROVENANCE_COMMAND_TIMEOUT_SECONDS
+    if _GIT_DEADLINE is not None:
+        remaining = _GIT_DEADLINE - time.monotonic()
+        if remaining <= 0:
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(repo_root), *arguments], 124,
+                stdout="", stderr="git validation timed out at the run deadline",
+            )
+        timeout = min(timeout, remaining)
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo_root), *arguments],
+            check=False,
+            text=True,
+            encoding="utf-8",
+            input=input_text,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as expired:
+        elapsed = timeout_seconds if timeout_seconds is not None else "configured"
+        return subprocess.CompletedProcess(
+            ["git", "-C", str(repo_root), *arguments],
+            124,
+            stdout=expired.stdout or "",
+            stderr=f"git command timed out after {elapsed}s",
+        )
+
+
+def _git_bytes(
+    repo_root: Path,
+    *arguments: str,
+    input_bytes: bytes = b"",
+    timeout_seconds: float | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    timeout = timeout_seconds or PROVENANCE_COMMAND_TIMEOUT_SECONDS
+    if _GIT_DEADLINE is not None:
+        remaining = _GIT_DEADLINE - time.monotonic()
+        if remaining <= 0:
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(repo_root), *arguments], 124,
+                stdout=b"", stderr=b"git validation timed out at the run deadline",
+            )
+        timeout = min(timeout, remaining)
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo_root), *arguments],
+            check=False,
+            input=input_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as expired:
+        elapsed = timeout_seconds if timeout_seconds is not None else "configured"
+        return subprocess.CompletedProcess(
+            ["git", "-C", str(repo_root), *arguments],
+            124,
+            stdout=expired.stdout or b"",
+            stderr=f"git command timed out after {elapsed}s".encode(),
+        )
 
 
 def _ancestry_problem(
@@ -1912,6 +2211,9 @@ def main(argv: list[str] | None = None) -> int:
         help="require pending-row dependencies to resolve to a ledger row or tombstone",
     )
     args = parser.parse_args(argv)
+    global _GIT_DEADLINE
+    _GIT_DEADLINE = time.monotonic() + PROVENANCE_TOTAL_TIMEOUT_SECONDS
+    set_git_probe_deadline(_GIT_DEADLINE)
     repo_root = args.repo_root.resolve()
     schema_path = args.schema or repo_root / "docs/status/sequencer-exposure.schema.json"
     document, origins, load_errors = load_ledger_from_worktree(
@@ -1928,6 +2230,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"sequencer exposure check: cannot read {schema_path}: {error}", file=sys.stderr)
         return 1
     errors = validate_document(document, repo_root)
+    if PROVENANCE_TIMEOUT_CONFIGURATION_ERROR:
+        errors.append(PROVENANCE_TIMEOUT_CONFIGURATION_ERROR)
     if args.strict_dependencies:
         errors.extend(validate_dependency_references(document))
     errors.extend(validate_schema_contract(schema))

@@ -22,6 +22,10 @@
 /// Shaping (log/skew) is a property of the target parameter's own `ParamRange`,
 /// not of the map — the map only supplies the normalized window.
 ///
+/// Superseded for new work by `MidiLearnEngine` (midi_learn_engine.hpp), which
+/// adds 14-bit CC, NRPN/RPN, pitch bend and pressure, relative encoders,
+/// takeover and a UI-thread learn flow. This class stays for existing callers.
+///
 /// Usage (in the processor):
 ///   midi_map_.pump();                       // top of process()
 ///   for (auto& e : midi_in)
@@ -39,22 +43,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <pulp/runtime/spsc_queue.hpp>
+#include <pulp/state/midi_map_scale.hpp>
 #include <pulp/state/store.hpp>
 
 namespace pulp::state {
-
-/// Normalized [0, 1] output window a CC sweep is mapped onto. `min > max`
-/// inverts. Defaults to the full range, i.e. an identity CC → normalized map.
-struct MidiMapScale {
-    float min = 0.0f;
-    float max = 1.0f;
-
-    /// Map a raw 7-bit CC value onto this window. The result is always within
-    /// [0, 1] because both endpoints are clamped there on insertion.
-    float apply(uint8_t value) const {
-        return min + (value / 127.0f) * (max - min);
-    }
-};
 
 class MidiParameterMap {
   public:

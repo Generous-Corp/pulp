@@ -30,6 +30,7 @@ class GitAndTrailerTests(unittest.TestCase):
 
         run.assert_called_once_with(
             ["git", "rev-parse", "--show-toplevel"],
+            timeout=10.0,
             check=True,
             capture_output=True,
             text=True,

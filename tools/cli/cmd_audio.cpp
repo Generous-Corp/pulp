@@ -23,16 +23,16 @@
 #include <pulp/tools/audio/service.hpp>
 
 #include "cmd_audio_compare.hpp"
+#include "cmd_audio_formats.hpp"
 #include "cmd_audio_heritage.hpp"
 #include "cmd_audio_plugin_inspect.hpp"
+#include "cmd_audio_png.hpp"
 #include "cmd_audio_render.hpp"
+#include "cmd_audio_inspect.hpp"
 #include "cmd_audio_sampler_mip.hpp"
+#include "cmd_audio_spectrogram.hpp"
 #include "cmd_audio_validate.hpp"
-
-// Parsing helpers (defined in cli_common.cpp, not in header since they are only
-// used by audio command — declare them locally to keep the header lean).
-extern bool parse_size_arg(const std::string& text, const char* flag, std::size_t& out);
-extern bool parse_double_arg(const std::string& text, const char* flag, double& out);
+#include "cmd_audio_waveform.hpp"
 
 static void print_audio_usage() {
     std::cout << "pulp audio — repo-level audio analysis tooling\n\n";
@@ -53,7 +53,16 @@ static void print_audio_usage() {
                  "--duration-frames <n>) [options]\n";
     std::cout
         << "  pulp audio plugin-inspect --plugin <bundle> [--format <fmt>] [--id <id>]  # JSON\n";
+    std::cout << "  pulp audio formats [--json]\n";
     std::cout << "  pulp audio sampler-mip build <source> [--levels <1|2>] [--json]\n";
+    std::cout
+        << "  pulp audio spectrogram <file> --png <out.png> [--fft 2048 --hop 512 --window hann "
+           "--scale linear|log|mel --db-range 90 --start s --end s --channel n --json <sidecar>]\n";
+    std::cout << "  pulp audio waveform <file> --png <out.png> [--start s --end s --channel n "
+                 "--width px --height px --select a,b --json <sidecar>]\n";
+    std::cout
+        << "  pulp audio inspect <file> [--json] [--include-metadata-text] [--absolute-paths] "
+           "[--raw --format <fmt> --channels <n> --rate <hz> --endian <le|be> --offset <n>]\n";
     std::cout << "  pulp audio heritage <validate|canonicalize|inspect|render> ...\n";
 }
 
@@ -197,6 +206,20 @@ std::vector<std::uint8_t> render_scope_png(const pulp::audio::AudioScopeAcquisit
 
     return pulp::render::HeadlessSurface::encode_png(rgba, error_out);
 }
+
+} // namespace
+
+std::vector<std::uint8_t> encode_png_rgba(std::uint32_t width, std::uint32_t height,
+                                          const std::vector<std::uint8_t>& rgba,
+                                          std::string* error_out) {
+    pulp::render::HeadlessSurface::Rgba surface;
+    surface.width = width;
+    surface.height = height;
+    surface.pixels = rgba;
+    return pulp::render::HeadlessSurface::encode_png(surface, error_out);
+}
+
+namespace {
 
 int cmd_audio_scope_offline(const fs::path& input_wav, const fs::path& json_path,
                             const fs::path& png_path, int window, int channel,
@@ -474,8 +497,21 @@ int cmd_audio(const std::vector<std::string>& args) {
         return cmd_audio_compare({args.begin() + 1, args.end()});
     }
 
+    if (args[0] == "formats") {
+        return cmd_audio_formats({args.begin() + 1, args.end()});
+    }
+
     if (args[0] == "sampler-mip") {
         return cmd_audio_sampler_mip({args.begin() + 1, args.end()});
+    }
+    if (args[0] == "spectrogram") {
+        return cmd_audio_spectrogram({args.begin() + 1, args.end()});
+    }
+    if (args[0] == "waveform") {
+        return cmd_audio_waveform({args.begin() + 1, args.end()});
+    }
+    if (args[0] == "inspect") {
+        return cmd_audio_inspect({args.begin() + 1, args.end()});
     }
 
     if (args[0] == "heritage") {
