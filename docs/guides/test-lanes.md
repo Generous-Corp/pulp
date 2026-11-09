@@ -116,6 +116,14 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   `wide-non-native-selftest`. Extra time is capped at ten minutes (batches stop
   starting; the rest are listed as skipped), and the merge group still runs
   everything.
+- **The clean-merge lane** — a pull-request head that is exactly a clean
+  merge of `main` into a head whose full macOS lane passed runs only configure,
+  `pr-fast` (minus `needs-build`) and `pr-guard`: no build, no tests the pull
+  request reaches. Its tier notice says `clean-merge`. The merge group still
+  builds and runs the full suite on the commit that lands. It ships in shadow
+  (`PULP_CLEAN_MERGE_LANE_MODE`); the trigger, the fail-closed rule and the
+  enforcement window are in the local CI guide, "A clean merge of main takes
+  the contract lane", and decisions contract row 31.
 - **`pr-fast`** — additive, never exclusive: a static repository contract
   (lint, drift, registry-completeness, generated-manifest check) that also runs
   on the pull request head, where the rest of the suite does not. Members are
@@ -132,6 +140,15 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   current `main`): it also runs the full suite, non-gating, to issue the
   receipt a merge group of that one pull request can reuse (see the local CI
   guide, "Exact PR receipts on an unchanged merge-group candidate").
+- **`pr-fast-configure`** — a subset of `pr-fast`: the generated-manifest
+  drift checks that fail most pull-request heads (`script-test-inputs-drift`,
+  the consumption-census drift checks, `agent-capability-manifest-check`).
+  They read only the checkout and the configure, so the PR-head macOS leg runs
+  them between `Configure` and `Build` and a stale manifest fails before the
+  build, about nine minutes sooner at the median; the post-build `pr-fast` run
+  leaves them out when that step passed. A member must read nothing a build
+  produces and must never also carry `needs-build`; `pr-fast-tier-contract`
+  enforces both. It changes nothing on `merge_group` or push.
 - **`source-selftest`** — applied from `tools/ci/source_selftests.json`, never by
   hand: a Python registration that reads only the checkout. **Excluded from the
   required `macos` gate on gate events** and run instead by the build-free

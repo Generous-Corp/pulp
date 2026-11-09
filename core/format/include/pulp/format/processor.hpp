@@ -42,6 +42,10 @@ namespace pulp::dataplane {
 class ValueChannelSet;
 }
 
+namespace pulp::state {
+class MidiLearnEngine;
+}
+
 namespace pulp::view {
 class ScriptedUiSession;
 class View;
@@ -97,6 +101,14 @@ inline std::unordered_map<const void*, bool>& standalone_processors() {
 /// mutex. Guarded by editor_resize_mutex().
 inline std::unordered_map<const void*, std::shared_ptr<PanicState>>& panic_states() {
     static std::unordered_map<const void*, std::shared_ptr<PanicState>> table;
+    return table;
+}
+
+/// The MIDI Learn engine a processor registered, in a side table for the same
+/// layout reason as the handlers above. Read off the audio thread (an adapter's
+/// host-learn callback); guarded by editor_resize_mutex().
+inline std::unordered_map<const void*, state::MidiLearnEngine*>& midi_learn_engines() {
+    static std::unordered_map<const void*, state::MidiLearnEngine*> table;
     return table;
 }
 
@@ -183,6 +195,7 @@ public:
         detail::editor_resize_handlers().erase(this);
         detail::standalone_processors().erase(this);
         detail::panic_states().erase(this);
+        detail::midi_learn_engines().erase(this);
     }
     virtual ~Processor();
 
@@ -1283,6 +1296,27 @@ public:
     /// What a panic request can do in the current host. Cheap; any thread.
     PanicCapabilities panic_capabilities() const {
         return panic_state()->capabilities();
+    }
+
+    /// Register the MIDI Learn engine this processor owns so a host adapter can
+    /// reach it (VST3 `IMidiLearn` forwards the controller the host saw move).
+    /// Pass nullptr to unregister. Prefer `format::MidiLearnHandle`
+    /// (midi_learn_support.hpp), which does both. Main thread; the engine must
+    /// outlive the registration.
+    void set_midi_learn_engine(state::MidiLearnEngine* engine) {
+        std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
+        if (engine)
+            detail::midi_learn_engines()[this] = engine;
+        else
+            detail::midi_learn_engines().erase(this);
+    }
+
+    /// The registered MIDI Learn engine, or nullptr. Not for the audio thread.
+    state::MidiLearnEngine* midi_learn_engine() const {
+        std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
+        const auto& table = detail::midi_learn_engines();
+        const auto it = table.find(this);
+        return it == table.end() ? nullptr : it->second;
     }
 
     /// The request/state object adapters service. Created on first use, off the
