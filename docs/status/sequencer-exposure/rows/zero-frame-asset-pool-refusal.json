@@ -1,0 +1,58 @@
+{
+  "id": "zero-frame-asset-pool-refusal",
+  "title": "A zero-frame WAV asset is refused at pool creation, not at decode",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "d2b4bee6-45fb-48a7-9370-67455d2f119a",
+  "owned_paths": [
+    "test/test_playback_audio_renderer.cpp",
+    ".agents/skills/playback/SKILL.md",
+    "docs/status/sequencer-exposure/rows/zero-frame-asset-pool-refusal.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/test_playback_audio_renderer.cpp",
+      "needles": [
+        "refuses a zero-frame WAV asset at pool creation",
+        "AudioRendererErrorCode::InvalidAsset",
+        "mono_pcm16_wav(std::span<const std::int16_t>{})"
+      ]
+    },
+    {
+      "path": "core/playback/src/audio_renderer.cpp",
+      "needles": [
+        "bool valid_audio(",
+        "value.num_frames() == 0"
+      ]
+    },
+    {
+      "path": ".agents/skills/playback/SKILL.md",
+      "needles": [
+        "A zero-frame WAV decodes; the asset pool is what refuses it",
+        "refuses a zero-frame WAV asset at pool"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The WAV decoders now return a zero-frame file as an empty decode; DecodedAudioAssetPool::decode_wav passes it through and create() refuses it with InvalidAsset exactly as before. No installed header or public symbol changes; this row covers the test that pins where the refusal lives."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI verb, flag, or handler changes; the project loader reaches the same create() refusal."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No musician-facing control or operation is added; a zero-frame media file remains an invalid asset."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No capability key or design-time manifest is added or changed."
+    }
+  }
+}

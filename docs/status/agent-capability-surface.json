@@ -780,11 +780,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/sample_resource.hpp",
-      "fingerprint": "sha256:663954f691b0957447899d2b86ea92a9bad7edba92f736eb6806955df7b362ea",
+      "fingerprint": "sha256:4c733ef0cfae35564705ba3eea27f79c8c01d87600ba31a6c8d513fe0476a6a2",
       "include": "pulp/audio/sample_resource.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Background sample decode service and snapshot handle; reviewed when a zero-frame decode became a load failure with a reason instead of an empty Loaded snapshot. Host infrastructure behind the sampler capabilities, not a generator-facing capability."
     },
     {
       "domain": "audio",

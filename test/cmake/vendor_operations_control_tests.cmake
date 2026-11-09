@@ -1,3 +1,29 @@
+# The agent tool kit example is built here too, so its declaration helper,
+# CONTROL_VENDOR_SOURCES, and controlled host are validated without examples.
+if(PULP_ENABLE_INSPECTOR AND APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS AND
+   TARGET pulp::inspect-agent-toolkit AND NOT TARGET AgentToolkitSynth)
+    # This fixture is built as part of the test tree, but its controlled host
+    # must not add a product install script to the producer SDK install. SDK
+    # consumer tests stage that install under an unprivileged prefix; leaving
+    # the fixture's install rule enabled makes it try to create the default
+    # /usr/local/libexec catalog on macOS. Keep normal CMake install-script
+    # generation enabled; suppress only this host's product install step.
+    set(_pulp_saved_skip_control_host_install
+        "${PULP_SKIP_CONTROL_HOST_INSTALL}")
+    set(PULP_SKIP_CONTROL_HOST_INSTALL TRUE)
+    add_subdirectory("${CMAKE_SOURCE_DIR}/examples/agent-toolkit-synth"
+        "${CMAKE_BINARY_DIR}/test/agent-toolkit-synth")
+    set(PULP_SKIP_CONTROL_HOST_INSTALL
+        "${_pulp_saved_skip_control_host_install}")
+    # The broker-launched host is built as a file named `host`, a name test
+    # sources use as an ordinary word, so the test-input scanner would read it
+    # as a program those tests spawn. Install renames the host to `host` under
+    # its own directory either way; only this build-tree copy gets a distinct
+    # name.
+    set_target_properties(AgentToolkitSynth_ControlHost PROPERTIES
+        OUTPUT_NAME agent-toolkit-synth-control-host)
+endif()
+
 # A real controlled Standalone product that declares vendor operations, driven
 # through the broker by the shipped CLI and pulp-mcp.
 function(_pulp_register_vendor_operations_control_e2e)
@@ -37,6 +63,11 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
         PULP_VENDOR_PRODUCT_FIXTURE="$<TARGET_FILE:${_fixture}>"
         PULP_SAMPLE_REGION_EDITABLE_STANDALONE="" PULP_SAMPLE_REGION_FROZEN_STANDALONE="")
     add_dependencies(${_e2e} ${_fixture} pulp-cli pulp-mcp)
+    if(TARGET AgentToolkitSynth_ControlHost)
+        target_compile_definitions(${_e2e} PRIVATE
+            PULP_AGENT_TOOLKIT_PRODUCT="$<TARGET_FILE:AgentToolkitSynth_ControlHost>")
+        add_dependencies(${_e2e} AgentToolkitSynth_ControlHost)
+    endif()
     set_target_properties(${_e2e} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/vendor-operations-control")
     add_custom_command(TARGET ${_e2e} POST_BUILD
