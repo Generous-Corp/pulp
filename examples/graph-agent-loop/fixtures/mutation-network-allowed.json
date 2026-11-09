@@ -4,7 +4,7 @@
   "model_digest": "sha256:c71de6d73a45012afe1d67d3e3e0a61c78f0b0dea25cfd9716aab39810af5b97",
   "tool_id": "pulp-graph-agent-loop",
   "tool_version": "1",
-  "source_sha": "2f3d36dae75c3dca283c58e47f7731356f088e0d",
+  "source_sha": "3fad8b42a44d496361f97eeb469639e3a2b9e3c6",
   "network_policy": "allow",
   "plugin_policy": "deny-ambient",
   "steps": [
