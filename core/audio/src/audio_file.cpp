@@ -1,5 +1,6 @@
 #include <pulp/audio/audio_file.hpp>
 #include "decode_limits_detail.hpp"
+#include "pcm_float_scaling.hpp"
 #include <cmath>
 #include <algorithm>
 #include <filesystem>
@@ -62,34 +63,6 @@ void float_to_int32(const float* src, int32_t* dst, size_t count) {
 }
 
 // ── Audio file I/O via CHOC ──────────────────────────────────────────────────
-
-// Integer PCM decodes to float by dividing by 2^(bits-1): int16 -32768 maps to
-// -1.0f and +32767 to 32767/32768. That is the convention of int16_to_float
-// above, sample_converter.hpp, the AIFF reader, dr_wav and libsndfile. CHOC's
-// readFrames divides by (2^(bits-1) - 1) instead, so the integer depths are
-// read at double precision, the original code is recovered exactly (a double
-// carries more than twice the bits of any PCM depth, so rounding the product
-// lands on the code), and rescaled here. Float files are read as they are.
-struct IntegerDepth {
-    double choc_full_scale; // what CHOC divided the code by
-    float scale;            // 1 / 2^(bits-1)
-};
-
-static std::optional<IntegerDepth> integer_depth(choc::audio::BitDepth depth) {
-    using choc::audio::BitDepth;
-    switch (depth) {
-    case BitDepth::int8:
-        return IntegerDepth{127.0, 1.0f / 128.0f};
-    case BitDepth::int16:
-        return IntegerDepth{32767.0, 1.0f / 32768.0f};
-    case BitDepth::int24:
-        return IntegerDepth{8388607.0, 1.0f / 8388608.0f};
-    case BitDepth::int32:
-        return IntegerDepth{2147483647.0, 1.0f / 2147483648.0f};
-    default:
-        return std::nullopt;
-    }
-}
 
 static choc::audio::AudioFileFormatList make_format_list() {
     choc::audio::AudioFileFormatList list;
@@ -174,38 +147,14 @@ read_audio_file(const std::string& path, const std::function<bool(const AudioFil
         for (auto& channel : data.channels)
             channel.resize(frames);
 
-        if (const auto depth = integer_depth(props.bitDepth)) {
-            // Chunked so the double-precision scratch stays a bounded
-            // transient rather than doubling the admitted output size.
-            constexpr uint32_t kChunkFrames = 65536u;
-            choc::buffer::ChannelArrayBuffer<double> chunk(props.numChannels,
-                                                           std::min(frames, kChunkFrames));
-            for (uint32_t start = 0; start < frames; start += kChunkFrames) {
-                const uint32_t count = std::min(kChunkFrames, frames - start);
-                auto view = chunk.getView().getStart(count);
-                if (!reader->readFrames(start, view))
-                    return std::nullopt;
-                for (uint32_t ch = 0; ch < props.numChannels; ++ch) {
-                    const double* scaled = view.getChannel(ch).data.data;
-                    float* out = data.channels[ch].data() + start;
-                    for (uint32_t i = 0; i < count; ++i) {
-                        const auto code = std::llround(scaled[i] * depth->choc_full_scale);
-                        out[i] = static_cast<float>(code) * depth->scale;
-                    }
-                }
-            }
-            return data;
-        }
-
-        choc::buffer::ChannelArrayBuffer<float> buffer(props.numChannels, frames);
-        if (!reader->readFrames(0, buffer.getView()))
+        std::vector<float*> planar(props.numChannels);
+        for (uint32_t ch = 0; ch < props.numChannels; ++ch)
+            planar[ch] = data.channels[ch].data();
+        // Pulp's integer scaling (pcm_float_scaling.hpp), shared with the
+        // streaming AudioReader so both WAV paths decode bit-identically.
+        if (!detail::read_pulp_float(*reader, props.bitDepth, 0, planar.data(), props.numChannels,
+                                     frames))
             return std::nullopt;
-
-        for (uint32_t ch = 0; ch < props.numChannels; ++ch) {
-            auto channel_view = buffer.getView().getChannel(ch);
-            for (uint32_t i = 0; i < frames; ++i)
-                data.channels[ch][i] = channel_view.data.data[i];
-        }
 
         return data;
     } catch (...) {
