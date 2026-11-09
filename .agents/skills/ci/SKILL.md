@@ -1746,6 +1746,15 @@ consequences worth knowing before you debug:
   `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
   merge receipt pins the same label string as `ctest_gate_args.py`
   (`REQUIRED_LABEL_EXCLUDE`), so change both or receipts stop being reused.
+- A new, deleted or renamed public header under an exported include root, or a
+  CMake change, makes `gates.sh` run `consumption_census.py --check` in the
+  generated-manifest lane (`gates_script_inputs.py`), so a stale
+  `docs/status/consumption-profiles.json` fails locally instead of as
+  `consumption-census-drift` on macos, drift-fast and linux. The header list is
+  read from git's index: `git add` the new header before regenerating with
+  `python3 tools/scripts/consumption_census.py --build-dir <build> --write`. A
+  host that cannot configure reports it NOT CHECKED. The pre-push hook's own
+  merge-tree script-state check does not run it.
 - `gates.sh` now runs this lane scoped to your diff
   (`source_selftests.py run --changed-from "$BASE"`): an entry runs when its own
   script changed or its source names a changed file (full path, a distinctive
