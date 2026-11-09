@@ -12,6 +12,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#include <pulp/host/graph_types.hpp>
 
 #include <algorithm>
 #include <array>
@@ -378,6 +379,22 @@ enum class GraphEventResult : std::uint8_t {
     Busy,
 };
 
+struct GraphAuthoredEventEdge {
+    NodeId producer = 0;
+    NodeId consumer = 0;
+    std::uint8_t source_port = 0;
+    std::uint8_t destination_port = 0;
+    std::uint8_t kind = 1;
+};
+
+enum class GraphEventBindingResult : std::uint8_t {
+    Accepted,
+    Cardinality,
+    Binding,
+    Feedback,
+    Mode,
+};
+
 struct GraphAuthoredEvent {
     std::uint64_t epoch = 0;
     std::uint64_t sample = 0;
@@ -395,6 +412,8 @@ struct GraphEventCounters {
     std::uint64_t sequence = 0;
     std::uint64_t epoch = 0;
     std::uint64_t overflow = 0;
+    std::uint64_t late = 0;
+    std::uint64_t future = 0;
     std::uint64_t diagnostic_refusals = 0;
     std::uint8_t attempts = 0;
     std::uint8_t accepted = 0;
@@ -407,19 +426,26 @@ template <std::size_t MaxFrames = 4096, std::size_t MaxAcceptedPerSample = 8>
 class GraphAuthoredEventLane final {
   public:
     static constexpr std::size_t kMaxAttemptsPerSample = 16;
+    static constexpr std::size_t kRecordCapacity = MaxFrames * MaxAcceptedPerSample;
+    static constexpr std::size_t kPendingCapacity = kRecordCapacity;
     static constexpr std::size_t kRecordBytes =
-        sizeof(GraphAuthoredEvent) * MaxFrames * MaxAcceptedPerSample;
-    static_assert(kRecordBytes <= 1'048'576);
+        sizeof(GraphAuthoredEvent) * (kRecordCapacity + kPendingCapacity);
+    // The trigger resource budget charges this fixed arena. Keep the lane
+    // bounded even when a caller chooses a large prepared frame size.
+    static_assert(kRecordBytes <= 2'097'152);
 
     GraphEventResult reset(std::uint64_t epoch) noexcept {
-        if (epoch == 0 || active_)
-            return active_ ? GraphEventResult::Busy : GraphEventResult::OutOfRange;
+        if (active_)
+            return GraphEventResult::Busy;
+        if (epoch == 0)
+            return GraphEventResult::OutOfRange;
         epoch_ = epoch;
         counters_ = {};
         counters_.epoch = epoch;
         cursor_ = 0;
         sequence_ = 0;
-        trace_size_ = 0;
+        trace_size_ = pending_size_ = 0;
+        current_received_begin_ = current_received_count_ = 0;
         consumed_frontier_ = 0;
         return GraphEventResult::Accepted;
     }
@@ -431,11 +457,61 @@ class GraphAuthoredEventLane final {
         if (epoch == 0 || epoch != epoch_ || frames == 0 || frames > MaxFrames ||
             sample_start > std::numeric_limits<std::uint64_t>::max() - frames)
             return GraphEventResult::OutOfRange;
+        const auto end = sample_start + frames;
+        // Retire pending records left behind by a seek. They are never
+        // retimed into the new block; each refusal is visible in diagnostics.
+        std::size_t keep = 0;
+        for (std::size_t i = 0; i < pending_size_; ++i) {
+            const auto& event = pending_[i];
+            if (event.epoch != epoch_) {
+                continue;
+            }
+            if (event.sample < sample_start) {
+                increment_(counters_.late);
+                increment_(counters_.diagnostic_refusals);
+                continue;
+            }
+            pending_[keep++] = event;
+        }
+        pending_size_ = keep;
         block_start_ = sample_start;
         block_frames_ = frames;
         sample_offset_ = 0;
         trace_size_ = 0;
+        current_received_begin_ = current_received_count_ = 0;
+        block_mode_ = false;
+        // Move queued records in this window into the current block arena. The
+        // insertion sort below establishes the same total order as host ingress.
+        for (std::size_t i = 0; i < pending_size_;) {
+            if (pending_[i].sample >= end)
+                ++i;
+            else {
+                if (trace_size_ < kRecordCapacity)
+                    insert_sorted_(records_, trace_size_, pending_[i]);
+                pending_[i] = pending_[pending_size_ - 1];
+                --pending_size_;
+            }
+        }
         active_ = true;
+        return GraphEventResult::Accepted;
+    }
+
+    GraphEventResult begin_producer_block() noexcept {
+        if (!active_ || phase_ != 0 || block_mode_)
+            return GraphEventResult::InvalidPhase;
+        current_sample_ = block_start_;
+        attempts_ = accepted_ = 0;
+        attempt_closed_ = false;
+        block_mode_ = true;
+        phase_ = 1;
+        return GraphEventResult::Accepted;
+    }
+
+    GraphEventResult begin_consumer_block() noexcept {
+        if (!active_ || !block_mode_ || phase_ != 1)
+            return GraphEventResult::InvalidPhase;
+        sort_records_();
+        phase_ = 2;
         return GraphEventResult::Accepted;
     }
 
@@ -445,18 +521,49 @@ class GraphAuthoredEventLane final {
         current_sample_ = block_start_ + offset;
         attempts_ = accepted_ = 0;
         attempt_closed_ = false;
-        sample_begin_ = trace_size_;
+        current_received_begin_ = current_received_count_ = 0;
         phase_ = 1;
         return GraphEventResult::Accepted;
     }
 
+    // Legacy producer API: an event at the producer's current sample.
     GraphEventResult emit(std::uint64_t epoch, std::uint32_t producer, std::uint16_t payload,
                           std::uint64_t target_sample, std::uint8_t source_port = 0,
                           std::uint8_t kind = 1) noexcept {
+        // Preserve the original sample-local primitive. New graph-authored
+        // producers use emit_at() when they need queued look-ahead delivery.
+        if (phase_ == 1 && target_sample != current_sample_) {
+            if (attempt_closed_)
+                return GraphEventResult::AttemptLimit;
+            if (attempts_ == kMaxAttemptsPerSample) {
+                attempt_closed_ = true;
+                return GraphEventResult::AttemptLimit;
+            }
+            ++attempts_;
+            counters_.attempts = attempts_;
+            ++sequence_;
+            counters_.sequence = sequence_;
+            if (target_sample > current_sample_)
+                increment_(counters_.future);
+            else
+                increment_(counters_.late);
+            increment_(counters_.diagnostic_refusals);
+            return target_sample > current_sample_ ? GraphEventResult::Future
+                                                   : GraphEventResult::Late;
+        }
+        return emit_at(epoch, producer, payload, target_sample, source_port, kind);
+    }
+
+    // Explicit absolute-target writer API. Targets in the current block or in
+    // the fixed one-block look-ahead horizon are retained; callers cannot
+    // smuggle a block-relative cursor into the callback.
+    GraphEventResult emit_at(std::uint64_t epoch, std::uint32_t producer, std::uint16_t payload,
+                             std::uint64_t target_sample, std::uint8_t source_port = 0,
+                             std::uint8_t kind = 1) noexcept {
         if (attempt_closed_)
             return GraphEventResult::AttemptLimit;
         if (phase_ != 1) {
-            ++counters_.diagnostic_refusals;
+            increment_(counters_.diagnostic_refusals);
             return GraphEventResult::InvalidPhase;
         }
         if (attempts_ == kMaxAttemptsPerSample) {
@@ -466,29 +573,45 @@ class GraphAuthoredEventLane final {
         ++attempts_;
         counters_.attempts = attempts_;
         const auto sequence = sequence_++;
-        // Expose the next producer-local sequence alongside the per-sample
-        // attempt counters. Invalid and overflowed attempts consume sequence
-        // identity, while the latched AttemptLimit refusal below does not.
         counters_.sequence = sequence_;
         auto refuse = [&](GraphEventResult result) {
-            ++counters_.diagnostic_refusals;
+            increment_(counters_.diagnostic_refusals);
             return result;
         };
         if (epoch != epoch_)
             return refuse(GraphEventResult::StaleEpoch);
         if (producer == 0 || source_port != 0 || kind != 1)
             return refuse(GraphEventResult::Unbound);
-        if (target_sample < current_sample_)
+        if (target_sample < current_sample_ || target_sample < consumed_frontier_) {
+            increment_(counters_.late);
             return refuse(GraphEventResult::Late);
-        if (target_sample > current_sample_)
-            return refuse(GraphEventResult::Future);
+        }
+        const auto block_end = block_start_ + block_frames_;
+        if (target_sample >= block_end) {
+            if (target_sample - block_end >= MaxFrames) {
+                increment_(counters_.future);
+                return refuse(GraphEventResult::Future);
+            }
+            if (pending_size_ == kPendingCapacity) {
+                increment_(counters_.overflow);
+                return GraphEventResult::Overflow;
+            }
+            pending_[pending_size_++] = {epoch_,  target_sample, sequence, producer,
+                                         payload, source_port,   kind};
+            ++accepted_;
+            counters_.accepted = accepted_;
+            return GraphEventResult::Accepted;
+        }
         if (accepted_ == MaxAcceptedPerSample) {
-            if (counters_.overflow != std::numeric_limits<std::uint64_t>::max())
-                ++counters_.overflow;
+            increment_(counters_.overflow);
             return GraphEventResult::Overflow;
         }
-        records_[trace_size_++] = {epoch_,  current_sample_, sequence, producer,
-                                   payload, source_port,     kind};
+        if (trace_size_ == kRecordCapacity) {
+            increment_(counters_.overflow);
+            return GraphEventResult::Overflow;
+        }
+        insert_sorted_(records_, trace_size_,
+                       {epoch_, target_sample, sequence, producer, payload, source_port, kind});
         ++accepted_;
         counters_.accepted = accepted_;
         return GraphEventResult::Accepted;
@@ -497,14 +620,35 @@ class GraphAuthoredEventLane final {
     GraphEventResult begin_consumer() noexcept {
         if (!active_ || phase_ != 1)
             return GraphEventResult::InvalidPhase;
+        sort_records_();
+        current_received_begin_ = 0;
+        while (current_received_begin_ < trace_size_ &&
+               records_[current_received_begin_].sample < current_sample_)
+            ++current_received_begin_;
+        current_received_count_ = 0;
+        while (current_received_begin_ + current_received_count_ < trace_size_ &&
+               records_[current_received_begin_ + current_received_count_].sample ==
+                   current_sample_)
+            ++current_received_count_;
         phase_ = 2;
         return GraphEventResult::Accepted;
     }
+
+    // Current-sample records, retained for the original trigger contract.
     std::span<const GraphAuthoredEvent> received() const noexcept {
         if (phase_ != 2)
             return {};
-        return {records_.data() + sample_begin_, trace_size_ - sample_begin_};
+        return {records_.data() + current_received_begin_, current_received_count_};
     }
+
+    // All records selected for this block, sorted by sample, producer and
+    // producer-local sequence. Valid only during the consumer callback.
+    std::span<const GraphAuthoredEvent> received_block() const noexcept {
+        if (phase_ != 2)
+            return {};
+        return {records_.data(), trace_size_};
+    }
+
     GraphEventResult end_sample() noexcept {
         if (!active_ || phase_ != 2)
             return GraphEventResult::InvalidPhase;
@@ -514,17 +658,17 @@ class GraphAuthoredEventLane final {
         return GraphEventResult::Accepted;
     }
     GraphEventResult end_block() noexcept {
-        if (!active_ || phase_ != 0 || sample_offset_ != block_frames_)
+        if (!active_ ||
+            (block_mode_ ? phase_ != 2 : (phase_ != 0 || sample_offset_ != block_frames_)))
             return GraphEventResult::InvalidPhase;
         if (cursor_ > std::numeric_limits<std::uint64_t>::max() - block_frames_) {
-            // The current block has completed its consumer phase. Retire the
-            // active state even when the monotonic cursor cannot advance, so
-            // the owner can reset to a new epoch instead of remaining wedged.
             active_ = false;
             return GraphEventResult::OutOfRange;
         }
         cursor_ += block_frames_;
         counters_.cursor = cursor_;
+        phase_ = 0;
+        block_mode_ = false;
         active_ = false;
         return GraphEventResult::Accepted;
     }
@@ -535,21 +679,54 @@ class GraphAuthoredEventLane final {
     std::span<const GraphAuthoredEvent> trace() const noexcept {
         return {records_.data(), trace_size_};
     }
+    std::size_t pending() const noexcept {
+        return pending_size_;
+    }
     std::uint64_t epoch() const noexcept {
         return epoch_;
     }
     bool active() const noexcept {
         return active_;
     }
+    std::uint64_t block_start() const noexcept {
+        return block_start_;
+    }
 
   private:
     friend struct detail::GraphEventLaneTestAccess;
 
+    static void increment_(std::uint64_t& value) noexcept {
+        if (value != std::numeric_limits<std::uint64_t>::max())
+            ++value;
+    }
+    static bool less_(const GraphAuthoredEvent& lhs, const GraphAuthoredEvent& rhs) noexcept {
+        if (lhs.sample != rhs.sample)
+            return lhs.sample < rhs.sample;
+        if (lhs.producer != rhs.producer)
+            return lhs.producer < rhs.producer;
+        return lhs.sequence < rhs.sequence;
+    }
+    static void insert_sorted_(std::array<GraphAuthoredEvent, kRecordCapacity>& records,
+                               std::size_t& size, const GraphAuthoredEvent& event) noexcept {
+        std::size_t at = size;
+        while (at > 0 && less_(event, records[at - 1])) {
+            records[at] = records[at - 1];
+            --at;
+        }
+        records[at] = event;
+        ++size;
+    }
+    void sort_records_() noexcept {
+        // Records are kept ordered on insertion; this pass is intentionally a
+        // no-op hook for future multi-producer publication and documents that
+        // the reader observes the total order contract.
+    }
     void test_set_cursor_(std::uint64_t cursor) noexcept {
         cursor_ = cursor;
     }
 
-    std::array<GraphAuthoredEvent, MaxFrames * MaxAcceptedPerSample> records_{};
+    std::array<GraphAuthoredEvent, kRecordCapacity> records_{};
+    std::array<GraphAuthoredEvent, kPendingCapacity> pending_{};
     GraphEventCounters counters_{};
     std::uint64_t epoch_ = 0;
     std::uint64_t cursor_ = 0;
@@ -559,13 +736,55 @@ class GraphAuthoredEventLane final {
     std::uint64_t consumed_frontier_ = 0;
     std::size_t block_frames_ = 0;
     std::size_t sample_offset_ = 0;
-    std::size_t sample_begin_ = 0;
+    std::size_t current_received_begin_ = 0;
+    std::size_t current_received_count_ = 0;
     std::size_t trace_size_ = 0;
+    std::size_t pending_size_ = 0;
     std::uint8_t attempts_ = 0;
     std::uint8_t accepted_ = 0;
     std::uint8_t phase_ = 0;
     bool attempt_closed_ = false;
+    bool block_mode_ = false;
     bool active_ = false;
+};
+
+// Borrowed callback-local writer. The producer identity and activation epoch
+// are supplied by the prepared graph; callers can only provide an absolute
+// target and payload, so sequence identity cannot be forged or retained across
+// blocks.
+template <std::size_t MaxFrames = 4096, std::size_t MaxAcceptedPerSample = 8>
+class GraphEventWriter final {
+  public:
+    GraphEventWriter() noexcept = default;
+    GraphEventWriter(GraphAuthoredEventLane<MaxFrames, MaxAcceptedPerSample>& lane,
+                     std::uint64_t epoch, std::uint32_t producer) noexcept
+        : lane_(&lane), epoch_(epoch), producer_(producer) {}
+    GraphEventResult emit_at(std::uint64_t absolute_sample, std::uint16_t payload,
+                             std::uint8_t source_port = 0, std::uint8_t kind = 1) noexcept {
+        if (lane_ == nullptr)
+            return GraphEventResult::Unbound;
+        return lane_->emit_at(epoch_, producer_, payload, absolute_sample, source_port, kind);
+    }
+
+  private:
+    GraphAuthoredEventLane<MaxFrames, MaxAcceptedPerSample>* lane_ = nullptr;
+    std::uint64_t epoch_ = 0;
+    std::uint32_t producer_ = 0;
+};
+
+template <std::size_t MaxFrames = 4096, std::size_t MaxAcceptedPerSample = 8>
+class GraphEventReader final {
+  public:
+    GraphEventReader() noexcept = default;
+    explicit GraphEventReader(
+        const GraphAuthoredEventLane<MaxFrames, MaxAcceptedPerSample>& lane) noexcept
+        : lane_(&lane) {}
+    std::span<const GraphAuthoredEvent> events() const noexcept {
+        return lane_ == nullptr ? std::span<const GraphAuthoredEvent>{} : lane_->received_block();
+    }
+
+  private:
+    const GraphAuthoredEventLane<MaxFrames, MaxAcceptedPerSample>* lane_ = nullptr;
 };
 
 } // namespace pulp::host

@@ -130,6 +130,79 @@ TriggerCounters counters(SignalGraph& g) {
 }
 } // namespace
 
+TEST_CASE("Graph-authored Custom callbacks receive ordered writer and reader handles",
+          "[g5][events][wiring]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    std::uint64_t next_sample = 0;
+    CustomNodeType type;
+    type.type_id = "test.g5.graph-event";
+    type.num_input_ports = type.num_output_ports = 1;
+    type.process_events = [&](auto& out, const auto& in, int frames,
+                              const CustomNodeEventBlock& events) {
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+        if (events.graph_writer != nullptr) {
+            REQUIRE(events.graph_writer->emit_at(next_sample, 77) == GraphEventResult::Accepted);
+            next_sample += static_cast<std::uint64_t>(frames);
+        }
+        if (events.graph_reader != nullptr) {
+            for (const auto& event : events.graph_reader->events())
+                out.channel_ptr(0)[event.sample - (next_sample - frames)] =
+                    static_cast<float>(event.payload);
+        }
+    };
+    REQUIRE(graph.register_custom_node_type(type));
+    const auto producer = graph.add_custom_node(type.type_id);
+    const auto consumer = graph.add_custom_node(type.type_id);
+    REQUIRE(producer != 0);
+    REQUIRE(consumer != 0);
+    REQUIRE(graph.connect(input, 0, producer, 0));
+    REQUIRE(graph.connect(producer, 0, consumer, 0));
+    REQUIRE(graph.connect(consumer, 0, output, 0));
+    REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted);
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::array<float, 4> source{};
+    std::array<float, 4> destination{};
+    const float* source_ptr = source.data();
+    float* destination_ptr = destination.data();
+    pulp::audio::BufferView<const float> in(&source_ptr, 1, source.size());
+    pulp::audio::BufferView<float> out(&destination_ptr, 1, destination.size());
+    graph.process(out, in, 4);
+    REQUIRE(destination[0] == 77.0f);
+
+    next_sample = 0;
+    graph.set_canonical_executor_routing_enabled(false);
+    REQUIRE(graph.prepare(48000.0, 4));
+    destination.fill(0.0f);
+    graph.process(out, in, 4);
+    REQUIRE(destination[0] == 77.0f);
+}
+
+TEST_CASE("Graph-authored event admission refuses unsupported roles and fanout",
+          "[g5][events][wiring][negative-control]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    CustomNodeType type;
+    type.type_id = "test.g5.graph-event-negative";
+    type.num_input_ports = type.num_output_ports = 1;
+    type.process = [](auto& out, const auto& in, int frames) {
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+    };
+    REQUIRE(graph.register_custom_node_type(type));
+    const auto producer = graph.add_custom_node(type.type_id);
+    const auto consumer = graph.add_custom_node(type.type_id);
+    REQUIRE(graph.connect(input, 0, producer, 0));
+    REQUIRE(graph.connect(producer, 0, consumer, 0));
+    REQUIRE(graph.connect(consumer, 0, output, 0));
+    REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Binding);
+    REQUIRE(graph.connect_graph_event({producer, producer}) == GraphEventBindingResult::Feedback);
+}
+
 TEST_CASE("Typed trigger pair preserves sample and tie order across partitions", "[trigger]") {
     std::vector<float> expected;
     std::vector<std::array<std::uint64_t, 4>> expected_events;

@@ -328,12 +328,29 @@ void graph_partition_controls() {
           "graph-counters");
 }
 
+void graph_callback_wiring_controls() {
+    GraphAuthoredEventLane<8> lane;
+    check(lane.reset(7) == GraphEventResult::Accepted, "callback-reset");
+    check(lane.begin_block(7, 0, 4) == GraphEventResult::Accepted, "callback-begin");
+    check(lane.begin_producer_block() == GraphEventResult::Accepted, "callback-producer");
+    GraphEventWriter writer(lane, 7, 42);
+    check(writer.emit_at(3, 9) == GraphEventResult::Accepted, "callback-emit");
+    check(lane.begin_consumer_block() == GraphEventResult::Accepted, "callback-consumer");
+    GraphEventReader reader(lane);
+    const auto events = reader.events();
+    check(events.size() == 1 && events[0].producer == 42 && events[0].sample == 3 &&
+              events[0].payload == 9,
+          "callback-reader-order");
+    check(lane.end_block() == GraphEventResult::Accepted, "callback-end");
+}
+
 } // namespace
 
 int main() {
     try {
         host_ingress_controls();
         graph_partition_controls();
+        graph_callback_wiring_controls();
         graph_ingress_controls();
         std::cout << "g5-host-event-contract PASS checks=" << checks
                   << " host_mpe_events=3 graph_events=9 graph_ingress_events=5"

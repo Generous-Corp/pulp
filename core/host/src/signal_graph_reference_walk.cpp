@@ -592,7 +592,22 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
                 if (auto event_it = cg->custom_event_processors.find(id);
                     event_it != cg->custom_event_processors.end()) {
                     midi::clear_midi_block(rt.midi_out);
-                    const CustomNodeEventBlock events{&rt.midi_in, &rt.midi_out};
+                    GraphEventWriter<> writer;
+                    GraphEventReader<> reader;
+                    if (cg->graph_event_lane && id == cg->graph_event_edge.producer) {
+                        (void)cg->graph_event_lane->begin_producer_block();
+                        writer = GraphEventWriter<>(*cg->graph_event_lane, cg->graph_event_epoch,
+                                                    static_cast<std::uint32_t>(id));
+                    } else if (cg->graph_event_lane && id == cg->graph_event_edge.consumer) {
+                        (void)cg->graph_event_lane->begin_consumer_block();
+                        reader = GraphEventReader<>(*cg->graph_event_lane);
+                    }
+                    const CustomNodeEventBlock events{
+                        &rt.midi_in, &rt.midi_out, nullptr,
+                        cg->graph_event_lane && id == cg->graph_event_edge.producer ? &writer
+                                                                                    : nullptr,
+                        cg->graph_event_lane && id == cg->graph_event_edge.consumer ? &reader
+                                                                                    : nullptr};
                     event_it->second(out_view, in_view, num_samples, events);
                 } else if (auto custom_it = cg->custom_processors.find(id);
                            custom_it != cg->custom_processors.end()) {
