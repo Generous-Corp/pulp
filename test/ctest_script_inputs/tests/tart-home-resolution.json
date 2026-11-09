@@ -1,0 +1,10 @@
+{
+ "name": "tart-home-resolution",
+ "record": {
+  "entry": "tools/scripts/test_tart_home_resolution.py",
+  "inputs": [
+   "tools/scripts/test_tart_home_resolution.py"
+  ],
+  "kind": "python"
+ }
+}

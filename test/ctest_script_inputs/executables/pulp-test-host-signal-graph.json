@@ -1,0 +1,17 @@
+{
+ "name": "pulp-test-host-signal-graph",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_host_signal_graph.cpp",
+   "test/test_host_signal_graph_prepared_edit.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

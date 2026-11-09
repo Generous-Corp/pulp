@@ -1,0 +1,8 @@
+{
+ "name": "host-lane-probe-requires-plugins",
+ "record": {
+  "entry": "${CMAKE_BINARY_DIR}/test/\"$1\" >/dev/null 2>&1; test $? -eq 2",
+  "inputs": [],
+  "kind": "shell"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "cmake-ios-hostapp-links",
+ "record": {
+  "entry": "test/cmake/test_ios_hostapp_links.sh",
+  "inputs": [
+   "test/cmake/test_ios_hostapp_links.sh"
+  ],
+  "kind": "shell"
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "name": "measure-min-os-selftest",
+ "record": {
+  "entry": "tools/scripts/test_measure_min_os.py",
+  "inputs": [
+   "tools/scripts/measure_min_os.py",
+   "tools/scripts/test_measure_min_os.py"
+  ],
+  "kind": "python"
+ }
+}

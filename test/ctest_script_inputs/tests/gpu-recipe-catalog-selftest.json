@@ -1,0 +1,26 @@
+{
+ "name": "gpu-recipe-catalog-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gpu_recipe_catalog.py",
+  "inputs": [
+   ".github/vellum-ownership.json",
+   "core/render/src/skia_surface.cpp",
+   "core/view/platform/mac/window_host_mac.mm",
+   "docs/status/gpu-recipes.schema.json",
+   "docs/status/gpu-recipes.yaml",
+   "docs/status/gpu-vellum-handoff.yaml",
+   "experimental/pulp-rs/src/install.rs",
+   "tools/cli/gpu_probe",
+   "tools/cli/gpu_probe/CMakeLists.txt",
+   "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+   "tools/cli/gpu_recipe_catalog_data.h.in",
+   "tools/mcp/mcp_gpu_tools.cpp",
+   "tools/scripts/connected_git_history.py",
+   "tools/scripts/gpu_recipe_catalog.py",
+   "tools/scripts/json_schema_lite.py",
+   "tools/scripts/release_artifact_contents.py",
+   "tools/scripts/test_gpu_recipe_catalog.py"
+  ],
+  "kind": "python"
+ }
+}

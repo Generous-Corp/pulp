@@ -1,0 +1,10 @@
+{
+ "name": "raw-this-async-selftest",
+ "record": {
+  "entry": "tools/scripts/raw_this_async_check.py",
+  "inputs": [
+   "tools/scripts/raw_this_async_check.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "harness-evidence-check-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_evidence_check.py",
+  "inputs": [
+   "tools/harness/tests/test_evidence_check.py"
+  ],
+  "kind": "python"
+ }
+}

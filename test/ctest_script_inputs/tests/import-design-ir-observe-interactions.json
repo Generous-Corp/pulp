@@ -1,0 +1,10 @@
+{
+ "name": "import-design-ir-observe-interactions",
+ "record": {
+  "entry": "test/test_design_ir_observe_interactions.py",
+  "inputs": [
+   "test/test_design_ir_observe_interactions.py"
+  ],
+  "kind": "python"
+ }
+}

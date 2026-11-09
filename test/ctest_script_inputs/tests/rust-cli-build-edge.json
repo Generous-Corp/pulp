@@ -1,0 +1,10 @@
+{
+ "name": "rust-cli-build-edge",
+ "record": {
+  "entry": "tools/scripts/rust_cli_build_edge_check.py",
+  "inputs": [
+   "tools/scripts/rust_cli_build_edge_check.py"
+  ],
+  "kind": "python"
+ }
+}

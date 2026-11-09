@@ -1,0 +1,12 @@
+{
+ "name": "odr-macro-gated-headers",
+ "record": {
+  "entry": "tools/scripts/test_odr_macro_gated_headers.py",
+  "inputs": [
+   "test/denormal_null_refgen.cpp",
+   "tools/scripts/repo_source_scan.py",
+   "tools/scripts/test_odr_macro_gated_headers.py"
+  ],
+  "kind": "python"
+ }
+}

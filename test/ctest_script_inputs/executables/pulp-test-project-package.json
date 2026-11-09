@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-project-package",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-project-package-mutant-helper",
+   "pulp-project-package-publish-helper"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_project_package.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

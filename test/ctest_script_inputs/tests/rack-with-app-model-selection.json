@@ -1,0 +1,10 @@
+{
+ "name": "rack-with-app-model-selection",
+ "record": {
+  "entry": "tools/rack/test_with_app_model_selection.py",
+  "inputs": [
+   "tools/rack/test_with_app_model_selection.py"
+  ],
+  "kind": "python"
+ }
+}

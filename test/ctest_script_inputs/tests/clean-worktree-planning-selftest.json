@@ -1,0 +1,12 @@
+{
+ "name": "clean-worktree-planning-selftest",
+ "record": {
+  "entry": "tools/scripts/test_clean_worktree_planning.py",
+  "inputs": [
+   "tools/scripts",
+   "tools/scripts/clean_worktree_planning.py",
+   "tools/scripts/test_clean_worktree_planning.py"
+  ],
+  "kind": "python"
+ }
+}

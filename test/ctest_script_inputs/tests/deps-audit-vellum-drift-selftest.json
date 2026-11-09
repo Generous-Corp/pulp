@@ -1,0 +1,16 @@
+{
+ "name": "deps-audit-vellum-drift-selftest",
+ "record": {
+  "entry": "tools/deps/test_audit_vellum_drift.py",
+  "inputs": [
+   "tools/ci/tart-provision.sh",
+   "tools/cmake",
+   "tools/cmake/PulpGpuRuntime.cmake",
+   "tools/deps/audit.py",
+   "tools/deps/manifest.json",
+   "tools/deps/test_audit_vellum_drift.py",
+   "tools/packages/test-stubs"
+  ],
+  "kind": "python"
+ }
+}

@@ -52,7 +52,7 @@
 #     written reason and an owner, and no allowlist entry outlives its raise)
 #   - ctest label-exclusion (no Catch2 suite is registered only behind a label
 #     that both the required gate and the coverage lane drop)
-#   - script-test inputs (test/ctest_script_inputs.json matches the ctest
+#   - script-test inputs (test/ctest_script_inputs/ matches the ctest
 #     inventory for scripts the diff touches; configures build-gate, no
 #     compile, when no current build exists — PULP_GATES_NO_CONFIGURE=1 opts out;
 #     the changed-surface families check fails rather than NOT CHECKED when it
@@ -617,7 +617,7 @@ done
 # added without running their generators (tools/scripts/gates_script_inputs.py).
 # `script-test-inputs-drift` reads the ctest inventory, so without a configured
 # build it used to be NOT CHECKED here and a stale or hand-edited
-# test/ctest_script_inputs.json surfaced only on the PR head. When the diff can
+# test/ctest_script_inputs/ surfaced only on the PR head. When the diff can
 # drift the list, this lane reuses a current build or configures `build-gate`
 # (configure only, no compile) and runs the diff-scoped check; a diff that
 # cannot drift it costs nothing. It runs before the pr-fast lane below so that
@@ -1190,10 +1190,13 @@ fi
 # Each fails a required CI check and costs about a second here. A hand-written
 # docs/migrations/vX.Y.Z.md guesses a version that version-at-land assigns later;
 # the text-encoding lint refuses text I/O without encoding= beyond the committed
-# baseline; a new script-driven add_test() with no test/ctest_script_inputs.json
+# baseline; a new script-driven add_test() with no test/ctest_script_inputs/
 # entry fails script-test-inputs-drift, which needs a configured build and so ran
 # only in CI. Each went red there on a push the local gates had called clean.
-for local_gate in migration_note_guard.py text_encoding_lint.py script_inputs_precheck.py; do
+# hotspot_edit_guard refuses a direct edit to a registered shared aggregate
+# (tools/scripts/hotspot_edit_guard.json) and names the fragment to write.
+for local_gate in migration_note_guard.py text_encoding_lint.py script_inputs_precheck.py \
+        hotspot_edit_guard.py; do
     local_path="$ROOT/tools/scripts/$local_gate"
     [ -f "$local_path" ] || continue
     echo "" >&2

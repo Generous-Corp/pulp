@@ -1,0 +1,21 @@
+{
+ "name": "pulp-test-graph-plugin-resolution",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "PulpNoEditorLinkFloor_CLAP",
+   "pulp-scan-worker",
+   "pulp-test-fixture-clap-abort",
+   "pulp-test-fixture-clap-probe"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_graph_plugin_resolution.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

@@ -440,6 +440,8 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         for path in [
             "tools/scripts/changed_surface_script_families.py",
             "test/ctest_script_inputs.json",
+            "test/ctest_script_inputs/tests/script-test-inputs-drift.json",
+            "tools/scripts/script_inputs_store.py",
         ]:
             with self.subTest(path=path):
                 self.assertEqual(disposition(self.policy, path), "selector_policy")

@@ -1,0 +1,11 @@
+{
+ "name": "tmp-leak-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_tmp_leak_guard.py",
+  "inputs": [
+   "tools/scripts/test_tmp_leak_guard.py",
+   "tools/scripts/tmp_leak_guard.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "name": "catch-discover-timeout-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_catch_discover_timeout_guard.py",
+  "inputs": [
+   "tools/scripts/catch_discover_timeout_guard.py",
+   "tools/scripts/test_catch_discover_timeout_guard.py"
+  ],
+  "kind": "python"
+ }
+}

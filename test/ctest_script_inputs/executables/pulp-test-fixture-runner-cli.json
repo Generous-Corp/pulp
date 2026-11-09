@@ -1,0 +1,25 @@
+{
+ "name": "pulp-test-fixture-runner-cli",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_fixture_runner_cli.cpp"
+  ],
+  "inputs": [
+   "test/fixtures/timeline"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-fixture-runner"
+  ],
+  "sources": [
+   "test/test_fixture_runner_cli.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_fixture_runner_cli.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}
