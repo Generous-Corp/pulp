@@ -878,6 +878,32 @@ class ExportEventTests(unittest.TestCase):
                             rationale="Adds a platform helper Vellum's host does not call yet.")
         self.assertEqual(code, self.pf.WRITE_REFUSED)
 
+    def test_a_new_event_names_the_receipt_pinned_on_the_base_branch_tip(self) -> None:
+        # main re-pinned after this branch forked: the report (read at the fork
+        # point) names the previous receipt, but CI judges by main's pin.
+        import json
+        repinned = "20261107-f0ac0a4ff392"
+        _git(self.root, "init", "-q")
+        _git(self.root, "config", "user.email", "fixture@example.invalid")
+        _git(self.root, "config", "user.name", "Fixture")
+        pin = self.root / ".github/vellum-export-receipt/pin.json"
+        pin.parent.mkdir(parents=True)
+        pin.write_text(json.dumps({"export_id": repinned}) + "\n", encoding="utf-8")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-q", "-m", "re-pin")
+        _git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        code, output = self._run()
+        self.assertEqual(code, self.pf.EXPORT_OWED, msg=output)
+        self.assertIn(f'"receipt_export_id": "{repinned}"', output)
+        self.assertNotIn(self.REPORT["export_id"], output)
+        code, output = self._run(
+            fix=True, inherits="false", event_id="20261108-after-repin",
+            rationale="Adds a platform helper Vellum's host does not call yet.")
+        self.assertEqual(code, 0, msg=output)
+        event = json.loads((self.root / ".github/vellum-export-events/20261108-after-repin.json")
+                           .read_text(encoding="utf-8"))
+        self.assertEqual(event["receipt_export_id"], repinned)
+
     def test_nothing_owed_is_clean(self) -> None:
         self.pf.export_verdict = lambda *a, **k: (
             subprocess.CompletedProcess([], 0, "", ""), {"missing": [], "status": "pass"})
