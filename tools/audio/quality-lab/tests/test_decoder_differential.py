@@ -61,6 +61,20 @@ EXPECTED_ACCEPTANCE_SPLITS: dict[str, tuple[bool, bool, str]] = {
 }
 
 
+def test_every_acceptance_split_states_its_reason():
+    # A row without a reason is a split nobody can review; this runs without
+    # libsndfile or the dump binary, so it holds wherever the module is collected.
+    for name, (pulp_decodes, sf_decodes, reason) in EXPECTED_ACCEPTANCE_SPLITS.items():
+        assert pulp_decodes != sf_decodes, f"{name}: a split row must name two different outcomes"
+        assert len(reason.strip()) >= 20, f"{name}: the split's reason is missing or too short"
+    for name in ("wav-bw64-ds64.wav", "wav-duplicate-fmt-identical.wav", "wav-fmt-after-data.wav"):
+        assert name in EXPECTED_ACCEPTANCE_SPLITS, f"{name}: expected a listed libsndfile split"
+        assert EXPECTED_ACCEPTANCE_SPLITS[name][:2] == (True, False), name
+    assert "BW64" in EXPECTED_ACCEPTANCE_SPLITS["wav-bw64-ds64.wav"][2]
+    assert "fmt" in EXPECTED_ACCEPTANCE_SPLITS["wav-duplicate-fmt-identical.wav"][2]
+    assert "after the data" in EXPECTED_ACCEPTANCE_SPLITS["wav-fmt-after-data.wav"][2]
+
+
 def _unavailable(reason: str) -> None:
     if os.environ.get(REQUIRED_ENV):
         pytest.fail(f"{REQUIRED_ENV} is set but {reason}")

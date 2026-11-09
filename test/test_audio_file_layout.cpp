@@ -853,7 +853,11 @@ TEST_CASE("a fact chunk of any size is stepped over by its declared size",
         CHECK(report.decode->decodable == info.has_value());
         REQUIRE(info);
         CHECK(info->num_frames == 2u);
+        CHECK_FALSE(info->truncated);
         CHECK(report.is_standard());
+        const auto decoded = decode_wav(bytes);
+        REQUIRE(decoded);
+        CHECK(decoded->channels[0] == std::vector<float>{0.0f, 1.0f / 32768.0f});
     }
     const auto after = make_wav_with_chunks(format, data, {}, {{"fact", Bytes(2u, 0u)}});
     REQUIRE(inspect_audio_file_layout(after).decode);
