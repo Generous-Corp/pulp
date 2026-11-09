@@ -344,7 +344,8 @@ class ProductionProviderCmakeTests(unittest.TestCase):
         source = root / "source"
         scripts = source / "tools/scripts"
         scripts.mkdir(parents=True)
-        for filename in ("gpu_audio_provider_identity.py", "fetch_skia_for_release.py"):
+        for filename in ("gpu_audio_provider_identity.py", "fetch_skia_for_release.py",
+                         "download_retry.py"):
             shutil.copyfile(SCRIPT.with_name(filename), scripts / filename)
         deps = source / "tools/deps"
         deps.mkdir()

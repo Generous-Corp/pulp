@@ -6064,6 +6064,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/gpu_audio_p2_campaign.py",
     "tools/scripts/gpu_audio_provider_identity.py",
@@ -6117,6 +6118,7 @@
     "tools/deps",
     "tools/deps/manifest.json",
     "tools/scripts",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/test_gpu_audio_provider_identity.py"
@@ -13878,6 +13880,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"
@@ -13889,6 +13892,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"
