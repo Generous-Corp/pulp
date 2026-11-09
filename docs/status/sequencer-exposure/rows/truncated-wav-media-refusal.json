@@ -35,7 +35,7 @@
     {
       "path": ".agents/skills/playback/SKILL.md",
       "needles": [
-        "A truncated WAV is the opposite case and is refused in `decode_wav` itself."
+        "A truncated WAV is the opposite case: the asset pool refuses it, not `audio::decode_wav`."
       ]
     },
     {

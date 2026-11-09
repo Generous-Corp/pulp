@@ -1761,10 +1761,11 @@ zero-frame fixture, and do not read `decoded.has_value()` as "placeable" —
 `pulp-test-playback-audio-renderer`'s "refuses a zero-frame WAV asset at pool
 creation" pins the seam.
 
-A truncated WAV is the opposite case and is refused in `decode_wav` itself.
-The WAV readers recover the whole frames of a file whose header declares more
-than it holds, and report `AudioFileInfo::truncated`; `AudioFileData` carries
-no such flag, so `DecodedAudioAssetPool::decode_wav` calls `inspect_wav` first
-and returns `InvalidAsset` for a truncated file, because media metadata and
-the timeline assume the declared length. Keep that check before the decode:
-after it, a cut-off asset is indistinguishable from a short one.
+A truncated WAV is the opposite case: the asset pool refuses it, not `audio::decode_wav`.
+The public `audio::decode_wav` and the other WAV readers recover the whole
+frames of a file whose header declares more than it holds, and report
+`AudioFileInfo::truncated`. `AudioFileData` carries no such flag, so
+`DecodedAudioAssetPool::decode_wav` asks the decoder to refuse a truncated
+file and returns `InvalidAsset`, because media metadata and the timeline
+assume the declared length. Keep that refusal in the decode call: after it,
+a cut-off asset is indistinguishable from a short one.
