@@ -960,6 +960,15 @@ harness or `ctest`.
   `engine [--input <wav>] --character <c>` (validate the REAL stretch engine, reference-free
   on a dry input), `engine-baseline` (regression gate: did an engine change make it worse?),
   `corpus list|add` (versioned, license-guarded corpus).
+- **Decoder differential (developer lane):** `tests/test_decoder_differential.py` decodes
+  every lossless seed in `test/fixtures/fuzz/audio-decoder/` (`.wav` `.flac` `.aiff`) with
+  libsndfile and with `pulp-audio-decode-dump` (built with the C++ tests; set
+  `PULP_AUDIO_DECODE_DUMP_BIN` to it) and requires the float32 streams to be byte-identical.
+  It skips without `soundfile` or the binary, so it never holds a gate. A seed only one side
+  decodes is an acceptance split and must be listed in the test's `EXPECTED_ACCEPTANCE_SPLITS`
+  with its reason (a deliberate Pulp contract or a tracked issue); an unlisted split, or a listed
+  one that stops happening, fails the test, and the sample comparison is never relaxed. Lossy
+  seeds stay out because libsndfile's Ogg/MP3 paths are different codecs from Pulp's.
 - **Synth-guidance experiment:** `tools/rack/fidelity.py patch.vcv --wav render.wav`
   writes only the speaker-bound audio taps, using one shared peak-normalization gain while
   refusing a silent source and content-binding original Rack voltage levels in the adjacent
