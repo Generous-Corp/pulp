@@ -468,6 +468,23 @@ Traps:
   change leaves untouched, but only paths every superseded event lists.
 - An export event may list only paths this change owes a decision for; a stray
   path fails, so an event cannot pre-authorise later edits.
+- A re-pin on main breaks every open branch whose added export event names the
+  previous `receipt_export_id` ("must name the pinned receipt"), and a stacked
+  branch whose base landed its own event fails with "claims paths this change
+  does not owe a decision for". Merging main fixes neither: the event file is
+  the branch's own text. Run
+  `python3 tools/scripts/vellum_receipt_drift.py --repin-events` and commit
+  (receipt mode reads committed HEAD). It rewrites only the export events the
+  branch adds that are not on `origin/main`: each gets the id pinned on
+  `origin/main`, and each path an export event on `origin/main` already
+  decides is dropped unless the branch changes that path again (judged on the
+  branch merged into `origin/main`, as the freeze lanes judge it). An event
+  left with no path is deleted; a `supersedes` correction keeps its paths. It
+  is idempotent, and both errors print the command.
+- `vellum_watch_preflight.py` fills a new export event's `receipt_export_id`
+  from the pin at the tip of `--base` (default `origin/main`), not from the
+  fork point, so an event written on a branch that forked before a re-pin is
+  born with the id CI checks.
 - A frozen path (the pin's `frozen_paths`: the transferred slices' paths
   minus the paths recorded with an owner ruling in
   `.github/vellum-export-receipt/owner-unfreezes.json`) owes no
