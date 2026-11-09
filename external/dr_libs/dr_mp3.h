@@ -3016,15 +3016,27 @@ static drmp3_bool32 drmp3_init_internal(drmp3* pMP3, drmp3_read_proc onRead, drm
                             /*
                             We have an APE tag. The footer is the preamble (8), version (4), tag size (4), item count (4),
                             flags (4) and reserved (8). The tag size covers the items and the footer but not the optional
-                            32-byte header, which is present when bit 31 of the flags is set.
+                            32-byte header, which an APEv2 tag (version 2000 or later) carries when bit 31 of the flags is
+                            set. APEv1 never has a header. A size below the footer's own 32 bytes is treated as the footer.
                             */
+                            drmp3_uint32 apeVersion =
+                                ((drmp3_uint32)(drmp3_uint8)ape[8]  << 0)  |
+                                ((drmp3_uint32)(drmp3_uint8)ape[9]  << 8)  |
+                                ((drmp3_uint32)(drmp3_uint8)ape[10] << 16) |
+                                ((drmp3_uint32)(drmp3_uint8)ape[11] << 24);
                             drmp3_uint32 tagSize =
                                 ((drmp3_uint32)(drmp3_uint8)ape[12] << 0)  |
                                 ((drmp3_uint32)(drmp3_uint8)ape[13] << 8)  |
                                 ((drmp3_uint32)(drmp3_uint8)ape[14] << 16) |
                                 ((drmp3_uint32)(drmp3_uint8)ape[15] << 24);
-                            drmp3_uint32 headerSize = (((drmp3_uint8)ape[23] & 0x80) != 0) ? 32 : 0;
-                            drmp3_int64 apeSize = (drmp3_int64)headerSize + (drmp3_int64)tagSize;
+                            drmp3_uint32 headerSize = (apeVersion >= 2000 && ((drmp3_uint8)ape[23] & 0x80) != 0) ? 32 : 0;
+                            drmp3_int64 apeSize;
+
+                            if (tagSize < 32) {
+                                tagSize = 32;
+                            }
+
+                            apeSize = (drmp3_int64)headerSize + (drmp3_int64)tagSize;
 
                             /* streamEndOffset is an int, so a tag that would push it below INT_MIN is treated as invalid. */
                             if (apeSize < streamLen && apeSize <= (drmp3_int64)streamEndOffset + 0x7FFFFFFF) {
