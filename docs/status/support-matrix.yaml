@@ -114,6 +114,13 @@ formats:
       (channel, controller) and the adapter decodes those parameter changes
       back into sample-accurate MIDI messages. Registered only when
       descriptor.accepts_midi=true.
+      MIDI Learn: IMidiLearn is offered only when a processor registered a
+      MidiLearnEngine, and a host-reported controller (CC, channel pressure,
+      pitch bend) binds the parameter being learned. Controller feedback goes
+      out as LegacyMIDICCOutEvent for a plug-in with produces_midi=true;
+      the adapter carries CC, pitch bend and channel/poly pressure that way.
+      Whether a given host forwards that output is host behaviour and is not
+      claimed here.
   au_v2:
     macos: usable
     windows: unsupported
@@ -125,10 +132,18 @@ formats:
       CATEGORY MidiEffect packages as kAudioUnitType_MIDIProcessor (aumi):
       MIDI in, MIDI out, no audio path, so the plugin appears in a host's
       MIDI-FX slot.
+      MIDI Learn feedback: a plug-in with produces_midi=true sends controller
+      feedback through kAudioUnitProperty_MIDIOutputCallback, including from an
+      aufx effect; whether a host installs the callback is host behaviour and
+      is not claimed here.
   clap:
     macos: usable
     windows: partial
     linux: partial
+    notes: >
+      MIDI Learn feedback: a plug-in with produces_midi=true sends controller
+      feedback as CLAP_EVENT_MIDI on output port 0 (every short message the
+      adapter forwards). Host forwarding is host behaviour and is not claimed.
   standalone:
     macos: usable
     windows: partial
@@ -136,6 +151,10 @@ formats:
   auv3:
     macos: experimental
     ios: experimental
+    notes: >
+      MIDI Learn feedback: a plug-in with produces_midi=true advertises one
+      MIDI output and writes controller feedback through MIDIOutputEventBlock;
+      a host that installs no block receives nothing.
   lv2:
     linux: experimental
   wam_v2:
