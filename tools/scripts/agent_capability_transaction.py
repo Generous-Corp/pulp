@@ -123,9 +123,39 @@ def _permitted(
     for target in actual:
         if target in expected:
             continue
+        # Lexical containment is only meaningful for a normalized absolute
+        # path: `<dir>/../x` lists <dir> among its parents.
+        if not target.is_absolute() or ".." in target.parts or "." in target.parts:
+            return False
         if not any(directory in target.parents for directory in directories):
             return False
     return len(set(actual)) == len(actual)
+
+
+def _prepare_fragment_parent(
+    path: pathlib.Path, root: pathlib.Path, directories: list[pathlib.Path]
+) -> None:
+    """Create the missing parent of a target that lies under a fragment directory.
+
+    `_validated_target` resolves the parent strictly, so a fragment in a new
+    subdirectory (the first header of a new domain, or the first write of a
+    directory) needs it to exist. Only a lexically contained, normalized path
+    is prepared; anything else is left for `_validated_target` to refuse."""
+    if not path.is_absolute():
+        path = root / path
+    if ".." in path.parts or path.parent.exists():
+        return
+    resolved_root = root.resolve(strict=True)
+    for directory in directories:
+        base = directory if directory.is_absolute() else resolved_root / directory
+        try:
+            path.relative_to(base)
+        except ValueError:
+            continue
+        base.mkdir(parents=True, exist_ok=True)
+        if base.resolve(strict=True).is_relative_to(resolved_root):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        return
 
 
 def recover_transaction(
@@ -235,6 +265,7 @@ def write_transaction(
     staged_paths: list[pathlib.Path] = []
     try:
         for target, text in outputs.items():
+            _prepare_fragment_parent(target, root, allowed_directories)
             target = _validated_target(target, root)
             payload = text.encode("utf-8")
             staged = target.with_name(f".{target.name}.{transaction_id}.staged")

@@ -265,6 +265,54 @@ class CanonicalTests(unittest.TestCase):
             store.join_history(broken)
 
 
+class TransactionTests(unittest.TestCase):
+    """The crash-recoverable write over fragment directories."""
+
+    def test_a_write_creates_new_subdirectories_and_removes_stale_fragments(self) -> None:
+        import agent_capability_transaction as transaction
+
+        with tempfile.TemporaryDirectory(prefix="pulp-capability-txn-") as temp:
+            root = pathlib.Path(temp).resolve()
+            fragments = root / "records"
+            stale = fragments / "headers/pulp/old/gone.hpp.json"
+            stale.parent.mkdir(parents=True)
+            stale.write_text("{}\n")
+            fresh = fragments / "headers/pulp/newdomain/first.hpp.json"
+            single = root / "snapshot.json"
+            transaction.write_transaction(
+                {fresh: "new\n", single: "snapshot\n"}, root / "journal.json", root=root,
+                removals=[stale], allowed_directories=[fragments])
+            self.assertEqual(fresh.read_text(), "new\n")
+            self.assertEqual(single.read_text(), "snapshot\n")
+            self.assertFalse(stale.exists())
+            self.assertFalse((root / "journal.json").exists())
+
+    def test_a_journal_target_that_climbs_out_of_a_fragment_directory_is_refused(self) -> None:
+        import agent_capability_transaction as transaction
+
+        with tempfile.TemporaryDirectory(prefix="pulp-capability-txn-") as temp:
+            root = pathlib.Path(temp).resolve()
+            fragments = root / "records"
+            fragments.mkdir()
+            victim = root / "keep.txt"
+            victim.write_text("keep\n")
+            journal = root / "journal.json"
+            journal.write_text(json.dumps({"schema": transaction.TRANSACTION_SCHEMA, "entries": [
+                {"target": str(fragments / ".." / "keep.txt"), "remove": "yes"}]}))
+            with self.assertRaisesRegex(RuntimeError, "do not match generated outputs"):
+                transaction.recover_transaction(journal, [], root=root,
+                                                allowed_directories=[fragments])
+            self.assertEqual(victim.read_text(), "keep\n")
+            # Control: the same removal inside the directory is honoured.
+            inside = fragments / "x.json"
+            inside.write_text("{}\n")
+            journal.write_text(json.dumps({"schema": transaction.TRANSACTION_SCHEMA, "entries": [
+                {"target": str(inside), "remove": "yes"}]}))
+            self.assertTrue(transaction.recover_transaction(journal, [], root=root,
+                                                            allowed_directories=[fragments]))
+            self.assertFalse(inside.exists())
+
+
 def _add_header(document: dict, include: str) -> dict:
     record = {
         "domain": "audio",
