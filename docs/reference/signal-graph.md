@@ -273,6 +273,70 @@ data. A PDC-active snapshot therefore pins the routing domain selected during
 switch an active delay line to another domain's stale history. A later
 `prepare_swap()` that would change the pinned domain fails closed.
 
+### Latency semantics
+
+The graph separates two kinds of delay a node can introduce, and treats them
+differently:
+
+| Kind | Examples | Compensated | Reported to host |
+|------|----------|-------------|------------------|
+| Artifact latency | lookahead, oversampling filters, FFT framing, a hosted plugin's reported latency | Yes, where paths reconverge | Yes |
+| Intentional delay | an echo, pre-delay or slapback the author asked for | Never | No (diagnostics only) |
+
+The graph enforces these rules:
+
+1. **Compensate only artifact latency.** `CustomNodeType::latency_samples`,
+   `latency_samples_for_block`, `output_port_latency_samples` and a hosted
+   plugin's `latency_samples()` are artifact latency.
+   `CustomNodeType::intentional_delay_samples` declares intentional delay; it
+   appears in `prepared_latency_snapshot()` and the realtime report and is never
+   added to any path. A wet/dry graph with a 500 ms echo on the wet branch keeps
+   the dry path at zero delay and reports zero latency.
+2. **Compensate only where paths reconverge.** Each connection's delay is the
+   destination's input latency minus the source's output latency. A chain with
+   no parallel branch therefore carries no alignment delay: its latency is real
+   and reported, but no delay line is allocated.
+3. **Equalise multiple outputs to one scalar.** Every plugin format reports a
+   single latency. A node that declares different artifact latency per output
+   port reports the maximum; the graph delays the other ports to it inside the
+   node binding, so every port leaves the node aligned. Likewise every
+   `AudioOutput` node is aligned to the graph total, because all outputs sum into
+   the same host buffer.
+4. **Latency changes go through re-prepare.** Latency is captured at `prepare()`
+   and never changes on a running snapshot. A change of oversampling factor (or
+   any other choice that alters latency) is observed only by the next
+   `prepare()`. `prepare_swap()` refuses a latency change with
+   `SwapResult::NeedsEagerPrepare`, and the hosting processor should then
+   report the new total through its host's latency-changed path.
+5. **Report the total as the plugin latency.** `SignalGraph::latency_samples()`
+   is the value a `Processor` hosting the graph returns from its own
+   `latency_samples()`. Intentional delay is never included.
+
+`PreparedNodeLatency` carries `artifact_latency_samples`,
+`intentional_delay_samples` and, for per-port nodes, the declared
+`output_port_latency_samples` before equalisation.
+
+### Realtime report
+
+`pulp/host/graph_rt_report.hpp` builds a per-node and per-graph report from a
+prepared graph: each node's realtime-safety class, whether allocation-freedom is
+proven (framework nodes covered by the graph's realtime test suite), declared, or
+unproven, its declared worst-case counted work per block (the FFT,
+transcendental and per-bin units of `rt_work_counter.hpp`), its loop-bound
+provenance, and its artifact and intentional latency. Custom nodes declare these
+through `CustomNodeType::rt_contract`. Hosted plugins are external code and are
+always reported as unknown.
+
+`measure_graph_rt_work()` renders an impulse and then silent blocks through the
+prepared graph, records the worst counted work per block, and can read a
+caller-supplied allocation counter. It calls `process()` itself, so run it only
+while the graph is not live in an audio callback. The verdict for a block size
+is `holds`, `does_not_hold` (an unsafe class, an allocation claim or
+measurement, a block larger than the prepared maximum, or work above an
+optional budget) or `unknown` (a node without a contract).
+`graph_rt_report_to_json()` emits schema `pulp.graph.rt-report` version 1, and
+`pulp graph report <file.pulpgraph>` prints it for a saved graph.
+
 ## Live plugin swap
 
 A *node* here is one box in the audio chain — for a `Plugin` node, the box

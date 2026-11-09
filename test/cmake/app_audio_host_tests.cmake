@@ -833,6 +833,14 @@ target_link_libraries(pulp-test-host PRIVATE pulp::host Catch2::Catch2WithMain)
 if(APPLE)
   target_sources(pulp-test-host PRIVATE test_plugin_slot_au.mm)
 endif()
+# The AUAudioUnit slot hosting Apple's own Audio Units out of process: real
+# plugin binaries present on every Mac, so nothing is installed.
+if(APPLE)
+  add_executable(pulp-test-auv3-slot test_plugin_slot_auv3.mm)
+  target_link_libraries(pulp-test-auv3-slot PRIVATE pulp::host Catch2::Catch2WithMain
+      "-framework AudioToolbox" "-framework AVFoundation" "-framework Foundation")
+  catch_discover_tests(pulp-test-auv3-slot)
+endif()
 # PulpGain_CLAP fixture wiring lives in the ROOT CMakeLists.txt after
 # add_subdirectory(examples) (test/ registered first, so a TARGET guard here
 # never sees it). The stress case stays in the binary for manual replay, out
@@ -1120,6 +1128,15 @@ if((PULP_HAS_VST3 OR PULP_HAS_CLAP) AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN O
         add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_CLAP)
         target_compile_definitions(pulp-test-host-probe-bundles PRIVATE
             PULP_TEST_HOST_PROBE_CLAP="$<IF:$<BOOL:${APPLE}>,${CMAKE_BINARY_DIR}/CLAP/Pulp Host Probe.clap,$<TARGET_FILE:PulpHostProbe_CLAP>>")
+    endif()
+    # The AU component, hosted through the AUAudioUnit slot.
+    if(APPLE AND PULP_HAS_AUSDK)
+        add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_AU PulpHostMidiProbe_AU)
+        target_compile_definitions(pulp-test-host-probe-bundles PRIVATE
+            PULP_TEST_HOST_PROBE_AU="${CMAKE_BINARY_DIR}/AU/Pulp Host Probe.component"
+            PULP_TEST_HOST_MIDI_PROBE_AU="${CMAKE_BINARY_DIR}/AU/Pulp Host MIDI Probe.component")
+        target_link_libraries(pulp-test-host-probe-bundles PRIVATE
+            "-framework AudioToolbox" "-framework CoreFoundation")
     endif()
     catch_discover_tests(pulp-test-host-probe-bundles)
 endif()
