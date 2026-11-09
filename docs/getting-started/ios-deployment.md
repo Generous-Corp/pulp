@@ -7,11 +7,9 @@ real-world host. Pairs with the `ios` skill
 `tools/cmake/PulpIosHostApp.cmake` for the CMake plumbing this guide
 calls into.
 
-> **Status (2026-05-26):** Phase iOS-B scaffolding (this recipe + the
-> `pulp_add_ios_host_app` CMake helper). Phase iOS-C is "scaffolded,
-> awaiting user device run" — the steps below are the recipe; the
-> matrix in [Validation Checklist](#garageband-ios-validation-checklist)
-> tracks which acceptance criteria a real-device session must confirm.
+> The steps below are the recipe. The
+> [validation checklist](#garageband-ios-validation-checklist) lists what a
+> real-device session should confirm.
 
 ## Prerequisites
 
@@ -22,15 +20,16 @@ calls into.
 - For physical-iPad deployment: Apple Developer Program membership +
   device paired in Xcode → Window → Devices and Simulators.
 
-Pulp ships secrets via `~/.config/pulp/secrets/notary.env`. The relevant
-keys for iOS:
+Signing credentials live outside the repository, in
+`~/.config/pulp/secrets/notary.env` (see
+[iOS dev signing](../guides/ios-dev-signing.md)). The relevant keys for iOS:
 
 ```bash
 PULP_SIGN_IDENTITY_SHA="..."       # signing-identity SHA-1
-PULP_TEAM_ID="95CX6P84C4"          # Apple Developer Team ID
+PULP_TEAM_ID="YOUR_TEAM_ID"        # Apple Developer Team ID
 ```
 
-Source the env when you need codesign + provisioning info:
+Source the file when you need codesign and provisioning info:
 
 ```bash
 source ~/.config/pulp/secrets/notary.env
@@ -69,7 +68,7 @@ The helper:
   `templates/ios-auv3/HostApp/PulpHostApp.swift` +
   `ContentView.swift` (override with `SOURCES ...` for a custom UI).
 - Generates `Info.plist` whose `AudioComponents` entry mirrors the
-  AUv3 extension's manufacturer / subtype / type / version — drift
+  AUv3 extension's manufacturer / subtype / type / version. Drift
   between HostApp and extension descriptors silently breaks
   `AVAudioUnitComponentManager` filters.
 - Embeds the built `.appex` into `${target}.app/PlugIns/` via a
@@ -158,7 +157,7 @@ cmake --build build-ios-device \
 
 ### 3. Install on device
 
-Two paths — pick whichever is more convenient.
+Two paths; pick whichever is more convenient.
 
 **A. `xcrun devicectl` (Xcode 15+, no Xcode UI):**
 
@@ -196,12 +195,12 @@ extension is now visible to GarageBand iOS and any other AUv3 host.
 
 ## GarageBand iOS validation checklist
 
-The user runs this on their paired iPad. Tracks Phase iOS-C acceptance.
+Run this on a paired iPad.
 
 | # | Step | Expected | Pass / Notes |
 |---|------|----------|--------------|
 | 1 | Open GarageBand iOS → New Project → Audio Recorder → Tap the keyboard icon → Audio Unit Extensions | "Pulp" appears as a manufacturer | |
-| 2 | Tap **Pulp → PulpSineSynth** | The plug-in's editor opens. (Default AU view — PulpSineSynth doesn't override `create_view()`.) | |
+| 2 | Tap **Pulp → PulpSineSynth** | The plug-in's editor opens. (Default AU view: PulpSineSynth doesn't override `create_view()`.) | |
 | 3 | Tap a note on the on-screen keyboard | Sine tone plays | |
 | 4 | Drag the editor's parameter slider (if visible) | Parameter updates audibly in real time | |
 | 5 | Rotate iPad portrait ↔ landscape | Editor reflows / does not crash | |
@@ -209,8 +208,7 @@ The user runs this on their paired iPad. Tracks Phase iOS-C acceptance.
 | 7 | Background then foreground GarageBand | Plug-in resumes without crash | |
 
 If steps 4–7 reveal issues, capture the symptom + reproducer + iPad
-console log (`Console.app` → connect device) and file under the
-Phase iOS-C tracker.
+console log (`Console.app` → connect device) and file an issue.
 
 ### Optional: AUM
 
@@ -222,19 +220,19 @@ that GarageBand abstracts away.
 
 - **`xcrun simctl install` succeeds but the HostApp doesn't appear in Springboard.** The Simulator caches PluginKit registrations aggressively; try `xcrun simctl shutdown booted && xcrun simctl boot booted` and re-install.
 - **AVAudioEngine throws `kAudioUnitErr_FailedInitialization` on first play.** Confirm `NSMicrophoneUsageDescription` is present in the HostApp's `Info.plist` (the template includes it; custom HostApps must preserve it).
-- **GarageBand doesn't see the plug-in after install.** Force-quit GarageBand and re-launch — `AVAudioUnitComponentManager` only re-scans on app launch on iOS. If still missing, delete the HostApp + re-install to force a PluginKit re-register.
+- **GarageBand doesn't see the plug-in after install.** Force-quit GarageBand and re-launch. `AVAudioUnitComponentManager` only re-scans on app launch on iOS. If still missing, delete the HostApp + re-install to force a PluginKit re-register.
 - **`-DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM` not honoured.** Inherited team is set on every target by the Xcode generator only when the property is set before `add_executable`. The shipped `pulp_add_ios_host_app(...)` honours this; custom HostApp targets must wire the same XCODE_ATTRIBUTE.
 
 ## Cross-references
 
-- `tools/cmake/PulpIosHostApp.cmake` — implementation of
+- `tools/cmake/PulpIosHostApp.cmake`: implementation of
   `pulp_add_ios_host_app(...)`.
-- `tools/cmake/PulpAuv3.cmake` — `_pulp_add_auv3_ios(...)`; stashes the
+- `tools/cmake/PulpAuv3.cmake`: `_pulp_add_auv3_ios(...)`; stashes the
   AudioComponentDescription on the `.appex` target as properties this
   helper reads back.
-- `templates/ios-auv3/HostApp/` — SwiftUI HostApp template + Info.plist
+- `templates/ios-auv3/HostApp/`: SwiftUI HostApp template + Info.plist
   template + entitlements template.
-- `.agents/skills/ios/SKILL.md` — iOS subsystem gotchas (touch dispatch,
+- `.agents/skills/ios/SKILL.md`: iOS subsystem gotchas (touch dispatch,
   Skia gating, `dealloc` order, etc.).
-- `planning/2026-05-24-auv3-ios-validation.md` — Phase iOS-A / B / C / D
-  status tracker.
+- [`docs/guides/ios-dev-signing.md`](../guides/ios-dev-signing.md): the
+  signing credential layout this recipe sources.
