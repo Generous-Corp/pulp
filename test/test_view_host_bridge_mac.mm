@@ -3,6 +3,7 @@
 #if TARGET_OS_OSX
 
 #import <Cocoa/Cocoa.h>
+#include <Carbon/Carbon.h>  // kVK_* virtual keycodes
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/state/store.hpp>
@@ -13,6 +14,7 @@
 
 #include <chrono>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace pulp::view;
@@ -21,6 +23,36 @@ using namespace pulp::view;
 // macOS virtual key code into Pulp's KeyCode. Forward-declared here to test the
 // Musical Typing additions without pulling the private platform header.
 namespace pulp::view::mac_geometry { pulp::view::KeyCode key_code_from_ns(unsigned short code); }
+
+TEST_CASE("macOS key_code_from_ns maps every key the synthetic key driver sends", "[view][mac]") {
+    // The standalone key driver turns a KeyCode into the virtual keycode AppKit
+    // would report; the hosts read it back through key_code_from_ns. Every key
+    // the driver can send must come back as itself, or a scripted key press
+    // reaches the editor as `unknown`.
+    using pulp::view::mac_geometry::key_code_from_ns;
+    const std::vector<std::pair<unsigned short, KeyCode>> keys = {
+        {kVK_ANSI_A, KeyCode::a}, {kVK_ANSI_Z, KeyCode::z}, {kVK_ANSI_0, KeyCode::num0},
+        {kVK_ANSI_9, KeyCode::num9}, {kVK_ANSI_Semicolon, KeyCode::semicolon},
+        {kVK_ANSI_Quote, KeyCode::apostrophe},
+        {kVK_LeftArrow, KeyCode::left}, {kVK_RightArrow, KeyCode::right},
+        {kVK_UpArrow, KeyCode::up}, {kVK_DownArrow, KeyCode::down},
+        {kVK_Home, KeyCode::home}, {kVK_End, KeyCode::end_},
+        {kVK_PageUp, KeyCode::page_up}, {kVK_PageDown, KeyCode::page_down},
+        {kVK_Return, KeyCode::enter}, {kVK_Escape, KeyCode::escape}, {kVK_Tab, KeyCode::tab},
+        {kVK_Delete, KeyCode::backspace}, {kVK_ForwardDelete, KeyCode::delete_},
+        {kVK_Space, KeyCode::space},
+        {kVK_F1, KeyCode::f1}, {kVK_F2, KeyCode::f2}, {kVK_F3, KeyCode::f3},
+        {kVK_F4, KeyCode::f4}, {kVK_F5, KeyCode::f5}, {kVK_F6, KeyCode::f6},
+        {kVK_F7, KeyCode::f7}, {kVK_F8, KeyCode::f8}, {kVK_F9, KeyCode::f9},
+        {kVK_F10, KeyCode::f10}, {kVK_F11, KeyCode::f11}, {kVK_F12, KeyCode::f12},
+    };
+    for (const auto& [code, key] : keys) {
+        INFO("virtual keycode " << code);
+        CHECK(key_code_from_ns(code) == key);
+    }
+    // A key with no mapping still reads as unknown (kVK_F13).
+    CHECK(key_code_from_ns(kVK_F13) == KeyCode::unknown);
+}
 
 TEST_CASE("macOS key_code_from_ns maps ; and ' (Musical Typing top keys)", "[view][mac]") {
     using pulp::view::mac_geometry::key_code_from_ns;
