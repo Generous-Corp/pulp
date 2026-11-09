@@ -1,0 +1,10 @@
+{
+ "name": "setup-bootstrap-plan-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_setup_bootstrap_plan_guard.py",
+  "inputs": [
+   "tools/scripts/test_setup_bootstrap_plan_guard.py"
+  ],
+  "kind": "python"
+ }
+}

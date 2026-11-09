@@ -1,0 +1,29 @@
+{
+ "name": "source-selftest-lane-selftest",
+ "record": {
+  "entry": "tools/ci/test_source_selftests.py",
+  "inputs": [
+   ".githooks/pre-push",
+   ".github/rulesets/main-protection.json",
+   ".github/workflows/build.yml",
+   "docs/status/consumption-profiles.json",
+   "docs/status/consumption-profiles.schema.json",
+   "test/cmake/design_import_tool_cli_tests.cmake",
+   "test/cmake/pr_fast_tests.cmake",
+   "tools/ci/ctest_gate_args.py",
+   "tools/ci/install_visual_python_deps.sh",
+   "tools/ci/source_selftests.json",
+   "tools/ci/source_selftests.py",
+   "tools/ci/test_source_selftests.py",
+   "tools/motion/visual/requirements.lock",
+   "tools/scripts/classify_changes.py",
+   "tools/scripts/consumption_census.py",
+   "tools/scripts/gate_python_imports_check.py",
+   "tools/scripts/json_schema_lite.py",
+   "tools/scripts/protected_merge_receipt.py",
+   "tools/scripts/test_ci_throughput_workflows.py",
+   "tools/scripts/test_generated_version_bump_check.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -829,6 +829,10 @@ HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph, std::uin
         return refuse(HostEventResult::StaleEpoch);
     if (graph.host_event_projection == nullptr)
         return refuse(HostEventResult::StaleEpoch);
+    // begin_host_event_block() fixed the projection window. A block of a
+    // different length would project records past its own end (offsets >=
+    // frames) while the cursor advances by fewer frames, delivering them
+    // early. Refuse before projecting so the staged records stay retryable.
     if (trigger_controller_->host_ingress.frames() != frames)
         return refuse(HostEventResult::OutOfRange);
     if (graph.host_event_midi_input == 0 && trigger_controller_->host_ingress.pending() == 0) {
@@ -868,8 +872,7 @@ HostEventResult SignalGraph::project_host_events_(CompiledGraph& graph, std::uin
         return refuse(HostEventResult::Overflow);
     projection.midi.sort();
     projection.ump.sort();
-
-    // The mailbox copy is another bounded transaction.  Check the fixed
+    // The mailbox copy is another bounded transaction. Check the fixed
     // destination capacities before deriving MPE or publishing the mailbox;
     // set_from_midi() clears its writer scratch before it reports a failed
     // copy, so calling it speculatively would make a retry observe partial

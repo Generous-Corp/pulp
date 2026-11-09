@@ -217,6 +217,18 @@ if(TARGET pulp::host)
         PUBLIC pulp::inspect-sample-region-runtime pulp-inspect-graph-runtime)
 endif()
 
+# Opt-in semantic vendor operations (presets, patch, offline render). Only a
+# target that declares vendor operations links it, through
+# CONTROL_VENDOR_SOURCES.
+add_library(pulp-inspect-agent-toolkit src/control_agent_toolkit.cpp)
+add_library(pulp::inspect-agent-toolkit ALIAS pulp-inspect-agent-toolkit)
+target_include_directories(pulp-inspect-agent-toolkit
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+target_link_libraries(pulp-inspect-agent-toolkit
+    PUBLIC pulp::inspect-runtime pulp::format pulp::state)
+
 # Exact-target UI capture/input remains an optional adapter so the common
 # control runtime does not acquire a renderer dependency.
 add_library(pulp-inspect-ui-runtime

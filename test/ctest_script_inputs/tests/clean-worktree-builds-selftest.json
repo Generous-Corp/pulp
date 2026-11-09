@@ -1,0 +1,10 @@
+{
+ "name": "clean-worktree-builds-selftest",
+ "record": {
+  "entry": "tools/scripts/test_clean_worktree_builds.py",
+  "inputs": [
+   "tools/scripts/test_clean_worktree_builds.py"
+  ],
+  "kind": "python"
+ }
+}

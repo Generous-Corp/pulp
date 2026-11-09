@@ -39,6 +39,10 @@ from agent_capability_history import (
     history_problems,
     pending_counters,
     protected_base_problems,
+    HistoryFormatError,
+    rendered_history,
+    state_is_recorded,
+    stored_history_problems,
     updated_history_entries,
 )
 from agent_capability_registry import (
@@ -53,8 +57,8 @@ from agent_capability_transaction import recover_transaction, write_transaction
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 91
-SURFACE_INVENTORY_VERSION = 210
+MANIFEST_REVISION = 92
+SURFACE_INVENTORY_VERSION = 212
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
 )
@@ -771,17 +775,6 @@ def rendered(root: pathlib.Path | None = None) -> str:
     return json.dumps(document(root), indent=2, ensure_ascii=False) + "\n"
 
 
-def render_history(history: dict[str, Any]) -> str:
-    """Render append-only history without repeating indentation overhead.
-
-    Each entry carries a complete manifest and public-surface snapshot. The
-    history is machine-validated JSON, and compact rendering keeps the
-    generated blob below GitHub's 100 MiB object limit without dropping any
-    provenance or changing its parsed representation.
-    """
-    return json.dumps(history, ensure_ascii=False, separators=(",", ":")) + "\n"
-
-
 def _counter_problems(
     old_history: Any, entries: list[dict[str, Any]], previous: Any,
     previous_surface: Any, doc: dict[str, Any], surface_document: dict[str, Any],
@@ -839,10 +832,17 @@ def counter_status(root: pathlib.Path, doc: dict[str, Any],
             return 1
         print("agent-capabilities: every counter is assigned")
         return 0
-    if not any(pending):
-        print("agent-capabilities: nothing pending to assign")
-        return 0
     source = pathlib.Path(__file__).resolve()
+    if not any(pending):
+        if state_is_recorded(history, doc, surface_document):
+            print("agent-capabilities: nothing pending to assign")
+            return 0
+        # An assigned state the history has not recorded (a hand-bumped
+        # counter) blocks the next branch from leaving its counter alone.
+        # --write records it; nothing is renumbered.
+        print("agent-capabilities: nothing pending; recording the assigned state")
+        return subprocess.run([sys.executable, str(source), "--write"], cwd=root,
+                              env=_assignment_environment()).returncode
     text = source.read_text(encoding="utf-8")
     for (constant, _), value, is_pending in zip(COUNTER_CONSTANTS, values, pending):
         if is_pending:
@@ -852,8 +852,19 @@ def counter_status(root: pathlib.Path, doc: dict[str, Any],
             text = text.replace(line, f"{constant} = {value + 1}\n")
     source.write_text(text, encoding="utf-8")
     # The constants are read at import, so the write runs in a fresh process.
-    result = subprocess.run([sys.executable, str(source), "--write"], cwd=root)
+    result = subprocess.run([sys.executable, str(source), "--write"], cwd=root,
+                            env=_assignment_environment())
     return result.returncode
+
+
+def _assignment_environment() -> dict[str, str]:
+    """Assign against the commit being assigned, not a CI event's base.
+
+    An assignment is the base's own material with its pending counters
+    advanced, so the protected base for that write is HEAD. On a push event
+    the default resolution would pick the pre-push commit instead, and the
+    single-writer rule would refuse the bump's own entry."""
+    return {**os.environ, "PULP_AGENT_CAPABILITY_BASE_REF": "HEAD"}
 
 
 def main() -> int:
@@ -970,21 +981,30 @@ def main() -> int:
             if problems:
                 return _print_problems(problems)
         history = _load_optional_json(history_path)
-        entries = updated_history_entries(
-            history,
-            previous,
-            previous_surface,
-            doc,
-            surface_document,
-            initial_bootstrap=initial_bootstrap,
-            migrate_unpublished=args.migrate_unpublished_v1,
-        )
-        if not args.migrate_unpublished_v1:
-            problems.extend(_counter_problems(
-                history, entries, previous, previous_surface, doc, surface_document))
-        if problems:
-            return _print_problems(problems)
-        history = history_document(entries)
+        # A bootstrap or unpublished migration replaces the history outright;
+        # any other write must be able to read the history it appends to.
+        if not (initial_bootstrap or args.migrate_unpublished_v1):
+            problems.extend(stored_history_problems(history))
+            if problems:
+                return _print_problems(problems)
+        try:
+            entries = updated_history_entries(
+                history,
+                previous,
+                previous_surface,
+                doc,
+                surface_document,
+                initial_bootstrap=initial_bootstrap,
+                migrate_unpublished=args.migrate_unpublished_v1,
+            )
+            if not args.migrate_unpublished_v1:
+                problems.extend(_counter_problems(
+                    history, entries, previous, previous_surface, doc, surface_document))
+            if problems:
+                return _print_problems(problems)
+            history = history_document(entries)
+        except HistoryFormatError as error:
+            return _print_problems([str(error)])
         problems = history_problems(history, doc, surface_document)
         problems.extend(
             protected_base_problems(
@@ -997,7 +1017,7 @@ def main() -> int:
             {
                 snapshot: output,
                 surface_snapshot: surface_output,
-                history_path: render_history(history),
+                history_path: rendered_history(history),
                 fixture: compile_fixture(),
             },
             transaction_path,
@@ -1032,6 +1052,8 @@ def main() -> int:
             if (root / ".git").exists() else None
         )
         history_issues = history_problems(history, doc, surface_document)
+        if not history_issues:
+            history_issues.extend(history_text_problems(history_path, history))
         if isinstance(history, dict):
             history_issues.extend(
                 protected_base_problems(
@@ -1045,7 +1067,7 @@ def main() -> int:
             return 1
         print(
             f"agent-capabilities: fresh; {len(doc['capabilities'])} keys and "
-            f"{surface_document['counts']['public_headers']} public headers checked"
+            f"{len(surface_document['headers'])} public headers checked"
         )
         if comparison is not None:
             print("agent-capabilities: comparison receipt=" +
@@ -1147,8 +1169,24 @@ def _load_optional_json(path: pathlib.Path) -> Any:
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        return {"_invalid": str(error)}
+    except (json.JSONDecodeError, RecursionError) as error:
+        return {"_invalid": str(error) or type(error).__name__}
+
+
+def history_text_problems(path: pathlib.Path, history: Any) -> list[str]:
+    """The history file must be byte-for-byte its own rendering.
+
+    Parsing alone cannot see a duplicated key or reformatted whitespace that
+    reads back as the honest document; only the text comparison does."""
+    if not path.exists() or not isinstance(history, dict):
+        return []
+    try:
+        expected = rendered_history(history)
+    except (KeyError, TypeError) as error:
+        return [f"{HISTORY_FILE} cannot be rendered: {error}"]
+    if path.read_text(encoding="utf-8") != expected:
+        return [f"{HISTORY_FILE} is not in its rendered form; rerun --write"]
+    return []
 
 
 

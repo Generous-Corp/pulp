@@ -1,0 +1,24 @@
+{
+ "name": "pulp-test-cli-skew-banner",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_cli_skew_banner.cpp"
+  ],
+  "inputs": [
+   ".claude-plugin/plugin.json",
+   "tools/scripts/cli_version_check.sh"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [
+   "test/test_cli_skew_banner.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_skew_banner.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

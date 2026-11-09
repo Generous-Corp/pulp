@@ -1,0 +1,39 @@
+{
+ "name": "inspector-truth-check-selftest",
+ "record": {
+  "entry": "tools/scripts/test_inspector_truth_check.py",
+  "inputs": [
+   ".github/workflows",
+   "docs/status/cli-commands.yaml",
+   "experimental/pulp-rs/src/cmd",
+   "experimental/pulp-rs/src/cmd/trace.rs",
+   "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+   "experimental/pulp-rs/src/help.rs",
+   "experimental/pulp-rs/src/main.rs",
+   "inspect/CMakeLists.txt",
+   "inspect/include/pulp/inspect",
+   "inspect/include/pulp/inspect/capability_definitions.inc",
+   "inspect/include/pulp/inspect/client.hpp",
+   "inspect/include/pulp/inspect/control_inspector_client.hpp",
+   "inspect/include/pulp/inspect/control_registry_digest.inc",
+   "inspect/include/pulp/inspect/trace_inspector.hpp",
+   "inspect/src/control_manifest.cpp",
+   "test/cmake/view_widget_bridge_tests.cmake",
+   "tools/cli",
+   "tools/cli/CMakeLists.txt",
+   "tools/cli/cmd_inspect.cpp",
+   "tools/cli/pulp_cli.cpp",
+   "tools/cmake/PulpControlShipping.cmake",
+   "tools/cmake/PulpInstallRules.cmake",
+   "tools/cmake/PulpPlugin.cmake",
+   "tools/cmake/PulpUtils.cmake",
+   "tools/mcp",
+   "tools/mcp/CMakeLists.txt",
+   "tools/mcp/pulp_mcp.cpp",
+   "tools/scripts/gate_common.py",
+   "tools/scripts/inspector_truth_check.py",
+   "tools/scripts/test_inspector_truth_check.py"
+  ],
+  "kind": "python"
+ }
+}

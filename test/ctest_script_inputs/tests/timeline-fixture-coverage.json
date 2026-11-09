@@ -1,0 +1,10 @@
+{
+ "name": "timeline-fixture-coverage",
+ "record": {
+  "entry": "tools/scripts/timeline_fixture_coverage_check.py",
+  "inputs": [
+   "tools/scripts/timeline_fixture_coverage_check.py"
+  ],
+  "kind": "python"
+ }
+}

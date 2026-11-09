@@ -1,0 +1,10 @@
+{
+ "name": "gpu-audio-daw-continuity-v2-receipt-verifier-selftest",
+ "record": {
+  "entry": "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py",
+  "inputs": [
+   "tools/validation/test_verify_gpu_audio_daw_continuity_receipt_v2.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "dead-test-guard",
+ "record": {
+  "entry": "tools/scripts/dead_test_guard.py",
+  "inputs": [
+   "tools/scripts/dead_test_guard.py"
+  ],
+  "kind": "python"
+ }
+}

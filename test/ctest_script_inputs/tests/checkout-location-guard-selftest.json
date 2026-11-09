@@ -1,0 +1,11 @@
+{
+ "name": "checkout-location-guard-selftest",
+ "record": {
+  "entry": "tools/ci/test_checkout_location_guard.py",
+  "inputs": [
+   "tools/ci/checkout_location_guard.py",
+   "tools/ci/test_checkout_location_guard.py"
+  ],
+  "kind": "python"
+ }
+}

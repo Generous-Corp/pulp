@@ -435,6 +435,54 @@ completes. A handler bound to an undeclared id is dropped. A declared operation
 without a handler fails as not implemented. An exception becomes an internal
 failure.
 
+### Agent tool kit
+
+The agent tool kit is a set of ready-made vendor operations a plugin can opt
+into instead of writing its own. Link `pulp::inspect-agent-toolkit` through
+`CONTROL_VENDOR_SOURCES` (the link is added for you) and call
+`add_control_agent_toolkit()` from the handler factory.
+
+| Operation | Tier | Does |
+|---|---|---|
+| `presets.list` | `read` | Lists factory and user presets and the current preset |
+| `presets.load` | `gesture` | Loads one preset by name and folder |
+| `presets.save` | `destructive` | Saves the patch as a user preset, replacing one with the same name |
+| `patch.schema` | `read` | Describes every parameter: id, name, unit, range, default, step |
+| `patch.get` | `read` | Reads all parameter values or the listed ids |
+| `patch.set` | `gesture` | Sets values, clamped to each range; one unknown id changes nothing |
+| `patch.randomize` | `gesture` | Moves parameters toward seeded random values; bypass, reset, and trigger parameters are skipped |
+| `notes.play` | `render` | Renders a note list with optional automation lanes offline and summarizes the audio |
+| `render.analyze` | `render` | Renders silence, an impulse, a sine, or seeded noise through the plugin and summarizes the audio |
+
+The preset operations need a `PresetManager`. The render operations need a
+processor factory. Each render runs on a fresh instance that holds the live
+patch's parameter values; other processor state is not copied. Automation
+points reach the processor both as sample-accurate parameter events and as
+store writes at each point, as a format adapter delivers block-rate host
+automation. The audio summary reports peak, RMS, ungated BS.1770 loudness,
+clipped samples, octave-band levels, and a spectral centroid. A render stops
+when the call is cancelled or its authority ends.
+
+Preset names and folders become file names, so the handlers accept only
+letters, digits, space, `_`, `-`, and `.`, reject a leading `.`, and reject
+`..` and other path separators.
+
+`pulp_control_agent_toolkit_declaration()` writes the matching declaration
+for a vendor id. `EXCLUDE` drops whole groups a target does not bind
+(`presets`, `patch`, `notes`, `render`); `CONTROL_CAPABILITIES` must then list
+exactly the tiers that remain:
+
+```cmake
+pulp_control_agent_toolkit_declaration(_ops VENDOR com.acme EXCLUDE presets)
+pulp_add_plugin(AcmeSynth ...
+    CONTROL_VENDOR_OPERATIONS "${_ops}"
+    CONTROL_VENDOR_SOURCES control/agent_operations.cpp)
+```
+
+An editor screenshot needs no tool kit operation: declare
+`dev.pulp.ui/capture@1` and use it. `examples/agent-toolkit-synth` is a
+complete plugin that binds every tool kit operation.
+
 ### Discovery and contract history
 
 The broker's instance listing carries a `vendor_operations` array for each

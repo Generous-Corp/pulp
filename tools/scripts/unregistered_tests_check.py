@@ -6,7 +6,7 @@ break-confirm run on a developer's machine is the only evidence it ever had.
 This guard requires each tracked tools/**/test_*.py to be invoked by at least
 one of:
 
-  * a configured ctest registration (an `entry` in test/ctest_script_inputs.json,
+  * a configured ctest registration (an `entry` in test/ctest_script_inputs/,
     which is generated from the configured test graph);
   * the source-selftest manifest (tools/ci/source_selftests.json);
   * a workflow, or a CMake file, that names the file, or hands a directory
@@ -35,7 +35,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BASELINE = "tools/scripts/unregistered_tests_baseline.json"
-SCRIPT_INPUTS = "test/ctest_script_inputs.json"
+SCRIPT_INPUTS = "test/ctest_script_inputs"
 SOURCE_SELFTESTS = "tools/ci/source_selftests.json"
 TEST_FILE = re.compile(r"^tools/.+/test_[^/]*\.py$")
 # A pytest or `unittest discover` invocation and its arguments, which may
@@ -78,7 +78,11 @@ def invoking_text(repo: Path) -> str:
 
 
 def registered_entries(repo: Path) -> set[str]:
-    data = json.loads((repo / SCRIPT_INPUTS).read_text(encoding="utf-8"))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import script_inputs_store
+    data = script_inputs_store.load(repo)
+    if data is None:
+        raise FileNotFoundError(f"no script-input list under {repo / SCRIPT_INPUTS}")
     return {spec.get("entry") for spec in data.get("tests", {}).values() if spec.get("entry")}
 
 

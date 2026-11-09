@@ -1,0 +1,18 @@
+{
+ "name": "pulp-test-design-import-benchmark",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-design-import-bench"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_design_import_benchmark.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

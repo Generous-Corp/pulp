@@ -1,0 +1,28 @@
+{
+ "name": "pulp-test-cli-import-design",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_cli_import_design.cpp"
+  ],
+  "inputs": [
+   "test/fixtures/imports/claude/2024.10",
+   "test/fixtures/imports/designmd/alpha",
+   "test/fixtures/imports/figma-plugin"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli",
+   "pulp-import-design"
+  ],
+  "sources": [
+   "test/test_cli_import_design.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_import_design.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

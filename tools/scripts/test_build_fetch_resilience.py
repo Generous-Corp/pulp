@@ -332,8 +332,8 @@ class MacosCcacheStep(unittest.TestCase):
     def test_exhaustion_fails_the_step(self) -> None:
         proc, calls = self._run(ccache_present=False, brew_failures=99)
         self.assertEqual(proc.returncode, 1)
-        self.assertEqual(calls.count("install|ccache|"), 3)
-        self.assertIn("::error::brew install ccache failed after 3 attempts", proc.stdout)
+        self.assertEqual(calls.count("install|ccache|"), 6)
+        self.assertIn("::error::brew install ccache failed after 6 attempts", proc.stdout)
 
 
 SEED_STEP = "Seed the checkout from the host git mirror (tartci macOS)"

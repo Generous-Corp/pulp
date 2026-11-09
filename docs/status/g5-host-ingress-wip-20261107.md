@@ -68,3 +68,16 @@ Processor sidecar plumbing only; it does not claim plugin voice parity.
 The requested planning files were not present in this checkout or the adjacent
 planning repository; the repository's G-5 readiness packet and host-ingress
 audit were used as the available authority.
+
+## MIDI mailbox repair — 2026-11-07
+
+PR #11736's macOS gate reported two real failures at head
+`7dca7b3ea192130d8c049cedcaf632fd200e73f7`: overflowed caller MIDI was reported
+complete, and a gap-free swap retained only one stale event instead of the
+bounded prefix. The ingress preflight in `signal_graph_mailbox.cpp` rejected
+oversized buffers before `set_from_midi()` could publish its retained prefix
+and incomplete marker. Removing that preflight restores caller-visible drops
+while preserving the existing fixed-capacity copy and return value.
+
+Governed Release target `pulp-test-host-signal-graph` rebuilt successfully.
+The two failing tests now pass, as do all 10 tests matching `SignalGraph MIDI`.

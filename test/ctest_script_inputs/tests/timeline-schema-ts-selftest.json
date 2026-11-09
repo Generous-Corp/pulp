@@ -1,0 +1,10 @@
+{
+ "name": "timeline-schema-ts-selftest",
+ "record": {
+  "entry": "core/timeline/tools/test_schema_ts_emit.py",
+  "inputs": [
+   "core/timeline/tools/test_schema_ts_emit.py"
+  ],
+  "kind": "python"
+ }
+}

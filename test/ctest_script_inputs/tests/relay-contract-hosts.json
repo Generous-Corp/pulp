@@ -1,0 +1,12 @@
+{
+ "name": "relay-contract-hosts",
+ "record": {
+  "entry": "tools/scripts/relay_contract_check.py",
+  "inputs": [
+   "tools/rack/library_catalog.py",
+   "tools/scripts/bundle_threejs_for_jsc.mjs",
+   "tools/scripts/relay_contract_check.py"
+  ],
+  "kind": "python"
+ }
+}

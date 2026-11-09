@@ -1,0 +1,10 @@
+{
+ "name": "timeline-engine-dependency-floor",
+ "record": {
+  "entry": "tools/scripts/timeline_engine_dependency_floor_check.py",
+  "inputs": [
+   "tools/scripts/timeline_engine_dependency_floor_check.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,12 @@
+{
+ "name": "repo-source-scan",
+ "record": {
+  "entry": "tools/scripts/test_repo_source_scan.py",
+  "inputs": [
+   "test/test_signal.cpp",
+   "tools/scripts/repo_source_scan.py",
+   "tools/scripts/test_repo_source_scan.py"
+  ],
+  "kind": "python"
+ }
+}

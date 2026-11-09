@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4174,
+  "total": 4172,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
@@ -95,7 +95,7 @@
     "tools/ci/test_merge_group_shadows.py": 1,
     "tools/ci/test_native_intel_runner.py": 1,
     "tools/ci/test_object_deps.py": 5,
-    "tools/ci/test_pr_head_affected_tests.py": 10,
+    "tools/ci/test_pr_head_affected_tests.py": 9,
     "tools/ci/test_proxmox_ephemeral_runner_linux.py": 13,
     "tools/ci/test_pulp_worktree_cache_env.py": 7,
     "tools/ci/test_pulp_worktree_gc.py": 8,
@@ -606,7 +606,7 @@
     "tools/scripts/runner_labels.py": 2,
     "tools/scripts/sample_region_compat_baseline.py": 8,
     "tools/scripts/sample_region_native_package_smoke.py": 1,
-    "tools/scripts/script_test_inputs.py": 5,
+    "tools/scripts/script_test_inputs.py": 4,
     "tools/scripts/sdk_capability_handoff.py": 1,
     "tools/scripts/sdk_consumer_sweep.py": 4,
     "tools/scripts/sdk_development_provenance.py": 3,

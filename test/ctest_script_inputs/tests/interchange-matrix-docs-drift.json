@@ -1,0 +1,11 @@
+{
+ "name": "interchange-matrix-docs-drift",
+ "record": {
+  "entry": "tools/scripts/schema_drift_check.py",
+  "inputs": [
+   "docs/reference/interchange-matrix.md",
+   "tools/scripts/schema_drift_check.py"
+  ],
+  "kind": "python"
+ }
+}

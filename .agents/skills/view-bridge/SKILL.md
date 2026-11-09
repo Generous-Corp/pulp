@@ -24,6 +24,45 @@ echoes do not change logical size or notify the processor. Validate with native
 sized backing surface alone does not prove the window fits it. The Windows
 `plugin-view-host` HiDPI regression covers this contract without a GPU adapter.
 
+## Native Metal surfaces (`integrations/pulp-native`)
+
+`pulp::native::MetalSurface` is for an editor that brings its own Metal
+renderer and does not go through `ViewBridge`. Two macOS behaviours shape both
+it and its tests, and both look like bugs until you know them:
+
+- **Hiding or showing a window posts no notification in an app that is not
+  active.** That includes a test binary and, likely, an AU helper process.
+  `orderOut:` and `orderFront` post no `NSWindowDidChangeOcclusionStateNotification`,
+  and `occlusionState` still reads visible after `orderOut:`. Visibility
+  therefore comes from `isVisible` and `isMiniaturized` as well as occlusion.
+  It is re-checked by `MetalSurface::poll_visibility()`, which a frame tick
+  calls. A visibility test that waits for the notification never sees one.
+- **`nextDrawable` does not block on Apple silicon.** On macOS 27 it returns in
+  about 8 ms even with every drawable held unpresented, or presented into a
+  hidden window. A test cannot produce a wait that reaches
+  `allowsNextDrawableTimeout`'s 1 s bound, so it can only prove that teardown
+  stays prompt while a client is acquiring. Holding drawables to force a block
+  will not fail the way you expect.
+
+- **A headless Mac has no display link.** `CVDisplayLinkCreateWithActiveCGDisplays`
+  fails on a host with no active display (m1, CI VMs), so a pump that relied
+  on it would skip every test on exactly the hosts that run them.
+  `pulp::native::FramePump` falls back to a 60 Hz timer with the same pacing
+  logic, and `follows_display()` says which one is running. Only the one
+  display-link case skips. It ran green on a Mac with a display, where the
+  rate cap also held.
+- **A synthetic right-button event reports button number 0.**
+  `+[NSEvent mouseEventWithType:...]` leaves `buttonNumber` at 0 for
+  right-button types. `pulp::native::translate_pointer` therefore takes the
+  left and right buttons from the event type, and reads `buttonNumber` only
+  for "other" buttons. A translator that trusts `buttonNumber` passes against
+  real input and fails every synthetic table test, or the other way round.
+
+The view's Objective-C class is registered at run time through
+`pulp/platform/objc_unique_class.hpp`, so two plug-ins never share it. Every
+override calls super through `super_implementation(<registered class>, sel)`,
+never through `object_getClass(self)`, which may be a KVO subclass.
+
 ## Standalone window factory ownership
 
 On Windows/Linux, standalone startup calls

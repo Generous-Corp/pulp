@@ -1,0 +1,20 @@
+{
+ "name": "toolchain-host_sync-selftest",
+ "record": {
+  "entry": "tools/toolchain/test_host_sync.py",
+  "inputs": [
+   ".githooks/post-checkout",
+   ".github/workflows",
+   ".github/workflows/build.yml",
+   "experimental/pulp-rs",
+   "experimental/pulp-rs/rust-toolchain.toml",
+   "tools/ci",
+   "tools/ci/provide_pinned_rust.sh",
+   "tools/toolchain/check_env.py",
+   "tools/toolchain/expected.json",
+   "tools/toolchain/host_sync.py",
+   "tools/toolchain/test_host_sync.py"
+  ],
+  "kind": "python"
+ }
+}
