@@ -763,6 +763,45 @@ def exercise_refuses_unresolvable_base() -> int:
     return 3
 
 
+def exercise_unreadable_base_history_warns() -> int:
+    """Losing the base history must not silently re-create the counter race.
+
+    Without it, derive falls back to base + 1, the integer every open branch
+    races for. The fallback still happens (it is safe), but it is named."""
+    import contextlib
+    import io
+    import types
+
+    checks = 0
+    original = rederive.history.read_git_path
+    cases = (
+        (types.SimpleNamespace(status="history_unavailable", content=None),
+         "history_unavailable"),
+        (types.SimpleNamespace(status="available", content="{not json"),
+         "not valid JSON"),
+    )
+    try:
+        for item, reason in cases:
+            rederive.history.read_git_path = lambda *_args, _item=item: _item
+            stream = io.StringIO()
+            with contextlib.redirect_stderr(stream):
+                result = rederive._read_base_history(ROOT, None)
+            assert result is None
+            message = stream.getvalue()
+            assert "falls back to base + 1" in message and reason in message, message
+            checks += 1
+        readable = types.SimpleNamespace(status="available", content='{"schema": "x"}')
+        rederive.history.read_git_path = lambda *_args: readable
+        stream = io.StringIO()
+        with contextlib.redirect_stderr(stream):
+            assert rederive._read_base_history(ROOT, None) == {"schema": "x"}
+        assert stream.getvalue() == "", "a readable history warned"
+        checks += 1
+    finally:
+        rederive.history.read_git_path = original
+    return checks
+
+
 def main() -> int:
     checks = 0
     checks += exercise_refuses_branch_behind_base()
@@ -783,6 +822,7 @@ def main() -> int:
     checks += exercise_counter_is_not_material()
     checks += exercise_rejects_underivable_base()
     checks += exercise_rewrite_round_trip()
+    checks += exercise_unreadable_base_history_warns()
     print(f"agent-capability-rederive: {checks} derivation contract checks passed")
     return 0
 

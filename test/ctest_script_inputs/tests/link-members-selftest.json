@@ -1,0 +1,15 @@
+{
+ "name": "link-members-selftest",
+ "record": {
+  "entry": "tools/ci/test_link_members.py",
+  "inputs": [
+   ".github/workflows/build.yml",
+   "tools/ci/link-members-launcher.sh",
+   "tools/ci/link_members.py",
+   "tools/ci/test_link_members.py",
+   "tools/ci/testdata/link_members/pulp-test-state.map",
+   "tools/cmake/PulpLinkMaps.cmake"
+  ],
+  "kind": "python"
+ }
+}

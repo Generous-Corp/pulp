@@ -1,0 +1,18 @@
+{
+ "name": "sampler-interpolation-benchmark-source-evidence",
+ "record": {
+  "entry": "tools/scripts/verify_sampler_interpolation_benchmark.py",
+  "inputs": [
+   "core/audio/include/pulp/audio/loop_types.hpp",
+   "core/audio/include/pulp/audio/sample_interpolation.hpp",
+   "core/audio/include/pulp/audio/sample_sinc_kernel.hpp",
+   "core/signal/include/pulp/signal/interpolator.hpp",
+   "core/signal/include/pulp/signal/windowing.hpp",
+   "test/cmake/sampler_interpolation_benchmark_tests.cmake",
+   "test/sample_interpolation_benchmark.cpp",
+   "test/support/sample_interpolation_render.hpp",
+   "tools/scripts/verify_sampler_interpolation_benchmark.py"
+  ],
+  "kind": "python"
+ }
+}

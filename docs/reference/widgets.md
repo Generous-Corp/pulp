@@ -198,7 +198,7 @@ lowercase names for serialization and the JS bridge.
 | `WaveformView` | Waveform display | sample data or `WaveformOverview`, trigger mode, oscillator preview shape, multi-channel | `widgets.hpp` |
 | `WaveformOverviewView` | Headless waveform overview | min/max peak columns, source-frame viewport for scrub/zoom, configurable line and background colors | `waveform_overview_view.hpp` |
 | `WaveformEditor` | Interactive waveform | selection, zoom/scroll, playhead, named regions, selection callback | `waveform_editor.hpp` |
-| `SpectrumView` | FFT magnitude spectrum | dB magnitudes, bars/line/filled, dB range | `widgets.hpp` |
+| `SpectrumView` | FFT spectrum analyzer | built-in analysis from `push_samples()`, log-frequency axis, window/FFT size/overlap, peak/RMS/power/PSD, bars/line/filled, time-based release; legacy dB-bin input still works | `audio_widgets.hpp` |
 | `SpectrogramView` | Scrolling STFT spectrogram | push frames, history/freq config, colormap, dB range | `widgets.hpp` |
 | `EqCurveView` | Parametric EQ curve | draggable bands (freq/gain/Q/type), spectrum overlay, band callbacks | `eq_curve_view.hpp` |
 | `ChannelStrip` | Mixer strip | label, level + pan (draggable), meter, wheel, callbacks | `gap_widgets.hpp` |

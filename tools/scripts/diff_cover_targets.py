@@ -265,6 +265,203 @@ class Codemodel:
         return seen
 
 
+# ── ctest command/artifact references ──────────────────────────────────────
+
+
+def _command_path_refs(command: Iterable[Any]) -> Iterable[str]:
+    """Yield absolute paths named by a CTest command.
+
+    CMake-script tests commonly pass generated binaries as a separate
+    ``--forbidden`` argument or as the value of ``-DVAR=``, ``--flag=`` or
+    ``NAME=``. A list-valued assignment may use either CMake's ``;`` or a
+    fixture script's ``|`` separator.
+    """
+    for token in command:
+        if not isinstance(token, str) or not token:
+            continue
+        candidates = [token]
+        if "=" in token:
+            candidates.append(token.rsplit("=", 1)[1])
+        for candidate in candidates:
+            for value in re.split(r"[;|]", candidate):
+                if os.path.isabs(value):
+                    yield str(Path(value).resolve())
+
+
+def _artifact_index(model: Codemodel) -> dict[str, set[str]]:
+    index: dict[str, set[str]] = {}
+    for name in model.targets:
+        for artifact in model.artifacts(name):
+            index.setdefault(str(artifact.resolve()), set()).add(name)
+    return index
+
+
+def _ctest_json(build_dir: Path) -> list[dict[str, Any]]:
+    proc = subprocess.run(
+        ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
+        check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        text=True, encoding="utf-8",
+    )
+    tests = json.loads(proc.stdout).get("tests", [])
+    return tests if isinstance(tests, list) else []
+
+
+def _install_script_artifacts(model: Codemodel) -> dict[str, set[str]]:
+    """Return artifacts named by the configured build's install scripts.
+
+    CMake script tests often invoke ``cmake -P`` (or ``cmake --install``)
+    rather than naming every archive in their CTest command.  The install
+    script is still authoritative about the files that command will consume;
+    map those absolute paths back to codemodel targets so a focused build can
+    repair a missing archive before CTest starts.
+    """
+    scripts: list[Path] = []
+    root_script = model.build_root / "cmake_install.cmake"
+    if root_script.is_file():
+        scripts.append(root_script)
+    for path in model.build_root.rglob("cmake_install.cmake"):
+        if path not in scripts:
+            scripts.append(path)
+    if not scripts:
+        return {}
+    text_parts: list[str] = []
+    for script in scripts:
+        try:
+            text_parts.append(script.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    text = "\n".join(text_parts)
+    index: dict[str, set[str]] = {}
+    for name in model.targets:
+        for artifact in model.artifacts(name):
+            key = str(artifact.resolve())
+            if key in text:
+                index.setdefault(key, set()).add(name)
+    return index
+
+
+def _is_install_test(command: Iterable[Any], build_dir: Path) -> bool:
+    """Whether a CTest command executes an install/build-tree staging path."""
+    tokens = [token for token in command if isinstance(token, str)]
+    joined = " ".join(tokens)
+    if "--install" in tokens or "--target install" in joined:
+        return True
+    # The SDK consumer fixtures use ``cmake -D PULP_BUILD_DIR=... -P
+    # test_installed_*``.  Keep this predicate narrow so an unrelated CMake
+    # script test does not pull the entire SDK install set into every plan.
+    return (
+        any("test_installed_" in token or "sdk-consumer" in token for token in tokens)
+        and any(str(build_dir.resolve()) in token for token in tokens)
+    )
+
+
+def artifact_closure(build_dir: Path, targets: Iterable[str],
+                     names: Iterable[str] = (), regex: str = "") -> dict[str, Any]:
+    """Check that selected CTests have every command/install artifact built.
+
+    The result is intentionally a receipt-shaped object.  ``status=blocked``
+    is actionable: ``missing_targets`` can be passed to the governed builder;
+    if a path has no codemodel owner the receipt preserves that exact path for
+    the next repair instead of allowing CTest to fail late inside an install.
+    """
+    model = Codemodel(build_dir)
+    wanted = set(targets)
+    command_index = _artifact_index(model)
+    install_index = _install_script_artifacts(model)
+    tests = _ctest_json(build_dir)
+    name_set = set(names)
+    try:
+        matcher = re.compile(regex) if regex else None
+    except re.error as exc:
+        return {
+            "schema": "pulp.diff-cover-artifact-closure/v1",
+            "status": "blocked",
+            "reason": f"invalid CTest regex: {exc}",
+            "missing": [], "missing_targets": [], "selected_tests": [],
+        }
+
+    selected: list[dict[str, Any]] = []
+    for test in tests:
+        name = str(test.get("name", ""))
+        command = test.get("command") or []
+        command_refs = {
+            owner
+            for path in _command_path_refs(command)
+            for owner in command_index.get(path, ())
+        }
+        install_test = _is_install_test(command, build_dir)
+        if name_set:
+            include = name in name_set
+        elif matcher is not None:
+            include = bool(matcher.search(name))
+        else:
+            include = bool(command_refs & wanted) or install_test
+        if include:
+            selected.append(test)
+
+    missing: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for test in selected:
+        name = str(test.get("name", ""))
+        command = test.get("command") or []
+        paths: dict[str, set[str]] = {}
+        for path in _command_path_refs(command):
+            owners = command_index.get(path, ())
+            # A CTest command naturally names system tools (cmake, python,
+            # shell).  Only retain an unmapped token when it points inside the
+            # active build tree; that is the actionable missing-artifact case.
+            if not owners and not path.startswith(str(model.build_root.resolve()) + os.sep):
+                continue
+            paths.setdefault(path, set()).update(owners)
+        if _is_install_test(command, build_dir):
+            for path, owners in install_index.items():
+                paths.setdefault(path, set()).update(owners)
+        for path, owners in paths.items():
+            if Path(path).exists():
+                continue
+            mapped = sorted(owners) or [""]
+            for owner in mapped:
+                row = (name, owner, path)
+                if row in seen:
+                    continue
+                seen.add(row)
+                missing.append({"test": name, "target": owner, "path": path})
+
+    missing_targets = sorted({row["target"] for row in missing if row["target"]})
+    report: dict[str, Any] = {
+        "schema": "pulp.diff-cover-artifact-closure/v1",
+        "status": "blocked" if missing else "ok",
+        "build_dir": str(build_dir.resolve()),
+        "selected_tests": [str(test.get("name", "")) for test in selected],
+        "missing": missing,
+        "missing_targets": missing_targets,
+    }
+    if missing:
+        report["reason"] = "selected CTest references missing build artifact(s)"
+        report["next_action"] = (
+            "build missing_targets with the governed builder, then rerun this guard"
+            if missing_targets else
+            "map each missing path to a configured CMake target before rerunning"
+        )
+    return report
+
+
+def _test_artifact_targets(build_dir: Path, model: Codemodel,
+                           planned: set[str]) -> set[str]:
+    """Return every target artifact referenced by a selected test command."""
+    index = _artifact_index(model)
+    extras: set[str] = set()
+    for test in _ctest_json(build_dir):
+        refs = {
+            owner
+            for path in _command_path_refs(test.get("command") or [])
+            for owner in index.get(path, ())
+        }
+        if refs & planned:
+            extras |= refs
+    return extras
+
+
 # ── plan ───────────────────────────────────────────────────────────────────
 
 
@@ -328,10 +525,23 @@ def compute_plan(repo: Path, build_dir: Path, base: str, config_json: Path,
         return plan
 
     buildable = sum(1 for t in model.targets.values() if t.get("type") in BUILDABLE_TYPES)
-    closure = sorted(
+    closure_set = {
         name for name in model.consumers_closure(owners)
         if model.targets[name].get("type") in BUILDABLE_TYPES
-    )
+    }
+    # A consumer test can invoke independent negative controls, static
+    # archives, SDK probes, or fixtures. Their command artifacts are part of
+    # this build closure even when no CMake dependency edge connects them to
+    # the changed owner.
+    try:
+        closure_set |= {
+            name for name in _test_artifact_targets(build_dir, model, closure_set)
+            if model.targets.get(name, {}).get("type") in BUILDABLE_TYPES
+        }
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        # CTest may not be configured yet during a cold selector probe.
+        pass
+    closure = sorted(closure_set)
     if not closure:
         plan["mode"] = "all"
         plan["reason"] = "owning targets are not buildable: " + ", ".join(sorted(owners))
@@ -344,7 +554,23 @@ def compute_plan(repo: Path, build_dir: Path, base: str, config_json: Path,
     if tier == "likely":
         blocker = likely_tier_blocker(model, plan["owners"], owners)
         if blocker is None:
-            likely = likely_tests(model, measured, set(closure))
+            likely = likely_tests(model, measured, closure_set)
+            if likely:
+                try:
+                    refs = _test_artifact_targets(build_dir, model, owners | likely)
+                    extras = {
+                        name for name in refs
+                        if model.targets.get(name, {}).get("type") in BUILDABLE_TYPES
+                    }
+                    closure_set |= extras
+                    closure = sorted(closure_set)
+                    plan["closure_targets"] = closure
+                    # Keep a likely test and every command artifact it uses
+                    # together; otherwise a negative control or SDK fixture
+                    # can be selected but absent from the build.
+                    likely |= extras - (owners | likely)
+                except (OSError, subprocess.CalledProcessError, ValueError):
+                    pass
             if not likely:
                 blocker = "no test source names or includes a changed file"
     if blocker is None:
@@ -467,13 +693,8 @@ def external_plan(cmd: str, build_dir: Path, base: str) -> dict[str, Any]:
 
 
 def _references(token: Any, artifact_paths: set[str]) -> bool:
-    """A command token names a built artifact, bare or as ``--flag=<path>``."""
-    if not isinstance(token, str):
-        return False
-    candidate = token.rsplit("=", 1)[-1]
-    if not os.path.isabs(candidate):
-        return False
-    return candidate in artifact_paths or str(Path(candidate).resolve()) in artifact_paths
+    """A command token names a planned built artifact."""
+    return any(path in artifact_paths for path in _command_path_refs([token]))
 
 
 def select_tests(build_dir: Path, targets: Iterable[str]) -> list[str]:
@@ -492,8 +713,13 @@ def select_tests(build_dir: Path, targets: Iterable[str]) -> list[str]:
     for test in tests:
         name = test.get("name", "")
         placeholder = NOT_BUILT_PLACEHOLDER.match(name)
-        if placeholder and placeholder.group("target") in wanted:
-            selected.append(name)
+        if placeholder:
+            target = placeholder.group("target")
+            # CTest emits placeholders for targets that were not configured or
+            # built. A name match alone would select utility/no-artifact
+            # registrations and then run a test with no executable.
+            if target in wanted and target in model.targets and any(model.artifacts(target)):
+                selected.append(name)
             continue
         if any(_references(token, artifact_paths) for token in test.get("command") or []):
             selected.append(name)
@@ -518,6 +744,12 @@ def main(argv: list[str] | None = None) -> int:
     p_tests.add_argument("--build-dir", type=Path, required=True)
     p_tests.add_argument("--plan", type=Path, required=True)
     p_tests.add_argument("--out", type=Path, required=True)
+    p_artifacts = sub.add_parser("artifacts")
+    p_artifacts.add_argument("--build-dir", type=Path, required=True)
+    p_artifacts.add_argument("--plan", type=Path, required=True)
+    p_artifacts.add_argument("--receipt", type=Path, required=True)
+    p_artifacts.add_argument("--tests-file", type=Path)
+    p_artifacts.add_argument("--regex", default="")
     args = parser.parse_args(argv)
 
     if args.cmd == "plan":
@@ -535,6 +767,33 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
+    if args.cmd == "artifacts":
+        names = ()
+        if args.tests_file:
+            try:
+                names = tuple(
+                    line.strip() for line in args.tests_file.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+            except OSError:
+                names = ()
+        try:
+            report = artifact_closure(
+                args.build_dir, plan.get("targets", []), names, args.regex)
+        except (OSError, subprocess.CalledProcessError, ValueError, PlanError) as exc:
+            report = {
+                "schema": "pulp.diff-cover-artifact-closure/v1",
+                "status": "blocked",
+                "reason": f"artifact closure probe failed: {exc}",
+                "missing": [], "missing_targets": [], "selected_tests": [],
+                "next_action": "inspect the CMake File API and CTest JSON before rerunning",
+            }
+        args.receipt.parent.mkdir(parents=True, exist_ok=True)
+        args.receipt.write_text(json.dumps(report, indent=1, sort_keys=True) + "\n",
+                                encoding="utf-8")
+        json.dump(report, sys.stdout, indent=1, sort_keys=True)
+        sys.stdout.write("\n")
+        return 3 if report.get("status") == "blocked" else 0
     try:
         names = select_tests(args.build_dir, plan.get("targets", []))
     except (OSError, subprocess.CalledProcessError, ValueError, PlanError) as exc:

@@ -693,6 +693,30 @@ struct ControlEndpoint::Impl {
                 item.addMember("registration_id",
                                choc::value::createString(registration.registration_id.value));
                 item.addMember("session_id", choc::value::createString(registration.session_id));
+                // Discovery describes what the exact registration declared; it
+                // grants nothing, exactly like the capability list above.
+                auto vendor_operations = choc::value::createEmptyArray();
+                if (const auto table =
+                        management_broker->vendor_operations(registration.manifest_digest)) {
+                    for (const auto& operation : table->operations()) {
+                        auto entry = choc::value::createObject("");
+                        entry.addMember("capability",
+                                        choc::value::createString(capability_contract_id(
+                                            control_vendor_tier_capability(operation.tier))));
+                        entry.addMember("description",
+                                        choc::value::createString(operation.description));
+                        entry.addMember("id", choc::value::createString(operation.id));
+                        entry.addMember("input_schema",
+                                        choc::json::parse(operation.input_schema_json));
+                        entry.addMember("output_schema",
+                                        choc::json::parse(operation.output_schema_json));
+                        entry.addMember("tier", choc::value::createString(
+                                                    control_vendor_tier_id(operation.tier)));
+                        entry.addMember("version", choc::value::createInt64(operation.version));
+                        vendor_operations.addArrayElement(entry);
+                    }
+                }
+                item.addMember("vendor_operations", vendor_operations);
                 instances.addArrayElement(item);
             }
             auto data = choc::value::createObject("");
@@ -827,7 +851,11 @@ struct ControlEndpoint::Impl {
                 const auto operation_id = std::string(params["operation_id"].getString());
                 selector_kind = ControlGrantSelectorKind::Operation;
                 selector_id = operation_id;
-                const auto* operation = resolve_control_operation(operation_id, 1);
+                const auto vendor_parts = parse_control_vendor_operation_id(operation_id);
+                const auto resolved = management_broker->resolve_operation(
+                    matches.front().manifest_digest, operation_id,
+                    vendor_parts ? vendor_parts->version : 1);
+                const auto* operation = resolved.descriptor;
                 if (!operation || !capability_is_grantable(operation->capability)) {
                     (void)reply("invalid-request", "{}", "the grant operation is unknown or not grantable");
                     return;
@@ -835,6 +863,10 @@ struct ControlEndpoint::Impl {
                 if (std::ranges::find(matches.front().capabilities, operation->capability) !=
                     matches.front().capabilities.end())
                     grant_request.capabilities.push_back(operation->capability);
+                // Consent names this one operation, so the grant must not
+                // reach the other vendor operations that share its tier.
+                if (resolved.vendor_table)
+                    grant_request.vendor_operations.push_back(operation_id);
             } else {
                 const auto profile_id_value = std::string(params["profile"].getString());
                 selector_id = profile_id_value;

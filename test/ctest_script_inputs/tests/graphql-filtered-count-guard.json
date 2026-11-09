@@ -1,0 +1,12 @@
+{
+ "name": "graphql-filtered-count-guard",
+ "record": {
+  "entry": "tools/scripts/test_graphql_filtered_count_guard.py",
+  "inputs": [
+   "tools/scripts/graphql_filtered_count_guard.py",
+   "tools/scripts/test_graphql_filtered_count_guard.py",
+   "tools/scripts/version_at_land.py"
+  ],
+  "kind": "python"
+ }
+}

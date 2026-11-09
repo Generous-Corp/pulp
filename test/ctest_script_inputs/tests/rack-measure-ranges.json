@@ -1,0 +1,13 @@
+{
+ "name": "rack-measure-ranges",
+ "record": {
+  "entry": "tools/rack/test_measure_ranges.py",
+  "inputs": [
+   "tools/rack/crash_watch.py",
+   "tools/rack/measure_ranges.py",
+   "tools/rack/param_units.py",
+   "tools/rack/test_measure_ranges.py"
+  ],
+  "kind": "python"
+ }
+}

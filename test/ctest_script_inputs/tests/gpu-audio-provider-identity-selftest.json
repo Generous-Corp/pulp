@@ -1,0 +1,17 @@
+{
+ "name": "gpu-audio-provider-identity-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gpu_audio_provider_identity.py",
+  "inputs": [
+   "external/skia-build",
+   "tools/deps",
+   "tools/deps/manifest.json",
+   "tools/scripts",
+   "tools/scripts/download_retry.py",
+   "tools/scripts/fetch_skia_for_release.py",
+   "tools/scripts/process_liveness.py",
+   "tools/scripts/test_gpu_audio_provider_identity.py"
+  ],
+  "kind": "python"
+ }
+}

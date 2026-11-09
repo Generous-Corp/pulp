@@ -294,6 +294,34 @@ the installed `sample-region-allpass` consumer validation. A green docs check
 does not establish graph reachability or format portability; those claims still
 require the packet's independent runtime receipts.
 
+### Choosing a UI stack (Vellum by default)
+
+Pulp has one default UI stack and two opt-in alternatives. Like Processor and
+SignalGraph, they are not rivals: pick the default unless a stated reason
+applies.
+
+- **The default is Vellum on Skia/Dawn.** This covers the in-tree `core/view` /
+  scripted-UI path (moving to Vellum) and a Vellum UI package bound with
+  `pulp_add_plugin(... UI <package>)`. New editors, imported designs and
+  agent-written UIs use it.
+- **RmlUi is opt-in.** It is an optional component in Vellum's standalone-buildable
+  `rmlui/` subproject, off unless enabled. Use it only for a product that already
+  ships RML/RCSS skins or Lua skin scripts, or when the developer asks for it.
+  Never choose it on your own. Do not build on Pulp's frozen
+  `pulp/view/rmlui_*` seam headers.
+- **A native surface is for bring-your-own renderers**, such as an existing
+  Metal or GL renderer, reached through `EditorContext::query_extension()`. Pulp
+  does not ship one yet. Do not hand-roll a substitute; ask first.
+- **Nobody compiles what they don't use.** A Pulp-only build must not fetch Skia,
+  Dawn or RmlUi. A Vellum build must not fetch RmlUi. An RmlUi build must not
+  need Skia or Dawn.
+- **Don't mix stacks in one editor** without a stated reason, and never put a
+  Dawn device and a privately owned GPU device in the same editor.
+
+The default changes only by an explicit owner decision. Details:
+[`rmlui`](.agents/skills/rmlui/SKILL.md) skill and
+[`docs/guides/editor-host-contract.md`](docs/guides/editor-host-contract.md).
+
 ### Scripted plugin UIs — read the checklist BEFORE you write the UI
 
 Load the [`view-bridge`](.agents/skills/view-bridge/SKILL.md) skill before writing or changing a JS/scripted editor with
@@ -1062,7 +1090,9 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Decide whether a DSP change made a sound WORSE — and at which timestamp. *(needs install)* → `python -m quality_lab.cli compare`
 - Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics. → `pulp audio render`
 - Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`
+- Look at a file's spectrum over time as a PNG an agent can read — never to measure or gate. → `pulp audio spectrogram`
 - Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV. → `pulp audio validate summarize`
+- Look at a file's envelope and where it clips, as a PNG — never to measure or gate. → `pulp audio waveform`
 - Validate complete matched GPU-audio trial captures and summarize their declared CPU, latency, transfer, and disposition evidence. → `tools/scripts/gpu_audio_p4_evidence.py`
   - ⚠ **Cannot see:** Validates recorded evidence only; does not run the product benchmark, authenticate provider/build attestations, or assign a physical program verdict.
 - Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
@@ -1990,6 +2020,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `pulp-vellum-change-routing` | Route repository-qualified changes across Pulp and Vellum using Pulp's exact ownership projection. |
 | `pulp-web-demo` | Generate and maintain browser demos of Pulp audio plugins (both web ABIs — WAM and WCLAP) from one declarative config, so every demo mounts the SAME shared player and the two ABIs stay in lockstep. |
 | `render-toolchain-update` | Update Pulp's pinned Skia, Dawn, and optional V8 prebuilts as one milestone-matched render-toolchain release. |
+| `rmlui` | Where RmlUi fits in Pulp, and when not to use it. |
 | `screenshot` | Capture faithful PNGs of Pulp view trees / imported UIs headlessly. |
 | `screenshot-sync` | Keep a plugin/demo repo's screenshots in sync with its UX. |
 | `sdf-text` | Work with Pulp's SDF / MSDF / PSDF glyph atlases — building, sampling via SkSL, and the shared text-layout helpers. |
@@ -2013,7 +2044,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
 | `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |
 
-This table of 70 skills is GENERATED from each
+This table of 71 skills is GENERATED from each
 `.agents/skills/<name>/SKILL.md` frontmatter by
 `tools/scripts/skills_doc_check.py --write`. Do not edit it by hand.
 <!-- generated:end id=skills-digest -->

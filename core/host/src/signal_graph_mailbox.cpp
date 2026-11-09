@@ -297,16 +297,27 @@ std::optional<SignalGraph::PreparedLatencySnapshot> SignalGraph::prepared_latenc
 
     PreparedLatencySnapshot result;
     result.total_latency_samples = cg->total_latency_samples;
+    result.sample_rate = cg->sample_rate;
+    result.max_block_size = cg->max_block_size;
     result.nodes.reserve(cg->order.size());
     for (const auto id : cg->order) {
         const auto it = cg->runtime.find(id);
         if (it == cg->runtime.end())
             continue;
-        result.nodes.push_back(PreparedNodeLatency{
+        PreparedNodeLatency node{
             .node_id = id,
             .input_latency_samples = it->second.input_latency,
             .output_latency_samples = it->second.output_latency,
-        });
+            .artifact_latency_samples =
+                std::max<std::int64_t>(0, it->second.output_latency - it->second.input_latency),
+        };
+        if (const auto delay = cg->custom_intentional_delay_samples.find(id);
+            delay != cg->custom_intentional_delay_samples.end())
+            node.intentional_delay_samples = delay->second;
+        if (const auto ports = cg->custom_output_port_latency_samples.find(id);
+            ports != cg->custom_output_port_latency_samples.end())
+            node.output_port_latency_samples.assign(ports->second.begin(), ports->second.end());
+        result.nodes.push_back(std::move(node));
     }
 
     result.connections.reserve(cg->connections.size());

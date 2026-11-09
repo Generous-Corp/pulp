@@ -1,0 +1,11 @@
+{
+ "name": "rack-prove-rack-plugin-layout-selftest",
+ "record": {
+  "entry": "tools/rack/test_prove_rack_plugin_layout.py",
+  "inputs": [
+   "tools/rack/prove_rack_opens.py",
+   "tools/rack/test_prove_rack_plugin_layout.py"
+  ],
+  "kind": "python"
+ }
+}

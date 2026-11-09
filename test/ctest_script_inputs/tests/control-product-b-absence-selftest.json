@@ -1,0 +1,15 @@
+{
+ "name": "control-product-b-absence-selftest",
+ "record": {
+  "entry": "tools/scripts/test_control_product_b_absence_check.py",
+  "inputs": [
+   "core/format",
+   "experimental/pulp-rs/CMakeLists.txt",
+   "inspect/include",
+   "tools/check-docs.sh",
+   "tools/scripts/control_product_b_absence_check.py",
+   "tools/scripts/test_control_product_b_absence_check.py"
+  ],
+  "kind": "python"
+ }
+}

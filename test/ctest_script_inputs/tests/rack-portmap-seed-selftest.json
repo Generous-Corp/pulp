@@ -1,0 +1,11 @@
+{
+ "name": "rack-portmap-seed-selftest",
+ "record": {
+  "entry": "tools/rack/test_portmap_seed.py",
+  "inputs": [
+   "tools/rack/portmap_seed.py",
+   "tools/rack/test_portmap_seed.py"
+  ],
+  "kind": "python"
+ }
+}

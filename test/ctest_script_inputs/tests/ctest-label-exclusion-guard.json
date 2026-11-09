@@ -1,0 +1,12 @@
+{
+ "name": "ctest-label-exclusion-guard",
+ "record": {
+  "entry": "tools/scripts/ctest_label_exclusion_guard.py",
+  "inputs": [
+   "test/cmake",
+   "tools/scripts/ctest_label_exclusion_guard.json",
+   "tools/scripts/ctest_label_exclusion_guard.py"
+  ],
+  "kind": "python"
+ }
+}

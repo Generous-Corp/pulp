@@ -1,0 +1,25 @@
+{
+ "name": "pulp-test-control-broker-daemon",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli",
+   "pulp-control-broker",
+   "pulp-control-broker-crash-fixture",
+   "pulp-control-installed-host-e2e-fixture",
+   "pulp-control-trusted-host-e2e-fixture",
+   "pulp-control-trusted-host-fixture",
+   "pulp-mcp"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "inspect/src/control_broker_daemon.cpp",
+   "test/test_control_broker_daemon.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

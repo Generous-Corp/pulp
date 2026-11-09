@@ -1,0 +1,10 @@
+{
+ "name": "harness-html-adapter-element-events-union-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_html_adapter_element_events_union.py",
+  "inputs": [
+   "tools/harness/tests/test_html_adapter_element_events_union.py"
+  ],
+  "kind": "python"
+ }
+}

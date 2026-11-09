@@ -1,0 +1,10 @@
+{
+ "name": "pulp-rust-gpu-trace-analysis-ctest-selftest",
+ "record": {
+  "entry": "experimental/pulp-rs/tests/test_trace_gpu_analysis_ctest.py",
+  "inputs": [
+   "experimental/pulp-rs/tests/test_trace_gpu_analysis_ctest.py"
+  ],
+  "kind": "python"
+ }
+}

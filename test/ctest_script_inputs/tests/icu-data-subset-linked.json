@@ -1,0 +1,10 @@
+{
+ "name": "icu-data-subset-linked",
+ "record": {
+  "entry": "tools/scripts/plugin_footprint_check.py",
+  "inputs": [
+   "tools/scripts/plugin_footprint_check.py"
+  ],
+  "kind": "python"
+ }
+}

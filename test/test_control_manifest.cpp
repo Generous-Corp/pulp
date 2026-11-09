@@ -1,6 +1,7 @@
 #include "support/control_manifest_fixtures.hpp"
 
 #include <pulp/inspect/control_manifest.hpp>
+#include <pulp/inspect/control_vendor_operations.hpp>
 #include <pulp/runtime/crypto.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -324,8 +325,15 @@ TEST_CASE("control registry projects capability and operation metadata",
     REQUIRE(registry.find("\"cancellation\":") != std::string::npos);
     REQUIRE(registry.find("\"compatibility\":") != std::string::npos);
 
+    // Vendor tiers carry operations a target declares, never a frozen one.
     std::size_t capability_count = 0;
     for (const auto& capability : inspector_capability_registry()) {
+        if (capability_is_vendor_tier(capability.capability)) {
+            CHECK(std::ranges::none_of(control_operation_registry(), [&](const auto& operation) {
+                return operation.capability == capability.capability;
+            }));
+            continue;
+        }
         if (capability.capability != InspectorCapability::Unavailable)
             ++capability_count;
     }

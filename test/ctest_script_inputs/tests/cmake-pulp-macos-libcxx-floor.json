@@ -1,0 +1,10 @@
+{
+ "name": "cmake-pulp-macos-libcxx-floor",
+ "record": {
+  "entry": "test/cmake/test_macos_libcxx_floor.sh",
+  "inputs": [
+   "test/cmake/test_macos_libcxx_floor.sh"
+  ],
+  "kind": "shell"
+ }
+}

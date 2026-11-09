@@ -1,0 +1,11 @@
+{
+ "name": "pulp-test-graph-identity",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "sources": [],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

@@ -1,0 +1,19 @@
+{
+ "name": "pulp-slice-rmlui",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/editor_host_slice/slice_main.cpp"
+  ],
+  "inputs": [
+   "test/editor_host_slice/knob_led.golden.png"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/editor_host_slice/rmlui_editor.cpp",
+   "test/editor_host_slice/slice_main.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

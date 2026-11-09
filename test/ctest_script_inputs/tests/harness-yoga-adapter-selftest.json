@@ -1,0 +1,10 @@
+{
+ "name": "harness-yoga-adapter-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_yoga_adapter.py",
+  "inputs": [
+   "tools/harness/tests/test_yoga_adapter.py"
+  ],
+  "kind": "python"
+ }
+}

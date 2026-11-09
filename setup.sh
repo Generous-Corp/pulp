@@ -1505,6 +1505,9 @@ ensure_shared_git_source_with_retry "Mbed TLS" "https://github.com/Mbed-TLS/mbed
 ensure_shared_git_source_with_retry "SheenBidi" "https://github.com/Tehreer/SheenBidi.git" \
     "c0aa79da5b5ff44bd2cbd9ce92963f81e4de6b1e" "$(fetchcontent_cache_dir_name "sheenbidi" "v3.0.0")"
 
+ensure_shared_git_source_with_retry "muFFT" "https://github.com/Themaister/muFFT.git" \
+    "47bb08652eab399c2c7d460abe5184857110f130" "$(fetchcontent_cache_dir_name "mufft" "47bb08652eab399c2c7d460abe5184857110f130")"
+
 ensure_shared_git_source_with_retry "Brotli" "https://github.com/google/brotli.git" \
     "db24a98aed38a16de78cc05ca15cdd8dc2a0d92d" "$(fetchcontent_cache_dir_name "brotli" "v1.2.1")" \
     "no-submodules"

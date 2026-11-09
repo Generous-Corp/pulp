@@ -1,0 +1,10 @@
+{
+ "name": "visual-python-deps-present",
+ "record": {
+  "entry": "tools/scripts/check_visual_python_deps.py",
+  "inputs": [
+   "tools/scripts/check_visual_python_deps.py"
+  ],
+  "kind": "python"
+ }
+}

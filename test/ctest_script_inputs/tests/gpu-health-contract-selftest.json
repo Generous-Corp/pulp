@@ -1,0 +1,12 @@
+{
+ "name": "gpu-health-contract-selftest",
+ "record": {
+  "entry": "tools/scripts/test_gpu_health_contract.py",
+  "inputs": [
+   "tools/scripts/gpu_health_contract.py",
+   "tools/scripts/json_schema_lite.py",
+   "tools/scripts/test_gpu_health_contract.py"
+  ],
+  "kind": "python"
+ }
+}

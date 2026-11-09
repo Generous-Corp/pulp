@@ -242,3 +242,30 @@ if(APPLE AND NOT PULP_IOS)
         "-framework AppKit"
         "-framework CoreFoundation")
 endif()
+if(APPLE)
+    # Per-binary unique Objective-C class names. The fixture dylib links its own
+    # copy of pulp-platform, standing in for a second plug-in in the process.
+    add_library(pulp-test-objc-unique-fixture MODULE
+        fixtures/objc_unique_class/objc_unique_fixture.mm)
+    target_link_libraries(pulp-test-objc-unique-fixture PRIVATE
+        pulp::platform "-framework Foundation")
+    pulp_add_test_suite(pulp-test-platform-objc-unique-class
+        SOURCES test_platform_objc_unique_class.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-objc-unique-class PRIVATE "-framework Foundation")
+    add_dependencies(pulp-test-platform-objc-unique-class pulp-test-objc-unique-fixture)
+    target_compile_definitions(pulp-test-platform-objc-unique-class PRIVATE
+        PULP_OBJC_UNIQUE_FIXTURE_PATH="$<TARGET_FILE:pulp-test-objc-unique-fixture>")
+    pulp_test_spawns(pulp-test-platform-objc-unique-class pulp-test-objc-unique-fixture)
+endif()
+if(TARGET pulp-native)
+    # integrations/pulp-native: the Metal surface on the real system device in
+    # offscreen windows (device, client-presented drawables, sizing, geometry
+    # snapshots, two-phase and bounded teardown, several surfaces, visibility).
+    add_executable(pulp-test-native-metal-surface test_native_metal_surface.mm)
+    target_compile_options(pulp-test-native-metal-surface PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-native-metal-surface PRIVATE
+        pulp::native Catch2::Catch2WithMain
+        "-framework AppKit" "-framework Metal" "-framework QuartzCore")
+    catch_discover_tests(pulp-test-native-metal-surface)
+endif()

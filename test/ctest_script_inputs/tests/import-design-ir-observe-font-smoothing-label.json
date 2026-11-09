@@ -1,0 +1,10 @@
+{
+ "name": "import-design-ir-observe-font-smoothing-label",
+ "record": {
+  "entry": "test/test_design_ir_observe_font_smoothing_label.py",
+  "inputs": [
+   "test/test_design_ir_observe_font_smoothing_label.py"
+  ],
+  "kind": "python"
+ }
+}

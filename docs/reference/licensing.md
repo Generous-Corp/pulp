@@ -19,7 +19,7 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 | **CHOC** | ISC | JS engine, MIDI utilities, audio file I/O, WebView, networking | [github.com/Tracktion/choc](https://github.com/Tracktion/choc) |
 | **command-group** | Apache-2.0 | Cross-platform process-tree containment for bounded Rust CLI trace analysis | [github.com/watchexec/command-group](https://github.com/watchexec/command-group) |
 | **cpp-httplib** | MIT | HTTP client (GET/POST/download) used by `pulp-runtime` | [github.com/yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) |
-| **dr_libs** | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (`dr_flac`, `dr_mp3`, `dr_wav`) | [github.com/mackron/dr_libs](https://github.com/mackron/dr_libs) |
+| **dr_libs** | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (`dr_flac`, `dr_mp3`, `dr_wav`); Ogg Vorbis decode (`stb_vorbis` v1.22, public domain, vendored alongside) | [github.com/mackron/dr_libs](https://github.com/mackron/dr_libs) |
 | **Highway** | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | [github.com/google/highway](https://github.com/google/highway) |
 | **Mbed TLS** | Apache-2.0 (dual-licensed; Pulp uses the Apache-2.0 option) | Cryptographic primitives (SHA-256, RSA, AES) | [github.com/Mbed-TLS/mbedtls](https://github.com/Mbed-TLS/mbedtls) |
 | **miniz** | MIT | ZIP/GZIP compression | [github.com/richgel999/miniz](https://github.com/richgel999/miniz) |
@@ -113,8 +113,13 @@ Embedded at build time for deterministic text rendering. Every font below is red
 |------|---------|---------|------|
 | **AudioUnitSDK** | Apache-2.0 | AU v2 plugin format adapter | [github.com/apple/AudioUnitSDK](https://github.com/apple/AudioUnitSDK) |
 | **CLAP** | MIT | CLAP plugin format headers | [github.com/free-audio/clap](https://github.com/free-audio/clap) |
+| **lilv** | ISC | Reads, instantiates, and saves the state of hosted LV2 plugins (vendored in `external/lilv`) | [drobilla.net/software/lilv](https://drobilla.net/software/lilv.html) |
 | **LV2** | ISC | LV2 plugin format headers | [github.com/lv2/lv2](https://github.com/lv2/lv2) |
+| **serd** | ISC | Turtle reader and writer used by lilv (vendored in `external/lilv`) | [drobilla.net/software/serd](https://drobilla.net/software/serd.html) |
+| **sord** | ISC | In-memory RDF store used by lilv (vendored in `external/lilv`) | [drobilla.net/software/sord](https://drobilla.net/software/sord.html) |
+| **sratom** | ISC | LV2 atom serialization used by lilv for plugin state (vendored in `external/lilv`) | [drobilla.net/software/sratom](https://drobilla.net/software/sratom.html) |
 | **VST3 SDK** | MIT | VST3 plugin format (pluginterfaces + base) | [github.com/steinbergmedia/vst3sdk](https://github.com/steinbergmedia/vst3sdk) |
+| **zix** | ISC | Data structures and file system helpers used by lilv, serd, and sord (vendored in `external/lilv`) | [gitlab.com/drobilla/zix](https://gitlab.com/drobilla/zix) |
 
 ### Platform-Specific Dependencies
 
