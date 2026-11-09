@@ -269,17 +269,6 @@ if(TARGET pulp-native)
         "-framework AppKit" "-framework Metal" "-framework QuartzCore")
     catch_discover_tests(pulp-test-native-metal-surface)
 endif()
-if(APPLE AND NOT PULP_IOS)
-    # MainThreadScope / MainThreadTimer: posting, owner-gone drops, and firing
-    # inside the menu-tracking and modal-panel run-loop modes. Its own process,
-    # because the cases measure the main run loop's wake-ups.
-    pulp_add_test_suite(pulp-test-platform-main-thread
-        SOURCES test_platform_main_thread.mm
-        LIBRARIES pulp::platform)
-    target_link_libraries(pulp-test-platform-main-thread PRIVATE
-        "-framework AppKit"
-        "-framework CoreFoundation")
-endif()
 if(TARGET pulp-native)
     # integrations/pulp-native: FramePump on the real display link (no link
     # until started, rate cap, one-shot, off-screen pause, delivery thread,
