@@ -455,15 +455,16 @@ TEST_CASE("G5 graph-authored event lane has checked refusal and attempt budget",
     for (std::uint16_t i = 0; i < 8; ++i)
         REQUIRE(lane.emit(1, 7, i, 8) == GraphEventResult::Accepted);
     REQUIRE(lane.emit(1, 7, 99, 8) == GraphEventResult::Overflow);
-    // Three refused attempts + eight accepted records + five overflows
-    // exhaust the fixed 16-attempt sample budget.
+    // The refused future target has its own canonical-sample budget; the
+    // current sample reaches its 16-attempt limit after the extra overflow.
     for (int i = 0; i < 4; ++i)
         REQUIRE(lane.emit(1, 7, 100, 8) == GraphEventResult::Overflow);
-    REQUIRE(lane.emit(1, 7, 101, 8) == GraphEventResult::AttemptLimit);
+    REQUIRE(lane.emit(1, 7, 101, 8) == GraphEventResult::Overflow);
+    REQUIRE(lane.emit(1, 7, 102, 8) == GraphEventResult::AttemptLimit);
     REQUIRE(lane.counters().attempts == 16);
     REQUIRE(lane.counters().accepted == 8);
-    REQUIRE(lane.counters().sequence == 16);
-    REQUIRE(lane.counters().overflow == 5);
+    REQUIRE(lane.counters().sequence == 17);
+    REQUIRE(lane.counters().overflow == 6);
     REQUIRE(lane.counters().diagnostic_refusals == 3);
     REQUIRE(lane.begin_consumer() == GraphEventResult::Accepted);
     REQUIRE(lane.received().size() == 8);
@@ -564,5 +565,38 @@ TEST_CASE("G5 callback writer and reader expose one borrowed sorted workflow",
     REQUIRE(events[0].producer == 42);
     REQUIRE(events[0].sample == 3);
     REQUIRE(events[0].payload == 9);
+    REQUIRE(lane.end_block() == GraphEventResult::Accepted);
+}
+
+TEST_CASE("G5 lane budgets attempts and accepted records per canonical sample",
+          "[host][graph][g5][events][negative-control]") {
+    GraphAuthoredEventLane<4> lane;
+    REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_block(1, 0, 2) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_producer_block() == GraphEventResult::Accepted);
+    // Each target sample has an independent accepted budget. The second
+    // sample must not inherit sample zero's eight accepted records.
+    for (std::uint16_t payload = 0; payload < 8; ++payload)
+        REQUIRE(lane.emit_at(1, 7, payload, 0) == GraphEventResult::Accepted);
+    REQUIRE(lane.emit_at(1, 7, 99, 0) == GraphEventResult::Overflow);
+    for (std::uint16_t payload = 0; payload < 8; ++payload)
+        REQUIRE(lane.emit_at(1, 7, payload, 1) == GraphEventResult::Accepted);
+    REQUIRE(lane.emit_at(1, 7, 99, 1) == GraphEventResult::Overflow);
+    REQUIRE(lane.begin_consumer_block() == GraphEventResult::Accepted);
+    REQUIRE(lane.received_block().size() == 16);
+    REQUIRE(lane.end_block() == GraphEventResult::Accepted);
+}
+
+TEST_CASE("G5 lane aborts a failed phase and recovers on the next block",
+          "[host][graph][g5][events][negative-control]") {
+    GraphAuthoredEventLane<4> lane;
+    REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_consumer_block() == GraphEventResult::InvalidPhase);
+    lane.abort_block();
+    REQUIRE_FALSE(lane.active());
+    REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_producer_block() == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_consumer_block() == GraphEventResult::Accepted);
     REQUIRE(lane.end_block() == GraphEventResult::Accepted);
 }

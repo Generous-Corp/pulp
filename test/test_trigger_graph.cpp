@@ -203,6 +203,57 @@ TEST_CASE("Graph-authored event admission refuses unsupported roles and fanout",
     REQUIRE(graph.connect_graph_event({producer, producer}) == GraphEventBindingResult::Feedback);
 }
 
+TEST_CASE("Graph-authored event admission requires a connected forward path",
+          "[g5][events][wiring][negative-control]") {
+    auto make_type = [] {
+        CustomNodeType type;
+        type.type_id = "test.g5.graph-event-path";
+        type.num_input_ports = type.num_output_ports = 1;
+        type.process_events = [](auto& out, const auto& in, int frames,
+                                 const CustomNodeEventBlock&) {
+            for (int i = 0; i < frames; ++i)
+                out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+        };
+        return type;
+    };
+
+    SECTION("disconnected") {
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(make_type()));
+        const auto producer = graph.add_custom_node("test.g5.graph-event-path");
+        const auto consumer = graph.add_custom_node("test.g5.graph-event-path");
+        REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Binding);
+    }
+    SECTION("reverse path") {
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(make_type()));
+        const auto producer = graph.add_custom_node("test.g5.graph-event-path");
+        const auto consumer = graph.add_custom_node("test.g5.graph-event-path");
+        REQUIRE(graph.connect(consumer, 0, producer, 0));
+        REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Binding);
+    }
+    SECTION("forward path") {
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(make_type()));
+        const auto producer = graph.add_custom_node("test.g5.graph-event-path");
+        const auto consumer = graph.add_custom_node("test.g5.graph-event-path");
+        REQUIRE(graph.connect(producer, 0, consumer, 0));
+        REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted);
+        graph.set_parallel_routing_enabled(true);
+        REQUIRE_FALSE(graph.parallel_routing_enabled());
+        REQUIRE(graph.remove_node(producer));
+        REQUIRE_FALSE(graph.graph_event_edge().has_value());
+        CustomNodeType replacement = make_type();
+        replacement.process_events = {};
+        replacement.process = [](auto& out, const auto& in, int frames) {
+            for (int i = 0; i < frames; ++i)
+                out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+        };
+        REQUIRE(graph.register_custom_node_type(std::move(replacement)));
+        REQUIRE_FALSE(graph.graph_event_edge().has_value());
+    }
+}
+
 TEST_CASE("Typed trigger pair preserves sample and tie order across partitions", "[trigger]") {
     std::vector<float> expected;
     std::vector<std::array<std::uint64_t, 4>> expected_events;

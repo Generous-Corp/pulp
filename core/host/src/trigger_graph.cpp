@@ -380,6 +380,17 @@ GraphEventBindingResult SignalGraph::connect_graph_event(GraphAuthoredEventEdge 
         pt->process_transport || pt->process_instance_transport || ct->process_transport ||
         ct->process_instance_transport)
         return GraphEventBindingResult::Binding;
+    // The event lane annotates the real feed-forward graph; it is not a
+    // second scheduler. Require a path and prove producer-before-consumer in
+    // the deterministic graph order before publishing the binding.
+    if (!has_path_locked_(edge.producer, edge.consumer))
+        return GraphEventBindingResult::Binding;
+    const auto order = processing_order();
+    const auto producer_it = std::find(order.begin(), order.end(), edge.producer);
+    const auto consumer_it = std::find(order.begin(), order.end(), edge.consumer);
+    if (producer_it == order.end() || consumer_it == order.end() ||
+        producer_it >= consumer_it)
+        return GraphEventBindingResult::Binding;
     graph_event_edge_ = edge;
     invalidate_live_locked_();
     return GraphEventBindingResult::Accepted;

@@ -595,11 +595,25 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
                     GraphEventWriter<> writer;
                     GraphEventReader<> reader;
                     if (cg->graph_event_lane && id == cg->graph_event_edge.producer) {
-                        (void)cg->graph_event_lane->begin_producer_block();
+                        if (cg->graph_event_lane->begin_producer_block() !=
+                            GraphEventResult::Accepted) {
+                            cg->graph_event_lane->abort_block();
+                            for (std::size_t channel = 0; channel < out_view.num_channels(); ++channel)
+                                std::memset(out_view.channel_ptr(channel), 0,
+                                            sizeof(float) * out_view.num_samples());
+                            break;
+                        }
                         writer = GraphEventWriter<>(*cg->graph_event_lane, cg->graph_event_epoch,
                                                     static_cast<std::uint32_t>(id));
                     } else if (cg->graph_event_lane && id == cg->graph_event_edge.consumer) {
-                        (void)cg->graph_event_lane->begin_consumer_block();
+                        if (cg->graph_event_lane->begin_consumer_block() !=
+                            GraphEventResult::Accepted) {
+                            cg->graph_event_lane->abort_block();
+                            for (std::size_t channel = 0; channel < out_view.num_channels(); ++channel)
+                                std::memset(out_view.channel_ptr(channel), 0,
+                                            sizeof(float) * out_view.num_samples());
+                            break;
+                        }
                         reader = GraphEventReader<>(*cg->graph_event_lane);
                     }
                     const CustomNodeEventBlock events{

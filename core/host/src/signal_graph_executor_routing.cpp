@@ -213,11 +213,23 @@ bool custom_binding(fmt::ProcessBlock& block,
         GraphEventWriter<> writer;
         GraphEventReader<> reader;
         if (cctx->graph_event_lane && cctx->node_id == cctx->graph_event_edge.producer) {
-            (void)cctx->graph_event_lane->begin_producer_block();
+            if (cctx->graph_event_lane->begin_producer_block() != GraphEventResult::Accepted) {
+                cctx->graph_event_lane->abort_block();
+                for (std::size_t channel = 0; channel < out.num_channels(); ++channel)
+                    std::memset(out.channel_ptr(channel), 0,
+                                sizeof(float) * out.num_samples());
+                return true;
+            }
             writer =
                 GraphEventWriter<>(*cctx->graph_event_lane, cctx->graph_event_epoch, cctx->node_id);
         } else if (cctx->graph_event_lane && cctx->node_id == cctx->graph_event_edge.consumer) {
-            (void)cctx->graph_event_lane->begin_consumer_block();
+            if (cctx->graph_event_lane->begin_consumer_block() != GraphEventResult::Accepted) {
+                cctx->graph_event_lane->abort_block();
+                for (std::size_t channel = 0; channel < out.num_channels(); ++channel)
+                    std::memset(out.channel_ptr(channel), 0,
+                                sizeof(float) * out.num_samples());
+                return true;
+            }
             reader = GraphEventReader<>(*cctx->graph_event_lane);
         }
         const CustomNodeEventBlock events{

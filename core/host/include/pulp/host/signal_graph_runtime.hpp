@@ -823,10 +823,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // GraphRuntimeExecutor::process_parallel; otherwise it falls back to the
     // serial executor (if its opt-in is set) and then the legacy walk. Output is
     // bit-identical across all three paths.
-    void set_parallel_routing_enabled(bool enabled) noexcept {
-        parallel_routing_enabled_.store(enabled, std::memory_order_relaxed);
-        detail::advance_execution_selection_generation(execution_selection_generation_);
-    }
+    void set_parallel_routing_enabled(bool enabled) noexcept;
     bool parallel_routing_enabled() const noexcept {
         return parallel_routing_enabled_.load(std::memory_order_relaxed);
     }
