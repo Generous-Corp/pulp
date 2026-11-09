@@ -144,7 +144,8 @@
     ],
     "platform_library_stems": {
         "darwin": [
-            "pulp-bundled-fonts"
+            "pulp-bundled-fonts",
+            "pulp-native"
         ],
         "linux": [
             "pulp-bundled-fonts",

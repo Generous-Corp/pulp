@@ -1234,7 +1234,10 @@ and only some of them run in `gates.sh`:
 
 Keep one include root per module. The Doxygen parity check accepts a second
 public install root only by name, so a module that installs `audio/include`
-beside `include` fails it.
+beside `include` fails it. The same holds for a package outside `core/`
+(`integrations/pulp-native/include`): name its root in
+`doxygen_installed_header_check.py` and add it to the Doxyfile `INPUT`, or the
+check reports "unsupported independent public-header install authority".
 
 ## `gates.sh` does NOT run the capability check — adding a public header passes pre-push and fails in CI
 
