@@ -1,6 +1,6 @@
 #pragma once
 
-// rmlui_metal_golden.hpp — what the Metal-renderer golden test and its
+// rmlui_metal_golden.hpp: what the Metal-renderer golden test and its
 // soft-renderer reference writer share: the documents, the frame sizes, the
 // font, the reference files, and the comparison.
 //

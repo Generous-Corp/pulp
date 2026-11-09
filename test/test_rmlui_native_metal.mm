@@ -1,4 +1,4 @@
-// test_rmlui_native_metal.mm — Vellum's Metal RmlUi renderer on an
+// test_rmlui_native_metal.mm: Vellum's Metal RmlUi renderer on an
 // RmlUiSurface: a frame drawn through the surface matches Vellum's
 // SoftRenderer within the tolerance Vellum holds the Metal renderer to, at
 // backing scale 1 and 2, and the hooks give the renderer the whole drawable

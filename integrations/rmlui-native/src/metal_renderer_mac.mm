@@ -1,4 +1,4 @@
-// metal_renderer_mac.mm — Vellum's Metal RmlUi renderer on an RmlUiSurface.
+// metal_renderer_mac.mm: Vellum's Metal RmlUi renderer on an RmlUiSurface.
 // Compiled with ARC.
 
 #include <pulp/rmlui_native/metal_renderer.hpp>

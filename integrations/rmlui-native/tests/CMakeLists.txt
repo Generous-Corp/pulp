@@ -35,7 +35,7 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain AND TARGET pulp-rmlui-nati
         COMMAND pulp-rmlui-soft-reference ${_pulp_rmlui_refs})
     set_tests_properties(rmlui-soft-references PROPERTIES
         FIXTURES_SETUP rmlui_soft_references
-        LABELS "native-surface;rmlui")
+        LABELS rmlui)
 
     add_executable(pulp-test-rmlui-native-metal
         ${PROJECT_SOURCE_DIR}/test/test_rmlui_native_metal.mm)
@@ -47,5 +47,5 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain AND TARGET pulp-rmlui-nati
     target_link_libraries(pulp-test-rmlui-native-metal PRIVATE
         pulp::rmlui-native-metal Catch2::Catch2WithMain "-framework AppKit" "-framework Metal")
     catch_discover_tests(pulp-test-rmlui-native-metal
-        PROPERTIES LABELS "native-surface;rmlui" FIXTURES_REQUIRED rmlui_soft_references)
+        PROPERTIES LABELS rmlui FIXTURES_REQUIRED rmlui_soft_references)
 endif()

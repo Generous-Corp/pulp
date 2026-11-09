@@ -1,4 +1,4 @@
-// rmlui_metal_soft_reference.cpp — writes the reference frames the Metal
+// rmlui_metal_soft_reference.cpp: writes the reference frames the Metal
 // renderer golden test compares against: each document rendered by Vellum's
 // SoftRenderer at each frame size, as premultiplied RGBA8 files.
 //
