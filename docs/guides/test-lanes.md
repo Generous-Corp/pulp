@@ -116,6 +116,14 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   `wide-non-native-selftest`. Extra time is capped at ten minutes (batches stop
   starting; the rest are listed as skipped), and the merge group still runs
   everything.
+- **The clean-merge lane** — a pull-request head that is exactly a clean
+  merge of `main` into a head whose full macOS lane passed runs only configure,
+  `pr-fast` (minus `needs-build`) and `pr-guard`: no build, no tests the pull
+  request reaches. Its tier notice says `clean-merge`. The merge group still
+  builds and runs the full suite on the commit that lands. It ships in shadow
+  (`PULP_CLEAN_MERGE_LANE_MODE`); the trigger, the fail-closed rule and the
+  enforcement window are in the local CI guide, "A clean merge of main takes
+  the contract lane", and decisions contract row 31.
 - **`pr-fast`** — additive, never exclusive: a static repository contract
   (lint, drift, registry-completeness, generated-manifest check) that also runs
   on the pull request head, where the rest of the suite does not. Members are

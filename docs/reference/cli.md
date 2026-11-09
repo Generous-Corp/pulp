@@ -2368,8 +2368,7 @@ corrupt, and points at `inspect` for the header facts.
 Both verbs produce an image an agent or a person can look at, plus a JSON
 sidecar that says exactly what was drawn. They are **display only**: nothing
 they emit participates in any verdict, gate or comparison. Measurements come
-from `audio validate`, `audio compare` and the analysis library; the images
-exist so a render can be seen without a DAW.
+from `audio validate`, `audio compare` and the analysis library.
 
 ```bash
 pulp audio spectrogram take.wav --png take.png --scale log --start 12 --end 18
@@ -2412,10 +2411,9 @@ zero-padded. A range shorter than one FFT exits `2` with the fix in the
 message.
 
 Waveform flags: `--select <start>,<end>` shades a selection in seconds; both
-ends must lie inside the rendered range. Peaks
-come from `WaveformOverview` at a base resolution chosen for the plot width;
-a column whose peak reaches full scale carries a red marker at the top and
-bottom edge.
+ends must lie inside the rendered range. Peaks come from `WaveformOverview` at
+a base resolution chosen for the plot width; a column whose peak reaches full
+scale carries a red marker at the top and bottom edge.
 
 Exit codes: `0` rendered; `1` usage or I/O error; `2` nothing to render (an
 input with no frames, or a range shorter than one FFT).
