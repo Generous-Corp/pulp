@@ -231,6 +231,17 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_mac_held_button_cursor.mm
         LIBRARIES pulp::view)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # MainThreadScope / MainThreadTimer: posting, owner-gone drops, and firing
+    # inside the menu-tracking and modal-panel run-loop modes. Its own process,
+    # because the cases measure the main run loop's wake-ups.
+    pulp_add_test_suite(pulp-test-platform-main-thread
+        SOURCES test_platform_main_thread.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-main-thread PRIVATE
+        "-framework AppKit"
+        "-framework CoreFoundation")
+endif()
 if(APPLE)
     # Per-binary unique Objective-C class names. The fixture dylib links its own
     # copy of pulp-platform, standing in for a second plug-in in the process.
