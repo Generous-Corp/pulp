@@ -119,3 +119,36 @@ inter-node frame transport. Graph edges still carry audio samples. It also does
 not define a persisted canonical frame encoding, assets schema, stage parameter
 automation, or G-5 granular time-index. These are remaining G-10 contracts; this
 slice must not be cited as proof of the full G-10 phase or the A3 flagship.
+
+## Row 16 output-clock evidence packet (2026-11-09)
+
+The bounded row-16 control was reproduced from `origin/main` at
+`2891a38389086e131bb91953d9bea892069e679f` in the isolated
+`evidence/g10-row16-output-clock` worktree. The focused Release target was built
+with `pulp build --target pulp-test-routed-spectral-ports`; the resulting
+`pulp-test-routed-spectral-ports` binary has SHA-256
+`79c874222aa023ccb11161b392bc0ab1c44075b81ff1c5395c0e9341355bad36`.
+
+The positive routed fault test (`[spectral-output-clock]`) passed 9 assertions.
+The existing unchanged-output/prefix and sibling control
+(`[spectral-fatal-prefix]`) passed 5,176 assertions, the callback allocation
+probe (`[spectral-allocation]`) passed 12 assertions with zero allocations, and
+the zero-output fault control (`[spectral-zero]`) passed 520 assertions.
+
+A temporary mutation replaced the output-clock bound predicate in
+`core/host/src/spectral_graph_internal.hpp` with `false`. Its mutated header
+SHA-256 was
+`c94ab18d6d4f73ab3d77b01fedb257e8595941cc88146b230b13646abba7631c`; the
+mutated focused binary SHA-256 was
+`c836d51ec5095942533b946bf537559f45d1c3da4803e2c9b56745b046e06368`. The
+positive test then failed as required (exit 42: `first_error` remained
+`None`, 5 of 6 assertions passed). Restoring the header and rebuilding returned
+the original header and binary hashes and restored all four controls to PASS.
+The mutation was temporary and no production source changed.
+
+The complete machine-readable receipt is
+`docs/validation/g10-spectral/row16-output-clock-receipt.json` (SHA-256
+`a4bc2d66d7f15a05ed0d328cac34410c3d8416d5d79c367a3d924dd877a8f71d`). This
+packet qualifies the named output-clock/fault boundary and the existing
+allocation and unchanged-output controls only; full G-10 and A3 status remains
+PARTIAL.
