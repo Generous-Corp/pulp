@@ -424,6 +424,47 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
                 "patch",
             )
 
+    def test_vendored_sources_are_an_sdk_release_surface(self) -> None:
+        # Vendored sources compiled into the SDK libraries, and the patches
+        # carried on them, ship in the SDK even though they sit outside
+        # core/. A fix to one of them must reach an SDK release on the patch
+        # lane. Skia headers are installed and included by public Pulp
+        # headers, so a change there is on the minor lane. Fonts that are not
+        # embedded stay outside the surface.
+        vbc = self._import_gate_module("version_bump_check")
+        cfg_path = VBC.parents[2] / "tools/scripts/versioning.json"
+        surface = next(s for s in vbc.load_config(cfg_path).surfaces
+                       if s.name == "sdk")
+        with mock.patch.object(
+            vbc, "git_diff_ignore_whitespace_nonempty", return_value=True
+        ):
+            expected_levels = {
+                "external/dr_libs/dr_mp3.h": "patch",
+                "external/dr_libs/stb_vorbis.c": "patch",
+                "external/miniz/miniz.c": "patch",
+                "external/pugixml/pugixml.cpp": "patch",
+                "external/nanosvg/nanosvgrast.h": "patch",
+                "external/tweetnacl/tweetnacl.c": "patch",
+                "external/cpp-httplib/httplib.h": "patch",
+                "external/lilv/lilv/src/world.c": "patch",
+                "external/fonts/Inter-Regular.ttf": "patch",
+                "external/fonts/NotoColorEmoji.ttf": "patch",
+                "tools/deps/patches/dr_libs/0001-dr_mp3-64-bit-xing-frame-count.patch": "patch",
+                "tools/cmake/PulpPatchChoc.cmake": "patch",
+                "external/skia-build/include/core/SkCanvas.h": "minor",
+                "external/fonts/FunnelDisplay-VariableFont_wght.ttf": "none",
+                "external/fonts/README.md": "none",
+                "external/vst3sdk/CMakeLists.txt": "none",
+            }
+            for path, expected in expected_levels.items():
+                with self.subTest(path=path):
+                    self.assertEqual(
+                        vbc.heuristic_for_surface(
+                            surface, [path], "base", "head"
+                        ),
+                        expected,
+                    )
+
     def test_version_bump_missing_config_returns_usage_error(self) -> None:
         code, out = _run(
             [
@@ -439,6 +480,7 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_RULES = "tools/cmake/PulpInstallRules.cmake"
+PATCH_MANIFEST = "tools/deps/patches.json"
 _INSTALL_CALL = re.compile(r"install\s*\((.*?)\n\s*\)", re.S)
 _SHIPPED_MODULE = re.compile(r'/tools/cmake/(Pulp[A-Za-z0-9_]*\.cmake)"')
 
@@ -457,14 +499,27 @@ def installed_pulp_modules(install_rules_text: str) -> set[str]:
     return shipped
 
 
+def source_patch_modules() -> set[str]:
+    """CMake modules that rewrite fetched dependency source at configure time.
+
+    tools/deps/patches.json names them under configure_time_patches. They are
+    not installed, but the source they rewrite is compiled into the SDK, so
+    they are sdk trigger paths without shipping.
+    """
+    manifest = json.loads((REPO_ROOT / PATCH_MANIFEST).read_text(encoding="utf-8"))
+    return {dep["configure_time_patches"]["file"] for dep in manifest["dependencies"]
+            if "configure_time_patches" in dep}
+
+
 def sdk_module_drift(install_rules_text: str, sdk_trigger_paths: list[str]) -> tuple[set[str], set[str]]:
     """(shipped modules the sdk surface does not trigger on,
     listed tools/cmake/Pulp*.cmake modules that do not ship)."""
     shipped = installed_pulp_modules(install_rules_text)
     listed = {p for p in sdk_trigger_paths
               if re.fullmatch(r"tools/cmake/Pulp[A-Za-z0-9_]*\.cmake", p)}
-    # The install rules file defines what ships rather than shipping itself.
-    return shipped - listed, listed - shipped - {INSTALL_RULES}
+    # The install rules file defines what ships rather than shipping itself,
+    # and a source-patch module changes compiled SDK code without shipping.
+    return shipped - listed, listed - shipped - {INSTALL_RULES} - source_patch_modules()
 
 
 class SdkShippedCmakeModulesTests(unittest.TestCase):
@@ -483,6 +538,13 @@ class SdkShippedCmakeModulesTests(unittest.TestCase):
         self.assertEqual(unshipped, set(), "an sdk trigger path for a module the SDK does not install")
         self.assertGreater(len(installed_pulp_modules(self.rules)), 30,
                            "the install-list parser found almost nothing; it is broken")
+
+    def test_every_source_patch_module_is_an_sdk_trigger(self) -> None:
+        patchers = source_patch_modules()
+        self.assertIn("tools/cmake/PulpPatchChoc.cmake", patchers,
+                      "patches.json lists no configure-time patch module; the reader is broken")
+        self.assertEqual(patchers - set(self.triggers), set(),
+                         "rewrites SDK source at configure time but is not an sdk trigger path")
 
     def test_a_planted_install_or_a_dropped_trigger_is_reported(self) -> None:
         planted = self.rules + (
