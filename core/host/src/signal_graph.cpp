@@ -1519,6 +1519,7 @@ void SignalGraph::clear() {
     cancel_swap_edit_locked_();
     connections_.clear();
     connection_identities_.clear();
+    graph_event_edge_.reset();
     nodes_.clear();
     processor_nodes_.clear();
     sample_region_definitions_.clear();

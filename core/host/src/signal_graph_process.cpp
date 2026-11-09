@@ -86,8 +86,10 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         std::shared_ptr<GraphAuthoredEventLane<>> lane;
         bool active = false;
         ~GraphEventBlockGuard() {
-            if (active)
-                (void)lane->end_block();
+            if (!active)
+                return;
+            if (lane->end_block() != GraphEventResult::Accepted)
+                lane->abort_block();
         }
     } graph_event_guard{cg->graph_event_lane};
     if (cg->graph_event_lane) {

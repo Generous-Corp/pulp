@@ -3347,6 +3347,10 @@ void SignalGraph::adopt_candidate_authoring_locked_(SignalGraph& candidate) {
     }
 
     this->cancel_swap_edit_locked_();
+    if (candidate.graph_event_edge_ &&
+        !candidate.has_path_locked_(candidate.graph_event_edge_->producer,
+                                    candidate.graph_event_edge_->consumer))
+        candidate.graph_event_edge_.reset();
     this->nodes_ = std::move(candidate.nodes_);
     this->processor_nodes_ = std::move(candidate.processor_nodes_);
     this->connections_ = std::move(candidate.connections_);

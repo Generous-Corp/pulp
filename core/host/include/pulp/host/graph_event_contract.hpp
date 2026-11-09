@@ -493,8 +493,16 @@ class GraphAuthoredEventLane final {
             if (pending_[i].sample >= end)
                 ++i;
             else {
-                if (trace_size_ < kRecordCapacity)
+                const auto budget = budget_index_(pending_[i].sample);
+                auto& accepted = accepted_by_sample_[budget];
+                if (accepted >= MaxAcceptedPerSample) {
+                    increment_(counters_.overflow);
+                } else if (trace_size_ < kRecordCapacity) {
                     insert_sorted_(records_, trace_size_, pending_[i]);
+                    ++accepted;
+                } else {
+                    increment_(counters_.overflow);
+                }
                 pending_[i] = pending_[pending_size_ - 1];
                 --pending_size_;
             }
@@ -509,7 +517,9 @@ class GraphAuthoredEventLane final {
         current_sample_ = block_start_;
         attempts_ = accepted_ = 0;
         attempt_closed_ = false;
-        reset_budget_for_sample_(current_sample_);
+        reset_attempt_budget_for_sample_(current_sample_);
+        accepted_ = accepted_by_sample_[budget_index_(current_sample_)];
+        counters_.accepted = accepted_;
         block_mode_ = true;
         phase_ = 1;
         return GraphEventResult::Accepted;
@@ -529,7 +539,9 @@ class GraphAuthoredEventLane final {
         current_sample_ = block_start_ + offset;
         attempts_ = accepted_ = 0;
         attempt_closed_ = false;
-        reset_budget_for_sample_(current_sample_);
+        reset_attempt_budget_for_sample_(current_sample_);
+        accepted_ = accepted_by_sample_[budget_index_(current_sample_)];
+        counters_.accepted = accepted_;
         current_received_begin_ = current_received_count_ = 0;
         phase_ = 1;
         return GraphEventResult::Accepted;
@@ -596,6 +608,10 @@ class GraphAuthoredEventLane final {
         }
         const auto block_end = block_start_ + block_frames_;
         if (target_sample >= block_end) {
+            if (accepted >= MaxAcceptedPerSample) {
+                increment_(counters_.overflow);
+                return GraphEventResult::Overflow;
+            }
             if (target_sample - block_end >= MaxFrames) {
                 increment_(counters_.future);
                 return refuse(GraphEventResult::Future);
@@ -757,10 +773,9 @@ class GraphAuthoredEventLane final {
             return static_cast<std::size_t>(current_sample_ - block_start_);
         return 0;
     }
-    void reset_budget_for_sample_(std::uint64_t sample) noexcept {
+    void reset_attempt_budget_for_sample_(std::uint64_t sample) noexcept {
         const auto index = budget_index_(sample);
         attempts_by_sample_[index] = 0;
-        accepted_by_sample_[index] = 0;
     }
     void test_set_cursor_(std::uint64_t cursor) noexcept {
         cursor_ = cursor;

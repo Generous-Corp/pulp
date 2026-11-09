@@ -587,12 +587,49 @@ TEST_CASE("G5 lane budgets attempts and accepted records per canonical sample",
     REQUIRE(lane.end_block() == GraphEventResult::Accepted);
 }
 
+TEST_CASE("G5 lane enforces accepted cap across lookahead and block boundary",
+          "[host][graph][g5][events][queued][negative-control]") {
+    GraphAuthoredEventLane<4> lane;
+    REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_producer_block() == GraphEventResult::Accepted);
+    for (std::uint16_t payload = 0; payload < 8; ++payload)
+        REQUIRE(lane.emit_at(1, 7, payload, 1) == GraphEventResult::Accepted);
+    REQUIRE(lane.emit_at(1, 7, 8, 1) == GraphEventResult::Overflow);
+    REQUIRE(lane.begin_consumer_block() == GraphEventResult::Accepted);
+    REQUIRE(lane.end_block() == GraphEventResult::Accepted);
+
+    REQUIRE(lane.begin_block(1, 1, 1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_producer_block() == GraphEventResult::Accepted);
+    // The eight records moved from pending already consume sample one's
+    // accepted budget; a new producer record cannot exceed it.
+    REQUIRE(lane.emit_at(1, 7, 9, 1) == GraphEventResult::Overflow);
+    REQUIRE(lane.begin_consumer_block() == GraphEventResult::Accepted);
+    REQUIRE(lane.received_block().size() == 8);
+    REQUIRE(lane.end_block() == GraphEventResult::Accepted);
+}
+
 TEST_CASE("G5 lane aborts a failed phase and recovers on the next block",
           "[host][graph][g5][events][negative-control]") {
     GraphAuthoredEventLane<4> lane;
     REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_consumer_block() == GraphEventResult::InvalidPhase);
+    lane.abort_block();
+    REQUIRE_FALSE(lane.active());
+    REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_producer_block() == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_consumer_block() == GraphEventResult::Accepted);
+    REQUIRE(lane.end_block() == GraphEventResult::Accepted);
+}
+
+TEST_CASE("G5 lane aborts a producer-only early exit before the next block",
+          "[host][graph][g5][events][negative-control]") {
+    GraphAuthoredEventLane<4> lane;
+    REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_producer_block() == GraphEventResult::Accepted);
+    REQUIRE(lane.end_block() == GraphEventResult::InvalidPhase);
     lane.abort_block();
     REQUIRE_FALSE(lane.active());
     REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);

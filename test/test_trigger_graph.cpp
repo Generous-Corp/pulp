@@ -181,6 +181,37 @@ TEST_CASE("Graph-authored Custom callbacks receive ordered writer and reader han
     REQUIRE(destination[0] == 77.0f);
 }
 
+TEST_CASE("Graph-authored event edge clears when its feed-forward path is disconnected",
+          "[g5][events][wiring][negative-control]") {
+    SignalGraph graph;
+    CustomNodeType type;
+    type.type_id = "test.g5.graph-event-disconnect";
+    type.num_input_ports = type.num_output_ports = 1;
+    type.process_events = [](auto&, const auto&, int, const CustomNodeEventBlock&) {};
+    REQUIRE(graph.register_custom_node_type(type));
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    const auto producer = graph.add_custom_node(type.type_id);
+    const auto bridge = graph.add_custom_node(type.type_id);
+    const auto consumer = graph.add_custom_node(type.type_id);
+    REQUIRE(graph.connect(input, 0, producer, 0));
+    REQUIRE(graph.connect(producer, 0, bridge, 0));
+    REQUIRE(graph.connect(bridge, 0, consumer, 0));
+    REQUIRE(graph.connect(consumer, 0, output, 0));
+    REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted);
+    REQUIRE(graph.graph_event_edge().has_value());
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit != nullptr);
+    REQUIRE(edit->prepare(48000.0, 4) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    REQUIRE(graph.graph_event_edge().has_value());
+
+    REQUIRE(graph.disconnect(producer, 0, bridge, 0));
+    REQUIRE_FALSE(graph.graph_event_edge().has_value());
+}
+
+
 TEST_CASE("Graph-authored event admission refuses unsupported roles and fanout",
           "[g5][events][wiring][negative-control]") {
     SignalGraph graph;

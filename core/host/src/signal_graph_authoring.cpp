@@ -701,6 +701,9 @@ bool SignalGraph::disconnect(NodeId source, PortIndex source_port, NodeId dest,
     if (it == connections_.end())
         return false;
     erase_connection_at_locked_(static_cast<std::size_t>(std::distance(connections_.begin(), it)));
+    if (graph_event_edge_ &&
+        !has_path_locked_(graph_event_edge_->producer, graph_event_edge_->consumer))
+        graph_event_edge_.reset();
     invalidate_live_locked_();
     return true;
 }
@@ -724,6 +727,9 @@ bool SignalGraph::disconnect_modulation(NodeId source, PortIndex source_port, No
     if (it == connections_.end())
         return false;
     erase_connection_at_locked_(static_cast<std::size_t>(std::distance(connections_.begin(), it)));
+    if (graph_event_edge_ &&
+        !has_path_locked_(graph_event_edge_->producer, graph_event_edge_->consumer))
+        graph_event_edge_.reset();
     invalidate_live_locked_();
     return true;
 }
