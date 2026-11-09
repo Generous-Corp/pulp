@@ -431,8 +431,6 @@ void finish(Builder& b, const Envelope& env, Walk& walk) {
         verdict.reason = "zero channels";
     } else if (facts->sample_rate == 0u) {
         verdict.reason = "zero sample rate";
-    } else if (facts->total_frames == 0u) {
-        verdict.reason = "zero frames";
     } else if (!whole_frames) {
         verdict.reason = "data payload is not a whole number of frames";
     } else {

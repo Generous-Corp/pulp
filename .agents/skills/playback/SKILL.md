@@ -1748,3 +1748,15 @@ expect them rather than treating them as a lost optimisation:
 `requires_generation_refresh` (offline Stretch artifacts whose publication
 provenance is generation-specific) and any capacity refusal, which fails the
 whole request instead of completing the track.
+
+## A zero-frame WAV decodes; the asset pool is what refuses it
+
+`audio::decode_wav` returns a zero-frame RIFF/WAVE (an empty `data` chunk) as
+a successful decode with the right rate and channel count and no samples, so
+`DecodedAudioAssetPool::decode_wav` hands back an asset with
+`audio->num_frames() == 0`. The refusal lives in `valid_audio`: `create()`
+rejects the asset with `InvalidAsset`, and `resolve_audio_media` rejects it
+again at clip compile. Do not add a third refusal in `decode_wav` to "fix" a
+zero-frame fixture, and do not read `decoded.has_value()` as "placeable" —
+`pulp-test-playback-audio-renderer`'s "refuses a zero-frame WAV asset at pool
+creation" pins the seam.
