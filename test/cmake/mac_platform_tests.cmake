@@ -314,3 +314,21 @@ if(TARGET pulp-native)
         pulp::native Catch2::Catch2WithMain "-framework AppKit" "-framework Metal")
     catch_discover_tests(pulp-test-native-surface-input)
 endif()
+if(TARGET pulp-native)
+    # The installed SDK carries the native surface: an outside project finds
+    # Pulp with COMPONENTS native and links MetalSurface, FramePump and input.
+    add_test(NAME cmake-native-sdk-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            "-DPULP_PARENT_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_native_sdk_consumer.cmake)
+    set_tests_properties(cmake-native-sdk-consumer PROPERTIES
+        LABELS "cmake;sdk;native-surface"
+        COST 60
+        TIMEOUT 600)
+endif()
