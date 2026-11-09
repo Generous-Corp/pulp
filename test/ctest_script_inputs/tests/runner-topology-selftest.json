@@ -1,0 +1,11 @@
+{
+ "name": "runner-topology-selftest",
+ "record": {
+  "entry": "tools/scripts/test_runner_topology_check.py",
+  "inputs": [
+   "tools/scripts/runner_topology.json",
+   "tools/scripts/test_runner_topology_check.py"
+  ],
+  "kind": "python"
+ }
+}

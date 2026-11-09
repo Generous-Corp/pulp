@@ -1,0 +1,10 @@
+{
+ "name": "fleet-snapshot-selftest",
+ "record": {
+  "entry": "tools/scripts/test_fleet_snapshot.py",
+  "inputs": [
+   "tools/scripts/test_fleet_snapshot.py"
+  ],
+  "kind": "python"
+ }
+}

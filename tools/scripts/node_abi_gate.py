@@ -6,6 +6,14 @@ Within a major node ABI version, new virtual methods must be appended at the
 end of the class vtable. Inserting, removing, reordering, or re-signaturing existing virtuals
 changes the node contract.
 
+The editor-host interfaces (Editor, EditorContext, EditorFactory and the
+NativeSurfaceHost extension) are FROZEN rather than append-only. Each side is
+built into a different binary (a UI package, a format adapter), so even an
+appended virtual breaks a prebuilt peer. Their virtual set must not change at
+all; the contract grows through new `EditorContext::query_extension()` ids
+instead. A frozen surface that does not exist at the base yet is new, and
+passes.
+
 The gate compares the current working tree against the merge-base of the git
 base and HEAD, and requires the base virtual-method declarations to remain a
 prefix of the current order. Reading the base tip instead would fail a branch
@@ -26,18 +34,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gate_common import resolve_git_comparison, strip_c_comments  # noqa: E402
 
 
+APPEND = "append"
+FROZEN = "frozen"
+
+_EDITOR_HOST = "core/format/include/pulp/format/editor_host.hpp"
+
 SURFACES = (
     (
         "Processor",
         "core/format/include/pulp/format/processor.hpp",
+        APPEND,
     ),
     (
         "PluginSlot",
         "core/host/include/pulp/host/plugin_slot.hpp",
+        APPEND,
     ),
     (
         "GpuAudioNode",
         "core/gpu_audio/include/pulp/gpu_audio/gpu_audio_node.hpp",
+        APPEND,
+    ),
+    ("Editor", _EDITOR_HOST, FROZEN),
+    ("EditorContext", _EDITOR_HOST, FROZEN),
+    ("EditorFactory", _EDITOR_HOST, FROZEN),
+    (
+        "NativeSurfaceHost",
+        "core/format/include/pulp/format/native_surface_host.hpp",
+        FROZEN,
     ),
 )
 
@@ -240,12 +264,37 @@ def render_mismatch(surface: str, old: list[VirtualDecl], new: list[VirtualDecl]
     return "\n".join(lines)
 
 
-def check_surface(root: Path, base: str, class_name: str, rel_path: str) -> str | None:
+def render_frozen_mismatch(surface: str, old: list[VirtualDecl], new: list[VirtualDecl]) -> str:
+    old_sigs = [v.signature for v in old]
+    new_sigs = [v.signature for v in new]
+    lines = [f"{surface}: virtual set is frozen and changed"]
+    for sig in new_sigs:
+        if sig not in old_sigs:
+            lines.append(f"  added:   {sig}")
+    for sig in old_sigs:
+        if sig not in new_sigs:
+            lines.append(f"  removed: {sig}")
+    if sorted(old_sigs) == sorted(new_sigs):
+        lines.append("  the same virtuals in a different order")
+    lines.append(
+        "  allowed change: none. A peer binary built against the base calls "
+        "through this vtable; add a capability under a new "
+        "EditorContext::query_extension() id instead"
+    )
+    return "\n".join(lines)
+
+
+def check_surface(
+    root: Path, base: str, class_name: str, rel_path: str, policy: str = APPEND
+) -> str | None:
+    current_path = root / rel_path
     old_text = git_show(base, rel_path)
     if old_text is None:
+        if policy == FROZEN and current_path.exists():
+            # A new interface: nothing built against the base depends on it.
+            return None
         return f"{class_name}: could not read {rel_path} at {base}"
 
-    current_path = root / rel_path
     if not current_path.exists():
         return f"{class_name}: current file missing: {rel_path}"
 
@@ -254,6 +303,13 @@ def check_surface(root: Path, base: str, class_name: str, rel_path: str) -> str 
         new = virtual_order(current_path.read_text(), class_name)
     except ValueError as exc:
         return f"{class_name}: {exc}"
+
+    if policy == FROZEN:
+        if [_comparison_signature(v.signature) for v in new] != [
+            _comparison_signature(v.signature) for v in old
+        ]:
+            return render_frozen_mismatch(class_name, old, new)
+        return None
 
     if [_comparison_signature(v.signature) for v in new[:len(old)]] != [
         _comparison_signature(v.signature) for v in old
@@ -302,13 +358,16 @@ def main(argv: list[str] | None = None) -> int:
     allowed = acknowledged_breaks(root, base)
     findings = [
         finding
-        for class_name, rel_path in SURFACES
+        for class_name, rel_path, policy in SURFACES
         if class_name not in allowed
-        and (finding := check_surface(root, base, class_name, rel_path))
+        and (finding := check_surface(root, base, class_name, rel_path, policy))
     ]
 
     if not findings:
-        print("node_abi_gate: Processor, PluginSlot, and GpuAudioNode virtual order is additive-only")
+        print(
+            "node_abi_gate: Processor, PluginSlot, and GpuAudioNode virtual order is "
+            "additive-only; the editor-host interfaces are unchanged"
+        )
         return 0
 
     print("\n\n".join(findings), file=sys.stderr)

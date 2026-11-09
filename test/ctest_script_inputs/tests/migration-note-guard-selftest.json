@@ -1,0 +1,11 @@
+{
+ "name": "migration-note-guard-selftest",
+ "record": {
+  "entry": "tools/scripts/test_migration_note_guard.py",
+  "inputs": [
+   "tools/scripts/migration_note_guard.py",
+   "tools/scripts/test_migration_note_guard.py"
+  ],
+  "kind": "python"
+ }
+}

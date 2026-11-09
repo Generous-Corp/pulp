@@ -1,0 +1,10 @@
+{
+ "name": "test-file-paths-lint",
+ "record": {
+  "entry": "tools/scripts/check_test_file_paths.py",
+  "inputs": [
+   "tools/scripts/check_test_file_paths.py"
+  ],
+  "kind": "python"
+ }
+}

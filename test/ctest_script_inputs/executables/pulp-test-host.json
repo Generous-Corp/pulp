@@ -1,0 +1,17 @@
+{
+ "name": "pulp-test-host",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_host.cpp",
+   "test/test_plugin_slot_au.mm"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

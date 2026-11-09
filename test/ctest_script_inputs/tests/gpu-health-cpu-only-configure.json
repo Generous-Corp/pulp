@@ -1,0 +1,10 @@
+{
+ "name": "gpu-health-cpu-only-configure",
+ "record": {
+  "entry": "test/cmake/test_gpu_health_cpu_only_configure.sh",
+  "inputs": [
+   "test/cmake/test_gpu_health_cpu_only_configure.sh"
+  ],
+  "kind": "shell"
+ }
+}

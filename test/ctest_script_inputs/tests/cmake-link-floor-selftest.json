@@ -1,0 +1,10 @@
+{
+ "name": "cmake-link-floor-selftest",
+ "record": {
+  "entry": "tools/scripts/link_floor_selftest.py",
+  "inputs": [
+   "tools/scripts/link_floor_selftest.py"
+  ],
+  "kind": "python"
+ }
+}

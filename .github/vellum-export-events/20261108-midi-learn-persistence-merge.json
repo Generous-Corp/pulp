@@ -3,7 +3,7 @@
   "event_id": "20261108-midi-learn-persistence-merge",
   "kind": "exported-path-change",
   "created_at": "2026-11-08T07:15:00Z",
-  "receipt_export_id": "20261102-0f616a440cec",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
   "paths": [
     "core/state/include/pulp/state/midi_decode.hpp",
     "core/state/include/pulp/state/midi_learn_engine.hpp",
@@ -14,5 +14,5 @@
     "core/state/src/midi_learn_persistence.cpp"
   ],
   "vellum_inherits": false,
-  "rationale": "MIDI Learn engine, mapping persistence and undo, plus equality operators added to two decode types. None is included by any file in the exported closure, so the next re-export does not carry them."
+  "rationale": "MIDI Learn engine, mapping persistence and undo, plus equality operators added to two decode types. Re-derived against pinned receipt 20261107-f0ac0a4ff392: its closure carries no core/state file and no file in it includes any of these headers, so the next re-export does not carry them. The new source is listed only in core/state/CMakeLists.txt, which the export receipt does not carry. This single event supersedes the earlier 20261107-midi-learn-persistence-not-inherited record for the same range."
 }

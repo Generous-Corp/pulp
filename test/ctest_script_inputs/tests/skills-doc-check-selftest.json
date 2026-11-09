@@ -1,0 +1,11 @@
+{
+ "name": "skills-doc-check-selftest",
+ "record": {
+  "entry": "tools/scripts/test_skills_doc_check.py",
+  "inputs": [
+   "tools/scripts/skills_doc_check.py",
+   "tools/scripts/test_skills_doc_check.py"
+  ],
+  "kind": "python"
+ }
+}

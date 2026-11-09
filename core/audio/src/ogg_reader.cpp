@@ -99,6 +99,13 @@ public:
         return ext == ".ogg" || ext == ".oga";
     }
     std::string format_name() const override { return "OGG Vorbis"; }
+    FormatCapabilities capabilities() const override {
+        return {.format_name = "OGG Vorbis",
+                .extensions = {".ogg", ".oga"},
+                .max_channels = 255,
+                .compressed = true,
+                .lossless = false};
+    }
 };
 
 std::unique_ptr<FormatReader> create_ogg_reader() {

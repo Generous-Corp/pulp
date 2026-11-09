@@ -1,0 +1,12 @@
+{
+ "name": "build-dir-lock-selftest",
+ "record": {
+  "entry": "tools/ci/test_build_dir_lock.py",
+  "inputs": [
+   "tools/ci/build_dir_lock.py",
+   "tools/ci/test_build_dir_lock.py",
+   "tools/scripts/process_liveness.py"
+  ],
+  "kind": "python"
+ }
+}

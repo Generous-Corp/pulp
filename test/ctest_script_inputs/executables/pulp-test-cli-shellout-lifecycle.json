@@ -1,0 +1,24 @@
+{
+ "name": "pulp-test-cli-shellout-lifecycle",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [
+   ".claude-plugin/plugin.json"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli"
+  ],
+  "sources": [
+   "test/test_cli_shellout_lifecycle.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_shellout_helpers.hpp",
+   "test/test_cli_shellout_lifecycle.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

@@ -1,0 +1,11 @@
+{
+ "name": "interchange-concepts-drift",
+ "record": {
+  "entry": "tools/scripts/schema_drift_check.py",
+  "inputs": [
+   "core/interchange/include/pulp/interchange/generated/concepts.hpp",
+   "tools/scripts/schema_drift_check.py"
+  ],
+  "kind": "python"
+ }
+}

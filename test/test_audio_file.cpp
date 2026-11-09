@@ -17,6 +17,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <utility>
 
@@ -388,10 +389,9 @@ static void append_aiff_chunk(std::vector<unsigned char>& bytes,
     }
 }
 
-static std::vector<unsigned char> make_comm_chunk(uint16_t channels,
-                                                  uint32_t frames,
-                                                  uint16_t bits_per_sample,
-                                                  bool aifc = false) {
+static std::vector<unsigned char> make_comm_chunk(uint16_t channels, uint32_t frames,
+                                                  uint16_t bits_per_sample, bool aifc = false,
+                                                  std::string_view compression = "NONE") {
     std::vector<unsigned char> comm;
     append_be16(comm, channels);
     append_be32(comm, frames);
@@ -399,9 +399,24 @@ static std::vector<unsigned char> make_comm_chunk(uint16_t channels,
     auto sample_rate = extended_sample_rate_44100();
     comm.insert(comm.end(), sample_rate.begin(), sample_rate.end());
     if (aifc) {
-        comm.insert(comm.end(), {'N', 'O', 'N', 'E'});
+        REQUIRE(compression.size() == 4);
+        comm.insert(comm.end(), compression.begin(), compression.end());
     }
     return comm;
+}
+
+// Reverse each sample point's bytes: the AIFF-C `sowt` spelling of the same
+// big-endian PCM stream.
+static std::vector<unsigned char> byte_swapped_pcm(const std::vector<unsigned char>& big_endian,
+                                                   uint16_t bits_per_sample) {
+    const size_t width = bits_per_sample / 8;
+    REQUIRE(big_endian.size() % width == 0);
+    std::vector<unsigned char> little_endian(big_endian.size());
+    for (size_t sample = 0; sample < big_endian.size(); sample += width)
+        std::reverse_copy(big_endian.begin() + static_cast<std::ptrdiff_t>(sample),
+                          big_endian.begin() + static_cast<std::ptrdiff_t>(sample + width),
+                          little_endian.begin() + static_cast<std::ptrdiff_t>(sample));
+    return little_endian;
 }
 
 static std::vector<unsigned char> make_ssnd_chunk_with_offset(
@@ -755,8 +770,8 @@ TEST_CASE("Read nonexistent file returns nullopt", "[audio][file]") {
     REQUIRE_FALSE(info.has_value());
 }
 
-TEST_CASE("WAV reader reports zero-frame metadata but rejects loading data",
-          "[audio][file]") {
+TEST_CASE("WAV reader decodes a zero-frame file to its metadata and no audio",
+          "[audio][file][zero-frames]") {
     auto path = unique_temp_audio_path("_zero_frames.wav");
     std::filesystem::remove(path);
 
@@ -788,7 +803,35 @@ TEST_CASE("WAV reader reports zero-frame metadata but rejects loading data",
     REQUIRE(info->num_frames == 0);
     REQUIRE(info->duration_seconds == 0.0);
 
-    REQUIRE_FALSE(read_audio_file(path.string()).has_value());
+    // A zero-frame WAV is a valid file: it decodes to its rate and channel
+    // count with no samples, through the direct reader and the registry alike.
+    auto direct = read_audio_file(path.string());
+    REQUIRE(direct.has_value());
+    REQUIRE(direct->sample_rate == 44100);
+    REQUIRE(direct->num_channels() == 1);
+    REQUIRE(direct->num_frames() == 0);
+    REQUIRE(direct->empty());
+
+    bool admitted = false;
+    auto admitted_read = read_audio_file(path.string(), [&](const AudioFileInfo& seen) {
+        admitted = seen.num_frames == 0 && seen.num_channels == 1;
+        return true;
+    });
+    REQUIRE(admitted);
+    REQUIRE(admitted_read.has_value());
+    REQUIRE(admitted_read->empty());
+
+    auto via_registry = FormatRegistry::instance().read(path.string());
+    REQUIRE(via_registry.has_value());
+    REQUIRE(via_registry->sample_rate == 44100);
+    REQUIRE(via_registry->num_channels() == 1);
+    REQUIRE(via_registry->num_frames() == 0);
+
+    // Consumers that need audio still get a clean "none" rather than a crash.
+    REQUIRE_FALSE(
+        offline_process(*direct, [](const float*, float*, int, int, double) {}, 64).has_value());
+    REQUIRE_FALSE(FormatRegistry::instance().write(
+        unique_temp_audio_path("_zero_frames_copy.wav").string(), *direct));
     std::filesystem::remove(path);
 }
 
@@ -2185,6 +2228,152 @@ TEST_CASE("AIFF reader handles AIFC metadata and odd chunk padding", "[audio][fi
     std::filesystem::remove(tmp_path);
 }
 
+TEST_CASE("AIFF and AIFF-C readers decode a zero-frame file to its metadata and no audio",
+          "[audio][file][registry][aiff][zero-frames]") {
+    auto& registry = FormatRegistry::instance();
+    for (const bool aifc : {false, true}) {
+        CAPTURE(aifc);
+        auto tmp_path = unique_temp_audio_path(aifc ? "_zero_frames.aifc" : "_zero_frames.aiff");
+        write_aiff_fixture(tmp_path, aifc ? "AIFC" : "AIFF",
+                           {
+                               {"COMM", make_comm_chunk(2, 0, 24, aifc, "sowt")},
+                               {"SSND", make_ssnd_chunk({})},
+                           });
+
+        auto info = registry.read_info(tmp_path.string());
+        REQUIRE(info.has_value());
+        REQUIRE(info->num_frames == 0);
+        REQUIRE(info->duration_seconds == 0.0);
+
+        auto data = registry.read(tmp_path.string());
+        REQUIRE(data.has_value());
+        REQUIRE(data->sample_rate == 44100);
+        REQUIRE(data->num_channels() == 2);
+        REQUIRE(data->num_frames() == 0);
+        REQUIRE(data->empty());
+
+        // The ranged mapped reader opens it and serves only zero fill.
+        MemoryMappedAudioReader reader;
+        REQUIRE(reader.open(tmp_path.string()));
+        REQUIRE(reader.info().num_frames == 0);
+        std::vector<float> left(4, 9.0f);
+        std::vector<float> right(4, 9.0f);
+        float* destinations[] = {left.data(), right.data()};
+        REQUIRE(reader.read_frames(destinations, 2, 0, 4));
+        REQUIRE(std::all_of(left.begin(), left.end(), [](float v) { return v == 0.0f; }));
+        REQUIRE(std::all_of(right.begin(), right.end(), [](float v) { return v == 0.0f; }));
+        reader.close();
+
+        // Consumers that need audio still get a clean "none".
+        REQUIRE_FALSE(
+            offline_process(*data, [](const float*, float*, int, int, double) {}, 64).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+}
+
+TEST_CASE("AIFF-C twos and sowt decode bit-exactly to the NONE big-endian samples",
+          "[audio][file][registry][aiff][aifc-pcm]") {
+    constexpr int32_t samples[] = {
+        std::numeric_limits<int32_t>::min(), -1073741824, -65536, 0, 256, 1073741824,
+        std::numeric_limits<int32_t>::max(),
+    };
+    auto& registry = FormatRegistry::instance();
+
+    for (const uint16_t bits_per_sample : {8, 16, 24, 32}) {
+        CAPTURE(bits_per_sample);
+        std::vector<unsigned char> big_endian;
+        for (size_t frame = 0; frame < std::size(samples); ++frame) {
+            append_aiff_pcm(big_endian, bits_per_sample, samples[frame]);
+            append_aiff_pcm(big_endian, bits_per_sample, samples[std::size(samples) - frame - 1]);
+        }
+        const auto little_endian = byte_swapped_pcm(big_endian, bits_per_sample);
+        const auto frames = static_cast<uint32_t>(std::size(samples));
+
+        auto decode = [&](std::string_view compression, const std::vector<unsigned char>& pcm) {
+            auto tmp_path = unique_temp_audio_path("_" + std::string(compression) + ".aifc");
+            write_aiff_fixture(
+                tmp_path, "AIFC",
+                {
+                    {"COMM", make_comm_chunk(2, frames, bits_per_sample, true, compression)},
+                    {"SSND", make_ssnd_chunk(pcm)},
+                });
+            auto info = registry.read_info(tmp_path.string());
+            REQUIRE(info.has_value());
+            REQUIRE(info->format == "AIFF-C");
+            REQUIRE(info->bits_per_sample == bits_per_sample);
+            auto data = registry.read(tmp_path.string());
+            std::filesystem::remove(tmp_path);
+            return data;
+        };
+
+        const auto none = decode("NONE", big_endian);
+        REQUIRE(none.has_value());
+        REQUIRE(none->num_channels() == 2);
+        REQUIRE(none->num_frames() == frames);
+        for (size_t frame = 0; frame < frames; ++frame) {
+            REQUIRE(none->channels[0][frame] == expected_aiff_pcm(bits_per_sample, samples[frame]));
+        }
+
+        // `twos` is the same big-endian stream under afconvert's name for it;
+        // `sowt` is the same sample points stored little-endian. Both must
+        // produce the identical floats, not merely close ones.
+        const auto twos = decode("twos", big_endian);
+        REQUIRE(twos.has_value());
+        REQUIRE(twos->channels == none->channels);
+
+        const auto sowt = decode("sowt", little_endian);
+        REQUIRE(sowt.has_value());
+        REQUIRE(sowt->channels == none->channels);
+
+        // The byte order is not optional: the little-endian bytes under a
+        // big-endian label decode to different samples.
+        if (bits_per_sample > 8) {
+            const auto mislabeled = decode("twos", little_endian);
+            REQUIRE(mislabeled.has_value());
+            REQUIRE(mislabeled->channels != none->channels);
+        }
+    }
+
+    SECTION("the ranged mapped reader honours sowt byte order") {
+        constexpr uint16_t bits_per_sample = 16;
+        std::vector<unsigned char> big_endian;
+        for (const int32_t sample : samples)
+            append_aiff_pcm(big_endian, bits_per_sample, sample);
+        auto tmp_path = unique_temp_audio_path("_ranged_sowt.aifc");
+        write_aiff_fixture(
+            tmp_path, "AIFC",
+            {
+                {"COMM", make_comm_chunk(1, std::size(samples), bits_per_sample, true, "sowt")},
+                {"SSND", make_ssnd_chunk(byte_swapped_pcm(big_endian, bits_per_sample))},
+            });
+        MemoryMappedAudioReader reader;
+        REQUIRE(reader.open(tmp_path.string()));
+        REQUIRE(reader.supports_ranged_read());
+        std::vector<float> mono(std::size(samples), 9.0f);
+        float* destination[] = {mono.data()};
+        REQUIRE(reader.read_frames(destination, 1, 0, std::size(samples)));
+        for (size_t frame = 0; frame < std::size(samples); ++frame)
+            REQUIRE(mono[frame] == expected_aiff_pcm(bits_per_sample, samples[frame]));
+        reader.close();
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("float and codec compression types stay refused") {
+        for (const char* compression : {"fl32", "fl64", "ulaw", "ima4"}) {
+            CAPTURE(compression);
+            auto tmp_path = unique_temp_audio_path(std::string("_") + compression + ".aifc");
+            write_aiff_fixture(tmp_path, "AIFC",
+                               {
+                                   {"COMM", make_comm_chunk(1, 2, 16, true, compression)},
+                                   {"SSND", make_ssnd_chunk({0x40, 0x00, 0x80, 0x00})},
+                               });
+            REQUIRE(registry.read_info(tmp_path.string()).has_value());
+            REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+            std::filesystem::remove(tmp_path);
+        }
+    }
+}
+
 TEST_CASE("MemoryMappedAudioReader range-reads AIFF PCM without reopening the file",
           "[audio][file][aiff][mmap][ranged]") {
     constexpr int32_t samples[] = {
@@ -2562,7 +2751,7 @@ TEST_CASE("AIFF reader rejects malformed container headers and missing chunks",
         std::filesystem::remove(tmp_path);
     }
 
-    SECTION("zero-frame COMM metadata has info but no readable audio") {
+    SECTION("zero-frame COMM metadata decodes to no audio, like a zero-frame WAV") {
         auto tmp_path = unique_temp_audio_path("_aiff_zero_frames.aiff");
         write_aiff_fixture(tmp_path,
                            "AIFF",
@@ -2574,6 +2763,19 @@ TEST_CASE("AIFF reader rejects malformed container headers and missing chunks",
         auto info = registry.read_info(tmp_path.string());
         REQUIRE(info.has_value());
         REQUIRE(info->num_frames == 0);
+        auto data = registry.read(tmp_path.string());
+        REQUIRE(data.has_value());
+        REQUIRE(data->sample_rate == 44100);
+        REQUIRE(data->num_channels() == 1);
+        REQUIRE(data->num_frames() == 0);
+        REQUIRE(data->empty());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("zero-frame COMM without an SSND chunk is still not readable") {
+        auto tmp_path = unique_temp_audio_path("_aiff_zero_frames_no_ssnd.aiff");
+        write_aiff_fixture(tmp_path, "AIFF", {{"COMM", make_comm_chunk(1, 0, 16)}});
+        REQUIRE(registry.read_info(tmp_path.string()).has_value());
         REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
         std::filesystem::remove(tmp_path);
     }

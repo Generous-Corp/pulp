@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-clap-identity",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-scan-worker",
+   "pulp-test-fixture-clap-identity"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_clap_identity.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

@@ -1,0 +1,13 @@
+{
+ "name": "cmake-catch-multilabel-properties",
+ "record": {
+  "entry": "tools/scripts/test_catch_multilabel_properties.py",
+  "inputs": [
+   "tools/cmake/PulpCatch.cmake",
+   "tools/cmake/PulpCatchAddTests.cmake",
+   "tools/cmake/PulpTestSuite.cmake",
+   "tools/scripts/test_catch_multilabel_properties.py"
+  ],
+  "kind": "python"
+ }
+}

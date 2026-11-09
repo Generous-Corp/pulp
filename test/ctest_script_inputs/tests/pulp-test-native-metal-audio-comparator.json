@@ -1,0 +1,11 @@
+{
+ "name": "pulp-test-native-metal-audio-comparator",
+ "record": {
+  "entry": "tools/scripts/gpu_audio_comparator_v2.py",
+  "inputs": [
+   "tools/scripts/gpu_audio_comparator_v2.py",
+   "tools/scripts/gpu_audio_p2_host_preflight.py"
+  ],
+  "kind": "python"
+ }
+}

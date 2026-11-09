@@ -620,7 +620,8 @@ bool ContextMenu::on_key_event(const KeyEvent& event) {
 View* ContextMenu::hit_test(Point local_point) {
     // The whole overlay is hit-testable so clicks anywhere (inside or outside
     // the menu box) reach us — outside clicks must dismiss.
-    if (!visible() || !enabled() || !hit_testable()) return nullptr;
+    if (!visible() || hit_test_blocked_by_disabled() || !hit_testable())
+        return nullptr;
     auto b = local_bounds();
     if (local_point.x >= 0.0f && local_point.x <= b.width &&
         local_point.y >= 0.0f && local_point.y <= b.height)

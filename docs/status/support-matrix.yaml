@@ -313,6 +313,24 @@ audio_io:
       to ALSA. JACK-gated enumeration/open smoke coverage exists, but broader
       hotplug and device-manager policy remain pending.
 
+audio_file_codecs:
+  extaudiofile:
+    status: usable
+    platform: macos
+    ci_test: pulp-test-system-audio-codec
+    notes: >-
+      write_system_audio_file() and FormatRegistry write AAC (M4A, ADTS),
+      ALAC (M4A, CAF), PCM in CAF (integer or float) and 16/24/32-bit AIFF
+      through ExtAudioFile; the platform reader decodes AAC, ALAC and CAF.
+      Round trips are tested on macOS. No third-party encoder is linked.
+  media_foundation:
+    status: experimental
+    platform: windows
+    notes: >-
+      write_system_audio_file() writes AAC in M4A through the Media Foundation
+      sink writer, and a Media Foundation reader decodes .m4a, .aac and .wma
+      through FormatRegistry. Only the Windows CI build leg compiles it, when
+      that leg runs; the round-trip test has not yet run on a Windows host.
 midi_io:
   coremidi:
     status: usable
@@ -606,7 +624,7 @@ widgets:
     notes: Meter, MultiMeter, CorrelationMeter — peak/RMS level bars with ballistics; CI coverage includes pulp-test-visualization. See core/view/include/pulp/view/widgets.hpp.
   spectrum_view:
     status: usable
-    notes: Real-time FFT spectrum display with log/linear frequency axis; CI coverage includes pulp-test-visualization. See core/view/include/pulp/view/widgets.hpp.
+    notes: FFT spectrum analyzer with built-in lock-free analysis (push_samples), log-frequency axis via signal::SpectrumBinMapping, selectable window, FFT size, overlap, peak/RMS/power/PSD levels and time-based release; caller-supplied dB bins remain supported (soft-deprecated); CI coverage includes pulp-test-widgets, pulp-test-spectrum-bin-mapping and pulp-test-spectrum-analyzer. See core/view/audio/include/pulp/view/audio_widgets.hpp.
   spectrogram_view:
     status: usable
     notes: Scrolling STFT spectrogram; CI coverage includes pulp-test-visualization. See core/view/include/pulp/view/widgets.hpp.
@@ -624,7 +642,7 @@ widgets:
     notes: Searchable, category-grouped preset browser with keyboard navigation; CI coverage includes pulp-test-preset-browser. See core/view/include/pulp/view/preset_browser.hpp.
   eq_curve_view:
     status: usable
-    notes: Draggable EQ band handles over the true biquad magnitude response (signal::response_curve_db), with an optional spectrum overlay resampled onto the shared log-frequency axis; CI coverage includes pulp-test-phase9-widgets. See core/view/audio/include/pulp/view/eq_curve_view.hpp.
+    notes: Draggable EQ band handles over the true biquad magnitude response (signal::response_curve_db), with an optional spectrum overlay mapped onto the shared log-frequency axis by signal::SpectrumBinMapping (same code path as SpectrumView); CI coverage includes pulp-test-phase9-widgets and pulp-test-widgets. See core/view/audio/include/pulp/view/eq_curve_view.hpp.
   graph_editor_view:
     status: usable
     ci_test: pulp-test-graph-editor-view
@@ -720,6 +738,36 @@ platform_maturity:
   tab_focus:
     status: usable
     notes: Tab/Shift+Tab cycles focus through focusable views. Wraps at ends.
+      Disabled views and their subtrees are skipped.
+  disabled_input_contract:
+    status: usable
+    notes: A disabled view, or one inside a disabled ancestor, receives no key,
+      text, gesture, hover-enter, press, move, drag or double-click, but still gets
+      the release and pointer-exit that finish an interaction in progress. The
+      cursor over it is the default. Enforced by the delivery functions in
+      pointer_dispatch.hpp; tested by test_disabled_input_contract.cpp.
+  modifier_key_changes:
+    status: partial
+    notes: View::on_modifier_keys_changed reaches the focused view and any view a
+      pointer press is captured by. Reported by the macOS standalone and plug-in
+      hosts (flagsChanged), the Windows plug-in host (modifier virtual keys) and
+      the browser host (keydown/keyup of Shift, Control, Alt, Meta). The Linux and
+      Android hosts have no keyboard path yet, so they do not report it. Tested
+      by test_modifier_keys_changed.cpp.
+  focus_cause:
+    status: usable
+    notes: Focus changes carry a FocusCause (pointer, keyboard, programmatic).
+      :focus-visible is true only for keyboard and programmatic focus, and
+      :focus-within follows on_descendant_focus_changed, delivered to every
+      ancestor. Script elements receive focus, blur, focusin and focusout from
+      native focus changes. Tested by test_focus_cause.cpp.
+  stationary_pointer_hover:
+    status: partial
+    notes: After a frame that moves content under a pointer that did not move,
+      reevaluate_stationary_hover delivers the hover enter, exit and positioned
+      move a mouse movement would have. The macOS standalone and plug-in hosts call
+      it from their per-frame cursor refresh. Other hosts can call it after each
+      presented frame. Tested by test_stationary_hover.cpp.
   accessibility:
     macos:
       status: usable
@@ -1104,6 +1152,15 @@ state_tree:
     ci_test: pulp-test-state-tree-validated
     notes: set_checked, the other *_checked edits and ValidatedTransaction return pulp::runtime::Result values with a TreeEditError code instead of ignoring an invalid edit; a ValidatedTransaction with any refused edit aborts on commit. Property validation is a caller-supplied predicate; JSON-Schema validation and a JavaScript bridge for transactions are not provided.
 
+plugin_hosting:
+  lv2:
+    status: usable
+    ci_test:
+      - pulp-test-lv2-host-slot
+      - pulp-test-lv2-host-discovery
+      - pulp-test-lv2-bundle-discovery-e2e
+    notes: The LV2 PluginSlot reads bundles through the vendored lilv and hosts instruments and effects. The tests host a real fixture bundle on macOS and Linux through PluginSlot and SignalGraph, checking MIDI in and out, time:Position, typed patch:Set parameters, the worker, options, state saved alongside the audio thread, latency, full-sequence handling, and refusal of bundles it cannot host. On Windows the loader and vendored libraries are compiled, but no test hosts an LV2 plugin there.
+
 subsystems:
   runtime: stable
   events: usable
@@ -1117,6 +1174,7 @@ subsystems:
   render: experimental
   view: usable
   osc: experimental
+  host: usable
 
 # ── Known limitations ────────────────────────────────────────────────────────
 #
@@ -1131,6 +1189,18 @@ subsystems:
 # Consistency rule enforced by check-docs-consistency.py (warn-mode):
 # every key under limitations: must resolve to a real entry in the matrix.
 limitations:
+  subsystems.host:
+    - text: "Host transport, offline render mode, 64-bit processing, every declared audio bus, the full MIDI map, plugin parameter feedback, and restart requests are implemented by the CLAP and VST3 slots. The AU slot accepts the same calls but still runs realtime with a single main bus, sees no host transport, and reports no parameter edits or restart requests."
+      tracked_in: "../guides/hosting.md#limits"
+    - text: "A hosted plugin's process mode is fixed when it is prepared. A block whose ProcessContext says offline still runs in the mode the plugin was prepared in; SignalGraph::set_hosted_plugin_process_mode() takes effect at the next prepare()."
+      tracked_in: "../guides/hosting.md#process-mode-and-precision"
+    - text: "Latency changes and restart requests are counted, not acted on: the host decides when to call SignalGraph::apply_plugin_restarts(), which re-prepares the whole graph under the usual no-process contract."
+      tracked_in: "../guides/hosting.md#restart-requests-and-latency-changes"
+    - text: "VST3 plug-ins learn only the host name (IHostApplication has no vendor or version). VST3 controllers, channel pressure, pitch bend, and program change reach a plug-in only through its IMidiMapping; unmapped ones are dropped, and VST3 note expression is not sent. CLAP plugins receive MIDI 1.0 or CLAP note events, never the MIDI 2.0 dialect."
+      tracked_in: "../guides/hosting.md#midi"
+  plugin_hosting.lv2:
+    - text: "The LV2 slot hosts instruments and effects through lilv (MIDI in and out, time:Position, patch parameters, worker, state, options, latency) but shows no plugin UI, feeds CV inputs silence, drops SysEx, and offers no state:mapPath or state:makePath, so state that refers to files does not restore."
+      tracked_in: "../guides/hosting.md#lv2-plugins"
   timeline_engine.cli_mcp:
     - text: "The headless render path emits arrangement audio only; it does not instantiate hosted devices or MIDI instruments, and unknown plugin-delay compensation remains null rather than being invented."
       tracked_in: "../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp"
@@ -1166,6 +1236,10 @@ limitations:
     # no stale stub limitation remains.
   audio_io.jack:
     - text: "Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending."
+  audio_file_codecs.extaudiofile:
+    - text: "Through FormatRegistry, .m4a and .aac use the codec's default AAC bitrate and .alac writes 16-bit ALAC; other settings need write_system_audio_file(). Multichannel AAC beyond stereo has no channel-layout control, and no metadata is written."
+  audio_file_codecs.media_foundation:
+    - text: "Writes AAC in M4A only, mono or stereo at 44.1 or 48 kHz, at one of four bitrates (96, 128, 160 or 192 kbps); no ALAC, CAF or AIFF writing. Only the Windows CI build leg compiles it, and the round-trip test has not yet run on a Windows host."
   midi_io.coremidi:
     - text: "MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback."
   midi_io.win32_midi:

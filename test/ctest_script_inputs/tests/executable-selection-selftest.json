@@ -1,0 +1,11 @@
+{
+ "name": "executable-selection-selftest",
+ "record": {
+  "entry": "tools/ci/test_executable_selection.py",
+  "inputs": [
+   "tools/ci/executable_selection.py",
+   "tools/ci/test_executable_selection.py"
+  ],
+  "kind": "python"
+ }
+}

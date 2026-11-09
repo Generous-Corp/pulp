@@ -1,0 +1,14 @@
+{
+ "name": "dependency-pins-selftest",
+ "record": {
+  "entry": "tools/ci/test_dependency_pins.py",
+  "inputs": [
+   "tools/ci/dependency_pins.py",
+   "tools/ci/test_dependency_pins.py",
+   "tools/cmake/PulpDependencies.cmake",
+   "tools/cmake/PulpFetchContent.cmake",
+   "tools/deps/manifest.json"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "name": "gpu-audio-trace-validator-selftest",
+ "record": {
+  "entry": "tools/scripts/test_validate_gpu_audio_trace_captures.py",
+  "inputs": [
+   "tools/scripts/test_validate_gpu_audio_trace_captures.py"
+  ],
+  "kind": "python"
+ }
+}

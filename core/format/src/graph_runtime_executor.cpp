@@ -172,10 +172,9 @@ using midi::midi_block_has_drops;
 // order). Topological order guarantees each source's output is final this block.
 // The node's MIDI output is left untouched — a MIDI-emitting binding fills it,
 // and a MidiInput system node's output is supplied by the host before the walk.
-void gather_node_midi(const graph::GraphRuntimePlan& plan,
-                      GraphRuntimeMidiScratch& midi,
-                      const graph::GraphRuntimeNodePlan& node,
-                      std::uint32_t node_index) noexcept {
+void gather_node_midi(const graph::GraphRuntimePlan& plan, GraphRuntimeMidiScratch& midi,
+                      const graph::GraphRuntimeNodePlan& node, std::uint32_t node_index,
+                      std::uint32_t frames, GraphRuntimeEventEdgeProbe* event_probe) noexcept {
     midi::MidiBuffer* in = midi.in(node_index);
     if (in == nullptr) return;
     clear_midi_block(*in);
@@ -191,6 +190,27 @@ void gather_node_midi(const graph::GraphRuntimePlan& plan,
         if (!graph::is_event(conn)) continue;
         const midi::MidiBuffer* src = midi.out(conn.source_index);
         if (src == nullptr) continue;
+        if (event_probe != nullptr && event_probe->samples.attached() &&
+            conn.source_index == event_probe->source_index &&
+            node_index == event_probe->destination_index && conn_index == event_probe->edge_index) {
+            graph::GraphRuntimeProbeSample sample;
+            sample.kind = graph::GraphRuntimeProbeKind::Event;
+            sample.timestamp_samples = event_probe->timestamp_samples;
+            sample.edge_index = event_probe->edge_index;
+            sample.frames = frames;
+            // This is a source-edge observation: payload_count and drops are
+            // read before destination append/capacity handling. The destination
+            // receives the existing bounded MIDI copy and remains the delivery
+            // oracle for consumers that need post-copy counts.
+            sample.payload_count = static_cast<std::uint32_t>(src->size());
+            sample.payload_dropped = src->dropped_event_count();
+            if (!src->empty()) {
+                const auto& first = (*src)[0];
+                sample.payload_offset = first.sample_offset;
+                sample.payload_status = first.size() == 0 ? 0 : first.data()[0];
+            }
+            event_probe->samples.try_push(sample);
+        }
         // A source whose output was incomplete, or a copy that drops here,
         // marks this node's input incomplete (matching the host walk's
         // node-to-node incompleteness propagation).
@@ -216,8 +236,8 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
                             GraphRuntimeBufferPool& pool, GraphRuntimeAutomationScratch& automation,
                             const graph::GraphRuntimeNodePlan& node, std::uint32_t node_index,
                             std::uint32_t frames, double sample_rate,
-                            AudioRateModulationDelivery delivery,
-                            bool preserve_parameter_events) noexcept {
+                            AudioRateModulationDelivery delivery, bool preserve_parameter_events,
+                            GraphRuntimeControlEdgeProbe* control_probe) noexcept {
     state::ParameterEventQueue* queue = automation.events(node_index);
     if (queue == nullptr) return;
     if (!preserve_parameter_events)
@@ -279,6 +299,21 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
             automation.slew_last(conn_index) = new_vN;
             m0 = new_v0;
             mN = new_vN;
+        }
+
+        if (control_probe != nullptr && control_probe->samples.attached() &&
+            conn.source_index == control_probe->source_index &&
+            node_index == control_probe->destination_index &&
+            conn_index == control_probe->edge_index && a.param_id == control_probe->parameter_id) {
+            graph::GraphRuntimeProbeSample sample;
+            sample.kind = graph::GraphRuntimeProbeKind::Control;
+            sample.timestamp_samples = control_probe->timestamp_samples;
+            sample.edge_index = control_probe->edge_index;
+            sample.frames = frames;
+            sample.value = m0;
+            sample.value_end = mN;
+            sample.payload_id = a.param_id;
+            control_probe->samples.try_push(sample);
         }
 
         std::uint32_t pi = 0;
@@ -552,16 +587,15 @@ bool has_sole_audio_output(const graph::GraphRuntimePlan& plan) noexcept {
 // output slots, per-node MIDI/automation buffers, per-connection inbound rings),
 // so distinct nodes may run concurrently — EXCEPT AudioOutput, which accumulates
 // into the shared output bus and must be run serially by the caller.
-GraphRuntimeExecutorErrorCode
-run_routed_node(std::uint32_t node_index, const graph::GraphRuntimePlan& plan,
-                std::span<const GraphRuntimeNodeBinding> bindings,
-                const graph::GraphRuntimeBufferAssignment& assignment, GraphRuntimeBufferPool& pool,
-                GraphRuntimeMidiScratch* midi, GraphRuntimeAutomationScratch* automation,
-                ProcessBlock& block, const BusBuffer* in_bus, BusBuffer* out_bus,
-                std::span<const GraphRuntimeCommandDecision> command_results, std::uint32_t frames,
-                bool time_node, bool sole_output,
-                std::span<const GraphRuntimeSnapshot::InputPortSource> ports,
-                GraphRuntimeBufferPool::BoundNode* bound) noexcept {
+GraphRuntimeExecutorErrorCode run_routed_node(
+    std::uint32_t node_index, const graph::GraphRuntimePlan& plan,
+    std::span<const GraphRuntimeNodeBinding> bindings,
+    const graph::GraphRuntimeBufferAssignment& assignment, GraphRuntimeBufferPool& pool,
+    GraphRuntimeMidiScratch* midi, GraphRuntimeAutomationScratch* automation, ProcessBlock& block,
+    const BusBuffer* in_bus, BusBuffer* out_bus,
+    std::span<const GraphRuntimeCommandDecision> command_results, std::uint32_t frames,
+    bool time_node, bool sole_output, std::span<const GraphRuntimeSnapshot::InputPortSource> ports,
+    GraphRuntimeBufferPool::BoundNode* bound, GraphRuntimeEdgeProbeSet* edge_probes) noexcept {
     const auto& node = plan.nodes[node_index];
     const auto& slots = assignment.nodes[node_index];
 
@@ -585,7 +619,8 @@ run_routed_node(std::uint32_t node_index, const graph::GraphRuntimePlan& plan,
         gather_node_inputs(plan, assignment, pool, node, slots, ports, frames, inputs, false);
     }
     if (midi != nullptr) {
-        gather_node_midi(plan, *midi, node, node_index);
+        gather_node_midi(plan, *midi, node, node_index, frames,
+                         edge_probes != nullptr ? edge_probes->event : nullptr);
         // System MidiInput output is prefilled by the host mailbox bridge and
         // must survive this node visit; every other node owns its sidecar
         // output for this block and starts with an empty bounded stream.
@@ -598,7 +633,8 @@ run_routed_node(std::uint32_t node_index, const graph::GraphRuntimePlan& plan,
     if (automation != nullptr) {
         gather_node_automation(plan, assignment, pool, *automation, node, node_index, frames,
                                block.sample_rate, binding.audio_rate_modulation_delivery,
-                               binding.preserve_parameter_events);
+                               binding.preserve_parameter_events,
+                               edge_probes != nullptr ? edge_probes->control : nullptr);
     }
 
     // Per-node CPU-load attribution: wrap this node's per-block produce step in
@@ -1409,7 +1445,8 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     std::span<const graph::GraphTimedCommand> commands,
     std::span<GraphRuntimeCommandDecision> command_results,
     GraphRuntimeCommandHandler command_handler, GraphRuntimeEventSink event_sink,
-    std::span<const std::uint8_t> skip_mask, GraphRuntimeAudioEdgeProbe* audio_probe) noexcept {
+    std::span<const std::uint8_t> skip_mask, GraphRuntimeAudioEdgeProbe* audio_probe,
+    GraphRuntimeEdgeProbeSet* edge_probes) noexcept {
     if (!block.validate()) return fail_invalid_block();
     if (!snapshot.valid()) return fail_invalid_snapshot();
 
@@ -1547,12 +1584,19 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     bool have_probe_sample = false;
     struct ProbeClockAdvance {
         GraphRuntimeAudioEdgeProbe* probe;
+        GraphRuntimeControlEdgeProbe* control;
+        GraphRuntimeEventEdgeProbe* event;
         std::uint32_t frames;
         ~ProbeClockAdvance() {
             if (probe != nullptr)
                 probe->timestamp_samples += frames;
+            if (control != nullptr)
+                control->timestamp_samples += frames;
+            if (event != nullptr)
+                event->timestamp_samples += frames;
         }
-    } probe_clock_advance{audio_probe, frames};
+    } probe_clock_advance{audio_probe, edge_probes != nullptr ? edge_probes->control : nullptr,
+                          edge_probes != nullptr ? edge_probes->event : nullptr, frames};
     for (const auto node_index : plan.processing_order_indices) {
         if (node_index >= bindings.size()) {
             zero_unwritten_sole_output();
@@ -1571,7 +1615,7 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
             run_routed_node(node_index, plan, bindings, assignment, pool, midi, automation, block,
                             routed_in_bus, out_bus, command_decisions, frames, time_nodes,
                             sole_output, snapshot.input_port_sources(node_index),
-                            bound ? &pool.bound_node(node_index) : nullptr);
+                            bound ? &pool.bound_node(node_index) : nullptr, edge_probes);
         if (error != GraphRuntimeExecutorErrorCode::None) {
             zero_unwritten_sole_output();
             result.error = error;
@@ -1651,7 +1695,7 @@ void run_level_node(void* ctx, std::uint32_t i) noexcept {
                                    t->midi, t->automation, *t->block, t->in_bus, t->out_bus,
                                    t->command_results, t->frames, t->time_nodes, t->sole_output,
                                    t->snapshot->input_port_sources(node_index),
-                                   t->bound ? &t->pool->bound_node(node_index) : nullptr);
+                                   t->bound ? &t->pool->bound_node(node_index) : nullptr, nullptr);
     if (e != GraphRuntimeExecutorErrorCode::None) {
         std::uint32_t expected = 0;
         if (t->error_code->compare_exchange_strong(
@@ -1811,11 +1855,11 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_parallel(
         if (serial) {
             for (std::uint32_t k = 0; k < width; ++k) {
                 const std::uint32_t node_index = levels.level_nodes[base + k];
-                const auto e = run_routed_node(node_index, plan, bindings, assignment, pool, midi,
-                                               automation, block, routed_in_bus, out_bus,
-                                               command_decisions, frames, time_nodes, sole_output,
-                                               snapshot.input_port_sources(node_index),
-                                               bound ? &pool.bound_node(node_index) : nullptr);
+                const auto e = run_routed_node(
+                    node_index, plan, bindings, assignment, pool, midi, automation, block,
+                    routed_in_bus, out_bus, command_decisions, frames, time_nodes, sole_output,
+                    snapshot.input_port_sources(node_index),
+                    bound ? &pool.bound_node(node_index) : nullptr, nullptr);
                 if (e != GraphRuntimeExecutorErrorCode::None) {
                     clear_deferred_output();
                     return report_failure(e, node_index);

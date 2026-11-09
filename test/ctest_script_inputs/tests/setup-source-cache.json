@@ -1,0 +1,18 @@
+{
+ "name": "setup-source-cache",
+ "record": {
+  "entry": "tools/scripts/test_setup_source_cache.sh",
+  "inputs": [
+   "CMakeLists.txt",
+   "setup.sh",
+   "tools/cmake/PulpDependencies.cmake",
+   "tools/cmake/PulpFetchContent.cmake",
+   "tools/cmake/PulpPatchChoc.cmake",
+   "tools/deps/manifest.json",
+   "tools/deps/shared-source-contract.txt",
+   "tools/deps/wgpu_native_digests.py",
+   "tools/scripts/test_setup_source_cache.sh"
+  ],
+  "kind": "shell"
+ }
+}

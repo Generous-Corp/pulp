@@ -7,6 +7,7 @@
 
 #include <pulp/audio/audio_file_layout.hpp>
 #include <pulp/audio/audio_file_layout_json.hpp>
+#include <pulp/audio/format_registry.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -48,6 +49,35 @@ std::string to_json(const AudioFileLayoutReport& report, bool include_text = fal
 } // namespace
 
 #ifdef PULP_SOURCE_DIR
+TEST_CASE("afconvert's AIFF-C twos fixture decodes to the same samples as its AIFF twin",
+          "[audio][file-layout][fixtures][aifc-pcm]") {
+    const auto root = pulp_test::fixture_root() / "test" / "fixtures" / "audio" / "inspect";
+    const auto aiff_path = root / "tone.aiff";
+    const auto aifc_path = root / "tone.aifc";
+    REQUIRE(fs::exists(aiff_path));
+    REQUIRE(fs::exists(aifc_path));
+
+    auto& registry = FormatRegistry::instance();
+    const auto aiff = registry.read(aiff_path.string());
+    const auto aifc = registry.read(aifc_path.string());
+    REQUIRE(aiff);
+    REQUIRE(aifc);
+    CHECK(aiff->sample_rate == 8000u);
+    CHECK(aifc->sample_rate == 8000u);
+    REQUIRE(aiff->num_frames() == 800u);
+    REQUIRE(aifc->num_frames() == 800u);
+    // Both files were written from one source by afconvert at BEI16; the only
+    // difference is the AIFC envelope and its 'twos' label, so the decoded
+    // samples must be identical floats.
+    CHECK(aifc->channels == aiff->channels);
+    // The tone is not silence: a decoder that zero-filled both would also pass
+    // the equality above.
+    CHECK(std::any_of(aiff->channels[0].begin(), aiff->channels[0].end(),
+                      [](float sample) { return sample != 0.0f; }));
+}
+#endif
+
+#ifdef PULP_SOURCE_DIR
 TEST_CASE("checked-in container fixtures walk end to end", "[audio][file-layout][fixtures]") {
     const auto root = pulp_test::fixture_root() / "test" / "fixtures" / "audio" / "inspect";
     auto inspect = [&](const char* name) {
@@ -80,11 +110,12 @@ TEST_CASE("checked-in container fixtures walk end to end", "[audio][file-layout]
                           [](const LayoutField& f) { return f.name == "compression_type"; }));
         REQUIRE(report.stream);
         CHECK(report.stream->frames == 800u);
-        // afconvert names big-endian PCM 'twos'; the reader admits only NONE,
-        // and the report says so instead of pretending otherwise.
+        // afconvert names big-endian PCM 'twos'; the reader decodes it as the
+        // same stream AIFF carries, and the verdict follows the reader.
         REQUIRE(report.decode);
-        CHECK_FALSE(report.decode->decodable);
-        CHECK_THAT(report.decode->reason, Catch::Matchers::ContainsSubstring("twos"));
+        CHECK(report.decode->decodable);
+        CHECK(report.decode->reason.empty());
+        CHECK(report.stream->bytes_per_frame == 2u);
         CHECK(report.is_standard());
         CHECK(report.stream->encoding == "pcm");
         CHECK(report.metadata_text.empty());

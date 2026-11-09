@@ -1,0 +1,10 @@
+{
+ "name": "pr-fast-tier-selftest",
+ "record": {
+  "entry": "tools/scripts/test_pr_fast_tier_check.py",
+  "inputs": [
+   "tools/scripts/test_pr_fast_tier_check.py"
+  ],
+  "kind": "python"
+ }
+}

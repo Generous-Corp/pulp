@@ -1,0 +1,11 @@
+{
+ "name": "inject-claude-prefs-hook",
+ "record": {
+  "entry": "test/test_inject_claude_prefs_hook.sh",
+  "inputs": [
+   "hooks/scripts/inject-claude-prefs.sh",
+   "test/test_inject_claude_prefs_hook.sh"
+  ],
+  "kind": "shell"
+ }
+}

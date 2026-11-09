@@ -1,0 +1,10 @@
+{
+ "name": "dsp-vocabulary-selftest",
+ "record": {
+  "entry": "tools/test_dsp_vocabulary.py",
+  "inputs": [
+   "tools/test_dsp_vocabulary.py"
+  ],
+  "kind": "python"
+ }
+}

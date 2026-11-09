@@ -1,0 +1,42 @@
+{
+ "name": "changed-surface-runner-selftest",
+ "record": {
+  "entry": "tools/scripts/test_run_changed_surface_tests.py",
+  "inputs": [
+   ".github/workflows",
+   "core/host",
+   "core/host/include",
+   "docs/status",
+   "test/cmake/cmake_smoke_tests.cmake",
+   "test/cmake/test_pulp_add_sparkle.cmake",
+   "test/cmake/test_wgpu_native_pin.cmake",
+   "test/ctest_script_inputs",
+   "test/fixtures",
+   "test/support",
+   "tools/ci",
+   "tools/ci/build-dir-sentinel.sh",
+   "tools/ci/build_dir_lock.py",
+   "tools/ci/changed_surface_lane_reds.json",
+   "tools/ci/codemodel_digest.py",
+   "tools/ci/executable_keys.py",
+   "tools/ci/executable_selection.py",
+   "tools/ci/governed-build.sh",
+   "tools/ci/key_blind_executables.json",
+   "tools/ci/lane_reuse_record.py",
+   "tools/ci/load_api_exemptions.json",
+   "tools/ci/spawn_none_build_path_reviews.json",
+   "tools/cmake/PulpSparkle.cmake",
+   "tools/cmake/PulpTestData.cmake",
+   "tools/cmake/PulpWgpuNative.cmake",
+   "tools/cmake/PulpWgpuUniversal.cmake",
+   "tools/scripts/changed_surface_inventory.py",
+   "tools/scripts/gate_common.py",
+   "tools/scripts/process_liveness.py",
+   "tools/scripts/run_changed_surface_tests.py",
+   "tools/scripts/script_inputs_store.py",
+   "tools/scripts/script_test_inputs.py",
+   "tools/scripts/test_run_changed_surface_tests.py"
+  ],
+  "kind": "python"
+ }
+}
