@@ -62,9 +62,9 @@ std::string semantic_fingerprint(const SignalGraph& graph) {
         const auto* destination = graph.node(edge.dest_node);
         require(source != nullptr && destination != nullptr, "semantic-edge-node");
         bytes << source->name << ':' << edge.source_port << '>' << destination->name << ':'
-              << edge.dest_port << ':' << edge.feedback << ':' << edge.midi << ':' << edge.automation
-              << ':' << edge.audio_rate_modulation << ':' << edge.sidechain << ':' << edge.spectral
-              << ';';
+              << edge.dest_port << ':' << edge.feedback << ':' << edge.midi << ':'
+              << edge.automation << ':' << edge.audio_rate_modulation << ':' << edge.sidechain
+              << ':' << edge.spectral << ';';
     }
     // This is an evidence-only stable digest. It intentionally does not claim
     // to be the graph identity or the resolved execution-plan hash.
@@ -80,12 +80,12 @@ std::string semantic_fingerprint(const SignalGraph& graph) {
 
 Rendered render(SignalGraph& graph, const std::vector<std::vector<float>>& input) {
     OfflineSignalGraphHost host(graph);
-    require(host.prepare({.sample_rate = 48000.0,
-                          .block_frames = 4,
-                          .input_channels = 2,
-                          .output_channels = 2}),
-            "prepare-render");
-    float* input_ptrs[] = {const_cast<float*>(input[0].data()), const_cast<float*>(input[1].data())};
+    require(
+        host.prepare(
+            {.sample_rate = 48000.0, .block_frames = 4, .input_channels = 2, .output_channels = 2}),
+        "prepare-render");
+    float* input_ptrs[] = {const_cast<float*>(input[0].data()),
+                           const_cast<float*>(input[1].data())};
     const pulp::audio::BufferView<const float> view(input_ptrs, 2, input[0].size());
     const auto result = host.render({.frame_count = input[0].size(), .input = view});
     require(result.ok && result.blocks_rendered == 3, "render");
@@ -180,11 +180,12 @@ int main(int argc, char** argv) try {
     std::filesystem::create_directories(output);
     const auto baseline_path = output / "baseline.pulpgraph";
     const auto edited_path = output / "edited.pulpgraph";
-    const auto baseline_payload = read_file(std::filesystem::path(A9_REPLAY_FIXTURE_DIR) /
-                                            "stereo-semantic.json");
+    const auto baseline_payload =
+        read_file(std::filesystem::path(A9_REPLAY_FIXTURE_DIR) / "stereo-semantic.json");
     const std::vector<std::vector<float>> input = {
         {1.0f, -0.5f, 0.25f, -0.125f, 0.0625f, -0.03125f, 0.015625f, -0.0078125f, 0.00390625f},
-        {-0.25f, 0.125f, -0.0625f, 0.03125f, -0.015625f, 0.0078125f, -0.00390625f, 0.001953125f, -0.0009765625f},
+        {-0.25f, 0.125f, -0.0625f, 0.03125f, -0.015625f, 0.0078125f, -0.00390625f, 0.001953125f,
+         -0.0009765625f},
     };
 
     SignalGraph authored;
@@ -211,8 +212,7 @@ int main(int argc, char** argv) try {
     require(baseline_resolved.plan_hash == authored_resolved.plan_hash, "save-preserves-plan");
     const auto baseline_render = render(baseline_graph, input);
 
-    require(baseline_graph.set_node_gain(node_named(baseline_graph, "gain_a"), 0.25f),
-            "edit-gain");
+    require(baseline_graph.set_node_gain(node_named(baseline_graph, "gain_a"), 0.25f), "edit-gain");
     require(GraphSerializer::to_file(baseline_graph, edited_path).ok, "save-edited");
     const auto edited_payload = replace_gain(baseline_payload, "f32:3e800000");
     const auto edited_resolved = resolved_receipt(baseline_graph, edited_payload);
@@ -235,7 +235,8 @@ int main(int argc, char** argv) try {
     else
         require(replay_render.channels == baseline_render.channels, "replay-restores-render");
     require(semantic_fingerprint(replay_graph) == baseline_semantic, "replay-restores-semantic");
-    require(replay_resolved.plan_hash == baseline_resolved.plan_hash, "replay-restores-resolved-plan");
+    require(replay_resolved.plan_hash == baseline_resolved.plan_hash,
+            "replay-restores-resolved-plan");
 
     std::cout << "graph-agent-loop-replay PASS checks=" << checks
               << " baseline_semantic=" << baseline_semantic

@@ -70,6 +70,19 @@ graph-agent-loop-replay-wrong-edit   PASS (expected refusal: wrong-edit-oracle)
 graph-agent-loop-replay-wrong-replay PASS (expected refusal: wrong-replay-input)
 ```
 
+## Repository gate status
+
+`tools/scripts/gates.sh origin/main` reached the repository checks. The build
+gate, source selftest, workflow lint, pr-fast CTest, and registered Python
+lanes were **NOT CHECKED** because this host is marked
+`TARTCI_ROLE=dedicated-builder`; the gate directs those suites to a light
+host or disposable VM. The script-input drift lanes were also **NOT CHECKED**
+locally because this standalone SDK build is not a source-tree gate configure.
+
+The actionable local checks are clean: the changed C++ lines pass
+`format_changed.sh`, and `examples_index_guard.py` reports every example
+directory listed exactly once.
+
 Artifact SHA-256 values from the installed-prefix consumer build:
 
 ```text
