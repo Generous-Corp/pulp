@@ -1,0 +1,11 @@
+{
+ "name": "android-smoke",
+ "record": {
+  "entry": "tools/scripts/android_smoke.sh",
+  "inputs": [
+   "android",
+   "tools/scripts/android_smoke.sh"
+  ],
+  "kind": "shell"
+ }
+}

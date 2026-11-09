@@ -1,0 +1,17 @@
+{
+ "name": "host-adapter-tracing-contract",
+ "record": {
+  "entry": "tools/scripts/check_host_adapter_tracing_contract.py",
+  "inputs": [
+   "core/format/include/pulp/format/au_v2_adapter.hpp",
+   "core/format/include/pulp/format/au_v2_instrument.hpp",
+   "core/format/include/pulp/format/clap_adapter.hpp",
+   "core/format/include/pulp/format/standalone.hpp",
+   "core/format/include/pulp/format/vst3_adapter.hpp",
+   "core/format/src/aax_runtime.cpp",
+   "core/format/src/au_adapter.mm",
+   "tools/scripts/check_host_adapter_tracing_contract.py"
+  ],
+  "kind": "python"
+ }
+}

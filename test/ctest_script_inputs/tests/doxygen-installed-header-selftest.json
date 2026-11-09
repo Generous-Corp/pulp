@@ -1,0 +1,30 @@
+{
+ "name": "doxygen-installed-header-selftest",
+ "record": {
+  "entry": "tools/scripts/test_doxygen_installed_header_check.py",
+  "inputs": [
+   "core/runtime/CMakeLists.txt",
+   "core/runtime/include/pulp/runtime/build_info.hpp.in",
+   "core/timeline_view/include/pulp/timeline_view/arranger_view.hpp",
+   "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+   "core/view/audio/include",
+   "inspect/include",
+   "inspect/include/pulp",
+   "inspect/include/pulp/inspect",
+   "inspect/include/pulp/inspect/protocol.hpp",
+   "tools/audio/analysis/include",
+   "tools/audio/analysis/include/pulp",
+   "tools/cli/gpu_health/include",
+   "tools/cli/gpu_health/include/pulp_tooling",
+   "tools/cli/gpu_health/include/pulp_tooling/gpu_health",
+   "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+   "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_result.hpp",
+   "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+   "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/recipes.hpp",
+   "tools/cmake/PulpInstallRules.cmake",
+   "tools/scripts/doxygen_installed_header_check.py",
+   "tools/scripts/test_doxygen_installed_header_check.py"
+  ],
+  "kind": "python"
+ }
+}

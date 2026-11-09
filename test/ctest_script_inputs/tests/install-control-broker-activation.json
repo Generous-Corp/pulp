@@ -1,0 +1,11 @@
+{
+ "name": "install-control-broker-activation",
+ "record": {
+  "entry": "test/test_install_control_broker_activation.sh",
+  "inputs": [
+   "test/test_install_control_broker_activation.sh",
+   "tools/install/install.sh"
+  ],
+  "kind": "shell"
+ }
+}

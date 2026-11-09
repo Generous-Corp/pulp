@@ -1,0 +1,11 @@
+{
+ "name": "ctest-gate-args-selftest",
+ "record": {
+  "entry": "tools/ci/test_ctest_gate_args.py",
+  "inputs": [
+   "tools/ci/ctest_gate_args.py",
+   "tools/ci/test_ctest_gate_args.py"
+  ],
+  "kind": "python"
+ }
+}

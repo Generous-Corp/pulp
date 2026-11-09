@@ -1,0 +1,20 @@
+{
+ "name": "pulp-test-mcp-timeline-tools",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_mcp_timeline_sessions.cpp"
+  ],
+  "inputs": [
+   "test/fixtures/timeline/v1/minimal.json",
+   "test/fixtures/timeline/v4/sequence-markers.json"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_mcp_timeline_sessions.cpp",
+   "test/test_mcp_timeline_tools.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

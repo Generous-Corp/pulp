@@ -1,0 +1,10 @@
+{
+ "name": "format-header-view-boundary",
+ "record": {
+  "entry": "tools/scripts/format_header_view_boundary.py",
+  "inputs": [
+   "tools/scripts/format_header_view_boundary.py"
+  ],
+  "kind": "python"
+ }
+}

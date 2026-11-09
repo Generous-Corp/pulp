@@ -1,0 +1,12 @@
+{
+ "name": "timeline-command-doc-coverage",
+ "record": {
+  "entry": "tools/scripts/timeline_command_doc_check.py",
+  "inputs": [
+   "core/timeline/include/pulp/timeline/command.hpp",
+   "core/timeline/schema/timeline_cli_verbs.json",
+   "tools/scripts/timeline_command_doc_check.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,32 @@
+{
+ "name": "pulp-test-group-sampler-host-graph",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_baked_codec.cpp"
+  ],
+  "inputs": [
+   "test/fixtures/sample-region-compat/bake/legacy-v1.pulpbake"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [
+   "test/test_baked_codec.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_dspx09_followup.cpp",
+   "test/test_retained_history_dspx03.cpp",
+   "test/test_signal_graph_anticipation.cpp",
+   "test/test_signal_graph_live_swap_continuity.cpp",
+   "test/test_signal_graph_live_swap_staging.cpp",
+   "test/test_signal_graph_metadata_cache.cpp",
+   "test/test_signal_graph_parallel_plugin_scratch.cpp",
+   "test/test_signal_graph_pdc_swap_continuity.cpp",
+   "test/test_signal_graph_prepared_swap_live.cpp",
+   "test/test_signal_graph_transport.cpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

@@ -1,0 +1,12 @@
+{
+ "name": "consumption-census-contract-control-note",
+ "record": {
+  "entry": "tools/scripts/test_consumption_census_contract_note.py",
+  "inputs": [
+   "docs/status/consumption-profiles.json",
+   "docs/status/consumption-profiles.schema.json",
+   "tools/scripts/test_consumption_census_contract_note.py"
+  ],
+  "kind": "python"
+ }
+}

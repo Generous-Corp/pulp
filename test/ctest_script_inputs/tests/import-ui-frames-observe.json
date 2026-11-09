@@ -1,0 +1,10 @@
+{
+ "name": "import-ui-frames-observe",
+ "record": {
+  "entry": "test/test_ui_frames_observe.py",
+  "inputs": [
+   "test/test_ui_frames_observe.py"
+  ],
+  "kind": "python"
+ }
+}

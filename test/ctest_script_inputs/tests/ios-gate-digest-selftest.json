@@ -1,0 +1,39 @@
+{
+ "name": "ios-gate-digest-selftest",
+ "record": {
+  "entry": "tools/ci/test_ios_gate_digest.py",
+  "inputs": [
+   ".github/rulesets/main-protection.json",
+   ".github/workflows/build.yml",
+   "core/midi/include/pulp/midi/midi.hpp",
+   "core/view/src/widgets.cpp",
+   "ship/CMakeLists.txt",
+   "test/cmake/quality_tests.cmake",
+   "test/cmake/test_ios_compile_gate.sh",
+   "test/test_biquad.cpp",
+   "tools/appearance",
+   "tools/audio",
+   "tools/audio/src/service.cpp",
+   "tools/ci/governed-build.sh",
+   "tools/ci/ios_gate_digest.py",
+   "tools/ci/test_ios_gate_digest.py",
+   "tools/cli/cmd_build.cpp",
+   "tools/cli/gpu_health",
+   "tools/deps/manifest.json",
+   "tools/design",
+   "tools/design-ab",
+   "tools/import-design",
+   "tools/import-design/browser_capture/capture.mjs",
+   "tools/screenshot",
+   "tools/scripts/bundle_threejs_for_jsc.mjs",
+   "tools/scripts/classify_changes.py",
+   "tools/scripts/fetch_skia_for_release.py",
+   "tools/scripts/gates.sh",
+   "tools/scripts/package-lock.json",
+   "tools/scripts/package.json",
+   "tools/scripts/protected_merge_receipt.py",
+   "tools/scripts/test_protected_merge_receipt.py"
+  ],
+  "kind": "python"
+ }
+}

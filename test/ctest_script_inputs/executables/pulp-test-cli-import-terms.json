@@ -1,0 +1,27 @@
+{
+ "name": "pulp-test-cli-import-terms",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_cli_import_terms.cpp"
+  ],
+  "inputs": [
+   "tools/import/known-frameworks.json",
+   "tools/scripts/check_import_provenance.py"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli"
+  ],
+  "sources": [
+   "test/test_cli_import_terms.cpp",
+   "tools/cli/import_terms.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_import_terms.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

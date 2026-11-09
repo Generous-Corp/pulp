@@ -1,0 +1,12 @@
+{
+ "name": "drift-fast-selftest",
+ "record": {
+  "entry": "tools/ci/test_drift_fast.py",
+  "inputs": [
+   "tools/ci/drift_fast.py",
+   "tools/ci/test_drift_fast.py",
+   "tools/scripts/hydrate_gpu_provenance_commits.py"
+  ],
+  "kind": "python"
+ }
+}

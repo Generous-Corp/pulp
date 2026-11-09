@@ -1,0 +1,10 @@
+{
+ "name": "deps-patches-verify",
+ "record": {
+  "entry": "tools/deps/check_patches.py",
+  "inputs": [
+   "tools/deps/check_patches.py"
+  ],
+  "kind": "python"
+ }
+}

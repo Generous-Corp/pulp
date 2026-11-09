@@ -1,0 +1,11 @@
+{
+ "name": "plugin-footprint-check-selftest",
+ "record": {
+  "entry": "tools/scripts/test_plugin_footprint_check.py",
+  "inputs": [
+   "tools/scripts/plugin_footprint_check.py",
+   "tools/scripts/test_plugin_footprint_check.py"
+  ],
+  "kind": "python"
+ }
+}

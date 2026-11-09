@@ -1,0 +1,10 @@
+{
+ "name": "harness-verify-report-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_verify_report.py",
+  "inputs": [
+   "tools/harness/tests/test_verify_report.py"
+  ],
+  "kind": "python"
+ }
+}

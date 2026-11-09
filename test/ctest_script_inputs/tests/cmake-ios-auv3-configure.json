@@ -1,0 +1,10 @@
+{
+ "name": "cmake-ios-auv3-configure",
+ "record": {
+  "entry": "test/cmake/test_ios_auv3_configure.sh",
+  "inputs": [
+   "test/cmake/test_ios_auv3_configure.sh"
+  ],
+  "kind": "shell"
+ }
+}

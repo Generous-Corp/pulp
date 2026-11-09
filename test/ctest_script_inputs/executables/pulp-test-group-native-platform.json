@@ -1,0 +1,17 @@
+{
+ "name": "pulp-test-group-native-platform",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_child_process.cpp",
+   "test/test_progress_parser.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

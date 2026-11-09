@@ -1,0 +1,10 @@
+{
+ "name": "harness-validate-test-ref-selftest",
+ "record": {
+  "entry": "tools/harness/tests/test_validate_test_ref.py",
+  "inputs": [
+   "tools/harness/tests/test_validate_test_ref.py"
+  ],
+  "kind": "python"
+ }
+}

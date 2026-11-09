@@ -1,0 +1,10 @@
+{
+ "name": "test-shared-objects",
+ "record": {
+  "entry": "tools/scripts/shared_test_objects_check.py",
+  "inputs": [
+   "tools/scripts/shared_test_objects_check.py"
+  ],
+  "kind": "python"
+ }
+}

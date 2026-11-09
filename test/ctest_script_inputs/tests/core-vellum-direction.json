@@ -1,0 +1,31 @@
+{
+ "name": "core-vellum-direction",
+ "record": {
+  "entry": "tools/scripts/core_vellum_direction.py",
+  "inputs": [
+   "core",
+   "core/gpu_audio/CMakeLists.txt",
+   "core/platform",
+   "core/platform/include",
+   "core/platform/include/pulp/platform/gpu_fwd.hpp",
+   "core/render/CMakeLists.txt",
+   "core/runtime",
+   "core/runtime/include",
+   "core/simd",
+   "core/simd/include",
+   "core/view",
+   "core/view/audio",
+   "core/view/include",
+   "core/view/include/pulp/view/widgets.hpp",
+   "core/view/src/reload_exports.cpp",
+   "tools/cmake",
+   "tools/cmake/PulpGpuRuntime.cmake",
+   "tools/cmake/PulpGpuRuntimeRecord.cmake",
+   "tools/scripts/core_vellum_direction.py",
+   "tools/scripts/include_boundary.py",
+   "tools/scripts/vellum_policy.json",
+   "tools/scripts/vellum_policy.py"
+  ],
+  "kind": "python"
+ }
+}
