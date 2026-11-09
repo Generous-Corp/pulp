@@ -502,6 +502,14 @@ Traps:
   freeze". A new rule in the receipt scripts takes effect in the trusted lanes
   only after it lands, so data that relies on the rule (a `supersedes`
   correction) must ship in a later change than the rule.
+- After Vellum's framework transfer (`.github/vellum-export-receipt/framework-transfer.json`,
+  keyed to the Vellum pull request and its transfer record's SHA-256), no
+  re-export carries a Pulp edit to a transferred path. Receipt mode therefore
+  refuses `vellum_inherits: true` on any listed path once the record is at the
+  base; state `false` (a Pulp-only edit) and make a change Vellum needs first in
+  Vellum's `framework/`. Frozen paths still need `framework-backport` or
+  `emergency-exception`. The record cannot be removed or edited after it lands,
+  and, like the pin, it judges only the changes after the one that adds it.
 - The pin is data a reviewer must read. A change to `frozen_paths` takes effect
   for every later change, so review a pin edit as an ownership decision. A
   swapped receipt copy fails the trusted lanes: with `VELLUM_READER_TOKEN` set,

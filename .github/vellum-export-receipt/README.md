@@ -36,6 +36,14 @@ the new receipt, updating `export_id`, `receipt_path`, `receipt_source` and
 `receipt_sha256` together, and removing the old copy. The pin cannot be deleted
 while the guard runs.
 
+`framework-transfer.json` records Vellum's transfer of an export's units into
+its native `framework/` root: the Vellum pull request and the SHA-256 of its
+`provenance/framework/transfer.json`, the export and its Pulp commit, and the
+exact Pulp paths transferred. No later re-export carries a Pulp edit to those
+paths, so while the record is at a change's base, an event stating
+`vellum_inherits: true` for one of them fails; `false` records a Pulp-only
+edit. It cannot be removed or edited once it lands.
+
 A changed exported path needs an added event that states `vellum_inherits`:
 a change event or expansion-watch event that covers it, or an export event under
 `.github/vellum-export-events/`:
