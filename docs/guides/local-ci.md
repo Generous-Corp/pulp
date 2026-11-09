@@ -4439,6 +4439,17 @@ unless it is listed. A HOLD from any session still counts. The key is read by
 the Shipyard commit pinned in `.github/workflows/review-verdict.yml`, so bump
 that pin with the setting.
 
+Two more `[auto_merge]` keys cut merge-queue ejections (Shipyard
+`docs/automated-draining.md`, "Ejection guards"). `generated_paths` lists the
+generated files that two batch-mates tend to regenerate; the steward defers a
+head that changes one while a queued entry changes the same path, so they never
+share a merge group. `known_flaky_tests` names tests whose failure alone earns
+the one same-head retry after an ejection: WaveNet GPU path (#11862),
+AsyncBlockWorker Auto mode (#11863), WakeSignal race (#11864), staged
+GpuConvolver bounded wait (#11865) and `inject-worktree-lineage-hook` (#11866).
+`ui-script-plugin-editor-au` (#11861) is deliberately absent: the evidence says
+it is a real crash. Both keys are read from the base branch only.
+
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its
 stdin script, so a wedged checkout volume can freeze the routing probe even
