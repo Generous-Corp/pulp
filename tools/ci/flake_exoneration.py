@@ -41,9 +41,13 @@ ways: a `::warning title=flake-exoneration::` annotation, a job-summary table,
 and a `pulp-flake-excusal/v1` record the workflow uploads as the
 `flake-excusals-macos` artifact, which `flake_quarantine.py` counts.
 
-Kill switch: the repository variable `PULP_FLAKE_EXONERATION_MODE=shadow`
-(any value other than `enforce` or empty) returns to annotating only: the
-verdict is computed and printed and the job fails as before.
+Mode: the repository variable `PULP_FLAKE_EXONERATION_MODE`. Only `enforce`
+acts; unset, `shadow` or any other value annotates only: the verdict is
+computed and printed and the job fails as before. Shadow is the default, and
+setting the variable back to `shadow` is the kill switch. Graduation to
+`enforce` is on evidence (decisions contract row 30): at least 5 days in
+shadow AND at least 8 would-excuse decisions, each confirmed by a same-head
+retry pass, with zero false excusals; any false excusal resets the count.
 
     flake_exoneration.py gate --repo O/R --merge-sha SHA --ctest-exit N \\
         --build-dir B --source-root S --junit J --selected-json I \\
@@ -93,9 +97,9 @@ DELIBERATE_SKIP_RE = re.compile(r"^(SKIP_RETURN_CODE=|SKIP_REGULAR_EXPRESSION_MA
 
 
 def resolve_mode(value: str | None) -> str:
-    """`enforce` when unset or `enforce`; every other value is the kill switch."""
+    """`enforce` only when the variable says exactly that; unset or anything else is shadow."""
     v = (value or "").strip().lower()
-    return MODE_ENFORCE if v in ("", MODE_ENFORCE) else MODE_SHADOW
+    return MODE_ENFORCE if v == MODE_ENFORCE else MODE_SHADOW
 
 
 # --------------------------------------------------------------------------

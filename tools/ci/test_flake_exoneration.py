@@ -19,8 +19,8 @@ All GitHub reads are stubbed. What must hold:
   failed is in the JUnit report;
 - `gate` in enforce mode runs the tests --stop-on-failure skipped and judges the
   union; it returns 0 and writes a record only when that union is excused;
-- the kill switch: any mode other than `enforce`/empty fails as before and
-  writes no record.
+- shadow is the default and the kill switch: any mode other than `enforce`
+  (unset included) fails as before and writes no record.
 
 Run:
     python3 tools/ci/test_flake_exoneration.py
@@ -310,15 +310,15 @@ class GateTests(unittest.TestCase):
 
     def test_kill_switch_shadow_fails_as_before(self) -> None:
         run, calls = self.remainder_run([case("later-1"), case("later-2")])
-        for mode in ("shadow", "off", "SHADOW"):
+        for mode in ("shadow", "off", "SHADOW", ""):
             self.assertEqual(self.gate(self.args(mode=mode), {FLAKY: {11001, 11002}}, run), 8)
         self.assertEqual(calls, [])
         self.assertFalse((self.root / "rec/flake-excusal.json").exists())
         self.assertIn("shadow", self.summaries[-1])
 
     def test_mode_resolution(self) -> None:
-        self.assertEqual(fx.resolve_mode(None), fx.MODE_ENFORCE)
-        self.assertEqual(fx.resolve_mode(""), fx.MODE_ENFORCE)
+        self.assertEqual(fx.resolve_mode(None), fx.MODE_SHADOW)
+        self.assertEqual(fx.resolve_mode(""), fx.MODE_SHADOW)
         self.assertEqual(fx.resolve_mode("Enforce"), fx.MODE_ENFORCE)
         self.assertEqual(fx.resolve_mode("shadow"), fx.MODE_SHADOW)
         self.assertEqual(fx.resolve_mode("anything-else"), fx.MODE_SHADOW)

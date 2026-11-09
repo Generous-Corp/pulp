@@ -28,8 +28,8 @@ at once. A test the current change touches is never quarantined for that run:
 a pull request that fixes the flake runs it in the required lane. Any read
 failure yields an empty list, so the test stays in the required lane.
 
-Kill switch: with `PULP_FLAKE_EXONERATION_MODE=shadow`, `active` writes an
-empty list and `sweep` only reports what it would do.
+Mode: unless `PULP_FLAKE_EXONERATION_MODE=enforce`, `active` writes an empty
+list and `sweep` only reports what it would do (shadow is the default).
 
     flake_quarantine.py active --repo O/R --sha SHA [--pr N] --source-root S --out-dir D
     flake_quarantine.py sweep  --repo O/R [--dry-run]

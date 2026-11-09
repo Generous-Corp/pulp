@@ -1742,10 +1742,14 @@ excludes active quarantines from ctest, keeping a test the change touches, and
 `Quarantined flaky tests (advisory)` runs them without gating. At expiry the
 sweep removes the label and the test is back in the required lane; closing the
 issue or removing the label ends a quarantine early. Only excusals after a
-test's latest quarantine began count toward the next one. The kill switch is
-the repository variable `PULP_FLAKE_EXONERATION_MODE=shadow` (any value other
-than `enforce` or empty): the gate then fails as before, quarantines nothing,
-and the sweep only reports.
+test's latest quarantine began count toward the next one.
+
+The mode is the repository variable `PULP_FLAKE_EXONERATION_MODE`. Only
+`enforce` acts; unset, `shadow` or anything else leaves the gate failing as
+before (the verdict is still annotated), quarantines nothing, and makes the
+sweep report only. Shadow is the default, and setting it back is the kill
+switch. Graduation to `enforce` is on evidence, not a date: at least 5 days in shadow AND at least 8 would-excuse decisions, each confirmed by a same-head retry pass, with zero false excusals. Any false excusal resets the count and keeps shadow mode. (decisions contract row 30). The 14-day quarantine
+expiry is a separate rule.
 
 Receipt reuse in a merge group downloads the PR head's exact-tree receipt and
 verifies the run it came from. GitHub leaves `pull_requests` empty on runs of

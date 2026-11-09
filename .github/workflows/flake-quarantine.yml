@@ -11,8 +11,8 @@ name: Flake quarantine
 # `flake-quarantine` label and the test is back in the required lane; closing
 # the issue as fixed ends the quarantine at once.
 #
-# Kill switch: the repository variable PULP_FLAKE_EXONERATION_MODE=shadow
-# makes this a dry run, and makes the gate quarantine and excuse nothing.
+# Mode: unless the repository variable PULP_FLAKE_EXONERATION_MODE is
+# `enforce`, this is a dry run and the gate quarantines and excuses nothing.
 
 on:
   schedule:

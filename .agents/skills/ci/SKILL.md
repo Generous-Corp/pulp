@@ -3388,7 +3388,8 @@ union. Gotchas:
   notrun that is not a deliberate skip is a build failure.
 - The advisory quarantine step restores `Testing/Temporary` after its own
   ctest run for the same reason.
-- The kill switch is `PULP_FLAKE_EXONERATION_MODE=shadow`. Quarantine state is
+- Only `PULP_FLAKE_EXONERATION_MODE=enforce` acts; unset is shadow, and so is
+  the kill switch. Graduation to `enforce` is on evidence, not a date: at least 5 days in shadow AND at least 8 would-excuse decisions, each confirmed by a same-head retry pass, with zero false excusals. Any false excusal resets the count and keeps shadow mode. Quarantine state is
   the open bot-authored `flake-quarantine` issues; a failed read quarantines
   nothing.
 
