@@ -659,6 +659,7 @@
       "pulp/platform/environment.hpp",
       "pulp/platform/file_dialog.hpp",
       "pulp/platform/gpu_fwd.hpp",
+      "pulp/platform/main_thread.hpp",
       "pulp/platform/native_handle.hpp",
       "pulp/platform/objc_unique_class.hpp",
       "pulp/platform/permissions.hpp",
@@ -1959,15 +1960,15 @@
             "closure_node_count": 5
           },
           {
+            "exported_as": "Pulp::platform",
+            "closure_node_count": 5
+          },
+          {
             "exported_as": "Pulp::ausdk",
             "closure_node_count": 4
           },
           {
             "exported_as": "Pulp::mbedx509",
-            "closure_node_count": 4
-          },
-          {
-            "exported_as": "Pulp::platform",
             "closure_node_count": 4
           },
           {
@@ -6441,7 +6442,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/platform",
           "closure": {
-            "node_count": 4,
+            "node_count": 5,
             "pulp_targets": [
               "pulp-platform"
             ],
@@ -6450,7 +6451,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 3,
+            "count": 4,
             "third_party_targets": [
               "gpu-runtime-device-api"
             ],
@@ -6458,6 +6459,7 @@
             "imported_targets": [],
             "frameworks": [
               "Cocoa",
+              "CoreFoundation",
               "UniformTypeIdentifiers"
             ],
             "system_libraries": []
@@ -6470,6 +6472,7 @@
           },
           "direct_dependencies": [
             "framework:Cocoa",
+            "framework:CoreFoundation",
             "framework:UniformTypeIdentifiers",
             "gpu-runtime-device-api"
           ]
