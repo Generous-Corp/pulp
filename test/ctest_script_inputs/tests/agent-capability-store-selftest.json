@@ -23,6 +23,7 @@
    "tools/scripts/agent_capability_history.py",
    "tools/scripts/agent_capability_store.py",
    "tools/scripts/agent_capability_surface.py",
+   "tools/scripts/agent_capability_transaction.py",
    "tools/scripts/gate_common.py",
    "tools/scripts/test_agent_capability_store.py"
   ],
