@@ -342,6 +342,13 @@ bool clap_init(const clap_plugin_t* plugin) {
     auto desc = self->processor->descriptor();
     self->preset_manager = std::make_unique<state::PresetManager>(
         self->store, desc.manufacturer, desc.name);
+    if (desc.supports_program_change) {
+        self->preset_library = std::make_unique<state::PresetLibrary>(
+            *self->preset_manager,
+            state::PresetLibrary::default_overlay_path(desc.manufacturer, desc.name));
+        self->preset_library->enable_program_map();
+        self->program_router.set_settings({true, 0, BankSelectMode::msb_lsb});
+    }
 
     const auto caps = desc.effective_capabilities();
 
@@ -1140,6 +1147,10 @@ static void clap_phase_snapshot_params(
 static bool clap_phase_prepare_sidecars(PulpClapPlugin* self,
                                         bool host_delivered_ump) {
     auto& midi_in = self->midi_in;
+    // Bank Select + Program Change: only latches a request here; the preset is
+    // loaded on the main thread from clap_on_main_thread().
+    if (self->preset_library)
+        self->program_router.process(midi_in);
     // MPE sidecar: run inbound MIDI through the voice tracker and attach
     // the resulting expression buffer to the processor for the duration
     // of this process() call. Events stay sample-ordered because midi_in
@@ -1700,10 +1711,9 @@ static void clap_phase_request_callback(PulpClapPlugin* self) {
     // RT-safe by contract and defaults to false, so plugins that don't need it
     // pay one non-virtual-dispatch-free false per block.
     if (self->host && self->host->request_callback && self->processor &&
-        (self->processor->latency_change_pending() ||
-         self->processor->tail_change_pending() ||
+        (self->processor->latency_change_pending() || self->processor->tail_change_pending() ||
          self->processor->note_names_change_pending() ||
-         self->processor->non_realtime_tick_pending())) {
+         self->processor->non_realtime_tick_pending() || self->program_router.has_pending())) {
         self->host->request_callback(self->host);
     }
 }
@@ -2195,12 +2205,22 @@ void clap_params_flush(const clap_plugin_t* plugin,
 
 // ── Preset load extension ─────────────────────────────────────────────────
 
-static bool preset_from_location(const clap_plugin_t* plugin,
-                                  uint32_t location_kind,
-                                  const char* location,
-                                  const char* /*load_key*/) {
+static bool preset_from_location(const clap_plugin_t* plugin, uint32_t location_kind,
+                                 const char* location, const char* load_key) {
     auto* self = get_self(plugin);
-    if (!self->preset_manager || !location) return false;
+    if (!self->preset_manager)
+        return false;
+    if (location_kind != 1 && !location)
+        return false;
+
+    // CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN = 1: the plug-in's own presets,
+    // named by the library key (a null location means the plug-in itself).
+    if (location_kind == 1) {
+        if (!self->preset_library || !load_key)
+            return false;
+        const auto preset = self->preset_library->find(load_key);
+        return preset && self->preset_manager->load(preset->path);
+    }
 
     // CLAP_PRESET_DISCOVERY_LOCATION_FILE = 0
     if (location_kind != 0) return false;
@@ -2290,6 +2310,14 @@ void clap_on_main_thread(const clap_plugin_t* plugin) {
     // flag becomes pending, and this entrypoint runs on the main thread.
     auto* self = get_self(plugin);
     if (!self || !self->processor || !self->host) return;
+
+    // A Program Change latched on the audio thread: resolve and load it here.
+    if (self->preset_library) {
+        if (const auto request = self->program_router.take_request()) {
+            if (const auto preset = self->preset_library->preset_at(request->position))
+                self->preset_manager->load(preset->path);
+        }
+    }
 
     const bool latency_changed =
         self->processor->consume_latency_changed_flag();

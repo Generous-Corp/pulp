@@ -131,6 +131,11 @@ class PresetProgramRouter {
 
     // ── Message thread ──────────────────────────────────────────────────
 
+    /// True when a Program Change is waiting. Real-time safe; does not take it.
+    bool has_pending() const noexcept {
+        return request_.load(std::memory_order_relaxed) != 0;
+    }
+
     /// The newest unhandled Program Change, if any. Taking it empties the slot.
     std::optional<Request> take_request() noexcept {
         const std::uint64_t v = request_.exchange(0, std::memory_order_acquire);

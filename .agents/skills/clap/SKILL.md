@@ -1400,3 +1400,18 @@ processor and wraps `process()` with `service_panic()` before and
 `midi_out` claim (`docs/guides/midi-panic.md`). Keep both calls on any new
 process path (including f64) or `Processor::request_panic()` silently stops
 working there. Tests: test_clap_midi_events.cpp (emitted note-offs and channel messages on out_events).
+
+## Program Change selects a preset only on opt-in
+
+A descriptor with `supports_program_change = true` makes the adapter create a
+`PresetLibrary` and a `PresetProgramRouter` at `clap_init`. The audio thread only
+scans `midi_in` for Bank Select + Program Change and stores one atomic request
+(`clap_phase_prepare_sidecars`); the block then asks the host for
+`request_callback` and `clap_on_main_thread` resolves the position and loads the
+preset. Nothing loads inside `process()`, so a note in the same block as the
+Program Change plays with the old values. The library's factory folder is read
+at init, so a harness that sets `set_factory_presets_dir` afterwards must call
+`preset_library->refresh()`. `clap.preset-load` at
+`CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN` loads a library key. The test harness
+`Harness` does not set `plugin.get_extension`; call
+`clap_adapter::clap_get_extension` instead of the vtable slot.
