@@ -1892,3 +1892,13 @@ an existing renderer or example, changing a widget label) adds no public header
 and changes no installed capability key. Run
 `python3 tools/docs_generate.py generate` so the generated limitations block
 follows the matrix, and do not touch the capability manifest for it.
+
+## G-5 host ingress header refresh
+
+The host-event ingress adapter changes `pulp/host/graph_event_contract.hpp`
+(reviewed as infrastructure) and `pulp/host/signal_graph_runtime.hpp`. Refresh
+the registry fingerprint and the `agent_capability_catalog_signal.py` binding
+fingerprints to the merged header bytes, then regenerate with
+`agent_capability_manifest.py --write`. Leave `SURFACE_INVENTORY_VERSION`
+alone: the surface change stays pending until version-at-land assigns it, and
+the history keeps main's line-per-entry storage rather than a compact rewrite.
