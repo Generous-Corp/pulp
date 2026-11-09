@@ -542,6 +542,13 @@ if(PULP_HAS_CLAP)
         TEST_PREFIX "lifecycle::"
         PROPERTIES LABELS lifecycle)
 
+    # MIDI Learn controller feedback through the CLAP adapter. Drives the adapter
+    # through its public header surface, like pulp-test-clap-midi-events.
+    add_executable(pulp-test-clap-midi-learn test_clap_midi_learn.cpp)
+    target_link_libraries(pulp-test-clap-midi-learn PRIVATE pulp::format clap Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
+    target_compile_definitions(pulp-test-clap-midi-learn PRIVATE PULP_CLAP_GUI=1)
+    catch_discover_tests(pulp-test-clap-midi-learn)
+
     # Pin the CLAP host-facing API contract that Bitwig / Reaper /
     # FL Studio / Studio One depend on. Re-compiles the
     # adapter TU into its own executable so the test owns the
