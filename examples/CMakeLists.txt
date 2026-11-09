@@ -23,6 +23,7 @@ endif()
 
 # PulpGain: minimal gain effect plugin
 add_subdirectory(pulp-gain)
+add_subdirectory(midi-learn-demo)
 add_subdirectory(design-panel-plugin)
 add_subdirectory(design-panel-instrument)
 add_subdirectory(design-panel-midi-effect)

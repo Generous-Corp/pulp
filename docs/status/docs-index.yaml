@@ -419,6 +419,11 @@ docs:
     kind: guide
     summary: PulpGain — stereo gain effect (reference example)
 
+  - slug: example-midi-learn-demo
+    path: examples/midi-learn-demo.md
+    kind: guide
+    summary: MidiLearnDemo, a level and pan effect that shows MIDI Learn with menu, overlay, feedback, undo and saved mappings
+
   - slug: example-pulp-tone
     path: examples/pulp-tone.md
     kind: guide

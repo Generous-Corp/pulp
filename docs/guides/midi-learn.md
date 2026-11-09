@@ -137,3 +137,5 @@ must outlive the undo history.
 `apply_relative`, `classify_learn_sequence` and `takeover_step` as pure functions
 over raw bytes, so a widget, a test or another subsystem can use them without
 running audio.
+
+The [MidiLearnDemo example](../examples/midi-learn-demo.md) wires all of this into a small plug-in.
