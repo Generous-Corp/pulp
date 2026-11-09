@@ -236,6 +236,9 @@ TEST_CASE("Host ingress refuses a block whose frames differ from the ingress win
     REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
     CHECK(fixture.graph.process_checked(block.out, block.in, 4) ==
           TriggerGraphResult::ProcessingFailure);
+    SignalGraph::HostEventIngressCounters refused;
+    REQUIRE(fixture.graph.host_event_counters(refused) == HostEventResult::Accepted);
+    CHECK(refused.refused == 1);
     CHECK(counters(fixture.graph).cursor == 0);
 
     pulp::midi::MidiBuffer delivered;
