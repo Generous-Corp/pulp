@@ -4274,3 +4274,8 @@ rules when touching it:
   selected, after product filtering, never the whole build dir (test binaries
   legitimately carry every marker).
 
+# G-7 graph probe parity
+
+The `pulp graph probe` command and MCP `pulp_graph` tool expose bounded audio,
+control, and event edge observations. Keep their `edge_kind` and
+`destination_param` schemas aligned when changing graph probe diagnostics.

@@ -3025,3 +3025,9 @@ invalid channel views before dereferencing pointers or mutating output, clock,
 or envelope state. The public consumer in
 `examples/g5-trigger-runtime-consumer` proves this bounded SDK seam; it does not
 establish complete G-5 coverage or realtime timing qualification.
+# G-7 edge diagnostics
+
+SignalGraph control and event edge probes are serial routed diagnostics with
+fixed-capacity publication and explicit refusal in unsupported execution modes.
+Host lifecycle changes must preserve detach-on-reset and the source-edge event
+observation boundary.

@@ -81,6 +81,14 @@ import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
 try:
+    import download_retry
+except ImportError:  # imported as tools.scripts.*, or loaded by path
+    try:
+        from tools.scripts import download_retry
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import download_retry
+try:
     from process_liveness import pid_alive
 except ImportError:  # imported as tools.scripts.*, or copied without its sibling
     try:
@@ -597,97 +605,25 @@ def expected_dawn_library_path(
     return skia.with_name(dawn_name)
 
 
-# Statuses worth a second attempt. A 403/404 means a bad pin or a revoked
-# asset: retrying cannot fix it, and burning the backoff first buries the real
-# error under five minutes of silence.
-_RETRYABLE_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
-
-# A bare OSError is deliberately NOT transient. It is what a full disk raises
-# on the write side, and re-downloading ~500 MiB three more times to fill the
-# same disk turns a clear error into a slow one.
-_TRANSIENT_DOWNLOAD_ERRORS = (
-    urllib.error.URLError,
-    TimeoutError,
-    ConnectionError,
-    http.client.IncompleteRead,
-)
-
-_DOWNLOAD_ATTEMPTS = 4
-_DOWNLOAD_BACKOFF_SECONDS = 2.0
-_DOWNLOAD_BACKOFF_CAP_SECONDS = 30.0
-
-
-def _download_backoff_seconds(attempt: int) -> float:
-    """Exponential backoff for `attempt` (1-based), capped."""
-    return min(_DOWNLOAD_BACKOFF_SECONDS * (2 ** (attempt - 1)),
-               _DOWNLOAD_BACKOFF_CAP_SECONDS)
-
-
-def _retry_after_seconds(error: BaseException, fallback: float) -> float:
-    """Honour a numeric Retry-After header when the server sends one."""
-    headers = getattr(error, "headers", None)
-    if headers is None:
-        return fallback
-    raw = headers.get("Retry-After")
-    if raw is None:
-        return fallback
-    try:
-        seconds = float(str(raw).strip())
-    except ValueError:
-        # The header also permits an HTTP-date. Parsing that buys little here,
-        # so fall back to our own schedule rather than guessing.
-        return fallback
-    if seconds < 0:
-        return fallback
-    return min(seconds, _DOWNLOAD_BACKOFF_CAP_SECONDS)
+# Names the fallback layer below uses to decide what moves on to the next source.
+_TRANSIENT_DOWNLOAD_ERRORS = download_retry.TRANSIENT_ERRORS
+_DOWNLOAD_ATTEMPTS = download_retry.DEFAULT_ATTEMPTS
 
 
 def download_release_asset(url: "str | urllib.request.Request",
                            zip_path: Path,
                            *,
-                           attempts: int = _DOWNLOAD_ATTEMPTS,
+                           attempts: int = download_retry.DEFAULT_ATTEMPTS,
                            sleep=time.sleep) -> None:
-    """Download `url` into `zip_path`, retrying transient network failures.
+    """Download `url` into `zip_path` under the shared retry policy.
 
     The pinned Skia asset is a few hundred megabytes fetched from a release
-    CDN, and a single 502 on that request fails the required macOS gate and
-    ejects the pull request from the merge queue. Each attempt reopens the
-    file for writing, so a partially written body is truncated rather than
-    concatenated with the next one; the caller's sha256 check remains the
-    authority on integrity either way.
+    CDN, and a single 5xx on that request fails the required macOS gate and
+    ejects the pull request from the merge queue. The policy lives in
+    `download_retry`; the caller's sha256 check remains the authority on
+    integrity.
     """
-    last_error: BaseException | None = None
-    for attempt in range(1, attempts + 1):
-        try:
-            with urllib.request.urlopen(url) as resp, zip_path.open("wb") as fp:
-                # 1 MiB chunks; skia zips are ~250-500 MiB
-                while True:
-                    chunk = resp.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    fp.write(chunk)
-            return
-        except urllib.error.HTTPError as err:
-            if err.code not in _RETRYABLE_HTTP_STATUS:
-                raise
-            last_error = err
-            delay = _retry_after_seconds(err, _download_backoff_seconds(attempt))
-        except _TRANSIENT_DOWNLOAD_ERRORS as err:
-            last_error = err
-            delay = _download_backoff_seconds(attempt)
-
-        if attempt == attempts:
-            break
-        print(
-            f"  transient download failure ({last_error}); retrying in "
-            f"{delay:.0f}s [attempt {attempt + 1} of {attempts}]",
-            flush=True,
-        )
-        sleep(delay)
-
-    assert last_error is not None
-    print(f"  download failed after {attempts} attempts: {last_error}", flush=True)
-    raise last_error
+    download_retry.download(url, zip_path, attempts=attempts, sleep=sleep)
 
 
 # The browser download URL and the REST API asset endpoint are served by

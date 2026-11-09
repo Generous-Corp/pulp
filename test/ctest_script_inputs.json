@@ -1774,6 +1774,18 @@
    ],
    "undeclared_sources": []
   },
+  "pulp-test-graph-control-event-probe": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_graph_control_event_probe.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-graph-identity": {
    "data": "none",
    "inputs": [],
@@ -3213,6 +3225,7 @@
   "pulp-test-gpu-wavenet-descriptor",
   "pulp-test-gpu-wavenet-realtime-node",
   "pulp-test-gpu-wavenet-session",
+  "pulp-test-graph-control-event-probe",
   "pulp-test-graph-executor-routing",
   "pulp-test-graph-identity",
   "pulp-test-graph-plugin-resolution",
@@ -6037,6 +6050,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/gpu_audio_p2_campaign.py",
     "tools/scripts/gpu_audio_provider_identity.py",
@@ -6090,6 +6104,7 @@
     "tools/deps",
     "tools/deps/manifest.json",
     "tools/scripts",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/test_gpu_audio_provider_identity.py"
@@ -13851,6 +13866,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"
@@ -13862,6 +13878,7 @@
    "inputs": [
     "external/skia-build",
     "tools/deps/manifest.json",
+    "tools/scripts/download_retry.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/process_liveness.py",
     "tools/scripts/verify_wasm_skia_slice.py"

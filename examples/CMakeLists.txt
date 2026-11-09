@@ -195,6 +195,7 @@ add_subdirectory(faust-tremolo)
 # Dense AudioRate ProcessorNode: a public, headless example of a native
 # Processor consuming a per-sample parameter lane produced by the graph.
 add_subdirectory(audio-rate-processor-node)
+add_subdirectory(graph-control-event-probe)
 
 # ViewBridge demo: custom create_view() + secondary-view attach
 add_subdirectory(view-bridge-demo)
