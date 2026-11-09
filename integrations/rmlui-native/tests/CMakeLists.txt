@@ -7,6 +7,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     target_link_libraries(pulp-test-rmlui-native-surface PRIVATE
         pulp::rmlui-native Catch2::Catch2WithMain "-framework AppKit" "-framework Metal")
     include(Catch)
+    # One label: catch_discover_tests splits a quoted list into separate
+    # property arguments, so "a;b" would set LABELS to "a" alone.
     catch_discover_tests(pulp-test-rmlui-native-surface
-        PROPERTIES LABELS "native-surface;rmlui")
+        PROPERTIES LABELS rmlui)
 endif()
