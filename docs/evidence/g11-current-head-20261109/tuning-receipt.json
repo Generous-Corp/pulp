@@ -1,0 +1,20 @@
+{
+  "schema": "pulp.g11.tuning-receipt.v1",
+  "accepted": true,
+  "a4_hz": 442.0,
+  "sample_rate": 48000,
+  "frames": 96,
+  "partitions": [
+    32,
+    17
+  ],
+  "invalid_note_refused": true,
+  "default_a4_negative": "exit=42; planted-default-a4 rejected by tuned audio oracle",
+  "failed_render_negative": "exit=7; empty render refused",
+  "binary_sha256": "0f97eb8717a00a23f3e870bf065ab45d416da492dd8838596280d73333904d63",
+  "source_sha": "3fad8b42a44d496361f97eeb469639e3a2b9e3c6",
+  "sdk_provenance_sha256": "cd4a21dd1ee66ae354c0c2c68e73cb0ce246b9bf045f553d86ccbfcc3e94f7ae",
+  "public_header_sha256": {
+    "tuning.hpp": "84f372a58c3a1955de081c6f76fc96fc6f67a65b3f07801833996dab90c8a025"
+  }
+}
