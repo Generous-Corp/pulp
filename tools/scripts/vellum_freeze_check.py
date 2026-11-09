@@ -1360,15 +1360,18 @@ def _receipt_mode(args: argparse.Namespace) -> int:
     token = os.environ.get("VELLUM_READER_TOKEN")
     report["receipt_source"] = "unchecked: no Vellum reader token"
     if token and report["state"] == "active":
-        try:
-            problems = receipt.receipt_copy_problems(
-                repo, (base, args.head),
-                lambda path: _public_github_json(
-                    f"https://api.github.com/{path}",
-                    token,
-                    os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
-                ),
+        def fetch(path: str) -> dict[str, Any]:
+            return _public_github_json(
+                f"https://api.github.com/{path}",
+                token,
+                os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
             )
+
+        try:
+            problems = receipt.receipt_copy_problems(repo, (base, args.head), fetch)
+            # The framework-transfer record must be Vellum main's transfer
+            # record, so it cannot take effect before Vellum's transfer merges.
+            problems += receipt.transfer_copy_problems(repo, (base, args.head), fetch)
         except (receipt.ReceiptDriftError, FreezeError, OSError) as exc:
             print(f"vellum-freeze receipt mode: {exc}", file=sys.stderr)
             return 1

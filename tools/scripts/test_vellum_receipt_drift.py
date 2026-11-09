@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -637,6 +638,7 @@ def transfer_value(paths: list[str] | None = None, **overrides) -> dict:
     return value
 
 
+LANDED_TRANSFER_PATHS_SHA256 = "779d1a84a5e1e4e44f9ba07a05052f9d617c3d7f43a2da1121f46c11b74da47e"
 STATE = "core/state/src/s.cpp"  # exported, in no transferred slice, not frozen
 CANVAS = "core/canvas/src/a.cpp"  # exported, in the canvas-kernel slice
 
@@ -692,11 +694,70 @@ class FrameworkTransferTests(unittest.TestCase):
         self.fixture.write(drift.TRANSFER_PATH, transfer_value())
         self.assertEqual(self.edit_with_decision(STATE, True)["status"], "pass")
 
-    def test_a_path_that_was_not_transferred_is_unaffected(self):
+    def test_a_pinned_path_outside_the_transfer_is_refused_too(self):
+        # The pinned receipt and the transfer's export can differ (Pulp's pin
+        # lists paths the transfer dropped). Neither is re-exported, so the
+        # refusal covers every path the pinned receipt makes owe a decision.
         self.land_transfer([path for path in EXPORTED if path != STATE])
         report = self.edit_with_decision(STATE, True)
+        self.assertEqual(report["inherited_after_transfer"], [STATE])
+        self.assertEqual(report["status"], "fail")
+
+    def test_a_path_no_export_names_is_unaffected(self):
+        self.land_transfer()
+        self.fixture.write("docs/readme.md", "// edited\n")
+        report = self.fixture.check()
         self.assertEqual(report["status"], "pass", report)
-        self.assertEqual(report["transfer"], EXPORT_ID)
+        self.assertEqual((report["owed"], report["inherited_after_transfer"]), ({}, []))
+
+    def test_a_new_file_under_a_transferred_source_directory_is_refused(self):
+        self.land_transfer()
+        path = "core/canvas/src/brand_new.cpp"
+        self.fixture.write(path, "// new\n")
+        self.fixture.write(f"{drift.EXPORT_EVENT_DIRECTORY}/20261108-new.json",
+                           export_event("20261108-new", [path], True))
+        report = self.fixture.check()
+        self.assertEqual(report["owed"], {path: "added in an exported source directory"})
+        self.assertEqual(report["inherited_after_transfer"], [path])
+        self.assertEqual(report["status"], "fail")
+
+    def test_a_generated_input_producer_is_refused(self):
+        self.land_transfer()
+        self.fixture.write(PRODUCER, "# edited\n")
+        self.fixture.write(f"{drift.EXPORT_EVENT_DIRECTORY}/20261108-producer.json",
+                           export_event("20261108-producer", [PRODUCER], True))
+        self.assertEqual(self.fixture.check()["inherited_after_transfer"], [PRODUCER])
+
+    def test_an_unfreezing_event_on_a_frozen_path_cannot_claim_inheritance(self):
+        for disposition in ("framework-backport", "emergency-exception"):
+            for inherits, status in ((True, "fail"), (False, "pass")):
+                with self.subTest(disposition=disposition, inherits=inherits):
+                    fixture = Fixture(frozen=[CANVAS])
+                    try:
+                        fixture.write(drift.TRANSFER_PATH, transfer_value())
+                        fixture.base = fixture.commit("record the framework transfer")
+                        fixture.write(CANVAS, "// backported\n")
+                        fixture.write(".github/vellum-change-events/20261108-canvas.json",
+                                      {"kind": "change", "slices": ["canvas-kernel"],
+                                       "disposition": disposition, "vellum_inherits": inherits})
+                        report = fixture.check()
+                        self.assertEqual(report["frozen"], [])
+                        self.assertEqual(report["inherited_after_transfer"], [CANVAS] if inherits else [])
+                        self.assertEqual(report["status"], status, report)
+                    finally:
+                        fixture.close()
+
+    def test_every_failing_part_is_described(self):
+        report = {"export_id": EXPORT_ID, "transfer": EXPORT_ID, "owed": {}, "missing": [],
+                  "conflicting": [], "frozen": [CANVAS], "inherited_after_transfer": [STATE]}
+        text = drift.describe_failure(report)
+        self.assertIn("frozen in Pulp", text)
+        self.assertIn("vellum_inherits cannot be true", text)
+        self.assertNotIn("need an explicit vellum_inherits decision", text)
+        report.update(missing=[STATE], owed={STATE: "exported"}, frozen=[])
+        text = drift.describe_failure(report)
+        self.assertIn("need an explicit vellum_inherits decision", text)
+        self.assertIn("vellum_inherits cannot be true", text)
 
     def test_the_transfer_record_cannot_be_removed_or_edited(self):
         self.land_transfer()
@@ -709,8 +770,13 @@ class FrameworkTransferTests(unittest.TestCase):
             self.fixture.check()
 
     def test_a_malformed_transfer_record_fails_cleanly(self):
-        for overrides in ({"framework_pull_request": "257"}, {"pulp_sha": "0" * 40},
-                          {"transferred_paths": []}, {"extra": 1}):
+        for overrides in ({"framework_pull_request": "257"}, {"framework_pull_request": 0},
+                          {"pulp_sha": "0" * 40}, {"transferred_paths": []}, {"extra": 1},
+                          {"schema_version": 2}, {"framework_repository": "Generous-Corp/pulp"},
+                          {"transfer_record": "provenance/framework/other.json"},
+                          {"transfer_record_sha256": "8" * 63}, {"export_id": "2026-11-07"},
+                          {"transferred_paths": ["../x"]},
+                          {"transferred_paths": [EXPORTED[1], EXPORTED[0]]}):
             with self.subTest(overrides=overrides):
                 self.fixture.write(drift.TRANSFER_PATH, transfer_value(**overrides))
                 with self.assertRaises(drift.ReceiptDriftError):
@@ -723,6 +789,106 @@ class FrameworkTransferTests(unittest.TestCase):
         self.assertEqual(value["framework_pull_request"], 257)
         self.assertEqual(transfer.export_id, "20261107-f0ac0a4ff392")
         self.assertEqual(len(transfer.paths), 911)
+        # Pinned to vellum#257's transfer record: its digest, and the digest of
+        # the sorted path list it transfers.
+        self.assertEqual(transfer.record_sha256,
+                         "81e8916ef73d0bf9b4d3a31409208524897ba2795e17fd749fea69756547e65c")
+        self.assertEqual(hashlib.sha256("\n".join(sorted(transfer.paths)).encode()).hexdigest(),
+                         LANDED_TRANSFER_PATHS_SHA256)
+
+
+class TransferSourceTests(unittest.TestCase):
+    """The framework-transfer record must be Vellum main's transfer record."""
+
+    SOURCE = "provenance/framework/transfer.json"
+
+    def setUp(self) -> None:
+        self.fixture = Fixture()
+        self.vellum = json.dumps({"records": [{"pulp_path": p} for p in EXPORTED]}).encode()
+        self.fixture.write(drift.TRANSFER_PATH,
+                           transfer_value(transfer_record_sha256=hashlib.sha256(self.vellum).hexdigest()))
+        self.head = self.fixture.commit("record the framework transfer")
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def served(self, data: bytes | None, **overrides):
+        def fetch(path: str):
+            self.assertEqual(path, f"repos/Generous-Corp/vellum/contents/{self.SOURCE}?ref=main")
+            if data is None:
+                raise OSError("unreachable")
+            value = {"type": "file", "path": self.SOURCE, "encoding": "base64",
+                     "content": base64.b64encode(data).decode()}
+            value.update(overrides)
+            return value
+        return fetch
+
+    def problems(self, fetch) -> list[str]:
+        return drift.transfer_copy_problems(self.fixture.root, (self.fixture.base, self.head), fetch)
+
+    def test_vellum_main_s_record_matches(self):
+        self.assertEqual(self.problems(self.served(self.vellum)), [])
+
+    def test_a_record_vellum_main_lacks_is_refused(self):
+        self.assertEqual(self.problems(self.served(self.vellum, type="dir")),
+                         ["Generous-Corp/vellum main has no file provenance/framework/transfer.json"])
+
+    def test_other_bytes_on_vellum_main_are_refused(self):
+        problems = self.problems(self.served(self.vellum + b" "))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("names transfer record", problems[0])
+
+    def test_another_path_set_on_vellum_main_is_refused(self):
+        other = json.dumps({"records": [{"pulp_path": p} for p in EXPORTED[1:]]}).encode()
+        self.fixture.write(drift.TRANSFER_PATH,
+                           transfer_value(transfer_record_sha256=hashlib.sha256(other).hexdigest()))
+        self.head = self.fixture.commit("record a transfer with another path set")
+        problems = self.problems(self.served(other))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("1 differ", problems[0])
+
+    def test_an_unreachable_vellum_never_reads_as_a_match(self):
+        with self.assertRaises(OSError):
+            self.problems(self.served(None))
+
+    def test_cli_refuses_the_introducing_change_until_vellum_main_has_the_record(self):
+        local = self.fixture.git("rev-parse", f"{self.fixture.base}:{drift.PIN_DIRECTORY}/{EXPORT_ID}.json")
+        script = (
+            "import base64, sys\n"
+            f"sys.path.insert(0, {str(SCRIPTS)!r})\n"
+            "import vellum_freeze_check as f\n"
+            "local, record = sys.argv[1], sys.argv[2]\n"
+            "def serve(url, token):\n"
+            "    path = url.split('/contents/')[1].split('?')[0]\n"
+            "    if path.startswith('provenance/mirror/'):\n"
+            "        return {'type': 'file', 'path': path, 'sha': local}\n"
+            "    if record == '-':\n"
+            "        return {'message': 'Not Found'}\n"
+            "    return {'type': 'file', 'path': path, 'encoding': 'base64',\n"
+            "            'content': base64.b64encode(open(record, 'rb').read()).decode()}\n"
+            "f._github_json = serve\n"
+            "sys.argv = [sys.argv[0]] + sys.argv[3:]\n"
+            "raise SystemExit(f.main())\n"
+        )
+        with tempfile.TemporaryDirectory() as out:
+            vellum = pathlib.Path(out) / "transfer.json"
+            vellum.write_bytes(self.vellum)
+            def run(record: str):
+                env = dict(os.environ, VELLUM_READER_TOKEN="t")
+                return subprocess.run(
+                    [sys.executable, "-c", script, local, record, "--receipt-mode",
+                     "--repo", str(self.fixture.root), "--base", self.fixture.base, "--head", self.head,
+                     "--output", str(pathlib.Path(out) / "r.json")],
+                    capture_output=True, text=True, encoding="utf-8", env=env, check=False)
+            missing = run("-")
+            self.assertEqual(missing.returncode, 1, missing.stdout + missing.stderr)
+            self.assertIn("main has no file provenance/framework/transfer.json", missing.stderr)
+            merged = run(str(vellum))
+            self.assertEqual(merged.returncode, 0, merged.stdout + merged.stderr)
+
+    def test_no_record_asks_nothing(self):
+        self.assertEqual(drift.transfer_copy_problems(self.fixture.root, (self.fixture.base,),
+                                                      lambda path: self.fail("fetched")), [])
 
 
 class ReceiptSourceTests(unittest.TestCase):

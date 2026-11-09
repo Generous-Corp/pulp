@@ -165,12 +165,27 @@ deleted at cutover. In Pulp they apply as follows.
    is made first in Vellum's `framework/` and, if Pulp also needs it, brought
    back with `framework-backport`.
    `.github/vellum-export-receipt/framework-transfer.json` records the
-   transfer (keyed to the Vellum pull request and the SHA-256 of its transfer
-   record) and the exact Pulp paths transferred. While it is present at a
-   change's base commit, receipt mode refuses any event stating
-   `vellum_inherits: true` for one of those paths; `vellum_inherits: false`
-   records the Pulp-only edit. Before the record lands nothing changes, and
-   once it lands it can be neither removed nor edited.
+   transfer: the Vellum pull request, the SHA-256 of its
+   `provenance/framework/transfer.json`, the export and its Pulp commit, and
+   the exact Pulp paths transferred. While it is present at a change's base
+   commit, receipt mode refuses `vellum_inherits: true` on every path it
+   judges, not only the transferred ones: an exported path of the pinned
+   receipt, a generated-input producer, a file under an exported source
+   directory, and any event covering a frozen path (a `framework-backport`
+   brings a Vellum commit back; it does not send one). The pinned receipt can
+   name paths the transfer's export dropped, and since neither is re-exported,
+   the refusal covers the union. `vellum_inherits: false` records the
+   Pulp-only edit.
+
+   The record is held to Vellum. In the trusted lanes, where a Vellum reader
+   token is present, receipt mode reads Vellum main's
+   `provenance/framework/transfer.json` and requires the record's
+   `transfer_record_sha256` to equal that file's SHA-256 and its
+   `transferred_paths` to equal that file's `pulp_path` set; a missing file, a
+   difference, or a failed read fails the check. So the record cannot land
+   before Vellum's transfer has merged. Like the pin, it judges only the
+   changes after the one that adds it, and once it lands it can be neither
+   removed nor edited.
 4. **Pulp's copies are deleted at cutover.** When Pulp consumes Vellum, its
    copies of the transferred paths are removed rather than kept in sync. Until
    then they are Pulp's build inputs and keep the `pulp` spelling.
