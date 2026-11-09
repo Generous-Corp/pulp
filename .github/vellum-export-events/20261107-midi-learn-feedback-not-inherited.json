@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261107-midi-learn-feedback-not-inherited",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-07T00:00:00Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/state/include/pulp/state/midi_feedback.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "New header-only MIDI feedback encoder included only by the MIDI Learn engine, which is itself in no exported closure, so the next re-export does not carry it."
+}
