@@ -211,7 +211,6 @@ TEST_CASE("Graph-authored event edge clears when its feed-forward path is discon
     REQUIRE_FALSE(graph.graph_event_edge().has_value());
 }
 
-
 TEST_CASE("Graph-authored event admission refuses unsupported roles and fanout",
           "[g5][events][wiring][negative-control]") {
     SignalGraph graph;
