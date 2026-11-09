@@ -704,32 +704,18 @@ target_include_directories(pulp-test-timeline-document-fuzz PRIVATE
 target_compile_definitions(pulp-test-timeline-document-fuzz PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 
-# Coverage-guided lane. Off by default: -fsanitize=fuzzer needs a compiler
-# runtime Apple's clang does not ship, so requesting it on a toolchain without
-# libclang_rt.fuzzer fails at configure time with a named cause rather than at
-# link time with a missing-library error.
+# Coverage-guided lane. Off by default; pulp_fuzz_instrument_target() proves
+# the toolchain can produce a libFuzzer binary (driver from the compiler, or
+# from PULP_FUZZ_RUNTIME_ARCHIVE) so a missing runtime fails at configure time
+# with a named cause rather than at link time with a missing-library error.
 if(PULP_ENABLE_FUZZING)
-    include(CheckCXXSourceCompiles)
-    set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer")
-    check_cxx_source_compiles(
-        "extern \"C\" int LLVMFuzzerTestOneInput(const unsigned char*, unsigned long) { return 0; }"
-        PULP_HAVE_LIBFUZZER)
-    unset(CMAKE_REQUIRED_FLAGS)
-    if(NOT PULP_HAVE_LIBFUZZER)
-        message(FATAL_ERROR
-            "PULP_ENABLE_FUZZING=ON but this toolchain has no libFuzzer runtime. "
-            "Apple's clang omits libclang_rt.fuzzer; use an LLVM that ships it "
-            "(for example CMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++).")
-    endif()
     add_executable(pulp-fuzz-timeline-document
         fuzz/timeline_document_fuzz_target.cpp
         fuzz/timeline_document_oracle.cpp)
     target_link_libraries(pulp-fuzz-timeline-document PRIVATE pulp::timeline)
     target_include_directories(pulp-fuzz-timeline-document PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR})
-    target_compile_options(pulp-fuzz-timeline-document PRIVATE
-        -fsanitize=${PULP_FUZZ_SANITIZERS} -fno-omit-frame-pointer)
-    target_link_options(pulp-fuzz-timeline-document PRIVATE -fsanitize=${PULP_FUZZ_SANITIZERS})
+    pulp_fuzz_instrument_target(pulp-fuzz-timeline-document)
 
     # Standard MIDI File import: chunk framing, variable-length quantities,
     # running status and meta payload lengths all come from the file.

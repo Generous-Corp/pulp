@@ -5,6 +5,7 @@
 
 #include <choc/audio/choc_AudioFileFormat_WAV.h>
 #include <choc/audio/choc_SampleBuffers.h>
+#include "pcm_float_scaling.hpp"
 
 #include <dr_flac.h>
 #include <dr_mp3.h>
@@ -600,6 +601,7 @@ struct WavDecoder final : Decoder {
         if (info.num_frames == 0 && data_chunk->declared_size != 0)
             return false;
         info.bits_per_sample = choc::audio::getBytesPerSample(props.bitDepth) * 8;
+        bit_depth = props.bitDepth;
         finish_info(info, props.formatName);
         return true;
     }
@@ -613,9 +615,11 @@ struct WavDecoder final : Decoder {
             const auto count = std::min(frames - produced, kMaxViewFrames);
             for (std::uint32_t ch = 0; ch < info.num_channels; ++ch)
                 pointers[ch] = out[ch] + produced;
-            auto view = choc::buffer::createChannelArrayView<float>(
-                pointers.data(), info.num_channels, static_cast<choc::buffer::FrameCount>(count));
-            if (!reader->readFrames(frame_offset + produced, view))
+            // Pulp's integer scaling (pcm_float_scaling.hpp), shared with the
+            // registry's whole-file decode so both WAV paths agree bit for bit.
+            if (!detail::read_pulp_float(*reader, bit_depth, frame_offset + produced,
+                                         pointers.data(), info.num_channels,
+                                         static_cast<std::uint32_t>(count)))
                 break;
             produced += count;
         }
@@ -628,6 +632,7 @@ struct WavDecoder final : Decoder {
     std::unique_ptr<SourceStreamBuf> buffer;
     std::shared_ptr<std::istream> stream;
     std::unique_ptr<choc::audio::AudioFileReader> reader;
+    choc::audio::BitDepth bit_depth = choc::audio::BitDepth::unknown;
     std::vector<float*> pointers;
 };
 
