@@ -119,12 +119,23 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(sorted(self.platforms), sorted(active))
         hosted = {"macos-15", "ubuntu-24.04", "ubuntu-24.04-arm",
                   "windows-latest", "windows-11-arm"}
-        routes = {leg["platform"]: leg["runs_on"] for leg in rcm.legs()}
+        routes = {leg["platform"]: json.loads(leg["runs_on_json"]) for leg in rcm.legs()}
         for platform, runner in routes.items():
             self.assertIn(runner, hosted, platform)
         # The release cross-configures darwin-x64 on Apple Silicon; so must this.
         self.assertEqual(routes["darwin-x64"], "macos-15")
         self.assertIn("darwin-x64", self.platforms)
+
+    def test_macos_override_routes_only_the_darwin_legs(self):
+        routes = {leg["platform"]: json.loads(leg["runs_on_json"])
+                  for leg in rcm.legs('["self-hosted", "macOS", "ARM64"]')}
+        self.assertEqual(routes["darwin-x64"], ["self-hosted", "macOS", "ARM64"])
+        self.assertEqual(routes["darwin-arm64"], ["self-hosted", "macOS", "ARM64"])
+        self.assertEqual(routes["linux-x64"], "ubuntu-24.04")
+        self.assertEqual(routes["windows-x64"], "windows-latest")
+        for bad in ("self-hosted", "[]", "{}", "[1]", '""'):
+            with self.subTest(bad=bad), self.assertRaises(rcm.PlanError):
+                rcm.legs(bad)
 
     def test_plans_replay_release_configures_without_building(self):
         for platform in self.platforms:
@@ -204,6 +215,22 @@ class PlanTests(unittest.TestCase):
             with self.assertRaisesRegex(rcm.PlanError, "unsupported expression"):
                 rcm.plan("darwin-x64", wf)
 
+    def test_break_unmodelled_step_key_fails_the_plan(self):
+        def mutate(job):
+            step(job, "Fetch Skia binaries")["working-directory"] = "external"
+        with MutatedWorkflow(mutate) as wf:
+            with self.assertRaisesRegex(rcm.PlanError, "working-directory"):
+                rcm.plan("darwin-x64", wf)
+
+    def test_break_workflow_env_fails_the_plan(self):
+        doc = load_yaml(rcm.RELEASE_WORKFLOW)
+        doc["env"] = {"PULP_SOMETHING": "1"}
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / "release-cli.yml"
+            wf.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+            with self.assertRaisesRegex(rcm.PlanError, "env"):
+                rcm.plan("darwin-x64", wf)
+
     def test_break_non_bash_replayed_step_fails_the_plan(self):
         def mutate(job):
             step(job, "Fetch Skia binaries")["shell"] = "pwsh"
@@ -230,6 +257,11 @@ class ExpressionTests(unittest.TestCase):
             mac.evaluate("secrets.TOKEN")
         with self.assertRaises(rcm.PlanError):
             mac.evaluate("(runner.os == 'Linux')")
+        # GitHub compares strings case-insensitively.
+        self.assertTrue(linux.evaluate("runner.os == 'linux'"))
+        self.assertFalse(linux.evaluate("runner.os != 'LINUX'"))
+        with self.assertRaisesRegex(rcm.PlanError, "glob"):
+            mac.evaluate("hashFiles('tools/**/*.py') != ''")
 
 
 class ScopeTests(unittest.TestCase):
@@ -261,15 +293,76 @@ class ScopeTests(unittest.TestCase):
 
     def test_version_line_only_bump_is_out_of_scope(self):
         bump = "@@ -8,7 +8,7 @@ project(Pulp\n-    VERSION 1.96.0\n+    VERSION 1.97.0\n"
-        self.assertEqual(rcm.decide(self.files("CMakeLists.txt", patch=bump)), (False, []))
+        files = self.files("CMakeLists.txt", patch=bump)
+        self.assertEqual(rcm.decide(files, project_version="1.97.0"), (False, []))
         other = bump + "+option(PULP_NEW \"x\" ON)\n"
-        self.assertTrue(rcm.decide(self.files("CMakeLists.txt", patch=other))[0])
+        self.assertTrue(rcm.decide(self.files("CMakeLists.txt", patch=other),
+                                   project_version="1.97.0")[0])
+        # A VERSION line that is not the project's (a dependency floor) counts.
+        self.assertTrue(rcm.decide(files, project_version="2.0.0")[0])
         # No patch (binary or too large): cannot prove version-only.
-        self.assertTrue(rcm.decide(self.files("CMakeLists.txt", patch=None))[0])
+        self.assertTrue(rcm.decide(self.files("CMakeLists.txt", patch=None),
+                                   project_version="1.97.0")[0])
+
+    def test_configure_inputs_scope_in_what_cmake_runs_or_reads(self):
+        inputs = rcm.configure_inputs()
+        # execute_process'd at configure (Dawn provider identity, checkout guard),
+        # file(READ) data, and a configure_file template.
+        for path in ("tools/scripts/gpu_audio_provider_identity.py",
+                     "tools/ci/checkout_location_guard.py",
+                     "docs/status/gpu-recipes.yaml",
+                     "core/runtime/include/pulp/runtime/build_info.hpp.in"):
+            with self.subTest(path=path):
+                self.assertIn(path, inputs)
+                self.assertTrue(rcm.decide(self.files(path), inputs)[0])
+        # Control: the scan is not just "everything".
+        self.assertFalse(rcm.decide(self.files("docs/guides/local-ci.md"), inputs)[0])
+        self.assertFalse(any(p.startswith(("test/", "examples/")) for p in inputs))
+
+    def test_source_files_count_only_when_removed_or_renamed(self):
+        inputs = rcm.configure_inputs()
+        source = next(p for p in sorted(inputs) if p.endswith(".cpp"))
+        self.assertFalse(rcm.decide([{"filename": source, "status": "modified"}], inputs)[0])
+        self.assertTrue(rcm.decide([{"filename": source, "status": "removed"}], inputs)[0])
+        moved = {"filename": "attic/x.cpp", "status": "renamed", "previous_filename": source}
+        self.assertTrue(rcm.decide([moved], inputs)[0])
+
+    def test_rename_out_of_scope_is_judged_by_its_old_path(self):
+        moved = {"filename": "docs/attic/PulpGpuRuntime.cmake.txt", "status": "renamed",
+                 "previous_filename": "tools/cmake/PulpGpuRuntime.cmake"}
+        self.assertTrue(rcm.decide([moved], set())[0])
+
+    def test_event_range(self):
+        env = {"EVENT": "pull_request", "PR_BASE": "a", "PR_HEAD": "b", "MQ_BASE": "c",
+               "MQ_HEAD": "d"}
+        self.assertEqual(rcm.event_range(env), ("a", "b"))
+        self.assertEqual(rcm.event_range({**env, "EVENT": "merge_group"}), ("c", "d"))
+        for event in ("schedule", "workflow_dispatch", ""):
+            self.assertIsNone(rcm.event_range({**env, "EVENT": event}))
+        self.assertIsNone(rcm.event_range({**env, "PR_HEAD": ""}))
 
     def test_compare_cap_runs_every_leg(self):
         many = self.files(*[f"docs/{i}.md" for i in range(rcm.COMPARE_FILE_CAP)])
         self.assertTrue(rcm.decide(many)[0])
+
+    def test_verdict_table(self):
+        cases = [
+            # event, scope, run, configure -> rc
+            ("pull_request", "success", "false", "skipped", 0),
+            ("pull_request", "success", "true", "success", 0),
+            ("pull_request", "success", "true", "failure", 1),
+            ("pull_request", "success", "true", "cancelled", 1),
+            ("pull_request", "success", "true", "skipped", 1),
+            ("pull_request", "success", "", "skipped", 1),
+            ("pull_request", "failure", "", "skipped", 1),
+            ("pull_request", "cancelled", "true", "success", 1),
+            ("pull_request", "skipped", "", "skipped", 1),
+            ("merge_group", "success", "true", "failure", 1),
+            ("schedule", "skipped", "", "skipped", 0),
+        ]
+        for event, scope, run, configure, rc in cases:
+            with self.subTest(event=event, scope=scope, run=run, configure=configure):
+                self.assertEqual(rcm.verdict(event, scope, run, configure)[0], rc)
 
     def test_unreadable_scope_runs_every_leg(self):
         env = dict(os.environ, PATH="")
@@ -277,7 +370,7 @@ class ScopeTests(unittest.TestCase):
         out = subprocess.run(
             [sys.executable, str(REPO / "tools/ci/release_configure_matrix.py"), "scope",
              "--repo", "o/r", "--base", "a", "--head", "b"],
-            env=env, capture_output=True, text=True, check=True)
+            env=env, capture_output=True, text=True, encoding="utf-8", check=True)
         self.assertEqual(out.stdout.strip(), "true")
 
 
@@ -308,7 +401,7 @@ class RunTests(unittest.TestCase):
             {"name": "b", "env": {"STEP": "1"}, "script":
                 'test "$FOO" = bar\n'
                 'test "$MULTI" = "$(printf "x\\ny")"\n'
-                'case ":$PATH:" in *:/opt/rcm-test-bin:*) ;; *) exit 3 ;; esac\n'
+                'case "$PATH" in /opt/rcm-test-bin:*) ;; *) exit 3 ;; esac\n'
                 'test "$STEP" = 1\ntest "$CCACHE_DISABLE" = 1\n'},
         ])
         self.assertEqual(rc, 0)
@@ -332,6 +425,17 @@ class RunTests(unittest.TestCase):
         self.assertIn("libdawn_combined.a does not match the lock", summary)
         self.assertIn("darwin-x64", summary)
         self.assertIn("release_configure_matrix.py run --platform darwin-x64", summary)
+
+    def test_annotation_escapes_workflow_command_data(self):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rcm.annotate("linux-x64", "Configure", ["CMake Error: 100% bad\n  line two"], 1)
+        line = buf.getvalue().strip()
+        self.assertTrue(line.startswith("::error title="))
+        self.assertNotIn("\n", line)
+        self.assertIn("100%25 bad%0A  line two", line)
 
     def test_cmake_error_blocks(self):
         blocks = rcm.cmake_errors(INCIDENT_LOG)
@@ -359,13 +463,21 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(agg["if"], "always()")
         self.assertEqual(sorted(agg["needs"]), ["configure", "scope"])
         self.assertNotIn("self-hosted", json.dumps(agg["runs-on"]))
-        run = agg["steps"][0]["run"]
-        self.assertIn('"$CONFIGURE_RESULT" != success', run)
-        self.assertIn('"$SCOPE_RESULT" != success', run)
+        run = next(s for s in agg["steps"] if "run" in s)
+        self.assertEqual(run["run"].strip(), "python3 tools/ci/release_configure_matrix.py verdict")
+        self.assertEqual(run["env"]["CONFIGURE_RESULT"], "${{ needs.configure.result }}")
+        self.assertEqual(run["env"]["SCOPE_RESULT"], "${{ needs.scope.result }}")
+        self.assertEqual(run["env"]["RUN"], "${{ needs.scope.outputs.run }}")
+        scope = self.gate["jobs"]["scope"]
+        decide = next(s for s in scope["steps"] if s.get("id") == "decide")
+        self.assertIn("release_configure_matrix.py scope", decide["run"])
+        self.assertIn("--from-event", decide["run"])
+        self.assertNotRegex(decide["run"], r"run=(true|false)")
+        self.assertEqual(scope["outputs"]["run"], "${{ steps.decide.outputs.run }}")
 
     def test_legs_run_on_hosted_runners_from_the_plan(self):
         configure = self.gate["jobs"]["configure"]
-        self.assertEqual(configure["runs-on"], "${{ matrix.runs_on }}")
+        self.assertEqual(configure["runs-on"], "${{ fromJSON(matrix.runs_on_json) }}")
         self.assertEqual(configure["strategy"]["fail-fast"], False)
         self.assertEqual(configure["needs"], "scope")
         replay = next(s for s in configure["steps"]
@@ -385,8 +497,9 @@ class WorkflowContractTests(unittest.TestCase):
         deps = "Install Linux dependencies"
         self.assertEqual(next(s for s in gate_steps if s.get("name") == deps)["with"],
                          step({"steps": release_steps}, deps)["with"])
-        self.assertEqual(next(s for s in gate_steps if s.get("name") == deps)["uses"],
-                         step({"steps": release_steps}, deps)["uses"])
+        for key in ("uses", "if"):
+            self.assertEqual(next(s for s in gate_steps if s.get("name") == deps)[key],
+                             step({"steps": release_steps}, deps)[key])
 
     def test_ruleset_and_contract_require_the_check(self):
         ruleset = json.loads(RULESET.read_text(encoding="utf-8"))

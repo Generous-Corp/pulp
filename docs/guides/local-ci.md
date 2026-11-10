@@ -3449,7 +3449,10 @@ and `darwin-arm64`.
   on the GitHub-hosted image the release leg uses: `macos-15` for both Darwin
   legs (`darwin-x64` cross-configures there, as in the release),
   `ubuntu-24.04`, `ubuntu-24.04-arm`, `windows-latest`, `windows-11-arm`. No
-  gate VM is used.
+  gate VM is used. If the hosted macOS pool starves (the merge queue gives a
+  required check 120 minutes), set `PULP_RELEASE_CONFIGURE_MACOS_RUNS_ON_JSON`
+  (a label or a JSON label array) to route both Darwin legs elsewhere; it is
+  read for same-repository events only, so a fork always gets `macos-15`.
 - **No copied flags.** `tools/ci/release_configure_matrix.py` reads
   `release-cli.yml`'s `build-cli` job and replays its steps by name, from the
   dependency bootstrap and Skia fetch through every `cmake -S`, with the build
@@ -3463,13 +3466,22 @@ and `darwin-arm64`.
   container (GCC 13, glibc floor). Replaying that toolchain install costs about
   20 minutes, so the gate configures `linux-x64` on the bare image.
 - **Scope.** The trigger is unfiltered (a required check must always report).
-  The scope job reads the change through the compare API and runs the legs only
-  when it touches a configure input: any `CMakeLists.txt` or `*.cmake` outside
-  `test/` and `examples/` (the release profile turns both off), `tools/cmake/`,
-  `tools/deps/`, `external/`, `setup.sh`, the toolchain pins, the release
-  workflow and matrix scripts. A root `CMakeLists.txt` change to the project
-  `VERSION` line alone is out of scope. An unreadable diff, or 300+ changed
-  files, runs every leg.
+  The scope job reads the change through the compare API (both the new and, for
+  a rename, the old path) and runs the legs only when it touches a configure
+  input:
+  - any `CMakeLists.txt` or `*.cmake` outside `test/` and `examples/` (the
+    release profile turns both off), `tools/cmake/`, `tools/deps/`,
+    `external/`, `setup.sh`, the toolchain pins, the release workflow and matrix
+    scripts;
+  - every file a configure-reachable CMake file names through
+    `${CMAKE_SOURCE_DIR}/`, `${PROJECT_SOURCE_DIR}/` and the other source-dir
+    variables (scripts it `execute_process`es, data it `file(READ)`s,
+    `configure_file` templates), found by scanning the checkout, so a new one
+    needs no list edit. A named source file counts only when it is deleted or
+    renamed.
+
+  A root `CMakeLists.txt` change to the project `VERSION` line alone is out of
+  scope. An unreadable diff, or 300+ changed files, runs every leg.
 - **Cost.** About four minutes per leg (bootstrap, Skia fetch, one or two
   configures), in parallel; out-of-scope changes finish in under a minute.
 - **On failure.** The leg prints the CMake error as an annotation titled
@@ -3482,7 +3494,9 @@ and `darwin-arm64`.
 `release-configure` runs under `if: always()` and fails unless the scope job
 succeeded and, when in scope, every leg did. Live enforcement is branch
 protection, which `shipyard governance apply` sets from `[governance]`; until
-that is applied the check reports but does not block.
+that is applied the check reports but does not block. Apply it only after the
+workflow is on `main`, then push to or re-run any open pull request that should
+land, because a pull request's checks only start on a push.
 
 ## Every failed run names its cause: the advisory `ci-cause` job
 

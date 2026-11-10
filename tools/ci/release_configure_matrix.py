@@ -140,6 +140,11 @@ HOSTED_RUNNER = {
     "windows-11-arm": "windows-11-arm",
 }
 
+# Step keys the replay honours. `timeout-minutes` bounds a step the gate's own
+# job timeout already bounds; anything else (working-directory,
+# continue-on-error, ...) would change behaviour the replay cannot reproduce.
+REPLAYABLE_STEP_KEYS = {"name", "id", "if", "run", "shell", "env", "timeout-minutes"}
+
 RUNNER_OS = {"darwin": "macOS", "linux": "Linux", "windows": "Windows"}
 
 # Paths whose change can alter a release leg's configure. The trigger itself is
@@ -183,7 +188,20 @@ SCOPE_EXCLUDES = ("test/**", "examples/**")
 
 # The version-at-land bump rewrites one line of the root CMakeLists.txt. A
 # change to that line alone cannot change a configure's outcome.
-VERSION_LINE = re.compile(r"^\s*VERSION\s+\d+\.\d+\.\d+\s*$")
+VERSION_LINE = re.compile(r"^\s*VERSION\s+(\d+\.\d+\.\d+)\s*$")
+
+# A configure reads more than CMake files: scripts it runs with
+# execute_process, data it file(READ)s, templates it configure_file()s. Those
+# are found by scanning the configure-reachable CMake files for repo paths
+# (configure_inputs), so a new one needs no edit here. Source files are
+# configure inputs only by existence: editing one cannot change a configure,
+# deleting or renaming one can.
+SOURCE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
+                   ".m", ".mm", ".swift", ".metal", ".inl", ".ipp")
+CMAKE_PATH_REF = re.compile(
+    r"\$\{(CMAKE_SOURCE_DIR|PROJECT_SOURCE_DIR|CMAKE_CURRENT_SOURCE_DIR|"
+    r"CMAKE_CURRENT_LIST_DIR|CMAKE_CURRENT_FUNCTION_LIST_DIR|PULP_SOURCE_DIR)\}/"
+    r"([A-Za-z0-9_.@+/-]+)")
 
 
 class PlanError(RuntimeError):
@@ -193,38 +211,104 @@ class PlanError(RuntimeError):
 # ── scope ──────────────────────────────────────────────────────────────────
 
 
-def in_scope(path: str) -> bool:
-    if any(glob_regex(g).match(path) for g in SCOPE_EXCLUDES):
+def _excluded(path: str) -> bool:
+    return any(glob_regex(g).match(path) for g in SCOPE_EXCLUDES)
+
+
+def configure_inputs(root: Path = REPO) -> set[str]:
+    """Repo paths that configure-reachable CMake files name explicitly."""
+    found: set[str] = set()
+    cmake_files = [p for p in root.rglob("*")
+                   if p.is_file() and (p.name == "CMakeLists.txt" or p.suffix == ".cmake"
+                                       or p.name.endswith(".cmake.in"))]
+    for cmake in cmake_files:
+        rel = cmake.relative_to(root).as_posix()
+        if _excluded(rel) or rel.startswith(("external/", "build", ".git/")) or "/_deps/" in rel:
+            continue
+        try:
+            text = cmake.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for var, tail in CMAKE_PATH_REF.findall(text):
+            tail = tail.rstrip("/.")
+            # CMAKE_CURRENT_SOURCE_DIR inside an include()d module names the
+            # including directory, so try the root and the file's own directory.
+            for base in (root, cmake.parent):
+                candidate = (base / tail).resolve()
+                try:
+                    inside = candidate.relative_to(root.resolve()).as_posix()
+                except ValueError:
+                    continue
+                # Files only: a directory named here is an include or install
+                # root, and prefix-matching it would scope in most of the tree.
+                if candidate.is_file() and not _excluded(inside):
+                    found.add(inside)
+    return found
+
+
+def in_scope(path: str, inputs: set[str] | frozenset[str] = frozenset(),
+             status: str = "modified") -> bool:
+    if _excluded(path):
         return False
-    return any(glob_regex(g).match(path) for g in SCOPE_GLOBS)
+    if any(glob_regex(g).match(path) for g in SCOPE_GLOBS):
+        return True
+    if path not in inputs:
+        return False
+    if path.endswith(SOURCE_SUFFIXES):
+        return status in ("removed", "renamed")
+    return True
 
 
-def version_line_only(patch: str | None) -> bool:
-    """True when a root CMakeLists.txt patch changes only the project VERSION."""
+def version_line_only(patch: str | None, project_version: str | None = None) -> bool:
+    """True when a root CMakeLists.txt patch changes only the project VERSION.
+
+    The added line must carry this checkout's project version, so another
+    `VERSION x.y.z` line (a dependency floor) never qualifies.
+    """
     if not patch:
         return False
-    changed = [
-        line[1:]
-        for line in patch.splitlines()
-        if line[:1] in "+-" and not line.startswith(("+++", "---"))
-    ]
-    return bool(changed) and all(VERSION_LINE.match(line) for line in changed)
+    if project_version is None:
+        try:
+            project_version = release_tag().removeprefix("v")
+        except PlanError:
+            return False
+    removed, added = [], []
+    for line in patch.splitlines():
+        if line.startswith(("+++", "---")):
+            continue
+        if line[:1] == "+":
+            added.append(line[1:])
+        elif line[:1] == "-":
+            removed.append(line[1:])
+    if len(added) != 1 or len(removed) != 1:
+        return False
+    new, old = VERSION_LINE.match(added[0]), VERSION_LINE.match(removed[0])
+    return bool(new and old and new.group(1) == project_version)
 
 
-def decide(files: list[dict]) -> tuple[bool, list[str]]:
-    """Return (run, reasons) for compare-API file entries {filename, patch}."""
+def decide(files: list[dict], inputs: set[str] | None = None,
+           project_version: str | None = None) -> tuple[bool, list[str]]:
+    """Return (run, reasons) for compare-API entries {filename, patch, status,
+    previous_filename}."""
     if len(files) >= COMPARE_FILE_CAP:
         return True, [f"{len(files)} changed files: the compare API stops listing at "
                       f"{COMPARE_FILE_CAP}, so nothing can be ruled out"]
+    if inputs is None:
+        inputs = configure_inputs()
     hits = []
     for entry in files:
-        name = entry.get("filename", "")
-        if not in_scope(name):
-            continue
-        if name == "CMakeLists.txt" and version_line_only(entry.get("patch")):
-            continue
-        hits.append(name)
-    return bool(hits), hits
+        status = entry.get("status") or "modified"
+        names = [entry.get("filename", "")]
+        if entry.get("previous_filename"):
+            names.append(entry["previous_filename"])
+        for name in names:
+            if not in_scope(name, inputs, status):
+                continue
+            if (name == "CMakeLists.txt" and status == "modified"
+                    and version_line_only(entry.get("patch"), project_version)):
+                continue
+            hits.append(name)
+    return bool(hits), sorted(set(hits))
 
 
 def compare_files(repo: str, base: str, head: str) -> list[dict]:
@@ -233,16 +317,38 @@ def compare_files(repo: str, base: str, head: str) -> list[dict]:
         raise PlanError("gh is not on PATH")
     out = subprocess.run(
         [gh, "api", f"repos/{repo}/compare/{base}...{head}",
-         "--jq", "[.files[] | {filename, patch}]"],
-        check=True, capture_output=True, text=True,
+         "--jq", "[.files[] | {filename, patch, status, previous_filename}]"],
+        check=True, capture_output=True, text=True, encoding="utf-8",
     ).stdout
     return json.loads(out or "[]")
+
+
+def event_range(env: dict[str, str]) -> tuple[str, str] | None:
+    """(base, head) to judge for this event; None means run every leg."""
+    event = env.get("EVENT", "")
+    if event == "pull_request":
+        base, head = env.get("PR_BASE", ""), env.get("PR_HEAD", "")
+    elif event == "merge_group":
+        base, head = env.get("MQ_BASE", ""), env.get("MQ_HEAD", "")
+    else:
+        return None
+    if not base or not head:
+        return None
+    return base, head
 
 
 def cmd_scope(args: argparse.Namespace) -> int:
     if args.files:
         files = json.loads(Path(args.files).read_text(encoding="utf-8"))
     else:
+        if args.from_event:
+            rng = event_range(dict(os.environ))
+            if rng is None:
+                print(f"event {os.environ.get('EVENT', '')!r}: running every leg",
+                      file=sys.stderr)
+                print("true")
+                return 0
+            args.base, args.head = rng
         try:
             files = compare_files(args.repo, args.base, args.head)
         except (PlanError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
@@ -260,25 +366,76 @@ def cmd_scope(args: argparse.Namespace) -> int:
     return 0
 
 
+def verdict(event: str, scope_result: str, run: str, configure_result: str) -> tuple[int, str]:
+    """The aggregate `release-configure` decision: (exit code, message)."""
+    if scope_result == "skipped" and event == "schedule":
+        return 0, "Scheduled run outside the primary repository: nothing to check."
+    if scope_result != "success":
+        return 1, f"The scope job ended '{scope_result}', so no leg was judged."
+    if run == "false":
+        return 0, "No changed path can affect a release configure; legs skipped."
+    if run != "true":
+        return 1, f"The scope job produced no decision ({run!r})."
+    if configure_result != "success":
+        return 1, (f"At least one release leg would fail at configure ({configure_result}). "
+                   "A tag cut from this change would publish nothing; see the failing "
+                   "'Release configure (<platform>)' job.")
+    return 0, "Every release leg configures."
+
+
+def cmd_verdict(args: argparse.Namespace) -> int:
+    rc, message = verdict(os.environ.get("EVENT", ""), os.environ.get("SCOPE_RESULT", ""),
+                          os.environ.get("RUN", ""), os.environ.get("CONFIGURE_RESULT", ""))
+    if rc:
+        print(f"::error title=release-configure::{message}")
+    else:
+        print(message)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(message + "\n")
+    return rc
+
+
 # ── legs ───────────────────────────────────────────────────────────────────
 
 
-def legs() -> list[dict[str, str]]:
+def legs(macos_override: str = "") -> list[dict[str, str]]:
+    """Matrix entries {platform, runs_on_json}.
+
+    `macos_override` is the JSON value of PULP_RELEASE_CONFIGURE_MACOS_RUNS_ON_JSON,
+    which the workflow passes only for same-repository events. It routes both
+    Darwin legs (a label string or a label array) when the hosted macOS pool is
+    starved; empty keeps the hosted image.
+    """
     from release_artifact_contents import DEFAULT_MATRIX_PATH, ProductMatrix
     from release_build_matrix import build_include
 
+    override = None
+    if macos_override.strip():
+        try:
+            override = json.loads(macos_override)
+        except json.JSONDecodeError as exc:
+            raise PlanError(f"macOS runner override is not JSON: {macos_override!r}") from exc
+        if not (isinstance(override, str) and override) and not (
+                isinstance(override, list) and override
+                and all(isinstance(x, str) and x for x in override)):
+            raise PlanError(f"macOS runner override must be a label or a label list: "
+                            f"{macos_override!r}")
     out = []
     for leg in build_include(ProductMatrix.load(DEFAULT_MATRIX_PATH)):
         runner = HOSTED_RUNNER.get(leg["os"])
         if runner is None:
             raise PlanError(f"release leg {leg['platform']} uses runner label {leg['os']!r}, "
                             "which has no hosted equivalent in HOSTED_RUNNER")
-        out.append({"platform": leg["platform"], "runs_on": runner})
+        route = override if (override is not None and leg["platform"].startswith("darwin-")) \
+            else runner
+        out.append({"platform": leg["platform"], "runs_on_json": json.dumps(route)})
     return out
 
 
 def cmd_legs(args: argparse.Namespace) -> int:
-    include = legs()
+    include = legs(os.environ.get("MACOS_RUNS_ON_JSON", ""))
     if args.github_output:
         print(f"include={json.dumps(include)}")
     else:
@@ -327,6 +484,8 @@ class Context:
             return m.group(1)
         m = re.fullmatch(r"hashFiles\('([^']+)'\)", text)
         if m:
+            if any(ch in m.group(1) for ch in "*?["):
+                raise PlanError(f"hashFiles glob {m.group(1)!r} is not supported")
             return "present" if (REPO / m.group(1)).is_file() else ""
         if text in self.values:
             return self.values[text]
@@ -337,7 +496,9 @@ class Context:
         if not m:
             return self.atom(text)
         left, op, right = self.atom(m.group(1)), m.group(2), self.atom(m.group(3))
-        return (left == right) if op == "==" else (left != right)
+        # GitHub compares strings case-insensitively.
+        same = str(left).casefold() == str(right).casefold()
+        return same if op == "==" else not same
 
     def evaluate(self, expr: str) -> str | bool:
         """GitHub's `a && b || c` subset: && binds tighter, values short-circuit."""
@@ -373,7 +534,16 @@ def load_job(workflow: Path) -> dict:
     except ImportError as exc:  # pragma: no cover - environment dependent
         raise PlanError("planning needs PyYAML (python3 -m pip install pyyaml)") from exc
     doc = yaml.safe_load(workflow.read_text(encoding="utf-8"))
-    return doc["jobs"][JOB]
+    job = doc["jobs"][JOB]
+    # The replay applies the job's `env:` and nothing else that shapes a step;
+    # refuse the workflow- and job-level keys it would otherwise ignore.
+    for scope, mapping, keys in (("workflow", doc, ("env", "defaults")),
+                                 (f"job {JOB}", job, ("defaults",))):
+        present = [k for k in keys if mapping.get(k)]
+        if present:
+            raise PlanError(f"release-cli.yml {scope} sets {present}, which the replay does "
+                            "not model; teach tools/ci/release_configure_matrix.py first")
+    return job
 
 
 def step_key(step: dict) -> str:
@@ -412,6 +582,10 @@ def plan(platform: str, workflow: Path = RELEASE_WORKFLOW) -> dict:
         step = by_name[name]
         if "run" not in step:
             raise PlanError(f"replayed step {name!r} is not a run step")
+        unmodelled = set(step) - REPLAYABLE_STEP_KEYS
+        if unmodelled:
+            raise PlanError(f"replayed step {name!r} sets {sorted(unmodelled)}, which the "
+                            "replay does not model")
         shell = step.get("shell", "bash")
         if shell != "bash":
             raise PlanError(f"replayed step {name!r} uses shell {shell!r}; only bash is replayed")
@@ -622,8 +796,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--repo")
     p.add_argument("--base")
     p.add_argument("--head")
-    p.add_argument("--files", help="JSON list of {filename, patch} (instead of the API)")
+    p.add_argument("--files", help="JSON list of compare-API file entries (instead of the API)")
+    p.add_argument("--from-event", action="store_true",
+                   help="take base/head from EVENT, PR_BASE/PR_HEAD, MQ_BASE/MQ_HEAD")
     p.set_defaults(func=cmd_scope)
+
+    p = sub.add_parser("verdict", help="the aggregate decision, from EVENT, SCOPE_RESULT, "
+                                       "RUN and CONFIGURE_RESULT")
+    p.set_defaults(func=cmd_verdict)
 
     p = sub.add_parser("legs")
     p.add_argument("--github-output", action="store_true")
@@ -642,8 +822,9 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_run_plan)
 
     args = parser.parse_args(argv)
-    if args.command == "scope" and not args.files and not (args.repo and args.base and args.head):
-        parser.error("scope needs --files, or --repo, --base and --head")
+    if args.command == "scope" and not args.files and not (
+            args.repo and (args.from_event or (args.base and args.head))):
+        parser.error("scope needs --files, or --repo with --from-event or --base and --head")
     try:
         return args.func(args)
     except PlanError as exc:

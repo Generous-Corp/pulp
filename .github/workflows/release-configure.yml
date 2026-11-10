@@ -88,29 +88,26 @@ jobs:
           MQ_HEAD: ${{ github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
-          case "$EVENT" in
-            pull_request) base="$PR_BASE"; head="$PR_HEAD" ;;
-            merge_group) base="$MQ_BASE"; head="$MQ_HEAD" ;;
-            *) echo "run=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
-          esac
           run="$(python3 tools/ci/release_configure_matrix.py scope \
-            --repo "$GITHUB_REPOSITORY" --base "$base" --head "$head")"
+            --repo "$GITHUB_REPOSITORY" --from-event)"
           echo "run=${run}" >> "$GITHUB_OUTPUT"
 
       - name: Plan every release leg
         id: legs
         if: steps.decide.outputs.run == 'true'
         shell: bash
+        env:
+          # Routes both Darwin legs when GitHub's hosted macOS pool is starved
+          # (a label or a JSON label array). Same-repository events only: a fork
+          # pull request always gets the hosted image.
+          MACOS_RUNS_ON_JSON: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.PULP_RELEASE_CONFIGURE_MACOS_RUNS_ON_JSON || '' }}
         run: |
           set -euo pipefail
           python3 tools/ci/release_configure_matrix.py legs --github-output | tee -a "$GITHUB_OUTPUT"
           mkdir -p "$RUNNER_TEMP/release-configure-plans"
-          python3 - <<'PY' > "$RUNNER_TEMP/platforms.txt"
-          import json, subprocess, sys
-          out = subprocess.run([sys.executable, "tools/ci/release_configure_matrix.py", "legs"],
-                               check=True, capture_output=True, text=True).stdout
-          print("\n".join(leg["platform"] for leg in json.loads(out)))
-          PY
+          python3 tools/ci/release_configure_matrix.py legs \
+            | python3 -c 'import json, sys; print("\n".join(l["platform"] for l in json.load(sys.stdin)))' \
+            > "$RUNNER_TEMP/platforms.txt"
           while read -r platform; do
             python3 tools/ci/release_configure_matrix.py plan --platform "$platform" \
               --out "$RUNNER_TEMP/release-configure-plans/${platform}.json"
@@ -123,6 +120,8 @@ jobs:
           name: release-configure-plans
           path: ${{ runner.temp }}/release-configure-plans/
           retention-days: 3
+          # A re-run of the workflow uploads the plans again under this name.
+          overwrite: true
 
   configure:
     name: Release configure (${{ matrix.platform }})
@@ -133,8 +132,8 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.scope.outputs.include) }}
     # The hosted image each release leg builds on (darwin-x64 cross-configures
-    # on Apple Silicon there too). Never a gate VM.
-    runs-on: ${{ matrix.runs_on }}
+    # on Apple Silicon there too), unless the Darwin override above is set.
+    runs-on: ${{ fromJSON(matrix.runs_on_json) }}
     timeout-minutes: 45
     steps:
       # Must run before the checkout to take effect; identical to release-cli.yml's
@@ -178,6 +177,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          lfs: false
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/release_configure_matrix.py
+            tools/ci/release_path_changed.py
+          sparse-checkout-cone-mode: false
       - name: Every release leg configures
         shell: bash
         env:
@@ -185,23 +192,4 @@ jobs:
           SCOPE_RESULT: ${{ needs.scope.result }}
           RUN: ${{ needs.scope.outputs.run }}
           CONFIGURE_RESULT: ${{ needs.configure.result }}
-        run: |
-          set -euo pipefail
-          if [ "$SCOPE_RESULT" = skipped ] && [ "$EVENT" = schedule ]; then
-            echo "Scheduled run outside the primary repository: nothing to check."
-            exit 0
-          fi
-          if [ "$SCOPE_RESULT" != success ]; then
-            echo "::error title=release-configure::The scope job ended '${SCOPE_RESULT}', so no leg was judged."
-            exit 1
-          fi
-          if [ "$RUN" != true ]; then
-            echo "No changed path can affect a release configure; legs skipped."
-            echo "No changed path can affect a release configure; legs skipped." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          if [ "$CONFIGURE_RESULT" != success ]; then
-            echo "::error title=release-configure::At least one release leg would fail at configure (${CONFIGURE_RESULT}). A tag cut from this change would publish nothing; see the failing 'Release configure (<platform>)' job."
-            exit 1
-          fi
-          echo "Every release leg configures."
+        run: python3 tools/ci/release_configure_matrix.py verdict
