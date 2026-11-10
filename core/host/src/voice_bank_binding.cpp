@@ -1,7 +1,7 @@
 #include <pulp/host/voice_bank_binding.hpp>
 
-#include <pulp/format/processor.hpp>
-#include <pulp/host/signal_graph.hpp>
+#include <pulp/format/processor_node_adapter.hpp>
+#include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/signal_graph_subgraph.hpp>
 
 #include <algorithm>
