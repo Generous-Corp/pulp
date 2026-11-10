@@ -2955,6 +2955,13 @@ commit predates it; the first merge group would fail with `No such file`. Keep
 such retries inline. The macOS ccache step uses an installed ccache (the gate
 golden bakes it) and never calls `brew install` then.
 
+**apt installs in workflows go through `tools/ci/apt-install-retry.sh`.** A
+mirror publishing a security update mid-job leaves the fetched index pointing at
+a 404 `.deb`; the helper reruns `apt-get update` and retries the install, 3
+attempts (`test_apt_install_retry.py` stubs `apt-get` to prove it). Call it with
+`sudo`. A step that runs before checkout (the `release-cli.yml` container
+pre-setup) carries the same loop inline as `apt_install`.
+
 **A deleted `gh-readonly-queue/...` branch is `merge group gone`, not a red.**
 `hydrate_gpu_provenance_commits.py` prints a `::notice::` for it and falls back
 to the event commit; only other fetch errors print `bounded fetch failed`.
