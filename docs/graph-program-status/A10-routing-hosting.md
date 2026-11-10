@@ -1,6 +1,6 @@
 # A10 — routing and hosting environment
 
-Status: **BLOCKED — exact-head installed consumer cannot be configured**
+Status: **PARTIAL — exact-current-head installed consumer passes bounded routing/hosting controls; hostile containment remains HOLD**
 
 Current `origin/main` is `2c2164d2da39a32a12559d2cc1598aae2628440d`.
 The required graph dependencies are present at exact merged heads:
@@ -26,19 +26,39 @@ an installed consumer once an exact-head SDK is available:
 | Hosted nodes | public `PluginSlot` lifecycle, `SignalGraph::add_plugin_node`, and typed hosted-editor methods | An in-process test slot can prove host wiring; arbitrary installed plugin loading requires an exact SDK and fixture artifact. |
 | Hostile-plugin policy | `GraphLoadOptions` with plugin loading disabled, `IsolatedPluginScanner`, and G-9 process-group helper | The current evidence does **not** prove arbitrary hosted-plugin containment, descendant cleanup on every platform, callback IPC, restart/state recovery, or sibling continuity. Keep this policy HOLD/N/A. |
 
-## Exact blocker and next safe slice
+## Exact current-main installed-SDK consumer (2026-11-10)
 
-The exact-head installed SDK for `2c2164d2da39a32a12559d2cc1598aae2628440d`
-is unavailable, so exact-head installed-consumer evidence cannot be produced.
-The available local Forge SDK provenance is stale, and the forge-dev SDK
-installer is known to refuse a dirty/non-clean checkout. Creating a consumer
-against that older SDK would produce stale provenance and is not admissible as
-A10 evidence.
+The former SDK-availability blocker is cleared for a bounded public-host
+consumer. A clean checkout at `origin/main=a3df0dc6e3dca64b601e67f0cd30e3d0dfd51f67`
+was configured as a Release source install with GPU disabled (the consumer
+does not exercise rendering), and `tools/ci/governed-build.sh cmake --build
+build-a10-cg --target install` completed. The installed
+`sdk-provenance.json` reports `kind=source-install`, `source_git_dirty=false`,
+that exact source SHA, `platform=darwin-arm64`, and `build_profile=release`.
 
-Next safe slice: run the SDK installer from a clean, exact-`origin/main`
-checkout, then add `examples/a10-routing-hosting-consumer` using only the
-public APIs above. The consumer must include a positive sidechain/automation/
-PDC/transactional-hosted-node path and a planted refusal control for unavailable
-latency or hostile containment. Do not promote the hostile fixture to PASS until
-platform descendant cleanup, callback safety, recovery, and sibling continuity
-are separately proven.
+An installed-prefix consumer configured solely with
+`Pulp_DIR=<prefix>/lib/cmake/Pulp`, built in Release with the governed build
+wrapper, and passed CTest 1/1. The executable reports
+`a10-routing-hosting PASS sidechain=1 automation=1 pdc=4 transactional_swap=1`.
+The receipt is [`receipt.json`](../evidence/a10-routing-hosting-installed-20261110/receipt.json)
+(`sha256=3bfb98eda9eeab6ea79f002b44d645b7dfcef05790f8f8badacd21964e4476d6).
+It records positive named sidechain, parameter automation, prepared latency,
+and transactional swap controls plus planted refusals for a non-plugin
+sidechain destination and an unknown parameter.
+
+This closes the exact-head installed-consumer configuration gap for the
+bounded host API. The fixture uses a caller-owned deterministic in-process
+`PluginSlot`; it intentionally does not claim arbitrary third-party plugin
+execution, process isolation, descendant cleanup, callback safety, recovery,
+sibling continuity, hard realtime, or Windows/Linux parity. G-9 production
+containment and those platform gates remain HOLD.
+
+## Historical blocker and remaining safe boundary
+
+The older `2c2164d2…` exact-head SDK blocker is superseded by the current-main
+source install and receipt above. No stale SDK is used for the current claim.
+The remaining safe boundary is unchanged: do not promote the hostile fixture to
+PASS until platform descendant cleanup, callback safety, recovery, and sibling
+continuity are separately proven. A future slice may add a real installed
+third-party plugin artifact only when its provenance and containment evidence
+are available.
