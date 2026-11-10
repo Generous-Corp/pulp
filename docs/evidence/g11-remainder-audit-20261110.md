@@ -1,7 +1,7 @@
 # G-11 remainder audit: live sampling, retuning, and parity
 
 Date: 2026-11-10  
-Audited source: `origin/main` at `ba04406f050258968f64d497fd6e80937618da68`  
+Audited source: `origin/main` at `68c471e93e46f57517fac64f4ece31148a6f0d93`  
 Disposition: **PARTIAL / HOLD / NOT CHECKED**
 
 This packet is an evidence-only audit of the G-11 remainder. It does not add a
