@@ -379,6 +379,15 @@ retain those fields in the PR/landing evidence.
   with `-DPULP_USE_GPU_RUNTIME=OFF` and build `pulp-test-gpu-device-only-consumer`.
   `gpu-runtime-mode-consistency` fails when a mode's `PULP_GPU_RUNTIME` define
   is missing or leaks.
+  gpu-runtime's renderer lock has one macOS platform, `macos-arm64`, pinned to
+  the universal skia-build asset's Dawn. An x86_64-only target (release-cli's
+  `darwin-x64` cross-compile, or a native Intel build) resolves the thin
+  x86_64 asset, whose `libdawn_combined.a` the lock refuses, so
+  `pulp_gpu_runtime_covers_target()` drops those builds to Pulp's own device
+  sources. That mode is what ships in the Intel CLI: a renderer bump must
+  keep it compiling for x86_64, and adding a `macos-x64` entry to Vellum's lock
+  is the change that would let Intel forward too. The release dry-run's Intel
+  leg is advisory, so a red there does not stop a tag.
   Vellum's GPU mirror build pins the archive and header digests of the Pulp
   commit it was exported from, so its renderer bump can only pass after Pulp's
   lands.
