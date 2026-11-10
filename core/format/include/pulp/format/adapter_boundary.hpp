@@ -394,6 +394,12 @@ inline bool apply_param_value(state::ParameterEventQueue& queue,
 /// counts. Each pass adds once, with a relaxed atomic: no allocation, no lock.
 /// The totals are process-wide, so a test reads them around a single-threaded
 /// render.
+// The same switch as `signal::rt` work counts; a build that does not define it
+// (tests off, an installed SDK consumer) counts nothing.
+#ifndef PULP_RT_WORK_COUNTERS
+#define PULP_RT_WORK_COUNTERS 0
+#endif
+
 struct ParamSyncCounts {
     std::uint64_t reads = 0;
     std::uint64_t compares = 0;
