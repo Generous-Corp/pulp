@@ -1116,14 +1116,14 @@ endif()
 # (test/fixtures/scale_probe, 2,000 parameters, six stereo outputs and a stereo
 # input) loaded as each format's real bundle through PluginSlot. The bundles
 # test checks IDs, state, the format's own bus reports, per-bus tones and a
-# zero-allocation audio callback; the sync-cost test times the per-block
-# parameter sync, so it is labelled performance (outside the required gate).
+# zero-allocation audio callback; its [performance] case times the per-block
+# parameter sync and is registered under that label (outside the required gate).
 if((PULP_HAS_VST3 OR PULP_HAS_CLAP) AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN OR WIN32))
     add_executable(pulp-test-host-scale-probe-bundles
-        test_host_scale_probe_bundles.cpp harness/rt_allocation_probe.cpp)
-    add_executable(pulp-test-host-scale-probe-sync-cost test_host_scale_probe_sync_cost.cpp)
+        test_host_scale_probe_bundles.cpp test_host_scale_probe_sync_cost.cpp
+        harness/rt_allocation_probe.cpp)
     target_link_libraries(pulp-test-host-scale-probe-bundles PRIVATE pulp::audio-analysis)
-    foreach(_scale_test pulp-test-host-scale-probe-bundles pulp-test-host-scale-probe-sync-cost)
+    foreach(_scale_test pulp-test-host-scale-probe-bundles)
         target_link_libraries(${_scale_test}
             PRIVATE pulp::host pulp::format Catch2::Catch2WithMain)
         target_include_directories(${_scale_test} PRIVATE ${PULP_ROOT_DIR}/test)
@@ -1157,8 +1157,13 @@ if((PULP_HAS_VST3 OR PULP_HAS_CLAP) AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN O
         target_include_directories(pulp-test-host-scale-probe-bundles
             PRIVATE ${PULP_ROOT_DIR}/core/host/src)
     endif()
-    catch_discover_tests(pulp-test-host-scale-probe-bundles)
-    catch_discover_tests(pulp-test-host-scale-probe-sync-cost PROPERTIES LABELS performance)
+    # The timing case is tagged [performance]: it gets its own registration
+    # under that label, and every other case stays on the required lane.
+    catch_discover_tests(pulp-test-host-scale-probe-bundles TEST_SPEC "~[performance]")
+    catch_discover_tests(pulp-test-host-scale-probe-bundles
+        TEST_SPEC "[performance]"
+        TEST_PREFIX "performance::"
+        PROPERTIES LABELS performance)
 endif()
 
 # The same per-block parameter sync, counted instead of timed: the CLAP and
