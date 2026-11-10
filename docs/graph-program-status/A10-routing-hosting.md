@@ -2,7 +2,7 @@
 
 Status: **PARTIAL — exact-current-head installed consumer passes bounded routing/hosting controls; hostile containment remains HOLD**
 
-Current source authority for this refreshed receipt is merge head `1b41de3f9314b36a928938d8b1fdf634bc60aa72`, based on live `origin/main=fb0ca2601cab3f082d72e4bba9f2aaf5675eb3a8` at build time. The governed Release install and consumer were rebuilt from this merge head; `source_tree_archive_sha256=564f65ea259a3591aeabfb417c765f8755a071100b41b6b176426681d8a8b2c9` binds the installed source tree.
+Current source authority for this refreshed receipt is merge head `5f7af2409a8eec8c07ace7d19da0f935b8e9b9e0`, based on live `origin/main=b4fb59b2128b8846c8d4597cad2c972c84c75d57` at build time. The governed Release install and consumer were rebuilt from this merge head; `source_tree_archive_sha256=b4b00a01ad8586f5cc62c1bd5b2ff45abd13c97261e65466ba8d3562e185f0da` binds the installed source tree.
 The required graph dependencies are present at exact merged heads:
 
 - G-1 named typed ports: PR [#11428](https://github.com/Generous-Corp/pulp/pull/11428), source head `be70e3c44836605ac1279c65a572e833699e1fbb`, merge `e19f556e67129117ef3a4587bff11fdee16ebf44`.
@@ -29,7 +29,7 @@ an installed consumer once an exact-head SDK is available:
 ## Exact current-main installed-SDK consumer (2026-11-10)
 
 The former SDK-availability blocker is cleared for a bounded public-host
-consumer. A clean checkout at merge source head `1b41de3f9314b36a928938d8b1fdf634bc60aa72` (based on live `origin/main=fb0ca2601cab3f082d72e4bba9f2aaf5675eb3a8`)
+consumer. A clean checkout at merge source head `5f7af2409a8eec8c07ace7d19da0f935b8e9b9e0` (based on live `origin/main=b4fb59b2128b8846c8d4597cad2c972c84c75d57`)
 was configured as a Pulp `release` profile and CMake Release source install with GPU disabled (the consumer
 does not exercise rendering), and `tools/ci/governed-build.sh cmake --build
 build-a10-sdk-release --target install` completed. The installed
@@ -41,8 +41,7 @@ An installed-prefix consumer configured solely with
 `Pulp_DIR=<prefix>/lib/cmake/Pulp`, built in Release with the governed build
 wrapper, and passed CTest 1/1. The executable reports
 `a10-routing-hosting PASS sidechain_route_accepted=1 automation_route_accepted=1 pdc=4 transactional_prepare_accepted=1`.
-The receipt is [`receipt.json`](../evidence/a10-routing-hosting-installed-20261110/receipt.json)
-(`sha256=fec24df91fb3e5c495714ce2f08d70e2d7502653aa39f9d6174c72e563341e33`).
+The receipt is [`receipt.json`](../evidence/a10-routing-hosting-installed-20261110/receipt.json).
 It records accepted named sidechain and automation route registration, prepared
 latency introspection, and transactional topology preparation plus planted
 refusals for a non-plugin sidechain destination and an unknown parameter. The
@@ -68,7 +67,7 @@ are available.
 
 ## Live admission snapshot — 2026-11-10
 
-This snapshot is bound to origin/main=57bf8800d00329314fc3bb5691182808802195cd and the live PR state read on 2026-11-10. It records admission state only; it does not promote any lane beyond its evidence scope.
+This snapshot is bound to origin/main=b4fb59b2128b8846c8d4597cad2c972c84c75d57 and the live PR state read on 2026-11-10. It records admission state only; it does not promote any lane beyond its evidence scope.
 
 - Merged evidence heads: PR #11922 (G-7) 3b552aaf35ce206be8ee57300a720c49eaa93965; PR #11923 (G-10/A3) 4aa53af2dc8b72df33e87fe50a58fd12b69d3c21; PR #11933 (G-9) 54df12452b2543341b859ccef35aa57a490697ed; PR #11935 (G-11) 4c6c284658215464496c278aa33495c2ad29c706; PR #11943 (G-4/G-5) 54ce8848a17390f99eef4f910ba7ec418d4eb291.
 - Open exact-head evidence: PR #11926 (A-10) aa57fb007af794dfa1f4fa3c1e7ead59842f4bf9; PR #11941 (A-1/G-6) 7bd1dc31c8b805a8a16be1c25308e06594f1f365; PR #11947 (A-9) 2d34234bef31d6e96d6ced052c94167df196f964. These remain unmerged and require current-head review/admission.
