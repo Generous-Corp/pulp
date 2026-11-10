@@ -147,6 +147,10 @@ struct IffHooks {
     std::function<void(const IffChunk&, LayoutRegion&)> on_chunk;
     /// A condition that stops the strict decoder. Optional.
     std::function<void(std::string)> fault;
+    /// Raise truncated_data, chunk_past_eof and missing_pad_byte warnings.
+    /// The RIFF/RF64 walker turns this off because the decoder's own walk
+    /// reports them.
+    bool report_chunk_faults = true;
 };
 
 /// Walk chunks from `start` to `env.walk_end`, creating a region per chunk,
