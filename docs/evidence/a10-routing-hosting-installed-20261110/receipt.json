@@ -1,6 +1,6 @@
 {
   "schema": "pulp.graph-a10-installed-consumer.v1",
-  "source_git_sha": "f4022ec16f273d90c232faaedef596505661b707",
+  "source_git_sha": "eaf7de2788cd68021686f1eac2a2e9b9f0256ead",
   "source_git_dirty": false,
   "platform": "darwin-arm64",
   "build_profile": "release",
@@ -22,8 +22,8 @@
     "no callback safety, recovery, sibling continuity, or cross-platform claim",
     "no hard-realtime qualification"
   ],
-  "sdk_provenance_sha256": "bffbf813db7736989e974db6d7e73f8872165358a8b8a22d57ccf533c23b4dc6",
-  "pulp_config_sha256": "6ca83463c71303da7987b09d0ce70fecf97c7048add9c77b5c8b4151d921601f",
-  "build_info_sha256": "085e6010e78c487e4f938ed1c1d05655b1d66ee14c28b2e0022a8fd8e785cf3c",
+  "sdk_provenance_sha256": "3470651ffc766bd4d5d44240deede3b951f1f754a8ba37d3037fa33d92da11fa",
+  "pulp_config_sha256": "b2b91892aa07f2f994c36bc90edc137c746a7cca572ce6b31e0b0d1b4aa0ec2e",
+  "build_info_sha256": "54c0fa39e3b77f32df1fb3b54229c0df2701f26ba338705e2ee331f6cd30a719",
   "consumer_sha256": "a09029a8a02de64f9661fab99c43cbac6d6d12caa027feb016e585d5547d3682"
 }

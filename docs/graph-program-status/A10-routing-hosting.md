@@ -2,7 +2,7 @@
 
 Status: **PARTIAL — exact-current-head installed consumer passes bounded routing/hosting controls; hostile containment remains HOLD**
 
-Current `origin/main` is `f4022ec16f273d90c232faaedef596505661b707`.
+Current source authority for this refreshed receipt is merge head `eaf7de2788cd68021686f1eac2a2e9b9f0256ead`, which contains live `origin/main=68c471e93e46f57517fac64f4ece31148a6f0d93`.
 The required graph dependencies are present at exact merged heads:
 
 - G-1 named typed ports: PR [#11428](https://github.com/Generous-Corp/pulp/pull/11428), source head `be70e3c44836605ac1279c65a572e833699e1fbb`, merge `e19f556e67129117ef3a4587bff11fdee16ebf44`.
@@ -29,10 +29,10 @@ an installed consumer once an exact-head SDK is available:
 ## Exact current-main installed-SDK consumer (2026-11-10)
 
 The former SDK-availability blocker is cleared for a bounded public-host
-consumer. A clean checkout at `origin/main=f4022ec16f273d90c232faaedef596505661b707`
+consumer. A clean checkout at refreshed source head `eaf7de2788cd68021686f1eac2a2e9b9f0256ead` (live `origin/main=68c471e93e46f57517fac64f4ece31148a6f0d93`)
 was configured as a Release source install with GPU disabled (the consumer
 does not exercise rendering), and `tools/ci/governed-build.sh cmake --build
-build-a10-release --target install` completed. The installed
+build-a10-sdk-release --target install` completed. The installed
 `sdk-provenance.json` reports `kind=source-install`, `source_git_dirty=false`,
 that exact source SHA, `platform=darwin-arm64`, and `build_profile=release`.
 
@@ -41,7 +41,7 @@ An installed-prefix consumer configured solely with
 wrapper, and passed CTest 1/1. The executable reports
 `a10-routing-hosting PASS sidechain=1 automation=1 pdc=4 transactional_swap=1`.
 The receipt is [`receipt.json`](../evidence/a10-routing-hosting-installed-20261110/receipt.json)
-(`sha256=5bbfc49e3e4dcedfcce23f7b778356c95a7d6ff77af3d97815f8677faafdd20c).
+(`sha256=b5b6c74168738474a70acac124d633bcdac49b8641a315017f89d72f4d74f29d).
 It records positive named sidechain, parameter automation, prepared latency,
 and transactional swap controls plus planted refusals for a non-plugin
 sidechain destination and an unknown parameter.
