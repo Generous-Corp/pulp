@@ -1022,7 +1022,7 @@ class WatchSignalScope {
 
 // std::system temporarily ignores SIGINT process-wide. Keep watch shellouts
 // cancellable without changing the CLI's general-purpose command runner.
-int run_watch_command(const std::string& command, const std::string& label = {}) {
+int run_watch_command(const std::string& command, const std::string& label = {}) try {
     if (const auto signal = requested_watch_stop())
         return 128 + signal;
     const bool spinner = !label.empty() && is_tty() && !g_no_color;
@@ -1049,14 +1049,20 @@ int run_watch_command(const std::string& command, const std::string& label = {})
     std::ifstream error(error_file.path(), std::ios::binary);
     if (!output.is_open() || !error.is_open())
         return 127;
-    auto forward = [](std::ifstream& input, std::ostream& destination) {
+    std::streamoff output_position = 0, error_position = 0;
+    auto forward = [](std::ifstream& input, std::ostream& destination, std::streamoff& position) {
+        // clear() alone does not make libc++'s file buffer retry an earlier
+        // EOF. Seek to the consumed byte offset before reading a growing file.
         input.clear();
+        input.seekg(position);
         std::array<char, 4096> bytes;
         for (int chunk = 0; chunk < 64; ++chunk) {
             input.read(bytes.data(), bytes.size());
             const auto count = input.gcount();
-            if (count)
+            if (count) {
                 destination.write(bytes.data(), count);
+                position += count;
+            }
             if (count < static_cast<std::streamsize>(bytes.size()))
                 break;
         }
@@ -1079,8 +1085,8 @@ int run_watch_command(const std::string& command, const std::string& label = {})
                       << label << color::dim() << " (" << seconds << "s)" << color::reset() << "  "
                       << std::flush;
         } else {
-            forward(output, std::cout);
-            forward(error, std::cerr);
+            forward(output, std::cout, output_position);
+            forward(error, std::cerr, error_position);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(80));
     }
@@ -1088,9 +1094,9 @@ int run_watch_command(const std::string& command, const std::string& label = {})
     const auto signal = requested_watch_stop();
     const int exit_code = signal ? 128 + signal : result.exit_code;
     if (!spinner) {
-        while (!forward(output, std::cout)) {
+        while (!forward(output, std::cout, output_position)) {
         }
-        while (!forward(error, std::cerr)) {
+        while (!forward(error, std::cerr, error_position)) {
         }
     } else {
         std::cout << "\r\033[K";
@@ -1115,6 +1121,9 @@ int run_watch_command(const std::string& command, const std::string& label = {})
         }
     }
     return exit_code;
+} catch (const std::exception& error) {
+    std::cerr << "pulp watch: command setup failed: " << error.what() << '\n';
+    return 127;
 }
 
 } // namespace

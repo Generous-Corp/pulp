@@ -5,6 +5,7 @@
 #include "shell_redirect.hpp"
 
 #include <pulp/runtime/system.hpp>
+#include <pulp/platform/child_process.hpp>
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
@@ -806,22 +807,43 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
             lease.jobs_ = granted;
     }
     lease.active_ = true;
-    lease.start_heartbeat();
+    lease.start_heartbeat(req.watch_loop);
     return lease;
 }
 
-void TartciAgentBuildLease::start_heartbeat() {
+void TartciAgentBuildLease::start_heartbeat(bool watch_loop) {
     if (!active_ || tartci_bin_.empty() || lease_id_.empty()) return;
     heartbeat_stop_ = std::make_shared<std::atomic<bool>>(false);
     auto stop = heartbeat_stop_;
     auto tartci_bin = tartci_bin_;
     auto lease_id = lease_id_;
-    heartbeat_thread_ = std::thread([stop, tartci_bin, lease_id] {
+    heartbeat_thread_ = std::thread([stop, tartci_bin, lease_id, watch_loop] {
         while (!stop->load()) {
             for (int i = 0; i < 30 && !stop->load(); ++i) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             }
-            if (stop->load()) break;
+            if (stop->load())
+                break;
+            if (watch_loop) {
+                // system() temporarily ignores SIGINT process-wide. A watch
+                // heartbeat must leave the watch's stop handler installed and
+                // be joinable when that existing lease is retired. Admission,
+                // cadence, output policy and heartbeat failure policy stay the
+                // same as the generic path below.
+                pulp::platform::ChildProcess heartbeat;
+                pulp::platform::ProcessOptions options;
+                options.capture_stdout = false;
+                options.capture_stderr = false;
+                if (heartbeat.start(tartci_bin, {"leases", "heartbeat", "--id", lease_id, "--json"},
+                                    options)) {
+                    while (!stop->load() && heartbeat.is_running())
+                        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+                    if (stop->load())
+                        heartbeat.cancel();
+                    (void)heartbeat.wait();
+                }
+                continue;
+            }
             auto cmd = shell_quote(tartci_bin) + " leases heartbeat --id "
                      + shell_quote(lease_id) + " --json" + output_to_null();
             (void)run(cmd);

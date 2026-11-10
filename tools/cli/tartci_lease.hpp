@@ -145,7 +145,7 @@ public:
 
 private:
     void release();
-    void start_heartbeat();
+    void start_heartbeat(bool watch_loop);
     void stop_heartbeat();
 
     bool ok_ = true;

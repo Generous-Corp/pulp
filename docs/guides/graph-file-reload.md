@@ -38,7 +38,9 @@ stop flag; process cleanup runs outside the handler.
 Watch rebuild, test and validation shellouts use the existing `ChildProcess`
 ownership and cancellation path, so an active shellout is joined before watch
 shutdown finishes. Their output streams and environment remain available to the
-invoked commands.
+invoked commands, including embedded NUL bytes in noninteractive output.
+The watch's existing build-lease heartbeat also uses owned subprocess cancellation;
+its admission, 30-second cadence, lease size and release policy stay unchanged.
 
 The operation `dev.pulp.graph/file.reload@1` uses the shared strict notation or
 saved-graph parser, validates every original edge, checks the catalog's state
