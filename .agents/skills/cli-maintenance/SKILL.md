@@ -4283,3 +4283,12 @@ control, and event edge observations. Keep their `edge_kind` and
 `validate` and `fmt --notation` use strict saved-edge validation. Keep diagnostic
 fields and codes identical across the public C++ API, CLI and MCP. Application
 Processor registrations belong to the C++ catalog, not the default tool catalog.
+
+### Transactional graph-file development reload
+
+The C++ dev/loop delegate accepts `--graph-file` with an existing enrolled
+`--graph-instance`, consent `--graph-grant` and `--graph-generation`. Reuse
+`SignalGraphControlAuthority`, the product catalog, strict shared parser and
+prepared-edit publication; no extension-only watcher or direct executor bypass.
+The serialized control request stays bounded at 512 KiB. See
+`docs/guides/graph-file-reload.md` for limitations and numeric installed proof.

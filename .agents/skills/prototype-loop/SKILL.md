@@ -243,3 +243,12 @@ The Claude Code slash command lives at [`.claude/commands/prototype-loop.md`](..
 - Validation example: Spectr native React editor coverage using focused Pulp framework-gap issues.
 - Coverage report: spectr `feature/native-react-editor` branch, `planning/spectr-style-coverage-report.md`
 - Companion docs: [`docs/guides/focus-mode.md`](../../docs/guides/focus-mode.md)
+
+### Transactional graph-file development reload
+
+The C++ dev/loop delegate accepts `--graph-file` with an existing enrolled
+`--graph-instance`, consent `--graph-grant` and `--graph-generation`. Reuse
+`SignalGraphControlAuthority`, the product catalog, strict shared parser and
+prepared-edit publication; no extension-only watcher or direct executor bypass.
+The serialized control request stays bounded at 512 KiB. See
+`docs/guides/graph-file-reload.md` for limitations and numeric installed proof.

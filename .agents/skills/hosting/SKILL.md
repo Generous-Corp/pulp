@@ -3129,3 +3129,12 @@ append named `midi` ports without changing audio counts; named connect must set
 the MIDI edge flag. Keep strict patch validation additive: the legacy serializer
 may drop bad edges, while strict validation must check every original edge.
 Opaque state and richer edge kinds need explicit contracts before formatting.
+
+### Transactional graph-file development reload
+
+The C++ dev/loop delegate accepts `--graph-file` with an existing enrolled
+`--graph-instance`, consent `--graph-grant` and `--graph-generation`. Reuse
+`SignalGraphControlAuthority`, the product catalog, strict shared parser and
+prepared-edit publication; no extension-only watcher or direct executor bypass.
+The serialized control request stays bounded at 512 KiB. See
+`docs/guides/graph-file-reload.md` for limitations and numeric installed proof.

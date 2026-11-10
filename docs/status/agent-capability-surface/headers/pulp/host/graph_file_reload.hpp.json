@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/graph_file_reload.hpp",
+  "fingerprint": "sha256:b242eecb8a6342423cd8e32cf5bf4aa6239d7d246eb675d312f726e7b003e30a",
+  "include": "pulp/host/graph_file_reload.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Strict catalog-derived graph-file preparation and existing transactional publication; bounded profile with explicit refusals, no alternate executor."
+}

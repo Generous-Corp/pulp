@@ -3,6 +3,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/graph_file_reload.hpp>
+#include <pulp/host/signal_graph_control.hpp>
+#include <pulp/inspect/control_signal_graph_executor.hpp>
+#include <choc/text/choc_JSON.h>
 #include <fstream>
 #include <utility>
 #include <thread>
@@ -202,10 +205,11 @@ TEST_CASE("Prepared replacement refuses removed processor aliases before any pre
         auto edit = graph.begin_prepared_topology_edit();
         REQUIRE(edit->remove_node(processor));
         REQUIRE(edit->add_processor_node(std::make_unique<ReloadLifecycleGain>(fresh)));
-        REQUIRE(edit->add_processor_node(instance));
+        const auto alias = edit->add_processor_node(instance);
+        REQUIRE(alias == 0);
         SECTION("prepare refuses alias before preparing fresh or live instance") {
             REQUIRE(edit->prepare(48000, 64) ==
-                    SignalGraph::PreparedTopologyEdit::Result::ExternalPluginReprepareRequired);
+                    SignalGraph::PreparedTopologyEdit::Result::InvalidMutation);
             REQUIRE(fresh.prepares == 0);
             REQUIRE(baseline.prepares == 1);
             REQUIRE(baseline.releases == 0);
@@ -221,7 +225,14 @@ TEST_CASE("Prepared replacement refuses removed processor aliases before any pre
             REQUIRE(competing->commit() ==
                     SignalGraph::PreparedTopologyEdit::Result::Committed);
             REQUIRE(edit->prepare(48000, 64) ==
-                    SignalGraph::PreparedTopologyEdit::Result::StaleBase);
+                    SignalGraph::PreparedTopologyEdit::Result::InvalidMutation);
+        }
+        SECTION("quiesced preparation cannot prepare a refused alias") {
+            REQUIRE(edit->prepare_quiesced(48000, 64) ==
+                    SignalGraph::PreparedTopologyEdit::Result::InvalidMutation);
+            REQUIRE(fresh.prepares == 0);
+            REQUIRE(baseline.prepares == 1);
+            REQUIRE(baseline.releases == 0);
         }
     }
     REQUIRE(baseline.releases == 0);
@@ -282,4 +293,72 @@ TEST_CASE("Replacement retains old processor audio until last snapshot retires o
     graph.release();
     REQUIRE(new_counts.releases == 1);
     REQUIRE(new_counts.release_thread == std::this_thread::get_id());
+}
+
+TEST_CASE("Graph file executor shares typed refusal and numeric publication with public API",
+          "[host][graph-file-reload][executor]") {
+    GraphPatchCatalog catalog;
+    auto graph = live(catalog);
+    SignalGraphControlAuthority authority(*graph, 48000, 64);
+    authority.set_graph_file_catalog(catalog);
+    auto executor = pulp::inspect::make_control_signal_graph_executor(
+        [&](const pulp::inspect::ControlAdmissionPlan&) { return &authority; });
+    pulp::inspect::ControlExecutionContext context;
+    context.checkpoint = [] { return pulp::inspect::ControlExecutionCheckpoint::Continue; };
+    pulp::inspect::ControlAdmissionPlan plan;
+    plan.receipt_id.value = "graph-file-test";
+    const auto request = [&](std::string text, std::uint64_t generation) {
+        auto params = choc::value::createObject("");
+        params.addMember("text", text);
+        params.addMember("format", "notation");
+        params.addMember("expected_generation", static_cast<std::int64_t>(generation));
+        pulp::inspect::ControlRequestEnvelope result;
+        result.operation_id = "dev.pulp.graph/file.reload@1";
+        result.operation_version = 1;
+        result.params_json = choc::json::toString(params, false);
+        return result;
+    };
+    const auto before = GraphSerializer::to_json(*graph);
+    const auto invalid = patch(0.75f) + "input.nope >> out.audio\n";
+    const auto api = parse_graph_patch(invalid, catalog);
+    REQUIRE_FALSE(api);
+    const auto refused = executor(plan, request(invalid, 0), context);
+    REQUIRE(refused.terminal_state == pulp::inspect::ControlReceiptState::Failed);
+    const auto refused_detail = choc::json::parse(refused.result.detail_json);
+    const auto diagnostic = refused_detail["diagnostic"];
+    REQUIRE(choc::json::toString(diagnostic, false) ==
+            choc::json::toString(choc::json::parse(graph_patch_diagnostic_json(api.diagnostic)), false));
+    REQUIRE(GraphSerializer::to_json(*graph) == before);
+    audio_is(*graph, 0.125f);
+    SECTION("cancel before commit") {
+        int checkpoints = 0;
+        context.checkpoint = [&] {
+            return ++checkpoints == 1 ? pulp::inspect::ControlExecutionCheckpoint::Continue
+                                      : pulp::inspect::ControlExecutionCheckpoint::Cancelled;
+        };
+        REQUIRE(executor(plan, request(patch(0.75f), 0), context).terminal_state ==
+                pulp::inspect::ControlReceiptState::Failed);
+        REQUIRE(authority.generation() == 0);
+        REQUIRE(GraphSerializer::to_json(*graph) == before);
+        audio_is(*graph, 0.125f);
+    }
+    SECTION("strict request bound") {
+        REQUIRE(executor(plan, request(std::string(512 * 1024, 'x'), 0), context).terminal_state ==
+                pulp::inspect::ControlReceiptState::Failed);
+        REQUIRE(authority.generation() == 0);
+        REQUIRE(GraphSerializer::to_json(*graph) == before);
+    }
+    SECTION("valid file and stale generation") {
+        const auto applied = executor(plan, request(patch(0.75f), 0), context);
+        INFO(applied.result.explanation);
+        REQUIRE(applied.terminal_state == pulp::inspect::ControlReceiptState::Completed);
+        REQUIRE(authority.generation() == 1);
+        audio_is(*graph, 0.375f);
+        const auto committed = GraphSerializer::to_json(*graph);
+        REQUIRE(executor(plan, request(patch(0.25f), 0), context).terminal_state ==
+                pulp::inspect::ControlReceiptState::Failed);
+        REQUIRE(GraphSerializer::to_json(*graph) == committed);
+        REQUIRE(authority.generation() == 1);
+        audio_is(*graph, 0.375f);
+    }
 }

@@ -79,6 +79,8 @@ PUBLIC_ROOTS = (
 # added, and `--check` stays green while it is.
 REVIEWED_HOST_HEADERS = (
     'pulp/host/graph_patch.hpp',
+    'pulp/host/graph_file_reload.hpp',
+    'pulp/host/signal_graph_control.hpp',
     'pulp/host/graph_event_contract.hpp',
     'pulp/host/plugin_identity.hpp',
     'pulp/host/plugin_slot.hpp',

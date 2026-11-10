@@ -28,6 +28,8 @@ int cmd_dev(const std::vector<std::string>& args) {
     bool hot_dsp = false;
     bool build_all = false;
     bool no_dev_shared = false;
+    GraphReloadOptions graph_reload;
+    std::string graph_error;
     bool after_separator = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
@@ -38,6 +40,9 @@ int cmd_dev(const std::vector<std::string>& args) {
             std::cout
                 << "Optionally runs tests, validates plugins, and manages a launched app.\n\n";
             std::cout << "Options:\n";
+            std::cout << "  --graph-file FILE      Reload .pat/.pulpgraph through an enrolled live instance\n"
+                         "  --graph-instance ID --graph-grant ID --graph-generation N\n"
+                         "  --graph-watch-polls N   Stop after 1..120 polls (500 ms each)\n";
             std::cout << "  --test, -t             Run tests after each successful build\n";
             std::cout << "  --test-filter=PATTERN  Run only tests matching PATTERN\n";
             std::cout
@@ -87,6 +92,10 @@ int cmd_dev(const std::vector<std::string>& args) {
             continue;
         }
 
+        if (parse_graph_reload_option(args, i, graph_reload, graph_error)) {
+            if (!graph_error.empty()) { std::cerr << graph_error << '\n'; return 2; }
+            continue;
+        }
         if (args[i] == "--test" || args[i] == "-t") {
             run_tests = true;
         } else if (args[i].rfind("--test-filter=", 0) == 0) {
@@ -158,6 +167,9 @@ int cmd_dev(const std::vector<std::string>& args) {
         return 2;
     }
 
+    if (!validate_graph_reload_options(graph_reload, graph_error)) {
+        std::cerr << graph_error << '\n'; return 2;
+    }
     BuildPlan plan({project_root, build_dir, standalone_mode, examples, build_all, build_args,
                     "pulp dev", dev_shared_ui_default(no_dev_shared, standalone_mode)});
     if (!plan.ok()) {
@@ -175,6 +187,8 @@ int cmd_dev(const std::vector<std::string>& args) {
     }
 
     // Enter the watch loop
-    return watch_loop(plan.watch_options(run_tests, test_filter, run_validate, launch_target,
-                                         launch_args, hot_dsp));
+    auto watch = plan.watch_options(run_tests, test_filter, run_validate, launch_target,
+                                         launch_args, hot_dsp);
+    watch.graph_reload = std::move(graph_reload);
+    return watch_loop(watch);
 }

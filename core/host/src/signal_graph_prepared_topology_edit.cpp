@@ -1665,6 +1665,19 @@ NodeId SignalGraph::PreparedTopologyEdit::add_owned_builtin_plugin_node(
 
 NodeId SignalGraph::PreparedTopologyEdit::add_processor_node(
     std::shared_ptr<format::ProcessorNodeInstance> processor, const std::string& name) {
+    GraphMutationLock owner_lock(*owner_);
+    const auto aliases_baseline = [&](const auto& baseline) {
+        return std::any_of(baseline.begin(), baseline.end(), [&](const auto& entry) {
+            return entry.second && entry.second->instance == processor;
+        });
+    };
+    // A removed baseline ID is still live in the published generation. Reject
+    // before minting a second lifetime token, even if the caller removes it again.
+    if (processor && (aliases_baseline(owner_->processor_nodes_) ||
+                      (base_live_ && aliases_baseline(base_live_->processors)))) {
+        mutation_failed_ = true;
+        return 0;
+    }
     return add_node_([&] { return candidate_->add_processor_node(std::move(processor), name); });
 }
 
@@ -3123,6 +3136,8 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
 
         {
             GraphMutationLock candidate_lock(*candidate_);
+            if (reject_baseline_processor_aliases_locked_())
+                return last_result_ = Result::ExternalPluginReprepareRequired;
             if (const auto rejection =
                     sample_region_preparation_result_(sample_rate, max_block_size))
                 return last_result_ = *rejection;

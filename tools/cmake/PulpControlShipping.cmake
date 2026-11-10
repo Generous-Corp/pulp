@@ -34,6 +34,7 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     timeline.document.session
     graph.sample-region.read
     graph.sample-region.edit
+    graph.file.reload
     graph.modulation-route.edit
     vendor.read
     vendor.gesture
@@ -68,6 +69,7 @@ set(_PULP_CONTROL_CAPABILITIES
     dev.pulp.timeline/document-session@1
     dev.pulp.graph/sample-region.read@1
     dev.pulp.graph/sample-region.edit@1
+    dev.pulp.graph/file.reload@1
     dev.pulp.graph/modulation-route.edit@1
     dev.pulp.vendor/read@1
     dev.pulp.vendor/gesture@1

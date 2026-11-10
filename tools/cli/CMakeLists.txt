@@ -71,6 +71,7 @@ add_executable(pulp-cli
     pulp_cli.cpp
     atomic_text_file.cpp
     cli_common.cpp
+    cli_graph_reload.cpp
     focused_build.cpp
     build_plan.cpp
     cli_delegate.cpp

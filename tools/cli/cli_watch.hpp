@@ -6,6 +6,7 @@
 // directly when only the watch loop is needed.
 #pragma once
 
+#include "cli_graph_reload.hpp"
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -13,6 +14,7 @@
 namespace fs = std::filesystem;
 
 struct WatchOptions {
+    GraphReloadOptions graph_reload;
     fs::path root;
     fs::path build_dir;
     std::vector<std::string> build_args;

@@ -1034,10 +1034,18 @@ int watch_loop(const WatchOptions& opts) {
     };
 
     launch_child();
+    std::optional<GraphReloadWatch> graph_reload;
+    if (!opts.graph_reload.file.empty()) graph_reload.emplace(opts.graph_reload);
+    unsigned graph_polls = 0;
 
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
+        if (graph_reload) {
+            graph_reload->poll();
+            if (opts.graph_reload.watch_polls && ++graph_polls >= opts.graph_reload.watch_polls)
+                return 0;
+        }
         auto current = snapshot_timestamps(opts.root);
         bool changed = false;
         std::string first_changed;
