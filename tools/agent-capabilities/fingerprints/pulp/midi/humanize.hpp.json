@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/midi/humanize.hpp",
+  "fingerprint": "sha256:1c4307dd8107cb3e38f9b3fd5046303f8ab8346164f021ecca414c9f227468b1"
+}

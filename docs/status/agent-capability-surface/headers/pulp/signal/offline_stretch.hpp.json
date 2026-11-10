@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/offline_stretch.hpp",
+  "fingerprint": "sha256:aa39df9f1d1828fba6cc54997e54aa334efadd2dc4818021ba3515912dc482b8",
+  "include": "pulp/signal/offline_stretch.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

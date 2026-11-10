@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/phase_distortion.hpp",
+  "fingerprint": "sha256:9fc1e8fa751942f5c17af2e6834097ef390427b10415f2d3fdbdadd6ae376c73",
+  "include": "pulp/signal/phase_distortion.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

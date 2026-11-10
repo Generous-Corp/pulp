@@ -87,8 +87,18 @@ Two tools are pinned in the manifest but are **not** installed by mise:
   let cargo fetch a toolchain mid-build (`RUSTUP_AUTO_INSTALL=0`); they run
   `tools/ci/provide_pinned_rust.sh` before configuring, which installs the pin
   when the image lacks it.
-- **Xcode** (`xcode = "26.5"`, build `17F42`). Xcode is installed into the
-  macOS CI image by the image provisioning scripts, not by mise.
+- **Xcode** (`xcode = "27.2"`, build `27B52`) and the golden's macOS
+  (`macos_base`, an image pinned by digest, and `macos_build`). Xcode is not
+  installed by mise: `tools/ci/tart-provision.sh` copies the host's
+  `/Applications/Xcode.app` into the golden at the same path and refuses a
+  build that is not the pin, and `check_env.py` reports a host or guest whose
+  selected Xcode differs in version or build. The same Xcode, at the same
+  path, on hosts and guests is what lets one ccache serve both
+  (`compiler_check=content` hashes the compiler).
+- **ccache and git-lfs** (`ccache`, `git_lfs`). Both were unpinned Homebrew
+  installs; mise now installs them from the lock (ccache from conda-forge,
+  which publishes no windows-arm64 build). Linux and Windows keep their
+  system copies as declared exceptions.
 
 The manifest also records, per tool, whether a version is already what the CI
 gate runs (`observed`) or a version the gate still has to reach (`target`).

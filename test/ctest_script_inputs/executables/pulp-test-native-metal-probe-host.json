@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-native-metal-probe-host",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "PulpNativeMetalProbe_AU",
+   "PulpNativeMetalProbe_CLAP"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/native_metal_probe_hosts.mm"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

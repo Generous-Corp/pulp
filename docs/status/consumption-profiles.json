@@ -1473,6 +1473,8 @@
       "pulp/view/live_constant_editor.hpp",
       "pulp/view/lock_to_source.hpp",
       "pulp/view/lottie_view.hpp",
+      "pulp/view/midi_learn_menu.hpp",
+      "pulp/view/midi_learn_target.hpp",
       "pulp/view/modal.hpp",
       "pulp/view/model_manager_view.hpp",
       "pulp/view/modulation_matrix.hpp",

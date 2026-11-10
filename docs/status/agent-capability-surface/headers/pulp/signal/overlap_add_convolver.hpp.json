@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/overlap_add_convolver.hpp",
+  "fingerprint": "sha256:a673761c3cbeb7eecaaea03f8f49a663cff7fe63f8e422b8538b6c66bafd3307",
+  "include": "pulp/signal/overlap_add_convolver.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "The single-partition overlap-add ConvolverT, moved out of fft.hpp (which still includes it) with an unchanged interface. A one-block-latency convolution utility that runs its spectra in split form internally; it carries no capability claim of its own, PartitionedConvolver being the advertised engine."
+}

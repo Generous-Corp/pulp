@@ -1,0 +1,9 @@
+{
+  "domain": "timebase",
+  "source": "core/timebase/include/pulp/timebase/rational_time.hpp",
+  "fingerprint": "sha256:333417397f3df67fef0d84bb91a0910d519ab58ef9a2ce7590f7e31a5b643c3f",
+  "include": "pulp/timebase/rational_time.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

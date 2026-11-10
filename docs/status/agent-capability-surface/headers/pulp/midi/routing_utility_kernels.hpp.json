@@ -1,0 +1,13 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/routing_utility_kernels.hpp",
+  "fingerprint": "sha256:25f48eace55842dd5e31cfd50722d6a65e5327057b1ec1866e2640145ba27636",
+  "include": "pulp/midi/routing_utility_kernels.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "midi.channel-routing",
+    "midi.keyboard-split",
+    "midi.note-range-filtering"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

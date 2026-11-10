@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fdn/frac_delay.hpp",
+  "fingerprint": "sha256:6ae028912b0f69c9698a23788caedee47f5dfd59edf292f7e1be01d80556f151",
+  "include": "pulp/signal/fdn/frac_delay.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Internal building block of the FDN reverb engine (fdn/frac_delay). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
+}

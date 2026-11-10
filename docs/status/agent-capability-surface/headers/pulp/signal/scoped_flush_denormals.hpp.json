@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/scoped_flush_denormals.hpp",
+  "fingerprint": "sha256:c9d2a472c1f096bc19969299925b933c21976d66a0e6492fa306ca309bc942ad",
+  "include": "pulp/signal/scoped_flush_denormals.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "ScopedFlushDenormals is numeric-mode infrastructure for processor audio boundaries. It does not expose a standalone generator capability; the Windows MSVC include ordering is part of that shared implementation contract."
+}

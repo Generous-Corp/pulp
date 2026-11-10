@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/halfband_iir.hpp",
+  "fingerprint": "sha256:c47732fc56150293213d048f7ac113f3f3ac0341a83167eb40bae9c4f89ccdfc",
+  "include": "pulp/signal/halfband_iir.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Closed-form elliptic half-band allpass designs, their pure response, group-delay and stopband evaluators, and the polyphase stage kernels OversamplerT cascades. Filter-design infrastructure behind the oversampler rather than an advertised generator surface; it makes no installed agent capability claim of its own."
+}

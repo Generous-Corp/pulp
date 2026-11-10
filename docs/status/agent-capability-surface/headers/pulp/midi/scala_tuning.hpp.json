@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/scala_tuning.hpp",
+  "fingerprint": "sha256:2c3f39709076bfd6930a78826fc02e58602575066dfbc1f75bde9bec642e31af",
+  "include": "pulp/midi/scala_tuning.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/spectrum_analyzer.hpp",
+  "fingerprint": "sha256:f9b372d037fc8a698cd4e7d36805422a3bf2037aeaeb2e600ceb6892e6350f58",
+  "include": "pulp/signal/spectrum_analyzer.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Display-side spectrum analysis behind SpectrumView: a lock-free sample tap for the audio thread plus UI-thread windowed FFT, level modes and time-based release; analysis for drawing, not a generator capability."
+}
