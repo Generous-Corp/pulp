@@ -3457,8 +3457,9 @@ Gotchas:
   `--print-path` keeps stdout to the final prefix
   and sends build progress to stderr so command substitution is reliable.
   The installed prefix is an arm64 contract all the way down: after installation,
-  every static archive is inspected with `lipo`; an archive containing arm64 plus
-  other slices is atomically replaced by its arm64 slice, while an archive with no
+  every static archive is inspected with `lipo`; Pulp-owned universal archives
+  are replaced by their arm64 slice, while the copied, lock-bound
+  `external/skia-build` archives retain their exact bytes. Any archive with no
   arm64 slice fails the publish. The profile also enables and validates WebView,
   and records `features.webview=true` in `sdk-provenance.json`, so imported
   WebView-backed designs can be built by downstream forge consumers without

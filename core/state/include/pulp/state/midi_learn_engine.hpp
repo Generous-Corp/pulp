@@ -54,6 +54,7 @@
 #include <pulp/state/midi_map_scale.hpp>
 #include <pulp/state/midi_mapping.hpp>
 #include <pulp/state/midi_source.hpp>
+#include <pulp/state/midi_source_reservation.hpp>
 #include <pulp/state/store.hpp>
 #include <span>
 #include <string>
@@ -91,7 +92,10 @@ struct MidiLearnState {
 
 /// Result of a completed learn.
 struct MidiLearnOutcome {
-    bool bound = false;                ///< False when the table was full.
+    bool bound = false; ///< False when the table was full or the source is reserved.
+    /// Set when the controller is reserved by the plug-in (see
+    /// `set_reservation`); a static string, null otherwise.
+    const char* refused_reason = nullptr;
     MidiMapping mapping;               ///< The new mapping (when bound).
     std::vector<MidiMapping> replaced; ///< Mappings this one displaced, for undo.
 };
@@ -119,6 +123,8 @@ class MidiLearnEngine {
     /// uid or the same source. Returns false (and changes nothing) when the
     /// table is full. The scale is clamped to [0, 1].
     bool set_mapping(MidiMapping m) {
+        if (is_reserved(m.source))
+            return false;
         m.scale = clamp_scale(m.scale);
         if (m.uid == 0)
             m.uid = next_uid_++;
@@ -152,6 +158,17 @@ class MidiLearnEngine {
         return remove_if([](const MidiMapping&) { return true; });
     }
 
+    /// Claim controllers for another owner (for example a preset router that
+    /// consumes Bank Select and Program Change). Claimed sources cannot be mapped
+    /// or learned, are dropped by `replace_all()` and loads, and are skipped by
+    /// `route()` even when a saved mapping already names them. Non-owning: null
+    /// clears it, and the owner must outlive the engine. Safe to call from any
+    /// thread; the reservation's own state must be safe to read from the audio
+    /// thread.
+    void set_reservation(const MidiSourceReservation* reservation) {
+        reservation_.store(reservation, std::memory_order_release);
+    }
+
     /// Replace the whole table with `incoming`. A mapping keeps its `uid` when
     /// it has one (so takeover state and undo snapshots stay valid); a later
     /// entry for the same source replaces an earlier one. Returns false and
@@ -160,6 +177,8 @@ class MidiLearnEngine {
         std::vector<MidiMapping> built;
         built.reserve(incoming.size());
         for (MidiMapping m : incoming) {
+            if (is_reserved(m.source))
+                continue;
             m.scale = clamp_scale(m.scale);
             auto same = std::find_if(built.begin(), built.end(),
                                      [&](const MidiMapping& e) { return e.source == m.source; });
@@ -396,6 +415,16 @@ class MidiLearnEngine {
         return s;
     }
 
+    bool is_reserved(const MidiSource& source) const {
+        const auto* r = reservation_.load(std::memory_order_acquire);
+        return r != nullptr && r->claims(source);
+    }
+
+    const char* reservation_reason() const {
+        const auto* r = reservation_.load(std::memory_order_acquire);
+        return r != nullptr ? r->reason() : nullptr;
+    }
+
     MidiLoadReport apply_parsed(MidiMapParseResult parsed, const StateStore* known,
                                 MidiImportMode mode) {
         MidiLoadReport report;
@@ -407,7 +436,7 @@ class MidiLearnEngine {
         std::vector<MidiMapping> keep;
         keep.reserve(parsed.mappings.size());
         for (auto& m : parsed.mappings) {
-            if (known && !known->info(m.id))
+            if (is_reserved(m.source) || (known && !known->info(m.id)))
                 ++report.dropped;
             else
                 keep.push_back(m);
@@ -506,6 +535,12 @@ class MidiLearnEngine {
         // source: drop whatever this binding displaces.
         const MidiSource src = m.source;
         const ParamID id = m.id;
+        if (is_reserved(src)) {
+            out.refused_reason = reservation_reason();
+            learning_.store(false, std::memory_order_release);
+            state_ = {};
+            return out;
+        }
         out.replaced =
             remove_if([&](const MidiMapping& e) { return overlaps(e.source, src) || e.id == id; });
         out.bound = set_mapping(m);
@@ -562,7 +597,7 @@ class MidiLearnEngine {
         bool driven = false;
         for (uint32_t i = 0; i < active_->count; ++i) {
             const MidiMapping& m = active_->items[i];
-            if (!m.source.matches(d.source))
+            if (!m.source.matches(d.source) || is_reserved(m.source))
                 continue;
             driven = true;
             if (d.kind == DecodedMidi::Kind::step) {
@@ -623,6 +658,7 @@ class MidiLearnEngine {
     std::atomic<bool> learning_{false};
     std::atomic<uint64_t> learn_overflow_{0};
     std::atomic<uint32_t> host_learn_pending_{0};
+    std::atomic<const MidiSourceReservation*> reservation_{nullptr};
     static constexpr uint32_t kHostLearnValid = 0x80000000u;
 
     // UI thread.

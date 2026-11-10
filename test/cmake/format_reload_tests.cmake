@@ -470,6 +470,10 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     pulp_add_test_suite(pulp-test-au-v2-effect GROUP pulp-test-group-fmt-au-v2
         LIBRARIES pulp::format pulp::midi ausdk)
 
+    # MIDI Learn feedback through the AU v2 MIDI output packet builder.
+    pulp_add_test_suite(pulp-test-au-midi-learn GROUP pulp-test-group-fmt-au-v2
+        LIBRARIES pulp::format pulp::midi ausdk)
+
     # AU v2 MIDI-processor (`aumi`) adapter. Drives the real adapter end to end:
     # host MIDI in through the SDK entry points, a host-installed
     # kAudioUnitProperty_MIDIOutputCallback, and Render() to advance the block.
