@@ -1827,6 +1827,12 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(clean-worktree-builds-selftest PROPERTIES TIMEOUT 600)
         # Stages live processes and worktrees on the host it runs on.
         set_property(TEST clean-worktree-builds-selftest APPEND PROPERTY LABELS environment-bound)
+        # The driver-link parsers over captured ninja and CMake output; the
+        # cases that need a real generator are in confirm-failure-harness.
+        add_test(NAME confirm-failure-driver-link-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_confirm_failure_driver_link
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(confirm-failure-driver-link-selftest PROPERTIES TIMEOUT 60)
         add_test(NAME clean-worktree-planning-selftest
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_planning
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
