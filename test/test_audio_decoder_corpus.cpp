@@ -11,12 +11,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/audio/audio_reader.hpp>
 #include <pulp/audio/format_registry.hpp>
 #include <pulp/audio/wav_decoder.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -154,6 +156,11 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
         {"m4a-aac-lc-mono.m4a", E{true, {}, {}, ""}},
         {"m4a-aac-mdat-size1.m4a", E{true, {}, {}, ""}},
         {"m4a-alac-stereo.m4a", E{true, {}, {}, ""}},
+        {"mp3-ape-size-below-footer.mp3", E{true, {}, {}, ""}},
+        {"mp3-apev1-footer.mp3", E{true, {}, {}, ""}},
+        {"mp3-apev1-header-flag.mp3", E{true, {}, {}, ""}},
+        {"mp3-apev2-footer.mp3", E{true, {}, {}, ""}},
+        {"mp3-apev2-size-high-bit.mp3", E{true, {}, {}, ""}},
         {"mp3-cbr-mono.mp3", E{true, {}, {}, ""}},
         {"mp3-id3v2-xing-vbr.mp3", E{true, {}, {}, ""}},
         {"ogg-chained-two-streams.ogg", E{true, {}, {}, ""}},
@@ -171,11 +178,6 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
         {"wav-rf64-ds64.wav",
          E{true, false, {}, "RF64 envelope: the registry (CHOC) reads it, decode_wav does not"}},
         // valid per the README, refused by Pulp for a stated reason
-        {"mp3-apev2-footer.mp3", E{false,
-                                   {},
-                                   {},
-                                   "dr_mp3 fails to initialise behind a well-formed APEv2 tag; "
-                                   "Generous-Corp/pulp issue 11788"}},
         {"wav-w64-pcm16-mono.wav",
          E{false, {}, true, "Sony Wave64 envelope; Pulp registers no Wave64 reader"}},
         // malformed seeds: refused or decoded, the oracle judges what comes back
@@ -503,6 +505,90 @@ TEST_CASE("an MP3 with no declared length reports the frames the decoder deliver
     REQUIRE(data.has_value());
     CHECK(data->num_frames() == 3456u);
     CHECK(info->num_frames == data->num_frames());
+}
+
+namespace {
+
+uint32_t le32(std::vector<uint8_t>::const_iterator at) {
+    return uint32_t(at[0]) | (uint32_t(at[1]) << 8) | (uint32_t(at[2]) << 16) |
+           (uint32_t(at[3]) << 24);
+}
+
+// The bytes in front of a trailing APE tag. The footer's size field (bytes
+// 12-15) counts the items and the footer, and is never less than the footer's
+// own 32 bytes. An APEv2 tag (version 2000 or later, bytes 8-11) also has a
+// 32-byte header in front of the items when flags bit 31 (footer byte 23, bit
+// 7) is set; APEv1 never has one.
+std::vector<uint8_t> strip_ape_tag(const std::vector<uint8_t>& bytes) {
+    REQUIRE(bytes.size() > 32u);
+    const auto footer = bytes.cbegin() + static_cast<std::ptrdiff_t>(bytes.size() - 32u);
+    REQUIRE(std::string(footer, footer + 8) == "APETAGEX");
+    const uint32_t version = le32(footer + 8);
+    const uint32_t tag_size = std::max<uint32_t>(le32(footer + 12), 32u);
+    const uint32_t header_size = version >= 2000u && (footer[23] & 0x80u) != 0 ? 32u : 0u;
+    REQUIRE(uint64_t(tag_size) + header_size < bytes.size());
+    return std::vector<uint8_t>(bytes.begin(), bytes.end() - (tag_size + header_size));
+}
+
+void require_same_audio(const pulp::audio::AudioFileData& tagged,
+                        const pulp::audio::AudioFileData& stripped) {
+    REQUIRE(stripped.num_frames() > 0u);
+    REQUIRE(tagged.sample_rate == stripped.sample_rate);
+    REQUIRE(tagged.num_channels() == stripped.num_channels());
+    REQUIRE(tagged.num_frames() == stripped.num_frames());
+    for (uint32_t ch = 0; ch < tagged.num_channels(); ++ch)
+        CHECK(std::memcmp(tagged.channels[ch].data(), stripped.channels[ch].data(),
+                          tagged.channels[ch].size() * sizeof(float)) == 0);
+}
+
+} // namespace
+
+TEST_CASE("an MP3 behind an APE tag decodes exactly as the same MP3 without it",
+          "[fuzz][audio][mp3]") {
+    // APEv2 with a header, APEv1 without one, APEv1 whose flags claim a header
+    // anyway, a footer whose size is below its own 32 bytes, and an APEv2 tag
+    // whose size byte has its high bit set. Each stripped stream is the
+    // untagged base.
+    const auto base = read_bytes(corpus_dir() / "mp3-cbr-mono.mp3");
+    pulp::test::ScopedTempDir dir("pulp-audio-decoder-ape");
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto limits = pulp_fuzz::audio_decoder::fuzz_limits();
+    for (const char* name :
+         {"mp3-apev2-footer.mp3", "mp3-apev1-footer.mp3", "mp3-apev1-header-flag.mp3",
+          "mp3-ape-size-below-footer.mp3", "mp3-apev2-size-high-bit.mp3"}) {
+        INFO(name);
+        const auto tagged = read_bytes(corpus_dir() / name);
+        const auto stripped = strip_ape_tag(tagged);
+        REQUIRE(stripped.size() < tagged.size());
+        CHECK(stripped == base);
+
+        const auto tagged_path = write_file(dir.path / (std::string("tagged-") + name), tagged);
+        const auto stripped_path =
+            write_file(dir.path / (std::string("stripped-") + name), stripped);
+        const auto tagged_info = registry.read_info(tagged_path);
+        const auto stripped_info = registry.read_info(stripped_path);
+        REQUIRE(tagged_info.has_value());
+        REQUIRE(stripped_info.has_value());
+        CHECK(tagged_info->num_frames == stripped_info->num_frames);
+        const auto tagged_data = registry.read(tagged_path, limits);
+        const auto stripped_data = registry.read(stripped_path, limits);
+        REQUIRE(tagged_data.has_value());
+        REQUIRE(stripped_data.has_value());
+        require_same_audio(*tagged_data, *stripped_data);
+
+        auto tagged_reader = pulp::audio::AudioReader::open_memory(tagged, ".mp3", limits);
+        auto stripped_reader = pulp::audio::AudioReader::open_memory(stripped, ".mp3", limits);
+        REQUIRE(tagged_reader != nullptr);
+        REQUIRE(stripped_reader != nullptr);
+        REQUIRE(tagged_reader->info().num_frames == stripped_reader->info().num_frames);
+        const auto frames = stripped_reader->info().num_frames;
+        const auto tagged_range = tagged_reader->read(0u, frames);
+        const auto stripped_range = stripped_reader->read(0u, frames);
+        REQUIRE(tagged_range.has_value());
+        REQUIRE(stripped_range.has_value());
+        require_same_audio(*tagged_range, *stripped_range);
+        CHECK(stripped_range->num_frames() == stripped_data->num_frames());
+    }
 }
 
 TEST_CASE("a WAV whose bext chunk is shorter than its fixed fields is refused without allocating",

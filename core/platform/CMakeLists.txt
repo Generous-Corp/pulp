@@ -10,6 +10,7 @@ target_include_directories(pulp-platform
 target_sources(pulp-platform PRIVATE
     src/platform.cpp
     src/main_thread.cpp
+    src/popup_window.cpp
     src/file_drag.cpp
     src/alert.cpp
     src/dialog_session.cpp
@@ -37,6 +38,7 @@ if(APPLE AND NOT IOS)
         platform/mac/popup_menu_mac.mm
         platform/mac/reveal_mac.mm
         platform/mac/environment_mac.mm
+        platform/mac/popup_window_mac.mm
         platform/mac/file_drag_mac.mm
         platform/mac/objc_unique_class_mac.mm
         platform/posix/child_process_posix.cpp
@@ -109,6 +111,10 @@ if(NOT (APPLE AND NOT IOS))
     )
 endif()
 
+if(NOT (APPLE AND NOT IOS))
+    target_sources(pulp-platform PRIVATE src/popup_window_stub.cpp)
+endif()
+
 # Public-header manifest: every header this target ships, relative to this
 # directory. The Vellum closure exports exactly these (plus what they include),
 # and the closure tool refuses a header under include/ that is not listed.
@@ -133,6 +139,7 @@ set(PULP_PLATFORM_UNIT_HEADERS
     include/pulp/platform/permissions.hpp
     include/pulp/platform/platform.hpp
     include/pulp/platform/popup_menu.hpp
+    include/pulp/platform/popup_window.hpp
     include/pulp/platform/progress_parser.hpp
     include/pulp/platform/reveal_in_file_manager.hpp
     include/pulp/platform/special_dir.hpp
