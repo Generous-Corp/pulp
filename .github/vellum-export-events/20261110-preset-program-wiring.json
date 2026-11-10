@@ -7,6 +7,6 @@
   "paths": [
     "core/state/include/pulp/state/midi_source_reservation.hpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "MidiSourceReservation added to core/state, and the preset library and program map files this branch builds on; additive, no existing behaviour changes."
+  "vellum_inherits": false,
+  "rationale": "MidiSourceReservation added to core/state, and the preset library and program map files this branch builds on; additive, no existing behaviour changes. Pulp-owned after the framework transfer; Vellum does not inherit these paths."
 }
