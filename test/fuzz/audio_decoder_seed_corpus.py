@@ -611,7 +611,16 @@ def build_wav_seeds(corpus: Corpus) -> None:
     chunks = chunk(b"ds64", ds64) + rf64_fmt + data_chunk
     ds64_body = struct.pack("<QQQI", 4 + len(chunks), len(mono16_bytes), len(mono16), 0)
     chunks = chunk(b"ds64", ds64_body) + rf64_fmt + data_chunk
-    corpus.add("wav-rf64-ds64.wav", b"RF64" + struct.pack("<I", 0xFFFFFFFF) + b"WAVE" + chunks)
+    rf64 = corpus.add("wav-rf64-ds64.wav", b"RF64" + struct.pack("<I", 0xFFFFFFFF) + b"WAVE" + chunks)
+    # BW64 (ITU-R BS.2088) shares RF64's ds64 layout under its own tag.
+    corpus.add("wav-bw64-ds64.wav", b"BW64" + rf64[4:])
+    # The RF64 seed cut after one third of its samples; ds64 still declares the full length.
+    rf64_data_at = rf64.index(b"data") + 8
+    corpus.add("wav-rf64-ds64-data-past-eof.wav", rf64[:rf64_data_at + len(mono16_bytes) // 3])
+    # A recorder that never back-filled ds64: the data size stays 0xFFFFFFFF and ds64's is zero.
+    ds64_data_size_at = 12 + 8 + 8
+    corpus.add("wav-rf64-ds64-data-size-zero.wav",
+               rf64[:ds64_data_size_at] + struct.pack("<Q", 0) + rf64[ds64_data_size_at + 8:])
 
     # Sony Wave64: 16-byte GUID chunk ids, 64-bit sizes that include the 24-byte chunk header.
     def w64_guid(fourcc: bytes) -> bytes:
@@ -638,6 +647,8 @@ def build_wav_seeds(corpus: Corpus) -> None:
                riff(chunk(b"fmt ", fmt16) + chunk(b"fmt ", fmt_payload(WAVE_FORMAT_PCM, 2, 44100, 8))
                     + chunk(b"data", mono16_bytes)))
     corpus.add("wav-fmt-after-data.wav", riff(chunk(b"data", mono16_bytes) + chunk(b"fmt ", fmt16)))
+    corpus.add("wav-duplicate-fmt-identical.wav",
+               riff(chunk(b"fmt ", fmt16) + chunk(b"fmt ", fmt16) + chunk(b"data", mono16_bytes)))
     truncated = base[:44 + len(mono16_bytes) // 3]
     corpus.add("wav-data-past-eof.wav", truncated)
     corpus.add("wav-data-size-zero.wav", riff(chunk(b"fmt ", fmt16) + chunk(b"data", b"")))
