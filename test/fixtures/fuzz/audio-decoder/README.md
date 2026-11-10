@@ -130,6 +130,9 @@ path or timestamp (the m4a `mvhd`/`tkhd`/`mdhd` times are zeroed).
 | `mp3-apev2-size-high-bit.mp3` | 1536 | derived | Valid with trailer: the CBR base plus an APEv2 tag padded so the footer size is 0x1F0, putting 0xF0 in footer byte 12. A reader that widens the size bytes through a signed char reads a sign-extended size. |
 | `mp3-ape-size-below-footer.mp3` | 1040 | derived | Valid with trailer: the CBR base plus a bare APEv2 footer (no header, no items, flags zero) whose size field is 0, below the footer's own 32 bytes. A reader that trusts the size strips less than the footer. |
 | `mp3-apev1-header-flag.mp3` | 1069 | derived | Valid with trailer: the CBR base plus an APEv1 tag (version 1000, one item, no header block) whose footer flags carry bit 31. APEv1 has no header, so a reader that trusts the flag strips 32 bytes of audio. |
+| `mp3-lyrics3v2-before-id3v1.mp3` | 1196 | derived | Valid with trailer: the CBR base plus a Lyrics3v2 block (IND and LYR fields) and then an ID3v1.1 tag. The ID3v1 tag is recognised; the Lyrics3 bytes are not, and must end the stream. |
+| `mp3-trailing-junk.mp3` | 1208 | derived | Valid with trailer: the CBR base plus 200 seeded pseudo-random bytes. |
+| `mp3-id3v1-before-apev2.mp3` | 1229 | derived | Valid with trailer: the CBR base plus an ID3v1.1 tag and then an APEv2 tag, the reverse of the usual order. Once the APE tag is stripped, the ID3v1 bytes remain behind the last frame. |
 | `mp3-truncated-frame.mp3` | 449 | derived | Malformed: cut 17 bytes into the fourth frame. |
 | `mp3-xing-declares-more-than-stream.mp3` | 1776 | derived | Malformed: the Xing VBR seed cut at 80% of its length, so the Xing header still declares 6400 PCM frames while the stream delivers 2351. Reproduces a libFuzzer finding whose artifact was not written. |
 | `mp3-id3v2-scan-counts-undecodable-frame.mp3` | 1777 | fuzzer | Malformed: libFuzzer reproducer mutated from the Xing VBR seed; the Xing frame is damaged so nothing is declared, dr_mp3's header scan counts 4 MP3 frames (4608 PCM) and the decoder delivers 3 (3456). Not produced by the generator script. |
@@ -184,6 +187,9 @@ tests to surface.
 | `mp3-apev2-size-high-bit.mp3` | 0.384 s from the byte length, decodes 8064 samples, no complaint | estimated 0.384 s, 7 packets |
 | `mp3-ape-size-below-footer.mp3` | 0.26 s from the byte length, decodes 8064 samples, no complaint | estimated 0.26 s, 7 packets |
 | `mp3-apev1-header-flag.mp3` | 0.26725 s, "Header missing" on the trailing tag bytes, still decodes 8064 samples and exits 0 | estimated 0.26725 s, 7 packets |
+| `mp3-lyrics3v2-before-id3v1.mp3` | 0.299 s, "Header missing" on the Lyrics3 bytes, decodes PCM byte-identical with the CBR base, exits 0 | estimated 0.299 s, 7 packets |
+| `mp3-trailing-junk.mp3` | 0.302 s, "Header missing" on the junk, decodes PCM byte-identical with the CBR base, exits 0 | estimated 0.302 s, 7 packets |
+| `mp3-id3v1-before-apev2.mp3` | 0.30725 s, no complaint, decodes PCM byte-identical with the CBR base | estimated 0.30725 s, 7 packets |
 | `mp3-truncated-frame.mp3` | 0.11225 s, "invalid new backstep -1" | 0.11225 s, no complaint |
 | `mp3-xing-declares-more-than-stream.mp3` | 0.200 s (trusts the Xing count), no complaint | estimated 0.252 s |
 | `mp3-id3v2-scan-counts-undecodable-frame.mp3` | 0.1786 s, no complaint | estimated 0.252 s |

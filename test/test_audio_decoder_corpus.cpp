@@ -162,7 +162,10 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
         {"mp3-apev2-footer.mp3", E{true, {}, {}, ""}},
         {"mp3-apev2-size-high-bit.mp3", E{true, {}, {}, ""}},
         {"mp3-cbr-mono.mp3", E{true, {}, {}, ""}},
+        {"mp3-id3v1-before-apev2.mp3", E{true, {}, {}, ""}},
         {"mp3-id3v2-xing-vbr.mp3", E{true, {}, {}, ""}},
+        {"mp3-lyrics3v2-before-id3v1.mp3", E{true, {}, {}, ""}},
+        {"mp3-trailing-junk.mp3", E{true, {}, {}, ""}},
         {"ogg-chained-two-streams.ogg", E{true, {}, {}, ""}},
         {"ogg-vorbis-mono.ogg", E{true, {}, {}, ""}},
         {"wav-bwf-bext-before-data.wav", E{true, {}, {}, ""}},
@@ -589,6 +592,106 @@ TEST_CASE("an MP3 behind an APE tag decodes exactly as the same MP3 without it",
         require_same_audio(*tagged_range, *stripped_range);
         CHECK(stripped_range->num_frames() == stripped_data->num_frames());
     }
+}
+
+TEST_CASE("an MP3 followed by bytes no tag reader claims decodes exactly as the stream alone",
+          "[fuzz][audio][mp3]") {
+    // A Lyrics3v2 block before an ID3v1 tag, plain junk, and an ID3v1 tag in
+    // front of an APE tag: each leaves bytes behind the last frame that are
+    // not a frame. The stream must end there with every frame decoded.
+    const auto base = read_bytes(corpus_dir() / "mp3-cbr-mono.mp3");
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto limits = pulp_fuzz::audio_decoder::fuzz_limits();
+    const auto base_path = (corpus_dir() / "mp3-cbr-mono.mp3").string();
+    const auto base_info = registry.read_info(base_path);
+    const auto base_data = registry.read(base_path, limits);
+    REQUIRE(base_info.has_value());
+    REQUIRE(base_data.has_value());
+    auto base_reader = pulp::audio::AudioReader::open_memory(base, ".mp3", limits);
+    REQUIRE(base_reader != nullptr);
+    const auto base_range = base_reader->read(0u, base_reader->info().num_frames);
+    REQUIRE(base_range.has_value());
+    for (const char* name : {"mp3-lyrics3v2-before-id3v1.mp3", "mp3-trailing-junk.mp3",
+                             "mp3-id3v1-before-apev2.mp3"}) {
+        INFO(name);
+        const auto path = corpus_dir() / name;
+        const auto bytes = read_bytes(path);
+        REQUIRE(bytes.size() > base.size());
+        REQUIRE(std::equal(base.begin(), base.end(), bytes.begin()));
+
+        const auto info = registry.read_info(path.string());
+        REQUIRE(info.has_value());
+        CHECK(info->num_frames == base_info->num_frames);
+        const auto data = registry.read(path.string(), limits);
+        REQUIRE(data.has_value());
+        require_same_audio(*data, *base_data);
+
+        auto reader = pulp::audio::AudioReader::open_memory(bytes, ".mp3", limits);
+        REQUIRE(reader != nullptr);
+        REQUIRE(reader->info().num_frames == base_reader->info().num_frames);
+        const auto range = reader->read(0u, reader->info().num_frames);
+        REQUIRE(range.has_value());
+        require_same_audio(*range, *base_range);
+    }
+}
+
+namespace {
+
+// 64 KiB of 16-bit little-endian PCM silence with +-2 LSB of dither, from a
+// fixed splitmix64 seed. The first sample is -1, so the buffer starts with
+// the bytes FF FF: an 11-bit frame sync that names Layer I. Such buffers are
+// full of byte pairs that read as Layer I and II frame headers.
+std::vector<uint8_t> dithered_pcm_silence(uint64_t seed) {
+    std::vector<uint8_t> bytes(64 * 1024);
+    for (std::size_t i = 0; i < bytes.size(); i += 2) {
+        uint64_t z = (seed += 0x9E3779B97F4A7C15ull);
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+        z ^= z >> 31;
+        const auto sample = static_cast<int16_t>(i == 0 ? -1 : static_cast<int>(z % 5) - 2);
+        const auto raw = static_cast<uint16_t>(sample);
+        bytes[i] = static_cast<uint8_t>(raw & 0xFF);
+        bytes[i + 1] = static_cast<uint8_t>(raw >> 8);
+    }
+    return bytes;
+}
+
+} // namespace
+
+TEST_CASE("dithered PCM silence without a format hint is not sniffed as MP3",
+          "[fuzz][audio][mp3]") {
+    // dr_mp3 accepts this buffer as a run of Layer I frames when told it is
+    // MP3. A bare frame sync at the start used to be enough to sniff it as
+    // MP3; only a Layer III header is now.
+    const auto bytes = dithered_pcm_silence(5);
+    REQUIRE(bytes[0] == 0xFF);
+    REQUIRE((bytes[1] & 0xE0) == 0xE0);
+    CHECK(pulp::audio::AudioReader::open_memory(bytes) == nullptr);
+    CHECK(pulp::audio::AudioReader::open_memory(bytes, ".bin") == nullptr);
+
+    // With an .mp3 hint the decoder still takes the false Layer I sync it
+    // has always taken: Layer I and II keep dr_mp3's strict frame-chain rule.
+    auto hinted = pulp::audio::AudioReader::open_memory(bytes, ".mp3");
+    REQUIRE(hinted != nullptr);
+    CHECK(hinted->info().num_frames == 2304u);
+}
+
+TEST_CASE("dithered PCM silence with an .mp3 hint gains no frames from the trailing-byte rules",
+          "[fuzz][audio][mp3]") {
+    // The Layer I headers in this buffer fail dr_mp3's strict frame-chain
+    // rule. Extending the trailing-byte relaxation to Layer I would accept it
+    // as about 150000 frames of noise.
+    const auto bytes = dithered_pcm_silence(1);
+    CHECK(pulp::audio::AudioReader::open_memory(bytes, ".mp3") == nullptr);
+    CHECK(pulp::audio::AudioReader::open_memory(bytes) == nullptr);
+
+    // dr_mp3 has always synced on this buffer as Layer I and decoded 1536
+    // frames. Decoding a synced Layer I frame whatever follows it would
+    // stretch the false run to 1920.
+    const auto synced = dithered_pcm_silence(1402);
+    auto reader = pulp::audio::AudioReader::open_memory(synced, ".mp3");
+    REQUIRE(reader != nullptr);
+    CHECK(reader->info().num_frames == 1536u);
 }
 
 TEST_CASE("a WAV whose bext chunk is shorter than its fixed fields is refused without allocating",
