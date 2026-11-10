@@ -222,7 +222,8 @@ range (`parse_bank_program`) is refused.
 
 `PresetProgramEditor` shows one bank's 128 slots with the preset in each. The
 arrows in its header, the Left and Right keys, or `next_bank`/`previous_bank`
-change bank; Up and Down move the selected program; Delete clears it; a double
+change bank; Up and Down move the selected program and scroll it into
+view, and the wheel scrolls the list; Delete clears it; a double
 click or Enter calls `on_assign_request(slot)` so the host can pick a preset and
 answer with `complete_assign(key)`. A double click on the title asks for a bank
 name through `on_bank_text_request`, and `complete_bank_text` renames or
