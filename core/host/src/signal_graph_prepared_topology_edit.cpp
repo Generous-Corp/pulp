@@ -2802,8 +2802,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             capture->resolved_buffer_values.clear();
             capture->resolved_alias_endpoint.reset();
             const auto endpoint = [&](std::uint32_t dense, bool output) {
-                return ResolvedEndpoint{
-                    capture->nodes[authored_positions[dense]].authored_key, output};
+                return ResolvedEndpoint{capture->nodes[authored_positions[dense]].authored_key,
+                                        output};
             };
             for (std::uint32_t dense = 0; dense < plan.nodes.size(); ++dense) {
                 const auto& binding = bindings[dense];
@@ -2826,8 +2826,12 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                 auto& classes = capture->resolved_buffer_classes;
                 if (std::none_of(classes.begin(), classes.end(),
                                  [&](const auto& value) { return value.id == id; }))
-                    classes.push_back({id, std::move(kind), capture->max_block_frames,
-                                       "f32", "prepare_zero", {}});
+                    classes.push_back({id,
+                                       std::move(kind),
+                                       capture->max_block_frames,
+                                       "f32",
+                                       "prepare_zero",
+                                       {}});
             };
             std::vector<std::vector<std::size_t>> produced(plan.nodes.size());
             for (const auto dense : plan.processing_order_indices) {
@@ -2854,63 +2858,87 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                         if (value.class_id != sources[port].slot)
                             return last_result_ = Result::PreflightFailed;
                         value.accesses.push_back({endpoint(dense, false), capture->channels[port],
-                            "input_view", "execute", port, "in_place_read"});
+                                                  "input_view", "execute", port, "in_place_read"});
                         value.last_read_phase = "execute";
                         value.lifetime_end = std::max(value.lifetime_end, position + 1);
                     } else {
                         if (incoming) {
                             auto& value = capture->resolved_buffer_values[*incoming];
-                            value.accesses.push_back({endpoint(dense, false), capture->channels[port],
-                                "input_view", "gather", port, "read"});
+                            value.accesses.push_back({endpoint(dense, false),
+                                                      capture->channels[port], "input_view",
+                                                      "gather", port, "read"});
                             value.last_read_phase = "gather";
                             value.lifetime_end = std::max(value.lifetime_end, position + 1);
                         }
                         const auto slot = slots.input_base + port;
                         add_typed_class(slot, "scratch");
                         value_index = capture->resolved_buffer_values.size();
-                        capture->resolved_buffer_values.push_back({endpoint(dense, false),
-                            capture->channels[port], "gather", port, slot,
-                            {{endpoint(dense, false), capture->channels[port], "input_scratch",
-                              "gather", port, incoming ? "copy" : "zero"},
-                             {endpoint(dense, false), capture->channels[port], "input_scratch",
-                              "execute", port, "read"}}, position, position + 1, "execute"});
+                        capture->resolved_buffer_values.push_back(
+                            {endpoint(dense, false),
+                             capture->channels[port],
+                             "gather",
+                             port,
+                             slot,
+                             {{endpoint(dense, false), capture->channels[port], "input_scratch",
+                               "gather", port, incoming ? "copy" : "zero"},
+                              {endpoint(dense, false), capture->channels[port], "input_scratch",
+                               "execute", port, "read"}},
+                             position,
+                             position + 1,
+                             "execute"});
                     }
                     if (pnode.kind == graph::GraphRuntimeNodeKind::AudioOutput) {
                         auto& value = capture->resolved_buffer_values[value_index];
                         value.accesses.push_back({endpoint(dense, false), capture->channels[port],
-                            "external_output", "output_copy", port, "read"});
+                                                  "external_output", "output_copy", port, "read"});
                         value.last_read_phase = "output_copy";
                         const auto external = assignment.slot_count + port;
                         add_typed_class(external, "external_output");
                         auto& klass = capture->resolved_buffer_classes.back();
                         klass.initialization = "external_contract";
-                        capture->resolved_buffer_values.push_back({endpoint(dense, false),
-                            capture->channels[port], "output_copy", port, external,
-                            {{endpoint(dense, false), capture->channels[port], "external_output",
-                              "output_copy", port, "write"}}, position, position + 1, {}});
+                        capture->resolved_buffer_values.push_back(
+                            {endpoint(dense, false),
+                             capture->channels[port],
+                             "output_copy",
+                             port,
+                             external,
+                             {{endpoint(dense, false), capture->channels[port], "external_output",
+                               "output_copy", port, "write"}},
+                             position,
+                             position + 1,
+                             {}});
                     }
                 }
                 for (std::uint32_t port = 0; port < pnode.output_ports; ++port) {
                     const auto slot = slots.output_base + port;
                     add_typed_class(slot, "scratch");
                     produced[dense].push_back(capture->resolved_buffer_values.size());
-                    capture->resolved_buffer_values.push_back({endpoint(dense, true),
-                        capture->channels[port], "execute", port, slot,
-                        {{endpoint(dense, true), capture->channels[port],
-                          pnode.kind == graph::GraphRuntimeNodeKind::AudioInput
-                              ? "external_input" : "node_output",
-                          "execute", port,
-                          pnode.kind == graph::GraphRuntimeNodeKind::AudioInput ? "copy" : "write"}},
-                        position, position + 1, {}});
+                    capture->resolved_buffer_values.push_back(
+                        {endpoint(dense, true),
+                         capture->channels[port],
+                         "execute",
+                         port,
+                         slot,
+                         {{endpoint(dense, true), capture->channels[port],
+                           pnode.kind == graph::GraphRuntimeNodeKind::AudioInput ? "external_input"
+                                                                                 : "node_output",
+                           "execute", port,
+                           pnode.kind == graph::GraphRuntimeNodeKind::AudioInput ? "copy"
+                                                                                 : "write"}},
+                         position,
+                         position + 1,
+                         {}});
                 }
             }
             for (const auto& value : capture->resolved_buffer_values) {
-                auto found = std::find_if(capture->resolved_buffer_classes.begin(),
-                    capture->resolved_buffer_classes.end(),
-                    [&](const auto& klass) { return klass.id == value.class_id; });
+                auto found =
+                    std::find_if(capture->resolved_buffer_classes.begin(),
+                                 capture->resolved_buffer_classes.end(),
+                                 [&](const auto& klass) { return klass.id == value.class_id; });
                 if (found == capture->resolved_buffer_classes.end())
                     return last_result_ = Result::PreflightFailed;
-                found->members.insert(found->members.end(), value.accesses.begin(), value.accesses.end());
+                found->members.insert(found->members.end(), value.accesses.begin(),
+                                      value.accesses.end());
             }
             capture->typed_resolved_capture = true;
 

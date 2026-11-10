@@ -166,15 +166,30 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     REQUIRE(resolved.value().canonical_bytes().find("\"buffers\"") != std::string_view::npos);
     const auto receipt = capture_graph_identity_receipt(*exported.value);
     REQUIRE(receipt);
-    REQUIRE(receipt.value().canonical_bytes().find("pulp.graph.identity.receipt.v1") != std::string::npos);
+    REQUIRE(receipt.value().canonical_bytes().find("pulp.graph.identity.receipt.v1") !=
+            std::string::npos);
     const auto resolved_bytes = std::string(resolved.value().canonical_bytes());
+    REQUIRE(resolved_bytes.size() == 13606);
     REQUIRE(resolved.value().digest() ==
-            "sha256:" + pulp::runtime::sha256_hex(std::string("pulp.graph.resolved-plan.v1") + std::string(1, '\0') + resolved_bytes));
+            "sha256:83f5e4e38d2b9610962fcf8c04a11cc11b511ec52d88bdbbb8db61110d7da48e");
+    REQUIRE(resolved.value().digest() ==
+            "sha256:" + pulp::runtime::sha256_hex(std::string("pulp.graph.resolved-plan.v1") +
+                                                  std::string(1, '\0') + resolved_bytes));
     const auto receipt_bytes = receipt.value().canonical_bytes();
+    REQUIRE(receipt_bytes.find("\"state_blobs\":{}") != std::string::npos);
     std::vector<std::byte> receipt_input(receipt_bytes.size());
     std::transform(receipt_bytes.begin(), receipt_bytes.end(), receipt_input.begin(),
                    [](char c) { return static_cast<std::byte>(static_cast<unsigned char>(c)); });
     REQUIRE(decode_graph_identity_receipt(receipt_input));
+    auto malformed_state = receipt_bytes;
+    const auto state_marker = malformed_state.find("\"state_blobs\":{}");
+    REQUIRE(state_marker != std::string::npos);
+    malformed_state.replace(state_marker, std::string("\"state_blobs\":{}").size(),
+                            "\"state_blobs\":[]");
+    std::vector<std::byte> malformed_state_input(malformed_state.size());
+    std::transform(malformed_state.begin(), malformed_state.end(), malformed_state_input.begin(),
+                   [](char c) { return static_cast<std::byte>(static_cast<unsigned char>(c)); });
+    REQUIRE_FALSE(decode_graph_identity_receipt(malformed_state_input));
     receipt_input[receipt_input.size() / 2] ^= std::byte{1};
     REQUIRE_FALSE(decode_graph_identity_receipt(receipt_input));
     auto provenance_variant = *exported.value;
@@ -187,6 +202,29 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     REQUIRE(resolved_fingerprint(provenance_variant));
     REQUIRE(resolved_fingerprint(provenance_variant).value().canonical_bytes() == resolved_bytes);
     REQUIRE(resolved_fingerprint(provenance_variant).value().digest() == resolved.value().digest());
+    auto zero_host_limit = *exported.value;
+    zero_host_limit.host_max_nodes = 0;
+    REQUIRE_FALSE(resolved_fingerprint(zero_host_limit));
+    auto forged_alias = *exported.value;
+    forged_alias.resolved_alias_endpoint->node = "forged";
+    REQUIRE_FALSE(resolved_fingerprint(forged_alias));
+    auto overlapping_storage = *exported.value;
+    REQUIRE(overlapping_storage.resolved_buffer_values.size() > 1);
+    bool overlapped = false;
+    for (std::size_t i = 0; i < overlapping_storage.resolved_buffer_values.size() && !overlapped;
+         ++i)
+        for (std::size_t j = i + 1; j < overlapping_storage.resolved_buffer_values.size(); ++j)
+            if (overlapping_storage.resolved_buffer_values[i].class_id ==
+                overlapping_storage.resolved_buffer_values[j].class_id) {
+                overlapping_storage.resolved_buffer_values[j].lifetime_begin =
+                    overlapping_storage.resolved_buffer_values[i].lifetime_begin;
+                overlapping_storage.resolved_buffer_values[j].lifetime_end =
+                    overlapping_storage.resolved_buffer_values[i].lifetime_end;
+                overlapped = true;
+                break;
+            }
+    REQUIRE(overlapped);
+    REQUIRE_FALSE(resolved_fingerprint(overlapping_storage));
     REQUIRE(exported.value->edges.size() == 6);
     REQUIRE(exported.value->channels == std::vector<std::string>{"L", "R"});
     REQUIRE(exported.value->interfaces.size() == 2);

@@ -90,16 +90,25 @@ enum class GraphIdentityError : std::uint8_t {
 // Only validated constructors below can mint an identity value.
 class GraphIdentityValue {
   public:
-    std::string_view domain() const noexcept { return domain_; }
-    std::string_view profile() const noexcept { return profile_; }
-    std::string_view canonical_bytes() const noexcept { return payload_; }
-    std::string_view digest() const noexcept { return digest_; }
+    std::string_view domain() const noexcept {
+        return domain_;
+    }
+    std::string_view profile() const noexcept {
+        return profile_;
+    }
+    std::string_view canonical_bytes() const noexcept {
+        return payload_;
+    }
+    std::string_view digest() const noexcept {
+        return digest_;
+    }
+
   private:
     std::string domain_, profile_, payload_, digest_;
     friend struct ResolvedIdentityAccess;
     friend struct GraphIdentityReceipt;
-    friend runtime::Result<bool, GraphIdentityError> compare_graph_identities(
-        const GraphIdentityValue&, const GraphIdentityValue&);
+    friend runtime::Result<bool, GraphIdentityError>
+    compare_graph_identities(const GraphIdentityValue&, const GraphIdentityValue&);
 };
 
 using GraphIdentityResult = runtime::Result<GraphIdentityValue, GraphIdentityError>;
@@ -117,8 +126,8 @@ using GraphReceiptResult = runtime::Result<GraphIdentityReceipt, GraphIdentityEr
 GraphIdentityResult resolved_fingerprint(const PreparedDescriptionData&);
 GraphReceiptResult capture_graph_identity_receipt(const PreparedDescriptionData&);
 GraphReceiptResult decode_graph_identity_receipt(std::span<const std::byte>);
-runtime::Result<bool, GraphIdentityError> compare_graph_identities(
-    const GraphIdentityValue&, const GraphIdentityValue&);
+runtime::Result<bool, GraphIdentityError> compare_graph_identities(const GraphIdentityValue&,
+                                                                   const GraphIdentityValue&);
 const char* graph_identity_error_name(GraphIdentityError) noexcept;
 
 } // namespace pulp::host
