@@ -1522,18 +1522,20 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         SignalGraph::GraphMutationLock lock(graph);
         if (graph.refuse_spectral_mutation_()) {
             spectral.result.ok = false;
-            spectral.result.error = "active spectral controller refuses graph loading; stop it first";
+            spectral.result.error =
+                "active spectral controller refuses graph loading; stop it first";
             return spectral.result;
         }
         auto& prepared = *spectral.graph;
         prepared.set_limits(graph.limits_);
-        if (!prepared.validate_generated_graph(std::min(4096, graph.limits_.max_block_size)).accepted) {
+        if (!prepared.validate_generated_graph(std::min(4096, graph.limits_.max_block_size))
+                 .accepted) {
             spectral.result.ok = false;
             spectral.result.error = "spectral graph exceeds destination graph limits";
             return spectral.result;
         }
         if (prepared.connections_.size() >
-            std::numeric_limits<std::uint64_t>::max() - graph.next_connection_identity_ ||
+                std::numeric_limits<std::uint64_t>::max() - graph.next_connection_identity_ ||
             graph.authoring_generation_ == std::numeric_limits<std::uint64_t>::max()) {
             spectral.result.ok = false;
             spectral.result.error = "spectral graph authoring identity exhausted";

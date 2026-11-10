@@ -1,8 +1,8 @@
 #include "spectral_graph_persistence.hpp"
 #include "spectral_asset_morph_internal.hpp"
 
-#include <pulp/runtime/base64.hpp>
 #include <choc/text/choc_JSON.h>
+#include <pulp/runtime/base64.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -61,6 +61,15 @@ bool real(View v, double& out) {
         return false;
     return std::isfinite(out);
 }
+bool fields(View value, std::initializer_list<std::string_view> allowed) {
+    if (!value.isObject())
+        return false;
+    for (std::uint32_t i = 0; i < value.size(); ++i)
+        if (std::find(allowed.begin(), allowed.end(), value.getObjectMemberAt(i).name) ==
+            allowed.end())
+            return false;
+    return true;
+}
 std::optional<SpectralIdentity> identity(View v) {
     std::string encoded;
     if (!text(v, encoded) || encoded.size() != 64)
@@ -80,17 +89,23 @@ std::optional<SpectralIdentity> identity(View v) {
         return {};
     const auto& c = *contract.value;
     const auto id = SpectralIdentity::make(c.fft_size, c.hop, c.channels,
-                                          std::bit_cast<double>(c.sample_rate_bits));
+                                           std::bit_cast<double>(c.sample_rate_bits));
     return id.value;
 }
 const char* type_name(NodeType type) {
     switch (type) {
-    case NodeType::AudioInput: return "audio_in";
-    case NodeType::AudioOutput: return "audio_out";
-    case NodeType::SpectralAssetMorph: return "spectral_asset_morph";
-    case NodeType::SpectralStage: return "spectral_stage";
-    case NodeType::SpectralSynthesis: return "spectral_synthesis";
-    default: return nullptr;
+    case NodeType::AudioInput:
+        return "audio_in";
+    case NodeType::AudioOutput:
+        return "audio_out";
+    case NodeType::SpectralAssetMorph:
+        return "spectral_asset_morph";
+    case NodeType::SpectralStage:
+        return "spectral_stage";
+    case NodeType::SpectralSynthesis:
+        return "spectral_synthesis";
+    default:
+        return nullptr;
     }
 }
 bool charge(std::size_t& used, std::size_t count) {
@@ -145,7 +160,7 @@ std::string write(const SignalGraph& graph,
             record.addMember("contract_hex", contract);
             record.addMember("bytes_sha256", hash);
             record.addMember("bytes_b64", runtime::base64_encode(encoded.value->bytes.get(),
-                                                                encoded.value->size));
+                                                                 encoded.value->size));
             assets.emplace(key, std::move(record));
             return key;
         };
@@ -173,8 +188,10 @@ std::string write(const SignalGraph& graph,
                     const auto& config = n.spectral_asset_morph;
                     if (!config || !charge(retained_charge, config->retained_bytes()))
                         return {};
-                    const auto a = add_asset(config->a, config->source_samples, config->hash_a, contract);
-                    const auto b = add_asset(config->b, config->source_samples, config->hash_b, contract);
+                    const auto a =
+                        add_asset(config->a, config->source_samples, config->hash_a, contract);
+                    const auto b =
+                        add_asset(config->b, config->source_samples, config->hash_b, contract);
                     if (a.empty() || b.empty())
                         return {};
                     spectral.addMember("asset_a", a);
@@ -184,8 +201,10 @@ std::string write(const SignalGraph& graph,
                         !charge(retained_charge, n.spectral_stage->retained_config_bytes()))
                         return {};
                     const auto& stage = *n.spectral_stage;
-                    spectral.addMember("stage", stage.kind() == QualifiedSpectralStage::Kind::IdentityV1
-                                                    ? "identity_v1" : "real_mask_v1");
+                    spectral.addMember("stage",
+                                       stage.kind() == QualifiedSpectralStage::Kind::IdentityV1
+                                           ? "identity_v1"
+                                           : "real_mask_v1");
                     auto gains = choc::value::createEmptyArray();
                     for (auto gain : stage.gains())
                         gains.addArrayElement(double(gain));
@@ -209,7 +228,8 @@ std::string write(const SignalGraph& graph,
         for (const auto& [key, record] : assets)
             asset_rows.addArrayElement(record);
         root.addMember("spectral_assets", asset_rows);
-        std::vector<Connection> ordered_edges(graph.connections().begin(), graph.connections().end());
+        std::vector<Connection> ordered_edges(graph.connections().begin(),
+                                              graph.connections().end());
         std::sort(ordered_edges.begin(), ordered_edges.end(), [](const auto& a, const auto& b) {
             return std::tie(a.source_node, a.source_port, a.dest_node, a.dest_port, a.spectral) <
                    std::tie(b.source_node, b.source_port, b.dest_node, b.dest_port, b.spectral);
@@ -223,7 +243,8 @@ std::string write(const SignalGraph& graph,
             edge.addMember("source_port", int64_t(c.source_port));
             edge.addMember("dest_node", int64_t(c.dest_node));
             edge.addMember("dest_port", int64_t(c.dest_port));
-            for (const char* key : {"feedback", "midi", "automation", "audio_rate_modulation", "sidechain"})
+            for (const char* key :
+                 {"feedback", "midi", "automation", "audio_rate_modulation", "sidechain"})
                 edge.addMember(key, false);
             edge.addMember("spectral", c.spectral);
             edges.addArrayElement(edge);
@@ -266,6 +287,9 @@ Candidate read(std::string_view json) {
         std::uint64_t version = 0;
         if (!uint(root["format_version"], version) || version != 5)
             return fail("spectral graph requires format_version 5");
+        if (!fields(root, {"format_version", "nodes", "connections", "spectral_assets",
+                           "sample_regions", "processors"}))
+            return fail("unsupported spectral graph envelope member");
         if (!root["nodes"].isArray() || !root["connections"].isArray() ||
             !root["spectral_assets"].isArray() || root["nodes"].size() > 128 ||
             root["connections"].size() > 512 || root["spectral_assets"].size() > 256)
@@ -276,12 +300,15 @@ Candidate read(std::string_view json) {
         std::map<std::string, Asset> assets;
         std::size_t decoded_bytes = 0, retained_bytes = 0;
         for (const auto row : root["spectral_assets"]) {
+            if (!fields(row, {"id", "schema", "version", "source_samples", "contract_hex",
+                              "bytes_sha256", "bytes_b64"}))
+                return fail("unsupported analyzed spectral asset member");
             std::string key, schema, bytes_hash, b64, contract;
             std::uint64_t v = 0, length = 0;
             auto shape = identity(row["contract_hex"]);
             if (!text(row["id"], key) || !text(row["schema"], schema) || schema != asset_schema ||
-                !uint(row["version"], v) || v != 1 || !uint(row["source_samples"], length) || !length ||
-                !text(row["bytes_sha256"], bytes_hash) || !text(row["bytes_b64"], b64) ||
+                !uint(row["version"], v) || v != 1 || !uint(row["source_samples"], length) ||
+                !length || !text(row["bytes_sha256"], bytes_hash) || !text(row["bytes_b64"], b64) ||
                 !text(row["contract_hex"], contract) || !shape ||
                 key != asset_id(length, contract, bytes_hash) || assets.contains(key))
                 return fail("invalid, duplicate or unsupported analyzed spectral asset metadata");
@@ -300,13 +327,17 @@ Candidate read(std::string_view json) {
         std::map<std::uint64_t, NodeId> ids;
         std::set<std::string> names;
         for (const auto n : root["nodes"]) {
+            if (!fields(n, {"id", "type", "name", "num_input_ports", "num_output_ports", "gain",
+                            "spectral", "layout"}))
+                return fail("unsupported spectral graph node member");
             std::uint64_t old = 0, in = 0, out = 0;
             std::string type, name;
             double gain = 0;
             if (!uint(n["id"], old, std::numeric_limits<NodeId>::max()) || !old ||
                 !text(n["type"], type) || !text(n["name"], name) ||
                 !uint(n["num_input_ports"], in, 64) || !uint(n["num_output_ports"], out, 64) ||
-                !real(n["gain"], gain) || gain != 1 || ids.contains(old) || !names.insert(name).second)
+                !real(n["gain"], gain) || gain != 1 || ids.contains(old) ||
+                !names.insert(name).second)
                 return fail("invalid or duplicate spectral graph node identity/shape");
             NodeId id = 0;
             if (type == "audio_in" && in == 0 && out > 0 && !n.hasObjectMember("spectral"))
@@ -319,6 +350,8 @@ Candidate read(std::string_view json) {
                 if (!spec.isObject() || !shape)
                     return fail("missing or unsupported spectral frame contract");
                 if (type == "spectral_asset_morph") {
+                    if (!fields(spec, {"contract_hex", "asset_a", "asset_b"}))
+                        return fail("unsupported spectral source contract member");
                     std::string a, b;
                     if (!text(spec["asset_a"], a) || !text(spec["asset_b"], b) ||
                         !assets.contains(a) || !assets.contains(b))
@@ -327,18 +360,24 @@ Candidate read(std::string_view json) {
                     auto& bb = assets.at(b);
                     if (aa.length != bb.length || aa.shape != shape || bb.shape != shape)
                         return fail("analyzed spectral asset extent/contract mismatch");
-                    const auto added = graph->add_spectral_asset_morph_v1(aa.bytes, bb.bytes, aa.length, name);
+                    const auto added =
+                        graph->add_spectral_asset_morph_v1(aa.bytes, bb.bytes, aa.length, name);
                     if (!added)
                         return fail("canonical spectral asset validation/factory refused");
                     id = added.value->node;
                     aa.used = bb.used = true;
-                    if (!charge(retained_bytes, graph->node(id)->spectral_asset_morph->retained_bytes()))
+                    if (!charge(retained_bytes,
+                                graph->node(id)->spectral_asset_morph->retained_bytes()))
                         return fail("aggregate retained spectral asset budget exceeded");
                 } else if (type == "spectral_synthesis") {
+                    if (!fields(spec, {"contract_hex"}))
+                        return fail("unsupported spectral synthesis contract member");
                     const auto added = graph->add_spectral_synthesis(*shape, name);
                     if (added)
                         id = added.value->node;
                 } else if (type == "spectral_stage") {
+                    if (!fields(spec, {"contract_hex", "stage", "gains"}))
+                        return fail("unsupported spectral stage contract member");
                     std::string kind;
                     if (!text(spec["stage"], kind) || !spec["gains"].isArray() ||
                         spec["gains"].size() > 16u * 8193u)
@@ -346,7 +385,8 @@ Candidate read(std::string_view json) {
                     std::vector<float> gains;
                     for (const auto g : spec["gains"]) {
                         double value = 0;
-                        if (!real(g, value) || value < 0 || value > 1 || double(float(value)) != value)
+                        if (!real(g, value) || value < 0 || value > 1 ||
+                            double(float(value)) != value)
                             return fail("invalid spectral mask gain");
                         gains.push_back(static_cast<float>(value));
                     }
@@ -367,6 +407,8 @@ Candidate read(std::string_view json) {
                 return fail("unsupported spectral node type or serialized port shape");
             ids.emplace(old, id);
             if (n.hasObjectMember("layout")) {
+                if (!fields(n["layout"], {"x", "y"}))
+                    return fail("unsupported spectral layout member");
                 double x = 0, y = 0;
                 if (!real(n["layout"]["x"], x) || !real(n["layout"]["y"], y) ||
                     !std::isfinite(float(x)) || !std::isfinite(float(y)))
@@ -378,19 +420,26 @@ Candidate read(std::string_view json) {
             if (!asset.used)
                 return fail("unreferenced analyzed spectral asset");
         for (const auto edge : root["connections"]) {
+            if (!fields(edge,
+                        {"source_node", "source_port", "dest_node", "dest_port", "feedback", "midi",
+                         "automation", "audio_rate_modulation", "sidechain", "spectral"}))
+                return fail("unsupported spectral connection member");
             std::uint64_t src = 0, dst = 0, sp = 0, dp = 0;
             if (!uint(edge["source_node"], src) || !uint(edge["dest_node"], dst) ||
                 !uint(edge["source_port"], sp, 65535) || !uint(edge["dest_port"], dp, 65535) ||
                 !ids.contains(src) || !ids.contains(dst) || !edge["spectral"].isBool())
                 return fail("invalid spectral connection endpoint/metadata");
-            for (const auto* key : {"feedback", "midi", "automation", "audio_rate_modulation", "sidechain"})
+            for (const auto* key :
+                 {"feedback", "midi", "automation", "audio_rate_modulation", "sidechain"})
                 if (!edge[key].isBool() || edge[key].getBool())
                     return fail("unsupported mixed spectral connection contract");
             const bool spectral = edge["spectral"].getBool();
-            auto port = [&](NodeId node, std::uint64_t index, bool output) -> std::optional<PortHandle> {
+            auto port = [&](NodeId node, std::uint64_t index,
+                            bool output) -> std::optional<PortHandle> {
                 const auto* n = graph->node(node);
                 for (const auto& p : output ? n->output_ports : n->input_ports)
-                    if (p.index == index && p.kind == (spectral ? PortKind::Spectral : PortKind::Audio))
+                    if (p.index == index &&
+                        p.kind == (spectral ? PortKind::Spectral : PortKind::Audio))
                         return p;
                 return {};
             };

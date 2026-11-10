@@ -1,7 +1,7 @@
+#include "../examples/g10-routed-consumer/asset_morph_oracle.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/runtime/base64.hpp>
-#include "../examples/g10-routed-consumer/asset_morph_oracle.hpp"
 
 #include <functional>
 
@@ -19,19 +19,20 @@ const Inputs& inputs() {
 std::unique_ptr<SignalGraph> fixture(bool stages = false) {
     auto graph = std::make_unique<SignalGraph>();
     const auto input = graph->add_input_node(1, "control");
-    const auto source = graph->add_spectral_asset_morph_v1(inputs().aa.view(), inputs().bb.view(), 769, "assets");
+    const auto source =
+        graph->add_spectral_asset_morph_v1(inputs().aa.view(), inputs().bb.view(), 769, "assets");
     REQUIRE(source);
     const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
     auto frames = source.value->frames;
     if (stages) {
-        const auto identity = graph->add_spectral_stage(shape, *QualifiedSpectralStage::identity_v1(shape).value,
-                                                       "identity");
+        const auto identity = graph->add_spectral_stage(
+            shape, *QualifiedSpectralStage::identity_v1(shape).value, "identity");
         REQUIRE(identity);
         REQUIRE(graph->connect(frames, identity.value->frames_in));
         frames = identity.value->frames_out;
         std::vector<float> gains(129, 1.0f);
-        const auto mask = graph->add_spectral_stage(shape, *QualifiedSpectralStage::real_mask_v1(shape, gains).value,
-                                                   "mask");
+        const auto mask = graph->add_spectral_stage(
+            shape, *QualifiedSpectralStage::real_mask_v1(shape, gains).value, "mask");
         REQUIRE(mask);
         REQUIRE(graph->connect(frames, mask.value->frames_in));
         frames = mask.value->frames_out;
@@ -54,8 +55,8 @@ std::vector<float> render(SignalGraph& graph, const std::vector<float>& control,
                           bool reset = false) {
     std::vector<float> audio(control.size());
     for (std::size_t t = 0; t < control.size();) {
-        const int count = static_cast<int>(std::min(control.size() - t,
-                                      std::size_t(partition ? partition : 1 + t * 17 % 511)));
+        const int count = static_cast<int>(
+            std::min(control.size() - t, std::size_t(partition ? partition : 1 + t * 17 % 511)));
         const float* in[] = {control.data() + t};
         float* out[] = {audio.data() + t};
         pulp::audio::BufferView<float> ov(out, 1, count);
@@ -118,7 +119,7 @@ TEST_CASE("Spectral identity and real-mask stages persist through existing typed
     REQUIRE(loaded.prepare(48000, 4096));
     const auto control = timeline();
     REQUIRE_NOTHROW(asset_oracle::compare(render(loaded, control, 0),
-                                         asset_oracle::expected(inputs().a, inputs().b, control)));
+                                          asset_oracle::expected(inputs().a, inputs().b, control)));
 }
 
 TEST_CASE("Spectral replay matches independent numeric audio without a serialization proxy",
@@ -131,7 +132,7 @@ TEST_CASE("Spectral replay matches independent numeric audio without a serializa
     REQUIRE(loaded.prepare(48000, 4096));
     const auto control = timeline();
     REQUIRE_NOTHROW(asset_oracle::compare(render(loaded, control, 0),
-                                         asset_oracle::expected(inputs().a, inputs().b, control)));
+                                          asset_oracle::expected(inputs().a, inputs().b, control)));
 }
 
 TEST_CASE("Spectral asset corruption and unsupported contracts preserve the old prepared graph",
@@ -149,10 +150,12 @@ TEST_CASE("Spectral asset corruption and unsupported contracts preserve the old 
         {"\"source_samples\": 769", "\"source_samples\": 770"},
         {"\"bytes_b64\": \"", "\"bytes_b64\": \"AAAA"},
         {"\"bytes_sha256\": \"", "\"bytes_sha256\": \"0"},
+        {"\"source_samples\": 769", "\"unsupported_contract\": true, \"source_samples\": 769"},
         {"\"asset_a\": \"", "\"asset_a\": \"missing-"},
         {"\"contract_hex\": \"", "\"contract_hex\": \"ff"},
         {"\"spectral\": true", "\"spectral\": false"},
         {"\"feedback\": false", "\"feedback\": true"},
+        {"\"feedback\": false", "\"unsupported_contract\": true, \"feedback\": false"},
         {"\"num_input_ports\": 0", "\"num_input_ports\": 1"},
         {"\"type\": \"spectral_synthesis\"", "\"type\": \"plugin\""},
     };
@@ -176,8 +179,7 @@ TEST_CASE("Spectral asset corruption and unsupported contracts preserve the old 
     // Use valid alternative canonical bytes, rather than malformed bytes that
     // the codec would reject even if production digest validation disappeared.
     auto substituted = good;
-    replace(substituted,
-            pulp::runtime::base64_encode(inputs().aa.bytes.get(), inputs().aa.size),
+    replace(substituted, pulp::runtime::base64_encode(inputs().aa.bytes.get(), inputs().aa.size),
             pulp::runtime::base64_encode(inputs().bb.bytes.get(), inputs().bb.size));
     REQUIRE_FALSE(GraphSerializer::from_json(old, substituted).ok);
     REQUIRE(GraphSerializer::to_json(old) == before);

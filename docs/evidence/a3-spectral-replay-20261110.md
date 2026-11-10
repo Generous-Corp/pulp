@@ -2,7 +2,8 @@
 
 Status: source-backed plan admitted by lead; implementation in progress.
 Local governed Release persistence tests pass: 16,705 assertions in five cases.
-Installed-consumer, production mutation and qualification results remain pending.
+Four actual production confirm_failure loops are confirmed with exact restoration.
+Installed-consumer, final numeric exit receipts and qualification remain pending.
 
 ## Dependency and checkout provenance
 
@@ -90,3 +91,23 @@ join/routing refusals remain acceptance requirements.
 Full paced qualification, supported sanitizer lanes and remaining full G10
 obligations remain required after this replay slice. This document is bounded
 branch evidence; the lead owns planning roadmap and master-ledger updates.
+
+## Production mutation evidence (intermediate)
+
+Each loop purged/rebuilt the production helper object and subject, passed its
+baseline, failed the intended assertion while broken, restored the exact source,
+and passed again. The driver reported CONFIRMED for all four. Explicit per-phase
+numeric exit receipts remain to be recorded; these intermediate logs do not
+substitute for the final receipt.
+
+| Mutation | Test observation while broken |
+|---|---|
+| Bypass canonical byte SHA256 check | Valid alternative canonical asset accepted with retained digest; refusal assertion fails |
+| Bypass content ID binding to original extent | Changed original extent accepted; refusal assertion fails |
+| Infer spectral edge kind instead of reading saved flag | Corrupted edge metadata accepted; refusal assertion fails |
+| Substitute A for B in existing factory call | Independent audio oracle peak 0.433362, RMS 0.041823; frozen limits 0.00002 / 0.000002 |
+
+The wrong-asset mutation selects `[a3-replay-audio-oracle]`, which has no
+serialization equality proxy. The other three select `[negative]`. The valid
+alternative canonical-byte digest control is retained unchanged in the final
+source. No morph DSP or codec wire format was edited.
