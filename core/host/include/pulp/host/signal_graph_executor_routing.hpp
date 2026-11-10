@@ -110,6 +110,7 @@ using CustomNodeTransportProcessFn =
 // empty `process` means the node was unresolved (unregistered type / shape
 // mismatch); the binding then reproduces SignalGraph's pass-through-or-zero.
 struct CustomBindingContext {
+    NodeId node_id = 0;
     CustomNodeProcessFn process;
     // Transport-aware callback for a transport-sensitive custom node. When set
     // (and a transport is available for the block) the binding invokes this
@@ -125,6 +126,9 @@ struct CustomBindingContext {
     // that declares both this and a transport callback, so the dispatch ladder
     // has no ambiguous case.
     CustomNodeEventProcessFn process_events;
+    std::shared_ptr<GraphAuthoredEventLane<>> graph_event_lane;
+    GraphAuthoredEventEdge graph_event_edge{};
+    std::uint64_t graph_event_epoch = 0;
 };
 
 // A SignalGraph translated into the canonical GraphRuntimeExecutor's routing

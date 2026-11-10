@@ -856,6 +856,7 @@ def test_prepush_blocks_unavailable_history() -> None:
                 f"PYTHON={sys.executable!r}",
                 "BASE=origin/main",
                 f"run_gate_captured() {{ return {status}; }}",
+                "prepush_fail() { fail=1; }",
                 case_block,
                 'printf "%s" "$fail"',
             )
@@ -866,7 +867,7 @@ def test_prepush_blocks_unavailable_history() -> None:
         return int(completed.stdout)
 
     check("history-unavailable exit 2 blocks", resulting_fail(block, 2) == 1)
-    mutated = block.replace("2) fail=1 ;;", "2) ;;")
+    mutated = block.replace("2) fail=1 ;;", "2) ;;").replace("2) prepush_fail ;;", "2) ;;")
     check(
         "mutation without exit-2 wiring would allow the push",
         mutated != block and resulting_fail(mutated, 2) == 0,
