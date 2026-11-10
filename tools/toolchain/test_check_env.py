@@ -30,7 +30,7 @@ VERSION_TEXT = {
     "rustc": "rustc 1.97.1 (6b00bc388 2026-06-12)",
     "clang-format": "clang-format version 21.1.8",
     "ccache": "ccache version 4.14.1\nFeatures: file-storage http-storage redis-storage",
-    "git-lfs": "git-lfs/3.8.1 (GitHub; darwin arm64; go 1.25.3)",
+    "git-lfs": "git-lfs/3.8.1 (GitHub; macOS arm64; go 1.25.3)",
     "xcodebuild": "Xcode 27.2\nBuild version 27B52",
     "mise": "2026.10.8 macos-arm64 (2026-10-13)",
 }
@@ -120,7 +120,7 @@ class CheckEnvTests(unittest.TestCase):
             "rustc": ("rustc 1.99.0 (abc 2026-09-01)", "1.99.0", "1.97.1"),
             "clang-format": ("Homebrew clang-format version 22.1.0", "22.1.0", "21.1.8"),
             "ccache": ("ccache version 4.14\nFeatures: file-storage", "4.14", "4.14.1"),
-            "git-lfs": ("git-lfs/3.7.1 (GitHub; darwin arm64; go 1.25.3)", "3.7.1", "3.8.1"),
+            "git-lfs": ("git-lfs/3.7.1 (GitHub; macOS arm64; go 1.25.3)", "3.7.1", "3.8.1"),
         }
         for name, (text, found, want) in cases.items():
             with self.subTest(tool=name):
