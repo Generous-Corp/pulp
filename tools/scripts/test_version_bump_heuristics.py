@@ -32,6 +32,66 @@ class VersionBumpHeuristicsTests(GateFixtureTestCase):
         self.assertIn("minor", out)
         self.assertIn("bump required", out)
 
+    # ── integrations/ is part of the shipped SDK ────────────────────────────
+    # The fixture's own config is minimal, so these tests give its sdk surface
+    # the real trigger and public-API paths from tools/scripts/versioning.json.
+
+    def _real_sdk_surface(self, drop_integrations: bool = False) -> None:
+        real = json.loads((REPO_ROOT / "tools/scripts/versioning.json").read_text(encoding="utf-8"))
+        sdk = real["surfaces"]["sdk"]
+        keep = (lambda p: not p.startswith("integrations/")) if drop_integrations else (lambda p: True)
+        path = self.f.root / "tools/scripts/versioning.json"
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["surfaces"]["sdk"]["trigger_paths"] = [p for p in sdk["trigger_paths"] if keep(p)]
+        config["surfaces"]["sdk"]["public_api_paths"] = [p for p in sdk["public_api_paths"] if keep(p)]
+        path.write_text(json.dumps(config), encoding="utf-8")
+
+    def test_integrations_source_change_scores_patch(self) -> None:
+        self._real_sdk_surface()
+        self.f.write("integrations/pulp-native/src/frame_pump.cpp", "int pump() { return 1; }\n")
+        self.f.commit("fix: pulp-native frame pump")
+        code, out = self.f.run_vbc()
+        # A patch is advisory in report mode: scored, suggested, not blocking.
+        self.assertEqual(code, 0, msg=out)
+        self.assertIn("[sdk] SDK: heuristic=patch", out)
+
+    def test_integrations_public_header_scores_minor(self) -> None:
+        self._real_sdk_surface()
+        self.f.write("integrations/pulp-native/include/native/surface.hpp",
+                     "#pragma once\nint surface();\n")
+        self.f.commit("feat: pulp-native surface header")
+        code, out = self.f.run_vbc()
+        self.assertEqual(code, 1, msg=out)
+        self.assertIn("heuristic=minor", out)
+
+    def test_integrations_cmake_change_scores_patch(self) -> None:
+        self._real_sdk_surface()
+        self.f.write("integrations/pulp-native/CMakeLists.txt", "# link line changed\nadd_library(x)\n")
+        self.f.commit("fix: pulp-native link line")
+        code, out = self.f.run_vbc()
+        self.assertEqual(code, 0, msg=out)
+        self.assertIn("[sdk] SDK: heuristic=patch", out)
+
+    def test_integrations_tests_and_docs_do_not_trigger(self) -> None:
+        self._real_sdk_surface()
+        self.f.write("integrations/pulp-native/test/test_pump.cpp", "int main() { return 0; }\n")
+        self.f.write("integrations/pulp-native/README.md", "notes\n")
+        self.f.commit("test: pulp-native pump test")
+        code, out = self.f.run_vbc()
+        self.assertEqual(code, 0, msg=out)
+        self.assertIn("no bump needed", out)
+
+    def test_without_the_integrations_paths_the_same_change_scores_none(self) -> None:
+        # Negative control: the config as it was before integrations/ was a
+        # trigger path. The identical change is invisible, which is exactly the
+        # silent skip the paths exist to prevent.
+        self._real_sdk_surface(drop_integrations=True)
+        self.f.write("integrations/pulp-native/src/frame_pump.cpp", "int pump() { return 1; }\n")
+        self.f.commit("chore: pulp-native frame pump")
+        code, out = self.f.run_vbc()
+        self.assertEqual(code, 0, msg=out)
+        self.assertIn("no bump needed", out)
+
     def test_comments_only_edit_does_not_trigger(self) -> None:
         path = self.tmp / "core/runtime/include/pulp/runtime/foo.hpp"
         path.write_text(

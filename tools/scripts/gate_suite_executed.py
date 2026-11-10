@@ -36,13 +36,15 @@ DEFAULT_REPO = "Generous-Corp/pulp"
 
 # Keep this in step-name terms because the Actions jobs API exposes names, not
 # workflow step ids. The full-suite steps in `.github/workflows/build.yml` are
-# `Test (<platform>)`. The two pull-request-head tiers are evidence that a tier
+# `Test (<platform>)`. The pull-request-head tiers (including the drift checks
+# run before the build) are evidence that a tier
 # ran, never that the suite did: build.yml says the fast tier "is NOT test
 # evidence for the merge", and the affected tier can select nothing. The other
 # `Test ...` steps are receipts or capability checks and count as neither.
 TEST_STEP_RE = re.compile(r"^\s*Test\s+\([^)]*\)", re.IGNORECASE)
 TIER_STEP_RE = re.compile(
-    r"^\s*Test\s+(?:fast deterministic tier\b|what this pull request reaches\b)",
+    r"^\s*Test\s+(?:fast deterministic tier\b|what this pull request reaches\b"
+    r"|configure-only drift checks before the build\b)",
     re.IGNORECASE,
 )
 BUILD_STEP_RE = re.compile(r"^\s*Build\s*$", re.IGNORECASE)
