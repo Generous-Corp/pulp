@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261110-preset-program-editor",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-10T04:49:47Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/include/pulp/view/preset_program_editor.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Context menu and program editor for the preset browser (core/view); Pulp-owned, not exported."
+}
