@@ -6,6 +6,7 @@
 
 #include <array>
 #include <csignal>
+#include <chrono>
 #include <cerrno>
 #include <cstdlib>
 #include <fstream>
@@ -195,6 +196,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
         options.capture_stderr = true;
         options.timeout_ms = 210000;
         bool ready = false, lease_acquired = !acquire;
+        std::chrono::steady_clock::time_point ready_at;
         bool publication_seen = false, owner_revoked = false;
         std::filesystem::remove(child_pid_file);
         int child_pid = -1;
@@ -211,6 +213,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
         options.on_stdout_line = [&](std::string_view line) {
             if (line.starts_with("Dev loop active")) {
                 ready = true;
+                ready_at = std::chrono::steady_clock::now();
                 if (acquire) {
                     const auto acquired = run(cli, root.runtime,
                         {"control", "call", "--instance", instance, "dev.pulp.session/control@1", "--params",
@@ -263,6 +266,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
         INFO("watch exit=" << result.exit_code << " timed_out=" << result.timed_out);
         REQUIRE(ready);
         REQUIRE(lease_acquired);
+        REQUIRE(std::chrono::steady_clock::now() - ready_at < std::chrono::seconds(45));
         REQUIRE(child_observed_alive);
         REQUIRE(child_terminated);
         if (revoke_after_publication) {
