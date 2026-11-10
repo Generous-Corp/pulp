@@ -33,7 +33,7 @@ calibrated to 1e-11 before candidate comparison.
 | Installed CMake consumer gate | PASS 1/1; nested public consumers PASS 2/2 |
 | Neighbor controls | PASS; trigger-runtime public consumer and DSPX-04 fail-closed processor binding |
 | Production mutations | All five CONFIRMED; compiled oracle test exits 0/42/0, driver exits 0 |
-| Source gates | Implementation-head run found exposure-path omission (corrected) and protected-base capability metadata drift; final rerun pending. Host-refused suites remain NOT CHECKED |
+| Source gates | Exposure path corrected; protected-base metadata repaired by clean merge of main f2664397c643807f01a4a885687ef6ebd4d30efa, preserving narrow projections without regeneration. Final head rerun required; host-refused suites remain NOT CHECKED |
 | Local diff coverage | NOT CHECKED, exit 4; dedicated-builder policy refusal |
 | Capability projections / docs | PASS on implementation head; narrow delegated projections only |
 | Script inventory | Correct-profile generation retained all off-profile records; only unrelated UI fixture advisory drift produced and excluded |
