@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -29,6 +30,7 @@ class FakeDevice : public AudioDevice {
         return true;
     }
     void close() override {
+        ++close_calls;
         std::lock_guard<std::mutex> lk(m_);
         opened_ = false;
     }
@@ -61,6 +63,9 @@ class FakeDevice : public AudioDevice {
 
     std::atomic<bool> in_callback{false};
     std::atomic<int> blocks{0};
+    std::function<void()> on_destroy;
+    std::atomic<int> stop_calls{0};
+    std::atomic<int> close_calls{0};
 
   private:
     FakeBackend& backend_;
@@ -130,6 +135,8 @@ struct FakeBackend : AudioSystem {
 };
 
 FakeDevice::~FakeDevice() {
+    if (on_destroy)
+        on_destroy();
     std::lock_guard<std::mutex> lk(backend_.m);
     auto it = backend_.live.find(id_);
     if (it != backend_.live.end() && it->second == this)
@@ -145,6 +152,7 @@ bool FakeDevice::start(AudioCallback cb) {
 }
 
 void FakeDevice::stop() {
+    ++stop_calls;
     {
         std::lock_guard<std::mutex> lk(m_);
         if (!running_)
@@ -345,4 +353,38 @@ TEST_CASE("a device with no outputs is not a valid target", "[audio][output_sess
     OutputDeviceSession s(sys, base_config(), [](auto&, auto&, auto&) {});
     REQUIRE_FALSE(s.open({true, ""}));
     REQUIRE(s.state() == OutputDeviceSession::State::missing);
+}
+
+// A real unplugged device may keep reporting open and running. The session must
+// stop, join and close the old handle itself rather than wait to be told.
+TEST_CASE("a dead device that never reports stopped is still stopped and closed by the session",
+          "[audio][output_session]") {
+    FakeBackend sys;
+    sys.add("A");
+    sys.default_id = "A";
+    OutputDeviceSession s(sys, base_config(), [](auto&, auto&, auto&) {});
+    REQUIRE(s.open({false, "A"}));
+    FakeDevice* dead = sys.handle("A");
+    REQUIRE(dead != nullptr);
+    REQUIRE(dead->is_open());
+    REQUIRE(dead->is_running());  // the dead handle still claims to be healthy
+    std::atomic<int>& stops = dead->stop_calls;
+    std::atomic<int>& closes = dead->close_calls;
+    // The counters live in the handle; read them before the session destroys it.
+    int stops_seen = -1, closes_seen = -1;
+    dead->on_destroy = [&] {
+        stops_seen = stops.load();
+        closes_seen = closes.load();
+    };
+
+    sys.remove("A");  // unplugged: gone from the list, handle still "running"
+    REQUIRE_FALSE(s.reconcile());
+    REQUIRE(stops_seen == 1);   // the session stopped it itself
+    REQUIRE(closes_seen == 1);  // and closed it
+    REQUIRE(sys.started == 0);  // no callback left live
+
+    sys.add("A");
+    REQUIRE(s.reconcile());
+    REQUIRE(sys.started == 1);
+    REQUIRE(sys.max_started.load() == 1);
 }
