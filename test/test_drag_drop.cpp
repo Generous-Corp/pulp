@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/file_dialog.hpp>
+#include <pulp/platform/file_drag.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/file_drop_zone.hpp>
 #include <pulp/view/input_events.hpp>
@@ -15,6 +16,8 @@
 // adding a CMake include-dir line to the frozen test/CMakeLists.txt.
 #include "../core/view/platform/linux/xdnd_parse.hpp"
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -616,18 +619,61 @@ TEST_CASE("start_file_drag hands off to the platform backend when a host has a "
 #endif
 
     // A non-null sentinel handle drives start_file_drag all the way to
-    // begin_file_drag. The macOS backend bails at [NSApp currentEvent] (nil in
-    // a headless test) BEFORE dereferencing the handle, and unsupported
-    // platforms use a no-op stub, so the full handoff is exercised without a
-    // live mouse event / drag session to start.
+    // begin_file_drag. With no file on disk the backend refuses before it
+    // touches the handle (and unsupported platforms use a no-op stub), so the
+    // handoff is exercised without a live mouse event or drag session.
     StubPluginViewHost host(reinterpret_cast<NativeViewHandle>(0x1));
     View v;
     v.set_plugin_view_host(&host);
     FileDragRequest req;
-    req.file_paths = {"/tmp/loop.wav"};
+    req.file_paths = {"/nonexistent-pulp-test-dir/loop.wav"};
     req.display_name = "frozen loop";
-    REQUIRE_FALSE(v.start_file_drag(req));  // no event context outside a drag
+    REQUIRE_FALSE(v.start_file_drag(req));
 }
+
+#if defined(__APPLE__)
+TEST_CASE("start_file_drag reaches the platform drag recorder on macOS", "[view][dnd][file-drag]") {
+    // An outbound drag needs the mouse event that started it, so without a
+    // recorder no test or automation could start one. With
+    // platform::set_file_drag_recorder() installed, View::start_file_drag
+    // records the drag instead: only the files that exist, offered as a copy,
+    // from the request's origin, with no pointer event or window. (The host's
+    // handle is a sentinel, so the test never reaches a real system drag.)
+    const auto file = std::filesystem::temp_directory_path() / "pulp-test-file-drag.wav";
+    std::ofstream(file) << "riff";
+    struct RecorderReset {
+        ~RecorderReset() {
+            pulp::platform::set_file_drag_recorder({});
+        }
+    } reset;
+
+    StubPluginViewHost host(reinterpret_cast<NativeViewHandle>(0x1));
+    View v;
+    v.set_plugin_view_host(&host);
+    FileDragRequest req;
+    req.file_paths = {file.string(), "/nonexistent-pulp-test-dir/missing.wav"};
+    req.root_position = {12.0f, 34.0f};
+
+    std::vector<pulp::platform::FileDragRequest> recorded;
+    pulp::platform::set_file_drag_recorder([&](const pulp::platform::FileDragRequest& r) {
+        recorded.push_back(r);
+        return pulp::platform::DragOperation::copy;
+    });
+    REQUIRE(v.start_file_drag(req));
+    REQUIRE(recorded.size() == 1);
+    CHECK(recorded[0].paths == std::vector<std::string>{file.string()});
+    CHECK(recorded[0].allowed == pulp::platform::drag_copy);
+    CHECK(recorded[0].origin_x == 12.0f);
+    CHECK(recorded[0].origin_y == 34.0f);
+
+    // Only missing files: nothing to drag, and the recorder is not called.
+    FileDragRequest missing;
+    missing.file_paths = {"/nonexistent-pulp-test-dir/missing.wav"};
+    CHECK_FALSE(v.start_file_drag(missing));
+    CHECK(recorded.size() == 1);
+    std::filesystem::remove(file);
+}
+#endif
 
 namespace {
 // A host that owns its outbound drag (the Windows OLE / Linux XDND shape):

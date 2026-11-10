@@ -44,6 +44,5 @@
 #define PulpAccessibilityHostLifetime  PULP_VIEW_OBJC_NAME(PulpAccessibilityHostLifetime)
 #define PulpTextAccessibilityElement   PULP_VIEW_OBJC_NAME(PulpTextAccessibilityElement)
 // Drag-and-drop source (drag_drop_mac.mm).
-#define PulpFileDragSource             PULP_VIEW_OBJC_NAME(PulpFileDragSource)
 
 #endif  // PULP_VIEW_OBJC_SUFFIX

@@ -1638,6 +1638,41 @@ warning and does not fail the check. Compiled tests are never exempted: their
 binary is the pull request's own build, so a base run would compare it with
 itself.
 
+### An approved head runs its deferred affected tests before the queue does
+
+The ten-minute budget is why the merge group used to be the first place a large
+diff's affected tests ran: in the week to 2026-11-09, 9 of 10 "passes on the
+head, fails merged" ejections failed on the head alone, in tests its run had
+deferred (#11471's head deferred 111). `deferred-tests-admission.yml` closes
+that without a new required context or a new merge writer (contract row 32):
+on a green Review verdict run, the fleet App's APPROVE comment (a wake-up only;
+it waits up to three minutes for `review-verdict` to turn green, which stays the
+only approval), or a Build and Test completion for an approved head, it re-runs
+the head's `macos` job when the budgeted attempt's summary artifact
+(`pr-head-affected-tests-a<attempt>`, written by `--summary-json` on the macos
+leg only, because an artifact name is unique per run and the Linux leg runs the
+same step) reports `skipped_for_budget > 0`. The re-run's affected step sees a
+green `review-verdict` (`deferred_admission.py probe`), passes `--admission`
+(40-minute budget) and `--prior-summary`: it runs this attempt's plan plus the
+earlier attempt's deferred tests, minus what that attempt passed on the same
+tested commit. The union matters: a warm re-run rebuilds less, so the
+rebuilt-executable edge alone would silently drop tests the first attempt
+deferred. The queue state is read again just before the re-run request. Its result
+is the head's `macos` check, which branch protection already requires, so the
+steward cannot arm the head while it runs or after it fails. It never touches
+an armed or queued head, never re-runs a red `macos` (contract row 14), and
+re-runs a run at most once (the admission attempt's summary says
+`admission: true`; attempt 3 is the hard limit). Every unreadable fact decides
+"no re-run", which is the old behaviour. The repository variable
+`PULP_DEFERRED_ADMISSION` must be `enforce` for the re-run and the wider budget;
+unset is shadow, which logs `deferred-tests-admission` notices only. Gotchas:
+the summary file lives in the warm build dir, so the step deletes it before the
+selector runs or an earlier run's summary would be uploaded; and nothing relies
+on whether a re-run requested with `GITHUB_TOKEN` fires `workflow_run`
+consumers: if it does, the admission attempt's summary stops a second re-run,
+and if it does not, `macos-tier-record.yml` publishes no record for that
+attempt, which matters only once `[queue] tiered_required_checks` is set.
+
 ### Reuse-record readers gate on `unusable()`, and an unlisted object counts as changed
 
 The reuse record's link-members and object-deps files each have an
@@ -10651,6 +10686,7 @@ Locally:
 
 - `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the compat-sync, compat-aggregate, node ABI, and hotspot-size gates, enforcing by default. `PULP_DISABLE_PREPUSH_GATES=1` demotes the fast gates to advisory; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
 - Pre-push gate subprocesses run through `.githooks/lib/gate-output.sh`: their stdout/stderr is captured to a regular temporary file, then replayed best-effort. Keep user-visible fast gates and the slow diff-cover script behind `run_gate_captured`; agent/tool callers can supply nonblocking pipes, and an uncaptured Python `print()` may otherwise raise `BlockingIOError` and turn a healthy gate into a false failure. The wrapper must snapshot and return the real child status before replay, while replay failure never changes that status. `tools/scripts/test_prepush_gate_output.py` pins success, exact nonzero propagation, replay, cleanup, and the slow-lane callsite.
+- A blocked pre-push ends with `FAILED GATE(S):`, one line per failing gate with the line that says why and its fix line, followed by the "gate failure(s) above" verdict. Every failure site in `.githooks/pre-push` calls `prepush_fail` (never a bare `fail=1`), which names the gate that ran last, or takes a label for a check that is not a captured gate; a gate that exits non-zero without failing the push (a skipped lane) is not named. `tools/scripts/test_prepush_gate_output.py` fails if a bare `fail=1` is added.
 - `tools/scripts/docs_noise_lint.py` (pre-push only, report mode) — scans changed/added lines for transient breadcrumbs across the markdown default scope (docs/reference + skills) **and source comments + test tags** under `core/examples/tools/test/apple/inspect/ship`. Source is diff-scoped only (never `--all`), so the historical backlog never blocks; it is comment-aware (only `//`, `/* */`, `#` comment text + string-literal Catch2 `[tag]`s, never code). Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment. Full guidance on *writing* durable comments lives in the `code-comments` skill.
 - `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + skill-path-map lint + version-bump + compat-sync + compat-aggregate + node-ABI + hotspot-size + deps-audit + codecov-config). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. The codecov-config gate is a *global invariant* (not diff-scoped): it runs the `test_codecov_config.py` / `test_codecov_components.py` contract tests so a new `core/<sub>/` subsystem can't land without a matching `codecov.yml` flag+component (graph/scene drifted onto main exactly this way), no platform subtree gets double-counted, and `codecov.yml`'s `ignore:` stays mirrored to `coverage_config.json`'s `diff_cover_excludes`. Needs PyYAML locally; skips cleanly if absent (the CI `codecov-config-validation` job in `coverage.yml` is the authoritative gate). Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
 
