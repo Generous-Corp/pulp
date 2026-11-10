@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/process_context.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
+#include <pulp/runtime/build_info.hpp>
 
 #include <algorithm>
 #include <array>
@@ -897,6 +898,9 @@ TEST_CASE("G12 paced activation receipt cell", "[.][host][graph][g12][activation
     const auto io_bytes = 2 * frames * sizeof(float);
     std::cout << "g12_paced_activation_v1\nG12_CELL rate=" << rate << " frames=" << frames
               << " backend=" << backend << " callbacks=" << callbacks
+              << " compiled_source=" << pulp::runtime::kGitSha
+              << " build_type=" << pulp::runtime::kBuildType
+              << " build_dirty=" << pulp::runtime::kGitDirty
               << " prepare_start_ns=" << observed.prepare_start_ns
               << " prepare_end_ns=" << observed.prepare_end_ns
               << " request_ns=" << observed.request_ns << " return_ns=" << observed.return_ns
