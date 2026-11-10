@@ -65,9 +65,9 @@ cmake -DPULP_BUILD_DIR=/absolute/root/build \
 ```
 
 The root CTest registration is `g11-live-retune-installed-sdk`. A Release
-configured root with tests enabled discovers it; Debug does not register this
+native Unix configured root with tests and the host target enabled discovers it; Debug and cross builds do not register this
 Release-SDK evidence lane. Ninja and Ninja Multi-Config positive/negative
-registration controls are retained in `registration-controls.log`. The standalone SDK driver
+registration controls are retained in `registration-controls.log`. Parent compiler, flags, architecture and sanitizer flags are forwarded; a consumer-only UBSan forwarding probe passed all five tests (this is not instrumented SDK qualification). The standalone SDK driver
 installs, configures, uses the governed build wrapper and runs all five cases.
 The retained SHA256 manifest covers the files in this packet. Final publication
 handoff additionally binds the final local/remote/API head to a fresh clean

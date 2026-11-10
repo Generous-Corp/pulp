@@ -10,23 +10,23 @@
 -- Configuring done (0.1s)
 -- Generating done (0.0s)
 -- Build files have been written to: /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-registration-probe/Ninja-Multi-Config-multi
-PASS generator=Ninja build_type=Debug ctest_config=Debug expected_tests=0
+PASS generator=Ninja build_type=Debug ctest_config=Debug expected_tests=0; instrumentation forwarded
 Test project /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-registration-probe/Ninja-Debug
 
 Total Tests: 0
 
-PASS generator=Ninja build_type=Release ctest_config=Release expected_tests=1
+PASS generator=Ninja build_type=Release ctest_config=Release expected_tests=1; instrumentation forwarded
 Test project /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-registration-probe/Ninja-Release
   Test #1: g11-live-retune-installed-sdk
 
 Total Tests: 1
 
-PASS generator=Ninja Multi-Config build_type= ctest_config=Debug expected_tests=0
+PASS generator=Ninja Multi-Config build_type= ctest_config=Debug expected_tests=0; instrumentation forwarded
 Test project /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-registration-probe/Ninja-Multi-Config-multi
 
 Total Tests: 0
 
-PASS generator=Ninja Multi-Config build_type= ctest_config=Release expected_tests=1
+PASS generator=Ninja Multi-Config build_type= ctest_config=Release expected_tests=1; instrumentation forwarded
 Test project /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-registration-probe/Ninja-Multi-Config-multi
   Test #1: g11-live-retune-installed-sdk
 
