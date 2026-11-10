@@ -66,6 +66,11 @@ struct AsyncBlockWorkerConfig {
     /// (tests, an externally owned service thread); Offline/Auto waits then
     /// pump inline on the calling thread.
     bool run_worker_thread = true;
+    /// The clock Auto mode reads to time each process() call; null reads
+    /// PullRateDetector::Clock::now(). A replacement must be realtime safe.
+    /// It lets a caller decide the pull rate itself, so the detector's
+    /// verdict does not depend on how the calling thread was scheduled.
+    PullRateDetector::Clock::time_point (*pull_clock)() noexcept = nullptr;
 };
 
 struct AsyncBlockWorkerStats {
@@ -294,8 +299,9 @@ template <typename Event = std::uint8_t> class AsyncBlockWorker {
 
         bool wait = latency_blocks_ == 0 || mode == AsyncBlockMode::Offline;
         if (mode == AsyncBlockMode::Auto) {
-            const bool fast =
-                detector_.observe(frames, config_.sample_rate, PullRateDetector::Clock::now());
+            const auto now =
+                config_.pull_clock ? config_.pull_clock() : PullRateDetector::Clock::now();
+            const bool fast = detector_.observe(frames, config_.sample_rate, now);
             fast_pull_.store(fast, std::memory_order_relaxed);
             wait = wait || fast;
         }

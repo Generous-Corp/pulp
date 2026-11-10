@@ -265,8 +265,9 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
 
     {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
     {'include': 'pulp/audio/sample_resource.hpp', 'fingerprint': 'sha256:4c733ef0cfae35564705ba3eea27f79c8c01d87600ba31a6c8d513fe0476a6a2', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Background sample decode service and snapshot handle; reviewed when a zero-frame decode became a load failure with a reason instead of an empty Loaded snapshot. Host infrastructure behind the sampler capabilities, not a generator-facing capability.'},
-    {'include': 'pulp/audio/wav_decoder.hpp', 'fingerprint': 'sha256:78e0bfc06ff17643493ebb343f9440348149324221e525de656a016d855be009', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Byte-span RIFF/WAVE inspector and decoder for import surfaces; reviewed when interpret_wav_format exposed the fmt interpretation for the layout report. Not a generator-facing capability.'},
-    {'include': 'pulp/audio/audio_file_layout.hpp', 'fingerprint': 'sha256:8fd849f594a11af739d14c42370b2fa74460a1e423cde2cab1ebd60c9ab74694', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Developer-tool byte layout report over audio containers (regions, warnings, decoder verdict) behind `pulp audio inspect`; reads headers only. Not a generator-facing capability.'},
+    {'include': 'pulp/audio/wav_decoder.hpp', 'fingerprint': 'sha256:be93cd6de97b8892c026130d0000e958895142b741b5f1c0ac03d1cd33aa119e', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Byte-span RIFF/WAVE inspector and decoder for import surfaces; reviewed when interpret_wav_format exposed the fmt interpretation for the layout report. Not a generator-facing capability.'},
+    {'include': 'pulp/audio/audio_file_layout.hpp', 'fingerprint': 'sha256:49e06f8a361b5a0bfd310df5d23bc707ae4ad4243386430021ee3d7023c13912', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Developer-tool byte layout report over audio containers (regions, warnings, decoder verdict) behind `pulp audio inspect`; reads headers only. Not a generator-facing capability.'},
+    {'include': 'pulp/audio/wave_layout.hpp', 'fingerprint': 'sha256:9edf0909ab697aadaba6dc8dbbbc70a164fa4ecc2e4af5cecfde6aef9ada02ed', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Dependency-free RIFF/WAVE chunk walk and acceptance policy (walk_wave_layout, decide_wave, canonical_wave_header) shared by every WAV reader and the layout report; no generator-facing capability.'},
     {'include': 'pulp/audio/audio_file_layout_json.hpp', 'fingerprint': 'sha256:7c02abb2e23707387db7f67ef4612ee8ee411241e1b16de31908866eea49b1ca', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Versioned JSON serializer for the layout report (pulp.audio.file_inspect.v1), a CLI/MCP developer surface. Not a generator-facing capability.'},
 
     {
@@ -376,7 +377,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/audio/audio_file.hpp",
-        "fingerprint": "sha256:6a97b20f7bb9a869f33f6cc52367cc2f9629660a9cb1341b284bfdf3479ee990",
+        "fingerprint": "sha256:f498b9bee9d8be7d00d4b108ea6b3e1a3a62ddf92bc4681b806ba9bc3c1f6c6f",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -554,7 +555,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/audio/async_block_worker.hpp",
-        "fingerprint": "sha256:33f3ba40c7c017a7859242307bb29d51dc50e56f7827e3e262f1ea68795251d2",
+        "fingerprint": "sha256:1b91118a46365bbfc75a00a7676897e8552f6880593911839cd4ec94af340cc2",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

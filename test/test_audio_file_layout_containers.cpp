@@ -1,6 +1,7 @@
 // Layout report over the non-WAV containers: the checked-in AIFF, AIFF-C,
 // FLAC, Ogg, MP3 and MP4 fixtures, and hand-built bytes for the facts each
-// container walk states.
+// container walk states. Also the WAV seeds of the decoder corpus, where the
+// report's verdict must be the decoder's.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -8,6 +9,7 @@
 #include <pulp/audio/audio_file_layout.hpp>
 #include <pulp/audio/audio_file_layout_json.hpp>
 #include <pulp/audio/format_registry.hpp>
+#include <pulp/audio/wav_decoder.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -17,6 +19,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -447,4 +451,47 @@ TEST_CASE("an AIFF COMM rate that is not finite is noted, not emitted",
     REQUIRE(report.decode);
     CHECK_FALSE(report.decode->decodable);
     CHECK_NOTHROW(choc::json::parse(to_json(report)));
+}
+
+TEST_CASE("the layout verdict is inspect_wav's on every WAV seed of the decoder corpus",
+          "[audio][file-layout][parity]") {
+    const auto corpus = pulp_test::fixture_root() / "test" / "fixtures" / "fuzz" / "audio-decoder";
+    std::vector<fs::path> seeds;
+    for (const auto& entry : fs::directory_iterator(corpus))
+        if (entry.path().extension() == ".wav")
+            seeds.push_back(entry.path());
+    std::sort(seeds.begin(), seeds.end());
+    REQUIRE(seeds.size() >= 20u);
+
+    std::size_t decodable = 0u;
+    std::size_t truncated = 0u;
+    for (const auto& seed : seeds) {
+        const auto name = seed.filename().string();
+        INFO(name);
+        std::ifstream in(seed, std::ios::binary);
+        const std::vector<std::uint8_t> bytes(std::istreambuf_iterator<char>(in), {});
+        const auto info = inspect_wav(bytes);
+        const auto report = inspect_audio_file_layout(seed);
+        // A file too short for an envelope gets no verdict at all.
+        const bool verdict = report.decode && report.decode->decodable;
+        CHECK(verdict == info.has_value());
+        if (!info)
+            continue;
+        ++decodable;
+        truncated += info->truncated ? 1u : 0u;
+        REQUIRE(report.stream);
+        CHECK(report.stream->frames == info->num_frames);
+        CHECK(report.stream->declared_frames == info->declared_frames);
+        CHECK(report.decode->truncated == info->truncated);
+        CHECK(has_warning(report, LayoutWarningKind::truncated_data) == info->truncated);
+    }
+    CHECK(decodable >= 20u);
+    CHECK(truncated >= 4u);
+    // The RF64 and BW64 seeds decode in every path.
+    for (const char* name : {"wav-rf64-ds64.wav", "wav-bw64-ds64.wav"}) {
+        INFO(name);
+        const auto report = inspect_audio_file_layout(corpus / name);
+        REQUIRE(report.decode);
+        CHECK(report.decode->decodable);
+    }
 }
