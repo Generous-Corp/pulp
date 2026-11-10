@@ -42,8 +42,8 @@ def _gated_view(report: dict) -> str:
 def _write_fake_pulp(path: Path) -> Path:
     """A stand-in `pulp` that honours `audio spectrogram|waveform <file> --png <p> --json <j>`
     by writing a PNG signature and a basename-only sidecar, so the attach path is
-    exercised end to end without a built CLI. Its sidecar deliberately includes a
-    tempting `peak_db` so the byte-identity test would catch a detector reading it."""
+    exercised end to end without a built CLI. Its sidecar includes a `peak_db`
+    field so the byte-identity test would catch a detector reading it."""
     script = path / "pulp"
     script.write_text(
         "#!/usr/bin/env python3\n"

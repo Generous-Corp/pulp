@@ -365,7 +365,7 @@ ActionPlan parse_action_plan(const std::string& text) {
     require(string_member(root, "tool_id", "tool-pin") == "pulp-graph-agent-loop", "tool-pin");
     require(string_member(root, "tool_version", "tool-version") == "1", "tool-version");
     require(string_member(root, "source_sha", "source-pin") ==
-                "2f3d36dae75c3dca283c58e47f7731356f088e0d",
+                "3fad8b42a44d496361f97eeb469639e3a2b9e3c6",
             "source-pin");
     const auto network_policy = string_member(root, "network_policy", "plan-network-policy");
     const auto network_policy_lower = lower_ascii(network_policy);

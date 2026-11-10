@@ -449,6 +449,12 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     if (!cg->spectral)
         cg->legacy_processing_lifetime = processing_handle_lifetime_;
     cg->sample_rate = sample_rate;
+    if (graph_event_edge_) {
+        cg->graph_event_edge = *graph_event_edge_;
+        cg->graph_event_lane = std::make_shared<GraphAuthoredEventLane<>>();
+        if (cg->graph_event_lane->reset(cg->graph_event_epoch) != GraphEventResult::Accepted)
+            return nullptr;
+    }
     cg->sample_region_bank = prepared_sample_region_bank_;
     cg->sample_regions = prepared_sample_regions_;
     cg->custom_registry_generation = custom_registry_generation_; // 2.2b predicate (M6)
@@ -1053,6 +1059,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         cg->routed.serial.valid = build_routing_snapshot_locked_(
             *cg, /*parallel_safe=*/false, cg->routed.serial.plugin_ctx,
             cg->routed.serial.custom_ctx, cg->routed.serial.snapshot);
+        for (auto& context : cg->routed.serial.custom_ctx) {
+            context.graph_event_lane = cg->graph_event_lane;
+            context.graph_event_edge = cg->graph_event_edge;
+            context.graph_event_epoch = cg->graph_event_epoch;
+        }
         // Size THIS snapshot's own scratch pool (per-snapshot, retired with the
         // snapshot via RCU — never resized under an in-flight reader).
         if (cg->routed.serial.valid && max_block_size > 0) {
@@ -1138,6 +1149,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             bool ok = build_routing_snapshot_locked_(
                 *cg, /*parallel_safe=*/true, cg->routed.parallel.plugin_ctx,
                 cg->routed.parallel.custom_ctx, cg->routed.parallel.snapshot);
+            for (auto& context : cg->routed.parallel.custom_ctx) {
+                context.graph_event_lane = cg->graph_event_lane;
+                context.graph_event_edge = cg->graph_event_edge;
+                context.graph_event_epoch = cg->graph_event_epoch;
+            }
             if (ok) {
                 cg->routed.parallel.levelization =
                     graph::build_graph_runtime_levelization(cg->routed.parallel.snapshot.plan());

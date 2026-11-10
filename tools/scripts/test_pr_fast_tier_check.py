@@ -74,6 +74,53 @@ class SelectionTests(unittest.TestCase):
         self.assertTrue(any("non-subsecond" in error for error in errors))
 
 
+class ConfigureSelectionTests(unittest.TestCase):
+    """The pre-build members: inside pr-fast, outside needs-build, complete."""
+
+    def fast(self) -> list[str]:
+        return list(tier.REQUIRED_MEMBERS) + list(tier.REQUIRED_CONFIGURE_MEMBERS)
+
+    def test_reads_the_configure_label_and_not_its_prefix(self) -> None:
+        doc = listing(
+            ("a", ["pr-fast", "pr-fast-configure"]),
+            ("b", "pr-fast;pr-fast-configure-extra"),
+            ("c", ["pr-fast"]),
+        )
+        self.assertEqual(tier.labelled_tests(doc, tier.CONFIGURE_LABEL), ["a"])
+        self.assertEqual(tier.labelled_tests(doc), ["a", "b", "c"])
+
+    def test_complete_configure_selection_passes(self) -> None:
+        configure = list(tier.REQUIRED_CONFIGURE_MEMBERS)
+        self.assertEqual(tier.check_configure_selection(self.fast(), configure, []), [])
+
+    def test_member_outside_pr_fast_fails(self) -> None:
+        # The post-build tier drops the label, so a member outside pr-fast
+        # would run nowhere on a pull-request head.
+        configure = list(tier.REQUIRED_CONFIGURE_MEMBERS) + ["orphan-drift"]
+        errors = tier.check_configure_selection(self.fast(), configure, [])
+        self.assertTrue(any("orphan-drift" in e and "not in pr-fast" in e for e in errors))
+
+    def test_member_that_needs_the_build_fails(self) -> None:
+        configure = list(tier.REQUIRED_CONFIGURE_MEMBERS)
+        errors = tier.check_configure_selection(
+            self.fast(), configure, ["consumption-census-drift"])
+        self.assertTrue(any("needs-build" in e for e in errors))
+
+    def test_each_required_configure_member_is_enforced(self) -> None:
+        for dropped in tier.REQUIRED_CONFIGURE_MEMBERS:
+            with self.subTest(dropped=dropped):
+                configure = [n for n in tier.REQUIRED_CONFIGURE_MEMBERS if n != dropped]
+                errors = tier.check_configure_selection(self.fast(), configure, [])
+                self.assertTrue(any(dropped in e for e in errors))
+
+    def test_required_configure_members_are_also_required_or_listed_fast_members(self) -> None:
+        # The drift checks behind most red heads; the two census/manifest ones
+        # are also pinned pr-fast members.
+        for name in ("consumption-census-drift", "agent-capability-manifest-check"):
+            self.assertIn(name, tier.REQUIRED_MEMBERS)
+            self.assertIn(name, tier.REQUIRED_CONFIGURE_MEMBERS)
+
+
 class WorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.text = WORKFLOW.read_text(encoding="utf-8")
@@ -111,6 +158,93 @@ class WorkflowTests(unittest.TestCase):
         )
         self.assertNotEqual(mutated, self.text)
         self.assertTrue(tier.check_workflow(mutated))
+
+    def configure_section(self) -> tuple[int, int]:
+        start = self.text.index("- name: " + tier.CONFIGURE_STEP_NAME)
+        end = self.text.index("- name:", start + 1)
+        return start, end
+
+    def test_live_workflow_has_the_pre_build_step_before_build(self) -> None:
+        self.assertEqual(tier.check_configure_workflow(self.text), [])
+        start, end = self.configure_section()
+        self.assertTrue(self.text[end:].startswith("- name: Build\n"))
+
+    def test_pre_build_step_moved_after_build_fails(self) -> None:
+        start, end = self.configure_section()
+        section = self.text[start:end]
+        rest = self.text[:start] + self.text[end:]
+        build = rest.index("- name: Build\n")
+        after_build = rest.index("- name:", build + 1)
+        mutated = rest[:after_build] + section + rest[after_build:]
+        errors = tier.check_workflow(mutated)
+        self.assertTrue(any("immediately before Build" in e for e in errors), errors)
+
+    def test_pre_build_step_on_the_contract_lane_fails(self) -> None:
+        start, end = self.configure_section()
+        section = self.text[start:end]
+        mutated = self.text[:start] + section.replace(
+            " && matrix.lane != 'contract'", "") + self.text[end:]
+        self.assertNotEqual(mutated, self.text)
+        self.assertTrue(any("contract lane" in e for e in tier.check_workflow(mutated)))
+
+    def test_pre_build_step_selecting_only_pr_fast_fails(self) -> None:
+        mutated = self.text.replace(" -L '^pr-fast-configure$'", "", 1)
+        self.assertNotEqual(mutated, self.text)
+        self.assertTrue(any("pre-build step does not select" in e
+                            for e in tier.check_workflow(mutated)))
+
+    def test_pre_build_step_tolerating_an_empty_selection_fails(self) -> None:
+        start, end = self.configure_section()
+        section = self.text[start:end]
+        mutated = self.text[:start] + section.replace(" --no-tests=error", "") + self.text[end:]
+        self.assertNotEqual(mutated, self.text)
+        self.assertTrue(any("pre-build step does not fail on an empty selection" in e
+                            for e in tier.check_workflow(mutated)))
+
+    def test_unconditional_drop_from_post_build_tier_fails(self) -> None:
+        # Dropping the members whether or not they ran before the build would
+        # leave a head that skipped the pre-build step without them.
+        mutated = self.text.replace(
+            'if [ "$PR_FAST_CONFIGURE_OUTCOME" = success ]; then', "if true; then", 1)
+        self.assertNotEqual(mutated, self.text)
+        self.assertTrue(any("without checking that the pre-build step passed" in e
+                            for e in tier.check_workflow(mutated)))
+
+    def test_pre_build_step_running_on_windows_fails(self) -> None:
+        start, end = self.configure_section()
+        section = self.text[start:end]
+        mutated = self.text[:start] + section.replace(
+            "runner.os != 'Windows' && ", "", 1) + self.text[end:]
+        self.assertNotEqual(mutated, self.text)
+        self.assertTrue(any("away from Windows" in e for e in tier.check_workflow(mutated)))
+
+    def test_pre_build_step_without_label_exclusions_fails(self) -> None:
+        start, end = self.configure_section()
+        section = self.text[start:end]
+        mutated = self.text[:start] + section.replace(' -LE "$label_exclude"', "", 1) + self.text[end:]
+        self.assertNotEqual(mutated, self.text)
+        self.assertTrue(any("label exclusions" in e for e in tier.check_workflow(mutated)))
+
+    def test_drop_outside_the_success_guard_fails(self) -> None:
+        # The guard is present but the exclusion moved out of it.
+        start = self.text.index("- name: " + tier.STEP_NAME)
+        end = self.text.index("- name:", start + 1)
+        section = self.text[start:end]
+        moved = section.replace(
+            '            label_exclude="${label_exclude}|^pr-fast-configure$"\n', "", 1)
+        moved = moved.replace(
+            '          if [ "$PR_FAST_CONFIGURE_OUTCOME" = success ]; then\n',
+            '          label_exclude="${label_exclude}|^pr-fast-configure$"\n'
+            '          if [ "$PR_FAST_CONFIGURE_OUTCOME" = success ]; then\n            :\n', 1)
+        self.assertNotEqual(moved, section)
+        mutated = self.text[:start] + moved + self.text[end:]
+        self.assertTrue(any("without checking that the pre-build step passed" in e
+                            for e in tier.check_workflow(mutated)))
+
+    def test_missing_pre_build_step_while_post_build_drops_fails(self) -> None:
+        mutated = self.text.replace(tier.CONFIGURE_STEP_NAME, "Renamed pre-build step")
+        self.assertTrue(any("expected exactly one" in e and tier.CONFIGURE_STEP_NAME in e
+                            for e in tier.check_workflow(mutated)))
 
     def test_missing_step_fails(self) -> None:
         mutated = self.text.replace(tier.STEP_NAME, "Renamed step")

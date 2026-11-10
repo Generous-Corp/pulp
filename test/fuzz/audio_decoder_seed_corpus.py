@@ -376,18 +376,45 @@ def ogg_rewrite_serial(data: bytes, serial: int) -> bytes:
 # --------------------------------------------------------------------------
 
 
-def apev2_tag(items: list[tuple[bytes, bytes]]) -> bytes:
+def ape_tag_items(items: list[tuple[bytes, bytes]]) -> bytes:
     body = b""
     for key, value in items:
         body += struct.pack("<II", len(value), 0) + key + b"\0" + value
+    return body
+
+
+def apev2_tag(items: list[tuple[bytes, bytes]], version: int = 2000, with_header: bool = True) -> bytes:
+    """Build an APE tag: optional 32-byte header, items, 32-byte footer.
+
+    The footer's size field (bytes 12-15) counts the items and the footer but
+    not the header. Flags bit 31 says a header is present and bit 29 marks the
+    block that is the header. APEv1 (version 1000) has no header and leaves
+    the flags zero, which `with_header=False` reproduces.
+    """
+    body = ape_tag_items(items)
     tag_size = len(body) + 32  # items plus footer
-    has_header = 1 << 31
+    has_header = (1 << 31) if with_header else 0
     is_header = 1 << 29
 
     def block(flags: int) -> bytes:
-        return b"APETAGEX" + struct.pack("<IIII", 2000, tag_size, len(items), flags) + bytes(8)
+        return b"APETAGEX" + struct.pack("<IIII", version, tag_size, len(items), flags) + bytes(8)
 
-    return block(has_header | is_header) + body + block(has_header)
+    header = block(has_header | is_header) if with_header else b""
+    return header + body + block(has_header)
+
+
+def apev2_tag_with_size(items: list[tuple[bytes, bytes]], tag_size: int) -> bytes:
+    """Build an APEv2 tag whose footer size field is exactly `tag_size`.
+
+    A trailing `Padding` item absorbs the difference, so the low size byte can
+    be steered to a value at or above 0x80.
+    """
+    fixed = len(ape_tag_items(items + [(b"Padding", b"")])) + 32
+    if tag_size < fixed:
+        raise ValueError(f"tag size {tag_size} is below the {fixed}-byte minimum for these items")
+    tag = apev2_tag(items + [(b"Padding", b"\0" * (tag_size - fixed))])
+    assert struct.unpack_from("<I", tag, len(tag) - 20)[0] == tag_size
+    return tag
 
 
 # --------------------------------------------------------------------------
@@ -588,7 +615,7 @@ def build_wav_seeds(corpus: Corpus) -> None:
                bytes.fromhex("72696666 2e91cf11 a5d628db 04c10000".replace(" ", ""))
                + struct.pack("<Q", 40 + len(w64_body)) + w64_wave_guid + w64_body)
 
-    # Malformed variants, each a deliberate departure from a valid base above.
+    # Malformed variants, each derived from a valid base above.
     fmt16 = fmt_payload(WAVE_FORMAT_PCM, 1, rate, 16)
     odd_data = mono16_bytes[:-1]  # 1599 bytes: odd, with one partial frame
     corpus.add("wav-odd-chunk-eof-no-pad.wav", riff(chunk(b"fmt ", fmt16) + chunk(b"data", odd_data, pad=False)))
@@ -704,7 +731,9 @@ def build_ogg_seeds(corpus: Corpus, tmp: str) -> None:
 
 def build_mp3_seeds(corpus: Corpus, tmp: str) -> None:
     lame = find_tool("lame")
-    names = ("mp3-cbr-mono.mp3", "mp3-id3v2-xing-vbr.mp3", "mp3-apev2-footer.mp3", "mp3-truncated-frame.mp3")
+    names = ("mp3-cbr-mono.mp3", "mp3-id3v2-xing-vbr.mp3", "mp3-apev2-footer.mp3", "mp3-apev1-footer.mp3",
+             "mp3-ape-size-below-footer.mp3", "mp3-apev1-header-flag.mp3", "mp3-apev2-size-high-bit.mp3",
+             "mp3-truncated-frame.mp3")
     if not lame:
         for name in names:
             corpus.skip(name, "lame encoder not found")
@@ -727,6 +756,26 @@ def build_mp3_seeds(corpus: Corpus, tmp: str) -> None:
         corpus.add("mp3-id3v2-xing-vbr.mp3", f.read())
     corpus.add("mp3-apev2-footer.mp3",
                cbr + apev2_tag([(b"Title", b"SYNTHETIC TITLE"), (b"Comment", b"APEv2 footer appended by Pulp")]))
+    # APEv1 carries no header block, so its footer flags leave bit 31 clear and
+    # a reader that always strips 32 extra bytes cuts into the last frame.
+    corpus.add("mp3-apev1-footer.mp3",
+               cbr + apev2_tag([(b"Title", b"SYNTHETIC TITLE"), (b"Comment", b"APEv1 footer appended by Pulp")],
+                               version=1000, with_header=False))
+    # A footer whose size field (0) is below the footer's own 32 bytes, with no
+    # items and no header. A reader that trusts the size strips less than the
+    # footer and leaves tag bytes in front of the frame matcher.
+    corpus.add("mp3-ape-size-below-footer.mp3",
+               cbr + b"APETAGEX" + struct.pack("<IIII", 2000, 0, 0, 0) + bytes(8))
+    # An APEv1 tag whose footer flags carry bit 31. APEv1 has no header block,
+    # so a reader that trusts the flag strips 32 bytes of audio.
+    v1_flagged = bytearray(apev2_tag([(b"Title", b"SYNTHETIC TITLE")], version=1000, with_header=False))
+    struct.pack_into("<I", v1_flagged, len(v1_flagged) - 12, 1 << 31)
+    corpus.add("mp3-apev1-header-flag.mp3", cbr + bytes(v1_flagged))
+    # A size of 0x1F0 puts 0xF0 in footer byte 12, so a reader that widens the
+    # footer bytes through a signed char reads a sign-extended size.
+    high_bit = apev2_tag_with_size([(b"Title", b"SYNTHETIC TITLE")], 0x1F0)
+    assert high_bit[-20] >= 0x80, "footer size byte 12 must have its high bit set"
+    corpus.add("mp3-apev2-size-high-bit.mp3", cbr + high_bit)
     # The CBR seed carries no ID3 tag and every MPEG-1 Layer III frame at
     # 32 kbit/s and 32 kHz is 144 bytes, so the fourth frame starts at
     # 3 * 144; the cut lands 17 bytes into it. The sync word is asserted so a

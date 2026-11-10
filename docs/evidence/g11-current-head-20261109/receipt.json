@@ -1,0 +1,71 @@
+{
+  "schema": "pulp.g11.exact-head-receipt.v1",
+  "accepted": true,
+  "source_head": "3fad8b42a44d496361f97eeb469639e3a2b9e3c6",
+  "source_git_dirty": false,
+  "sdk_prefix": "/Volumes/Workshop/Code/pulp-a9-sdk-prefix-3fad8b42",
+  "sdk_provenance_sha256": "cd4a21dd1ee66ae354c0c2c68e73cb0ce246b9bf045f553d86ccbfcc3e94f7ae",
+  "sdk_provenance": {
+    "schema": "pulp.sdk-provenance.v1",
+    "kind": "source-install",
+    "distribution_eligible": false,
+    "source_git_sha": "3fad8b42a44d496361f97eeb469639e3a2b9e3c6",
+    "source_git_dirty": false,
+    "bridge_exec": false,
+    "platform": "darwin-arm64",
+    "build_profile": "release"
+  },
+  "binaries": {
+    "tuning_consumer": "0f97eb8717a00a23f3e870bf065ab45d416da492dd8838596280d73333904d63",
+    "live_sampling_consumer": "a3296d8135860db7fca6861fa811eae756e22a19492135d0e46b932ef08521b5"
+  },
+  "tuning": {
+    "schema": "pulp.g11.tuning-receipt.v1",
+    "accepted": true,
+    "a4_hz": 442.0,
+    "sample_rate": 48000,
+    "frames": 96,
+    "partitions": [
+      32,
+      17
+    ],
+    "invalid_note_refused": true,
+    "default_a4_negative": "exit=42; planted-default-a4 rejected by tuned audio oracle",
+    "failed_render_negative": "exit=7; empty render refused",
+    "binary_sha256": "0f97eb8717a00a23f3e870bf065ab45d416da492dd8838596280d73333904d63",
+    "source_sha": "3fad8b42a44d496361f97eeb469639e3a2b9e3c6",
+    "sdk_provenance_sha256": "cd4a21dd1ee66ae354c0c2c68e73cb0ce246b9bf045f553d86ccbfcc3e94f7ae",
+    "public_header_sha256": {
+      "tuning.hpp": "84f372a58c3a1955de081c6f76fc96fc6f67a65b3f07801833996dab90c8a025"
+    }
+  },
+  "live_sampling": {
+    "schema": "pulp.sample-region-installed-consumer.v1",
+    "accepted": true,
+    "sample_rate": 48000,
+    "maximum_block": 257,
+    "renders": 6,
+    "oracle_tolerance": 1e-06,
+    "maximum_oracle_error": 6.503505523003383e-08,
+    "null_tolerance_dbfs": -180,
+    "reported_latency": 0,
+    "signed_bake_negative_controls": 3,
+    "lifecycle_recovery_cases": 2,
+    "measurement_negative_controls": 2,
+    "constructor_negative_controls": 2
+  },
+  "live_sampling_evidence": {
+    "regular_irregular_paths": 6,
+    "reload_paths": 2,
+    "bake_paths": 2,
+    "scalar_oracle_max_error": 6.503505523003383e-08,
+    "scalar_oracle_tolerance": 1e-06,
+    "null_tolerance_dbfs": -180,
+    "signed_bake_trust_negative_controls": 3,
+    "constructor_negative_controls": 2,
+    "measurement_negative_controls": 2,
+    "lifecycle_recovery_cases": 2,
+    "reported_latency": 0
+  },
+  "scope": "fixture and installed public SDK evidence only; no runtime changes or realtime claim"
+}

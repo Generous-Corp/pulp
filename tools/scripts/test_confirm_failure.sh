@@ -10,6 +10,9 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UNDER_TEST="$SCRIPT_DIR/confirm_failure.sh"
+# confirm_failure.sh runs this for every --subject check.
+DRIVER_LINK_HELPER="$SCRIPT_DIR/confirm_failure_driver_link.py"
+[ -f "$DRIVER_LINK_HELPER" ] || { echo "missing $DRIVER_LINK_HELPER" >&2; exit 1; }
 
 FAILURES=0
 check() {
@@ -116,6 +119,47 @@ NOCOMPILE=$( ( cd "$TMP/nocompile" && "$UNDER_TEST" \
 check "a break that does not compile is INCONCLUSIVE" 2 "$NOCOMPILE"
 check "the tree is restored after a break that does not compile" "" \
     "$(cd "$TMP/nocompile" && git status --porcelain -- value.cpp)"
+
+# A downstream project copies a third-party library into its build directory at
+# configure time, and a post-build step needs it. No build rule produces it, so
+# purging it leaves the baseline build with nothing to recreate it from. The
+# purge must leave such a file alone, or the loop reports INCONCLUSIVE for a
+# test that does cover the change.
+if command -v ninja >/dev/null 2>&1; then
+    make_prebuilt_project() {
+        local root="$1"
+        mkdir -p "$root/prebuilt"
+        echo "not a real library" > "$root/prebuilt/libthird.dylib"
+        cat > "$root/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.20)
+project(confirm_failure_prebuilt CXX)
+set(CMAKE_CXX_STANDARD 17)
+file(COPY ${CMAKE_SOURCE_DIR}/prebuilt/libthird.dylib DESTINATION ${CMAKE_BINARY_DIR})
+add_library(fixture_lib STATIC value.cpp)
+add_executable(fixture_test test.cpp)
+target_link_libraries(fixture_test PRIVATE fixture_lib)
+add_custom_command(TARGET fixture_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/libthird.dylib
+            ${CMAKE_BINARY_DIR}/bundled_libthird.dylib)
+EOF
+        printf 'int answer();\n' > "$root/value.hpp"
+        printf '#include "value.hpp"\nint answer() { return 42; }\n' > "$root/value.cpp"
+        printf '#include "value.hpp"\nint main() { return answer() == 42 ? 0 : 1; }\n' > "$root/test.cpp"
+        ( cd "$root" && git init -q . && git config user.email t@example.com \
+            && git config user.name test && git add -A && git commit -qm fixture ) >/dev/null 2>&1
+        cmake -G Ninja -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+        cmake --build "$root/build" >/dev/null 2>&1
+    }
+    make_prebuilt_project "$TMP/prebuilt"
+    check "the fixture's post-build step works before any purge" yes \
+        "$([ -f "$TMP/prebuilt/build/bundled_libthird.dylib" ] && echo yes || echo no)"
+    check "a configure-time library the build cannot recreate does not make the loop INCONCLUSIVE" 0 \
+        "$(run_under_test "$TMP/prebuilt")"
+    check "the configure-time library is still there afterwards" yes \
+        "$([ -f "$TMP/prebuilt/build/libthird.dylib" ] && echo yes || echo no)"
+else
+    echo "  skip a configure-time library case (ninja is not installed)"
+fi
 
 # ── The --no-build lane, for a test whose subject is interpreted ────────────
 #
@@ -396,8 +440,16 @@ make_shellout_project "$TMP/shellout"
 # refuse a verdict rather than bless or blame the test.
 check "a shell-out test without --subject is INCONCLUSIVE" 2 \
     "$(run_shellout_under_test "$TMP/shellout")"
-check "a shell-out test with --subject is CONFIRMED" 0 \
+# A script may run any binary, including one that links the edited code, and
+# the build graph cannot see inside it, so --subject refuses rather than guess.
+check "a script --test with --subject is INCONCLUSIVE" 2 \
     "$(run_shellout_under_test "$TMP/shellout" --subject ./build/fixture_subject)"
+SUBJECT_DIRECT=$( ( cd "$TMP/shellout" && "$UNDER_TEST" \
+    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
+    --build-dir build --target fixture_subject \
+    --subject ./build/fixture_subject --test ./build/fixture_subject --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "a --test that runs the subject itself is CONFIRMED" 0 "$SUBJECT_DIRECT"
 
 # A compiled driver that runs the subject, with --target building the subject
 # alone: the driver must survive the run (it used to be deleted and never
@@ -423,77 +475,258 @@ else
     FAILURES=$((FAILURES + 1))
 fi
 
-# A driver that links the edited code itself, with --target building only the
-# subject: the driver keeps the unbroken copy and passes, which used to read as
-# NOT CONFIRMED. The loop must refuse instead.
-make_shellout_project "$TMP/driver-links"
-printf 'add_executable(fixture_driver driver.cpp)\ntarget_link_libraries(fixture_driver PRIVATE fixture_lib)\n' \
-    >> "$TMP/driver-links/CMakeLists.txt"
-printf '#include "value.hpp"\nint main() { return answer() == 42 ? 0 : 1; }\n' \
-    > "$TMP/driver-links/driver.cpp"
-( cd "$TMP/driver-links" && git add -A && git commit -qm driver ) >/dev/null 2>&1
-cmake -S "$TMP/driver-links" -B "$TMP/driver-links/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
-cmake --build "$TMP/driver-links/build" --target fixture_driver >/dev/null 2>&1
-LINKS=$( ( cd "$TMP/driver-links" && "$UNDER_TEST" \
-    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
-    --build-dir build --target fixture_subject \
-    --subject ./build/fixture_subject \
-    --test ./build/fixture_driver --jobs 2 \
-  ) >/dev/null 2>&1; echo $? )
-check "a driver that links the edited source, with a subject-only --target, is INCONCLUSIVE" 2 "$LINKS"
-# Control: the same project with the driver's own target (which also builds
-# the library) gets a real verdict.
-LINKS_OK=$( ( cd "$TMP/driver-links" && "$UNDER_TEST" \
-    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
-    --build-dir build --target fixture_driver \
-    --test ./build/fixture_driver --jobs 2 \
-  ) >/dev/null 2>&1; echo $? )
-check "the same driver with its own --target is CONFIRMED" 0 "$LINKS_OK"
-
-# The same refusal when the library is built with hidden visibility, which
-# turns its globals into local symbols of the linked driver.
-make_shellout_project "$TMP/driver-links-hidden"
-printf 'set_target_properties(fixture_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)\nadd_executable(fixture_driver driver.cpp)\ntarget_link_libraries(fixture_driver PRIVATE fixture_lib)\n' \
-    >> "$TMP/driver-links-hidden/CMakeLists.txt"
-printf '#include "value.hpp"\nint main() { return answer() == 42 ? 0 : 1; }\n' \
-    > "$TMP/driver-links-hidden/driver.cpp"
-( cd "$TMP/driver-links-hidden" && git add -A && git commit -qm driver ) >/dev/null 2>&1
-cmake -S "$TMP/driver-links-hidden" -B "$TMP/driver-links-hidden/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
-cmake --build "$TMP/driver-links-hidden/build" --target fixture_driver >/dev/null 2>&1
-HIDDEN=$( ( cd "$TMP/driver-links-hidden" && "$UNDER_TEST" \
-    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
-    --build-dir build --target fixture_subject \
-    --subject ./build/fixture_subject \
-    --test ./build/fixture_driver --jobs 2 \
-  ) >/dev/null 2>&1; echo $? )
-check "a driver that links a hidden-visibility copy of the edited source is INCONCLUSIVE" 2 "$HIDDEN"
-
-# Negative control: a driver that does NOT link the edited object but defines
-# local symbols with the same names (an anonymous-namespace helper, a static
-# function, a static constant) must still get a verdict. Locals mangle the
-# same way in every object, so matching on them would refuse ordinary runs.
-make_shellout_project "$TMP/driver-locals"
-printf 'add_executable(fixture_driver driver.cpp)\n' >> "$TMP/driver-locals/CMakeLists.txt"
-LOCAL_DEFS='namespace {
-__attribute__((used, noinline)) int helper() { return 1; }
+# ── Driver-link detection reads the build graph, under both generators ──────
+#
+# Inline functions and template instantiations from a header the driver and the
+# edited source both include are emitted into both objects, and Mach-O nm
+# prints them as strong "T". A symbol comparison therefore saw a link that did
+# not exist and refused every CLI shell-out run. The build graph has no such
+# ambiguity; these cases hold it to both answers and to failing closed.
+#
+# make_graph_project <root> <generator> <variant>...
+#   links            the driver links fixture_lib (and so value.cpp)
+#   no-driver-header the driver does not include shared.hpp
+#   own-value        the driver compiles its own, unrelated driver_src/value.cpp
+#   object           value.cpp embeds value_data.txt, the file a run edits
+#   custom-script    a custom command writes build/run.sh, which runs the driver
+make_graph_project() {
+    local root="$1" generator="$2"; shift 2
+    local links=0 driver_header=1 own_value=0 object=0 custom_script=0 variant
+    for variant in "$@"; do
+        case "$variant" in
+            links) links=1 ;;
+            no-driver-header) driver_header=0 ;;
+            own-value) own_value=1 ;;
+            object) object=1 ;;
+            custom-script) custom_script=1 ;;
+        esac
+    done
+    mkdir -p "$root/driver_src"
+    cat > "$root/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.20)
+project(confirm_failure_graph_fixture CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_library(fixture_lib value.cpp)
+add_executable(fixture_subject subject.cpp)
+target_link_libraries(fixture_subject PRIVATE fixture_lib)
+EOF
+    # The driver target builds the subject first, as a CLI shell-out suite's
+    # target builds the CLI it launches.
+    if [ "$own_value" -eq 1 ]; then
+        printf 'add_executable(fixture_driver driver.cpp driver_src/value.cpp)\n' >> "$root/CMakeLists.txt"
+        printf 'int driver_value() { return 5; }\n' > "$root/driver_src/value.cpp"
+    else
+        printf 'add_executable(fixture_driver driver.cpp)\n' >> "$root/CMakeLists.txt"
+    fi
+    printf 'add_dependencies(fixture_driver fixture_subject)\n' >> "$root/CMakeLists.txt"
+    [ "$links" -eq 1 ] &&
+        printf 'target_link_libraries(fixture_driver PRIVATE fixture_lib)\n' >> "$root/CMakeLists.txt"
+    if [ "$custom_script" -eq 1 ]; then
+        printf '#!/bin/sh\nexec ./build/fixture_driver\n' > "$root/run.sh.in"
+        cat >> "$root/CMakeLists.txt" <<'EOF'
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/run.sh
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/run.sh.in ${CMAKE_BINARY_DIR}/run.sh
+    DEPENDS ${CMAKE_SOURCE_DIR}/run.sh.in fixture_driver)
+add_custom_target(fixture_script ALL DEPENDS ${CMAKE_BINARY_DIR}/run.sh)
+EOF
+    fi
+    cat > "$root/shared.hpp" <<'EOF'
+#include <string>
+#include <vector>
+template <typename T> struct Box { T v; __attribute__((noinline)) T get() const { return v; } };
+inline __attribute__((noinline)) int shared_helper(int x) { return x * 3; }
+inline int use_shared(const std::string& s) {
+    std::vector<std::string> v{s};
+    Box<int> b{shared_helper(static_cast<int>(v.size()))};
+    return b.get();
 }
-__attribute__((used, noinline)) static int sfun() { return 2; }
-__attribute__((used)) static int kName = 3;
-'
-printf '%s' "$LOCAL_DEFS" >> "$TMP/driver-locals/value.cpp"
-{ printf '%s' "$LOCAL_DEFS"
-  printf '#include <cstdlib>\nint main() { return std::system("./build/fixture_subject") == 0 ? 0 : 1; }\n'
-} > "$TMP/driver-locals/driver.cpp"
-( cd "$TMP/driver-locals" && git add -A && git commit -qm driver ) >/dev/null 2>&1
-cmake -S "$TMP/driver-locals" -B "$TMP/driver-locals/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
-cmake --build "$TMP/driver-locals/build" --target fixture_driver >/dev/null 2>&1
-LOCALS=$( ( cd "$TMP/driver-locals" && "$UNDER_TEST" \
-    --file value.cpp --break "perl -pi -e 's/return 42;/return 7;/'" \
-    --build-dir build --target fixture_subject \
-    --subject ./build/fixture_subject \
-    --test ./build/fixture_driver --jobs 2 \
-  ) >/dev/null 2>&1; echo $? )
-check "a driver sharing only local symbol names with the edited source is CONFIRMED" 0 "$LOCALS"
+EOF
+    printf 'int answer();\n' > "$root/value.hpp"
+    if [ "$object" -eq 1 ]; then
+        printf '42\n' > "$root/value_data.txt"
+        cat > "$root/value.cpp" <<'EOF'
+#include "value.hpp"
+#include "shared.hpp"
+int answer() {
+    return use_shared("x") == 3 ?
+#include "value_data.txt"
+    : 0;
+}
+EOF
+    else
+        cat > "$root/value.cpp" <<'EOF'
+#include "value.hpp"
+#include "shared.hpp"
+int answer() { return use_shared("x") == 3 ? 42 : 0; }
+EOF
+    fi
+    printf '#include "value.hpp"\nint main() { return answer() == 42 ? 0 : 1; }\n' > "$root/subject.cpp"
+    if [ "$driver_header" -eq 1 ]; then
+        cat > "$root/driver.cpp" <<'EOF'
+#include <cstdlib>
+#include "shared.hpp"
+int main() {
+    if (use_shared("y") != 3) return 2;
+    return std::system("./build/fixture_subject") == 0 ? 0 : 1;
+}
+EOF
+    else
+        printf '#include <cstdlib>\nint main() { return std::system("./build/fixture_subject") == 0 ? 0 : 1; }\n' \
+            > "$root/driver.cpp"
+    fi
+    ( cd "$root" \
+      && git init -q . \
+      && git config user.email t@example.com \
+      && git config user.name test \
+      && git add -A \
+      && git commit -qm fixture ) >/dev/null 2>&1
+    cmake -G "$generator" -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+    cmake --build "$root/build" -j 2 >/dev/null 2>&1
+}
+
+# run_graph_under_test <root> <target> [--test <cmd>] [extra args...]
+run_graph_under_test() {
+    local root="$1" target="$2"; shift 2
+    local test_cmd="./build/fixture_driver"
+    if [ "${1:-}" = "--test" ]; then test_cmd="$2"; shift 2; fi
+    ( cd "$root" && "$UNDER_TEST" \
+        --file value.cpp --break "perl -pi -e 's/42 : 0/7 : 0/'" \
+        --build-dir build --target "$target" \
+        --subject ./build/fixture_subject \
+        --test "$test_cmd" --jobs 2 "$@" ) >/dev/null 2>&1
+    echo $?
+}
+
+# A header break: shared_helper feeds answer(), so the subject fails with it.
+run_header_under_test() {
+    local root="$1" target="$2"
+    ( cd "$root" && "$UNDER_TEST" \
+        --file shared.hpp --break "perl -pi -e 's/x \* 3/x * 4/'" \
+        --build-dir build --target "$target" \
+        --subject ./build/fixture_subject \
+        --test ./build/fixture_driver --jobs 2 ) >/dev/null 2>&1
+    echo $?
+}
+
+# Each line below needs a real generator; the parsers and driver selection
+# behind them are unit-tested over captured output in
+# test_confirm_failure_driver_link.py. Cases that do not depend on the
+# generator run once, under Unix Makefiles, which every host has.
+GENERATORS="Unix Makefiles"
+if command -v ninja >/dev/null 2>&1; then
+    GENERATORS="$GENERATORS|Ninja"
+else
+    printf '  skip Ninja graph cases: no ninja on PATH\n'
+fi
+IFS='|' read -r -a GENERATOR_LIST <<< "$GENERATORS"
+for generator in "${GENERATOR_LIST[@]}"; do
+    tag="$(printf '%s' "$generator" | tr 'A-Z ' 'a-z-')"
+
+    make_graph_project "$TMP/graph-shared-$tag" "$generator"
+    # Control: the shape really is the one that fooled nm - on Mach-O the
+    # edited object and the driver both carry the header's definitions as
+    # strong text symbols (ELF marks them weak, so the control is Mach-O only).
+    shared_obj="$(find "$TMP/graph-shared-$tag/build" -name 'value.cpp.o' | head -1)"
+    if [ "$(uname -s)" != Darwin ]; then
+        printf '  skip (%s) the Mach-O shared-symbol control on %s\n' "$generator" "$(uname -s)"
+    elif [ -n "$shared_obj" ] &&
+       nm "$shared_obj" | grep -q ' T __Z13shared_helperi$' &&
+       nm "$TMP/graph-shared-$tag/build/fixture_driver" | grep -q ' [Tt] __Z13shared_helperi$'; then
+        printf '  ok   (%s) the edited object and the driver share header symbols (control)\n' "$generator"
+    else
+        printf '  FAIL (%s) the shared-header fixture does not share symbols (control)\n' "$generator"
+        FAILURES=$((FAILURES + 1))
+    fi
+    check "($generator) a driver sharing only header definitions with the edited source is CONFIRMED" 0 \
+        "$(run_graph_under_test "$TMP/graph-shared-$tag" fixture_subject)"
+
+    make_graph_project "$TMP/graph-links-$tag" "$generator" links
+    check "($generator) a driver that links the edited source, with a subject-only --target, is INCONCLUSIVE" 2 \
+        "$(run_graph_under_test "$TMP/graph-links-$tag" fixture_subject)"
+    # A --target that rebuilds the driver makes the link harmless: the stale
+    # copy is relinked from the broken object, so the run gets a verdict.
+    check "($generator) a linking driver whose own target is --target is CONFIRMED" 0 \
+        "$(run_graph_under_test "$TMP/graph-links-$tag" fixture_driver)"
+
+    # The driver's own value.cpp shares the edited file's basename, so only
+    # the source match (build.make here, ninja's graph there) keeps it from
+    # reading as a link.
+    make_graph_project "$TMP/graph-own-value-$tag" "$generator" own-value
+    check "($generator) a driver compiling its own same-named source is CONFIRMED" 0 \
+        "$(run_graph_under_test "$TMP/graph-own-value-$tag" fixture_subject)"
+
+    # A build-dir file that no object is linked into (a custom command's
+    # output) may run anything, here the linking driver.
+    make_graph_project "$TMP/graph-script-$tag" "$generator" links custom-script
+    check "($generator) a custom-command script that runs the driver is INCONCLUSIVE" 2 \
+        "$(run_graph_under_test "$TMP/graph-script-$tag" fixture_subject --test "sh ./build/run.sh")"
+done
+
+MK="$TMP/graph-links-unix-makefiles"
+# A wrapper or a chain in front of the driver does not hide it, and a --test
+# with no binary from the build dir cannot be checked at all.
+check "a linking driver behind an env prefix is INCONCLUSIVE" 2 \
+    "$(run_graph_under_test "$MK" fixture_subject --test "env ./build/fixture_driver")"
+check "a linking driver chained after the subject is INCONCLUSIVE" 2 \
+    "$(run_graph_under_test "$MK" fixture_subject --test "./build/fixture_subject && ./build/fixture_driver")"
+check "ctest as --test with --subject is INCONCLUSIVE" 2 \
+    "$(run_graph_under_test "$MK" fixture_subject --test "ctest --test-dir build")"
+# The default target relinks every target, the driver included.
+check "(Unix Makefiles) a linking driver with --target all is CONFIRMED" 0 \
+    "$(run_graph_under_test "$MK" all)"
+
+# --object: the edited file is embedded into value.cpp's object. Named by its
+# path, the embedding source is matched exactly, so a driver compiling its
+# own value.cpp is not a link.
+run_object_under_test() {
+    ( cd "$1" && "$UNDER_TEST" \
+        --file value_data.txt --object value.cpp --break "perl -pi -e 's/42/7/'" \
+        --build-dir build --target fixture_subject \
+        --subject ./build/fixture_subject \
+        --test ./build/fixture_driver --jobs 2 ) >/dev/null 2>&1
+    echo $?
+}
+make_graph_project "$TMP/graph-object-own-value" "Unix Makefiles" object own-value
+check "--object with a driver compiling its own same-named source is CONFIRMED" 0 \
+    "$(run_object_under_test "$TMP/graph-object-own-value")"
+make_graph_project "$TMP/graph-object-links" "Unix Makefiles" object links
+check "--object with a driver that links the embedding object is INCONCLUSIVE" 2 \
+    "$(run_object_under_test "$TMP/graph-object-links")"
+
+# The Makefile lane records no header dependencies, so a header edit cannot be
+# checked there.
+check "(Unix Makefiles) a header edit with --subject is INCONCLUSIVE" 2 \
+    "$(run_header_under_test "$TMP/graph-shared-unix-makefiles" fixture_subject)"
+# Without the driver's link.txt the graph cannot say what it links.
+rm -f "$TMP/graph-shared-unix-makefiles/build/CMakeFiles/fixture_driver.dir/link.txt"
+check "(Unix Makefiles) an unreadable graph (no link.txt) is INCONCLUSIVE" 2 \
+    "$(run_graph_under_test "$TMP/graph-shared-unix-makefiles" fixture_subject)"
+
+if command -v ninja >/dev/null 2>&1; then
+    # A header edit reaches every object that includes it, which ninja's
+    # dependency log records.
+    check "(Ninja) a header the driver includes is INCONCLUSIVE" 2 \
+        "$(run_header_under_test "$TMP/graph-shared-ninja" fixture_subject)"
+    make_graph_project "$TMP/graph-nohdr-ninja" Ninja no-driver-header
+    check "(Ninja) a header the driver does not include is CONFIRMED" 0 \
+        "$(run_header_under_test "$TMP/graph-nohdr-ninja" fixture_subject)"
+    # Without the dependency log, whether the driver includes it is unknown.
+    rm -f "$TMP/graph-nohdr-ninja/build/.ninja_deps"
+    check "(Ninja) a header with no dependency log is INCONCLUSIVE" 2 \
+        "$(run_header_under_test "$TMP/graph-nohdr-ninja" fixture_subject)"
+    # No ninja to read build.ninja with: the question is unanswerable, so the
+    # run must refuse rather than assume the driver links nothing.
+    check "(Ninja) an unreadable graph (no ninja) is INCONCLUSIVE" 2 \
+        "$(CONFIRM_FAILURE_NINJA=/nonexistent/ninja \
+           run_graph_under_test "$TMP/graph-shared-ninja" fixture_subject)"
+    # A crash inside the check (here, ninja output that is not text) must not
+    # read as "the driver links nothing".
+    printf '#!/bin/sh\nprintf "\\377\\376\\n"\n' > "$TMP/garbage-ninja"
+    chmod +x "$TMP/garbage-ninja"
+    check "(Ninja) a crash in the link check is INCONCLUSIVE" 2 \
+        "$(CONFIRM_FAILURE_NINJA="$TMP/garbage-ninja" \
+           run_graph_under_test "$TMP/graph-shared-ninja" fixture_subject)"
+fi
 
 # An INCONCLUSIVE exit must not leave the subject built from broken source.
 # Only the --test binary used to be invalidated on restore, so the next run's
@@ -507,7 +740,7 @@ STALE=$( ( cd "$TMP/shellout-stale" && "$UNDER_TEST" \
     --break "perl -pi -e 's/no_such_text/x/'" \
     --build-dir build --target fixture_subject \
     --subject ./build/fixture_subject \
-    --test "sh ./run_test.sh" --jobs 2 \
+    --test ./build/fixture_subject --jobs 2 \
   ) >/dev/null 2>&1; echo $? )
 check "a no-op break with --subject is INCONCLUSIVE" 2 "$STALE"
 if [ -e "$TMP/shellout-stale/build/fixture_subject" ]; then

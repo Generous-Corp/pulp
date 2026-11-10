@@ -183,6 +183,12 @@ if(TARGET pulp-inspect-authoring)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-authoring)
 endif()
 
+# The native surface (integrations/pulp-native) for an editor that brings its
+# own renderer: MetalSurface, FramePump and input translation. macOS only.
+if(TARGET pulp-native)
+    list(APPEND PULP_SDK_TARGETS pulp-native)
+endif()
+
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
 # CMake exports the canvas target through PulpTargets, and refuses unless
 # every PRIVATE-linked dependency is also in the export set.
@@ -365,6 +371,12 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
     endif()
 endforeach()
 unset(_pulp_sdk_header_subsystems)
+
+if(TARGET pulp-native)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-native/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
 
 # GraphEditorView is an audio-UI header kept outside view-core, while retaining
 # its public pulp/view/widgets include path for installed consumers.

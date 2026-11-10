@@ -63,7 +63,7 @@ if(APPLE AND PULP_HAS_CLAP AND TARGET PulpGain_CLAP AND TARGET PulpEffect_CLAP)
     set(_pulp_coload_classes
         PulpView PulpWindowDelegate PulpAppDelegate PulpMenuCommandTarget
         PulpPluginView PulpAccessibilityElement PulpWindowAccessibilityElement
-        PulpAccessibilityHostLifetime PulpTextAccessibilityElement PulpFileDragSource)
+        PulpAccessibilityHostLifetime PulpTextAccessibilityElement)
     add_test(NAME mac-objc-coload-PulpGain-PulpEffect
         COMMAND pulp-mac-objc-coload-probe
             $<TARGET_FILE:PulpGain_CLAP> PulpGain_CLAP
