@@ -483,7 +483,7 @@ TEST_CASE("G5 graph-authored lane recovers after cursor exhaustion",
     REQUIRE(lane.begin_sample(0) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_consumer() == GraphEventResult::Accepted);
     REQUIRE(lane.end_sample() == GraphEventResult::Accepted);
-    REQUIRE(lane.end_block() == GraphEventResult::OutOfRange);
+    REQUIRE(lane.end_block() == GraphEventResult::ClockExhausted);
     REQUIRE_FALSE(lane.active());
     REQUIRE(lane.reset(2) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_block(2, 0, 1) == GraphEventResult::Accepted);
@@ -492,6 +492,26 @@ TEST_CASE("G5 graph-authored lane recovers after cursor exhaustion",
     REQUIRE(lane.end_sample() == GraphEventResult::Accepted);
     REQUIRE(lane.end_block() == GraphEventResult::Accepted);
     REQUIRE(lane.counters().cursor == 1);
+}
+
+TEST_CASE("G5 graph-authored lane refuses reused epochs and far-future budget aliasing",
+          "[host][graph][g5][events][negative-control]") {
+    GraphAuthoredEventLane<4> lane;
+    REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
+    REQUIRE(lane.reset(1) == GraphEventResult::StaleEpoch);
+    REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);
+    REQUIRE(lane.begin_producer_block() == GraphEventResult::Accepted);
+    for (std::uint16_t payload = 0; payload < 8; ++payload)
+        REQUIRE(lane.emit_at(1, 7, payload, 0) == GraphEventResult::Accepted);
+    // This target is outside the fixed current/look-ahead arena. It is refused
+    // without consuming sample zero's remaining attempt budget.
+    REQUIRE(lane.emit_at(1, 7, 99, 100) == GraphEventResult::Future);
+    REQUIRE(lane.emit_at(1, 7, 100, 0) == GraphEventResult::Overflow);
+    REQUIRE(lane.counters().attempts == 9);
+    REQUIRE(lane.begin_consumer_block() == GraphEventResult::Accepted);
+    REQUIRE(lane.end_block() == GraphEventResult::Accepted);
+    REQUIRE(lane.reset(2) == GraphEventResult::Accepted);
+    REQUIRE(lane.reset(1) == GraphEventResult::StaleEpoch);
 }
 
 TEST_CASE("G5 graph-authored lane queues one-block lookahead with stable ordering",
