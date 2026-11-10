@@ -9,6 +9,7 @@ if(TARGET pulp-host)
     pulp_add_test_group(pulp-test-group-trigger-graph LIBRARIES pulp::host)
     pulp_add_test_suite(pulp-test-trigger-graph GROUP pulp-test-group-trigger-graph
         SOURCES test_trigger_graph.cpp test_g5_host_event_contract.cpp
+                test_g5_graph_event_rt.cpp
                 harness/rt_allocation_probe.cpp LIBRARIES pulp::host
         PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 endif()
