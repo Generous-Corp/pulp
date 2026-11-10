@@ -12,6 +12,9 @@ bindings, wrong authored paths, aliased slot state, stale deferred generations,
 and disconnected or swapped stereo slot endpoints. The installed consumer also
 fills all 128 distinct tracker keys, requires a typed atomic refusal for the
 129th, releases one physical key, and proves a retry renders the new note.
+It also fills the tracker, applies same-sample CC120 or CC123, then starts a new
+note; each channel-mode control must free the addressed physical-key records
+before the capacity preflight decides whether the new note fits.
 Polyphonic key pressure is refused before note or output mutation because this
 bounded MIDI path does not route it; channel pressure remains supported.
 The numeric first-sample oracle observes `sample3=-0.353553`, `sample10=0`.
