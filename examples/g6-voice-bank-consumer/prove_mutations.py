@@ -49,6 +49,16 @@ MUTATIONS = {
         "(void)note;",
         "finite-release-reclaimed",
     ),
+    "skip_tracker_capacity_refusal": (
+        "if (free == membership.end()) return refuse(VoiceBankBindingCode::TrackerCapacity);",
+        "if (free == membership.end()) continue;",
+        "capacity-typed-refusal",
+    ),
+    "silently_accept_poly_pressure": (
+        "const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xd0 ||",
+        "const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xa0 || kind == 0xd0 ||",
+        "poly-pressure-typed-refusal",
+    ),
 }
 
 

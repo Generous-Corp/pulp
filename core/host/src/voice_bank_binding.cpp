@@ -283,6 +283,12 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
     std::size_t count = 0;
     if (impl_->ingress.project(impl_->projected, count) != HostEventResult::Accepted)
         return VoiceBankBindingCode::IngressFailure;
+    const auto refuse = [&](VoiceBankBindingCode code) {
+        impl_->ingress.rollback_projection();
+        (void)impl_->ingress.end_block();
+        impl_->block_open = false;
+        return code;
+    };
     // Refuse unsupported MIDI before any slot or output is changed. Pedal and
     // channel-mode semantics need the separate G5 sustain bridge and are not
     // silently interpreted as ordinary tracker input here.
@@ -297,16 +303,38 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
         const bool in_zone = config.zone_for_channel(channel) ||
                              (channel == 0 && config.lower_zone.member_channels != 0) ||
                              (channel == 15 && config.upper_zone.member_channels != 0);
-        const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xa0 || kind == 0xd0 ||
+        const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xd0 ||
                                kind == 0xe0 || (kind == 0xb0 && size == 3 && bytes[1] == 74);
         const std::size_t expected_size = kind == 0xd0 ? 2 : 3;
         const bool valid_bytes = size == expected_size && (bytes[1] & 0x80) == 0 &&
                                  (size == 2 || (bytes[2] & 0x80) == 0);
-        if (record.has_ump || !in_zone || !supported || !valid_bytes) {
-            impl_->ingress.rollback_projection();
-            (void)impl_->ingress.end_block();
-            impl_->block_open = false;
-            return VoiceBankBindingCode::IngressFailure;
+        if (record.has_ump || !in_zone || !supported || !valid_bytes ||
+            ((kind == 0x80 || kind == 0x90) &&
+             ((channel == 0 && config.lower_zone.member_channels != 0) ||
+              (channel == 15 && config.upper_zone.member_channels != 0))))
+            return refuse(VoiceBankBindingCode::IngressFailure);
+    }
+    // The tracker can hold 128 distinct physical keys even while the audio
+    // allocator keeps only eight sounding voices. Preview the complete block
+    // in event order so a full table refuses before any output or voice changes.
+    std::array<std::uint16_t, midi::MpeVoiceTracker::kMaxNotes> membership{};
+    for (std::size_t i = 0; i < membership.size(); ++i) {
+        const auto& note = impl_->tracker.slots()[i];
+        if (note.active)
+            membership[i] = static_cast<std::uint16_t>(1u + (note.channel << 7) + note.note);
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto& message = impl_->projected[index].midi;
+        if (!message.is_note_on() && !message.is_note_off()) continue;
+        const auto key = static_cast<std::uint16_t>(1u + (message.channel() << 7) +
+                                                    message.note());
+        const auto matching = std::find(membership.begin(), membership.end(), key);
+        if (message.is_note_off() || message.velocity() == 0) {
+            if (matching != membership.end()) *matching = 0;
+        } else if (matching == membership.end()) {
+            const auto free = std::find(membership.begin(), membership.end(), 0);
+            if (free == membership.end()) return refuse(VoiceBankBindingCode::TrackerCapacity);
+            *free = key;
         }
     }
     const auto failures_before = impl_->graph.routed_only_execution_failures();

@@ -114,6 +114,83 @@ void check_state_and_generation() {
           "stale-epoch-refusal");
 }
 
+void check_capacity_and_poly_pressure() {
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    check(static_cast<bool>(bank), "capacity-prepare");
+    for (std::uint32_t slot = 1; slot < 8; ++slot)
+        check(bank->set_slot_parameter(slot, "level", 0.0f), "capacity-silent-slot");
+    for (std::uint64_t sample = 0; sample < 128; ++sample) {
+        check(bank->begin_block(sample, 1) == HostEventResult::Accepted, "capacity-begin");
+        check(bank->publish(event(bank->epoch(), sample, 1,
+                                  midi::MidiEvent::note_on(1,
+                                                           static_cast<std::uint8_t>(sample),
+                                                           127))) == HostEventResult::Accepted,
+              "capacity-fill");
+        audio::Buffer<float> buffer(2, 1);
+        auto view = buffer.view();
+        check(bank->render(view, sample, 1) == VoiceBankBindingCode::Ok,
+              "capacity-fill-render");
+    }
+    const auto generation = owner(*bank).allocator().voice(0).note_id();
+    check(bank->begin_block(128, 1) == HostEventResult::Accepted, "capacity-overflow-begin");
+    check(bank->publish(event(bank->epoch(), 128, 1,
+                              midi::MidiEvent::note_on(2, 0, 127))) ==
+              HostEventResult::Accepted,
+          "capacity-overflow-publish");
+    audio::Buffer<float> overflow(2, 1);
+    overflow.channel(0)[0] = overflow.channel(1)[0] = 7.0f;
+    auto overflow_view = overflow.view();
+    check(bank->render(overflow_view, 128, 1) == VoiceBankBindingCode::TrackerCapacity,
+          "capacity-typed-refusal");
+    check(overflow.channel(0)[0] == 7.0f && overflow.channel(1)[0] == 7.0f,
+          "capacity-output-untouched");
+    check(owner(*bank).allocator().voice(0).note_id() == generation,
+          "capacity-generation-untouched");
+    check(bank->begin_block(129, 1) == HostEventResult::Accepted, "capacity-release-begin");
+    check(bank->publish(event(bank->epoch(), 129, 1, midi::MidiEvent::note_off(1, 0))) ==
+              HostEventResult::Accepted,
+          "capacity-release");
+    audio::Buffer<float> released(2, 1);
+    auto released_view = released.view();
+    check(bank->render(released_view, 129, 1) == VoiceBankBindingCode::Ok,
+          "capacity-release-render");
+    check(bank->begin_block(130, 1) == HostEventResult::Accepted, "capacity-retry-begin");
+    check(bank->publish(event(bank->epoch(), 130, 1,
+                              midi::MidiEvent::note_on(2, 0, 127))) ==
+              HostEventResult::Accepted,
+          "capacity-retry-publish");
+    audio::Buffer<float> resumed(2, 1);
+    auto resumed_view = resumed.view();
+    check(bank->render(resumed_view, 130, 1) == VoiceBankBindingCode::Ok,
+          "capacity-retry-render");
+    check(owner(*bank).allocator().voice(0).channel() == 2 &&
+              owner(*bank).allocator().voice(0).note_number() == 0 &&
+              owner(*bank).allocator().voice(0).note_id() == 129 &&
+              resumed.channel(0)[0] == -0.125f,
+          "capacity-recovered-audio");
+
+    auto pressure = make_bank(schema(), status);
+    check(static_cast<bool>(pressure), "pressure-prepare");
+    check(pressure->begin_block(0, 1) == HostEventResult::Accepted, "pressure-begin");
+    check(pressure->publish(event(pressure->epoch(), 0, 1,
+                                  midi::MidiEvent::note_on(1, 69, 127))) ==
+              HostEventResult::Accepted,
+          "pressure-note");
+    check(pressure->publish(event(pressure->epoch(), 0, 2,
+                                  midi::MidiEvent::poly_pressure(1, 69, 127))) ==
+              HostEventResult::Accepted,
+          "poly-pressure-publish");
+    audio::Buffer<float> refused(2, 1);
+    refused.channel(0)[0] = refused.channel(1)[0] = 7.0f;
+    auto refused_view = refused.view();
+    check(pressure->render(refused_view, 0, 1) == VoiceBankBindingCode::IngressFailure,
+          "poly-pressure-typed-refusal");
+    check(owner(*pressure).allocator().active_count() == 0 &&
+              refused.channel(0)[0] == 7.0f && refused.channel(1)[0] == 7.0f,
+          "poly-pressure-atomic-refusal");
+}
+
 class AliasedOwner final : public VoiceBankOwner {
   public:
     AliasedOwner()
@@ -176,6 +253,7 @@ int main() {
         }
         check_steal_policies();
         check_state_and_generation();
+        check_capacity_and_poly_pressure();
         VoiceBankBindingResult status;
         auto malformed = schema();
         malformed.bindings[0].target = "unbound-note-port";

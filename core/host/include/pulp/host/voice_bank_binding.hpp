@@ -117,6 +117,7 @@ enum class VoiceBankBindingCode : std::uint8_t {
     StaleEpoch,
     StaleGeneration,
     EpochExhausted,
+    TrackerCapacity,
 };
 
 struct VoiceBankBindingResult {

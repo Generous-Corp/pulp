@@ -7,7 +7,12 @@ four-frame release against an independent scalar oracle over the same absolute
 MIDI timeline at block sizes 1, 32, 64, 127, and 256, then checks four ninth-note
 steal victims and release reclamation. It refuses unknown note/expression
 bindings, wrong authored paths, aliased slot state, stale deferred generations,
-and disconnected or swapped stereo slot endpoints. The numeric first-sample
+and disconnected or swapped stereo slot endpoints. The installed consumer also
+fills all 128 distinct tracker keys, requires a typed atomic refusal for the
+129th, releases one physical key, and proves a retry renders the new note.
+Polyphonic key pressure is refused before note or output mutation because this
+bounded MIDI path does not route it; channel pressure remains supported.
+The numeric first-sample
 oracle observes `sample3=-0.125`, `sample6=-0.11125`, and `sample10=0`.
 
 `prove_mutations.py --sdk-prefix <installed-sdk> --scratch <build-directory>`

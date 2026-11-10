@@ -323,3 +323,140 @@ TEST_CASE("G6 named Processor parameters remain independent between slots",
     CHECK(first_sample(1, 2.0f) == baseline);
     CHECK(first_sample(0, 2.0f) == baseline * 2.0f);
 }
+
+TEST_CASE("G6 tracker capacity refuses 129th distinct start atomically and recovers",
+          "[host][graph][g6][ingress][capacity]") {
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    REQUIRE(bank);
+    for (std::uint32_t slot = 1; slot < 8; ++slot)
+        REQUIRE(bank->set_slot_parameter(slot, "level", 0.0f));
+    for (std::uint64_t sample = 0; sample < 128; ++sample) {
+        REQUIRE(bank->begin_block(sample, 1) == HostEventResult::Accepted);
+        REQUIRE(bank->publish(event(bank->epoch(), sample, 1,
+                                    midi::MidiEvent::note_on(1, static_cast<std::uint8_t>(sample),
+                                                             127))) == HostEventResult::Accepted);
+        audio::Buffer<float> buffer(2, 1);
+        auto view = buffer.view();
+        REQUIRE(bank->render(view, sample, 1) == VoiceBankBindingCode::Ok);
+    }
+    CHECK(owner(*bank).allocator().steal_count() == 120);
+    const auto generation = owner(*bank).allocator().voice(0).note_id();
+    REQUIRE(bank->begin_block(128, 1) == HostEventResult::Accepted);
+    REQUIRE(bank->publish(event(bank->epoch(), 128, 1,
+                                midi::MidiEvent::note_on(2, 0, 127))) ==
+            HostEventResult::Accepted);
+    audio::Buffer<float> refused(2, 1);
+    refused.channel(0)[0] = 7.0f;
+    refused.channel(1)[0] = 7.0f;
+    auto view = refused.view();
+    CHECK(bank->render(view, 128, 1) == VoiceBankBindingCode::TrackerCapacity);
+    CHECK(refused.channel(0)[0] == 7.0f);
+    CHECK(refused.channel(1)[0] == 7.0f);
+    CHECK(owner(*bank).allocator().voice(0).note_id() == generation);
+    CHECK(owner(*bank).allocator().steal_count() == 120);
+    REQUIRE(bank->begin_block(129, 1) == HostEventResult::Accepted);
+    REQUIRE(bank->publish(event(bank->epoch(), 129, 1,
+                                midi::MidiEvent::note_off(1, 0))) == HostEventResult::Accepted);
+    audio::Buffer<float> released(2, 1);
+    auto released_view = released.view();
+    REQUIRE(bank->render(released_view, 129, 1) == VoiceBankBindingCode::Ok);
+    REQUIRE(bank->begin_block(130, 1) == HostEventResult::Accepted);
+    REQUIRE(bank->publish(event(bank->epoch(), 130, 1,
+                                midi::MidiEvent::note_on(2, 0, 127))) ==
+            HostEventResult::Accepted);
+    audio::Buffer<float> resumed(2, 1);
+    auto resumed_view = resumed.view();
+    REQUIRE(bank->render(resumed_view, 130, 1) == VoiceBankBindingCode::Ok);
+    CHECK(owner(*bank).allocator().voice(0).note_id() != generation);
+    CHECK(owner(*bank).allocator().voice(0).note_id() == 129);
+    CHECK(owner(*bank).allocator().voice(0).channel() == 2);
+    CHECK(owner(*bank).allocator().voice(0).note_number() == 0);
+    CHECK(resumed.channel(0)[0] == -0.125f);
+}
+
+TEST_CASE("G6 capacity preview respects retrigger and equal-sample event order",
+          "[host][graph][g6][ingress][capacity]") {
+    auto filled = [] {
+        VoiceBankBindingResult status;
+        auto bank = make_bank(schema(), status);
+        REQUIRE(bank);
+        for (std::uint64_t sample = 0; sample < 128; ++sample) {
+            REQUIRE(bank->begin_block(sample, 1) == HostEventResult::Accepted);
+            REQUIRE(bank->publish(event(bank->epoch(), sample, 1,
+                                        midi::MidiEvent::note_on(1,
+                                                                 static_cast<std::uint8_t>(sample),
+                                                                 127))) ==
+                    HostEventResult::Accepted);
+            audio::Buffer<float> buffer(2, 1);
+            auto view = buffer.view();
+            REQUIRE(bank->render(view, sample, 1) == VoiceBankBindingCode::Ok);
+        }
+        return bank;
+    };
+    auto retrigger = filled();
+    REQUIRE(retrigger->begin_block(128, 1) == HostEventResult::Accepted);
+    REQUIRE(retrigger->publish(event(retrigger->epoch(), 128, 1,
+                                     midi::MidiEvent::note_on(1, 127, 100))) ==
+            HostEventResult::Accepted);
+    audio::Buffer<float> retrigger_audio(2, 1);
+    auto retrigger_view = retrigger_audio.view();
+    CHECK(retrigger->render(retrigger_view, 128, 1) == VoiceBankBindingCode::Ok);
+
+    auto off_on = filled();
+    REQUIRE(off_on->begin_block(128, 1) == HostEventResult::Accepted);
+    REQUIRE(off_on->publish(event(off_on->epoch(), 128, 1,
+                                  midi::MidiEvent::note_off(1, 0))) == HostEventResult::Accepted);
+    REQUIRE(off_on->publish(event(off_on->epoch(), 128, 2,
+                                  midi::MidiEvent::note_on(2, 0, 127))) ==
+            HostEventResult::Accepted);
+    audio::Buffer<float> off_on_audio(2, 1);
+    auto off_on_view = off_on_audio.view();
+    CHECK(off_on->render(off_on_view, 128, 1) == VoiceBankBindingCode::Ok);
+
+    auto on_off = filled();
+    const auto generation = owner(*on_off).allocator().voice(0).note_id();
+    REQUIRE(on_off->begin_block(128, 1) == HostEventResult::Accepted);
+    REQUIRE(on_off->publish(event(on_off->epoch(), 128, 1,
+                                  midi::MidiEvent::note_on(2, 0, 127))) ==
+            HostEventResult::Accepted);
+    REQUIRE(on_off->publish(event(on_off->epoch(), 128, 2,
+                                  midi::MidiEvent::note_off(1, 0))) == HostEventResult::Accepted);
+    audio::Buffer<float> on_off_audio(2, 1);
+    on_off_audio.channel(0)[0] = 7.0f;
+    auto on_off_view = on_off_audio.view();
+    CHECK(on_off->render(on_off_view, 128, 1) == VoiceBankBindingCode::TrackerCapacity);
+    CHECK(on_off_audio.channel(0)[0] == 7.0f);
+    CHECK(owner(*on_off).allocator().voice(0).note_id() == generation);
+}
+
+TEST_CASE("G6 polyphonic pressure refuses before note or output mutation",
+          "[host][graph][g6][ingress]") {
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    REQUIRE(bank);
+    REQUIRE(bank->begin_block(0, 1) == HostEventResult::Accepted);
+    REQUIRE(bank->publish(event(bank->epoch(), 0, 1, midi::MidiEvent::note_on(1, 69, 127))) ==
+            HostEventResult::Accepted);
+    REQUIRE(bank->publish(event(bank->epoch(), 0, 2,
+                                midi::MidiEvent::poly_pressure(1, 69, 127))) ==
+            HostEventResult::Accepted);
+    audio::Buffer<float> buffer(2, 1);
+    buffer.channel(0)[0] = 7.0f;
+    buffer.channel(1)[0] = 7.0f;
+    auto view = buffer.view();
+    CHECK(bank->render(view, 0, 1) == VoiceBankBindingCode::IngressFailure);
+    CHECK(owner(*bank).allocator().active_count() == 0);
+    CHECK(buffer.channel(0)[0] == 7.0f);
+    CHECK(buffer.channel(1)[0] == 7.0f);
+    REQUIRE(bank->begin_block(1, 1) == HostEventResult::Accepted);
+    REQUIRE(bank->publish(event(bank->epoch(), 1, 1, midi::MidiEvent::note_on(1, 69, 127))) ==
+            HostEventResult::Accepted);
+    REQUIRE(bank->publish(event(bank->epoch(), 1, 2,
+                                midi::MidiEvent{choc::midi::ShortMessage(0xd1, 127, 0), 0,
+                                                0.0})) == HostEventResult::Accepted);
+    audio::Buffer<float> positive(2, 1);
+    auto positive_view = positive.view();
+    REQUIRE(bank->render(positive_view, 1, 1) == VoiceBankBindingCode::Ok);
+    CHECK(owner(*bank).allocator().voice(0).pressure() == 1.0f);
+}
