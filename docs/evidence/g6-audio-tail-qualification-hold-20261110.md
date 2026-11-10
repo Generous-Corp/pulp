@@ -3,7 +3,7 @@
 ## Exact base and disposition
 
 This bounded audit starts from `origin/main` at
-`448057ec9ea569c6b75809251dbd356074c0201a` in a fresh classified worktree.
+`d8cae12b3ae3e95941dc84fd6c52fc8b621921ed` in a fresh classified worktree.
 Disposition: **HOLD; no runtime/API change and no duplicate G-5 work**.
 
 The existing G-6 allocator consumer is a useful control probe, but it is
