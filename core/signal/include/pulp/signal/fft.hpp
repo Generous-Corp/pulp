@@ -154,6 +154,34 @@ inline bool checked_fft_retained_bytes(std::uint64_t fft_size,
     return true;
 }
 
+// Conventions (pinned by test/test_fft_scaling_contract.cpp, which runs against
+// every backend a host can build):
+//
+//   forward():  X[k] = sum_n x[n] e^(-2 pi i k n / N)          not scaled
+//   inverse():  x[n] = (1/N) sum_k X[k] e^(+2 pi i k n / N)    scaled by 1/N
+//
+// The exponent is negative going forward, so inverse(forward(x)) returns x. Data
+// is natural order, interleaved complex (re, im), transformed in place, with bin
+// 0 first and N/2 the Nyquist bin; sizes are powers of two. A caller that wants
+// the textbook unscaled inverse multiplies inverse()'s result by N. That is
+// exact for a power-of-two N (1/N and N only move the exponent), so it changes
+// no rounding. The real-input entry points take their scale as an argument; the
+// default is 1 forward and 1/N inverse, the same convention.
+//
+// Determinism: one binary gives the same bits on every run and for every
+// instance, and the results for an impulse, a constant and an alternating
+// signal are exact. Bit-identical results across backends (vDSP, muFFT, the
+// built-in transform) or platforms are NOT promised for general data; they agree
+// to float rounding. Measured at N = 128 over 200 random inputs on arm64, the
+// float backends differ from each other by at most 3.8e-6 absolute (1.4e-7 of
+// the largest bin) forward and 4.8e-7 (4.8e-7 of the peak) inverse, and most
+// output values differ in their last bits. Compare backends with a tolerance,
+// not memcmp. A caller that needs one fixed arithmetic (for example to quantise
+// the output and compare bytes) should pin a backend for the whole binary:
+// FftT<double> always runs the built-in radix-2 transform, and a float build
+// defining PULP_FFT_FORCE_PORTABLE and PULP_FFT_FORCE_BUILTIN does too. Even
+// then, equal bits across compilers and libm versions are not measured here.
+
 // Radix-2 FFT — in-place, decimation-in-time.
 // Size must be a power of 2.
 // Float transforms use vDSP on Apple and muFFT elsewhere (see the backend

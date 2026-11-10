@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <span>
 
 namespace pulp::host {
@@ -93,6 +94,33 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         }
     } graph_event_guard{cg->graph_event_lane};
     if (cg->graph_event_lane) {
+        // A host seek/discontinuity retires the old pending ring before the
+        // next callback. Keep the event clock in the host's absolute sample
+        // domain when the transport supplies one, and advance the activation
+        // epoch so borrowed writers from the retired block become stale.
+        if (transport && transport->should_reset_stream_history()) {
+            if (transport->position_samples < 0 ||
+                cg->graph_event_epoch == std::numeric_limits<std::uint64_t>::max()) {
+                for (std::size_t c = 0; c < output.num_channels(); ++c)
+                    std::memset(output.channel_ptr(c), 0,
+                                sizeof(float) * static_cast<std::size_t>(num_samples));
+                return;
+            }
+            const auto next_epoch = cg->graph_event_epoch + 1;
+            const auto reset = cg->graph_event_lane->reset(
+                next_epoch, static_cast<std::uint64_t>(transport->position_samples));
+            if (reset != GraphEventResult::Accepted) {
+                for (std::size_t c = 0; c < output.num_channels(); ++c)
+                    std::memset(output.channel_ptr(c), 0,
+                                sizeof(float) * static_cast<std::size_t>(num_samples));
+                return;
+            }
+            cg->graph_event_epoch = next_epoch;
+            for (auto& context : cg->routed.serial.custom_ctx)
+                context.graph_event_epoch = next_epoch;
+            for (auto& context : cg->routed.parallel.custom_ctx)
+                context.graph_event_epoch = next_epoch;
+        }
         const auto result = cg->graph_event_lane->begin_block(
             cg->graph_event_epoch, cg->graph_event_lane->counters().cursor,
             static_cast<std::size_t>(num_samples));

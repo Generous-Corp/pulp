@@ -194,18 +194,24 @@ Or run: `./tools/build-skia.sh <platform>` to build from source.
 | `skia-build-linux-x64-gpu-release.zip` | `74c31d020cd18f1f9e544b1d8440bcc293e82982e50a9777a3940d84e2ccd666` |
 | `manifest-key-mac-arm64--skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
 | `skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
-| `skia-build-mac-x86_64-gpu-release.zip` | `2a795f54bb22feb46a499d56740f98a15b6e95bfdf5923b82b222ef95edb2f47` |
+| `manifest-key-mac-x86_64--skia-build-mac-universal-gpu-release.zip` | `dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250` |
 | `skia-build-wasm-wasm32-gpu-release.zip` | `a3382b3a53d13780667f7db9d9969c42d531451e55de35faaadf4e62f64ce357` |
 | `skia-build-win-arm64-gpu-release.zip` | `d2586d3ae1d3a1103aa87dda5afecfed2ced7be82d0276f6b9a15fd034d9a5c7` |
 | `skia-build-win-x64-gpu-release.zip` | `a23b3fc4f75eda3420ec7de70cbc68307be6f4fed37d004f43e9bb1ea81e5854` |
 
-The manifest's `mac-arm64` selector uses the universal archive, so its cache
-oracle row above intentionally carries the universal digest. The release also
+The manifest's `mac-arm64` and `mac-x86_64` selectors both use the universal
+archive, so their cache oracle rows above intentionally carry the universal
+digest. gpu-runtime's renderer lock pins that one macOS asset, and Pulp's macOS
+device layer forwards to gpu-runtime for every architecture, so an Intel build
+must resolve the same archive; the linker takes its x86_64 slice. That slice's
+object files are byte-identical to the thin x86_64 archive's (the two `.a`
+files differ only in `ar` member timestamps). The release also
 publishes these non-fetcher assets, whose GitHub asset digests were audited:
 
 | Published asset | SHA-256 |
 |-----------------|---------|
 | skia-build-mac-arm64-gpu-release.zip | `20735644dc7c65c71522a4d2b303f19fcd236c2e24468759daa86c7829c39edb` |
+| skia-build-mac-x86_64-gpu-release.zip | `2a795f54bb22feb46a499d56740f98a15b6e95bfdf5923b82b222ef95edb2f47` |
 | skia-build-visionos-device-arm64-gpu-release.zip | `6eaee60b606254890209ac73f73e22479e9d6877a28ffdcc99e69aa05e4ab751` |
 | skia-build-visionos-simulator-arm64-gpu-release.zip | `b506044cfe7a8500727fe787ad00b309fd512ad65f6d35de161608a4c0e4b1f0` |
 | skia-build-win-x64-gpu-debug.zip | `d7b6255332b92167b9ec6a00cbab020f7518f1fa88a768b07c21ce17fbb06340` |
