@@ -53,3 +53,39 @@ only the affected branch from its cutoff; reset is required for reuse.
 Coverage status is PARTIAL. The C++ API is executable; notation/catalog authoring,
 full callback timing qualification and the complete production-mutation matrix
 must be tracked separately in `docs/graph-program-status/G-10-routed.md`.
+
+## Finite two-asset source
+
+`add_spectral_asset_morph_v1(asset_a, asset_b, source_samples, name)` owns two
+validated canonical codec streams. It accepts profile 1, mono, FFT 256/hop 64,
+matching exact sample-rate bits and matching frame grids. For positive length L,
+each stream has exactly `ceil((L+192)/64)` frames starting at origin -192.
+The codec does not store original length: the caller supplies the same original
+length for both assets. Calls that reject leave authoring unchanged.
+
+Connect one direct host `AudioInput` output to the returned named `morph` Audio
+input and connect `frames` to existing typed synthesis, optionally through
+identity or real-mask stages. Each absolute hop uses the mean of its 64 live
+control samples, independently of callback partition. Every consumed sample
+must be finite and in [0,1]; invalid control terminates the affected branch at
+the failing frame's absolute origin. Magnitudes interpolate linearly and phases
+follow the shortest arc using the same mean. DC/Nyquist retain real-only values
+with the existing morph DSP's sign selection policy.
+
+The source publishes four zero drain frames after the stored frames, including
+their windows in synthesis normalization. `render_frames` is the exclusive
+finite audio cutoff, including exactly 320 initial silent samples. Rendering
+beyond it returns silence without additional frame synthesis or missing-frame
+diagnostics. Reset restarts both assets and hop accumulation under a fresh
+epoch; transport position does not select an asset offset. Arbitrary seeks,
+looping, delayed control subgraphs and hot asset replacement are unsupported.
+Reconstruct while stopped to replace assets.
+
+Decode, copy and SHA-256 hashing happen on the stopped control thread. Prepared
+nodes retain immutable assets; callbacks use borrowed pointers and fixed scratch.
+Assets, scratch, retained configuration and edge storage share the existing
+64 MiB bound; the prepared block limit remains 4096. The installed
+`asset-morph-consumer` target demonstrates real canonical inputs, live control,
+partition comparison and an independent direct double-precision DFT/Hann/WOLA
+oracle. This functional source does not establish saved-graph replay, notation
+support or paced realtime qualification.
