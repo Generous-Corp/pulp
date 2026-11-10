@@ -44,6 +44,7 @@ unrelated line of CMake moves, are left out.
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import os
@@ -56,6 +57,31 @@ from typing import Any
 SCHEMA = "pulp-codemodel-digest/v2"
 REPLY = Path(".cmake") / "api" / "v1" / "reply"
 DIGEST_HEX = 32
+
+
+@functools.lru_cache(maxsize=None)
+def _realpath(path: str) -> str:
+    return os.path.realpath(path)
+
+
+def realpath(path: str | os.PathLike[str]) -> str:
+    """`os.path.realpath`, memoized per spelling.
+
+    The digest and the affected-test graph resolve every path Ninja recorded:
+    about 4 million calls over some 20 thousand distinct paths, and each
+    uncached call lstat()s every component, which made resolution nearly all
+    of each instrument's minutes on the gate. The cache is process-wide:
+    affected_tests_shadow's helpers (and through them test_receipts_shadow
+    and read_audit) share it, and merge_group_shadows.py runs several of
+    those in one process. Every caller reads a finished build tree that
+    nothing is rewriting, so a spelling's answer cannot change while the
+    process runs; code that creates or retargets a symlink and then resolves
+    through it must call `realpath_cache_clear()` first."""
+    return _realpath(os.fspath(path))
+
+
+def realpath_cache_clear() -> None:
+    _realpath.cache_clear()
 
 
 class CodemodelError(RuntimeError):
@@ -74,7 +100,7 @@ def _roots(builds: list[str], sources: list[str]) -> list[tuple[str, str]]:
     for paths, token in ((builds, "<build>"), (sources, "<src>")):
         for p in paths:
             if p:
-                pairs |= {(os.path.normpath(p), token), (os.path.realpath(p), token)}
+                pairs |= {(os.path.normpath(p), token), (realpath(p), token)}
     # Longest first, and the build root before an equal-length source root:
     # the build directory usually lives inside the checkout.
     return sorted(pairs, key=lambda r: (-len(r[0]), r[1] != "<build>"))
@@ -119,7 +145,7 @@ def _tests_by_artifact(tests: list[dict], build_dir: Path) -> dict[str, list[dic
         if not cmd:
             continue
         exe = cmd[0] if os.path.isabs(cmd[0]) else str(build_dir / cmd[0])
-        out.setdefault(os.path.realpath(exe), []).append(test)
+        out.setdefault(realpath(exe), []).append(test)
     return out
 
 
@@ -135,18 +161,18 @@ class _Generated:
     or an embedded build identity would leave every digest unchanged."""
 
     def __init__(self, build_roots: list[str]) -> None:
-        self.roots = sorted({os.path.realpath(r) for r in build_roots if r})
+        self.roots = sorted({realpath(r) for r in build_roots if r})
         self.files: dict[str, str] = {}
 
     def under_build(self, path: str, skip: set[str] = SKIP_DIRS) -> bool:
-        real = os.path.realpath(path)
+        real = realpath(path)
         if not any(real.startswith(r + os.sep) for r in self.roots):
             return False
         rel = next(os.path.relpath(real, r) for r in self.roots if real.startswith(r + os.sep))
         return not any(part in skip for part in Path(rel).parts)
 
     def file(self, path: str) -> str:
-        real = os.path.realpath(path)
+        real = realpath(path)
         if real not in self.files:
             try:
                 with open(real, "rb") as fh:
@@ -256,7 +282,7 @@ def digest_targets(build_dir: Path, source_root: Path, tests: list[dict] | None 
         compiles = any(g.get("sourceIndexes") for g in groups)
         known = headers is not None and (name in headers or not compiles)
         gen_files |= (headers or {}).get(name, set())
-        gen_rows = sorted((_normalise(os.path.realpath(p), roots), generated.file(p)) for p in gen_files)
+        gen_rows = sorted((_normalise(realpath(p), roots), generated.file(p)) for p in gen_files)
         compile_ = [{"language": g.get("language"),
                      "flags": [f.get("fragment") for f in g.get("compileCommandFragments", [])],
                      "defines": [d.get("define") for d in g.get("defines", [])],
@@ -276,7 +302,7 @@ def digest_targets(build_dir: Path, source_root: Path, tests: list[dict] | None 
             p = art.get("path", "")
             full = p if os.path.isabs(p) else str(model_build / p)
             artifacts.append(full)
-            for test in by_artifact.get(os.path.realpath(full), []):
+            for test in by_artifact.get(realpath(full), []):
                 matched.add(test.get("name", ""))
                 regs.append({"name": test.get("name"), "command": test.get("command"),
                              "properties": test.get("properties", [])})
