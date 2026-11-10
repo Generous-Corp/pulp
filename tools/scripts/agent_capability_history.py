@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
+import agent_capability_store as store
 import agent_capability_surface as surface
 from gate_common import (
     GitComparisonProvenance,
@@ -30,7 +31,11 @@ HISTORY_SCHEMA = "pulp.agent-capability-history.v2"
 # The original layout repeated every entry's whole material inline. It is still
 # read (a protected base may hold it, and --write converts it), never written.
 LEGACY_HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
-HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
+# The single file the history used to be. It is now the directory
+# store.HISTORY_DIR, one file per recorded state; this path is still how the
+# combined document is named in messages and read from an older revision.
+HISTORY_FILE = store.HISTORY_LEGACY
+HISTORY_DIR = store.HISTORY_DIR
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
 # GitHub refuses any pushed file over 100 MB. The guard sits far below that so
 # growth is noticed years before a push can fail.
@@ -278,19 +283,12 @@ def _entries_or_none(history: Any) -> list[dict[str, Any]] | None:
 
 
 def rendered_history(history: dict[str, Any]) -> str:
-    """The checked-in text: one entry digest and one stored object per line."""
-    lines = ["{", f'  "schema": {json.dumps(history["schema"])},', '  "entries": [']
-    digests = history["entries"]
-    lines += [f"    {json.dumps(d)}{',' if i + 1 < len(digests) else ''}"
-              for i, d in enumerate(digests)]
-    lines += ["  ],", '  "objects": {']
-    keys = sorted(history["objects"])
-    for index, key in enumerate(keys):
-        body = json.dumps(history["objects"][key], ensure_ascii=False,
-                          separators=(",", ":"), sort_keys=True)
-        lines.append(f"    {json.dumps(key)}: {body}{',' if index + 1 < len(keys) else ''}")
-    lines += ["  }", "}"]
-    return "\n".join(lines) + "\n"
+    """The combined text: one entry digest and one stored object per line.
+
+    This is the single file the history used to be; it is no longer committed
+    (store.split_history gives the committed entry files) but stays the
+    measure of size and of a lossless split."""
+    return store.render_history(history)
 
 
 def history_entry(
@@ -572,8 +570,8 @@ def protected_base_problems(
         ]
     reads = [
         read_git_path(root, comparison, SNAPSHOT),
-        read_git_path(root, comparison, surface.SURFACE_SNAPSHOT),
-        read_git_path(root, comparison, HISTORY_FILE),
+        store.read_at(root, comparison, surface.SURFACE_SNAPSHOT),
+        store.read_at(root, comparison, HISTORY_FILE),
     ]
     unavailable = [item for item in reads if item.status not in {"available", "path_absent"}]
     if unavailable:

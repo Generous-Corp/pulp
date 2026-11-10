@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/transition_mixer.hpp",
+  "fingerprint": "sha256:f505434e7e7f9b6d32a9f67e74dc33495728fe07ca87533cabef32b7f3ff4470",
+  "include": "pulp/signal/transition_mixer.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

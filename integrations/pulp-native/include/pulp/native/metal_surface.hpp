@@ -31,6 +31,7 @@
 /// teardown longer than that.
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -272,17 +273,28 @@ class MetalSurface {
     /// The cursor shown while the pointer is over the surface; the arrow is
     /// restored when it leaves. Main thread.
     void set_cursor(Cursor cursor);
-    /// Hold keyboard focus for text entry (a click into a text field), or give
-    /// it back. While held the view is first responder and keys are offered to
-    /// the client first; otherwise the host keeps the keyboard. A host that
-    /// takes first responder ends the hold. False when the view is in no
-    /// window or AppKit refused the change. Main thread.
+    /// Hold the keyboard for keys or for text entry, or give it back
+    /// (`KeyboardFocus::none`). While held the view is first responder and
+    /// every key is offered to the client first. With `keys`, a key the client
+    /// declines goes on to the host through the responder chain; with `text`
+    /// it becomes text input. Without a hold the host keeps the keyboard. A
+    /// host that takes first responder ends the hold. False when the view is
+    /// in no window or AppKit refused the change. Main thread.
+    bool set_keyboard_focus(KeyboardFocus focus);
+    KeyboardFocus keyboard_focus() const noexcept;
+    /// `set_keyboard_focus(KeyboardFocus::text)`, or, with false, give back
+    /// whatever hold the client has.
     bool set_text_focus(bool held);
+    /// True while the hold is for text entry.
     bool text_focus() const noexcept;
 
     /// The Objective-C class of the surface's view. Its name is unique to the
     /// binary that contains this library.
     static std::string view_class_name();
+
+    /// Surfaces alive in this process (each owns one CAMetalLayer), for leak
+    /// checks and diagnostics.
+    static std::size_t live_surfaces() noexcept;
 
     struct Impl;
 

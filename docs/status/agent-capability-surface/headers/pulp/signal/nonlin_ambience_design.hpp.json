@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/nonlin_ambience_design.hpp",
+  "fingerprint": "sha256:1b9e4b5a8178283964fcacac595ac5540576f35bdffb717b77e3aaf92bf98cd4",
+  "include": "pulp/signal/nonlin_ambience_design.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.stochastic-sources"
+  ],
+  "rationale": "Control-side velvet tap design consumes deterministic coordinate draws; it is design support rather than a runtime entrypoint."
+}

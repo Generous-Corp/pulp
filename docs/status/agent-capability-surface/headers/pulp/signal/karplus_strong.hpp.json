@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/karplus_strong.hpp",
+  "fingerprint": "sha256:081a56e41a69cb9a8d7b32b8cee1833b1a985731c74ca0cca3a85fe6e0e16218",
+  "include": "pulp/signal/karplus_strong.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

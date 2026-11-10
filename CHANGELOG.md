@@ -9,6 +9,52 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1990"></a>
+## [1.99.0] - 2026-11-10
+
+- release/version bump ([#11942](https://github.com/Generous-Corp/pulp/pull/11942))
+- codex/g4 g5 qualification 20261110 ([#11943](https://github.com/Generous-Corp/pulp/pull/11943))
+- codex/g11 remainder 20261110 ([#11935](https://github.com/Generous-Corp/pulp/pull/11935))
+- codex/g6 remaining runtime 20261109 ([#11922](https://github.com/Generous-Corp/pulp/pull/11922))
+- fix/dr mp3 ape footer 20261109 ([#11900](https://github.com/Generous-Corp/pulp/pull/11900))
+- codex/g9 isolation audit2 ([#11933](https://github.com/Generous-Corp/pulp/pull/11933))
+- chore/steward ejection guards ([#11874](https://github.com/Generous-Corp/pulp/pull/11874))
+- codex/post roadmap graph research 20261110 ([#11927](https://github.com/Generous-Corp/pulp/pull/11927))
+- feature/platform popup window ([#11774](https://github.com/Generous-Corp/pulp/pull/11774))
+
+<a id="v1980"></a>
+## [1.98.0] - 2026-11-10
+
+- release/version bump ([#11925](https://github.com/Generous-Corp/pulp/pull/11925))
+- docs/vellum freeze ui scope ([#11928](https://github.com/Generous-Corp/pulp/pull/11928))
+- feature/view file drag recorder ([#11920](https://github.com/Generous-Corp/pulp/pull/11920))
+- feature/mac function and page keys ([#11918](https://github.com/Generous-Corp/pulp/pull/11918))
+- codex/g10 a3 remainder 20261109 ([#11923](https://github.com/Generous-Corp/pulp/pull/11923))
+- ci/run deferred tests before admission ([#11901](https://github.com/Generous-Corp/pulp/pull/11901))
+- codex/g7 qualification 20261109 ([#11902](https://github.com/Generous-Corp/pulp/pull/11902))
+- fix/versioning integrations surface ([#11916](https://github.com/Generous-Corp/pulp/pull/11916))
+- fix/confirm failure driver link module 20261109 ([#11911](https://github.com/Generous-Corp/pulp/pull/11911))
+- codex/a9 edit replay 20261109 ([#11903](https://github.com/Generous-Corp/pulp/pull/11903))
+- feature/native key focus ([#11888](https://github.com/Generous-Corp/pulp/pull/11888))
+- build/sdk vendored triggers 20261110 ([#11914](https://github.com/Generous-Corp/pulp/pull/11914))
+- feature/preset library core ([#11879](https://github.com/Generous-Corp/pulp/pull/11879))
+- release/version bump ([#11913](https://github.com/Generous-Corp/pulp/pull/11913))
+- fix/clean merge test prebuild drift 20261109 ([#11909](https://github.com/Generous-Corp/pulp/pull/11909))
+- planning/graph ledger refresh 20261109 ([#11905](https://github.com/Generous-Corp/pulp/pull/11905))
+- codex/g5 event wiring 20261109 ([#11869](https://github.com/Generous-Corp/pulp/pull/11869))
+- feature/platform async menu ([#11772](https://github.com/Generous-Corp/pulp/pull/11772))
+- feature/prepush failing gate summary ([#11889](https://github.com/Generous-Corp/pulp/pull/11889))
+- fix/confirm failure driver link 20261109 ([#11907](https://github.com/Generous-Corp/pulp/pull/11907))
+- ci/gate instrumentation overlap ([#11896](https://github.com/Generous-Corp/pulp/pull/11896))
+
+<a id="v1960"></a>
+## [1.96.0] - 2026-11-09
+
+- release/version bump ([#11908](https://github.com/Generous-Corp/pulp/pull/11908))
+- evidence/g10 row16 output clock ([#11895](https://github.com/Generous-Corp/pulp/pull/11895))
+- docs/audio tools clarity 20261109 ([#11891](https://github.com/Generous-Corp/pulp/pull/11891))
+- ci/clean merge lane ([#11898](https://github.com/Generous-Corp/pulp/pull/11898))
+
 <a id="v1950"></a>
 ## [1.95.0] - 2026-11-09
 
@@ -12596,6 +12642,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.99.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.99.0
+[1.98.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.98.0
+[1.96.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.96.0
 [1.95.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.95.0
 [1.94.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.94.0
 [1.93.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.93.0

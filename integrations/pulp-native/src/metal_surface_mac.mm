@@ -27,6 +27,8 @@ namespace {
 
 constexpr const char* kViewClassBase = "PulpNativeSurfaceView";
 
+std::atomic<std::size_t> g_live_surfaces{0};
+
 bool supported_pixel_format(std::uint32_t format) {
     switch (static_cast<MTLPixelFormat>(format)) {
     case MTLPixelFormatBGRA8Unorm:
@@ -403,9 +405,16 @@ std::unique_ptr<MetalSurface> MetalSurface::create(const MetalSurfaceOptions& op
     return std::unique_ptr<MetalSurface>(new MetalSurface(std::move(impl)));
 }
 
-MetalSurface::MetalSurface(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
+MetalSurface::MetalSurface(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {
+    g_live_surfaces.fetch_add(1);
+}
+
+std::size_t MetalSurface::live_surfaces() noexcept {
+    return g_live_surfaces.load();
+}
 
 MetalSurface::~MetalSurface() {
+    g_live_surfaces.fetch_sub(1);
     if (impl_->attached)
         detach();
     impl_->stop_observing();
@@ -536,24 +545,35 @@ void MetalSurface::set_cursor(Cursor cursor) {
         [(__bridge NSCursor*)ns_cursor_for(cursor) set];
 }
 
-bool MetalSurface::set_text_focus(bool held) {
+bool MetalSurface::set_keyboard_focus(KeyboardFocus focus) {
     NSView* view = impl_->view;
     NSWindow* window = view.window;
     if (!view || !window)
         return false;
-    if (held) {
-        impl_->input.text_focus = true;
-        if (window.firstResponder == view)
+    if (focus != KeyboardFocus::none) {
+        const KeyboardFocus before = impl_->input.focus;
+        impl_->input.focus = focus;
+        if (window.firstResponder == view) {
+            // Leaving text entry while keeping the keyboard: no resign follows,
+            // so drop an unfinished composition here.
+            if (before == KeyboardFocus::text && focus != KeyboardFocus::text &&
+                !impl_->input.marked.empty()) {
+                [view.inputContext discardMarkedText];
+                impl_->input.marked.clear();
+                if (impl_->input.handler.marked_text)
+                    impl_->input.handler.marked_text(std::string(), 0);
+            }
             return true;
+        }
         NSResponder* prior = window.firstResponder;
         if ([window makeFirstResponder:view]) {
             impl_->input.prior_responder = prior;
             return true;
         }
-        impl_->input.text_focus = false;
+        impl_->input.focus = before;
         return false;
     }
-    impl_->input.text_focus = false;
+    impl_->input.focus = KeyboardFocus::none;
     if (window.firstResponder != view)
         return true;
     // Hand the keyboard back to whatever held it before, not to nil: a host
@@ -566,8 +586,16 @@ bool MetalSurface::set_text_focus(bool held) {
     return [window makeFirstResponder:nil];
 }
 
+KeyboardFocus MetalSurface::keyboard_focus() const noexcept {
+    return impl_->input.focus;
+}
+
+bool MetalSurface::set_text_focus(bool held) {
+    return set_keyboard_focus(held ? KeyboardFocus::text : KeyboardFocus::none);
+}
+
 bool MetalSurface::text_focus() const noexcept {
-    return impl_->input.text_focus;
+    return impl_->input.focus == KeyboardFocus::text;
 }
 
 std::string MetalSurface::view_class_name() {

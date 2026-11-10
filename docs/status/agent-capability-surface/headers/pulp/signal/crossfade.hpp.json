@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/crossfade.hpp",
+  "fingerprint": "sha256:f342c0c90361767a4572ca8cf8575160574121575e059a89694f546ed4160d71",
+  "include": "pulp/signal/crossfade.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

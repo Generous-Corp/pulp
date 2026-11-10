@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/tuning.hpp",
+  "fingerprint": "sha256:84f372a58c3a1955de081c6f76fc96fc6f67a65b3f07801833996dab90c8a025",
+  "include": "pulp/midi/tuning.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

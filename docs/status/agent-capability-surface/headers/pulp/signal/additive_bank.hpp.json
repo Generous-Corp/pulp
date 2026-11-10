@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/additive_bank.hpp",
+  "fingerprint": "sha256:4a3a79b3d1d8faff30cb3778afd1b47c3591f525f6e30d0bb79c4ed50950be22",
+  "include": "pulp/signal/additive_bank.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.additive-bank"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

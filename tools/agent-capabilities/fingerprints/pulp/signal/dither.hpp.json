@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/dither.hpp",
+  "fingerprint": "sha256:72536ca7644208062b3769cceddfc8aa935d4b441db999b5a61171947446a9af"
+}

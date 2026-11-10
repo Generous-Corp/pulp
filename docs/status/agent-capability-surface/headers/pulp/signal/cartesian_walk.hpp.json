@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/cartesian_walk.hpp",
+  "fingerprint": "sha256:0dd49e8351e1fdb7c0144f0038272c99b0709cfde6e1d4dac2cd5a086f63446f",
+  "include": "pulp/signal/cartesian_walk.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

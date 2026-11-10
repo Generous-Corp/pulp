@@ -948,9 +948,12 @@ if(UNIX)
     add_test(NAME worktree-lineage-selftest
         COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_worktree_lineage.sh)
     set_tests_properties(worktree-lineage-selftest PROPERTIES TIMEOUT 120)
-    # Builds four throwaway CMake fixtures, so it is slower than a text check
-    # and worth every second: the vacuous-test case is the one that proves the
-    # harness reports a test that cannot fail rather than blessing it.
+    # Builds throwaway CMake fixtures under both generators, so it is slower
+    # than a text check and worth every second: the vacuous-test case is the
+    # one that proves the harness reports a test that cannot fail rather than
+    # blessing it. Graph parsing is unit-tested by
+    # confirm-failure-driver-link-selftest, which keeps this one to the cases
+    # that need a real generator.
     add_test(NAME confirm-failure-harness
         COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_confirm_failure.sh)
     set_tests_properties(confirm-failure-harness PROPERTIES TIMEOUT 300)

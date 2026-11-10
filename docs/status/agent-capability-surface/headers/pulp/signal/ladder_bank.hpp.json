@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/ladder_bank.hpp",
+  "fingerprint": "sha256:4b69722977f1fc7c92ae2aff3d0864b5c264bdc49d4fa86fc9d5bdc51a4c44e9",
+  "include": "pulp/signal/ladder_bank.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Runs N ladder-filter voices in lockstep structure-of-arrays lanes, each voice bit-identical to LadderFilter. A voice-processing primitive for polyphonic processors; it makes no installed agent capability claim of its own."
+}

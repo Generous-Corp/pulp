@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/drum/zap.hpp",
+  "fingerprint": "sha256:1bfabc16a0000e093e25c5d5122aa94a5a43f4098844c38a05870962a44513d7",
+  "include": "pulp/signal/drum/zap.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

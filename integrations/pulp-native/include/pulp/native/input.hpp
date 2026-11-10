@@ -273,10 +273,26 @@ enum class KeyRoute : std::uint8_t {
     client_first = 1,
 };
 
-/// The routing rule. While the client holds keyboard focus for text entry,
-/// every key, Space and Command chords included, is offered to the client
-/// first. Otherwise the host keeps every key, so an editor that only shows
-/// controls never takes Space or a shortcut from the DAW.
+/// What the client holds the keyboard for.
+enum class KeyboardFocus : std::uint8_t {
+    /// The host keeps the keyboard.
+    none = 0,
+    /// Keys without text entry (a focused control, an editor shortcut): the
+    /// client is offered every key first, and a key it declines goes on to
+    /// the host, so Space still reaches the DAW's transport.
+    keys = 1,
+    /// Text entry: the client is offered every key first, and a key it
+    /// declines becomes text input instead of reaching the host.
+    text = 2,
+};
+
+/// The routing rule. While the client holds the keyboard, for keys or for
+/// text, every key, Space and Command chords included, is offered to the
+/// client first. Otherwise the host keeps every key, so an editor that only
+/// shows controls never takes Space or a shortcut from the DAW.
+KeyRoute route_key(const KeyEvent& event, KeyboardFocus focus) noexcept;
+/// The same rule with text-entry focus as a flag (`true` is
+/// `KeyboardFocus::text`).
 KeyRoute route_key(const KeyEvent& event, bool client_holds_text_focus) noexcept;
 
 /// The key for a macOS virtual key code, or `Key::unknown`.

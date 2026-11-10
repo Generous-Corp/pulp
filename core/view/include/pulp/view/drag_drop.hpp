@@ -49,12 +49,16 @@ public:
     }
 
     // The drag left this receiver (moved away, exited the window, or dropped).
-    // Clear any highlight set by accept_drag.
+    // Clear any highlight set by accept_drag. On a drop this runs BEFORE
+    // accept_drop, so state derived from the hover (an insertion index, a
+    // target slot) is already cleared by then; derive the drop's own state
+    // from accept_drop's `local` instead.
     virtual void leave_drag() {}
 
-    // Commit a drop at `local`. Return true if handled — a true return CONSUMES
-    // the drop (dispatch stops bubbling); false lets it fall through to an outer
-    // receiver / View::on_drop.
+    // Commit a drop at `local`, the drop point in this receiver's local
+    // coordinates. Called after leave_drag. Return true if handled: a true
+    // return CONSUMES the drop (dispatch stops bubbling); false lets it fall
+    // through to an outer receiver / View::on_drop.
     virtual bool accept_drop(const DropData& data, Point local) = 0;
 };
 
@@ -117,7 +121,9 @@ struct FileDragRequest {
 // platform is unsupported, the handle is null, there are no files, or there is
 // no active mouse event to anchor the drag. Implemented per-platform alongside
 // register_drop_target (macOS, Windows, and Linux/X11 today; a no-op stub
-// elsewhere).
+// elsewhere). On macOS it goes through pulp::platform::begin_file_drag, so a
+// recorder installed with pulp::platform::set_file_drag_recorder() records the
+// drag (and this returns true) with no mouse event or window.
 bool begin_file_drag(void* native_view, const FileDragRequest& request);
 
 // Process-global outbound file-drag backend for HOSTLESS platforms — Android,

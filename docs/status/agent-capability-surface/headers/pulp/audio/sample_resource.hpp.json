@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/sample_resource.hpp",
+  "fingerprint": "sha256:4c733ef0cfae35564705ba3eea27f79c8c01d87600ba31a6c8d513fe0476a6a2",
+  "include": "pulp/audio/sample_resource.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Background sample decode service and snapshot handle; reviewed when a zero-frame decode became a load failure with a reason instead of an empty Loaded snapshot. Host infrastructure behind the sampler capabilities, not a generator-facing capability."
+}

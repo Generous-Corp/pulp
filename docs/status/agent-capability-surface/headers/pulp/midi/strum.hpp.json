@@ -1,0 +1,11 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/strum.hpp",
+  "fingerprint": "sha256:d048728399a0f642cc59b8772e834851dfb263f395069cc73a2f6403020ca258",
+  "include": "pulp/midi/strum.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "midi.strum-spread"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}
