@@ -62,7 +62,7 @@ class PresetMetadataStore {
     }
     /// Wall-clock source for edit stamps, in Unix milliseconds. Defaults to the
     /// system clock; tests set a fixed clock to force edits into one tick. It
-    /// also dates tombstone compaction.
+    /// also dates tombstone compaction. Set it before the store is shared.
     using Clock = std::function<std::int64_t()>;
     void set_clock(Clock clock) {
         clock_ = std::move(clock);
@@ -86,9 +86,12 @@ class PresetMetadataStore {
     bool add_tag(const std::string& key, const std::string& tag, const std::string& digest);
     bool remove_tag(const std::string& key, const std::string& tag, const std::string& digest);
 
-    /// Move a record to a new key (a preset that was renamed or moved).
+    /// Move a record to a new key (a preset that was renamed or moved). Returns
+    /// false, changing nothing, if the old record is gone or the new key already
+    /// carries edits once the file is merged.
     bool rekey(const std::string& old_key, const std::string& new_key);
-    /// Drop a record (a tombstone is written so the removal merges).
+    /// Drop a record (a tombstone is written so the removal merges). Returns
+    /// false if the record is already gone once the file is merged.
     bool erase(const std::string& key);
 
   private:

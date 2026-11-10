@@ -302,11 +302,11 @@ std::int64_t PresetMetadataStore::next_stamp(std::int64_t after) const {
     return std::max(clock_now(), after + 1);
 }
 
+// `apply` makes the change and returns false when, against the merged state,
+// there is nothing to change; the file is then left alone and commit() fails.
 template <typename Apply> bool PresetMetadataStore::commit(Apply&& apply) {
-    if (file_.empty()) {
-        apply();
-        return true;
-    }
+    if (file_.empty())
+        return apply();
     std::error_code ec;
     if (file_.has_parent_path()) {
         fs::create_directories(file_.parent_path(), ec);
@@ -331,7 +331,8 @@ template <typename Apply> bool PresetMetadataStore::commit(Apply&& apply) {
     if (!read_file(disk))
         disk.clear(); // a corrupt file is replaced by the merged state
     merge_into(records_, disk);
-    apply();
+    if (!apply())
+        return false;
     return write_file(records_);
 }
 
@@ -347,6 +348,7 @@ bool PresetMetadataStore::edit(const std::string& key, const std::string& digest
         rec.updated_ms = next_stamp(rec.updated_ms);
         if (rec.empty())
             rec.deleted = true;
+        return true;
     });
 }
 
@@ -385,8 +387,11 @@ bool PresetMetadataStore::rekey(const std::string& old_key, const std::string& n
     return commit([&] {
         auto from = records_.find(old_key);
         if (from == records_.end() || from->second.deleted)
-            return; // another instance removed it meanwhile
+            return false; // another instance removed it meanwhile
         auto to = records_.find(new_key);
+        if (to != records_.end() && !to->second.deleted)
+            return false; // another instance edited the target meanwhile; keep its edits
+        // Outrank a tombstone at the target so the move is not undone by a merge.
         const std::int64_t seen =
             std::max(from->second.updated_ms,
                      to == records_.end() ? std::int64_t{0} : to->second.updated_ms);
@@ -396,6 +401,7 @@ bool PresetMetadataStore::rekey(const std::string& old_key, const std::string& n
         from->second.deleted = true;
         from->second.updated_ms = moved.updated_ms;
         records_[new_key] = std::move(moved);
+        return true;
     });
 }
 
@@ -405,9 +411,12 @@ bool PresetMetadataStore::erase(const std::string& key) {
         return false;
     return commit([&] {
         auto& rec = records_[key];
+        if (rec.deleted)
+            return false; // another instance removed it meanwhile
         rec.key = key;
         rec.updated_ms = next_stamp(rec.updated_ms);
         rec.deleted = true;
+        return true;
     });
 }
 

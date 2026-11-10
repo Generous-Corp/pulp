@@ -420,10 +420,12 @@ TEST_CASE("a writer whose clock runs behind still wins with a later edit",
 
     REQUIRE(ahead.set_favourite("factory:A", true, "sha256:a"));
     REQUIRE(behind.set_favourite("factory:A", false, "sha256:a"));
+    PresetMetadataStore reader(file);
+    REQUIRE(reader.load());
+    REQUIRE(reader.find("factory:A") == nullptr); // the removal beat the clock
+
     REQUIRE(behind.set_favourite("factory:A", true, "sha256:a")); // re-add after the removal
     REQUIRE(ahead.set_favourite("factory:B", true, "sha256:b"));
-
-    PresetMetadataStore reader(file);
     REQUIRE(reader.load());
     REQUIRE(reader.find("factory:A") != nullptr);
     REQUIRE(reader.find("factory:A")->favourite);
@@ -432,6 +434,52 @@ TEST_CASE("a writer whose clock runs behind still wins with a later edit",
     REQUIRE(behind.erase("factory:A"));
     REQUIRE(reader.reload_if_changed());
     REQUIRE(reader.find("factory:A") == nullptr);
+}
+
+TEST_CASE("a rekey does not overwrite edits another writer made at the new key",
+          "[state][preset][library]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-lib-rekey-race");
+    const auto file = sandbox.root / "overlay" / "library.json";
+    PresetMetadataStore mover(file);
+    mover.load();
+    REQUIRE(mover.set_display_name("user:Old", "Moved Name", "sha256:m"));
+
+    PresetMetadataStore other(file);
+    other.load();
+    REQUIRE(other.add_tag("user:New", "bright", "sha256:m")); // mover has not seen this
+
+    REQUIRE_FALSE(mover.rekey("user:Old", "user:New"));
+    PresetMetadataStore reader(file);
+    REQUIRE(reader.load());
+    REQUIRE(reader.find("user:Old") != nullptr); // still an orphan, not lost
+    REQUIRE(reader.find("user:Old")->display_name == "Moved Name");
+    const auto* kept = reader.find("user:New");
+    REQUIRE(kept != nullptr);
+    REQUIRE(kept->tags_add == std::vector<std::string>{"bright"});
+    REQUIRE(kept->display_name.empty());
+
+    REQUIRE(other.erase("user:New"));
+    REQUIRE(mover.rekey("user:Old", "user:New")); // a tombstone at the target is outranked
+    REQUIRE(reader.load());
+    REQUIRE(reader.find("user:Old") == nullptr);
+    REQUIRE(reader.find("user:New")->display_name == "Moved Name");
+}
+
+TEST_CASE("erasing a record another writer already removed changes nothing",
+          "[state][preset][library]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-lib-erase-race");
+    const auto file = sandbox.root / "overlay" / "library.json";
+    PresetMetadataStore first(file);
+    first.load();
+    REQUIRE(first.set_favourite("user:X", true, "sha256:x"));
+    PresetMetadataStore second(file);
+    second.load();
+    REQUIRE(second.erase("user:X"));
+
+    const auto revision = first.revision();
+    REQUIRE_FALSE(first.erase("user:X")); // its copy is stale; the file already has the tombstone
+    REQUIRE(first.revision() == revision);
+    REQUIRE(first.find("user:X") == nullptr);
 }
 
 TEST_CASE("concurrent writers to one overlay file keep every edit", "[state][preset][library]") {
