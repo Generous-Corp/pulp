@@ -3677,6 +3677,20 @@ after ten minutes, listing the rest as skipped. Its annotation is
 `pr-head-affected-tests` (`pulp-pr-head-affected-tests/v1`): selected, passed,
 failed, skipped-for-budget and minutes, which is the per-PR extra cost to watch.
 
+### Approved heads run the deferred tests before admission
+
+When the budget defers tests, the first place they run is otherwise the merge
+group, where a failure ejects the whole batch. Once a head is approved,
+`deferred-tests-admission.yml` re-runs its `macos` job, and that attempt runs
+exactly the tests the budgeted attempt deferred (`--admission`,
+`--prior-summary`; the budgeted attempt uploads its summary as the
+`pr-head-affected-tests-a<attempt>` artifact). The result is the existing
+required `macos` check, so no new required context exists and the steward
+remains the only writer of admission. Armed or queued heads, red runs and runs
+already re-run once are left alone (decisions contract row 32). The repository variable
+`PULP_DEFERRED_ADMISSION=enforce` turns it on; unset is shadow mode, which only
+reports what it would re-run. Rules and tests: `tools/ci/deferred_admission.py`.
+
 ## Exact PR receipts on an unchanged merge-group candidate
 
 A pull-request head normally runs only the build and the `pr-fast` tier, which
@@ -4524,6 +4538,21 @@ globs, so a reviewer tab that is not the scheduled standing pass does not count
 unless it is listed. A HOLD from any session still counts. The key is read by
 the Shipyard commit pinned in `.github/workflows/review-verdict.yml`, so bump
 that pin with the setting.
+
+Two more `[auto_merge]` keys cut merge-queue ejections (Shipyard
+`docs/automated-draining.md`, "Ejection guards"). `generated_paths` lists the
+generated files that two batch-mates tend to regenerate; the steward defers a
+head that changes one while a queued entry changes the same path, so they never
+share a merge group. `known_flaky_tests` names tests whose failure alone earns
+the one same-head retry after an ejection. Both keys are read from the base
+branch only. The introducing change defines these keys with empty arrays so the
+trusted lane can validate the configuration surface; a follow-up populates the
+path and test data after the keys are on the trusted base.
+The steward matches each name Shipyard reads from ctest's `The following tests
+FAILED:` block, with the number and the trailing `(Failed)` or `(Timeout)`
+removed, so an entry is the registered ctest name, not a Catch2 section title.
+The failure is excused only when every failed test in the step is listed and the
+same check passed on the head.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its

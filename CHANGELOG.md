@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1960"></a>
+## [1.96.0] - 2026-11-09
+
+- release/version bump ([#11908](https://github.com/Generous-Corp/pulp/pull/11908))
+- evidence/g10 row16 output clock ([#11895](https://github.com/Generous-Corp/pulp/pull/11895))
+- docs/audio tools clarity 20261109 ([#11891](https://github.com/Generous-Corp/pulp/pull/11891))
+- ci/clean merge lane ([#11898](https://github.com/Generous-Corp/pulp/pull/11898))
+
 <a id="v1950"></a>
 ## [1.95.0] - 2026-11-09
 
@@ -12596,6 +12604,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.96.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.96.0
 [1.95.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.95.0
 [1.94.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.94.0
 [1.93.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.93.0

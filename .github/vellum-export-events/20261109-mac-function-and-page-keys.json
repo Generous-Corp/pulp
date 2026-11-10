@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261109-mac-function-and-page-keys",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-09T20:02:29Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/platform/mac/window_host_mac_geometry.mm"
+  ],
+  "vellum_inherits": true,
+  "rationale": "The mac key table gains Page Up, Page Down and F1-F12, which every macOS host reads keys through; Vellum's mirrored copy should carry the same mapping so its hosts receive those keys too."
+}
