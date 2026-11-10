@@ -110,6 +110,18 @@ std::optional<DawProjectImportError> DawProjectMediaSealer::seal(const pugi::xml
         return import_error(DawProjectImportErrorCode::InvalidValue,
                             "media resolver provided an invalid or unsupported WAV for '" + path +
                                 "'");
+    // A sealed asset is identified by its bytes, so it must hold every frame
+    // its header declares; a recoverable but truncated WAV is refused. The
+    // media byte budget above bounds the size; only the truncation rule
+    // applies here.
+    constexpr audio::WavDecodeLimits kSealLimits{
+        .max_frames = std::numeric_limits<std::uint64_t>::max(),
+        .max_channels = std::numeric_limits<std::uint32_t>::max(),
+        .max_output_bytes = std::numeric_limits<std::uint64_t>::max(),
+        .refuse_truncated = true};
+    if (!audio::wav_decode_admits(*info, kSealLimits))
+        return import_error(DawProjectImportErrorCode::InvalidValue,
+                            "media resolver provided a truncated WAV for '" + path + "'");
     if (sample_rate != static_cast<double>(info->sample_rate))
         return import_error(DawProjectImportErrorCode::InvalidValue,
                             "<Audio sampleRate> does not match resolved media '" + path + "'");

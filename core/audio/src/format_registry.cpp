@@ -78,7 +78,7 @@ std::unique_ptr<FormatWriter> create_system_audio_writer();
 std::unique_ptr<FormatReader> create_media_foundation_reader();
 #endif
 
-// ── WAV Reader/Writer (via CHOC) ────────────────────────────────────────
+// ── WAV Reader (shared WAV policy + dr_wav) / Writer (CHOC) ─────────────
 
 class WavReader : public FormatReader {
 public:
@@ -106,11 +106,18 @@ public:
     }
     std::string format_name() const override { return "WAV"; }
     FormatCapabilities capabilities() const override {
+        // What the shared WAV decoder reads: integer PCM of any width in a
+        // 1- to 4-byte container (12- and 20-bit included), 32- and 64-bit
+        // float, and up to dr_wav's 256 channels. It also reads A-law,
+        // mu-law, MS ADPCM and IMA ADPCM, which these fields cannot list.
+        std::vector<std::uint32_t> depths;
+        for (std::uint32_t bits = 1; bits <= 32; ++bits)
+            depths.push_back(bits);
         return {.format_name = "WAV",
                 .extensions = {".wav", ".wave"},
-                .bit_depths = {8, 16, 24, 32},
+                .bit_depths = std::move(depths),
                 .float_samples = true,
-                .max_channels = 65535};
+                .max_channels = 256};
     }
 };
 

@@ -1,8 +1,9 @@
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/audio/audio_reader.hpp>
+#include "byte_source_cursor.hpp"
 #include "decode_limits_detail.hpp"
-#include "pcm_float_scaling.hpp"
+#include "wav_frame_reader.hpp"
 #include <cmath>
-#include <cstring>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -17,9 +18,10 @@
 #include <unistd.h>
 #endif
 #include <limits>
+#include <memory>
 #include <optional>
 
-// CHOC audio file support
+// CHOC's WAV writer; every WAV read goes through wav_frame_reader.hpp.
 #include <choc/audio/choc_AudioFileFormat_WAV.h>
 
 namespace pulp::audio {
@@ -73,13 +75,7 @@ void float_to_int32(const float* src, int32_t* dst, size_t count) {
     }
 }
 
-// ── Audio file I/O via CHOC ──────────────────────────────────────────────────
-
-static choc::audio::AudioFileFormatList make_format_list() {
-    choc::audio::AudioFileFormatList list;
-    list.addFormat<choc::audio::WAVAudioFileFormat<true>>();
-    return list;
-}
+// ── WAV reading ──────────────────────────────────────────────────────────────
 
 static bool has_consistent_channel_lengths(const AudioFileData& data) {
     if (data.empty()) return false;
@@ -97,65 +93,39 @@ static bool can_write_wav(const AudioFileData& data) {
            data.num_frames() <= std::numeric_limits<uint32_t>::max();
 }
 
-// choc clamps a data chunk that runs past end of file to the bytes present,
-// so a header claiming frames the file does not hold also reads as zero
-// frames. Only a RIFF/WAVE whose data chunk itself declares zero bytes is a
-// genuine zero-frame file; a truncated or lying claim stays a refused decode.
-static bool wav_declares_zero_data_bytes(const std::string& path) {
-    std::ifstream in(std::filesystem::path(path), std::ios::binary);
-    unsigned char header[12];
-    if (!in.read(reinterpret_cast<char*>(header), sizeof(header)))
-        return false;
-    if (std::memcmp(header, "RIFF", 4) != 0 || std::memcmp(header + 8, "WAVE", 4) != 0)
-        return false;
-    for (int chunk = 0; chunk < 64; ++chunk) {
-        unsigned char chunk_header[8];
-        if (!in.read(reinterpret_cast<char*>(chunk_header), sizeof(chunk_header)))
-            return false;
-        const uint32_t size = static_cast<uint32_t>(chunk_header[4]) |
-                              (static_cast<uint32_t>(chunk_header[5]) << 8) |
-                              (static_cast<uint32_t>(chunk_header[6]) << 16) |
-                              (static_cast<uint32_t>(chunk_header[7]) << 24);
-        if (std::memcmp(chunk_header, "data", 4) == 0)
-            return size == 0;
-        in.seekg(static_cast<std::streamoff>(size + (size & 1u)), std::ios::cur);
-        if (!in)
-            return false;
-    }
-    return false;
-}
+namespace {
 
-static std::optional<AudioFileInfo>
-info_from_properties(const choc::audio::AudioFileProperties& props) {
-    if (!(props.sampleRate > 0) || props.numChannels == 0)
+std::optional<detail::WavSource> open_wav(const std::string& path) {
+    detail::WavSource opened;
+    if (!opened.open(make_file_byte_source(path)))
         return std::nullopt;
-
-    AudioFileInfo info;
-    info.sample_rate = static_cast<uint32_t>(props.sampleRate);
-    info.num_channels = props.numChannels;
-    info.num_frames = props.numFrames;
-    info.bits_per_sample = choc::audio::getBytesPerSample(props.bitDepth) * 8;
-    info.format = props.formatName;
-    info.duration_seconds =
-        props.numFrames > 0 ? static_cast<double>(props.numFrames) / props.sampleRate : 0;
-    return info;
+    return opened;
 }
+
+std::optional<AudioFileData>
+read_wav_admitted(const std::string& path, const std::function<bool(const AudioFileInfo&)>& admit) {
+    const auto opened = open_wav(path);
+    if (!opened)
+        return std::nullopt;
+    // The decode below reads through this same open, so what `admit` saw is
+    // what gets allocated and decoded.
+    if (!admit(detail::wav_file_info(opened->probe)))
+        return std::nullopt;
+    return detail::decode_all(opened->cursor, opened->probe);
+}
+
+} // namespace
 
 std::optional<AudioFileInfo> read_audio_file_info(const std::string& path) {
-    try {
-        auto formats = make_format_list();
-        auto reader = formats.createReader(std::filesystem::path(path));
-        if (!reader) return std::nullopt;
-        return info_from_properties(reader->getProperties());
-    } catch (...) {
+    const auto opened = open_wav(path);
+    if (!opened)
         return std::nullopt;
-    }
+    return detail::wav_file_info(opened->probe);
 }
 
 std::optional<AudioFileData> read_audio_file(const std::string& path) {
-    // The header's frame and channel counts size the allocation below, so a
-    // direct caller gets the same default ceilings the registry applies; a
-    // WAV declaring 2^30+1 frames is refused here instead of allocating.
+    // The recoverable frame and channel counts size the allocation below, so
+    // a direct caller gets the same default ceilings the registry applies.
     return read_audio_file(path, [](const AudioFileInfo& info) {
         return detail::within_decode_limits("WAV", info.num_frames, info.num_channels,
                                             DecodeLimits{});
@@ -164,46 +134,10 @@ std::optional<AudioFileData> read_audio_file(const std::string& path) {
 
 std::optional<AudioFileData>
 read_audio_file(const std::string& path, const std::function<bool(const AudioFileInfo&)>& admit) {
+    // An allocation the caller's admit let through can still fail; a failed
+    // read is a refusal, never an exception out of the reader.
     try {
-        auto formats = make_format_list();
-        auto reader = formats.createReader(std::filesystem::path(path));
-        if (!reader) return std::nullopt;
-
-        auto props = reader->getProperties();
-        const auto info = info_from_properties(props);
-        if (!info || props.numFrames > std::numeric_limits<uint32_t>::max())
-            return std::nullopt;
-        // The decode below reads from this same reader, so what `admit` saw
-        // is what gets allocated and decoded.
-        if (!admit(*info))
-            return std::nullopt;
-
-        AudioFileData data;
-        data.sample_rate = static_cast<uint32_t>(props.sampleRate);
-        data.channels.resize(props.numChannels);
-
-        // A zero-frame file is a valid file with no audio: it decodes to its
-        // channel count and rate with empty channels (`AudioFileData::empty()`
-        // is true), the same answer libsndfile gives.
-        uint32_t frames = static_cast<uint32_t>(props.numFrames);
-        if (frames == 0)
-            return wav_declares_zero_data_bytes(path)
-                       ? std::optional<AudioFileData>(std::move(data))
-                       : std::nullopt;
-
-        for (auto& channel : data.channels)
-            channel.resize(frames);
-
-        std::vector<float*> planar(props.numChannels);
-        for (uint32_t ch = 0; ch < props.numChannels; ++ch)
-            planar[ch] = data.channels[ch].data();
-        // Pulp's integer scaling (pcm_float_scaling.hpp), shared with the
-        // streaming AudioReader so both WAV paths decode bit-identically.
-        if (!detail::read_pulp_float(*reader, props.bitDepth, 0, planar.data(), props.numChannels,
-                                     frames))
-            return std::nullopt;
-
-        return data;
+        return read_wav_admitted(path, admit);
     } catch (...) {
         return std::nullopt;
     }

@@ -17,10 +17,18 @@ struct AudioFileInfo {
     uint32_t bits_per_sample = 0;
     std::string format;  // "WAV", "FLAC", "OGG", "MP3"
     double duration_seconds = 0;
+    // A WAV header can declare more frames than the file holds (a cut-off
+    // download, a lying size field). The reader then recovers the whole frames
+    // present: num_frames counts those, truncated is set, and declared_frames
+    // holds the header's claim. A caller that must refuse partial media checks
+    // truncated. WAV readers always fill declared_frames; readers of other
+    // formats refuse a shortfall instead and leave both fields at their defaults.
+    bool truncated = false;
+    uint64_t declared_frames = 0;
 };
 
-// Read an audio file into float buffers (uses CHOC internally)
-// Returns deinterleaved float channels
+// Read a WAV file into float buffers through Pulp's WAV reader (the policy in
+// wave_layout.hpp). Returns deinterleaved float channels.
 struct AudioFileData {
     std::vector<std::vector<float>> channels;
     uint32_t sample_rate = 0;

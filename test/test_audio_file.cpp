@@ -7,6 +7,7 @@
 #include <pulp/audio/offline_processor.hpp>
 #include <pulp/audio/streaming_writer.hpp>
 #include <pulp/runtime/base64.hpp>
+#include "support/unique_temp_dir.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -3112,13 +3113,8 @@ ParsedWav parse_wav(const std::vector<uint8_t>& b) {
 }
 
 struct ScratchDir {
-    std::filesystem::path root =
-        std::filesystem::temp_directory_path() /
-        ("pulp_wav_atomic_" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    ScratchDir() {
-        std::filesystem::create_directories(root);
-    }
+    std::filesystem::path root = pulp::test::make_unique_temp_dir("pulp_wav_atomic");
+    ScratchDir() = default;
     ~ScratchDir() {
         std::error_code ec;
         std::filesystem::remove_all(root, ec);
