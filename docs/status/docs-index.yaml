@@ -94,6 +94,11 @@ docs:
     kind: guide
     summary: State and parameter system — ParamValue, StateStore, Binding, serialization
 
+  - slug: wav-writing
+    path: guides/wav-writing.md
+    kind: guide
+    summary: WAV writing at 16/24-bit integer and 32-bit float with atomic publication and a replace policy
+
   - slug: presets
     path: guides/presets.md
     kind: guide
