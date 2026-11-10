@@ -1,0 +1,13 @@
+{
+  "pulp/format/processor.hpp": "f4cf94d6a54e59076dc204d29a472ec492be2b8f5dc2c5309ab068e0e58476f4",
+  "pulp/signal/adsr.hpp": "4daa4704d4f686d319cc02512db610cefe5db900eb4d73e47440b355ee2cffa9",
+  "pulp/signal/osc/va.hpp": "60abb49620684a3516e8c1a56ec34402205b7ef1180a768c00375ade9f1f6f35",
+  "pulp/state/store.hpp": "9a7fc48137a949f2ab55e8ee672166ccd41559078275d0b4dfdf55bf2f57f127",
+  "pulp/audio/analysis/pitch_track.hpp": "d1a6d2a3d7f6393337a96195fca6e5f228ab9fc180dd3eaa44a208dcbecb37ae",
+  "pulp/audio/streaming_writer.hpp": "f722e34094bde9bd502352608ea95e024d7133f78d8031772c079361bb6767e0",
+  "pulp/host/signal_graph_runtime.hpp": "f019944597428bafd78e528df1de843977e8d2c120e52a3a90f61f308eef7c34",
+  "pulp/midi/mts_esp_tuning.hpp": "360dc9fa8ccbdfea24210bdeb0b6edb2d3f4731378cffbf707bc3ae8375cd156",
+  "pulp/midi/scala_tuning.hpp": "2c3f39709076bfd6930a78826fc02e58602575066dfbc1f75bde9bec642e31af",
+  "pulp/format/processor_node_adapter.hpp": "3ebe075f3ea9c34ef20b9f5838a5cb49fa4adbc32ca4ca29df85b0c54b0ac325",
+  "pulp/midi/tuning.hpp": "84f372a58c3a1955de081c6f76fc96fc6f67a65b3f07801833996dab90c8a025"
+}

@@ -5,6 +5,9 @@ It demonstrates a host-selected callback boundary, with continuous oscillator
 phase and envelope state. It does not introduce a tuning engine or a graph
 scheduler. G-11 remains **PARTIAL**.
 
+The [retained macOS offline receipt](../evidence/g11-live-retune-20261110/README.md)
+contains numeric chronology, audio, clean SDK provenance and mutation proof.
+
 The standalone installed-SDK project is
 [`g11-live-retune-consumer`](../../examples/g11-live-retune-consumer/README.md).
 Its runtime-editable rack contains two independent Processor instruments, one
