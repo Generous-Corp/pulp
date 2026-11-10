@@ -17,7 +17,7 @@ plants = {
 if len(sys.argv) != 3 or sys.argv[1] not in plants:
     raise SystemExit('usage: g5_rt_escape_mutator.py allocation|mutex|write FILE')
 source = Path(sys.argv[2])
-text = source.read_text()
+text = source.read_text(encoding="utf-8")
 if text.count(needle) != 1:
     raise SystemExit('expected exactly one callback escape marker')
-source.write_text(text.replace(needle, plants[sys.argv[1]], 1))
+source.write_text(text.replace(needle, plants[sys.argv[1]], 1), encoding="utf-8")

@@ -1,5 +1,7 @@
-#include "harness/rt_allocation_probe.hpp"
-#include "harness/rt_contract_probe.hpp"
+// Compiled into the existing trigger-graph test unit: the graph runtime is already
+// included there, so this fixture adds no redundant heavy-header consumer.
+#include "../harness/rt_allocation_probe.hpp"
+#include "../harness/rt_contract_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/process_context.hpp>
@@ -21,7 +23,7 @@
 #include <unistd.h>
 #endif
 
-namespace {
+namespace g5_rt_fixture {
 using namespace pulp::host;
 
 constexpr std::size_t kFrames = 8192;
@@ -248,7 +250,9 @@ double p99(std::array<double, 128> values) {
     std::sort(values.begin(), values.end());
     return values[126];
 }
-} // namespace
+} // namespace g5_rt_fixture
+
+using namespace g5_rt_fixture;
 
 TEST_CASE("G5 graph event callbacks keep fixed storage across both serial backends",
           "[host][graph][g5][events][rt]") {
