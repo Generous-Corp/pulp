@@ -6,6 +6,11 @@
 #include <pulp/inspect/control_standalone_host.hpp>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <fstream>
+#include <pulp/host/graph_serializer.hpp>
+#include <choc/text/choc_JSON.h>
 #include <memory>
 
 extern "C" const volatile char pulp_control_standalone_host_markers_v1[];
@@ -45,9 +50,10 @@ class RouteNodeProcessor final : public pulp::format::Processor {
     }
     void prepare(const pulp::format::PrepareContext&) override {}
     void process(pulp::audio::BufferView<float>& output,
-                 const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&,
+                 const pulp::audio::BufferView<const float>& input, pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
-        output.clear();
+        for (std::size_t frame = 0; frame < output.num_samples(); ++frame)
+            output.channel(0)[frame] = input.channel(0)[frame] * 0.25f;
     }
 };
 
@@ -65,6 +71,7 @@ class GraphProductProcessor final : public pulp::format::Processor {
     }
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const pulp::format::PrepareContext& context) override {
+        stimulus_.fill(0.5f);
         source_ = graph_.add_input_node(1, "source");
         destination_ = graph_.add_processor_node(std::make_unique<RouteNodeProcessor>());
         output_ = graph_.add_output_node(1, "output");
@@ -81,7 +88,30 @@ class GraphProductProcessor final : public pulp::format::Processor {
     void process(pulp::audio::BufferView<float>& output,
                  const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
-        output.clear();
+        float* source = stimulus_.data();
+        const pulp::audio::BufferView<const float> input(&source, 1, stimulus_.size());
+        for (std::size_t start = 0; start < output.num_samples(); start += stimulus_.size()) {
+            auto block = output.slice(start, stimulus_.size());
+            graph_.process(block, input.slice(0, block.num_samples()),
+                           static_cast<int>(block.num_samples()));
+        }
+        if (!output.empty()) {
+            // The main-thread evidence observer needs only the latest complete
+            // callback sample; it does not order any other shared state.
+            last_sample_.store(output.channel(0)[0], std::memory_order_relaxed);
+            process_count_.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    void record_evidence() const {
+        auto evidence = choc::value::createObject("");
+        evidence.addMember("sample", last_sample_.load(std::memory_order_relaxed));
+        evidence.addMember("process_count", static_cast<std::int64_t>(
+            process_count_.load(std::memory_order_relaxed)));
+        evidence.addMember("state", pulp::host::GraphSerializer::to_json(graph_));
+        // Resolver callbacks run on the control thread. No I/O or graph
+        // serialization enters the product's audio callback.
+        std::ofstream file("graph-audio.json");
+        file << choc::json::toString(evidence);
     }
     pulp::format::ViewSize view_size() const override {
         return {1, 1, 1, 1, 1, 1};
@@ -94,6 +124,9 @@ class GraphProductProcessor final : public pulp::format::Processor {
     }
 
   private:
+    std::array<float, 64> stimulus_{};
+    std::atomic<float> last_sample_{0};
+    std::atomic<std::uint64_t> process_count_{0};
     pulp::host::SignalGraph graph_;
     std::unique_ptr<pulp::host::ProcessorSignalGraphBinding> binding_;
     pulp::host::NodeId source_ = 0;
@@ -102,6 +135,7 @@ class GraphProductProcessor final : public pulp::format::Processor {
 };
 
 pulp::host::SignalGraphControlAuthority* resolve_graph(pulp::format::Processor& processor) {
+    static_cast<GraphProductProcessor&>(processor).record_evidence();
     return pulp::host::create_processor_signal_graph_authority(processor);
 }
 

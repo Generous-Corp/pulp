@@ -179,6 +179,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     const std::string patch = "# flow 1\nin : pulp/audio_in\ngain : pulp/gain\nout : pulp/audio_out\n"
                               "in.audio >> gain.audio\ngain.audio >> out.audio\ngain.gain = 0.75\n";
     { std::ofstream save(file); save << patch; }
+    std::string state_before_revocation;
     const auto watch = [&](const char* command, std::uint64_t generation,
                            bool acquire = true, std::string watch_grant = {},
                            bool revoke_after_publication = false) {
@@ -202,6 +203,20 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
             if (revoke_after_publication && !publication_seen &&
                 line.find("committed") != std::string_view::npos) {
                 publication_seen = true;
+                const auto observed = run(cli, root.runtime,
+                    {"control", "call", "--instance", instance, "dev.pulp.graph/file.reload@1", "--params",
+                     R"({"text":"malformed","format":"notation","expected_generation":3})",
+                     "--json", "--grant", watch_grant});
+                if (observed.exit_code != 0) {
+                    const auto receipt = choc::json::parse(observed.stdout_output);
+                    if (receipt["detail"]["generation"].getInt64() == 3 &&
+                        receipt["detail"]["code"].getString() == "invalid-document") {
+                        std::ifstream captured(host_dir / "graph-audio.json");
+                        const std::string bytes(std::istreambuf_iterator<char>{captured}, {});
+                        if (!bytes.empty())
+                            state_before_revocation = std::string(choc::json::parse(bytes)["state"].getString());
+                    }
+                }
                 const auto revoked = run(cli, root.runtime,
                     {"control", "revoke", "--grant", watch_grant, "--json"});
                 owner_revoked = revoked.exit_code == 0;
@@ -215,7 +230,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
         };
         options.working_directory = project.string();
         auto result = pulp::platform::ChildProcess::run("/usr/bin/env",
-            {"TMPDIR=" + root.runtime.string(), "PULP_HOME=" + (project / "pulp-home").string(), cli.string(), command, "--target", "proof",
+            {"PULP_BUILD_JOBS=2", "TMPDIR=" + root.runtime.string(), "PULP_HOME=" + (project / "pulp-home").string(), cli.string(), command, "--target", "proof",
              "--no-dev-shared", "--graph-file", file.string(), "--graph-instance", instance,
              "--graph-grant", watch_grant, "--graph-generation", std::to_string(generation),
              "--graph-watch-polls", "12"}, options);
@@ -230,6 +245,27 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
         }
         return result;
     };
+    const auto audio_state = [&](std::uint64_t generation, const std::string& grant,
+                                 double expected_sample) {
+        const auto refused = run(cli, root.runtime,
+            {"control", "call", "--instance", instance, "dev.pulp.graph/file.reload@1", "--params",
+             "{\"text\":\"malformed\",\"format\":\"notation\",\"expected_generation\":" +
+                 std::to_string(generation) + "}", "--json", "--grant", grant});
+        INFO(refused.stdout_output); INFO(refused.stderr_output);
+        REQUIRE(refused.exit_code != 0);
+        const auto receipt = choc::json::parse(refused.stdout_output);
+        REQUIRE(receipt["detail"]["generation"].getInt64() == generation);
+        REQUIRE(receipt["detail"]["code"].getString() == "invalid-document");
+        std::ifstream captured(host_dir / "graph-audio.json");
+        const std::string bytes(std::istreambuf_iterator<char>{captured}, {});
+        REQUIRE_FALSE(bytes.empty());
+        const auto evidence = choc::json::parse(bytes);
+        REQUIRE(evidence["process_count"].getInt64() > 0);
+        REQUIRE(evidence["sample"].getFloat64() == expected_sample);
+        return std::string(evidence["state"].getString());
+    };
+    const auto initial_state = audio_state(0, develop_grant, 0.125);
+    REQUIRE_FALSE(initial_state.empty());
     const auto dev = watch("dev", 0);
     INFO(dev.stdout_output); INFO(dev.stderr_output);
     REQUIRE(dev.exit_code == 0);
@@ -253,6 +289,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     INFO(stale.stdout_output); INFO(stale.stderr_output);
     REQUIRE(stale.exit_code == 0);
     REQUIRE(stale.stdout_output.find("stale-base") != std::string::npos);
+    const auto before_refusals = audio_state(2, develop_grant, 0.375);
     const auto acquired = run(cli, root.runtime,
         {"control", "call", "--instance", instance, "dev.pulp.session/control@1", "--params",
          R"({"action":"acquire"})", "--json", "--grant", develop_grant});
@@ -282,6 +319,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     REQUIRE(denied_renewal.exit_code == 0);
     REQUIRE(denied_renewal.stderr_output.find("renewal refused") != std::string::npos);
     REQUIRE(denied_renewal.stdout_output.find("committed") == std::string::npos);
+    CHECK(audio_state(2, develop_grant, 0.375) == before_refusals);
     const auto revoked_watch = watch("dev", 2, true, develop_grant, true);
     INFO(revoked_watch.stdout_output); INFO(revoked_watch.stderr_output);
     REQUIRE(revoked_watch.exit_code == 0);
@@ -298,6 +336,9 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
         {"control", "call", "--instance", instance, "dev.pulp.session/control@1", "--params",
          R"({"action":"acquire"})", "--json", "--grant", final_grant});
     REQUIRE(final_lease.exit_code == 0);
+    CHECK(audio_state(3, final_grant, 0.375) != initial_state);
+    REQUIRE_FALSE(state_before_revocation.empty());
+    CHECK(audio_state(3, final_grant, 0.375) == state_before_revocation);
     const auto unchanged_generation = run(cli, root.runtime,
         {"control", "call", "--instance", instance, "dev.pulp.graph/file.reload@1", "--params",
          R"({"text":"malformed","format":"notation","expected_generation":3})",

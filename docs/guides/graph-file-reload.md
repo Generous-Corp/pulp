@@ -65,3 +65,10 @@ headers: a real file save stages a 0.25 gain, preserves old output 0.125 during
 prepare, publishes 0.75 gain/output 0.375, and verifies malformed replacement keeps
 the new state/audio. Focused controls also retain old snapshots, exercise failed
 prepare and stale publication, and compare executor/public diagnostics.
+
+The broker product test drives the actual standalone audio callback with a constant
+0.5 input. A test-owned control-thread observer records the last rendered sample
+and canonical graph state. It checks 0.125 before replacement, 0.375 after
+publication, and unchanged audio/state through malformed/stale documents, expired
+leases, restricted renewal and owner revocation during a running watch. The
+observer adds no production control operation or audio-thread I/O.
