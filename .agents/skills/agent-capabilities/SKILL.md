@@ -2049,3 +2049,12 @@ Edit only that hash, then run `agent_capability_rederive.py` against the base: i
 confirms the counters stay at the base value (no manual `SURFACE_INVENTORY_VERSION`
 bump) and rewrites `agent-capability-surface.json`. Hand-bumping the version, as
 the section above describes for other headers, was not needed here.
+
+## Isolated host headers require the same refresh
+
+Changes to the isolated CLAP host headers, including
+`isolated_plugin_slot.hpp`, `signal_graph_execution_snapshot.hpp`, and
+`signal_graph_runtime.hpp`, update their surface fragments and fingerprints.
+Run rederive, fingerprint acceptance, manifest write, and installed-consumer
+checks together; do not hand-edit generated fragments or treat a passing worker
+test as sufficient provenance evidence.
