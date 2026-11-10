@@ -22,6 +22,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
     "pulp/signal/smoothed_value.hpp": "Pulp::signal",
     "pulp/signal/indexed_control.hpp": "Pulp::signal",
+    "pulp/signal/control_math.hpp": "Pulp::signal",
     "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
     "pulp/host/signal_graph.hpp": "Pulp::host",
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
@@ -303,6 +304,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         "rationale": (
             "Bounded scalar mapping and caller-indexed table reads support one G-5 "
             "workflow; they do not establish a graph event transport or independent "
+            "generator-facing capability contract."
+        ),
+    },
+    {
+        "include": "pulp/signal/control_math.hpp",
+        "fingerprint": "sha256:51948a38e0ccfa2804f44fa2a344fcd17d51cac71951163f64d78f169ea8da33",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Finite scalar math and bounded integrator primitives support the G-5 "
+            "graph Control nodes; they do not establish an independent "
             "generator-facing capability contract."
         ),
     },
