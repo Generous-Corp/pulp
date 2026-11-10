@@ -3687,7 +3687,7 @@ exactly the tests the budgeted attempt deferred (`--admission`,
 `pr-head-affected-tests-a<attempt>` artifact). The result is the existing
 required `macos` check, so no new required context exists and the steward
 remains the only writer of admission. Armed or queued heads, red runs and runs
-already re-run once are left alone (decisions contract row 31). The repository variable
+already re-run once are left alone (decisions contract row 32). The repository variable
 `PULP_DEFERRED_ADMISSION=enforce` turns it on; unset is shadow mode, which only
 reports what it would re-run. Rules and tests: `tools/ci/deferred_admission.py`.
 

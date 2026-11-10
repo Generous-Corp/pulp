@@ -1644,7 +1644,7 @@ The ten-minute budget is why the merge group used to be the first place a large
 diff's affected tests ran: in the week to 2026-11-09, 9 of 10 "passes on the
 head, fails merged" ejections failed on the head alone, in tests its run had
 deferred (#11471's head deferred 111). `deferred-tests-admission.yml` closes
-that without a new required context or a new merge writer (contract row 31):
+that without a new required context or a new merge writer (contract row 32):
 on a green Review verdict run, the fleet App's APPROVE comment (a wake-up only;
 it waits up to three minutes for `review-verdict` to turn green, which stays the
 only approval), or a Build and Test completion for an approved head, it re-runs
