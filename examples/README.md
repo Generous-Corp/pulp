@@ -30,6 +30,7 @@ cmake -S examples/<dir> -B build/<dir> -DPulp_DIR=<sdk>/lib/cmake/Pulp
 | Directory | What it shows | Build and run |
 |---|---|---|
 | `pulp-gain` | Smallest plugin: gain, bypass, all formats, a golden-file audio test | `pulp build --examples --target PulpGain_Standalone` |
+| `midi-learn-demo` | MIDI Learn end to end: processor, controller feedback, saved mappings, and headless editor pieces (the shipped plug-in has no editor wiring yet) | `pulp build --examples --target MidiLearnDemo_CLAP` |
 | `pulp-effect` | Biquad filter with parameters and state save and restore | `pulp build --examples --target PulpEffect_CLAP` |
 | `pulp-compressor` | Sidechain compressor, multi-bus routing | `pulp build --examples --target PulpCompressor_CLAP` |
 | `pulp-delay` | Stereo character delay with tempo sync and an in-loop tone control | `pulp build --examples --target PulpDelay_Standalone` |

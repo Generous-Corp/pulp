@@ -9,6 +9,47 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11040"></a>
+## [1.104.0] - 2026-11-10
+
+- release/version bump ([#12001](https://github.com/Generous-Corp/pulp/pull/12001))
+- codex/a3 two asset morph 20261110 ([#11998](https://github.com/Generous-Corp/pulp/pull/11998))
+- release/version bump ([#11994](https://github.com/Generous-Corp/pulp/pull/11994))
+- codex/script inventory inspect root 20261110 ([#11995](https://github.com/Generous-Corp/pulp/pull/11995))
+- fix/native geometry test overlap ([#11992](https://github.com/Generous-Corp/pulp/pull/11992))
+- feature/fft parity recipe main ([#11991](https://github.com/Generous-Corp/pulp/pull/11991))
+- feature/fft scaling contract ([#11989](https://github.com/Generous-Corp/pulp/pull/11989))
+- feature/midi learn au feedback ([#11987](https://github.com/Generous-Corp/pulp/pull/11987))
+- feature/midi learn reservation ([#11986](https://github.com/Generous-Corp/pulp/pull/11986))
+- fix/forge dev preserve locked archives 20261110 ([#11985](https://github.com/Generous-Corp/pulp/pull/11985))
+- fix/workflow lint flake exoneration step ([#11988](https://github.com/Generous-Corp/pulp/pull/11988))
+- fix/agent toolkit synth duplicate target ([#11917](https://github.com/Generous-Corp/pulp/pull/11917))
+- feature/rmlui native adapter ([#11806](https://github.com/Generous-Corp/pulp/pull/11806))
+- fix/darwin x64 universal skia ([#11959](https://github.com/Generous-Corp/pulp/pull/11959))
+- codex/g5 graph authored event 20261110 ([#11984](https://github.com/Generous-Corp/pulp/pull/11984))
+- feature/wav atomic write ([#11950](https://github.com/Generous-Corp/pulp/pull/11950))
+- release/version bump ([#11983](https://github.com/Generous-Corp/pulp/pull/11983))
+- codex/a10 installed consumer refresh2 20261109 ([#11926](https://github.com/Generous-Corp/pulp/pull/11926))
+- refactor/audio corpus split 20261110 ([#11979](https://github.com/Generous-Corp/pulp/pull/11979))
+- codex/graph ledger refresh 20261110 ([#11973](https://github.com/Generous-Corp/pulp/pull/11973))
+- chore/vellum framework transfer record ([#11980](https://github.com/Generous-Corp/pulp/pull/11980))
+- feature/merge group flake exoneration ([#11885](https://github.com/Generous-Corp/pulp/pull/11885))
+- fix/g9 crash no report ([#11972](https://github.com/Generous-Corp/pulp/pull/11972))
+- docs/native surface guide ([#11792](https://github.com/Generous-Corp/pulp/pull/11792))
+- codex/g6 audio tail audit 20261110 ([#11957](https://github.com/Generous-Corp/pulp/pull/11957))
+- fix/apt install retry ([#11974](https://github.com/Generous-Corp/pulp/pull/11974))
+- release/version bump ([#11977](https://github.com/Generous-Corp/pulp/pull/11977))
+- fix/flake trio menu decode asyncworker ([#11962](https://github.com/Generous-Corp/pulp/pull/11962))
+- feature/audio wav acceptance policy 20261109 ([#11904](https://github.com/Generous-Corp/pulp/pull/11904))
+- codex/g10 runtime adapter 20261110 ([#11976](https://github.com/Generous-Corp/pulp/pull/11976))
+- codex/g5 qualification 20261110 ([#11966](https://github.com/Generous-Corp/pulp/pull/11966))
+- codex/g3 identity retry2 20261110 ([#11969](https://github.com/Generous-Corp/pulp/pull/11969))
+- codex/g10 granular retry2 20261110 ([#11971](https://github.com/Generous-Corp/pulp/pull/11971))
+- codex/g6 audio tail retry2 ([#11970](https://github.com/Generous-Corp/pulp/pull/11970))
+- codex/g3 identity contract audit 20261110 ([#11967](https://github.com/Generous-Corp/pulp/pull/11967))
+- codex/g11 remaining qualification 20261110 ([#11964](https://github.com/Generous-Corp/pulp/pull/11964))
+- codex/g4 processor audit 20261110 ([#11965](https://github.com/Generous-Corp/pulp/pull/11965))
+
 <a id="v11000"></a>
 ## [1.100.0] - 2026-11-10
 
@@ -12670,6 +12711,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.104.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.104.0
 [1.100.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.100.0
 [1.99.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.99.1
 [1.99.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.99.0

@@ -590,7 +590,10 @@ class TestMainCli(unittest.TestCase):
         self.assertIn(
             "python3 tools/scripts/test_merge_stall_watchdog.py", lint
         )
-        self.assertIn("'tools/scripts/merge_stall_watchdog.py'", lint)
+        scope = (
+            Path(__file__).resolve().parents[2] / "tools" / "ci" / "workflow_lint_paths.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        self.assertIn("tools/scripts/merge_stall_watchdog.py", scope)
 
     def test_documented_fallback_contains_every_main_required_context(self):
         self.assertEqual(
