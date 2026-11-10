@@ -3,15 +3,18 @@
 #ifdef __APPLE__
 #import <Cocoa/Cocoa.h>
 
-// Per-binary-unique ObjC class names (renames PulpFileDragSource and the PulpView
-// the drag category attaches to when a shipped binary defines
-// PULP_VIEW_OBJC_SUFFIX). Must precede the first reference to those classes.
+// Per-binary-unique ObjC class names (renames the PulpView the drag category
+// attaches to when a shipped binary defines PULP_VIEW_OBJC_SUFFIX). Must
+// precede the first reference to those classes.
 #include "pulp_mac_objc_names.h"
 // The category below extends the standalone host NSView; its interface is
 // shared with the file that implements it. The hosted plug-in editor views get
 // the same behavior from plugin_view_host_mac_drag.mm.
 #include "drag_drop_mac_internal.h"
 #include "window_host_mac_view.h"
+
+#include <pulp/platform/file_drag.hpp>
+#include <pulp/platform/main_thread.hpp>
 
 #include <unordered_map>
 
@@ -103,87 +106,24 @@ static std::unordered_map<void*, pulp::view::DropTarget*> g_drop_targets;
 
 @end
 
-// A self-retaining NSDraggingSource for outbound file drags (see
-// begin_file_drag below). AppKit does NOT keep the source alive for the
-// session's lifetime, so the object holds a strong reference to itself and
-// clears it when the session ends — scoping its lifetime exactly to the drag
-// with no leak and without having to make every host NSView a dragging source.
-@interface PulpFileDragSource : NSObject <NSDraggingSource>
-@property (nonatomic, strong) PulpFileDragSource* keepAlive;
-@end
-
-@implementation PulpFileDragSource
-- (NSDragOperation)draggingSession:(NSDraggingSession*)session
-    sourceOperationMaskForDraggingContext:(NSDraggingContext)context {
-    (void)session;
-    (void)context;
-    // A dropped file is copied into the destination (DAW import, Finder copy);
-    // the source file (a temp export) stays put.
-    return NSDragOperationCopy;
-}
-- (void)draggingSession:(NSDraggingSession*)session
-           endedAtPoint:(NSPoint)screenPoint
-              operation:(NSDragOperation)operation {
-    (void)session;
-    (void)screenPoint;
-    (void)operation;
-    self.keepAlive = nil;  // release the session-scoped self-reference
-}
-@end
-
 namespace pulp::view {
 
 bool begin_file_drag(void* native_view, const FileDragRequest& request) {
-    @autoreleasepool {
-        NSView* view = (__bridge NSView*)native_view;
-        if (!view || request.file_paths.empty()) return false;
-
-        // NSDraggingSession can only be anchored to the mouse event that
-        // initiated it. start_file_drag() is documented as call-from-a-pointer-
-        // handler, so the initiating event is NSApp.currentEvent.
-        NSEvent* event = [NSApp currentEvent];
-        if (!event) return false;
-        switch (event.type) {
-            case NSEventTypeLeftMouseDown:
-            case NSEventTypeLeftMouseDragged:
-            case NSEventTypeRightMouseDown:
-            case NSEventTypeRightMouseDragged:
-            case NSEventTypeOtherMouseDown:
-            case NSEventTypeOtherMouseDragged:
-                break;
-            default:
-                return false;  // no mouse context → can't start a drag
-        }
-
-        // Anchor the drag image at the current mouse location in the view.
-        NSPoint where = [view convertPoint:event.locationInWindow fromView:nil];
-
-        NSMutableArray<NSDraggingItem*>* items = [NSMutableArray array];
-        NSWorkspace* ws = [NSWorkspace sharedWorkspace];
-        NSFileManager* fm = [NSFileManager defaultManager];
-        for (const auto& path : request.file_paths) {
-            if (path.empty()) continue;
-            NSString* p = [NSString stringWithUTF8String:path.c_str()];
-            if (p.length == 0 || ![fm fileExistsAtPath:p]) continue;
-            NSURL* url = [NSURL fileURLWithPath:p];
-            NSDraggingItem* item =
-                [[NSDraggingItem alloc] initWithPasteboardWriter:url];
-            NSImage* icon = [ws iconForFile:p];
-            NSSize sz = (icon && icon.size.width > 0) ? icon.size
-                                                      : NSMakeSize(32, 32);
-            NSRect frame = NSMakeRect(where.x - sz.width / 2.0,
-                                      where.y - sz.height / 2.0,
-                                      sz.width, sz.height);
-            [item setDraggingFrame:frame contents:icon];
-            [items addObject:item];
-        }
-        if (items.count == 0) return false;  // nothing existed on disk
-
-        PulpFileDragSource* source = [PulpFileDragSource new];
-        source.keepAlive = source;  // retained until the session ends
-        [view beginDraggingSessionWithItems:items event:event source:source];
-        return true;
-    }
+    if (!native_view || request.file_paths.empty())
+        return false;
+    // The platform layer owns the native drag: it anchors to the current mouse
+    // event, drags only the files that exist, and honours a recorder installed
+    // with pulp::platform::set_file_drag_recorder(), so tests and automation can
+    // start this drag without a real pointer event. Nothing is reported back
+    // when the drag ends, so a local scope is enough.
+    pulp::platform::FileDragRequest platform_request;
+    platform_request.paths = request.file_paths;
+    platform_request.allowed = pulp::platform::drag_copy;
+    platform_request.origin_x = request.root_position.x;
+    platform_request.origin_y = request.root_position.y;
+    pulp::platform::MainThreadScope scope;
+    return pulp::platform::begin_file_drag(scope, native_view, platform_request, {}) ==
+           pulp::platform::FileDragError::none;
 }
 
 bool register_drop_target(void* native_view, DropTarget& target) {
