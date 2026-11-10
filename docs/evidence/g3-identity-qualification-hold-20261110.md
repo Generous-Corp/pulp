@@ -58,3 +58,7 @@ followed by an installed consumer and independent planted-negative controls.
 No source or runtime implementation was changed. No claim is made about
 hard-realtime behavior, arbitrary nodes, plugin hosting, cross-platform parity,
 or graph mutation semantics.
+
+## Current-base reconciliation — 2026-11-10
+
+The branch was reconciled against `origin/main` at `d33f5ea7d8e9f7ef2fd54cd3f90fbe44e0e6eb43`. The controls and HOLD disposition above remain unchanged; this section binds the evidence packet to the current base and does not promote the focused vectors to whole-graph qualification.
