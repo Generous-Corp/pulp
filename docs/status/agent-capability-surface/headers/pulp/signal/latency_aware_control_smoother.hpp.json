@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/latency_aware_control_smoother.hpp",
+  "fingerprint": "sha256:b3b99fa8275403a047516a06d2d6a268b45c64dc94f90548ed5e7b994e922291",
+  "include": "pulp/signal/latency_aware_control_smoother.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

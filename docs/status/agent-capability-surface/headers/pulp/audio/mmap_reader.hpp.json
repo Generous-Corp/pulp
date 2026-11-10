@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/mmap_reader.hpp",
+  "fingerprint": "sha256:e690b373b06a9a9b87d68702f1c6b31e1bfc2f6c8df565194c325bc38cf71478",
+  "include": "pulp/audio/mmap_reader.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Memory-mapped, snapshot-backed ranged audio file reading is host infrastructure that sample streaming consumes; it is not an independently selected generator-facing capability."
+}

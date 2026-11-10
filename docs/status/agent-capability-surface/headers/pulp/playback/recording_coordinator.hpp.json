@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/recording_coordinator.hpp",
+  "fingerprint": "sha256:96dfd4b5b13477a83bfe35aa40b8ec5fd7806496fe0c045c14a38b337a022572",
+  "include": "pulp/playback/recording_coordinator.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Recording monitor modes and resolved paths (Off/Direct/Software/Auto), recording sources, and the track and coordinator configuration around them. It is the playback module's internal recording orchestration and binds no installed agent capability of its own."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/system_audio_codec.hpp",
+  "fingerprint": "sha256:3c3cc0182566ebd1fc4054b0726de8ee995b593c0c95dbdef7268423152fc5c0",
+  "include": "pulp/audio/system_audio_codec.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Audio file encoding through the operating system's codecs (AAC, ALAC and PCM via ExtAudioFile or Media Foundation) is host infrastructure for export and file writing; it is not an independently selected generator-facing capability."
+}

@@ -76,7 +76,7 @@
         },
         {
           "kind": "agent_manifest",
-          "path": "docs/status/agent-capability-surface.json",
+          "path": "docs/status/agent-capability-surface/headers/pulp/signal/tempo_delay_wrapper.hpp.json",
           "needles": ["pulp/signal/tempo_delay_wrapper.hpp"]
         }
       ],

@@ -1,0 +1,11 @@
+{
+  "domain": "timebase",
+  "source": "core/timebase/include/pulp/timebase/inline_groove_projector.hpp",
+  "fingerprint": "sha256:1008649e2c45404205bb6f525a32b6c91dd7c881e97bb768c4037fbf0253c4cb",
+  "include": "pulp/timebase/inline_groove_projector.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "timebase.inline-groove-projector"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

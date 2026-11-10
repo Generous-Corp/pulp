@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/live_dsp_telemetry_json.hpp",
+  "fingerprint": "sha256:b8f0e6568ec315cc489f3253aea85c7984f779d8c3f5082a4b6aa693412f6c44",
+  "include": "pulp/audio/live_dsp_telemetry_json.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

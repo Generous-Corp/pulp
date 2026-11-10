@@ -1,0 +1,11 @@
+{
+  "domain": "sequence",
+  "source": "core/sequence/include/pulp/sequence/host_transport_projector.hpp",
+  "fingerprint": "sha256:3c0a31d541635c9339fadb13b584e9bdec7a4e9e274afd595450f707c8344051",
+  "include": "pulp/sequence/host_transport_projector.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "sequence.host-transport-projector"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

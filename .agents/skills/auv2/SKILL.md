@@ -316,6 +316,23 @@ per plug-in, and the factory class is exported. Things to keep straight:
   processor overrides `editor_factory()`. Only view-free UI-package AUs serve the
   contract view.
 
+### `auval` over SSH cannot see user-installed components
+
+Run from an SSH session, `auval` finds Apple's components (`auval -v aufx dely
+appl` passes) but none in `~/Library/Audio/Plug-Ins/Components`: `auval -a`
+lists no third-party unit, and a freshly installed one fails with `didn't find
+the component`. `check_au_component_preflight.py --diagnose-host` names the
+cause: the `AudioComponentRegistrar` is unavailable in the SSH session's
+Background launchd domain. That is the session, not the plug-in. Validate user
+AUs from a logged-in GUI session. For a remote, headless check, use an
+in-process host that registers the bundle with `AudioComponentRegister`, as
+`editor_ui_package_au_host.mm` does.
+
+The build also leaves an ad-hoc signature that `codesign --verify` rejects
+(`code has no resources but signature indicates they must be present`). An
+installed copy needs `codesign --force --deep -s -` before a registrar will
+consider it.
+
 ## Factory presets
 
 All three adapters override `AUBase::GetPresets` and
