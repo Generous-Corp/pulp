@@ -2,7 +2,7 @@
 
 Status: **PARTIAL — exact-current-head installed consumer passes bounded routing/hosting controls; hostile containment remains HOLD**
 
-Current source authority for this refreshed receipt is merge head `eaf7de2788cd68021686f1eac2a2e9b9f0256ead`, which contains live `origin/main=68c471e93e46f57517fac64f4ece31148a6f0d93`.
+Current source authority for this refreshed receipt is repair head `527598fdff912662d7ac4172bef6808291c2cf8b`, based on live `origin/main=1d9a966e4d90e1ddb24da8ec7cb28812b3f562f8`.
 The required graph dependencies are present at exact merged heads:
 
 - G-1 named typed ports: PR [#11428](https://github.com/Generous-Corp/pulp/pull/11428), source head `be70e3c44836605ac1279c65a572e833699e1fbb`, merge `e19f556e67129117ef3a4587bff11fdee16ebf44`.
@@ -29,22 +29,25 @@ an installed consumer once an exact-head SDK is available:
 ## Exact current-main installed-SDK consumer (2026-11-10)
 
 The former SDK-availability blocker is cleared for a bounded public-host
-consumer. A clean checkout at refreshed source head `eaf7de2788cd68021686f1eac2a2e9b9f0256ead` (live `origin/main=68c471e93e46f57517fac64f4ece31148a6f0d93`)
+consumer. A clean checkout at repair source head `527598fdff912662d7ac4172bef6808291c2cf8b` (based on live `origin/main=1d9a966e4d90e1ddb24da8ec7cb28812b3f562f8`)
 was configured as a Release source install with GPU disabled (the consumer
 does not exercise rendering), and `tools/ci/governed-build.sh cmake --build
 build-a10-sdk-release --target install` completed. The installed
 `sdk-provenance.json` reports `kind=source-install`, `source_git_dirty=false`,
-that exact source SHA, `platform=darwin-arm64`, and `build_profile=release`.
+that exact source SHA, `platform=darwin-arm64`, and `build_profile=dev`; the
+source and consumer CMake builds use `CMAKE_BUILD_TYPE=Release`.
 
 An installed-prefix consumer configured solely with
 `Pulp_DIR=<prefix>/lib/cmake/Pulp`, built in Release with the governed build
 wrapper, and passed CTest 1/1. The executable reports
-`a10-routing-hosting PASS sidechain=1 automation=1 pdc=4 transactional_swap=1`.
+`a10-routing-hosting PASS sidechain_route_accepted=1 automation_route_accepted=1 pdc=4 transactional_prepare_accepted=1`.
 The receipt is [`receipt.json`](../evidence/a10-routing-hosting-installed-20261110/receipt.json)
-(`sha256=b5b6c74168738474a70acac124d633bcdac49b8641a315017f89d72f4d74f29d).
-It records positive named sidechain, parameter automation, prepared latency,
-and transactional swap controls plus planted refusals for a non-plugin
-sidechain destination and an unknown parameter.
+(`sha256=4d38ceacd92ad2e8d395162fb1ab978e1cf7f4425cffec6ebd62785af20071f6).
+It records accepted named sidechain and automation route registration, prepared
+latency introspection, and transactional topology preparation plus planted
+refusals for a non-plugin sidechain destination and an unknown parameter. The
+consumer does not call `SignalGraph::process`, so these are graph wiring and
+preparation acceptance checks rather than audio or parameter-value behavior.
 
 This closes the exact-head installed-consumer configuration gap for the
 bounded host API. The fixture uses a caller-owned deterministic in-process

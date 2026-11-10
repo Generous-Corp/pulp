@@ -135,8 +135,9 @@ int main() {
         if (swap == SignalGraph::SwapResult::NeedsEagerPrepare)
             require(graph.prepare(48000.0, 64), "eager-prepare");
 
-        std::cout
-            << "a10-routing-hosting PASS sidechain=1 automation=1 pdc=4 transactional_swap=1\n";
+        std::cout << "a10-routing-hosting PASS sidechain_route_accepted=1 "
+                     "automation_route_accepted=1 pdc=4 "
+                     "transactional_prepare_accepted=1\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "a10-routing-hosting FAIL rule=" << error.what() << '\n';
