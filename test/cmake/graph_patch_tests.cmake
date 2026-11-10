@@ -1,8 +1,10 @@
 if(TARGET pulp-host)
     pulp_add_test_suite(pulp-test-graph-patch LIBRARIES pulp::host)
+    pulp_test_data(pulp-test-graph-patch NO_DEFINE PATHS examples/graph-patch-consumer/hello.pat)
+    pulp_test_spawns(pulp-test-graph-patch NONE REASON "uses only in-process graph and offline host APIs")
     target_compile_definitions(pulp-test-graph-patch PRIVATE
         PULP_PATCH_HELLO="${CMAKE_SOURCE_DIR}/examples/graph-patch-consumer/hello.pat")
-    add_test(NAME graph-patch-grammar-sync
+    add_test(NAME graph-patch-grammar-fixture
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/rack/generate_signal_graph_grammar.py --check)
 endif()
 
