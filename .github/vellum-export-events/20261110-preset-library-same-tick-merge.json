@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261110-preset-library-same-tick-merge",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-10T08:10:34Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/state/include/pulp/state/preset_metadata_store.hpp",
+    "core/state/src/preset_metadata_store.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "PresetMetadataStore now stamps an overlay edit after merging the shared file, so the newest edit wins even within one clock tick, and a rekey no longer overwrites another writer's edits at its target. A bug fix to code the previous event already marked as inherited; Vellum's preset browser should carry it with the store."
+}
