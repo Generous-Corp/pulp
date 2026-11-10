@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261110-midi-learn-example-watch",
+  "created_at": "2026-11-10T12:50:41Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Adds the MidiLearnDemo example plug-in, its docs, and the pulp-test-midi-learn-example suite registered in test/cmake/design_import_view_widget_tests.cmake. The only path under design-source-ingest is that test manifest registration; no importer, Chromium capture, DesignIR, rendering, or packaging code changes, so no design-import authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-midi-learn-example",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

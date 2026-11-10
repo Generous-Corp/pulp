@@ -1,0 +1,10 @@
+{
+ "name": "configure-tests-and-examples-both-on",
+ "record": {
+  "entry": "test/cmake/test_tests_and_examples_configure.sh",
+  "inputs": [
+   "test/cmake/test_tests_and_examples_configure.sh"
+  ],
+  "kind": "shell"
+ }
+}
