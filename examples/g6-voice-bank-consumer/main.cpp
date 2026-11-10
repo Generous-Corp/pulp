@@ -189,7 +189,7 @@ void check_capacity_and_poly_pressure() {
     check(owner(*bank).allocator().voice(0).channel() == 2 &&
               owner(*bank).allocator().voice(0).note_number() == 0 &&
               owner(*bank).allocator().voice(0).note_id() == 129 &&
-              resumed.channel(0)[0] == -0.125f,
+              resumed.channel(0)[0] == -kBankGain,
           "capacity-recovered-audio");
 
     auto pressure = make_bank(schema(), status);
