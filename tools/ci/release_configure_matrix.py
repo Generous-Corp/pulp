@@ -815,7 +815,20 @@ def cmd_run(args: argparse.Namespace) -> int:
         return run_plan(data, Path(tmp))
 
 
+def utf8_console() -> None:
+    """Relay step output as UTF-8 whatever the console code page is.
+
+    The replayed steps print UTF-8 (setup.sh's check marks, CMake's quotes);
+    Windows Python's stdout defaults to cp1252 and raises on the first one.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    utf8_console()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 

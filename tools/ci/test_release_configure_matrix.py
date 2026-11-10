@@ -437,6 +437,24 @@ class RunTests(unittest.TestCase):
                                 "false | cat\n"}])
         self.assertEqual(rc, 1)
 
+    def test_step_output_survives_a_non_utf8_console(self):
+        # Windows Python writes stdout as cp1252; setup.sh prints check marks.
+        import subprocess
+        data = {"platform": "windows-x64", "runner_os": "Windows", "release_tag": "v1.0.0",
+                "job_env": {}, "steps": [{"name": "unicode", "env": {},
+                                          "script": "printf '\\342\\234\\223 ready\\n'\n"}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = Path(tmp) / "plan.json"
+            plan.write_text(json.dumps(data), encoding="utf-8")
+            env = dict(os.environ, PYTHONIOENCODING="cp1252")
+            env.pop("GITHUB_STEP_SUMMARY", None)
+            out = subprocess.run(
+                [sys.executable, str(REPO / "tools/ci/release_configure_matrix.py"),
+                 "run-plan", "--plan", str(plan)],
+                env=env, capture_output=True)
+        self.assertEqual(out.returncode, 0, out.stderr.decode("utf-8", "replace"))
+        self.assertIn("\u2713 ready".encode("utf-8"), out.stdout)
+
     def test_failure_reports_the_cmake_error(self):
         script = f"cat <<'LOG'\n{INCIDENT_LOG}LOG\nexit 1\n"
         rc, summary = self.run_plan([{"name": "Configure (CLI, no WebView on Linux)",
