@@ -267,6 +267,13 @@
       ]
     },
     {
+      "name": "deferred-admission-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_deferred_admission.py"
+      ],
+      "timeout": 60.0
+    },
+    {
       "name": "deps-patches-selftest",
       "argv": [
         "{repo}/tools/deps/test_check_patches.py"
