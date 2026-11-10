@@ -3,7 +3,6 @@
 from pathlib import Path
 import sys
 
-source = Path('test/test_g5_graph_event_rt.cpp')
 needle = '    // RT_ESCAPE_INJECTION: confirm_failure plants an actual callback escape here.'
 plants = {
     'allocation': '    auto* escaped = new volatile unsigned char[64]; escaped[0] = 7; delete[] escaped;',
@@ -15,8 +14,9 @@ plants = {
     (void)::write(1, "x", 1);
 #endif''',
 }
-if len(sys.argv) != 2 or sys.argv[1] not in plants:
-    raise SystemExit('usage: g5_rt_escape_mutator.py allocation|mutex|write')
+if len(sys.argv) != 3 or sys.argv[1] not in plants:
+    raise SystemExit('usage: g5_rt_escape_mutator.py allocation|mutex|write FILE')
+source = Path(sys.argv[2])
 text = source.read_text()
 if text.count(needle) != 1:
     raise SystemExit('expected exactly one callback escape marker')
