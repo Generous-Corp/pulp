@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/modulation_curve.hpp",
+  "fingerprint": "sha256:da89147c18e3c0479bf02294273bc7ec8ff76bc83cc7e198e645b14fe100a298"
+}

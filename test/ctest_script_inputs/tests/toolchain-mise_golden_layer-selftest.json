@@ -7,6 +7,8 @@
    "tools/ci/mise-golden-layer.sh",
    "tools/ci/tart-provision.sh",
    "tools/ci/test_mise_golden_layer.py",
+   "tools/toolchain",
+   "tools/toolchain/expected.json",
    "tools/toolchain/manifest.toml"
   ],
   "kind": "python"

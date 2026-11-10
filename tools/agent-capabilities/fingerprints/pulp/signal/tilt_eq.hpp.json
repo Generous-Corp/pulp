@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/tilt_eq.hpp",
+  "fingerprint": "sha256:ed676f18106a4465246265aeaebe138bc28c75ef197db2083b95e934418efb3d"
+}

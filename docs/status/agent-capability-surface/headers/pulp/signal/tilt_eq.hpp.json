@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/tilt_eq.hpp",
+  "fingerprint": "sha256:ed676f18106a4465246265aeaebe138bc28c75ef197db2083b95e934418efb3d",
+  "include": "pulp/signal/tilt_eq.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.tilt-eq"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

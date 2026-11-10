@@ -592,7 +592,38 @@ void SignalGraph::run_reference_walk_(audio::BufferView<float>& output,
                 if (auto event_it = cg->custom_event_processors.find(id);
                     event_it != cg->custom_event_processors.end()) {
                     midi::clear_midi_block(rt.midi_out);
-                    const CustomNodeEventBlock events{&rt.midi_in, &rt.midi_out};
+                    GraphEventWriter<> writer;
+                    GraphEventReader<> reader;
+                    if (cg->graph_event_lane && id == cg->graph_event_edge.producer) {
+                        if (cg->graph_event_lane->begin_producer_block() !=
+                            GraphEventResult::Accepted) {
+                            cg->graph_event_lane->abort_block();
+                            for (std::size_t channel = 0; channel < out_view.num_channels();
+                                 ++channel)
+                                std::memset(out_view.channel_ptr(channel), 0,
+                                            sizeof(float) * out_view.num_samples());
+                            break;
+                        }
+                        writer = GraphEventWriter<>(*cg->graph_event_lane, cg->graph_event_epoch,
+                                                    static_cast<std::uint32_t>(id));
+                    } else if (cg->graph_event_lane && id == cg->graph_event_edge.consumer) {
+                        if (cg->graph_event_lane->begin_consumer_block() !=
+                            GraphEventResult::Accepted) {
+                            cg->graph_event_lane->abort_block();
+                            for (std::size_t channel = 0; channel < out_view.num_channels();
+                                 ++channel)
+                                std::memset(out_view.channel_ptr(channel), 0,
+                                            sizeof(float) * out_view.num_samples());
+                            break;
+                        }
+                        reader = GraphEventReader<>(*cg->graph_event_lane);
+                    }
+                    const CustomNodeEventBlock events{
+                        &rt.midi_in, &rt.midi_out, nullptr,
+                        cg->graph_event_lane && id == cg->graph_event_edge.producer ? &writer
+                                                                                    : nullptr,
+                        cg->graph_event_lane && id == cg->graph_event_edge.consumer ? &reader
+                                                                                    : nullptr};
                     event_it->second(out_view, in_view, num_samples, events);
                 } else if (auto custom_it = cg->custom_processors.find(id);
                            custom_it != cg->custom_processors.end()) {

@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/external_sync.hpp",
+  "fingerprint": "sha256:7ef8447d4783267894611f1a14032347fcbab6e2f2e6dd2208ab1053717e764f",
+  "include": "pulp/playback/external_sync.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "MTC vocabulary — MtcFrameRate (including 29.97 drop), MtcTimecode, validity checking and conversion to samples. It is a bounded timecode conversion primitive for an external-sync source and advertises no installed agent capability of its own."
+}

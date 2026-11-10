@@ -115,7 +115,18 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   non-native tier's manifest, classifier or any `test/` CMake registration adds
   `wide-non-native-selftest`. Extra time is capped at ten minutes (batches stop
   starting; the rest are listed as skipped), and the merge group still runs
+  everything. Once the head is approved, `deferred-tests-admission.yml` re-runs
+  its `macos` job to run the skipped tests on the head before admission
+  (`PULP_DEFERRED_ADMISSION=enforce`; shadow when unset).
   everything.
+- **The clean-merge lane** — a pull-request head that is exactly a clean
+  merge of `main` into a head whose full macOS lane passed runs only configure,
+  `pr-fast` (minus `needs-build`) and `pr-guard`: no build, no tests the pull
+  request reaches. Its tier notice says `clean-merge`. The merge group still
+  builds and runs the full suite on the commit that lands. It ships in shadow
+  (`PULP_CLEAN_MERGE_LANE_MODE`); the trigger, the fail-closed rule and the
+  enforcement window are in the local CI guide, "A clean merge of main takes
+  the contract lane", and decisions contract row 31.
 - **`pr-fast`** — additive, never exclusive: a static repository contract
   (lint, drift, registry-completeness, generated-manifest check) that also runs
   on the pull request head, where the rest of the suite does not. Members are
@@ -558,6 +569,13 @@ make sure it is enforced somewhere. During the staged rollout,
 promotion to a required context is what turns that signal into enforcement.
 Use a dedicated gating lane for anything that must block before then. "It runs
 nightly" is a backstop, not enforcement.
+
+The one automatic exit is the flake quarantine (`tools/ci/flake_quarantine.py`):
+a test the merge-group gate excused as a corroborated flake 3 times in 7 days
+leaves the gate for at most 14 days, behind an owner issue labelled `ci:flake`.
+Its enforcer is the expiry, which returns it to the gate; meanwhile the
+`Quarantined flaky tests (advisory)` step runs it on every gate run, and a
+change that touches the test runs it in the gate. See `docs/guides/local-ci.md`.
 
 ### A label is not the only way to leave the gate
 

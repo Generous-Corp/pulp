@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/transient_designer.hpp",
+  "fingerprint": "sha256:f82fbba753fd01410ff7117cf86f9f8868d071a3979c36d87f677f99cbc34ae2",
+  "include": "pulp/signal/transient_designer.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.transient-designer"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

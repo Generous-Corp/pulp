@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261109-view-file-drag-recorder-watch",
+  "created_at": "2026-11-09T20:26:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The macOS outbound file drag in the view layer delegates to the platform file-drag seam, so a recorder can observe it; the view's own NSDraggingSource class is removed. Same anchoring, file filtering and copy operation; no design-import, Chromium, rendering, asset or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-drag-drop",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/program_wire.hpp",
+  "fingerprint": "sha256:f9c86057b4ad3169207bf924d797ca0ccdf931c691b42c65d2212073740f554b",
+  "include": "pulp/playback/program_wire.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "The flat, pointer-free byte layout one compiled program generation is published in, plus its native encoder and validating decoder — the crossing form for a consumer that does not share the producer's address space, such as an AudioWorklet and its Worker. Sections tile the payload exactly and a length that disagrees with its content is a rejection rather than an interpretation; a static_assert refuses a big-endian host. It is a serialization surface with no typed capability binding of its own today."
+}

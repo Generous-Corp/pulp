@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/sinc_resampler.hpp",
+  "fingerprint": "sha256:681a0d7fb7feb2457a8136779766172efcc7ef5030f0304b675f544341062215",
+  "include": "pulp/signal/sinc_resampler.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

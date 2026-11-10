@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/pcm_capabilities.hpp",
+  "fingerprint": "sha256:d52260fa3447b8c4b48ca1a52e2113cf9c6a3b37b73f2ec0e7ebd43da78d6ed3",
+  "include": "pulp/audio/pcm_capabilities.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Pure conversion of driver-reported PCM ranges into DeviceInfo lists for the ALSA backend; not a generator-facing capability."
+}

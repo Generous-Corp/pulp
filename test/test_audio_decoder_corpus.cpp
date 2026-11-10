@@ -1,8 +1,9 @@
 // Deterministic replay of the audio decoder seed corpus through the oracle the
 // libFuzzer target uses. This is the lane that runs on the required gate, and
 // the only lane that reaches the platform CoreAudio reader, which the fuzzer
-// excludes. It also holds the WAV differential: the registry's CHOC path and
-// the byte-span dr_wav decoder must agree bit for bit on every seed.
+// excludes. It also holds the WAV path differential: the registry's file
+// reader and the byte-span decoder apply one acceptance policy and must agree
+// on every seed, bit for bit where they decode.
 // approach after SimZhou/vscode-audiolens c5c5a24; re-authored
 
 #include "fuzz/audio_decoder_fuzz_oracle.hpp"
@@ -11,12 +12,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/audio/audio_reader.hpp>
 #include <pulp/audio/format_registry.hpp>
 #include <pulp/audio/wav_decoder.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -122,19 +125,17 @@ std::string write_file(const fs::path& path, const std::vector<uint8_t>& bytes) 
 }
 
 // What each committed seed must do, one row per seed, so "both refused"
-// cannot read as agreement for a seed that is supposed to decode and so
-// the WAV differential reads its expected splits from the same table.
-//   must_decode        valid per the corpus README: read_info and read succeed
-//                      through the registry; false means it may be refused
-//   span_decodes       WAV seeds only: decode_wav's outcome WHEN it differs
-//                      from the registry's (a listed split); empty means the
-//                      two WAV paths agree on accepting or refusing
+// cannot read as agreement for a seed that is supposed to decode.
+//   must_decode        read_info and read succeed through the registry; false
+//                      means it may be refused
+//   truncated          WAV seeds that decode: whether the header declares more
+//                      frames than the file holds (recovered, reported)
 //   libsndfile_decodes mirror of the lab differential's table (checked there)
-//   reason             why a refusal or split is expected
+//   reason             why a refusal, a recovery or a split is expected
 // A seed in the corpus without a row fails the replay until it is classified.
 struct SeedExpectation {
     bool must_decode;
-    std::optional<bool> span_decodes;
+    std::optional<bool> truncated;
     std::optional<bool> libsndfile_decodes;
     const char* reason;
 };
@@ -154,28 +155,55 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
         {"m4a-aac-lc-mono.m4a", E{true, {}, {}, ""}},
         {"m4a-aac-mdat-size1.m4a", E{true, {}, {}, ""}},
         {"m4a-alac-stereo.m4a", E{true, {}, {}, ""}},
+        {"mp3-ape-size-below-footer.mp3", E{true, {}, {}, ""}},
+        {"mp3-apev1-footer.mp3", E{true, {}, {}, ""}},
+        {"mp3-apev1-header-flag.mp3", E{true, {}, {}, ""}},
+        {"mp3-apev2-footer.mp3", E{true, {}, {}, ""}},
+        {"mp3-apev2-size-high-bit.mp3", E{true, {}, {}, ""}},
         {"mp3-cbr-mono.mp3", E{true, {}, {}, ""}},
+        {"mp3-id3v1-before-apev2.mp3", E{true, {}, {}, ""}},
         {"mp3-id3v2-xing-vbr.mp3", E{true, {}, {}, ""}},
+        {"mp3-lyrics3v2-before-id3v1.mp3", E{true, {}, {}, ""}},
+        {"mp3-trailing-junk.mp3", E{true, {}, {}, ""}},
         {"ogg-chained-two-streams.ogg", E{true, {}, {}, ""}},
         {"ogg-vorbis-mono.ogg", E{true, {}, {}, ""}},
-        {"wav-bwf-bext-before-data.wav", E{true, {}, {}, ""}},
-        {"wav-data-size-zero.wav", E{true, {}, {}, ""}},
-        {"wav-extensible-pcm24in32-stereo.wav", E{true, {}, {}, ""}},
-        {"wav-float32-mono-fmt18.wav", E{true, {}, {}, ""}},
-        {"wav-float64-mono.wav", E{true, {}, {}, ""}},
-        {"wav-list-info-heavy.wav", E{true, {}, {}, ""}},
-        {"wav-pcm16-mono-canonical44.wav", E{true, {}, {}, ""}},
-        {"wav-pcm24-stereo.wav", E{true, {}, {}, ""}},
-        {"wav-pcm32-stereo.wav", E{true, {}, {}, ""}},
-        {"wav-pcm8-stereo.wav", E{true, {}, {}, ""}},
-        {"wav-rf64-ds64.wav",
-         E{true, false, {}, "RF64 envelope: the registry (CHOC) reads it, decode_wav does not"}},
+        {"wav-bwf-bext-before-data.wav", E{true, false, {}, ""}},
+        {"wav-bw64-ds64.wav",
+         E{true, false, false, "BW64 envelope with ds64; libsndfile does not recognise BW64"}},
+        {"wav-data-size-zero.wav", E{true, false, {}, ""}},
+        {"wav-duplicate-fmt-identical.wav",
+         E{true, false, false,
+           "a fmt chunk repeated byte for byte is accepted with a warning; libsndfile refuses "
+           "any second fmt"}},
+        {"wav-extensible-pcm24in32-stereo.wav", E{true, false, {}, ""}},
+        {"wav-float32-mono-fmt18.wav", E{true, false, {}, ""}},
+        {"wav-float64-mono.wav", E{true, false, {}, ""}},
+        {"wav-list-info-heavy.wav", E{true, false, {}, ""}},
+        {"wav-pcm16-mono-canonical44.wav", E{true, false, {}, ""}},
+        {"wav-pcm24-stereo.wav", E{true, false, {}, ""}},
+        {"wav-pcm32-stereo.wav", E{true, false, {}, ""}},
+        {"wav-pcm8-stereo.wav", E{true, false, {}, ""}},
+        {"wav-rf64-ds64.wav", E{true, false, {}, "RF64 envelope with ds64"}},
+        // header longer than the file: the whole frames present decode
+        {"wav-data-past-eof.wav",
+         E{true, true, {}, "data chunk runs past EOF: the whole frames present decode"}},
+        {"wav-data-size-ffffffff-no-ds64.wav",
+         E{true, true, {}, "0xFFFFFFFF data size with no ds64: decodes to the end of the file"}},
+        {"wav-declares-100000001-frames.wav",
+         E{true, true, {}, "declares 100,000,001 frames over 800: the 800 decode"}},
+        {"wav-fmt-after-data.wav",
+         E{true, false, false, "fmt after data is accepted with a warning; libsndfile refuses it"}},
+        {"wav-odd-chunk-eof-no-pad.wav",
+         E{true, true, {}, "odd data chunk at EOF with no pad byte: the partial frame is dropped"}},
+        {"wav-riff-size-lying-small.wav",
+         E{true, false, {}, "RIFF size smaller than the chunks it holds: a warning only"}},
+        {"wav-rf64-ds64-data-size-zero.wav",
+         E{true, true, true,
+           "0xFFFFFFFF data size and a zero ds64 entry: decodes to the end of the file; "
+           "libsndfile trusts the zero and decodes no frames"}},
+        {"wav-rf64-ds64-data-past-eof.wav",
+         E{true, true, {}, "ds64 data size runs past EOF: the whole frames present decode"}},
         // valid per the README, refused by Pulp for a stated reason
-        {"mp3-apev2-footer.mp3", E{false,
-                                   {},
-                                   {},
-                                   "dr_mp3 fails to initialise behind a well-formed APEv2 tag; "
-                                   "Generous-Corp/pulp issue 11788"}},
         {"wav-w64-pcm16-mono.wav",
          E{false, {}, true, "Sony Wave64 envelope; Pulp registers no Wave64 reader"}},
         // malformed seeds: refused or decoded, the oracle judges what comes back
@@ -199,37 +227,16 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
            {},
            "bext chunk shorter than its fixed fields; CHOC once sized a 4 GiB string read"}},
         {"wav-block-align-smaller-than-frame.wav",
-         E{false, true, true,
-           "nBlockAlign smaller than channels x sample width: the registry refuses the layout, "
-           "dr_wav and libsndfile derive the stride"}},
-        {"wav-data-past-eof.wav",
          E{false,
-           false,
            {},
-           "data chunk runs past EOF: CHOC decodes what is there, dr_wav refuses"}},
-        {"wav-data-size-ffffffff-no-ds64.wav",
-         E{false, false, {}, "RF64 sentinel without ds64: CHOC decodes, dr_wav refuses"}},
-        {"wav-declares-100000001-frames.wav",
-         E{false,
-           false,
-           {},
-           "declared frames exceed the data: CHOC decodes what is there, dr_wav refuses"}},
+           true,
+           "nBlockAlign smaller than channels x sample width contradicts the fmt chunk; "
+           "libsndfile derives the stride instead"}},
         {"wav-duplicate-fmt.wav",
-         E{false,
-           {},
-           false,
-           "two fmt chunks: Pulp decodes by the last one, libsndfile refuses; issue 11788"}},
-        {"wav-fmt-after-data.wav",
-         E{false, true, {}, "fmt after data: CHOC refuses, dr_wav decodes"}},
-        {"wav-odd-chunk-eof-no-pad.wav",
-         E{false,
-           false,
-           {},
-           "odd chunk at EOF without its pad byte: CHOC decodes, dr_wav refuses"}},
-        {"wav-overlapping-chunks.wav", E{false, {}, {}, ""}},
-        {"wav-riff-header-only.wav", E{false, {}, {}, ""}},
-        {"wav-riff-size-lying-small.wav",
-         E{false, false, {}, "RIFF size smaller than the chunks: CHOC decodes, dr_wav refuses"}},
+         E{false, {}, false, "two fmt chunks that disagree contradict each other"}},
+        {"wav-overlapping-chunks.wav",
+         E{false, {}, {}, "fmt declares more than it holds, so the walk never reaches data"}},
+        {"wav-riff-header-only.wav", E{false, {}, {}, "no WAVE header"}},
     };
     return rows;
 }
@@ -291,6 +298,11 @@ TEST_CASE("every audio decoder seed satisfies the shared oracle through the regi
             failures.push_back(name + ": valid seed, read_info " +
                                (outcome.info_ok ? "ok" : "refused") + ", read " +
                                (outcome.decode_ok ? "ok" : "refused"));
+        } else if (row->second.truncated && outcome.info &&
+                   outcome.info->truncated != *row->second.truncated) {
+            failures.push_back(name + ": read_info reports truncated=" +
+                               (outcome.info->truncated ? "true" : "false") + ", expected " +
+                               (*row->second.truncated ? "true" : "false"));
         }
     }
 
@@ -321,31 +333,33 @@ TEST_CASE("WAV seeds decode identically through the registry and the byte-span d
     span_limits.max_output_bytes = limits.max_output_bytes;
 
     std::size_t both_decoded = 0;
-    std::set<std::string> splits_seen;
+    std::size_t truncated_decoded = 0;
     for (const auto& file : wav_files) {
         const auto name = file.filename().string();
+        INFO(name);
         const auto bytes = read_bytes(file);
+        const auto registry_info = registry.read_info(file.string());
+        const auto span_info = pulp::audio::inspect_wav(bytes);
         const auto registry_data = registry.read(file.string(), limits);
         const auto span_data = pulp::audio::decode_wav(bytes, span_limits);
 
-        if (registry_data.has_value() != span_data.has_value()) {
-            // A listed split: the row names decode_wav's outcome where it
-            // differs from the registry's.
-            const auto row = seed_expectations().find(name);
-            if (row != seed_expectations().end() && row->second.span_decodes.has_value() &&
-                *row->second.span_decodes == span_data.has_value()) {
-                splits_seen.insert(name);
-                continue;
-            }
-            FAIL_CHECK(name << ": registry (CHOC) " << (registry_data ? "decoded" : "refused")
-                            << ", decode_wav (dr_wav) " << (span_data ? "decoded" : "refused"));
-            continue;
+        // One policy: the two paths accept and refuse the same files and
+        // report the same facts about them.
+        CHECK(registry_info.has_value() == span_info.has_value());
+        CHECK(registry_data.has_value() == span_data.has_value());
+        CHECK(registry_info.has_value() == registry_data.has_value());
+        if (registry_info && span_info) {
+            CHECK(registry_info->num_frames == span_info->num_frames);
+            CHECK(registry_info->declared_frames == span_info->declared_frames);
+            CHECK(registry_info->truncated == span_info->truncated);
+            CHECK(registry_info->bits_per_sample == span_info->bits_per_sample);
         }
-        if (!registry_data)
+        if (!registry_data || !span_data)
             continue;
         ++both_decoded;
+        if (registry_info && registry_info->truncated)
+            ++truncated_decoded;
 
-        INFO(name);
         CHECK(registry_data->sample_rate == span_data->sample_rate);
         CHECK(registry_data->num_channels() == span_data->num_channels());
         CHECK(registry_data->num_frames() == span_data->num_frames());
@@ -370,15 +384,37 @@ TEST_CASE("WAV seeds decode identically through the registry and the byte-span d
             }
         }
     }
-    // A listed split that no longer happens is stale and must be removed.
-    for (const auto& [name, row] : seed_expectations()) {
-        if (!row.span_decodes.has_value())
-            continue;
-        INFO("expected split no longer observed: " << name);
-        CHECK(splits_seen.count(name) == 1);
-    }
-    // At least one seed must be well formed, or the differential measured nothing.
+    // Well-formed and recovered seeds must both reach the comparison, or the
+    // differential measured nothing about the recovery path.
     REQUIRE(both_decoded > 0);
+    CHECK(truncated_decoded > 0);
+}
+
+TEST_CASE("a truncated WAV decodes the whole frames present and reports the declaration",
+          "[fuzz][audio][wav]") {
+    // The canonical base cut after a third of its samples: 1600 bytes of
+    // mono 16-bit declared, 533 present, so 266 whole frames decode and the
+    // header's 800 are reported alongside.
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    for (const char* name : {"wav-data-past-eof.wav", "wav-rf64-ds64-data-past-eof.wav"}) {
+        INFO(name);
+        const auto path = corpus_dir() / name;
+        REQUIRE(fs::exists(path));
+        const auto info = registry.read_info(path.string());
+        REQUIRE(info.has_value());
+        CHECK(info->truncated);
+        CHECK(info->num_frames == 266u);
+        CHECK(info->declared_frames == 800u);
+        const auto data = registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits());
+        REQUIRE(data.has_value());
+        CHECK(data->num_frames() == 266u);
+    }
+    // The untouched base declares exactly what it holds.
+    const auto base =
+        registry.read_info((corpus_dir() / "wav-pcm16-mono-canonical44.wav").string());
+    REQUIRE(base.has_value());
+    CHECK_FALSE(base->truncated);
+    CHECK(base->declared_frames == base->num_frames);
 }
 
 TEST_CASE("integer PCM WAV extremes decode by 2^(bits-1) on both WAV paths", "[fuzz][audio][wav]") {
@@ -468,8 +504,8 @@ TEST_CASE("a declared length the stream does not deliver is refused, an undeclar
 
 TEST_CASE("an MP3 whose Xing header declares more frames than the stream delivers is refused",
           "[fuzz][audio][mp3]") {
-    // Found by the fuzzer as an info/decode disagreement (6400 declared, a
-    // few dozen decoded); this seed is the Xing VBR seed cut at 80%.
+    // The Xing VBR seed cut at 80%: the header declares 6400 frames and the
+    // stream delivers a few dozen.
     const auto path = corpus_dir() / "mp3-xing-declares-more-than-stream.mp3";
     REQUIRE(fs::exists(path));
     auto& registry = pulp::audio::FormatRegistry::instance();
@@ -505,23 +541,203 @@ TEST_CASE("an MP3 with no declared length reports the frames the decoder deliver
     CHECK(info->num_frames == data->num_frames());
 }
 
+namespace {
+
+uint32_t le32(std::vector<uint8_t>::const_iterator at) {
+    return uint32_t(at[0]) | (uint32_t(at[1]) << 8) | (uint32_t(at[2]) << 16) |
+           (uint32_t(at[3]) << 24);
+}
+
+// The bytes in front of a trailing APE tag. The footer's size field (bytes
+// 12-15) counts the items and the footer, and is never less than the footer's
+// own 32 bytes. An APEv2 tag (version 2000 or later, bytes 8-11) also has a
+// 32-byte header in front of the items when flags bit 31 (footer byte 23, bit
+// 7) is set; APEv1 never has one.
+std::vector<uint8_t> strip_ape_tag(const std::vector<uint8_t>& bytes) {
+    REQUIRE(bytes.size() > 32u);
+    const auto footer = bytes.cbegin() + static_cast<std::ptrdiff_t>(bytes.size() - 32u);
+    REQUIRE(std::string(footer, footer + 8) == "APETAGEX");
+    const uint32_t version = le32(footer + 8);
+    const uint32_t tag_size = std::max<uint32_t>(le32(footer + 12), 32u);
+    const uint32_t header_size = version >= 2000u && (footer[23] & 0x80u) != 0 ? 32u : 0u;
+    REQUIRE(uint64_t(tag_size) + header_size < bytes.size());
+    return std::vector<uint8_t>(bytes.begin(), bytes.end() - (tag_size + header_size));
+}
+
+void require_same_audio(const pulp::audio::AudioFileData& tagged,
+                        const pulp::audio::AudioFileData& stripped) {
+    REQUIRE(stripped.num_frames() > 0u);
+    REQUIRE(tagged.sample_rate == stripped.sample_rate);
+    REQUIRE(tagged.num_channels() == stripped.num_channels());
+    REQUIRE(tagged.num_frames() == stripped.num_frames());
+    for (uint32_t ch = 0; ch < tagged.num_channels(); ++ch)
+        CHECK(std::memcmp(tagged.channels[ch].data(), stripped.channels[ch].data(),
+                          tagged.channels[ch].size() * sizeof(float)) == 0);
+}
+
+} // namespace
+
+TEST_CASE("an MP3 behind an APE tag decodes exactly as the same MP3 without it",
+          "[fuzz][audio][mp3]") {
+    // APEv2 with a header, APEv1 without one, APEv1 whose flags claim a header
+    // anyway, a footer whose size is below its own 32 bytes, and an APEv2 tag
+    // whose size byte has its high bit set. Each stripped stream is the
+    // untagged base.
+    const auto base = read_bytes(corpus_dir() / "mp3-cbr-mono.mp3");
+    pulp::test::ScopedTempDir dir("pulp-audio-decoder-ape");
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto limits = pulp_fuzz::audio_decoder::fuzz_limits();
+    for (const char* name :
+         {"mp3-apev2-footer.mp3", "mp3-apev1-footer.mp3", "mp3-apev1-header-flag.mp3",
+          "mp3-ape-size-below-footer.mp3", "mp3-apev2-size-high-bit.mp3"}) {
+        INFO(name);
+        const auto tagged = read_bytes(corpus_dir() / name);
+        const auto stripped = strip_ape_tag(tagged);
+        REQUIRE(stripped.size() < tagged.size());
+        CHECK(stripped == base);
+
+        const auto tagged_path = write_file(dir.path / (std::string("tagged-") + name), tagged);
+        const auto stripped_path =
+            write_file(dir.path / (std::string("stripped-") + name), stripped);
+        const auto tagged_info = registry.read_info(tagged_path);
+        const auto stripped_info = registry.read_info(stripped_path);
+        REQUIRE(tagged_info.has_value());
+        REQUIRE(stripped_info.has_value());
+        CHECK(tagged_info->num_frames == stripped_info->num_frames);
+        const auto tagged_data = registry.read(tagged_path, limits);
+        const auto stripped_data = registry.read(stripped_path, limits);
+        REQUIRE(tagged_data.has_value());
+        REQUIRE(stripped_data.has_value());
+        require_same_audio(*tagged_data, *stripped_data);
+
+        auto tagged_reader = pulp::audio::AudioReader::open_memory(tagged, ".mp3", limits);
+        auto stripped_reader = pulp::audio::AudioReader::open_memory(stripped, ".mp3", limits);
+        REQUIRE(tagged_reader != nullptr);
+        REQUIRE(stripped_reader != nullptr);
+        REQUIRE(tagged_reader->info().num_frames == stripped_reader->info().num_frames);
+        const auto frames = stripped_reader->info().num_frames;
+        const auto tagged_range = tagged_reader->read(0u, frames);
+        const auto stripped_range = stripped_reader->read(0u, frames);
+        REQUIRE(tagged_range.has_value());
+        REQUIRE(stripped_range.has_value());
+        require_same_audio(*tagged_range, *stripped_range);
+        CHECK(stripped_range->num_frames() == stripped_data->num_frames());
+    }
+}
+
+TEST_CASE("an MP3 followed by bytes no tag reader claims decodes exactly as the stream alone",
+          "[fuzz][audio][mp3]") {
+    // A Lyrics3v2 block before an ID3v1 tag, plain junk, and an ID3v1 tag in
+    // front of an APE tag: each leaves bytes behind the last frame that are
+    // not a frame. The stream must end there with every frame decoded.
+    const auto base = read_bytes(corpus_dir() / "mp3-cbr-mono.mp3");
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto limits = pulp_fuzz::audio_decoder::fuzz_limits();
+    const auto base_path = (corpus_dir() / "mp3-cbr-mono.mp3").string();
+    const auto base_info = registry.read_info(base_path);
+    const auto base_data = registry.read(base_path, limits);
+    REQUIRE(base_info.has_value());
+    REQUIRE(base_data.has_value());
+    auto base_reader = pulp::audio::AudioReader::open_memory(base, ".mp3", limits);
+    REQUIRE(base_reader != nullptr);
+    const auto base_range = base_reader->read(0u, base_reader->info().num_frames);
+    REQUIRE(base_range.has_value());
+    for (const char* name : {"mp3-lyrics3v2-before-id3v1.mp3", "mp3-trailing-junk.mp3",
+                             "mp3-id3v1-before-apev2.mp3"}) {
+        INFO(name);
+        const auto path = corpus_dir() / name;
+        const auto bytes = read_bytes(path);
+        REQUIRE(bytes.size() > base.size());
+        REQUIRE(std::equal(base.begin(), base.end(), bytes.begin()));
+
+        const auto info = registry.read_info(path.string());
+        REQUIRE(info.has_value());
+        CHECK(info->num_frames == base_info->num_frames);
+        const auto data = registry.read(path.string(), limits);
+        REQUIRE(data.has_value());
+        require_same_audio(*data, *base_data);
+
+        auto reader = pulp::audio::AudioReader::open_memory(bytes, ".mp3", limits);
+        REQUIRE(reader != nullptr);
+        REQUIRE(reader->info().num_frames == base_reader->info().num_frames);
+        const auto range = reader->read(0u, reader->info().num_frames);
+        REQUIRE(range.has_value());
+        require_same_audio(*range, *base_range);
+    }
+}
+
+namespace {
+
+// 64 KiB of 16-bit little-endian PCM silence with +-2 LSB of dither, from a
+// fixed splitmix64 seed. The first sample is -1, so the buffer starts with
+// the bytes FF FF: an 11-bit frame sync that names Layer I. Such buffers are
+// full of byte pairs that read as Layer I and II frame headers.
+std::vector<uint8_t> dithered_pcm_silence(uint64_t seed) {
+    std::vector<uint8_t> bytes(64 * 1024);
+    for (std::size_t i = 0; i < bytes.size(); i += 2) {
+        uint64_t z = (seed += 0x9E3779B97F4A7C15ull);
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+        z ^= z >> 31;
+        const auto sample = static_cast<int16_t>(i == 0 ? -1 : static_cast<int>(z % 5) - 2);
+        const auto raw = static_cast<uint16_t>(sample);
+        bytes[i] = static_cast<uint8_t>(raw & 0xFF);
+        bytes[i + 1] = static_cast<uint8_t>(raw >> 8);
+    }
+    return bytes;
+}
+
+} // namespace
+
+TEST_CASE("dithered PCM silence without a format hint is not sniffed as MP3",
+          "[fuzz][audio][mp3]") {
+    // dr_mp3 accepts this buffer as a run of Layer I frames when told it is
+    // MP3. A bare frame sync at the start used to be enough to sniff it as
+    // MP3; only a Layer III header is now.
+    const auto bytes = dithered_pcm_silence(5);
+    REQUIRE(bytes[0] == 0xFF);
+    REQUIRE((bytes[1] & 0xE0) == 0xE0);
+    CHECK(pulp::audio::AudioReader::open_memory(bytes) == nullptr);
+    CHECK(pulp::audio::AudioReader::open_memory(bytes, ".bin") == nullptr);
+
+    // With an .mp3 hint the decoder still takes the false Layer I sync it
+    // has always taken: Layer I and II keep dr_mp3's strict frame-chain rule.
+    auto hinted = pulp::audio::AudioReader::open_memory(bytes, ".mp3");
+    REQUIRE(hinted != nullptr);
+    CHECK(hinted->info().num_frames == 2304u);
+}
+
+TEST_CASE("dithered PCM silence with an .mp3 hint gains no frames from the trailing-byte rules",
+          "[fuzz][audio][mp3]") {
+    // The Layer I headers in this buffer fail dr_mp3's strict frame-chain
+    // rule. Extending the trailing-byte relaxation to Layer I would accept it
+    // as about 150000 frames of noise.
+    const auto bytes = dithered_pcm_silence(1);
+    CHECK(pulp::audio::AudioReader::open_memory(bytes, ".mp3") == nullptr);
+    CHECK(pulp::audio::AudioReader::open_memory(bytes) == nullptr);
+
+    // dr_mp3 has always synced on this buffer as Layer I and decoded 1536
+    // frames. Decoding a synced Layer I frame whatever follows it would
+    // stretch the false run to 1920.
+    const auto synced = dithered_pcm_silence(1402);
+    auto reader = pulp::audio::AudioReader::open_memory(synced, ".mp3");
+    REQUIRE(reader != nullptr);
+    CHECK(reader->info().num_frames == 1536u);
+}
+
 TEST_CASE("a WAV whose bext chunk is shorter than its fixed fields is refused without allocating",
           "[fuzz][audio][wav]") {
-    // libFuzzer reproducer: a 128-byte bext chunk; the BWAV reader's fixed
-    // fields ran past it and the remaining-length subtraction wrapped to
-    // about 4 GiB, which std::string::resize then requested. The file has no
-    // data chunk, so info reports zero frames (as a zero-length data chunk
-    // does) and the decode is refused; both must finish without that request.
+    // libFuzzer reproducer: a 128-byte bext chunk; a reader that parsed the
+    // BWAV fixed fields ran past it and the remaining-length subtraction
+    // wrapped to about 4 GiB, which std::string::resize then requested. The
+    // WAV walk reads no metadata payload, and the file has no data chunk, so
+    // info and decode are both refused, without that request.
     const auto path = corpus_dir() / "wav-bext-declares-4gib.wav";
     REQUIRE(fs::exists(path));
     auto& registry = pulp::audio::FormatRegistry::instance();
     const auto started = std::chrono::steady_clock::now();
-    const auto direct = pulp::audio::read_audio_file_info(path.string());
-    REQUIRE(direct.has_value());
-    CHECK(direct->num_frames == 0u);
-    const auto info = registry.read_info(path.string());
-    REQUIRE(info.has_value());
-    CHECK(info->num_frames == 0u);
+    CHECK_FALSE(pulp::audio::read_audio_file_info(path.string()).has_value());
+    CHECK_FALSE(registry.read_info(path.string()).has_value());
     CHECK_FALSE(pulp::audio::read_audio_file(path.string()).has_value());
     CHECK_FALSE(registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
     CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
@@ -530,12 +746,16 @@ TEST_CASE("a WAV whose bext chunk is shorter than its fixed fields is refused wi
 TEST_CASE("a WAV whose block align is smaller than its channels' samples is refused",
           "[fuzz][audio][wav]") {
     // libFuzzer reproducer: two 8-bit channels declared with nBlockAlign 1,
-    // which once walked the reader off the end of its raw block.
+    // which once walked a reader off the end of its raw block. The fmt chunk
+    // contradicts itself, so every path refuses it.
     const auto path = corpus_dir() / "wav-block-align-smaller-than-frame.wav";
     REQUIRE(fs::exists(path));
     auto& registry = pulp::audio::FormatRegistry::instance();
     CHECK_FALSE(registry.read_info(path.string()).has_value());
     CHECK_FALSE(registry.read(path.string(), pulp_fuzz::audio_decoder::fuzz_limits()).has_value());
+    const auto bytes = read_bytes(path);
+    CHECK_FALSE(pulp::audio::inspect_wav(bytes).has_value());
+    CHECK_FALSE(pulp::audio::decode_wav(bytes).has_value());
 }
 
 TEST_CASE("a comment header with an impossible string length is refused without allocating",
@@ -577,9 +797,22 @@ TEST_CASE("read_audio_file applies the default decode ceilings to a declared hea
     CHECK_FALSE(pulp::audio::read_audio_file(channels_path).has_value());
     CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
 
-    // Under the ceiling: the corpus seed that declares 100,000,001 frames
-    // still decodes through the same overload.
-    const auto seed = corpus_dir() / "wav-declares-100000001-frames.wav";
+    // The ceilings bind the frames a decode produces. A valid seed is
+    // refused one frame under its length and decodes at it.
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto seed = corpus_dir() / "wav-pcm16-mono-canonical44.wav";
     REQUIRE(fs::exists(seed));
-    CHECK(pulp::audio::read_audio_file(seed.string()).has_value());
+    pulp::audio::DecodeLimits limits;
+    limits.max_frames = 799u;
+    CHECK_FALSE(registry.read(seed.string(), limits).has_value());
+    limits.max_frames = 800u;
+    CHECK(registry.read(seed.string(), limits).has_value());
+    // A header declaring 100,000,001 frames over 800 is bound by the 800 it
+    // holds, never by the declaration.
+    const auto lying = corpus_dir() / "wav-declares-100000001-frames.wav";
+    REQUIRE(fs::exists(lying));
+    const auto recovered = registry.read(lying.string(), limits);
+    REQUIRE(recovered.has_value());
+    CHECK(recovered->num_frames() == 800u);
+    CHECK(pulp::audio::read_audio_file(lying.string()).has_value());
 }

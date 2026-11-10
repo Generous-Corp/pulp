@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/headphone_crossfeed.hpp",
+  "fingerprint": "sha256:ed91124815b320271a1246f87fa35655cc02ef989a9caa6cab734af0a363268c"
+}

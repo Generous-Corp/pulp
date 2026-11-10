@@ -145,8 +145,9 @@ Vellum commit that merged that change; until then, the rules earlier in this
 contract apply unchanged. The integrator decision of
 2026-11-07 that ends the freeze-versus-mirror contradiction states three rules:
 the renamed units are Vellum-native and editable; "Pulp's frozen copies change
-only by `framework-backport` from a named Vellum commit"; and Pulp's copies are
-deleted at cutover. In Pulp they apply as follows.
+only by `framework-backport` from a named Vellum commit"; and Pulp's copies of
+the UI units are deleted at cutover (scoped by the integrator decision of
+2026-11-09, below). In Pulp they apply as follows.
 
 1. **The renamed units are Vellum-native and editable.** Generic work on them
    originates in Vellum's `framework/` and is reviewed there. Vellum no longer
@@ -201,9 +202,33 @@ deleted at cutover. In Pulp they apply as follows.
    `framework_commit`; that change's trusted run uses `main`'s scripts, which by
    then hold the rule, so it cannot pass until the commit exists on Vellum's
    main.
-4. **Pulp's copies are deleted at cutover.** When Pulp consumes Vellum, its
-   copies of the transferred paths are removed rather than kept in sync. Until
-   then they are Pulp's build inputs and keep the `pulp` spelling.
+4. **Pulp's copies of the UI units are deleted at cutover.** When Pulp
+   consumes Vellum, it removes its copies of the transferred paths of the UI
+   units (canvas, render-2d, view-core, design-import and view-script, 675
+   paths) rather than keeping them in sync. It also removes the 12 frozen UI
+   paths that the export does not carry, because they are outside its compile
+   closure: `core/canvas/src/noto_color_emoji.cpp`,
+   `core/render/src/render_loop_apple.mm`,
+   `core/render/src/render_loop_emscripten.cpp`,
+   `core/render/src/skia_surface_ganesh.cpp`,
+   `core/view/src/screenshot_skia.cpp`,
+   `core/render/include/pulp/render/render_pass.hpp`, the three
+   `packages/pulp-import-ir/src/` files `anchors.ts`, `diff.ts` and
+   `tweaks.ts`, and the three `core/canvas/shaders/` `.sksl` files. Until then
+   they are Pulp's build inputs and keep the `pulp` spelling.
+
+   The other transferred units, foundation, state-core, dataplane and
+   gpu-device-api (236 paths), stay in Pulp, which audio-only builds still
+   need. Pulp's copies of them become ordinary Pulp code again and Vellum's
+   renamed copies evolve independently; neither is synchronized from the
+   other. The five non-UI frozen paths (`core/render/include/pulp/render/gpu_surface.hpp`,
+   `core/render/src/gpu_surface_dawn.cpp`, `core/render/src/metal_surface_mac.mm`,
+   `core/render/src/pulp_render_objc_names.h` and
+   `core/canvas/src/skia_chromium_raw_ptr_compat.cpp`) are unfrozen at cutover
+   with the owner's approval, recorded in `owner-unfreezes.json`. The split
+   is the integrator decision of 2026-11-09 (gpu-device-api counts as non-UI);
+   it is proven for the recorded Darwin export configuration, and each
+   platform's export settles its own closure.
 
 Pulp-specific audio, plug-in, host, and legacy integration work stays
 `pulp-only` and is unaffected.

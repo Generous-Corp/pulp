@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fdn/stages.hpp",
+  "fingerprint": "sha256:02a305c4607e4e42fd4e51d161bfc46f6c10d13d8fe4bb0fb9d3d6d5cbcf9e75",
+  "include": "pulp/signal/fdn/stages.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Internal building block of the FDN reverb engine (fdn/stages). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
+}

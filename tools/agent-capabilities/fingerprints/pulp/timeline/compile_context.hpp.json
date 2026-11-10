@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/timeline/compile_context.hpp",
+  "fingerprint": "sha256:a081fae4f53800166cd07d644408aa85922c817d3b4c6fe6d3f10558e6d25713"
+}

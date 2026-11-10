@@ -528,6 +528,21 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     sample_kernel_types_.erase(key);
     custom_node_diagnostics_.erase(key);
     custom_node_types_[key] = std::move(type);
+    if (graph_event_edge_) {
+        const auto endpoint_uses_replaced_type = [&](NodeId id) {
+            const auto* n = node(id);
+            return n != nullptr && n->type == NodeType::Custom &&
+                   custom_node_key(n->custom_type_id, n->custom_type_version) == key;
+        };
+        const auto& replacement = custom_node_types_.at(key);
+        const bool replacement_is_event_compatible = replacement.consumes_events() &&
+                                                     !replacement.process_transport &&
+                                                     !replacement.process_instance_transport;
+        if ((endpoint_uses_replaced_type(graph_event_edge_->producer) ||
+             endpoint_uses_replaced_type(graph_event_edge_->consumer)) &&
+            !replacement_is_event_compatible)
+            graph_event_edge_.reset();
+    }
     // M6 (2.2b): any registry change bumps the generation so a reinit-free swap
     // compiled against an older generation is rejected (a re-register rebinds
     // callbacks to instances the old factory produced).
@@ -1504,6 +1519,7 @@ void SignalGraph::clear() {
     cancel_swap_edit_locked_();
     connections_.clear();
     connection_identities_.clear();
+    graph_event_edge_.reset();
     nodes_.clear();
     processor_nodes_.clear();
     sample_region_definitions_.clear();
