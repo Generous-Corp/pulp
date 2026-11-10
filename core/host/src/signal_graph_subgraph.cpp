@@ -1,5 +1,6 @@
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/signal_graph_subgraph.hpp>
+#include <pulp/format/processor_node_adapter.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -17,10 +18,12 @@ GraphResult boundary(GraphResult::Code code, std::string rule, std::string fix =
 }
 
 bool valid_node_type(NodeType type) {
-    return type == NodeType::AudioInput || type == NodeType::AudioOutput || type == NodeType::Gain;
+    return type == NodeType::AudioInput || type == NodeType::AudioOutput ||
+           type == NodeType::Gain || type == NodeType::Plugin;
 }
 
-NodeId add_node(SignalGraph& graph, const SubgraphNodeSpec& spec, const std::string& name) {
+NodeId add_node(SignalGraph& graph, const SubgraphNodeSpec& spec, const std::string& name,
+                std::shared_ptr<format::ProcessorNodeInstance> processor) {
     switch (spec.type) {
     case NodeType::AudioInput:
         return graph.add_input_node(spec.channels, name);
@@ -34,6 +37,8 @@ NodeId add_node(SignalGraph& graph, const SubgraphNodeSpec& spec, const std::str
         }
         return id;
     }
+    case NodeType::Plugin:
+        return graph.add_processor_node(std::move(processor), name);
     default:
         return 0;
     }
@@ -48,7 +53,13 @@ bool validate_template(const SubgraphTemplate& definition, std::size_t depth,
     std::unordered_set<std::string> node_keys;
     for (const auto& node : definition.nodes) {
         if (node.key.empty() || !valid_node_type(node.type) || node.channels <= 0 ||
-            !std::isfinite(node.gain) || !node_keys.insert(node.key).second) {
+            !std::isfinite(node.gain) || !node_keys.insert(node.key).second ||
+            (node.type == NodeType::Plugin &&
+             (!node.processor_factory || node.processor_type_id.empty() ||
+              node.processor_descriptor_version.empty() || node.processor_type_version <= 0)) ||
+            (node.type != NodeType::Plugin &&
+             (node.processor_factory || !node.processor_type_id.empty() ||
+              !node.processor_descriptor_version.empty() || node.processor_type_version != 0))) {
             active.erase(&definition);
             return false;
         }
@@ -56,18 +67,28 @@ bool validate_template(const SubgraphTemplate& definition, std::size_t depth,
 
     std::unordered_set<std::string> parameter_paths;
     std::unordered_set<std::string> parameter_nodes;
+    std::unordered_set<std::string> processor_targets;
     for (const auto& parameter : definition.parameters) {
         const auto target =
             std::find_if(definition.nodes.begin(), definition.nodes.end(),
                          [&](const SubgraphNodeSpec& spec) { return spec.key == parameter.node; });
-        if (target == definition.nodes.end() || target->type != NodeType::Gain ||
+        if (target == definition.nodes.end() ||
+            (target->type != NodeType::Gain && target->type != NodeType::Plugin) ||
+            (target->type == NodeType::Plugin &&
+             (parameter.processor_parameter_id == 0 || parameter.processor_parameter_name.empty())) ||
+            (target->type == NodeType::Gain &&
+             (parameter.processor_parameter_id != 0 || !parameter.processor_parameter_name.empty())) ||
             parameter.path.empty() || !std::isfinite(parameter.minimum) ||
             !std::isfinite(parameter.maximum) || parameter.minimum > parameter.maximum ||
             !std::isfinite(parameter.default_value) ||
             parameter.default_value < parameter.minimum ||
             parameter.default_value > parameter.maximum ||
             !parameter_paths.insert(parameter.path).second ||
-            !parameter_nodes.insert(parameter.node).second) {
+            (target->type == NodeType::Gain &&
+             !parameter_nodes.insert(parameter.node).second) ||
+            (target->type == NodeType::Plugin &&
+             !processor_targets.insert(parameter.node + ":" +
+                                       std::to_string(parameter.processor_parameter_id)).second)) {
             active.erase(&definition);
             return false;
         }
@@ -89,10 +110,38 @@ struct ExpansionContext {
     SignalGraph& graph;
     SubgraphInstance& instance;
     std::unordered_map<std::string, NodeId> nodes;
+    std::unordered_map<std::string, std::shared_ptr<format::ProcessorNodeInstance>> processors;
     // All child exposed ports are retained by their stable namespaced key so a
     // parent can re-expose them or connect them to one of its own built-ins.
     std::unordered_map<std::string, PortHandle> exposed;
 };
+
+std::string scoped(const std::string& prefix, std::string_view key);
+
+bool preflight_processors(ExpansionContext& context, const SubgraphTemplate& definition,
+                          const std::string& prefix, std::uint32_t instance_index) {
+    for (const auto& spec : definition.nodes) {
+        if (spec.type != NodeType::Plugin)
+            continue;
+        std::shared_ptr<format::ProcessorNodeInstance> instance;
+        try {
+            instance = format::ProcessorNodeInstance::create(spec.processor_factory(instance_index));
+        } catch (...) {
+            return false;
+        }
+        if (!instance || instance->descriptor().version != spec.processor_descriptor_version)
+            return false;
+        instance->set_graph_type_id(spec.processor_type_id);
+        instance->set_graph_type_version(spec.processor_type_version);
+        if (!context.processors.emplace(scoped(prefix, spec.key), std::move(instance)).second)
+            return false;
+    }
+    for (const auto& child : definition.children)
+        if (!preflight_processors(context, *child.definition, scoped(prefix, child.key),
+                                  instance_index))
+            return false;
+    return true;
+}
 
 std::string scoped(const std::string& prefix, std::string_view key) {
     return prefix.empty() ? std::string(key) : prefix + "." + std::string(key);
@@ -139,8 +188,9 @@ bool expand_template(ExpansionContext& context, const SubgraphTemplate& definiti
                      const std::string& prefix, std::size_t depth) {
     for (const auto& spec : definition.nodes) {
         const auto key = scoped(prefix, spec.key);
-        const auto id =
-            add_node(context.graph, spec, context.instance.instance_identity + "." + key);
+        const auto processor = context.processors.find(key);
+        const auto id = add_node(context.graph, spec, context.instance.instance_identity + "." + key,
+                                 processor == context.processors.end() ? nullptr : processor->second);
         if (id == 0)
             return false;
         context.instance.nodes.push_back(id);
@@ -189,6 +239,7 @@ void clear_instance(SubgraphInstance& instance) {
     instance.ports.clear();
     instance.parameters.clear();
     instance.parameter_nodes.clear();
+    instance.processor_parameter_ids.clear();
     instance.parameter_bounds.clear();
     instance.child_template_identities.clear();
     instance.child_instance_indices.clear();
@@ -204,9 +255,33 @@ bool bind_parameters(ExpansionContext& context, const SubgraphTemplate& definiti
             !context.instance.parameter_bounds
                  .emplace(path, SubgraphParameterBounds{parameter.minimum, parameter.maximum})
                  .second ||
-            !context.instance.parameters.emplace(path, parameter.default_value).second ||
-            !context.graph.set_node_gain(node->second, parameter.default_value))
+            !context.instance.parameters.emplace(path, parameter.default_value).second)
             return false;
+        const auto* target = context.graph.node(node->second);
+        if (!target)
+            return false;
+        if (target->type == NodeType::Gain) {
+            if (!context.graph.set_node_gain(node->second, parameter.default_value))
+                return false;
+        } else {
+            const auto processor = context.processors.find(scoped(prefix, parameter.node));
+            if (processor == context.processors.end())
+                return false;
+            const auto* info = processor->second->parameter(parameter.processor_parameter_id);
+            if (!info || info->name != parameter.processor_parameter_name ||
+                info->range.min != parameter.minimum ||
+                info->range.max != parameter.maximum ||
+                info->range.default_value != parameter.default_value ||
+                state::is_discrete_param(*info))
+                return false;
+            context.instance.processor_parameter_ids.emplace(path,
+                                                              parameter.processor_parameter_id);
+            processor->second->state_store().set_value(parameter.processor_parameter_id,
+                                                       parameter.default_value);
+            if (processor->second->state_store().get_value(parameter.processor_parameter_id) !=
+                parameter.default_value)
+                return false;
+        }
     }
     for (const auto& child : definition.children) {
         if (!bind_parameters(context, *child.definition, scoped(prefix, child.key)))
@@ -241,7 +316,8 @@ SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphT
         const auto target =
             std::find_if(definition.nodes.begin(), definition.nodes.end(),
                          [&](const SubgraphNodeSpec& spec) { return spec.key == parameter.node; });
-        if (target == definition.nodes.end() || target->type != NodeType::Gain) {
+        if (target == definition.nodes.end() ||
+            (target->type != NodeType::Gain && target->type != NodeType::Plugin)) {
             out.result =
                 boundary(GraphResult::Code::UnknownPort, "parameter target is not a gain node");
             return out;
@@ -255,6 +331,11 @@ SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphT
     }
 
     ExpansionContext context{graph, out.instance};
+    if (!preflight_processors(context, definition, {}, instance_index)) {
+        out.result = boundary(GraphResult::Code::UnknownNode,
+                              "Processor factory or exact descriptor version was rejected");
+        return out;
+    }
     auto rollback = [&] {
         for (auto it = out.instance.nodes.rbegin(); it != out.instance.nodes.rend(); ++it)
             graph.remove_node(*it);
@@ -348,12 +429,25 @@ GraphResult restore_subgraph_state(SignalGraph& graph, SubgraphInstance& instanc
             return boundary(GraphResult::Code::UnknownPort,
                             "state parameter value is non-finite or out of range");
         const auto* target = graph.node(node->second);
-        if (!target || target->type != NodeType::Gain)
+        if (!target || (target->type != NodeType::Gain && target->type != NodeType::Plugin))
             return boundary(GraphResult::Code::UnknownPort,
                             "state parameter target is unavailable");
+        if (target->type == NodeType::Plugin) {
+            const auto id = instance.processor_parameter_ids.find(path);
+            const auto processor = graph.processor_node_instance(node->second);
+            if (id == instance.processor_parameter_ids.end() || !processor ||
+                !processor->parameter(id->second))
+                return boundary(GraphResult::Code::UnknownPort,
+                                "state Processor parameter target is unavailable");
+        }
     }
     for (const auto& [path, value] : state.parameters) {
-        graph.set_node_gain(instance.parameter_nodes.at(path), value);
+        const auto node = instance.parameter_nodes.at(path);
+        if (const auto id = instance.processor_parameter_ids.find(path);
+            id != instance.processor_parameter_ids.end())
+            graph.processor_node_instance(node)->state_store().set_value(id->second, value);
+        else
+            graph.set_node_gain(node, value);
         instance.parameters.at(path) = value;
     }
     return {GraphResult::Code::Ok};

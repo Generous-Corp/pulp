@@ -2,6 +2,7 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_subgraph.hpp>
 #include <pulp/host/voice_identity.hpp>
+#include <pulp/format/processor.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -13,6 +14,49 @@
 using namespace pulp::host;
 
 namespace {
+class TwoParamProcessor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor value;
+        value.name = "Two Param";
+        value.manufacturer = "Pulp Test";
+        value.bundle_id = "com.pulp.test.two-param";
+        value.version = "2.0.0";
+        value.output_buses = {{"Out", 1, false}};
+        return value;
+    }
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter({.id = 1, .name = "one",
+                             .range = pulp::state::ParamRange::linear(0.0f, 2.0f, 1.0f)});
+        store.add_parameter({.id = 2, .name = "two",
+                             .range = pulp::state::ParamRange::linear(0.0f, 2.0f, 0.5f)});
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        out.clear();
+    }
+};
+
+SubgraphTemplate two_param_template() {
+    SubgraphTemplate t;
+    t.identity = "test.two-param";
+    SubgraphNodeSpec node;
+    node.key = "processor";
+    node.type = NodeType::Plugin;
+    node.processor_type_id = "test.two-param";
+    node.processor_type_version = 2;
+    node.processor_descriptor_version = "2.0.0";
+    node.processor_factory = [](std::uint32_t) -> std::unique_ptr<pulp::format::Processor> {
+        return std::make_unique<TwoParamProcessor>();
+    };
+    t.nodes.push_back(std::move(node));
+    t.parameters = {{"one", "processor", 1.0f, 0.0f, 2.0f, 1, "one"},
+                    {"two", "processor", 0.5f, 0.0f, 2.0f, 2, "two"}};
+    return t;
+}
+
 SubgraphTemplate gain_template() {
     SubgraphTemplate t;
     t.identity = "test.gain";
@@ -58,6 +102,33 @@ SubgraphTemplate nested_gain_template() {
     return parent;
 }
 } // namespace
+
+TEST_CASE("subgraph binds two distinct named Processor parameters transactionally") {
+    SignalGraph graph;
+    auto t = two_param_template();
+    auto expanded = instantiate_subgraph(graph, t, "voice", 3);
+    REQUIRE(expanded);
+    CHECK(expanded.instance.processor_parameter_ids.at("one") == 1);
+    CHECK(expanded.instance.processor_parameter_ids.at("two") == 2);
+    auto state = expanded.instance.save_state();
+    state.parameters["one"] = 1.5f;
+    state.parameters["two"] = 0.75f;
+    REQUIRE(restore_subgraph_state(graph, expanded.instance, state));
+    auto* processor = graph.processor_node_instance(expanded.instance.nodes.front()).get();
+    REQUIRE(processor);
+    CHECK(processor->state_store().get_value(1) == 1.5f);
+    CHECK(processor->state_store().get_value(2) == 0.75f);
+
+    t.parameters[1].processor_parameter_id = 1;
+    const auto duplicate = instantiate_subgraph(graph, t, "duplicate", 4);
+    CHECK_FALSE(duplicate);
+    CHECK(graph.nodes().size() == 1);
+    t = two_param_template();
+    t.parameters[1].maximum = 3.0f;
+    const auto mismatched = instantiate_subgraph(graph, t, "mismatch", 5);
+    CHECK_FALSE(mismatched);
+    CHECK(graph.nodes().size() == 1);
+}
 
 TEST_CASE("subgraph expands with instance-local ports and parameters") {
     SignalGraph graph;
