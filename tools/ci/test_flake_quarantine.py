@@ -192,6 +192,29 @@ class ActiveCommandTests(unittest.TestCase):
             self.assertEqual(fq.cmd_sweep(a, now=NOW), 0)
             applied.assert_called_once()
 
+    def test_sweep_redacts_api_values_in_logs(self) -> None:
+        records = [rec(str(i), 1, FLAKY) for i in range(3)]
+        a = argparse.Namespace(repo="o/r", dry_run=False, threshold=3, mode="shadow", bot_login=fq.BOT_LOGIN)
+        with mock.patch.object(fq, "list_issues", return_value=[]), \
+                mock.patch.object(fq, "load_records", return_value=(records, ["secret refusal"])), \
+                mock.patch("builtins.print") as printed:
+            self.assertEqual(fq.cmd_sweep(a, now=NOW), 0)
+        output = "\n".join(str(call.args[0]) for call in printed.call_args_list)
+        self.assertNotIn("secret refusal", output)
+        self.assertNotIn(FLAKY, output)
+        self.assertIn("<redacted:", output)
+
+
+class WorkflowTrustTests(unittest.TestCase):
+    def test_quarantine_runs_only_trusted_base_copy_with_token(self) -> None:
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        block = workflow[workflow.index("- name: Resolve flake quarantine"):workflow.index("- name: Test (non-Windows)")]
+        self.assertIn("TRUSTED_BASE_SHA", block)
+        self.assertIn('git show "$TRUSTED_BASE_SHA:tools/ci/$module"', block)
+        self.assertIn('python3 "$trusted/flake_quarantine.py"', block)
+        self.assertNotIn("GH_TOKEN: ${{ github.token }}", block)
+        self.assertNotIn("python3 tools/ci/flake_quarantine.py", block)
+
 
 class TrustTests(unittest.TestCase):
     def test_only_merge_group_build_runs_of_this_repo_are_trusted(self) -> None:

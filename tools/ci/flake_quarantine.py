@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import io
 import json
 import os
@@ -69,6 +70,12 @@ QUARANTINE_DAYS = 14
 MAX_RECORD_BYTES = 1 << 20
 # CMake regular-expression metacharacters.
 _CMAKE_RE_META = set("^$.[]*+?()|\\")
+
+
+def _redacted(value: object) -> str:
+    """Identify an API-derived value in logs without exposing its contents."""
+    digest = hashlib.sha256(str(value).encode("utf-8", "replace")).hexdigest()[:12]
+    return f"<redacted:{digest}>"
 
 
 def _parse_time(value) -> dt.datetime | None:
@@ -345,12 +352,12 @@ def cmd_active(a: argparse.Namespace, *, issues_fn=None, scope_fn=None, now: dt.
     touched = fx.touched_tests(tests, scope, Path(a.source_root), fx.load_script_inputs(Path(a.source_root)), {})
     kept = sorted(tests - set(touched))
     for name, why in sorted(touched.items()):
-        print(f"flake-quarantine: `{name}` stays in the required lane ({why})")
+        print(f"flake-quarantine: test {_redacted(name)} stays in the required lane ({_redacted(why)})")
     names_file.write_text("".join(n + "\n" for n in kept), encoding="utf-8")
     regex_file.write_text(exclude_fragment(kept), encoding="utf-8")
     if kept:
         print(f"::notice title=flake-quarantine::{len(kept)} quarantined test(s) run in the advisory "
-              f"step, not the gate: {json.dumps(kept)}")
+              f"step, not the gate (tests redacted: {_redacted(kept)})")
     return 0
 
 
@@ -364,12 +371,13 @@ def cmd_sweep(a: argparse.Namespace, now: dt.datetime | None = None) -> int:
         return 1
     records, refusals = load_records(a.repo, now)
     for r in refusals:
-        print(f"flake-quarantine: refused {r}")
+        print(f"flake-quarantine: refused record {_redacted(r)}")
     actions = plan_sweep(records, issues, now, a.threshold, a.bot_login)
     print(f"flake-quarantine: {len(records)} excusal record(s) in {WINDOW_DAYS} d; "
           f"{len(actions)} action(s){' (dry run)' if dry else ''}")
     for act in actions:
-        print(f"  {act.kind}: {act.test} issue={act.issue} runs={list(act.runs)}")
+        issue_state = "present" if act.issue is not None else "none"
+        print(f"  {act.kind}: test={_redacted(act.test)} issue={issue_state} runs={len(act.runs)}")
     if dry or not actions:
         return 0
     ensure_labels(a.repo)

@@ -3253,14 +3253,25 @@ jobs:
         shell: bash
         env:
           PULP_GH_CLI: gh
-          GH_TOKEN: ${{ github.token }}
           PULP_FLAKE_EXONERATION_MODE: ${{ vars.PULP_FLAKE_EXONERATION_MODE }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          TRUSTED_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
+          set -euo pipefail
           out="$RUNNER_TEMP/flake-quarantine"
-          python3 tools/ci/flake_quarantine.py active --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" \
-            ${PR_NUMBER:+--pr "$PR_NUMBER"} --source-root "$GITHUB_WORKSPACE" --out-dir "$out" || true
+          trusted="$RUNNER_TEMP/flake-quarantine-trusted"
+          mkdir -p "$trusted"
+          if [ -z "${TRUSTED_BASE_SHA:-}" ] || ! git cat-file -e "$TRUSTED_BASE_SHA^{commit}"; then
+            echo "::warning title=flake-quarantine::protected base is unavailable; no quarantine applied"
+            exit 0
+          fi
+          for module in base_poison_detector.py flake_exoneration.py flake_quarantine.py; do
+            git show "$TRUSTED_BASE_SHA:tools/ci/$module" > "$trusted/$module"
+          done
+          GH_TOKEN="${{ github.token }}" PYTHONPATH="$trusted" \
+            python3 "$trusted/flake_quarantine.py" active --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" \
+              ${PR_NUMBER:+--pr "$PR_NUMBER"} --source-root "$GITHUB_WORKSPACE" --out-dir "$out" || true
           count=0
           if [ -s "$out/names.txt" ]; then count="$(wc -l < "$out/names.txt" | tr -d ' ')"; fi
           echo "count=$count" >> "$GITHUB_OUTPUT"
