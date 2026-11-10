@@ -57,11 +57,7 @@ class FakeDevice : public AudioDevice {
     // Run one callback block. Returns false when the device is not running.
     bool pump();
     // The device disappears under the handle: it stops being open.
-    void yank() {
-        std::lock_guard<std::mutex> lk(m_);
-        opened_ = false;
-        running_ = false;
-    }
+    void yank();
 
     std::atomic<bool> in_callback{false};
     std::atomic<int> blocks{0};
@@ -157,6 +153,14 @@ void FakeDevice::stop() {
     }
     std::lock_guard<std::mutex> wait(run_);  // waits for an in-flight block
     --backend_.started;
+}
+
+void FakeDevice::yank() {
+    std::lock_guard<std::mutex> lk(m_);
+    opened_ = false;
+    if (running_)
+        --backend_.started;  // the dead stream no longer delivers callbacks
+    running_ = false;
 }
 
 bool FakeDevice::pump() {
