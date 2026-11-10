@@ -367,6 +367,7 @@ class EveryExternalRowTests(unittest.TestCase):
         self.assertTrue(any("recompute" in v for v in self.check(forged_label)))
         replay = row["patch_recipe"]["replay"]
         self.assertEqual(replay["functions"], ["pulp_patch_choc_v8", "pulp_patch_choc_json_number_exponent",
+                                              "pulp_patch_choc_json_number_token_hook",
                                               "pulp_patch_choc_file_watcher",
                                               "pulp_patch_choc_wav_extensible_container_bits",
                                               "pulp_patch_choc_wav_block_align_bounds",

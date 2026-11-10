@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "resolved_identity_validation.hpp"
+#include "resolved_identity_json.hpp"
 
 #include <choc/text/choc_JSON.h>
 #include <pulp/host/identity_text.hpp>
@@ -34,7 +35,6 @@ constexpr std::string_view kSemanticProfile = "pulp.graph.identity.v1";
 constexpr std::string_view kResolvedProfile = "pulp.graph.resolved.io-gain.v1";
 constexpr std::string_view kExecutor = "pulp.graph.canonical-executor.f32.v1";
 constexpr auto kU32 = std::numeric_limits<std::uint32_t>::max();
-constexpr auto kJsonUnsigned = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
 
 bool text(V value, std::string_view expected) {
     return value.isString() && value.getString() == expected;
@@ -47,12 +47,12 @@ bool shape(V value, std::initializer_list<std::string_view> fields) {
             return false;
     return true;
 }
-bool unsigned_value(V value, std::uint64_t maximum = kJsonUnsigned) {
-    return value.isInt() && value.getInt64() >= 0 &&
-           static_cast<std::uint64_t>(value.getInt64()) <= maximum;
+bool unsigned_value(V value, std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max()) {
+    const auto integer = resolved_json::number(value);
+    return integer && *integer <= maximum;
 }
 std::uint64_t u(V value) {
-    return static_cast<std::uint64_t>(value.getInt64());
+    return resolved_json::number(value).value();
 }
 std::string s(V value) {
     return std::string(value.getString());
@@ -699,11 +699,6 @@ bool validate_resolved_identity_capture(const PreparedDescriptionData& d) {
     // The new profile has positive effective bounds and cannot encode a real
     // zero cap as an unbounded null. Keep that live-graph case explicitly outside it.
     if (d.host_max_nodes == 0 || d.host_max_connections == 0 || d.host_max_ports == 0)
-        return false;
-    // CHOC's current integer Value is signed. Refuse this representational gap
-    // before projection rather than rounding a valid unsigned host bound.
-    if (d.host_max_nodes > kJsonUnsigned || d.host_max_connections > kJsonUnsigned ||
-        d.host_max_ports > kJsonUnsigned || d.host_max_estimated_work_units > kJsonUnsigned)
         return false;
     if (d.schema != "pulp.graph.prepared-io-gain.v1" || !d.typed_resolved_capture ||
         !d.serial_pool_bound || !std::isfinite(d.sample_rate) || d.sample_rate <= 0 ||

@@ -1,5 +1,6 @@
 #include <pulp/host/prepared_description.hpp>
 #include "resolved_identity_validation.hpp"
+#include "resolved_identity_json.hpp"
 
 #include <pulp/runtime/crypto.hpp>
 
@@ -405,9 +406,7 @@ J str(std::string_view s) {
     return J(std::string(s));
 }
 J num(std::uint64_t n) {
-    if (n > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
-        throw std::invalid_argument("integer outside bounded profile");
-    return J(static_cast<std::int64_t>(n));
+    return detail::resolved_json::number(n);
 }
 J arr() {
     return choc::value::createEmptyArray();
@@ -483,10 +482,8 @@ void encode(V v, std::string& out) {
         resolved_quote(out, v.getString());
     else if (v.isBool())
         out += v.getBool() ? "true" : "false";
-    else if (v.isInt()) {
-        if (v.getInt64() < 0)
-            throw std::invalid_argument("negative integer");
-        number(out, static_cast<std::uint64_t>(v.getInt64()));
+    else if (const auto integer = detail::resolved_json::number(v)) {
+        number(out, *integer);
     } else if (v.isArray()) {
         out += '[';
         for (std::uint32_t i = 0; i < v.size(); ++i) {
@@ -766,8 +763,9 @@ GraphIdentityResult resolved_fingerprint(const PreparedDescriptionData& data) {
     try {
         require(detail::validate_resolved_identity_capture(data));
         const auto payload = encoded(projection(data));
-        require(detail::validate_resolved_identity_projection(
-            choc::json::parse(payload), data.semantic_payload, data.semantic_digest, encoded));
+        require(detail::validate_resolved_identity_projection(detail::resolved_json::parse(payload),
+                                                              data.semantic_payload,
+                                                              data.semantic_digest, encoded));
         const auto digest = hash(resolved_domain, payload);
         return GraphIdentityResult(runtime::Ok(ResolvedIdentityAccess::make(
             std::string(resolved_domain), std::string(resolved_profile), payload, digest)));
@@ -809,7 +807,7 @@ std::string GraphIdentityReceipt::canonical_bytes() const {
                                        {"state_blobs", obj({})}})},
                      {"resolved", obj({{"domain", str(resolved.domain_)},
                                        {"profile", str(resolved.profile_)},
-                                       {"payload", choc::json::parse(resolved.payload_)},
+                                       {"payload", detail::resolved_json::parse(resolved.payload_)},
                                        {"digest", str(resolved.digest_)}})},
                      {"capture_provenance", str(capture_provenance)},
                      {"artifact_provenance", str(artifact_provenance)}});
@@ -820,7 +818,7 @@ GraphReceiptResult decode_graph_identity_receipt(std::span<const std::byte> byte
     try {
         require(bytes.size() <= 64 * 1024 * 1024);
         std::string source(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-        auto root = choc::json::parse(source);
+        auto root = detail::resolved_json::parse(source);
         shape(root,
               {"schema", "authored", "resolved", "capture_provenance", "artifact_provenance"});
         require(text(root["schema"], "pulp.graph.identity.receipt.v1"));
@@ -845,7 +843,7 @@ GraphReceiptResult decode_graph_identity_receipt(std::span<const std::byte> byte
         require(authored.domain() == semantic_domain && resolved.domain() == resolved_domain &&
                 resolved.profile() == resolved_profile && authored.profile() == semantic_profile);
         require(detail::validate_resolved_identity_projection(
-            choc::json::parse(std::string(resolved.canonical_bytes())),
+            detail::resolved_json::parse(resolved.canonical_bytes()),
             std::string(authored.canonical_bytes()), std::string(authored.digest()), encoded));
         GraphIdentityReceipt result{std::move(authored), std::move(resolved),
                                     string(root["capture_provenance"]),

@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/host/signal_graph.hpp>
@@ -15,6 +16,10 @@
 #include <unordered_map>
 
 using namespace pulp::host;
+
+static std::span<const std::byte> receipt_input(std::string_view text) {
+    return {reinterpret_cast<const std::byte*>(text.data()), text.size()};
+}
 
 static std::string stereo_payload() {
     return R"G3({"assets":{},"edges":{"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"gain_a\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"gain_b\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]],"destination":{"direction":"in","kind":"audio","node":"gain_b","port":"audio"},"feedback":false,"lane":"audio","semantic_order":null,"source":{"direction":"out","kind":"audio","node":"gain_a","port":"audio"}},"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"gain_b\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"output\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]],"destination":{"direction":"in","kind":"audio","node":"output","port":"audio"},"feedback":false,"lane":"audio","semantic_order":null,"source":{"direction":"out","kind":"audio","node":"gain_b","port":"audio"}},"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"input\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"gain_a\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]],"destination":{"direction":"in","kind":"audio","node":"gain_a","port":"audio"},"feedback":false,"lane":"audio","semantic_order":null,"source":{"direction":"out","kind":"audio","node":"input","port":"audio"}}},"interfaces":[{"channels":["L","R"],"endpoint":{"direction":"out","kind":"audio","node":"input","port":"audio"},"key":"main-in","kind":"audio","role":"input"},{"channels":["L","R"],"endpoint":{"direction":"in","kind":"audio","node":"output","port":"audio"},"key":"main-out","kind":"audio","role":"output"}],"nodes":{"gain_a":{"config":{"gain":"f32:3f800000"},"implementation":"pulp.builtin.gain.v1","initial_state":{"mode":"default","revision":"gain.v1"},"kind":"gain","kind_contract":"gain.v1","parameter_bindings":{},"policies":{},"ports":{"in":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}},"out":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}}}},"gain_b":{"config":{"gain":"f32:3f800000"},"implementation":"pulp.builtin.gain.v1","initial_state":{"mode":"default","revision":"gain.v1"},"kind":"gain","kind_contract":"gain.v1","parameter_bindings":{},"policies":{},"ports":{"in":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}},"out":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}}}},"input":{"config":{},"implementation":"pulp.builtin.audio-input.v1","initial_state":{"mode":"default","revision":"io.v1"},"kind":"audio_input","kind_contract":"io.v1","parameter_bindings":{},"policies":{},"ports":{"in":{},"out":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}}}},"output":{"config":{},"implementation":"pulp.builtin.audio-output.v1","initial_state":{"mode":"default","revision":"io.v1"},"kind":"audio_output","kind_contract":"io.v1","parameter_bindings":{},"policies":{},"ports":{"in":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}},"out":{}}}},"policies":{"event_order":"none","fault":"fail","feedback":"forbid","rate_conversion":"none","seed":null,"state_retention":"none"},"profile":"pulp.graph.identity.v1"})G3";
@@ -101,6 +106,147 @@ TEST_CASE("D4 export rejects a retired owner generation") {
     REQUIRE(second->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
     REQUIRE(retired.export_prepared_description().refusal ==
             PreparedDescriptionRefusal::SnapshotChanged);
+}
+
+static PreparedDescriptionData unsigned_limit_capture() {
+    SignalGraph graph;
+    graph.set_limits({.max_nodes = std::numeric_limits<std::size_t>::max(),
+                      .max_connections = std::numeric_limits<std::size_t>::max(),
+                      .max_ports = std::numeric_limits<std::size_t>::max(),
+                      .max_block_size = 16384,
+                      .max_estimated_work_units = std::numeric_limits<std::size_t>::max()});
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    const auto input = edit->add_input_node(2, "Input");
+    const auto first = edit->add_gain_node("Gain A");
+    const auto second = edit->add_gain_node("Gain B");
+    const auto output = edit->add_output_node(2, "Output");
+    AuthoredRuntimeBinding binding;
+    binding.nodes = {{input, "input"}, {first, "gain_a"}, {second, "gain_b"}, {output, "output"}};
+    for (std::uint32_t channel = 0; channel < 2; ++channel) {
+        REQUIRE(edit->connect(input, channel, first, channel));
+        REQUIRE(edit->connect(first, channel, second, channel));
+        REQUIRE(edit->connect(second, channel, output, channel));
+        const auto key = channel == 0 ? "L" : "R";
+        for (const auto node : {input, first, second})
+            binding.channels.push_back({node, "audio", true, key, channel, channel});
+        for (const auto node : {first, second, output})
+            binding.channels.push_back({node, "audio", false, key, channel, channel});
+    }
+    binding.interfaces = {{"main-in", false, input, "audio", "L", 0, 0, 0},
+                          {"main-in", false, input, "audio", "R", 1, 0, 1},
+                          {"main-out", true, output, "audio", "L", 0, 0, 0},
+                          {"main-out", true, output, "audio", "R", 1, 0, 1}};
+    REQUIRE(edit->bind_authored_identity(stereo_payload(), binding));
+    REQUIRE(edit->prepare(48000, 128) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    const auto capture = edit->committed_execution_snapshot().export_prepared_description();
+    REQUIRE(capture);
+    REQUIRE(capture.value->host_max_nodes == std::numeric_limits<std::size_t>::max());
+    REQUIRE(capture.value->host_max_connections == std::numeric_limits<std::size_t>::max());
+    REQUIRE(capture.value->host_max_ports == std::numeric_limits<std::size_t>::max());
+    REQUIRE(capture.value->host_max_estimated_work_units ==
+            std::numeric_limits<std::size_t>::max());
+    REQUIRE(capture.value->effective_max_nodes <= 512);
+    return *capture.value;
+}
+
+static std::string replace_once(std::string source, std::string_view from, std::string_view to) {
+    const auto at = source.find(from);
+    REQUIRE(at != std::string::npos);
+    REQUIRE(source.find(from, at + from.size()) == std::string::npos);
+    source.replace(at, from.size(), to);
+    return source;
+}
+
+TEST_CASE("Resolved identity round trips exact unsigned limits", "[resolved-unsigned]") {
+    auto capture = unsigned_limit_capture();
+    const auto actual = capture_graph_identity_receipt(capture);
+    REQUIRE(actual);
+    REQUIRE(decode_graph_identity_receipt(receipt_input(actual.value().canonical_bytes())));
+    capture.host_max_estimated_work_units = 0;
+    const auto baseline = resolved_fingerprint(capture);
+    REQUIRE(baseline);
+    const std::array<std::pair<std::uint64_t, std::string_view>, 8> boundaries{{
+        {9007199254740991ull, "9007199254740991"},
+        {9007199254740992ull, "9007199254740992"},
+        {9007199254740993ull, "9007199254740993"},
+        {9223372036854775806ull, "9223372036854775806"},
+        {9223372036854775807ull, "9223372036854775807"},
+        {9223372036854775808ull, "9223372036854775808"},
+        {9223372036854775809ull, "9223372036854775809"},
+        {18446744073709551615ull, "18446744073709551615"},
+    }};
+    std::set<std::string> digests;
+    for (const auto& [value, decimal] : boundaries) {
+        INFO(decimal);
+        capture.host_max_estimated_work_units = value;
+        const auto receipt = capture_graph_identity_receipt(capture);
+        REQUIRE(receipt);
+        const auto& resolved = receipt.value().resolved;
+        const auto expected = replace_once(std::string(baseline.value().canonical_bytes()),
+                                           "\"max_estimated_work_units\":0",
+                                           "\"max_estimated_work_units\":" + std::string(decimal));
+        REQUIRE(resolved.canonical_bytes() == expected);
+        REQUIRE(resolved.digest() ==
+                "sha256:" + pulp::runtime::sha256_hex(std::string("pulp.graph.resolved-plan.v1") +
+                                                      std::string(1, '\0') + expected));
+        REQUIRE(digests.emplace(resolved.digest()).second);
+        const auto bytes = receipt.value().canonical_bytes();
+        const auto decoded = decode_graph_identity_receipt(receipt_input(bytes));
+        REQUIRE(decoded);
+        REQUIRE(decoded.value().resolved.canonical_bytes() == expected);
+        REQUIRE(decoded.value().canonical_bytes() == bytes);
+    }
+}
+
+TEST_CASE("Resolved numeric fields reject wire substitutes and overflow", "[resolved-unsigned]") {
+    auto capture = unsigned_limit_capture();
+    capture.host_max_estimated_work_units = 0;
+    const auto receipt = capture_graph_identity_receipt(capture);
+    REQUIRE(receipt);
+    const auto payload = std::string(receipt.value().resolved.canonical_bytes());
+    const auto bytes = receipt.value().canonical_bytes();
+    const auto rewrite = [&](std::string_view from, std::string_view to) {
+        const auto replacement = replace_once(payload, from, to);
+        auto modified = replace_once(bytes, payload, replacement);
+        const auto digest =
+            "sha256:" + pulp::runtime::sha256_hex(std::string("pulp.graph.resolved-plan.v1") +
+                                                  std::string(1, '\0') + replacement);
+        return replace_once(modified, receipt.value().resolved.digest(), digest);
+    };
+    for (std::string_view invalid :
+         {"18446744073709551616", "-1", "-0", "00", "01", "+1", "1.0", "1e3",
+          "\"9223372036854775808\"", "true", "{\"high\":2147483648,\"low\":0}",
+          "{\"$class\":\"pulp.identity.unsigned64\",\"high\":2147483648,\"low\":0}"}) {
+        INFO(invalid);
+        const auto modified = rewrite("\"max_estimated_work_units\":0",
+                                      "\"max_estimated_work_units\":" + std::string(invalid));
+        REQUIRE_FALSE(decode_graph_identity_receipt(receipt_input(modified)));
+    }
+    const auto narrow = rewrite("\"input_ports\":0", "\"input_ports\":4294967296");
+    REQUIRE_FALSE(decode_graph_identity_receipt(receipt_input(narrow)));
+    const auto wrong_minimum = rewrite("\"effective\":{\"block_frames\":128",
+                                       "\"effective\":{\"block_frames\":18446744073709551615");
+    REQUIRE_FALSE(decode_graph_identity_receipt(receipt_input(wrong_minimum)));
+}
+
+TEST_CASE("Exact numeric token opt in preserves the default JSON parser", "[resolved-unsigned]") {
+    const auto defaults = choc::json::parse("[0,-42,1.25,1e+3,9223372036854775807]");
+    REQUIRE(defaults[0].isInt());
+    REQUIRE(defaults[1].getInt64() == -42);
+    REQUIRE(defaults[2].getFloat64() == 1.25);
+    REQUIRE(defaults[3].getFloat64() == 1000);
+    REQUIRE(defaults[4].isFloat64());
+    const auto token = +[](std::string_view number, bool negative) {
+        return choc::value::Value(std::string(negative ? "-" : "") + std::string(number));
+    };
+    const std::string surrounded = "[18446744073709551615,-42,1e+3]trailing";
+    const auto exact = choc::json::parseWithNumberTokenParser(
+        std::string_view(surrounded.data(), surrounded.find(']') + 1), token);
+    REQUIRE(exact[0].getString() == "18446744073709551615");
+    REQUIRE(exact[1].getString() == "-42");
+    REQUIRE(exact[2].getString() == "1e+3");
 }
 
 TEST_CASE("D4 refuses an unbound prepared snapshot") {
