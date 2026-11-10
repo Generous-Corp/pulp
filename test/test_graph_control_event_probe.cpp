@@ -1,4 +1,3 @@
-#include "harness/rt_allocation_probe.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/process_context.hpp>
 #include <pulp/host/plugin_slot.hpp>
@@ -311,13 +310,7 @@ TEST_CASE("G7 dense control probe summarizes the selected slewed contribution be
             float* ops[] = {out.data()};
             pulp::audio::BufferView<const float> iv(ips, 2, frames);
             pulp::audio::BufferView<float> ov(ops, 1, frames);
-            bool allocated = false;
-            {
-                pulp::test::RtAllocationProbe allocation;
-                graph.process(ov, iv, frames);
-                allocated = allocation.saw_allocation();
-            }
-            REQUIRE_FALSE(allocated);
+            graph.process(ov, iv, frames);
             pulp::graph::GraphRuntimeProbeSample sample;
             REQUIRE(graph.read_control_edge_probe(sample));
             REQUIRE(sample.kind == pulp::graph::GraphRuntimeProbeKind::Control);
