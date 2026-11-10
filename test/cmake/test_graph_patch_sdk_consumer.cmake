@@ -31,6 +31,13 @@ run_step(stage "${CMAKE_COMMAND}" --install "${PULP_BUILD_DIR}"
     --prefix "${_prefix}" --config "${_config}")
 file(READ "${_prefix}/sdk-provenance.json" _provenance)
 file(APPEND "${_receipt}" "Installed provenance: ${_provenance}\n")
+execute_process(COMMAND git -C "${PULP_SOURCE_DIR}" rev-parse HEAD
+    RESULT_VARIABLE _git_result OUTPUT_VARIABLE _head OUTPUT_STRIP_TRAILING_WHITESPACE)
+string(JSON _installed_head GET "${_provenance}" source_git_sha)
+string(JSON _installed_dirty GET "${_provenance}" source_git_dirty)
+if(NOT _git_result EQUAL 0 OR NOT _installed_head STREQUAL _head OR _installed_dirty)
+    message(FATAL_ERROR "Installed SDK must come from the clean current commit; reconfigure and build before this test")
+endif()
 file(SHA256 "${PULP_SOURCE_DIR}/core/host/include/pulp/host/graph_patch.hpp" _expected)
 file(SHA256 "${_prefix}/include/pulp/host/graph_patch.hpp" _actual)
 if(NOT _actual STREQUAL _expected)

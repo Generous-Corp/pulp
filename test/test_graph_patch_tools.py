@@ -57,7 +57,30 @@ def main():
         saved = directory / 'saved.pulpgraph'
         assert run([args.cli, 'graph', 'save', path, '--output', saved]).returncode == 0
         assert json.loads(run([args.cli, 'graph', 'fmt', saved, '--notation', '--json']).stdout)['notation'] == canonical
-    print('PASS API/CLI/MCP 6 diagnostic controls and notation/save roundtrip')
+        damaged = json.loads(saved.read_text())
+        damaged['connections'][0]['source_port'] = 999
+        broken = directory / 'dangling.pulpgraph'
+        broken.write_text(json.dumps(damaged))
+        api = run([args.consumer, '--validate', broken])
+        cli = run([args.cli, 'graph', 'validate', broken, '--json'])
+        assert api.returncode == cli.returncode == 1
+        assert json.loads(api.stdout) == json.loads(cli.stdout)
+        assert json.loads(cli.stdout)['code'] == 'UnknownPort'
+        request = {'jsonrpc': '2.0', 'id': 100, 'method': 'tools/call',
+                   'params': {'name': 'pulp_graph', 'arguments': {'path': str(broken), 'operation': 'validate'}}}
+        wire = json.dumps(request)
+        mcp = run([args.mcp], data=f'Content-Length: {len(wire)}\r\n\r\n{wire}', cwd=args.root)
+        payload = json.loads(mcp.stdout.split('\n\n', 1)[1])['result']
+        assert payload['isError'] and json.loads(payload['content'][0]['text']) == json.loads(cli.stdout)
+        request['id'] = 101
+        request['params']['arguments'] = {'operation': 'catalog'}
+        wire = json.dumps(request)
+        mcp = run([args.mcp], data=f'Content-Length: {len(wire)}\r\n\r\n{wire}', cwd=args.root)
+        payload = json.loads(mcp.stdout.split('\n\n', 1)[1])['result']
+        assert not payload.get('isError', False)
+        assert json.loads(payload['content'][0]['text']) == json.loads(run([args.cli, 'graph', 'catalog', '--json']).stdout)
+
+    print('PASS API/CLI/MCP 7 diagnostic controls, catalog without path and notation/save roundtrip')
 
 
 if __name__ == '__main__':
