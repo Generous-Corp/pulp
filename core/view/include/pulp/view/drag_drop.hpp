@@ -56,7 +56,7 @@ public:
     virtual void leave_drag() {}
 
     // Commit a drop at `local`, the drop point in this receiver's local
-    // coordinates. Called after leave_drag. Return true if handled — a true
+    // coordinates. Called after leave_drag. Return true if handled: a true
     // return CONSUMES the drop (dispatch stops bubbling); false lets it fall
     // through to an outer receiver / View::on_drop.
     virtual bool accept_drop(const DropData& data, Point local) = 0;
