@@ -19,6 +19,7 @@
 /// growth to the two callback members themselves.
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/host/graph_event_contract.hpp>
 
 #include <functional>
 
@@ -56,6 +57,10 @@ struct CustomNodeEventBlock {
     const midi::MidiBuffer* in = nullptr;
     midi::MidiBuffer* out = nullptr;
     TriggerContext* triggers = nullptr;
+    // Graph-authored event handles are callback-local and null for ordinary
+    // MIDI-only custom nodes. The prepared graph owns their lane storage.
+    GraphEventWriter<>* graph_writer = nullptr;
+    GraphEventReader<>* graph_reader = nullptr;
 };
 
 /// Stateless event-aware process callback.
