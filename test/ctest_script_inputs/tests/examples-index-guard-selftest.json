@@ -3,6 +3,8 @@
  "record": {
   "entry": "tools/scripts/test_examples_index_guard.py",
   "inputs": [
+   "examples/CMakeLists.txt",
+   "test/CMakeLists.txt",
    "tools/scripts/examples_index_guard.py",
    "tools/scripts/test_examples_index_guard.py"
   ],

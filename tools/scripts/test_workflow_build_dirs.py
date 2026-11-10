@@ -404,8 +404,15 @@ class WorkflowBuildDirTests(unittest.TestCase):
         """The three merge-group shadow instruments run from ONE step through
         tools/ci/merge_group_shadows.py, gated on a merge group with a
         successful build, continue-on-error, after ctest; neither Build nor
-        Test reads anything from them. The separate flake-exoneration gate
-        runs from the trusted queue base; its shadow remains advisory."""
+        Test reads anything from them.
+
+        The flake-exoneration GATE (tools/ci/flake_exoneration.py) is not a
+        shadow instrument: it decides the merge-group macos job outcome, so it
+        belongs in Test and is asserted by its own test below. What stays
+        banned from Build and Test is the shadow module and its outputs. The
+        gate imports pure classifier helpers from flake_exoneration_shadow, so
+        an edit to that module can change the gate's verdict and is reviewed
+        as a gate change."""
         step = workflow_named_step(BUILD_WORKFLOW, "build", "Merge-group shadow instruments")
         self.assertTrue(step.get("continue-on-error"))
         cond = " ".join(str(step.get("if")).split())
@@ -419,11 +426,27 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("ctest-evidence/selected.json", run)
         for name in ("Build", "Test (non-Windows)"):
             body = str(workflow_named_step(BUILD_WORKFLOW, "build", name)["run"])
-            for token in ("merge_group_shadows", "binary_identity", "affected_tests_shadow", "flake_exoneration_shadow",
+            for token in ("merge_group_shadows", "merge-group-shadows", "binary_identity",
+                          "affected_tests_shadow", "flake_exoneration_shadow",
                           "test_receipts", "test-receipts"):
                 self.assertNotIn(token, body)
-            if name == "Build":
-                self.assertNotIn("flake_exoneration", body)
+
+    def test_flake_exoneration_gate_is_scoped_to_merge_group_macos(self) -> None:
+        """Only a failed merge-group run of the required macos leg may consult
+        the flake-exoneration gate, Build never does, and ctest's own exit code
+        is recorded as evidence before the gate can replace it."""
+        build = str(workflow_named_step(BUILD_WORKFLOW, "build", "Build")["run"])
+        self.assertNotIn("flake_exoneration", build)
+        run = str(workflow_named_step(BUILD_WORKFLOW, "build", "Test (non-Windows)")["run"])
+        self.assertEqual(run.count("flake_exoneration.py gate"), 1)
+        gate = run.index("flake_exoneration.py gate")
+        guard = run.rindex("if ", 0, gate)
+        condition = run[guard:gate]
+        for needle in ('[ "$ctest_exit" -ne 0 ]', '[ "$GITHUB_EVENT_NAME" = merge_group ]',
+                       '[ "${RUNNER_OS}" = "macOS" ]', '[ "${MATRIX_KEY:-}" = macos ]'):
+            self.assertIn(needle, condition, needle)
+        evidence = run.index('printf \'%s\\n\' "$ctest_exit" > "$evidence_dir/exit-code"')
+        self.assertLess(evidence, gate, "the receipt evidence must keep ctest's own exit code")
 
     def test_per_test_receipts_are_uploaded_only_from_merge_group_macos(self) -> None:
         """The shadow's receipts are written by the merge-group macOS job only
