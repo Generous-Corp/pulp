@@ -117,7 +117,9 @@ struct FileDragRequest {
 // platform is unsupported, the handle is null, there are no files, or there is
 // no active mouse event to anchor the drag. Implemented per-platform alongside
 // register_drop_target (macOS, Windows, and Linux/X11 today; a no-op stub
-// elsewhere).
+// elsewhere). On macOS it goes through pulp::platform::begin_file_drag, so a
+// recorder installed with pulp::platform::set_file_drag_recorder() records the
+// drag (and this returns true) with no mouse event or window.
 bool begin_file_drag(void* native_view, const FileDragRequest& request);
 
 // Process-global outbound file-drag backend for HOSTLESS platforms — Android,
