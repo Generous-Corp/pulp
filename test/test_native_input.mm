@@ -313,7 +313,8 @@ TEST_CASE("a modifier on its own is a down and an up of that key, with its side"
     REQUIRE(right_up->modifiers & modifier_shift);
 }
 
-TEST_CASE("keys stay with the host unless the client holds text focus", "[native-surface][input]") {
+TEST_CASE("keys stay with the host unless the client holds the keyboard",
+          "[native-surface][input]") {
     KeyEvent space;
     space.key = Key::space;
     space.characters = " ";
@@ -325,6 +326,11 @@ TEST_CASE("keys stay with the host unless the client holds text focus", "[native
     for (const auto& e : {space, save, letter}) {
         REQUIRE(route_key(e, false) == KeyRoute::host);
         REQUIRE(route_key(e, true) == KeyRoute::client_first);
+        REQUIRE(route_key(e, KeyboardFocus::none) == KeyRoute::host);
+        // Keys without text entry are offered to the client first too; what
+        // it declines goes back to the host (the surface decides that part).
+        REQUIRE(route_key(e, KeyboardFocus::keys) == KeyRoute::client_first);
+        REQUIRE(route_key(e, KeyboardFocus::text) == KeyRoute::client_first);
     }
 }
 
