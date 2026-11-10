@@ -1,0 +1,23 @@
+--- a/external/dr_libs/dr_mp3.h
++++ b/external/dr_libs/dr_mp3.h
+@@ -2261,8 +2261,9 @@ static int drmp3d_match_frame(const drmp3_uint8 *hdr, int mp3_bytes, int frame_b
+         i += drmp3_hdr_frame_bytes(hdr + i, frame_bytes) + drmp3_hdr_padding(hdr + i);
+         if (i + DRMP3_HDR_SIZE > mp3_bytes)
+             return nmatch > 0;
++        /* A chain that ends in bytes that are not a frame, such as a trailing tag or junk, counts like one that ends at the buffer end. */
+         if (!drmp3_hdr_compare(hdr, hdr + i))
+-            return 0;
++            return nmatch > 0;
+     }
+     return 1;
+ }
+@@ -2319,7 +2320,8 @@ DRMP3_API int drmp3dec_decode_frame(drmp3dec *dec, const drmp3_uint8 *mp3, int m
+     if (mp3_bytes > 4 && dec->header[0] == 0xff && drmp3_hdr_compare(dec->header, mp3))
+     {
+         frame_size = drmp3_hdr_frame_bytes(mp3, dec->free_format_bytes) + drmp3_hdr_padding(mp3);
+-        if (frame_size != mp3_bytes && (frame_size + DRMP3_HDR_SIZE > mp3_bytes || !drmp3_hdr_compare(mp3, mp3 + frame_size)))
++        /* Once synced, a frame that matches the previous header and fits in the buffer is decoded even when what follows it is not a frame, so the last frame before a trailing tag or junk is kept. */
++        if (frame_size > mp3_bytes)
+         {
+             frame_size = 0;
+         }
