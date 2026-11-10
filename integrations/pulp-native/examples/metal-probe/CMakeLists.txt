@@ -75,6 +75,31 @@ if(CMAKE_NM AND TARGET PulpNativeMetalProbe_CLAP)
     endif()
 endif()
 
+# The census itself, on fixed listings (cat stands in for nm): a std template
+# instantiated over a pulp::view type is not pulp::view code, and a real
+# pulp::view definition is.
+find_program(_pulp_census_cat cat)
+if(_pulp_census_cat)
+    set(_census ${CMAKE_CURRENT_SOURCE_DIR}/check_symbol_census.cmake)
+    set(_census_fixtures ${PROJECT_SOURCE_DIR}/test/fixtures/symbol_census)
+    add_test(NAME symbol-census-ignores-std-instantiations
+        COMMAND ${CMAKE_COMMAND} -DNM=${_pulp_census_cat}
+            -DBINARY=${_census_fixtures}/std_instantiation_only.nm -DEXPECT=absent
+            -DREQUIRED=clap_entry -P ${_census})
+    add_test(NAME symbol-census-sees-a-view-definition
+        COMMAND ${CMAKE_COMMAND} -DNM=${_pulp_census_cat}
+            -DBINARY=${_census_fixtures}/view_definition.nm -DEXPECT=present -P ${_census})
+    # Control: the same listing as absent must fail, or the census is blind.
+    add_test(NAME symbol-census-rejects-a-view-definition
+        COMMAND ${CMAKE_COMMAND} -DNM=${_pulp_census_cat}
+            -DBINARY=${_census_fixtures}/view_definition.nm -DEXPECT=absent
+            -DREQUIRED=clap_entry -P ${_census})
+    set_tests_properties(symbol-census-ignores-std-instantiations
+        symbol-census-sees-a-view-definition symbol-census-rejects-a-view-definition
+        PROPERTIES LABELS "native-surface;cmake" TIMEOUT 60)
+    set_tests_properties(symbol-census-rejects-a-view-definition PROPERTIES WILL_FAIL TRUE)
+endif()
+
 # The host proof: the probe editor driven through the editor-host contract (the
 # path every format adapter takes), in offscreen windows on the system Metal
 # device.
