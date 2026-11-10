@@ -123,8 +123,9 @@ TEST_CASE("a refused duplicate registration fails the contract closed", "[reload
     state::StateStore candidate; fill_store(candidate);
     // Author bug: register kGain twice. The store refuses the second entry and
     // counts it; the gate must still refuse to hot-swap that store.
-    REQUIRE_FALSE(candidate.add_parameter(
-        {.id = kGain, .name = "Gain (dup)", .unit = "", .range = {0.0f, 1.0f, 0.5f, 0.0f}}));
+    const bool added = candidate.add_parameter(
+        {.id = kGain, .name = "Gain (dup)", .unit = "", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+    REQUIRE_FALSE(added);
     REQUIRE(candidate.duplicate_registrations() == 1);
     REQUIRE(param_contract_diff(live, candidate).empty()); // the entries are identical
     REQUIRE_FALSE(param_contracts_match(live, candidate));
