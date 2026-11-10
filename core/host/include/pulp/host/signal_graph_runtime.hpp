@@ -639,7 +639,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
         PortIndex destination_port = 0;
         std::uint32_t parameter_id = 0;
     };
-    // One ordinary audio edge, observed at its source before PDC/mixing. Attach
+    // One ordinary/sidechain audio edge, observed at its source before PDC/mixing,
+    // or feedback edge, observed from its retained input before current capture.
+    // Feedback timestamps mark the receiving block. Attach
     // and detach are control-thread lifecycle operations: stop process() and
     // any pinned-snapshot rendering first, as for prepare(). Reattachment starts
     // a fresh 256-record ring and a zero-based sample clock. Reprepare/topology
@@ -654,8 +656,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::uint64_t audio_edge_probe_dropped() const;
     EdgeProbeStatus audio_edge_probe_status() const;
     EdgeProbeIdentity audio_edge_probe_identity() const;
-    // Control probes observe one prepared sparse automation edge after its
-    // per-edge source mapping and slew, before destination mixing and bounds
+    // Control probes observe one prepared sparse or dense automation edge after
+    // per-edge PDC (dense only), source mapping and slew, before mixing and bounds
     // clamping. The destination is identified by NodeId + public parameter id
     // because automation edges do not have a destination audio port.
     EdgeProbeStatus attach_control_edge_probe(const PortHandle& source, NodeId destination,

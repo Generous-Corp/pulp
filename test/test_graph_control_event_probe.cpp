@@ -1,3 +1,4 @@
+#include "harness/rt_allocation_probe.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/process_context.hpp>
 #include <pulp/host/plugin_slot.hpp>
@@ -7,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -17,6 +19,8 @@ namespace {
 class ProbeSlot final : public pulp::host::PluginSlot {
   public:
     static constexpr std::uint32_t kParam = 7;
+    std::array<float, 8> delivered{};
+    std::size_t delivered_count = 0;
 
     explicit ProbeSlot(pulp::host::ParamRate rate) : rate_(rate) {
         info_.name = "G7 probe slot";
@@ -37,8 +41,13 @@ class ProbeSlot final : public pulp::host::PluginSlot {
     void release() override {}
     void process(pulp::audio::BufferView<float>& output,
                  const pulp::audio::BufferView<const float>&, const pulp::midi::MidiBuffer&,
-                 pulp::midi::MidiBuffer&, const pulp::host::ParameterEventQueue&,
+                 pulp::midi::MidiBuffer&, const pulp::host::ParameterEventQueue& events,
                  int frames) override {
+        delivered_count = 0;
+        for (const auto& event : events) {
+            if (event.param_id == kParam && delivered_count < delivered.size())
+                delivered[delivered_count++] = event.value;
+        }
         for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
             std::fill_n(output.channel_ptr(channel), frames, 0.0f);
     }
@@ -130,7 +139,7 @@ void process_audio(pulp::host::SignalGraph& graph, bool reset = false) {
 
 } // namespace
 
-TEST_CASE("G7 control probes cover lifecycle refusals, dense rejection, and reset clocks",
+TEST_CASE("G7 control probes cover lifecycle refusals, dense attachment, and reset clocks",
           "[host][graph][g7][probe]") {
     AudioGraph unprepared(pulp::host::ParamRate::ControlRate);
     const auto source = unprepared.source_port();
@@ -183,7 +192,14 @@ TEST_CASE("G7 control probes cover lifecycle refusals, dense rejection, and rese
     REQUIRE(dense.graph.prepare(48000.0, 8));
     REQUIRE(dense.graph.attach_control_edge_probe(dense.source_port(), dense.plugin,
                                                   ProbeSlot::kParam) ==
-            pulp::host::SignalGraph::EdgeProbeStatus::UnsupportedExecution);
+            pulp::host::SignalGraph::EdgeProbeStatus::Attached);
+    process_audio(dense.graph);
+    REQUIRE(dense.graph.read_control_edge_probe(sample));
+    REQUIRE(sample.value == 0.5f);
+    REQUIRE(sample.value_end == 0.5f);
+    REQUIRE(sample.peak == 0.5f);
+    REQUIRE(sample.rms == 0.5f);
+    REQUIRE(sample.payload_count == 8);
 }
 
 TEST_CASE("G7 event probes cover lifecycle, identity, reset detach, and publication",
@@ -238,4 +254,114 @@ TEST_CASE("G7 event probes cover lifecycle, identity, reset detach, and publicat
     process_audio(graph);
     REQUIRE(graph.read_event_edge_probe(sample));
     REQUIRE(sample.timestamp_samples == 0);
+}
+
+TEST_CASE("G7 dense control probe summarizes the selected slewed contribution before mixing",
+          "[host][graph][g7][probe][dense-probe]") {
+    using Graph = pulp::host::SignalGraph;
+    using Status = Graph::EdgeProbeStatus;
+    for (const auto& partitions :
+         {std::vector<int>{8, 8, 8, 8}, std::vector<int>{1, 3, 8, 5, 7, 8}}) {
+        Graph graph;
+        const auto input = graph.add_input_node(2);
+        auto slot = std::make_unique<ProbeSlot>(pulp::host::ParamRate::AudioRate);
+        auto* receiver = slot.get();
+        const auto destination = graph.add_plugin_node(std::move(slot), 1, 1);
+        const auto output = graph.add_output_node(1);
+        REQUIRE(graph.connect(input, 0, destination, 0));
+        REQUIRE(graph.connect(destination, 0, output, 0));
+        REQUIRE(graph.connect_audio_rate_modulation(input, 0, destination, ProbeSlot::kParam, -1.0f,
+                                                    2.0f, 0.5f));
+        REQUIRE(graph.connect_audio_rate_modulation(input, 1, destination, ProbeSlot::kParam, 0.6f,
+                                                    0.6f, 0.0f, pulp::host::AutomationMix::Add));
+        REQUIRE(graph.prepare(48000, 8));
+        const auto source = graph.node(input)->out("audio");
+        REQUIRE(graph.attach_control_edge_probe(source, destination, ProbeSlot::kParam) ==
+                Status::Attached);
+        const auto identity = graph.control_edge_probe_identity();
+        std::uint64_t timestamp = 0;
+        std::uint64_t sequence = 0;
+        float previous = 0.0f;
+        bool primed = false;
+        for (const int frames : partitions) {
+            std::array<float, 8> in{}, other{}, out{}, expected{};
+            float peak = 0.0f;
+            double squares = 0.0;
+            for (int f = 0; f < frames; ++f) {
+                const auto position = timestamp + f;
+                in[f] = (position % 5 == 0)   ? 1.25f
+                        : (position % 5 == 1) ? -0.25f
+                                              : static_cast<float>(position % 4) / 4.0f;
+                const float target = -1.0f + 3.0f * std::clamp(in[f], 0.0f, 1.0f);
+                // Independent scalar slew: 3 units over 24 samples at 48 kHz.
+                if (!primed) {
+                    previous = target;
+                    primed = true;
+                } else if (target > previous + 0.125f)
+                    previous += 0.125f;
+                else if (target < previous - 0.125f)
+                    previous -= 0.125f;
+                else
+                    previous = target;
+                expected[f] = previous;
+                peak = std::max(peak, std::abs(previous));
+                squares += static_cast<double>(previous) * previous;
+            }
+            const float* ips[] = {in.data(), other.data()};
+            float* ops[] = {out.data()};
+            pulp::audio::BufferView<const float> iv(ips, 2, frames);
+            pulp::audio::BufferView<float> ov(ops, 1, frames);
+            bool allocated = false;
+            {
+                pulp::test::RtAllocationProbe allocation;
+                graph.process(ov, iv, frames);
+                allocated = allocation.saw_allocation();
+            }
+            REQUIRE_FALSE(allocated);
+            pulp::graph::GraphRuntimeProbeSample sample;
+            REQUIRE(graph.read_control_edge_probe(sample));
+            REQUIRE(sample.kind == pulp::graph::GraphRuntimeProbeKind::Control);
+            REQUIRE(sample.sequence == sequence++);
+            REQUIRE(sample.timestamp_samples == timestamp);
+            REQUIRE(sample.frames == frames);
+            REQUIRE(sample.payload_count == frames);
+            REQUIRE(sample.payload_id == ProbeSlot::kParam);
+            REQUIRE(sample.value == expected[0]);
+            REQUIRE(sample.value_end == expected[frames - 1]);
+            REQUIRE(sample.peak == peak);
+            REQUIRE(sample.rms == static_cast<float>(std::sqrt(squares / frames)));
+            REQUIRE(receiver->delivered_count == frames);
+            for (int f = 0; f < frames; ++f)
+                REQUIRE(receiver->delivered[f] == std::clamp(expected[f] + 0.6f, 0.0f, 1.0f));
+            REQUIRE(graph.control_edge_probe_identity().connection == identity.connection);
+            REQUIRE_FALSE(graph.read_control_edge_probe(sample));
+            timestamp += frames;
+        }
+        for (int block = 0; block < 258; ++block)
+            process_audio(graph);
+        REQUIRE(graph.control_edge_probe_dropped() == 2);
+        pulp::graph::GraphRuntimeProbeSample sample;
+        for (int record = 0; record < 256; ++record) {
+            REQUIRE(graph.read_control_edge_probe(sample));
+            REQUIRE(sample.sequence == sequence++);
+            REQUIRE(sample.timestamp_samples == timestamp + record * 8);
+        }
+        REQUIRE_FALSE(graph.read_control_edge_probe(sample));
+        graph.detach_control_edge_probe();
+        REQUIRE(graph.control_edge_probe_status() == Status::Detached);
+        REQUIRE(graph.attach_control_edge_probe(source, destination, ProbeSlot::kParam) ==
+                Status::Attached);
+        process_audio(graph);
+        REQUIRE(graph.read_control_edge_probe(sample));
+        REQUIRE(sample.sequence == 0);
+        REQUIRE(sample.timestamp_samples == 0);
+        REQUIRE(graph.control_edge_probe_dropped() == 0);
+        REQUIRE(graph.prepare(48000, 8));
+        REQUIRE(graph.control_edge_probe_status() == Status::Detached);
+        REQUIRE(graph.attach_control_edge_probe(source, destination, ProbeSlot::kParam) ==
+                Status::Attached);
+        REQUIRE(graph.disconnect(input, 0, destination, 0));
+        REQUIRE(graph.control_edge_probe_status() == Status::Unprepared);
+        REQUIRE_FALSE(graph.read_control_edge_probe(sample));
+    }
 }
