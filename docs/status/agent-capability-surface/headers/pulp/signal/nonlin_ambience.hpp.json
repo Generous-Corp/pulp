@@ -1,0 +1,12 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/nonlin_ambience.hpp",
+  "fingerprint": "sha256:aa58d912e15593e959118a912f5146774523a213446de5c8f19212d3eb9e7375",
+  "include": "pulp/signal/nonlin_ambience.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.dither-quantizer",
+    "signal.stochastic-sources"
+  ],
+  "rationale": "Existing ambience processor adopts deterministic dither and velvet-noise primitives without a new ambience contract in this slice."
+}

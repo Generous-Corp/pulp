@@ -521,7 +521,7 @@ class VellumWatchPreflightTest(_PreflightRepo, unittest.TestCase):
                 r'vellum_rc"? -eq 10 \] \|\| \[ "\$vellum_rc"? -eq 11 \] '
                 r'\|\| \[ "\$vellum_rc"? -eq 12 \] \|\|\s+\[ "\$vellum_rc"? -eq 13 \] '
                 r'\|\| \[ "\$vellum_rc"? -eq 14 \] \|\| \[ "\$vellum_rc"? -eq 15 \];'
-                r' then\s+fail=1',
+                r' then\s+(?:fail=1|prepush_fail)',
                 msg=f"{rel} does not fail on an owed watch event, a stale "
                     "inventory, an owed change event, an unverifiable inventory, "
                     "an owed export event, or a wrong unit header list")
@@ -878,12 +878,55 @@ class ExportEventTests(unittest.TestCase):
                             rationale="Adds a platform helper Vellum's host does not call yet.")
         self.assertEqual(code, self.pf.WRITE_REFUSED)
 
+    def test_a_new_event_names_the_receipt_pinned_on_the_base_branch_tip(self) -> None:
+        # main re-pinned after this branch forked: the report (read at the fork
+        # point) names the previous receipt, but CI judges by main's pin.
+        import json
+        repinned = "20261107-f0ac0a4ff392"
+        _git(self.root, "init", "-q")
+        _git(self.root, "config", "user.email", "fixture@example.invalid")
+        _git(self.root, "config", "user.name", "Fixture")
+        pin = self.root / ".github/vellum-export-receipt/pin.json"
+        pin.parent.mkdir(parents=True)
+        pin.write_text(json.dumps({"export_id": repinned}) + "\n", encoding="utf-8")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-q", "-m", "re-pin")
+        _git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        code, output = self._run()
+        self.assertEqual(code, self.pf.EXPORT_OWED, msg=output)
+        self.assertIn(f'"receipt_export_id": "{repinned}"', output)
+        self.assertNotIn(self.REPORT["export_id"], output)
+        code, output = self._run(
+            fix=True, inherits="false", event_id="20261108-after-repin",
+            rationale="Adds a platform helper Vellum's host does not call yet.")
+        self.assertEqual(code, 0, msg=output)
+        event = json.loads((self.root / ".github/vellum-export-events/20261108-after-repin.json")
+                           .read_text(encoding="utf-8"))
+        self.assertEqual(event["receipt_export_id"], repinned)
+
     def test_nothing_owed_is_clean(self) -> None:
         self.pf.export_verdict = lambda *a, **k: (
             subprocess.CompletedProcess([], 0, "", ""), {"missing": [], "status": "pass"})
         code, output = self._run()
         self.assertEqual(code, 0, msg=output)
         self.assertEqual(output, "")
+
+    def test_a_receipt_failure_blocks_even_without_a_stderr_diagnostic(self) -> None:
+        self.pf.export_verdict = lambda *a, **k: (
+            subprocess.CompletedProcess([], 1, "", ""), {"missing": [], "status": "fail"})
+        code, output = self._run()
+        self.assertEqual(code, self.pf.EXPORT_OWED, msg=output)
+        self.assertIn("vellum export receipt (BLOCKING)", output)
+        self.assertIn("status: fail", output)
+
+    def test_no_receipt_verdict_does_not_manufacture_a_failure(self) -> None:
+        for result in ((None, None),
+                       (subprocess.CompletedProcess([], 1, "", "internal error"), {})):
+            with self.subTest(result=result):
+                self.pf.export_verdict = lambda *a, **k: result
+                code, output = self._run()
+                self.assertEqual(code, 0, msg=output)
+                self.assertEqual(output, "")
 
 
 class ExportEventRealCheckerTests(unittest.TestCase):
@@ -955,6 +998,39 @@ class ExportEventRealCheckerTests(unittest.TestCase):
                       .read_text(encoding="utf-8")}, "add the export event")
         code, output = self._run()
         self.assertEqual(code, 0, msg=output)
+
+    def test_inheritance_after_transfer_is_refused_and_pulp_only_restores_success(self) -> None:
+        import json
+        self.assertTrue((self.clone / ".github/vellum-export-receipt/framework-transfer.json").is_file())
+        original = (self.clone / self.EXPORTED_PATH).read_text(encoding="utf-8")
+        self._commit({self.EXPORTED_PATH: original + "// receipt preflight probe\n"},
+                     "edit an exported path after transfer")
+        code, output = self._run(
+            fix=True, inherits="false", event_id="20261110-preflight-transfer-probe",
+            rationale="Pulp-only probe of local receipt failure propagation after transfer.")
+        self.assertEqual(code, 0, msg=output)
+        event_path = ".github/vellum-export-events/20261110-preflight-transfer-probe.json"
+        event = json.loads((self.clone / event_path).read_text(encoding="utf-8"))
+
+        for phase, inherits in (("positive", False), ("planted inherited", True),
+                                ("restored", False)):
+            event["vellum_inherits"] = inherits
+            self._commit({event_path: json.dumps(event) + "\n"}, phase)
+            with self.subTest(phase=phase):
+                done, report = self.pf.export_verdict(self.clone, self.base, "HEAD")
+                self.assertIsNotNone(done)
+                self.assertEqual(done.returncode, 1 if inherits else 0, msg=done.stderr)
+                self.assertEqual(report["status"], "fail" if inherits else "pass")
+                self.assertEqual(report["missing"], [])
+                self.assertEqual(report["frozen"], [])
+                self.assertEqual(report["conflicting"], [])
+                self.assertEqual(report["inherited_after_transfer"],
+                                 [self.EXPORTED_PATH] if inherits else [])
+                code, output = self._run()
+                self.assertEqual(code, self.pf.EXPORT_OWED if inherits else 0, msg=output)
+                if inherits:
+                    self.assertIn("vellum export receipt (BLOCKING)", output)
+                    self.assertIn(self.EXPORTED_PATH, output)
 
 
 if __name__ == "__main__":

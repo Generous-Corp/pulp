@@ -54,6 +54,13 @@ pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
 # decode for WAV, AIFF, FLAC, MP3 and Ogg Vorbis built from one known signal.
 pulp_add_test_suite(pulp-test-audio-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
+pulp_test_data(pulp-test-audio-reader PATHS test/fixtures/fuzz/audio-decoder)
+
+# CHOC's WAV reader as the configure-time patches leave it: Pulp reads WAV
+# through dr_wav, but the patched CHOC header installs with the SDK.
+pulp_add_test_suite(pulp-test-choc-wav-reader-patches
+    LIBRARIES pulp::audio)
+pulp_test_data(pulp-test-choc-wav-reader-patches PATHS test/fixtures/fuzz/audio-decoder)
 
 # System codec writer: AAC, ALAC and PCM written through ExtAudioFile (Apple)
 # or Media Foundation (Windows) read back as the source signal.
@@ -76,7 +83,11 @@ pulp_add_test_suite(pulp-test-format-registry-limits GROUP pulp-test-group-cap-a
 # the required gate; it is the one lane that reaches the platform CoreAudio
 # reader, which the fuzzer excludes, and it holds the CHOC-vs-dr_wav WAV
 # differential.
+# One executable, split by format; the shared helpers and the per-seed
+# expectation table live in test/support/audio_decoder_corpus*.hpp.
 pulp_add_test_suite(pulp-test-audio-decoder-corpus LIBRARIES pulp::audio
+    SOURCES test_audio_decoder_corpus.cpp test_audio_decoder_corpus_wav.cpp
+        test_audio_decoder_corpus_mp3.cpp test_audio_decoder_corpus_flac_ogg.cpp
     LABELS fuzz audio)
 pulp_test_data(pulp-test-audio-decoder-corpus PATHS test/fixtures/fuzz/audio-decoder)
 

@@ -1,0 +1,47 @@
+{
+  "layout": "pulp.agent-capability-surface-fragments.v1",
+  "document": {
+    "$schema": "agent-capability-surface.schema.json",
+    "schema": "pulp.agent-capability-surface.v1",
+    "inventory_version": 217,
+    "fingerprint_algorithm": "sha256-file-bytes",
+    "coverage_state": "partial",
+    "roots": [
+      {
+        "domain": "audio",
+        "source": "core/audio/include/pulp/audio",
+        "install_prefix": "pulp/audio"
+      },
+      {
+        "domain": "midi",
+        "source": "core/midi/include/pulp/midi",
+        "install_prefix": "pulp/midi"
+      },
+      {
+        "domain": "music",
+        "source": "core/music/include/pulp/music",
+        "install_prefix": "pulp/music"
+      },
+      {
+        "domain": "playback",
+        "source": "core/playback/include/pulp/playback",
+        "install_prefix": "pulp/playback"
+      },
+      {
+        "domain": "sequence",
+        "source": "core/sequence/include/pulp/sequence",
+        "install_prefix": "pulp/sequence"
+      },
+      {
+        "domain": "signal",
+        "source": "core/signal/include/pulp/signal",
+        "install_prefix": "pulp/signal"
+      },
+      {
+        "domain": "timebase",
+        "source": "core/timebase/include/pulp/timebase",
+        "install_prefix": "pulp/timebase"
+      }
+    ]
+  }
+}

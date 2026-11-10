@@ -95,6 +95,12 @@ EVENT_ID_RE = re.compile(r"^[0-9]{8}-[a-z0-9][a-z0-9-]{2,79}$")
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 MAX_EVENT_BYTES = 32 * 1024
+# The one command that repairs an added export event after main re-pins the
+# receipt or merges an event that decides the same paths.
+REPIN_COMMAND = (
+    "python3 tools/scripts/vellum_receipt_drift.py --repin-events && "
+    "git commit -am 'chore(vellum): re-pin export events to the pinned receipt'"
+)
 # The change-event dispositions that may touch a frozen path.
 FROZEN_EDIT_DISPOSITIONS = frozenset({"framework-backport", "emergency-exception"})
 MAX_RECEIPT_BYTES = 8 * 1024 * 1024
@@ -659,7 +665,11 @@ def validate_export_event(value: Any, path: str, pin: Pin) -> ExportEvent:
     _parse_utc(event["created_at"], f"{path}.created_at")
     if event["receipt_export_id"] != pin.export_id:
         raise ReceiptDriftError(
-            f"{path}: receipt_export_id must name the pinned receipt {pin.export_id}"
+            f"{path}: receipt_export_id must name the pinned receipt {pin.export_id}, "
+            f"not {event['receipt_export_id']!r}. The pin moved on main after this event "
+            "was written, and merging main does not rewrite the event. Re-pin the events "
+            f"this branch adds, then commit (receipt mode reads committed HEAD, not the "
+            f"working tree):\n    {REPIN_COMMAND}"
         )
     paths = _sorted_unique(event["paths"], f"{path}.paths", allow_empty=False)
     for index, item in enumerate(paths):
@@ -677,6 +687,57 @@ def validate_export_event(value: Any, path: str, pin: Pin) -> ExportEvent:
                     f"{path}: supersedes must name other export events by event_id"
                 )
     return ExportEvent(event_id, tuple(paths), event["vellum_inherits"], tuple(supersedes))
+
+
+def _export_event_paths(repo: pathlib.Path, commit: str) -> list[str]:
+    """The export event files in ``commit``'s tree."""
+    listing = _git(repo, "ls-tree", "-z", "--name-only", commit,
+                   "--", f"{EXPORT_EVENT_DIRECTORY}/").stdout
+    return sorted(
+        name for name in listing.decode("utf-8", errors="replace").split("\0")
+        if name.endswith(".json") and posixpath.dirname(name) == EXPORT_EVENT_DIRECTORY
+    )
+
+
+def decided_at(repo: pathlib.Path, commit: str) -> dict[str, list[str]]:
+    """Each path an export event in ``commit``'s tree lists, with those events.
+
+    Events are read loosely: a landed event may name an older receipt and still
+    be the record that decided its paths.
+    """
+    decided: dict[str, list[str]] = {}
+    for event_path in _export_event_paths(repo, commit):
+        raw = _blob(repo, commit, event_path, MAX_EVENT_BYTES)
+        try:
+            value = json.loads(raw.decode("utf-8")) if raw is not None else None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        paths = value.get("paths") if isinstance(value, dict) else None
+        for item in paths if isinstance(paths, list) else []:
+            if isinstance(item, str):
+                decided.setdefault(item, []).append(event_path)
+    return decided
+
+
+def describe_stray(repo: pathlib.Path, base: str | None, path: str, stray: list[str]) -> str:
+    """The "does not owe" error, naming the base events that already decide the paths."""
+    lines = [f"{path}: claims paths this change does not owe a decision for: " + ", ".join(stray)]
+    decided = decided_at(repo, base) if base else {}
+    owners = sorted({event for item in stray for event in decided.get(item, [])})
+    if owners:
+        lines.append(
+            "  Already decided by an export event merged on the base (a stacked change whose "
+            "base landed its own event):"
+        )
+        for event in owners:
+            covered = [item for item in stray if event in decided.get(item, [])]
+            lines.append(f"    - {event}: {', '.join(covered)}")
+    lines.append(
+        "  Drop those paths from this event (and fix a stale receipt_export_id) with the "
+        "command below, then commit; receipt mode reads committed HEAD, not the working tree:"
+    )
+    lines.append(f"    {REPIN_COMMAND}")
+    return "\n".join(lines)
 
 
 def _apply_supersession(
@@ -739,8 +800,13 @@ def collect_decisions(
     owed: dict[str, str],
     pin: Pin,
     slice_paths: dict[str, list[str]],
+    base: str | None = None,
 ) -> tuple[dict[str, set[bool]], list[str]]:
-    """Each owed path's stated inheritance values, and the events read."""
+    """Each owed path's stated inheritance values, and the events read.
+
+    ``base`` only sharpens the error for a stray path: it names the export
+    event at the base that already decides it.
+    """
     decisions: dict[str, dict[str, bool]] = {path: {} for path in owed}
     correcting: list[tuple[str, ExportEvent]] = []
     events: list[str] = []
@@ -761,10 +827,7 @@ def collect_decisions(
                 item for item in event.paths if item not in owed
             ]
             if stray:
-                raise ReceiptDriftError(
-                    f"{path}: claims paths this change does not owe a decision for: "
-                    + ", ".join(stray)
-                )
+                raise ReceiptDriftError(describe_stray(repo, base, path, stray))
             for item in event.paths:
                 if item in decisions:
                     decisions[item][path] = event.inherits
@@ -852,7 +915,7 @@ def check(repo: pathlib.Path, base: str, head: str) -> dict[str, Any]:
     map_raw = _blob(repo, base, MAP_PATH, MAX_RECEIPT_BYTES)
     base_map = _strict_json(map_raw, MAP_PATH) if map_raw is not None else None
     slice_paths = _transferred_slice_paths(base_map)
-    decisions, events = collect_decisions(repo, head, changes, owed, pin, slice_paths)
+    decisions, events = collect_decisions(repo, head, changes, owed, pin, slice_paths, base)
     missing = sorted(path for path, values in decisions.items() if not values)
     conflicting = sorted(path for path, values in decisions.items() if len(values) > 1)
     edits = frozen_edits(changes, pin)
@@ -957,3 +1020,142 @@ def describe_frozen(report: dict[str, Any]) -> str:
         "disposition framework-backport or emergency-exception."
     )
     return "\n".join(lines)
+
+
+def _judged_changes(repo: pathlib.Path, main: str, head: str) -> list[tuple[str, str]]:
+    """The changes CI judges: ``head`` merged into ``main``, measured from ``main``.
+
+    The freeze lanes diff live main against the merge of the branch into it, so
+    a branch that has not merged main is judged without main's later changes.
+    When the merge conflicts, the fork-point diff is the conservative stand-in.
+    """
+    merged = _git(repo, "merge-tree", "--write-tree", main, head, check=False)
+    tree = merged.stdout.decode("utf-8", errors="replace").split("\n", 1)[0].strip()
+    if merged.returncode == 0 and re.fullmatch(r"[0-9a-f]{40,64}", tree):
+        return _changes(repo, main, tree)
+    fork = _git(repo, "merge-base", main, head).stdout.decode().strip()
+    return _changes(repo, fork, head)
+
+
+def repin_events(
+    repo: pathlib.Path, main_ref: str = "origin/main", head_ref: str = "HEAD"
+) -> tuple[list[str], list[str]]:
+    """Rewrite the export events this branch adds so receipt mode accepts them.
+
+    Only events the branch ADDS since its fork point from ``main_ref``, and
+    that do not exist on ``main_ref``, are touched. Each gets the receipt id
+    pinned on ``main_ref``. Paths an export event already on ``main_ref``
+    decides are dropped when this branch does not change them again, and an
+    event left with no path is deleted. A correcting event (``supersedes``) may
+    list undecided paths by design, so its paths are kept. Files are rewritten
+    in the working tree. Returns (what changed, what still needs a hand), and
+    running it again changes nothing.
+    """
+    main = _git(repo, "rev-parse", "--verify", f"{main_ref}^{{commit}}").stdout.decode().strip()
+    head = _git(repo, "rev-parse", "--verify", f"{head_ref}^{{commit}}").stdout.decode().strip()
+    pin_raw = _blob(repo, main, PIN_PATH, MAX_EVENT_BYTES)
+    if pin_raw is None:
+        raise ReceiptDriftError(f"{main_ref} pins no receipt ({PIN_PATH}); nothing to re-pin to")
+    pin = parse_pin(pin_raw)
+    fork = _git(repo, "merge-base", main, head).stdout.decode().strip()
+    added = [
+        path for status, path in _changes(repo, fork, head)
+        if status == "A" and posixpath.dirname(path) == EXPORT_EVENT_DIRECTORY
+        and path.endswith(".json") and _blob(repo, main, path, MAX_EVENT_BYTES) is None
+    ]
+    if not added:
+        return [], []
+    receipt_raw = _blob(repo, main, pin.receipt_path, MAX_RECEIPT_BYTES)
+    if receipt_raw is None:
+        raise ReceiptDriftError(f"{main_ref}:{pin.receipt_path} is missing")
+    receipt = parse_receipt(receipt_raw, pin)
+    owed = drifted_paths(_judged_changes(repo, main, head), receipt, pin,
+                         _existed_at(repo, receipt.pulp_sha))
+    decided = decided_at(repo, main)
+    report: list[str] = []
+    notes: list[str] = []
+    for rel in added:
+        target = repo / rel
+        if not target.is_file():
+            notes.append(f"{rel}: not in the working tree; skipped")
+            continue
+        try:
+            event = _strict_json(target.read_bytes(), rel)
+        except ReceiptDriftError as exc:
+            notes.append(f"{rel}: skipped, {exc}")
+            continue
+        if not isinstance(event, dict):
+            notes.append(f"{rel}: skipped, not a JSON object")
+            continue
+        changed = False
+        old_id = event.get("receipt_export_id")
+        if old_id != pin.export_id:
+            event["receipt_export_id"] = pin.export_id
+            report.append(f"{rel}: receipt_export_id {old_id} -> {pin.export_id}")
+            changed = True
+        paths = event.get("paths")
+        if not event.get("supersedes") and isinstance(paths, list):
+            pruned = [item for item in paths if item in decided and item not in owed]
+            if pruned:
+                owners = sorted({owner for item in pruned for owner in decided[item]})
+                kept = [item for item in paths if item not in pruned]
+                report.append(
+                    f"{rel}: dropped {', '.join(pruned)} (already decided on {main_ref} by "
+                    f"{', '.join(owners)})"
+                )
+                if not kept:
+                    target.unlink()
+                    report.append(f"{rel}: deleted, every path it listed is already decided")
+                    continue
+                event["paths"] = kept
+                changed = True
+            stray = [item for item in event.get("paths", [])
+                     if isinstance(item, str) and item not in owed]
+            if stray:
+                notes.append(
+                    f"{rel}: still lists paths this branch does not change and no event on "
+                    f"{main_ref} decides: {', '.join(stray)}; remove them by hand"
+                )
+        if changed:
+            target.write_text(json.dumps(event, indent=2, ensure_ascii=False) + "\n",
+                              encoding="utf-8")
+    return report, notes
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse  # noqa: PLC0415  (only the command line needs it)
+
+    parser = argparse.ArgumentParser(
+        description="Receipt-mode helpers. The check itself runs as "
+                    "`vellum_freeze_check.py --receipt-mode`.")
+    parser.add_argument(
+        "--repin-events", action="store_true",
+        help="rewrite the export events this branch adds to name the receipt pinned on "
+             "--base-branch, and drop paths an export event there already decides")
+    parser.add_argument("--repo", type=pathlib.Path, default=pathlib.Path.cwd())
+    parser.add_argument("--base-branch", default="origin/main")
+    args = parser.parse_args(argv)
+    if not args.repin_events:
+        parser.print_help(sys.stderr)
+        return 2
+    try:
+        top = _git(args.repo, "rev-parse", "--show-toplevel").stdout.decode().strip()
+        changed, notes = repin_events(pathlib.Path(top), args.base_branch)
+    except ReceiptDriftError as exc:
+        print(f"vellum-receipt --repin-events: {exc}", file=sys.stderr)
+        return 1
+    for line in notes:
+        print(f"vellum-receipt --repin-events: note: {line}", file=sys.stderr)
+    if not changed:
+        print("vellum-receipt --repin-events: nothing to change; the export events this "
+              "branch adds already name the pinned receipt and no path of theirs is "
+              "decided on the base branch.")
+        return 0
+    for line in changed:
+        print(f"vellum-receipt --repin-events: {line}")
+    print("Commit the result: receipt mode reads committed HEAD, not the working tree.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

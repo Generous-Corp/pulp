@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/convolver.hpp",
+  "fingerprint": "sha256:dcf17ae7acdf07ad6bfc3082876bf5c2f695a9dda49c933f56a074b3a7b5621d",
+  "include": "pulp/signal/convolver.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Uniform partitioned convolution engine with a lock-free live IR swap and an opt-in swap crossfade. docs/reference/modules.md documents it as a bounded DSP primitive a plugin drives from its own process() at a fixed block size, and its generator-facing shape is already published through the signal compatibility vocabulary, so it makes no installed agent capability claim of its own."
+}

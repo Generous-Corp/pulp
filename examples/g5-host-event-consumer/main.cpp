@@ -1,3 +1,4 @@
+#include <pulp/format/process_context.hpp>
 #include <pulp/host/graph_event_contract.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/trigger_graph.hpp>
@@ -5,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -328,12 +330,172 @@ void graph_partition_controls() {
           "graph-counters");
 }
 
+struct AuthoredGraphObservation {
+    std::vector<GraphAuthoredEvent> events;
+    std::vector<float> audio;
+    bool overflow_refused = false;
+    bool future_refused = false;
+};
+
+AuthoredGraphObservation render_authored_graph(bool routed) {
+    using namespace pulp::host;
+    struct State {
+        std::size_t producer_calls = 0;
+        std::uint64_t consumer_cursor = 0;
+        AuthoredGraphObservation observation;
+    };
+    auto state = std::make_shared<State>();
+    SignalGraph graph;
+    CustomNodeType type;
+    type.type_id = "g5.public.graph-authored-event";
+    type.num_input_ports = type.num_output_ports = 1;
+    type.process_events = [state](auto& out, const auto& in, int frames,
+                                  const CustomNodeEventBlock& events) {
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+        if (events.graph_writer != nullptr && state->producer_calls++ == 0) {
+            for (std::uint16_t payload = 0; payload < 8; ++payload)
+                check(events.graph_writer->emit_at(2, payload) == GraphEventResult::Accepted,
+                      "runtime-queued-accept");
+            state->observation.overflow_refused =
+                events.graph_writer->emit_at(2, 99) == GraphEventResult::Overflow;
+            check(state->observation.overflow_refused, "runtime-overflow-refusal");
+            check(events.graph_writer->emit_at(3, 55) == GraphEventResult::Accepted,
+                  "runtime-boundary-accept");
+            state->observation.future_refused =
+                events.graph_writer->emit_at(2 + GraphAuthoredEventLane<>::kPendingCapacity, 77) ==
+                GraphEventResult::Future;
+            check(state->observation.future_refused, "runtime-future-refusal");
+        }
+        if (events.graph_reader != nullptr) {
+            for (const auto& event : events.graph_reader->events()) {
+                check(event.sample >= state->consumer_cursor &&
+                          event.sample - state->consumer_cursor <
+                              static_cast<std::uint64_t>(frames),
+                      "runtime-event-window");
+                state->observation.events.push_back(event);
+                out.channel_ptr(0)[event.sample - state->consumer_cursor] =
+                    static_cast<float>(event.payload);
+            }
+            state->consumer_cursor += static_cast<std::uint64_t>(frames);
+        }
+    };
+    check(graph.register_custom_node_type(type), "runtime-register");
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    const auto producer = graph.add_custom_node(type.type_id);
+    const auto consumer = graph.add_custom_node(type.type_id);
+    check(graph.connect(input, 0, producer, 0) && graph.connect(producer, 0, consumer, 0) &&
+              graph.connect(consumer, 0, output, 0),
+          "runtime-connect");
+    check(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted,
+          "runtime-event-admission");
+    graph.set_canonical_executor_routing_enabled(routed);
+    check(graph.prepare(48000.0, 4), "runtime-prepare");
+    constexpr std::array<std::size_t, 3> partitions{2, 1, 3};
+    std::array<float, 4> source{};
+    std::array<float, 4> destination{};
+    const float* source_ptr = source.data();
+    float* destination_ptr = destination.data();
+    pulp::audio::BufferView<const float> in(&source_ptr, 1, source.size());
+    pulp::audio::BufferView<float> out(&destination_ptr, 1, source.size());
+    for (const auto frames : partitions) {
+        destination.fill(0.0f);
+        out = pulp::audio::BufferView<float>(&destination_ptr, 1, frames);
+        graph.process(out, in, static_cast<int>(frames));
+        for (std::size_t i = 0; i < frames; ++i)
+            state->observation.audio.push_back(destination[i]);
+    }
+    check(state->observation.events.size() == 9, "runtime-exactly-once-count");
+    for (std::size_t i = 0; i < 8; ++i) {
+        const auto& event = state->observation.events[i];
+        check(event.epoch == 1 && event.sample == 2 && event.sequence == i &&
+                  event.producer == producer && event.payload == i,
+              "runtime-ordered-tuple");
+    }
+    check(state->observation.events.back().sample == 3 &&
+              state->observation.events.back().payload == 55,
+          "runtime-boundary-tuple");
+    check(state->observation.audio.size() == 6 && state->observation.audio[2] == 7.0f &&
+              state->observation.audio[3] == 55.0f,
+          "runtime-audio-oracle");
+    return state->observation;
+}
+
+void graph_authored_runtime_controls() {
+    const auto routed = render_authored_graph(true);
+    const auto reference = render_authored_graph(false);
+    check(routed.events == reference.events && routed.audio == reference.audio,
+          "runtime-backend-parity");
+}
+
+void graph_authored_reset_controls() {
+    using namespace pulp::host;
+    auto calls = std::make_shared<int>(0);
+    auto delivered = std::make_shared<int>(0);
+    SignalGraph graph;
+    CustomNodeType type;
+    type.type_id = "g5.public.graph-authored-reset";
+    type.num_input_ports = type.num_output_ports = 1;
+    type.process_events = [calls, delivered](auto& out, const auto& in, int frames,
+                                             const CustomNodeEventBlock& events) {
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+        if (events.graph_writer != nullptr && (*calls)++ == 0)
+            check(events.graph_writer->emit_at(2, 1) == GraphEventResult::Accepted,
+                  "runtime-reset-queue");
+        if (events.graph_reader != nullptr)
+            *delivered += static_cast<int>(events.graph_reader->events().size());
+    };
+    check(graph.register_custom_node_type(type), "runtime-reset-register");
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    const auto producer = graph.add_custom_node(type.type_id);
+    const auto consumer = graph.add_custom_node(type.type_id);
+    check(graph.connect(input, 0, producer, 0) && graph.connect(producer, 0, consumer, 0) &&
+              graph.connect(consumer, 0, output, 0) &&
+              graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted,
+          "runtime-reset-admission");
+    check(graph.prepare(48000.0, 2), "runtime-reset-prepare");
+    std::array<float, 2> source{}, destination{};
+    const float* source_ptr = source.data();
+    float* destination_ptr = destination.data();
+    pulp::audio::BufferView<const float> in(&source_ptr, 1, source.size());
+    pulp::audio::BufferView<float> out(&destination_ptr, 1, source.size());
+    graph.process(out, in, 1);
+    pulp::format::ProcessContext reset;
+    reset.reset_requested = true;
+    reset.position_samples = 0;
+    destination.fill(0.0f);
+    graph.process(out, in, 1, reset);
+    check(*delivered == 0 && destination[0] == 0.0f, "runtime-reset-clears-pending");
+}
+
+void graph_callback_wiring_controls() {
+    GraphAuthoredEventLane<8> lane;
+    check(lane.reset(7) == GraphEventResult::Accepted, "callback-reset");
+    check(lane.begin_block(7, 0, 4) == GraphEventResult::Accepted, "callback-begin");
+    check(lane.begin_producer_block() == GraphEventResult::Accepted, "callback-producer");
+    pulp::host::GraphEventWriter writer(lane, 7, 42);
+    check(writer.emit_at(3, 9) == GraphEventResult::Accepted, "callback-emit");
+    check(lane.begin_consumer_block() == GraphEventResult::Accepted, "callback-consumer");
+    pulp::host::GraphEventReader reader(lane);
+    const auto events = reader.events();
+    check(events.size() == 1 && events[0].producer == 42 && events[0].sample == 3 &&
+              events[0].payload == 9,
+          "callback-reader-order");
+    check(lane.end_block() == GraphEventResult::Accepted, "callback-end");
+}
+
 } // namespace
 
 int main() {
     try {
         host_ingress_controls();
         graph_partition_controls();
+        graph_authored_runtime_controls();
+        graph_authored_reset_controls();
+        graph_callback_wiring_controls();
         graph_ingress_controls();
         std::cout << "g5-host-event-contract PASS checks=" << checks
                   << " host_mpe_events=3 graph_events=9 graph_ingress_events=5"

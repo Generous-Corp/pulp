@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/ota_cascade_filter.hpp",
+  "fingerprint": "sha256:cd159bfc52680259c16f215a80e65c09f271115d733ef90be8ac279467382236",
+  "include": "pulp/signal/ota_cascade_filter.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

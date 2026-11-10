@@ -221,6 +221,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
 
     SpectralResult<SpectralAnalysisPorts> add_spectral_analysis(SpectralIdentity identity,
                                                                 const std::string& name);
+    SpectralResult<SpectralAssetMorphPorts>
+    add_spectral_asset_morph_v1(std::span<const std::uint8_t> asset_a,
+                                std::span<const std::uint8_t> asset_b, std::uint64_t source_samples,
+                                const std::string& name);
     SpectralResult<SpectralStagePorts> add_spectral_stage(SpectralIdentity identity,
                                                           QualifiedSpectralStage stage,
                                                           const std::string& name);
@@ -306,6 +310,12 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::span<const HostEventRecord> host_event_trace() const noexcept;
     TriggerGraphResult trigger_counters(TriggerCounters& counters) const noexcept;
     TriggerResourceReport trigger_resources() const;
+
+    /// Opt in exactly one feed-forward Custom-node event edge. Both nodes must
+    /// expose event callbacks; the prepared snapshot binds the callback-local
+    /// writer/reader handles and refuses plugins, feedback, and fan-out.
+    GraphEventBindingResult connect_graph_event(GraphAuthoredEventEdge edge);
+    std::optional<GraphAuthoredEventEdge> graph_event_edge() const;
     // View expires at the next render/reset/publication boundary. Read while stopped.
     std::span<const TriggerRecord> trigger_trace() const noexcept;
 
@@ -817,10 +827,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // GraphRuntimeExecutor::process_parallel; otherwise it falls back to the
     // serial executor (if its opt-in is set) and then the legacy walk. Output is
     // bit-identical across all three paths.
-    void set_parallel_routing_enabled(bool enabled) noexcept {
-        parallel_routing_enabled_.store(enabled, std::memory_order_relaxed);
-        detail::advance_execution_selection_generation(execution_selection_generation_);
-    }
+    void set_parallel_routing_enabled(bool enabled) noexcept;
     bool parallel_routing_enabled() const noexcept {
         return parallel_routing_enabled_.load(std::memory_order_relaxed);
     }
@@ -1276,6 +1283,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
     struct CompiledGraph {
         explicit CompiledGraph(bool reserve_midi = true) : midi_publish_scratch(reserve_midi) {}
         std::shared_ptr<detail::TriggerState> trigger_state;
+        std::shared_ptr<GraphAuthoredEventLane<>> graph_event_lane;
+        GraphAuthoredEventEdge graph_event_edge{};
+        std::uint64_t graph_event_epoch = 1;
         // Keeps candidate-owned per-node measurers alive after publication.
         std::shared_ptr<SignalGraph> trigger_preparation_owner;
 
@@ -1625,6 +1635,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::unordered_map<NodeId, TriggerEnvelopeConfig> trigger_envelopes_;
     std::unordered_map<NodeId, TriggerAudioConfig> trigger_audio_;
     std::vector<TriggerEdge> trigger_edges_;
+    std::optional<GraphAuthoredEventEdge> graph_event_edge_;
     std::atomic<bool> typed_trigger_authoring_{false};
     std::shared_ptr<detail::TriggerController> trigger_controller_;
     std::shared_ptr<detail::TriggerState> compiling_trigger_state_;

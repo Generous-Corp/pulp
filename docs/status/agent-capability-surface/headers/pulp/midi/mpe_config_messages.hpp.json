@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/mpe_config_messages.hpp",
+  "fingerprint": "sha256:f08204a4069ba5246daaee14bd9da3373a7a5c6cd50eeee7f4f709780f6ae1b7",
+  "include": "pulp/midi/mpe_config_messages.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Allocation-free builders for MPE zone layout and pitch-bend-range messages sent to a device; not a generator-facing capability."
+}

@@ -643,7 +643,10 @@ holds the worker's real output. `AsyncBlockMode::Auto` also waits while
 `audio::PullRateDetector` sees the host pulling faster than real time without
 declaring it, which some hosts do when they bounce or freeze; without it such
 a render is silent. Waits are bounded by the configured deadline. Zero latency
-blocks waits on every call, like rendering inline.
+blocks waits on every call, like rendering inline. Auto times each call with
+`AsyncBlockWorkerConfig::pull_clock`, which defaults to the steady clock; a
+caller that already knows the pull rate (or a test that must not depend on
+thread scheduling) can supply its own realtime-safe clock.
 
 ## Verifying the contract in tests
 

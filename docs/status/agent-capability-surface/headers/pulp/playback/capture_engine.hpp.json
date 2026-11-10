@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/capture_engine.hpp",
+  "fingerprint": "sha256:cddd98aca3fdc18fb931a42f71009752949f8e2dc10530ef4e158d8f071bc0ce",
+  "include": "pulp/playback/capture_engine.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "CaptureTrackConfig and CaptureEngineConfig, including the default preallocation cap that bounds how much a capture may reserve up front. It is the bounded recording-buffer substrate the recording coordinator composes, not an installed agent capability."
+}

@@ -1,5 +1,6 @@
 #include "../core/host/src/spectral_graph_internal.hpp"
 #include "support/thread_progress.hpp"
+#include "../examples/g10-routed-consumer/asset_morph_oracle.hpp"
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>
@@ -7,6 +8,47 @@
 #include <pulp/host/signal_graph.hpp>
 
 namespace {
+struct AssetFaultGraph {
+    pulp::host::SignalGraph graph;
+    pulp::host::SpectralRuntimeBank bank;
+    pulp::host::NodeId source, stage, wet, sibling;
+    AssetFaultGraph() {
+        using namespace pulp::host;
+        auto a = asset_oracle::encode(asset_oracle::analyze(asset_oracle::stimulus(0)));
+        auto b = asset_oracle::encode(asset_oracle::analyze(asset_oracle::stimulus(1)));
+        const auto input = graph.add_input_node(1);
+        const auto s = *graph.add_spectral_asset_morph_v1(a.view(), b.view(), 769, "assets").value;
+        const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
+        const auto t =
+            *graph
+                 .add_spectral_stage(identity, *QualifiedSpectralStage::identity_v1(identity).value,
+                                     "identity")
+                 .value;
+        const auto w = *graph.add_spectral_synthesis(identity, "wet").value;
+        const auto d = *graph.add_spectral_synthesis(identity, "sibling").value;
+        REQUIRE(graph.connect(graph.node(input)->out("audio"), s.morph));
+        REQUIRE(graph.connect(s.frames, t.frames_in));
+        REQUIRE(graph.connect(t.frames_out, w.frames));
+        REQUIRE(graph.connect(s.frames, d.frames));
+        REQUIRE(bank.prepare(graph.nodes(), graph.connections(), 48000, 512) ==
+                SpectralError::None);
+        source = s.node;
+        stage = t.node;
+        wet = w.node;
+        sibling = d.node;
+        bank.reset(17);
+    }
+    void process(pulp::host::NodeId id, std::span<const float> input, std::span<float> output) {
+        const float* ip[] = {input.data()};
+        float* op[] = {output.data()};
+        pulp::format::GraphRuntimeNodeProcessContext ctx;
+        ctx.node_inputs = {ip, 1, input.size()};
+        ctx.node_outputs = {op, 1, output.size()};
+        ctx.spectral_input = bank.find(id)->input;
+        pulp::format::ProcessBlock block;
+        REQUIRE(pulp::host::SpectralRuntimeBank::Node::process(block, ctx, bank.find(id)));
+    }
+};
 struct FaultGraph {
     pulp::host::SignalGraph graph;
     pulp::host::SpectralRuntimeBank bank;
@@ -45,6 +87,45 @@ struct FaultGraph {
     }
 };
 } // namespace
+
+TEST_CASE(
+    "Finite asset batches reject missing duplicate and reordered stamps without harming siblings",
+    "[host][spectral-asset-morph][spectral-fault]") {
+    for (int fault : {0, 1, 2}) {
+        AssetFaultGraph bad, good;
+        std::array<float, 512> input, scratch{}, wet{}, sibling{}, expected{};
+        input.fill(0.37f);
+        bool differed = false;
+        for (int block = 0; block < 5; ++block) {
+            for (auto* f : {&bad, &good}) {
+                f->bank.begin_block();
+                f->process(f->source, input, scratch);
+            }
+            if (block == 0) {
+                auto& edge = *bad.bank.find(bad.stage)->input;
+                REQUIRE(edge.count == 8);
+                if (fault == 0)
+                    --edge.count;
+                if (fault == 1)
+                    edge.stamps[3] = edge.stamps[2];
+                if (fault == 2)
+                    std::swap(edge.stamps[3], edge.stamps[4]);
+            }
+            for (auto* f : {&bad, &good})
+                f->process(f->stage, input, scratch);
+            good.process(good.wet, input, expected);
+            bad.process(bad.wet, input, wet);
+            bad.process(bad.sibling, input, sibling);
+            REQUIRE(sibling == expected);
+            differed |= wet != expected;
+        }
+        REQUIRE(differed);
+        REQUIRE(bad.bank.find(bad.stage)->errors > 0);
+        REQUIRE(bad.bank.find(bad.sibling)->errors == 0);
+        REQUIRE(good.bank.find(good.wet)->errors == 0);
+        REQUIRE(bad.bank.find(bad.source)->sequence == 20);
+    }
+}
 
 TEST_CASE("Routed late synthesis failure preserves prefix and independent sibling",
           "[host][spectral-fault][spectral-fatal-prefix]") {

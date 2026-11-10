@@ -310,8 +310,8 @@ applies.
   Never choose it on your own. Do not build on Pulp's frozen
   `pulp/view/rmlui_*` seam headers.
 - **A native surface is for bring-your-own renderers**, such as an existing
-  Metal or GL renderer, reached through `EditorContext::query_extension()`. Pulp
-  does not ship one yet. Do not hand-roll a substitute; ask first.
+  Metal renderer: `integrations/pulp-native` on macOS, only when the product
+  already has its own renderer ([guide](docs/guides/native-surface-editors.md)).
 - **Nobody compiles what they don't use.** A Pulp-only build must not fetch Skia,
   Dawn or RmlUi. A Vellum build must not fetch RmlUi. An RmlUi build must not
   need Skia or Dawn.
@@ -1985,7 +1985,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `clap` | CLAP format adapter for Pulp — how Processor bridges to clap_plugin_t, how parameters / modulation / sidechain / MPE / UMP / sysex flow, and the pitfalls discovered while wiring the adapter. |
 | `cli-maintenance` | Checklist and decision tree for adding, modifying, or removing CLI commands. |
 | `cmajor-external` | Use Pulp's MIT-safe Cmajor support lane via source-owned patches, an external `cmaj` toolchain, and explicit generated-artifact workflows. |
-| `code-comments` | How to write source comments, doc comments, and test names/tags that have lasting value — and what to never write. |
+| `code-comments` | How to write source comments, doc comments, and test names/tags that have lasting value, and what never to write. |
 | `content` | Validate, install, update, list, rescan, remove, and reveal data-only Pulp content packs for installed plugins. |
 | `contrib-intake` | Maintainer side of an outside contribution — find what has arrived (fork PR, issue, or patches sent out-of-band), adopt it into an in-repo branch with authorship intact, review it against the repo's bar, and ship it through the normal merge path. |
 | `contribute` | Prepare an outside contribution to Pulp or Forge that a maintainer can land with minimal rework — routing (Core vs Forge), local build and test on a plain Mac, the checks that are worth running without Shipyard/Tart/VMs, and the handoff format. |

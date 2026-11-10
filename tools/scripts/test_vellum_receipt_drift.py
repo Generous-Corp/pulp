@@ -811,10 +811,20 @@ class FrameworkTransferTests(unittest.TestCase):
                 with self.assertRaises(drift.ReceiptDriftError):
                     self.fixture.check()
 
-    def test_this_change_ships_the_rule_without_a_record(self):
-        # The rule lands first; the record follows in a later change, after
-        # Vellum's transfer merges. Until then receipt mode behaves as before.
-        self.assertFalse((SCRIPTS.parents[1] / drift.TRANSFER_PATH).exists())
+    def test_the_landed_record_is_vellum_s_transfer_of_the_pinned_export(self):
+        # The record names Vellum's transfer pull request and the export it
+        # transferred; its paths are exactly that export receipt's files.
+        landed = SCRIPTS.parents[1] / drift.TRANSFER_PATH
+        transfer = drift.parse_transfer(landed.read_bytes())
+        self.assertEqual((transfer.export_id, transfer.pull_request), ("20261107-f0ac0a4ff392", 305))
+        self.assertEqual(transfer.record_sha256,
+                         "81e8916ef73d0bf9b4d3a31409208524897ba2795e17fd749fea69756547e65c")
+        receipt = json.loads((landed.parent / f"{transfer.export_id}.json").read_text(encoding="utf-8"))
+        self.assertEqual(json.loads(landed.read_text(encoding="utf-8"))["pulp_sha"], receipt["pulp_sha"])
+        self.assertEqual(set(transfer.paths), {row["pulp_path"] for row in receipt["files"]})
+        self.assertEqual(len(transfer.paths), 911)
+
+    def test_without_a_record_receipt_mode_behaves_as_before(self):
         self.assertIsNone(drift.transfer_in_effect(self.fixture.root, self.fixture.base, self.fixture.base))
         report = self.edit_with_decision(STATE, True)
         self.assertEqual((report["status"], report["transfer"], report["inherited_after_transfer"]),
@@ -1266,6 +1276,245 @@ class OwnerUnfreezeRecordTests(unittest.TestCase):
                     self.record(approval_url="https://github.com/Generous-Corp/pulp/pull/1#issuecomment-2x")):
             with self.assertRaises(ValueError):
                 owner_unfrozen_paths(bad, self.TRANSFERRED)
+
+
+STALE_ID = "20261014-34d16417a460"
+EVENTS = drift.EXPORT_EVENT_DIRECTORY
+
+
+class RepinEventsTests(unittest.TestCase):
+    """`--repin-events` repairs what a re-pin or a merged parent event breaks.
+
+    Each case first proves the branch fails receipt mode the way CI judges it
+    (live main against the branch merged into it), then that the rewrite makes
+    the same judgement pass.
+    """
+
+    def setUp(self) -> None:
+        self.fixture = Fixture()
+        self.git = self.fixture.git
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def event_bytes(self, event_id: str) -> bytes:
+        return (self.fixture.root / EVENTS / f"{event_id}.json").read_bytes()
+
+    def branch(self, name: str, start: str = "main") -> None:
+        self.git("checkout", "-q", "-b", name, start)
+
+    def ci_check(self) -> dict:
+        """Receipt mode as the freeze lanes run it: base live main, head the merge."""
+        main = self.git("rev-parse", "main")
+        head = self.git("rev-parse", "HEAD")
+        tree = self.git("merge-tree", "--write-tree", main, head).splitlines()[0]
+        candidate = self.git("commit-tree", tree, "-p", main, "-p", head, "-m", "candidate")
+        return drift.check(self.fixture.root, main, candidate)
+
+    def repin(self) -> tuple[list[str], list[str]]:
+        return drift.repin_events(self.fixture.root, "main")
+
+    def test_a_stale_receipt_id_is_rewritten_to_the_pin_on_main(self):
+        self.branch("topic")
+        self.fixture.write(STATE, "// edited\n")
+        self.fixture.write(f"{EVENTS}/20261101-state-edit.json",
+                           export_event("20261101-state-edit", [STATE], False,
+                                        receipt_export_id=STALE_ID))
+        self.fixture.commit("edit with an event naming the previous receipt")
+        # main moves on after the fork, as it does in the field.
+        self.git("checkout", "-q", "main")
+        self.fixture.write("docs/later.md", "later\n")
+        self.fixture.commit("unrelated main change")
+        self.git("checkout", "-q", "topic")
+        with self.assertRaises(drift.ReceiptDriftError) as raised:
+            self.ci_check()
+        self.assertIn(f"must name the pinned receipt {EXPORT_ID}", str(raised.exception))
+        self.assertIn(drift.REPIN_COMMAND, str(raised.exception))
+        self.assertIn("committed HEAD", str(raised.exception))
+
+        changed, notes = self.repin()
+        self.assertEqual(notes, [])
+        self.assertEqual(changed, [f"{EVENTS}/20261101-state-edit.json: receipt_export_id "
+                                   f"{STALE_ID} -> {EXPORT_ID}"])
+        event = json.loads(self.event_bytes("20261101-state-edit"))
+        self.assertEqual(event["receipt_export_id"], EXPORT_ID)
+        self.assertEqual(event["paths"], [STATE])
+        self.fixture.commit("re-pin")
+        self.assertEqual(self.ci_check()["status"], "pass")
+        # Idempotent: a second run finds nothing and rewrites nothing.
+        before = self.event_bytes("20261101-state-edit")
+        self.assertEqual(self.repin(), ([], []))
+        self.assertEqual(self.event_bytes("20261101-state-edit"), before)
+
+    def test_a_stacked_event_drops_paths_its_merged_parent_already_decides(self):
+        parent_event = f"{EVENTS}/20261101-parent.json"
+        self.branch("parent")
+        self.fixture.write(STATE, "// parent edit\n")
+        self.fixture.write(parent_event, export_event("20261101-parent", [STATE], False))
+        self.fixture.commit("parent")
+        self.branch("child", "parent")
+        self.fixture.write(EXPORTED[0], "// child edit\n")
+        self.fixture.write(f"{EVENTS}/20261102-child.json",
+                           export_event("20261102-child", [EXPORTED[0], STATE], True,
+                                        receipt_export_id=STALE_ID))
+        self.fixture.commit("child")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "land parent", "parent")
+        self.git("checkout", "-q", "child")
+        main_events = {name: self.git("show", f"main:{name}")
+                       for name in drift._export_event_paths(self.fixture.root, "main")}
+        self.assertEqual(list(main_events), [parent_event])
+        with self.assertRaises(drift.ReceiptDriftError):
+            self.ci_check()
+
+        changed, notes = self.repin()
+        self.assertEqual(notes, [])
+        self.assertEqual(changed, [
+            f"{EVENTS}/20261102-child.json: receipt_export_id {STALE_ID} -> {EXPORT_ID}",
+            f"{EVENTS}/20261102-child.json: dropped {STATE} (already decided on main by "
+            f"{parent_event})",
+        ])
+        self.assertEqual(json.loads(self.event_bytes("20261102-child"))["paths"],
+                         [EXPORTED[0]])
+        self.fixture.commit("re-pin")
+        self.assertEqual(self.ci_check()["status"], "pass")
+        self.assertEqual(self.repin(), ([], []))
+        for name, text in main_events.items():
+            self.assertEqual(self.git("show", f"HEAD:{name}"), text, name)
+
+    def test_the_stray_path_error_names_the_merged_event_that_decides_it(self):
+        parent_event = f"{EVENTS}/20261101-parent.json"
+        self.branch("parent")
+        self.fixture.write(STATE, "// parent edit\n")
+        self.fixture.write(parent_event, export_event("20261101-parent", [STATE], False))
+        self.fixture.commit("parent")
+        self.branch("child", "parent")
+        self.fixture.write(EXPORTED[0], "// child edit\n")
+        self.fixture.write(f"{EVENTS}/20261102-child.json",
+                           export_event("20261102-child", [EXPORTED[0], STATE], True))
+        self.fixture.commit("child")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "land parent", "parent")
+        self.git("checkout", "-q", "child")
+        with self.assertRaises(drift.ReceiptDriftError) as raised:
+            self.ci_check()
+        message = str(raised.exception)
+        self.assertIn("does not owe a decision for: " + STATE, message)
+        self.assertIn(f"{parent_event}: {STATE}", message)
+        self.assertIn(drift.REPIN_COMMAND, message)
+
+        changed, notes = self.repin()
+        self.assertEqual(notes, [])
+        self.assertEqual(changed, [f"{EVENTS}/20261102-child.json: dropped {STATE} (already "
+                                   f"decided on main by {parent_event})"])
+        self.fixture.commit("re-pin")
+        self.assertEqual(self.ci_check()["status"], "pass")
+
+    def test_a_path_the_branch_changes_again_is_kept(self):
+        # main decided STATE once; this branch edits it again, so it still owes it.
+        self.fixture.write(STATE, "// landed edit\n")
+        self.fixture.write(f"{EVENTS}/20261101-landed.json",
+                           export_event("20261101-landed", [STATE], False))
+        self.fixture.commit("landed")
+        self.branch("topic")
+        self.fixture.write(STATE, "// edited again\n")
+        self.fixture.write(f"{EVENTS}/20261102-again.json",
+                           export_event("20261102-again", [STATE], True))
+        self.fixture.commit("again")
+        before = self.event_bytes("20261102-again")
+        self.assertEqual(self.repin(), ([], []))
+        self.assertEqual(self.event_bytes("20261102-again"), before)
+        self.assertEqual(self.ci_check()["status"], "pass")
+
+    def test_an_event_left_with_no_path_is_deleted(self):
+        parent_event = f"{EVENTS}/20261101-parent.json"
+        self.branch("parent")
+        self.fixture.write(STATE, "// parent edit\n")
+        self.fixture.write(parent_event, export_event("20261101-parent", [STATE], False))
+        self.fixture.commit("parent")
+        self.branch("child", "parent")
+        self.fixture.write(f"{EVENTS}/20261102-child.json",
+                           export_event("20261102-child", [STATE], False))
+        self.fixture.write("docs/child.md", "child\n")
+        self.fixture.commit("child")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "land parent", "parent")
+        self.git("checkout", "-q", "child")
+        changed, _ = self.repin()
+        self.assertIn(f"{EVENTS}/20261102-child.json: deleted, every path it listed is "
+                      "already decided", changed)
+        self.assertFalse((self.fixture.root / EVENTS / "20261102-child.json").exists())
+        self.fixture.commit("re-pin")
+        self.assertEqual(self.ci_check()["status"], "pass")
+
+    def test_a_clean_branch_is_a_no_op(self):
+        self.branch("topic")
+        self.fixture.write(STATE, "// edited\n")
+        self.fixture.write(f"{EVENTS}/20261101-state-edit.json",
+                           export_event("20261101-state-edit", [STATE], False))
+        self.fixture.commit("edit")
+        before = self.event_bytes("20261101-state-edit")
+        self.assertEqual(self.repin(), ([], []))
+        self.assertEqual(self.event_bytes("20261101-state-edit"), before)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_events_already_on_main_are_never_modified(self):
+        # A landed event names the previous receipt; it stays as it landed.
+        self.fixture.write(STATE, "// landed\n")
+        landed = f"{EVENTS}/20261020-landed.json"
+        self.fixture.write(landed, export_event("20261020-landed", [STATE], False,
+                                                receipt_export_id=STALE_ID))
+        self.fixture.commit("landed under the previous pin")
+        landed_bytes = (self.fixture.root / landed).read_bytes()
+        self.branch("topic")
+        self.fixture.write(EXPORTED[0], "// edited\n")
+        self.fixture.write(f"{EVENTS}/20261101-mine.json",
+                           export_event("20261101-mine", [EXPORTED[0]], False,
+                                        receipt_export_id=STALE_ID))
+        self.fixture.commit("mine")
+        changed, _ = self.repin()
+        self.assertEqual(changed, [f"{EVENTS}/20261101-mine.json: receipt_export_id "
+                                   f"{STALE_ID} -> {EXPORT_ID}"])
+        self.assertEqual((self.fixture.root / landed).read_bytes(), landed_bytes)
+
+    def test_a_parent_event_carried_by_a_squash_landing_is_not_touched(self):
+        # The parent landed as a squash, so its event file exists on main and
+        # in this branch's own history; it belongs to main, not to the branch.
+        parent_event = f"{EVENTS}/20261101-parent.json"
+        self.branch("parent")
+        self.fixture.write(STATE, "// parent edit\n")
+        self.fixture.write(parent_event, export_event("20261101-parent", [STATE], False,
+                                                      receipt_export_id=STALE_ID))
+        self.fixture.commit("parent")
+        parent_bytes = (self.fixture.root / parent_event).read_bytes()
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--squash", "parent")
+        self.fixture.commit("squash parent")
+        self.git("checkout", "-q", "parent")
+        self.assertEqual(self.repin(), ([], []))
+        self.assertEqual((self.fixture.root / parent_event).read_bytes(), parent_bytes)
+
+    def test_the_command_line_repins_and_reports(self):
+        self.branch("topic")
+        self.fixture.write(STATE, "// edited\n")
+        self.fixture.write(f"{EVENTS}/20261101-state-edit.json",
+                           export_event("20261101-state-edit", [STATE], False,
+                                        receipt_export_id=STALE_ID))
+        self.fixture.commit("edit")
+
+        def run() -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [sys.executable, str(SCRIPTS / "vellum_receipt_drift.py"), "--repin-events",
+                 "--repo", str(self.fixture.root), "--base-branch", "main"],
+                capture_output=True, text=True, encoding="utf-8", check=False)
+
+        first = run()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertIn(f"{STALE_ID} -> {EXPORT_ID}", first.stdout)
+        self.assertIn("committed HEAD", first.stdout)
+        second = run()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("nothing to change", second.stdout)
 
 
 class CommittedPinTests(unittest.TestCase):

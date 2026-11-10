@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fdn/multirate.hpp",
+  "fingerprint": "sha256:dfad7d64648cbd7e5ced29e8629fa6590b6911f8def641c58b5f5803bf006a2f",
+  "include": "pulp/signal/fdn/multirate.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Internal building block of the FDN reverb engine (fdn/multirate). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
+}

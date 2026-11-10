@@ -1711,6 +1711,56 @@ failures ÷ merge-group failures, and `main_evidence_read` ÷ exonerations,
 which must be 1, with `unique_cause` > 0 and the base-red streak count
 unchanged as controls.
 
+The **enforced** verdict is a stricter rule in `tools/ci/flake_exoneration.py`,
+run inside the ctest step of the merge-group `macos` leg. A failed run passes
+only when every failing test failed on 2 or more OTHER pull requests in the
+last 24 hours, counted by pull request number from their own FULL-SUITE head
+runs (`pull_request` runs whose base is main and whose `Test (non-Windows)`
+step ran, read from `ctest.junit.xml`; the pr-fast, pr-guard and affected-test
+tiers run a pull request's own tests, so their failures are not independent;
+the run's commit resolves the pull request when GitHub leaves `pull_requests`
+empty, and a commit shared by two pull requests counts as none), never a pull
+request in this group, never a run whose head already carries a group pull
+request's head, never a pull request whose own diff touches the test, and
+never a merge-group run (a broken entry fails every group it joins under a
+different tip); passed in main's tip gate run by name (its `ctest.junit.xml`, so a test
+new in the group never qualifies); is not `pr-fast` or drift-fast; is not
+touched by the group (its name in a changed file, or a changed declared input
+or command path, from `compare/main...<sha>`, unread when truncated); and is
+not a build failure (a "not run" test other than a deliberate skip, or
+compiler, linker or CMake errors in the output). ctest must have exited 8 and
+`LastTestsFailed.log` must name nothing the JUnit report does not. An excused
+run first runs the tests `--stop-on-failure` skipped (`--tests-from-file`) and
+judges the union. Known residual: a corroborating failure from a window in
+which main itself was briefly red still counts; the next group after a bad
+landing then fails on main's tip, which stops further excusals. Two narrower residuals: the "touched" check of
+a corroborating pull request reads this group's checkout, so a file that pull
+request adds and that names the test is missed (its input-path check still
+applies), and a pull request branched from an earlier commit of a group pull
+request, without its head, is not recognised as carrying it. The exit-code evidence keeps ctest's own status, so no
+receipt claims an excused run passed. Every excusal is a
+`::warning title=flake-exoneration::` annotation, a job-summary table, and a
+`flake-excusals-macos` artifact (`pulp-flake-excusal/v1`, kept 90 days); a
+record that cannot be uploaded fails the job.
+
+`flake-quarantine.yml` (every 30 minutes) counts those records from trusted
+merge-group runs. A test excused 3 or more times in 7 days gets an owner issue
+labelled `ci:flake` and `flake-quarantine`, carrying a
+`pulp-flake-quarantine/v1` marker with a 14-day expiry. The `macos` gate
+(`Resolve flake quarantine`, merge groups and full-suite pull-request runs)
+excludes active quarantines from ctest, keeping a test the change touches, and
+`Quarantined flaky tests (advisory)` runs them without gating. At expiry the
+sweep removes the label and the test is back in the required lane; closing the
+issue or removing the label ends a quarantine early. Only excusals after a
+test's latest quarantine began count toward the next one.
+
+The mode is the repository variable `PULP_FLAKE_EXONERATION_MODE`. Only
+`enforce` acts; unset, `shadow` or anything else leaves the gate failing as
+before (the verdict is still annotated), quarantines nothing, and makes the
+sweep report only. Shadow is the default, and setting it back is the kill
+switch. Graduation to `enforce` is on evidence, not a date: at least 5 days in shadow AND at least 8 would-excuse decisions, each confirmed by a same-head retry pass, with zero false excusals. Any false excusal resets the count and keeps shadow mode. (decisions contract row 34). The 14-day quarantine
+expiry is a separate rule.
+
 Receipt reuse in a merge group downloads the PR head's exact-tree receipt and
 verifies the run it came from. GitHub leaves `pull_requests` empty on runs of
 App-opened pull requests (most of this repository's), so the verifier binds
@@ -3430,6 +3480,129 @@ two disagree (and the detector judges all six on main's tip). `[governance]` is 
 `shipyard governance apply` pushes exactly that list to branch protection.
 Removing it again is the reverse `required_status_checks` edit.
 
+## `release-configure`: every release leg's configure, before merge
+
+`release-cli.yml` runs only on a version-tag push, and its `release` job needs
+every build leg, so a change that breaks one leg's CMake configure is first
+seen after it merges and is tagged; from then on no tag publishes. From
+2026-11-07 to 2026-11-10 that stopped v1.81.0 through v1.96.0: a gpu-runtime
+forward made the `darwin-x64` leg (cross-configured for x86_64 on Apple
+Silicon) stop with `gpu-runtime: libdawn_combined.a does not match the lock`.
+The required gate never configures the release matrix, the weekly dry-run's
+Intel leg is advisory, and `release-path-pr-gate.yml` builds only `linux-x64`
+and `darwin-arm64`.
+
+`.github/workflows/release-configure.yml` closes that gap without building:
+
+- **Legs.** One per active release platform
+  (`tools/scripts/release_product_matrix.json` via `release_build_matrix.py`),
+  on the GitHub-hosted image the release leg uses: `macos-15` for both Darwin
+  legs (`darwin-x64` cross-configures there, as in the release),
+  `ubuntu-24.04`, `ubuntu-24.04-arm`, `windows-latest`, `windows-11-arm`. No
+  gate VM is used. If the hosted macOS pool starves (the merge queue gives a
+  required check 120 minutes), set `PULP_RELEASE_CONFIGURE_MACOS_RUNS_ON_JSON`
+  (a label or a JSON label array) to route both Darwin legs elsewhere; it is
+  read for same-repository events only, so a fork always gets `macos-15`.
+- **No copied flags.** `tools/ci/release_configure_matrix.py` reads
+  `release-cli.yml`'s `build-cli` job and replays its steps by name, from the
+  dependency bootstrap and Skia fetch through every `cmake -S`, with the build
+  command inside the SDK configure steps replaced by an echo. Steps run as
+  GitHub runs `shell: bash` (`bash -eo pipefail`), and `GITHUB_ENV` /
+  `GITHUB_PATH` carry between them. Every `build-cli` step must be classified
+  as replayed, mirrored or skipped (with a reason); a new or renamed step fails
+  the gate's self-test, which runs in the gate's scope job and in
+  `workflow-lint.yml`.
+- **Known gap.** The release builds `linux-x64` in an `ubuntu:22.04`
+  container (GCC 13, glibc floor). Replaying that toolchain install costs about
+  20 minutes, so the gate configures `linux-x64` on the bare image.
+- **Scope.** The trigger is unfiltered (it will become a required check, and a
+  required check must always report).
+  The scope job reads the change through the compare API (both the new and, for
+  a rename, the old path) and runs the legs only when it touches a configure
+  input:
+  - any `CMakeLists.txt` or `*.cmake` outside `test/` and `examples/` (the
+    release profile turns both off), `tools/cmake/`, `tools/deps/`,
+    `external/`, `setup.sh`, the toolchain pins, the release workflow and matrix
+    scripts;
+  - every file a configure-reachable CMake file names through
+    `${CMAKE_SOURCE_DIR}/`, `${PROJECT_SOURCE_DIR}/` and the other source-dir
+    variables (scripts it `execute_process`es, data it `file(READ)`s,
+    `configure_file` templates), found by scanning the checkout, so a new one
+    needs no list edit. A named source file counts only when it is deleted or
+    renamed.
+
+  A root `CMakeLists.txt` change to the project `VERSION` line alone is out of
+  scope. An unreadable diff, or 300+ changed files, runs every leg.
+- **Cost.** About four minutes per leg (bootstrap, Skia fetch, one or two
+  configures), in parallel; out-of-scope changes finish in under a minute.
+- **On failure.** The leg prints the CMake error as an annotation titled
+  `Release <platform> configure fails`, writes it to the step summary, and
+  names the local reproduction:
+  `python3 tools/ci/release_configure_matrix.py run --platform <platform>`
+  (a matching host: macOS for the Darwin legs).
+
+**It is not required yet** (decision 33 in `.agents/contract.toml`). The gate
+lands first and is judged from `main`; a later pull request adds
+`release-configure` to `.github/rulesets/main-protection.json`, `[governance]`
+and `[landability]` in `.shipyard/config.toml`, and the required-check maps
+(`required_check_machinery.py`, `merge_stall_watchdog.py`, the base-poison
+detector), and only once every leg is green on `main`. Until then the check
+reports but does not block. The aggregate job `release-configure` already runs
+under `if: always()` and fails unless the scope job succeeded and, when in
+scope, every leg did, so registering it changes no workflow. After it is
+registered, push to or re-run any open pull request that should land, because a
+pull request's checks only start on a push.
+
+## `workflow-lint` in the merge queue
+
+`.github/workflows/workflow-lint.yml` runs the workflow linters (yamllint,
+structural parse, actionlint) and the CI-policy contract suites. A queue batch
+is the only run that sees several pull requests' workflow changes together, and
+two that each pass on their own head can land a combined tree that fails. A
+`paths:` filter never applies to `merge_group`, so the workflow carries none on
+any trigger and runs on `pull_request`, `merge_group` and pushes to `main`:
+
+- **`scope`** reads the change through the compare API (both sides of a
+  rename) and matches it against `tools/ci/workflow_lint_paths.txt`, the one
+  list for every event. An unreadable diff, a new branch, or 300+ changed files
+  runs every suite.
+- **`lint`** and **`generated-version-bump-contract`** run only in scope.
+- **`workflow-lint`** (the aggregate, `if: always()`) passes when the scope job
+  succeeded and either nothing was in scope or every suite passed. It reports
+  on every run, so it can be required without holding a pull request on
+  "Expected". `tools/ci/test_workflow_lint_scope.py` holds that shape and its
+  verdict table, with negative controls.
+
+Out-of-scope changes finish in well under a minute on a hosted runner.
+
+The scope list and script run from the change's own tree, as the workflow file
+itself does, so a pull request that edits `workflow_lint_paths.txt` or the
+scope script can narrow its own scope; that edit is itself in scope and is a
+review concern. A workflow file GitHub cannot parse produces no run at all, so
+once `workflow-lint` is required such a change waits on "Expected" rather than
+failing; the pull request's own run of the linters is what names it.
+
+**It is not required yet.** As with `release-configure` (decision 33), the
+workflow lands and is judged from `main` first; registering `workflow-lint`
+means adding it to `.github/rulesets/main-protection.json`, `[governance]` and
+`[landability]` in `.shipyard/config.toml` and the required-check maps, then
+`shipyard governance apply`.
+
+### The merge-group flake gate runs from the queue base
+
+A failed merge-group `macos` run is judged by `tools/ci/flake_exoneration.py
+gate` (decision 34). The Test step extracts `tools/ci`, `tools/scripts` and
+`.shipyard/config.toml` from `github.event.merge_group.base_sha` into
+`$RUNNER_TEMP` and runs the gate from there, so the gate's code and the files
+it reads beside itself (`drift_fast.json`, `gate_suite_executed.py`, and the
+required contexts main's tip is judged on) are the base's, not those of the
+pull requests it is judging; the test sources it inspects are still the
+group's. A base that cannot be read, or that does not carry the gate, excuses
+nothing and keeps ctest's exit. The step text itself is still the group's
+`build.yml`, so a change to that step is a review concern.
+`tools/ci/test_flake_exoneration.py` runs the extracted snippet against a
+scratch repository whose base and tree carry different stub gates.
+
 ## Every failed run names its cause: the advisory `ci-cause` job
 
 When any job in a `build.yml` run fails, the `ci-cause (advisory)` job runs
@@ -3677,6 +3850,20 @@ after ten minutes, listing the rest as skipped. Its annotation is
 `pr-head-affected-tests` (`pulp-pr-head-affected-tests/v1`): selected, passed,
 failed, skipped-for-budget and minutes, which is the per-PR extra cost to watch.
 
+### Approved heads run the deferred tests before admission
+
+When the budget defers tests, the first place they run is otherwise the merge
+group, where a failure ejects the whole batch. Once a head is approved,
+`deferred-tests-admission.yml` re-runs its `macos` job, and that attempt runs
+exactly the tests the budgeted attempt deferred (`--admission`,
+`--prior-summary`; the budgeted attempt uploads its summary as the
+`pr-head-affected-tests-a<attempt>` artifact). The result is the existing
+required `macos` check, so no new required context exists and the steward
+remains the only writer of admission. Armed or queued heads, red runs and runs
+already re-run once are left alone (decisions contract row 32). The repository variable
+`PULP_DEFERRED_ADMISSION=enforce` turns it on; unset is shadow mode, which only
+reports what it would re-run. Rules and tests: `tools/ci/deferred_admission.py`.
+
 ## Exact PR receipts on an unchanged merge-group candidate
 
 A pull-request head normally runs only the build and the `pr-fast` tier, which
@@ -3905,6 +4092,27 @@ label selects fewer than 50 tests or drops one of its pinned members. The step
 writes `ctest-pr-fast.junit.xml` rather than `ctest.junit.xml`: the tier is
 not the merge's test evidence and must never satisfy a protected-validation
 receipt.
+
+The generated-manifest drift members, labelled `pr-fast-configure` in the same
+file (`script-test-inputs-drift`, the consumption-census drift checks and
+`agent-capability-manifest-check`), run earlier, in `Test configure-only drift
+checks before the build (pull request head)`: between `Configure` and `Build`,
+selected with `ctest -L '^pr-fast$' -L '^pr-fast-configure$' --no-tests=error`.
+They read only the checkout and what the configure wrote (`CTestTestfile.cmake`,
+the file-API codemodel, the census facts), never a built artifact, and they were
+behind 27 of 30 sampled red pull-request heads whose fast tier failed (79
+such heads over 2026-11-02..09). A stale manifest now fails the required check
+before the build, about nine minutes sooner at the median, and frees the gate
+VM. When that step passed, the post-build tier excludes `^pr-fast-configure$`
+so each member runs once; when it was skipped (the contract lane, which never
+builds) the post-build step runs the whole tier as before. The step writes
+`ctest-pr-fast-prebuild.junit.xml`, uploaded with the other ctest logs and
+recorded as its own `pr-fast-configure` suite in the reuse record; the
+ctest non-run report falls back to it when the head stopped before the build.
+A red here clears the `.pulp-build-incomplete` marker Configure left, because
+nothing was compiled and the warm build directory is still sound. `pr-fast-tier-contract` fails if a `pr-fast-configure` member is
+outside `pr-fast`, carries `needs-build`, or one of the four pinned drift checks
+loses the label, and if the step stops being the one immediately before `Build`.
 
 ## macOS on a pull request waits for approval
 
@@ -4294,6 +4502,71 @@ Unset `PULP_MACOS_PR_GATING`, or set it to anything but `true`. Every pull
 request then takes the full lane and the reset
 workflow does nothing. `pr-guard` keeps running on the full lane.
 
+## A clean merge of main takes the contract lane
+
+**Shadow by default.** The repository variable `PULP_CLEAN_MERGE_LANE_MODE`
+reads `shadow` when unset: the leg decides, annotates `would_take`, and runs the
+full lane anyway. `enforce` takes the lane; `off` decides nothing and is the
+rollback. It is independent of `PULP_MACOS_PR_GATING`, but inert while that is
+`true`: every `synchronize` head is then already on the contract lane, so the
+decision step never runs and no `pulp-clean-merge-lane` notice appears.
+
+**Trigger.** A `pull_request` `synchronize` head on the macOS leg's full lane
+takes the clean-merge lane only when every one of these is read and holds;
+anything unreadable is the full lane:
+
+- the head has exactly two parents: `github.event.before` (the previous head)
+  and a different commit on the base branch's first-parent chain, fetched at run
+  time;
+- `git merge-tree --write-tree <before> <base parent>` exits 0 and its tree is
+  the head's tree, so the merge carries no conflict resolution or hand edit;
+- the newest `macos` check run this repository's workflows produced on
+  `before`, whatever its event, is from `build.yml` on a same-repository
+  `pull_request` run, concluded `success`, its `Build` step succeeded, and its
+  `shipyard-test-tier` is `fast` or `full`. A newer red (a fleet `pr_number`
+  dispatch, another workflow) is never passed over for an older green. A
+  previous green that was itself a contract or clean-merge lane does not count
+  (no chaining).
+
+Expect fewer hits than the audit's 8.2 clean merges a day: a fleet-dispatched
+full-lane green on `before` never counts (only `pull_request` runs do), and a
+quick merge of main often cancels `before`'s own `pull_request` run first. Both
+are deliberate in this version; the shadow window measures the real rate.
+
+**What runs.** The contract lane's steps: configure, `pr-fast` (minus
+`needs-build`) and `pr-guard`. No Build, no affected tests, no installed-SDK
+proof, no artifact uploads. The check is green on the head's own run, never on
+a copied verdict, and says so in its tier notice:
+`{"schema":"shipyard-test-tier/v1","tier":"clean-merge","selector":"pr-fast+pr-guard","carried_from":"<before>","full_suite_runs_in":"merge_group"}`.
+The merge group builds and tests the commit that lands, as it does for every
+pull request.
+
+**Where.** `tools/ci/clean_merge_lane.py` decides, in the step `Decide the
+clean-merge lane (pull request head)` after the history hydration and before
+Configure. Every step the contract lane skips reads the same expression,
+`matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'`;
+`tools/scripts/test_build_workflow.py` pins it at every site, so a new
+build-fed step must use it too. The step is `continue-on-error`: a crash leaves
+the output empty, which is the full lane. Each decision is a notice titled
+`pulp-clean-merge-lane` (schema `pulp-clean-merge-lane/v1`, verdicts
+`would_take | took | full`).
+
+**Shadow window and control.** Enforce only after at least 7 days or 50
+`would_take` heads with zero `would_take` heads whose full lane then failed
+Build, affected tests or the SDK proof (a `pr-fast` red does not count; the lane
+runs it). One command gives the figures:
+
+```bash
+GH_TOKEN=... python3 tools/ci/clean_merge_lane.py report \
+  --repository Generous-Corp/pulp --since 2026-11-10
+```
+
+After enforcement the control is the merge group: a clean-merge-lane green
+followed by a merge-group red in a test the head's full lane would have run is
+a `missed` event (`report` lists the `took` heads to check). One such event sets
+the mode back to `shadow` until the cause is found. Decisions contract row 31
+holds the rule.
+
 ## Windows is gated by the merge queue, not by the PR head
 
 Windows is advisory and runs entirely on GitHub-hosted runners, and a single
@@ -4438,6 +4711,21 @@ globs, so a reviewer tab that is not the scheduled standing pass does not count
 unless it is listed. A HOLD from any session still counts. The key is read by
 the Shipyard commit pinned in `.github/workflows/review-verdict.yml`, so bump
 that pin with the setting.
+
+Two more `[auto_merge]` keys cut merge-queue ejections (Shipyard
+`docs/automated-draining.md`, "Ejection guards"). `generated_paths` lists the
+generated files that two batch-mates tend to regenerate; the steward defers a
+head that changes one while a queued entry changes the same path, so they never
+share a merge group. `known_flaky_tests` names tests whose failure alone earns
+the one same-head retry after an ejection. Both keys are read from the base
+branch only. The introducing change defines these keys with empty arrays so the
+trusted lane can validate the configuration surface; a follow-up populates the
+path and test data after the keys are on the trusted base.
+The steward matches each name Shipyard reads from ctest's `The following tests
+FAILED:` block, with the number and the trailing `(Failed)` or `(Timeout)`
+removed, so an entry is the registered ctest name, not a Catch2 section title.
+The failure is excused only when every failed test in the step is listed and the
+same check passed on the head.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its

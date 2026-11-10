@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/ladder_filter.hpp",
+  "fingerprint": "sha256:399f80b1a8d01250ac1cbad10b0c511dc5cf465e1d48a85b9489828f8908a16a",
+  "include": "pulp/signal/ladder_filter.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.drum-tom-voice"
+  ],
+  "rationale": "The generic ladder owns the compile-time saturation dispatch used by the measured tom consumer; it is not independently advertised."
+}

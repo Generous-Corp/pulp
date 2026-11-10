@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/android_midi_fifo.hpp",
+  "fingerprint": "sha256:6f28940461c02bc3f631a756e270c2eeaea532c4d415ccd78fecf614b2668f6c",
+  "include": "pulp/midi/android_midi_fifo.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

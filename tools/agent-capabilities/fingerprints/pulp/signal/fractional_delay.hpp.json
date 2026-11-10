@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/fractional_delay.hpp",
+  "fingerprint": "sha256:375d2e2acd389ad5a7194d5c362eac77a03e0a6c4e2c89bf38b09e10d86ed5e7"
+}

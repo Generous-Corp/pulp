@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261110-apt-install-retry-watch",
+  "created_at": "2026-11-10T11:03:11Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Release, docs, sanitizer and web-plugins workflows now run apt installs through a retry helper that re-runs apt-get update after a stale-mirror 404. Only CI package installation changes; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "python3 tools/ci/test_apt_install_retry.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

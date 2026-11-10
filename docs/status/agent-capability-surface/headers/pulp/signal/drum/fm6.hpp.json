@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/drum/fm6.hpp",
+  "fingerprint": "sha256:1059887e7cfa8785366482b2171b0306d49f950adf35da2a88b64067249b57e6",
+  "include": "pulp/signal/drum/fm6.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.fm-operator-engine"
+  ],
+  "rationale": "Existing drum voice composes the reusable fixed-capacity FM operator engine while retaining its voice-specific contract."
+}

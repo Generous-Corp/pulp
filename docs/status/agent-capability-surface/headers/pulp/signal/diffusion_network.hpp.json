@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/diffusion_network.hpp",
+  "fingerprint": "sha256:f09f50d1877d090ffd1c8ea200085461b572a6e29231534c3ad1b49445c0683c",
+  "include": "pulp/signal/diffusion_network.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.diffusion-network"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

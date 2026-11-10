@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/timebase/grid_projection.hpp",
+  "fingerprint": "sha256:1bd2b91ed7be26bbf4c8f34798af5d673fd557e2235c31f540fc987b8deb189f"
+}

@@ -174,6 +174,8 @@ const char* layout_warning_kind_name(LayoutWarningKind kind) noexcept {
         return "extensible_mask_channel_mismatch";
     case LayoutWarningKind::valid_bits_above_container:
         return "valid_bits_above_container";
+    case LayoutWarningKind::ds64_size_mismatch:
+        return "ds64_size_mismatch";
     }
     return "unknown";
 }
@@ -610,11 +612,12 @@ void walk_iff_chunks(Builder& b, const IffEnvelope& env, std::uint64_t start,
         chunk.chunk_end = chunk.past_eof ? file_size : chunk.payload_offset + chunk.declared;
         if (chunk.past_eof) {
             const auto missing = chunk.payload_offset + chunk.declared - file_size;
-            b.warn(chunk.id == env.data_id ? LayoutWarningKind::truncated_data
-                                           : LayoutWarningKind::chunk_past_eof,
-                   offset,
-                   chunk.id + " declares " + std::to_string(chunk.declared) + " bytes, " +
-                       std::to_string(missing) + " past end of file");
+            if (hooks.report_chunk_faults)
+                b.warn(chunk.id == env.data_id ? LayoutWarningKind::truncated_data
+                                               : LayoutWarningKind::chunk_past_eof,
+                       offset,
+                       chunk.id + " declares " + std::to_string(chunk.declared) + " bytes, " +
+                           std::to_string(missing) + " past end of file");
             fault(chunk.id + " chunk extends past end of file");
         }
 
@@ -623,9 +626,10 @@ void walk_iff_chunks(Builder& b, const IffEnvelope& env, std::uint64_t start,
             if ((chunk.declared & 1u) != 0u) {
                 pad = 1u;
                 if (!chunk.past_eof && chunk.chunk_end >= file_size) {
-                    b.warn(LayoutWarningKind::missing_pad_byte, offset,
-                           chunk.id + " has odd size " + std::to_string(chunk.declared) +
-                               " and ends the file without a pad byte");
+                    if (hooks.report_chunk_faults)
+                        b.warn(LayoutWarningKind::missing_pad_byte, offset,
+                               chunk.id + " has odd size " + std::to_string(chunk.declared) +
+                                   " and ends the file without a pad byte");
                     fault(chunk.id + " chunk is odd-sized with no pad byte");
                     pad = 0u;
                 }

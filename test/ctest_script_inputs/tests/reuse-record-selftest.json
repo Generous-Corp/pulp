@@ -9,6 +9,7 @@
    "core/host",
    "core/host/include",
    "docs/status",
+   "inspect/src",
    "test/ctest_script_inputs",
    "test/fixtures",
    "test/support",

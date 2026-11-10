@@ -1,13 +1,14 @@
 // libFuzzer entry point over the audio container readers that ship their own
-// decoder: WAV (CHOC), AIFF (in-house), FLAC (dr_flac), MP3 (dr_mp3) and Ogg
-// Vorbis (stb_vorbis). Each input reaches exactly one reader.
+// decoder: WAV (dr_wav behind Pulp's chunk walk), AIFF (in-house), FLAC
+// (dr_flac), MP3 (dr_mp3) and Ogg Vorbis (stb_vorbis). Each input reaches
+// exactly one reader.
 // approach after SimZhou/vscode-audiolens c5c5a24; re-authored
 //
 // Routing: the container magic is sniffed first, so a plain seed file (and
 // every mutation that keeps its header) goes to the reader that owns it.
 // When no magic matches, the first byte selects a format and the rest is the
 // payload, which lets the fuzzer reach a reader with a header it invented.
-// The platform CoreAudio reader is deliberately never selected: it is system
+// The platform CoreAudio reader is never selected: it is system
 // code, and the deterministic Catch2 corpus replay covers it on Apple.
 //
 // Readers take paths, so the input is written to one scratch file per call.

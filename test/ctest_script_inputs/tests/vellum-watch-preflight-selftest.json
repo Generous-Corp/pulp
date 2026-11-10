@@ -8,6 +8,7 @@
    ".github/vellum-expansion-watch-events",
    ".github/vellum-export-events",
    ".github/vellum-export-receipt",
+   ".github/vellum-export-receipt/framework-transfer.json",
    ".github/vellum-export-receipt/pin.json",
    ".github/vellum-ownership.json",
    "core/platform",
