@@ -26,17 +26,17 @@ LAYOUTS = (("passthrough", 1, 3, 2, 4, 3), ("chain", 1, 3, 2, 4, 3),
 
 def write_receipt(path: Path, receipt: dict) -> None:
     receipt["receipt_sha256"] = gq.receipt_digest(receipt)
-    path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+    path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def fake_receipt(directory: Path) -> Path:
     source = directory / "source-fixture.cpp"
-    source.write_text("fixture source\n")
+    source.write_text("fixture source\n", encoding="utf-8")
     executable = directory / "benchmark-executable"
     executable.write_bytes(b"retained executable fixture")
     stdout = directory / "raw-output.txt"
     stderr = directory / "raw-stderr.txt"
-    stderr.write_text("")
+    stderr.write_text("", encoding="utf-8")
     lines = [gq.FIXTURE_VERSION, "graph_direct_copy_benchmark_v2 timer_overhead_ns=1.000"]
     samples = ",".join(map(str, range(1, 32)))
     for shape, scale, nodes, edges, logical, slots in LAYOUTS:
@@ -53,8 +53,8 @@ def fake_receipt(directory: Path) -> Path:
                          f"batch_mean_samples_ns={samples} oracle=pass process_allocations=0 "
                          f"timed_allocations=0 timed_allocation_samples=31 "
                          f"output_bits=0x{gq.expected_output_bits(shape, scale):x}")
-    stdout.write_text("\n".join(lines) + "\n")
-    cells = gq.parse_output(stdout.read_text())
+    stdout.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    cells = gq.parse_output(stdout.read_text(encoding="utf-8"))
     for cell in cells:
         cell.pop("timer_overhead_ns")
         cell["expected_output_bits"] = gq.expected_output_bits(cell["shape"], cell["scale"])
@@ -84,7 +84,7 @@ class GraphPerformanceQualification(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = fake_receipt(Path(temporary))
             gq.validate_receipt(path)
-            receipt = json.loads(path.read_text())
+            receipt = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(len(receipt["matrix"]["cells"]), 40)
             timing = receipt["matrix"]["cells"][0]["timing"]
             self.assertEqual({key: timing[key] for key in gq.SUMMARY_FIELDS},
@@ -103,17 +103,17 @@ class GraphPerformanceQualification(unittest.TestCase):
                              ("no_reuse_payload_bytes", 0)):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as temporary:
                 path = fake_receipt(Path(temporary))
-                receipt = json.loads(path.read_text())
+                receipt = json.loads(path.read_text(encoding="utf-8"))
                 target = receipt["matrix"]["cells"][0]
                 target["memory"][field] = value
                 raw = path.parent / "raw-output.txt"
-                lines = raw.read_text().splitlines()
+                lines = raw.read_text(encoding="utf-8").splitlines()
                 for i, line in enumerate(lines):
                     if line.startswith("shape=chain scale=1 block=16 ") and "oracle=" not in line:
                         tokens = line.split()
                         lines[i] = " ".join(f"{field}={value}" if token.startswith(field + "=") else token
                                             for token in tokens)
-                raw.write_text("\n".join(lines) + "\n")
+                raw.write_text("\n".join(lines) + "\n", encoding="utf-8")
                 receipt["artifacts"]["raw_stdout"]["sha256"] = gq.sha256_file(raw)
                 write_receipt(path, receipt)
                 with self.assertRaisesRegex(gq.ReceiptError, "memory/reuse topology"):
@@ -122,7 +122,7 @@ class GraphPerformanceQualification(unittest.TestCase):
     def test_all_required_raw_fields_and_cells_are_enforced(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = fake_receipt(Path(temporary))
-            original = (path.parent / "raw-output.txt").read_text()
+            original = (path.parent / "raw-output.txt").read_text(encoding="utf-8")
             lines = original.splitlines()
             for row in (2, 3):
                 for token in lines[row].split():
@@ -143,7 +143,7 @@ class GraphPerformanceQualification(unittest.TestCase):
             for invalid in (-1, float("nan"), float("inf"), True):
                 with self.subTest(section=section, invalid=invalid), tempfile.TemporaryDirectory() as temporary:
                     path = fake_receipt(Path(temporary))
-                    receipt = json.loads(path.read_text())
+                    receipt = json.loads(path.read_text(encoding="utf-8"))
                     cell = receipt["matrix"]["cells"][0]
                     measured = cell[section] if section == "timing" else cell["preparation"][section]
                     measured["batch_mean_samples_ns" if section == "timing" else "samples_ns"][0] = invalid
@@ -152,7 +152,7 @@ class GraphPerformanceQualification(unittest.TestCase):
                         gq.validate_receipt(path)
             with tempfile.TemporaryDirectory() as temporary:
                 path = fake_receipt(Path(temporary))
-                receipt = json.loads(path.read_text())
+                receipt = json.loads(path.read_text(encoding="utf-8"))
                 cell = receipt["matrix"]["cells"][0]
                 measured = cell[section] if section == "timing" else cell["preparation"][section]
                 measured["p50_ns"] = 15
@@ -166,24 +166,24 @@ class GraphPerformanceQualification(unittest.TestCase):
             path = fake_receipt(directory)
             source = directory / "test" / "test_graph_r2_measurement.cpp"
             source.parent.mkdir()
-            source.write_text("fixture source\n")
+            source.write_text("fixture source\n", encoding="utf-8")
             subprocess.run(["git", "init", "-q", str(directory)], check=True)
             subprocess.run(["git", "-C", str(directory), "add", "test"], check=True)
             subprocess.run(["git", "-C", str(directory), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "fixture"], check=True)
-            receipt = json.loads(path.read_text())
+            receipt = json.loads(path.read_text(encoding="utf-8"))
             receipt["source_sha"] = gq._source_sha(directory)
             write_receipt(path, receipt)
             gq.validate_receipt(path, directory)
             changed = copy.deepcopy(receipt)
             fixture = directory / "source-fixture.cpp"
-            fixture.write_text("different fixture\n")
+            fixture.write_text("different fixture\n", encoding="utf-8")
             changed["source_fixture"]["sha256"] = gq.sha256_file(fixture)
             changed["artifacts"]["source_fixture"]["sha256"] = gq.sha256_file(fixture)
             write_receipt(path, changed)
             with self.assertRaisesRegex(gq.ReceiptError, "source commit"):
                 gq.validate_receipt(path, directory)
-            fixture.write_text("fixture source\n")
+            fixture.write_text("fixture source\n", encoding="utf-8")
             write_receipt(path, receipt)
             binary = directory / "benchmark-executable"
             binary.write_bytes(b"different executable")
@@ -195,7 +195,7 @@ class GraphPerformanceQualification(unittest.TestCase):
     def test_contract_does_not_accept_callback_or_live_activation_claims(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = fake_receipt(Path(temporary))
-            receipt = json.loads(path.read_text())
+            receipt = json.loads(path.read_text(encoding="utf-8"))
             receipt["measurement_contract"]["timing"] = "callback p99 and WCET"
             write_receipt(path, receipt)
             with self.assertRaisesRegex(gq.ReceiptError, "contract"):

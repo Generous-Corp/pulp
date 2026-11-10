@@ -88,8 +88,7 @@ struct PreparationSample {
     PhaseSample pool_allocate;
 };
 
-template <typename Function>
-bool measure_phase(PhaseSample& sample, Function&& function) {
+template <typename Function> bool measure_phase(PhaseSample& sample, Function&& function) {
     pulp::test::RtAllocationProbe probe;
     const auto start = std::chrono::steady_clock::now();
     const bool ok = function();
@@ -195,12 +194,13 @@ bool build_case(Shape shape, int frames, int scale, Case& result, std::string& e
     }
 
     pulp::graph::GraphRuntimePlanResult plan;
-    if (!measure_phase(sample.compile, [&] {
-            plan = pulp::graph::build_graph_runtime_plan(nodes, connections);
-            return plan.ok();
-        }) || !measure_phase(sample.snapshot_prepare, [&] {
-            return result.snapshot.reset(std::move(plan.plan), bindings);
-        })) {
+    if (!measure_phase(sample.compile,
+                       [&] {
+                           plan = pulp::graph::build_graph_runtime_plan(nodes, connections);
+                           return plan.ok();
+                       }) ||
+        !measure_phase(sample.snapshot_prepare,
+                       [&] { return result.snapshot.reset(std::move(plan.plan), bindings); })) {
         error = "failed to build graph runtime snapshot";
         return false;
     }
@@ -288,8 +288,7 @@ TimedSample timed_sample(Case& test, GraphRuntimeExecutor& executor, double over
             probe.allocation_count()};
 }
 
-void print_phase(std::string_view name,
-                 const std::array<PreparationSample, kSamples>& samples,
+void print_phase(std::string_view name, const std::array<PreparationSample, kSamples>& samples,
                  PhaseSample PreparationSample::* member) {
     std::cout << ' ' << name << "_samples_ns=";
     for (std::size_t i = 0; i < samples.size(); ++i)
@@ -310,15 +309,14 @@ bool print_memory(const Case& test, int frames) {
     if (!without_reuse.ok || without_reuse.slot_count != logical_port_slots ||
         test.pool.slot_count() > without_reuse.slot_count)
         return false;
-    const auto scratch_bytes = static_cast<std::size_t>(test.pool.slot_count()) * frames * sizeof(float);
-    std::cout << " node_count=" << plan.node_count()
-              << " edge_count=" << plan.connection_count()
+    const auto scratch_bytes =
+        static_cast<std::size_t>(test.pool.slot_count()) * frames * sizeof(float);
+    std::cout << " node_count=" << plan.node_count() << " edge_count=" << plan.connection_count()
               << " logical_port_slots=" << logical_port_slots
               << " no_reuse_slots=" << without_reuse.slot_count
               << " scratch_slots=" << test.pool.slot_count()
               << " reused_slots=" << without_reuse.slot_count - test.pool.slot_count()
-              << " sample_bytes=" << sizeof(float)
-              << " scratch_payload_bytes=" << scratch_bytes
+              << " sample_bytes=" << sizeof(float) << " scratch_payload_bytes=" << scratch_bytes
               << " no_reuse_payload_bytes=" << logical_port_slots * frames * sizeof(float);
     return true;
 }
@@ -354,8 +352,10 @@ int run() {
                 std::cout << "shape=" << shape_name(shape) << " scale=" << scale
                           << " block=" << frames;
                 print_phase("compile", preparation_samples, &PreparationSample::compile);
-                print_phase("snapshot_prepare", preparation_samples, &PreparationSample::snapshot_prepare);
-                print_phase("pool_allocate", preparation_samples, &PreparationSample::pool_allocate);
+                print_phase("snapshot_prepare", preparation_samples,
+                            &PreparationSample::snapshot_prepare);
+                print_phase("pool_allocate", preparation_samples,
+                            &PreparationSample::pool_allocate);
                 if (!print_memory(test, frames)) {
                     std::cerr << "invalid memory control\n";
                     return EXIT_FAILURE;
@@ -435,7 +435,7 @@ int run() {
                           << " batch_mean_samples_ns=";
                 for (std::size_t i = 0; i < samples.size(); ++i)
                     std::cout << (i ? "," : "") << samples[i];
-                std::cout                          << " oracle=pass"
+                std::cout << " oracle=pass"
                           << " process_allocations=" << process_allocations
                           << " timed_allocations=" << timed_allocations
                           << " timed_allocation_samples=" << kSamples << " output_bits=0x"
