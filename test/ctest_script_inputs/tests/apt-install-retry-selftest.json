@@ -1,0 +1,11 @@
+{
+ "name": "apt-install-retry-selftest",
+ "record": {
+  "entry": "tools/ci/test_apt_install_retry.py",
+  "inputs": [
+   "tools/ci/apt-install-retry.sh",
+   "tools/ci/test_apt_install_retry.py"
+  ],
+  "kind": "python"
+ }
+}
