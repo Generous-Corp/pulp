@@ -43,7 +43,11 @@
 #include <pulp/format/detail/standalone_audio_probe_json.hpp>
 #include <pulp/format/detail/standalone_audio_scope_json.hpp>
 #endif
+#include <pulp/format/preset_program_router.hpp>
+#include <pulp/platform/special_dir.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/state/preset_library.hpp>
+#include <pulp/state/preset_manager.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/runtime/system.hpp>
 #include <pulp/runtime/trace_session.hpp>
@@ -503,6 +507,10 @@ void StandaloneApp::render_audio_block(
         // created before audio starts and remains stable until after it stops.
         drain_view_input(midi_in, ctx.buffer_size);
         midi_in.sort();
+        // Bank Select + Program Change: latch only; the load runs on the main
+        // thread from service_program_changes().
+        if (program_router_)
+            program_router_->process(midi_in);
 
 #if PULP_ENABLE_AUDIO_PROBES
         auto analyze_output_probe = [&]() noexcept {
@@ -681,6 +689,7 @@ bool StandaloneApp::start() {
         processor_->set_editor_host_kind(EditorHostKind::standalone);
         processor_->set_state_store(&store_);
         processor_->define_parameters(store_);
+        init_program_change();
         restore_persisted_state();
     }
 
@@ -906,7 +915,10 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
         test_input_host_.set_playing(playing);
         config_.transport_playing = playing;
     };
-    options.on_idle = [this] { service_state_persistence(); };
+    options.on_idle = [this] {
+        service_state_persistence();
+        service_program_changes();
+    };
     return detail::run_standalone_contract_editor(*processor_, store_, factory, options);
 }
 
@@ -1185,6 +1197,42 @@ void StandaloneApp::restore_persisted_state() {
     processor_->consume_state_dirty_flag();
     state_persist_.saved_fingerprint = state_fingerprint();
     state_persist_.observed_fingerprint = state_persist_.saved_fingerprint;
+}
+
+void StandaloneApp::init_program_change() {
+    if (!processor_ || preset_library_)
+        return;
+    const auto desc = processor_->descriptor();
+    if (!desc.supports_program_change)
+        return;
+
+    preset_manager_ = std::make_unique<state::PresetManager>(store_, desc.manufacturer, desc.name);
+    const auto bundle = platform::special_dir(platform::SpecialDir::bundle_dir);
+    if (!bundle.empty() && std::filesystem::is_directory(bundle / "Presets"))
+        preset_manager_->set_factory_presets_dir(bundle / "Presets");
+    preset_library_ = std::make_unique<state::PresetLibrary>(
+        *preset_manager_, state::PresetLibrary::default_overlay_path(desc.manufacturer, desc.name));
+    preset_library_->enable_program_map();
+    program_router_ = std::make_unique<PresetProgramRouter>();
+    program_router_->set_settings({true, 0, BankSelectMode::msb_lsb});
+}
+
+void StandaloneApp::service_program_changes(std::chrono::steady_clock::time_point now) {
+    if (!program_router_ || !preset_library_)
+        return;
+    // The idle loop runs at the display rate; about 30 Hz is plenty for a
+    // preset change.
+    constexpr auto kPollInterval = std::chrono::milliseconds(33);
+    if (program_change_polled_ != std::chrono::steady_clock::time_point{} &&
+        now - program_change_polled_ < kPollInterval)
+        return;
+    program_change_polled_ = now;
+
+    const auto request = program_router_->take_request();
+    if (!request)
+        return;
+    if (const auto preset = preset_library_->preset_at(request->position))
+        preset_manager_->load(preset->path);
 }
 
 void StandaloneApp::service_state_persistence(std::chrono::steady_clock::time_point now) {

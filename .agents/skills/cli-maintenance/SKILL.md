@@ -4279,3 +4279,12 @@ rules when touching it:
 The `pulp graph probe` command and MCP `pulp_graph` tool expose bounded audio,
 control, and event edge observations. Keep their `edge_kind` and
 `destination_param` schemas aligned when changing graph probe diagnostics.
+
+## Standalone drains Program Change from the idle loop
+
+`StandaloneApp` creates a preset library and router when the processor sets
+`supports_program_change` (`init_program_change`, called from `start()`). The
+render callback only latches a request; `service_program_changes()` loads it on
+the main thread. Both built-in editors call it beside `service_state_persistence`
+from their idle hook. A standalone built without an editor must call it itself,
+or a Program Change is latched and never applied.

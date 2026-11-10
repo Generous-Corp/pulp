@@ -185,3 +185,13 @@ the flag is unchanged: no library, no scan, no callback request.
 The adapter also answers `clap.preset-load` at the plug-in location
 (`CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN`) with a library key as the load key,
 for example `factory:Pads/Warm`. Other formats do not use the flag yet.
+
+### Opting in from a plug-in (standalone)
+
+The standalone host honours `supports_program_change` the same way. It creates
+the library and router when the processor is created, scans hardware MIDI for
+Bank Select + Program Change inside the audio callback (latch only), and loads
+the preset from `StandaloneApp::service_program_changes()`, which the built-in
+editors call from their idle loop and which throttles itself to about 30 Hz. A
+host that runs its own loop calls it a few times a second. The factory folder is
+`Presets` inside the app bundle's resource directory when it exists.
