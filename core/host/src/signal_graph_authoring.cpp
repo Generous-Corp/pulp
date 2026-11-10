@@ -921,6 +921,21 @@ GraphResult SignalGraph::connect(const PortHandle& source, const PortHandle& des
         (dp->owner && (dp->owner != dest.owner || dp->incarnation != dest.incarnation)))
         return {GraphResult::Code::UnknownPort, dest.node, dp->index,
                 "stale or foreign port handle", "obtain this graph's current port"};
+    if (dst->type == NodeType::SpectralAssetMorph) {
+        if (src->type != NodeType::AudioInput || dp->name != "morph" || sp->kind != PortKind::Audio)
+            return {GraphResult::Code::KindMismatch,
+                    dest.node,
+                    dp->index,
+                    "asset morph requires a direct host AudioInput",
+                    {}};
+        for (const auto& edge : connections_)
+            if (edge.dest_node == dest.node)
+                return {GraphResult::Code::Duplicate,
+                        dest.node,
+                        dp->index,
+                        "asset morph requires one control producer",
+                        {}};
+    }
     if (sp->kind == PortKind::Spectral) {
         if (!src->spectral_identity || !dst->spectral_identity ||
             src->spectral_identity != dst->spectral_identity)

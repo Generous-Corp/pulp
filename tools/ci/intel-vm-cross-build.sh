@@ -87,9 +87,10 @@ for _ in $(seq 1 24); do vmssh true 2>/dev/null && break; sleep 5; done
 BUILD_TARGETS=""
 [ "$FULL_BUILD" = "0" ] && BUILD_TARGETS="--target pulp-rust-cli pulp-cpp pulp-mcp"
 
-# The recipe runs in-guest. Note the Skia-clobber fix (REQUIRED on a cross build):
-# setup.sh --ci prefetches the HOST-arch (arm64) Skia and fetch_skia's flatten
-# step won't clobber it, so the x86_64 FindSkia fails unless we clear it first.
+# The recipe runs in-guest. darwin-x64 resolves the universal Skia archive (the
+# one gpu-runtime's renderer lock pins), so the fetched libskia.a must CONTAIN an
+# x86_64 slice, not be thin. The tree is still cleared first so the fetch writes
+# a fresh, receipt-bound generation rather than reusing setup.sh's prefetch.
 RECIPE=$(cat <<REMOTE
 set -euo pipefail
 export PATH=\$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH
@@ -100,7 +101,7 @@ cd ~/pulp-xbuild
 ./setup.sh --ci --deps-only
 rm -rf external/skia-build/build   # cross-build Skia-clobber fix
 python3 tools/scripts/fetch_skia_for_release.py darwin-x64
-[ "\$(lipo -archs external/skia-build/build/mac-gpu/lib/Release/libskia.a 2>/dev/null)" = "x86_64" ] || { echo "FAIL: skia not x86_64 after clean fetch"; exit 12; }
+lipo -archs external/skia-build/build/mac-gpu/lib/Release/libskia.a 2>/dev/null | tr " " "\\n" | grep -qx x86_64 || { echo "FAIL: skia has no x86_64 slice after clean fetch"; exit 12; }
 env -u SKIA_DIR cmake -S . -B build-x64 -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=x86_64 -DPULP_RUST_CLI_TARGET=x86_64-apple-darwin \
   -DPULP_PROFILE=release \

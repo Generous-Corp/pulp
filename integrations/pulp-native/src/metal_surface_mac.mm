@@ -372,7 +372,8 @@ std::unique_ptr<MetalSurface> MetalSurface::create(const MetalSurfaceOptions& op
     Class cls = view_class();
     if (!cls)
         return nullptr;
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    id<MTLDevice> device =
+        options.device ? (__bridge id<MTLDevice>)options.device : MTLCreateSystemDefaultDevice();
     if (!device)
         return nullptr;
 

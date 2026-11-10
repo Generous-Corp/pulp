@@ -9,10 +9,10 @@
 /// epoch/sample/sequence rules as the admitted trigger runtime, while keeping
 /// the producer and consumer phases explicit for future graph bindings.
 
+#include <pulp/host/graph_types.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
-#include <pulp/host/graph_types.hpp>
 
 #include <algorithm>
 #include <array>
@@ -377,6 +377,7 @@ enum class GraphEventResult : std::uint8_t {
     AttemptLimit,
     InvalidPhase,
     Busy,
+    ClockExhausted,
 };
 
 struct GraphAuthoredEventEdge {
@@ -437,15 +438,17 @@ class GraphAuthoredEventLane final {
     // bounded even when a caller chooses a large prepared frame size.
     static_assert(kRecordBytes <= 2'097'152);
 
-    GraphEventResult reset(std::uint64_t epoch) noexcept {
+    GraphEventResult reset(std::uint64_t epoch, std::uint64_t cursor = 0) noexcept {
         if (active_)
             return GraphEventResult::Busy;
         if (epoch == 0)
             return GraphEventResult::OutOfRange;
+        if (epoch <= epoch_)
+            return GraphEventResult::StaleEpoch;
         epoch_ = epoch;
         counters_ = {};
         counters_.epoch = epoch;
-        cursor_ = 0;
+        cursor_ = cursor;
         sequence_ = 0;
         trace_size_ = pending_size_ = 0;
         current_received_begin_ = current_received_count_ = 0;
@@ -459,9 +462,10 @@ class GraphAuthoredEventLane final {
                                  std::size_t frames) noexcept {
         if (active_)
             return GraphEventResult::Busy;
-        if (epoch == 0 || epoch != epoch_ || frames == 0 || frames > MaxFrames ||
-            sample_start > std::numeric_limits<std::uint64_t>::max() - frames)
+        if (epoch == 0 || epoch != epoch_ || frames == 0 || frames > MaxFrames)
             return GraphEventResult::OutOfRange;
+        if (sample_start > std::numeric_limits<std::uint64_t>::max() - frames)
+            return GraphEventResult::ClockExhausted;
         const auto end = sample_start + frames;
         // Retire pending records left behind by a seek. They are never
         // retimed into the new block; each refusal is visible in diagnostics.
@@ -554,7 +558,18 @@ class GraphAuthoredEventLane final {
         // Preserve the original sample-local primitive. New graph-authored
         // producers use emit_at() when they need queued look-ahead delivery.
         if (phase_ == 1 && target_sample != current_sample_) {
-            const auto budget = budget_index_(target_sample);
+            std::size_t budget = 0;
+            if (!budget_index_(target_sample, budget)) {
+                ++sequence_;
+                counters_.sequence = sequence_;
+                if (target_sample > current_sample_)
+                    increment_(counters_.future);
+                else
+                    increment_(counters_.late);
+                increment_(counters_.diagnostic_refusals);
+                return target_sample > current_sample_ ? GraphEventResult::Future
+                                                       : GraphEventResult::Late;
+            }
             auto& attempts = attempts_by_sample_[budget];
             if (attempts >= kMaxAttemptsPerSample)
                 return GraphEventResult::AttemptLimit;
@@ -584,7 +599,21 @@ class GraphAuthoredEventLane final {
             increment_(counters_.diagnostic_refusals);
             return GraphEventResult::InvalidPhase;
         }
-        const auto budget = budget_index_(target_sample);
+        // Targets outside the current block plus the fixed look-ahead arena
+        // have no canonical sample slot. Refuse them before touching a
+        // per-sample attempt budget; a far-future typo must not consume the
+        // current sample's 16-attempt allowance.
+        std::size_t budget = 0;
+        if (!budget_index_(target_sample, budget)) {
+            const auto sequence = sequence_++;
+            counters_.sequence = sequence;
+            const auto block_end = block_start_ + block_frames_;
+            const auto result =
+                target_sample >= block_end ? GraphEventResult::Future : GraphEventResult::Late;
+            increment_(result == GraphEventResult::Future ? counters_.future : counters_.late);
+            increment_(counters_.diagnostic_refusals);
+            return result;
+        }
         auto& attempts = attempts_by_sample_[budget];
         auto& accepted = accepted_by_sample_[budget];
         if (attempts >= kMaxAttemptsPerSample)
@@ -608,13 +637,13 @@ class GraphAuthoredEventLane final {
         }
         const auto block_end = block_start_ + block_frames_;
         if (target_sample >= block_end) {
-            if (accepted >= MaxAcceptedPerSample) {
-                increment_(counters_.overflow);
-                return GraphEventResult::Overflow;
-            }
             if (target_sample - block_end >= MaxFrames) {
                 increment_(counters_.future);
                 return refuse(GraphEventResult::Future);
+            }
+            if (accepted >= MaxAcceptedPerSample) {
+                increment_(counters_.overflow);
+                return GraphEventResult::Overflow;
             }
             if (pending_size_ == kPendingCapacity) {
                 increment_(counters_.overflow);
@@ -689,7 +718,7 @@ class GraphAuthoredEventLane final {
             return GraphEventResult::InvalidPhase;
         if (cursor_ > std::numeric_limits<std::uint64_t>::max() - block_frames_) {
             active_ = false;
-            return GraphEventResult::OutOfRange;
+            return GraphEventResult::ClockExhausted;
         }
         cursor_ += block_frames_;
         counters_.cursor = cursor_;
@@ -761,17 +790,24 @@ class GraphAuthoredEventLane final {
         // no-op hook for future multi-producer publication and documents that
         // the reader observes the total order contract.
     }
-    std::size_t budget_index_(std::uint64_t sample) const noexcept {
+    bool budget_index_(std::uint64_t sample, std::size_t& index) const noexcept {
         if (sample >= block_start_) {
             const auto offset = sample - block_start_;
-            if (offset < kBudgetCapacity)
-                return static_cast<std::size_t>(offset);
+            if (offset < kBudgetCapacity) {
+                index = static_cast<std::size_t>(offset);
+                return true;
+            }
+        } else if (current_sample_ >= block_start_ &&
+                   current_sample_ - block_start_ < kBudgetCapacity) {
+            index = static_cast<std::size_t>(current_sample_ - block_start_);
+            return true;
         }
-        // Invalid/late targets are charged to the producer's current sample,
-        // while valid look-ahead targets are charged to their own sample.
-        if (current_sample_ >= block_start_ && current_sample_ - block_start_ < kBudgetCapacity)
-            return static_cast<std::size_t>(current_sample_ - block_start_);
-        return 0;
+        return false;
+    }
+    std::size_t budget_index_(std::uint64_t sample) const noexcept {
+        std::size_t index = 0;
+        (void)budget_index_(sample, index);
+        return index;
     }
     void reset_attempt_budget_for_sample_(std::uint64_t sample) noexcept {
         const auto index = budget_index_(sample);
