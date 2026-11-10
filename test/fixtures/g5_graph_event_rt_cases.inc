@@ -543,6 +543,10 @@ struct Observation {
     std::vector<CallbackRow> rows = std::vector<CallbackRow>(kCallbacks);
     std::vector<std::uint32_t> audio_bits;
     std::size_t frames = kBlockFrames;
+    pulp::format::GraphRuntimeExecutorStats executor_stats{};
+    std::uint64_t walk_fallbacks = 0;
+    std::uint64_t execution_failures = 0;
+    bool parallel_enabled = false;
     std::int64_t prepare_start_ns = 0;
     std::int64_t prepare_end_ns = 0;
     std::int64_t request_ns = 0;
@@ -686,6 +690,10 @@ Observation run(bool routed, double rate = kRate, std::size_t frames = kBlockFra
     REQUIRE(latency);
     observation.latency = *latency;
     observation.prepared = graph.prepared_stats();
+    observation.executor_stats = graph.routing_executor_stats();
+    observation.walk_fallbacks = graph.routed_walk_fallbacks();
+    observation.execution_failures = graph.routed_only_execution_failures();
+    observation.parallel_enabled = graph.parallel_routing_enabled();
     const auto period_ns =
         static_cast<std::int64_t>(1000000000.0 * static_cast<double>(frames) / rate);
     for (std::size_t i = 0; i < callbacks; ++i) {
@@ -909,6 +917,11 @@ TEST_CASE("G12 paced activation receipt cell", "[.][host][graph][g12][activation
         std::cout << observed.latency.connections[i].delay_samples;
     }
     std::cout << " nodes=" << p.node_count << " edges=" << p.connection_count
+              << " executor_blocks=" << observed.executor_stats.blocks_processed
+              << " parallel_levels=" << observed.executor_stats.parallel_levels_dispatched
+              << " parallel_enabled=" << observed.parallel_enabled
+              << " walk_fallbacks=" << observed.walk_fallbacks
+              << " execution_failures=" << observed.execution_failures
               << " voices=0 grains=0 probes=0"
               << " node_audio_bytes=" << p.node_audio_buffer_bytes
               << " automation_bytes=" << p.automation_buffer_bytes
