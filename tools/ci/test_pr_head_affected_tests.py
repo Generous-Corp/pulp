@@ -1037,7 +1037,9 @@ class WorkflowWiringTests(unittest.TestCase):
         full = text.index("- name: Test (non-Windows)")
         self.assertLess(fast, step_at)
         self.assertLess(step_at, full)
-        block = text[step_at:full]
+        # Only this step: later steps before the full tier (the flake
+        # quarantine read) may be advisory without loosening this gate.
+        block = text[step_at:text.index("\n      - name:", step_at)]
         self.assertIn("github.event_name == 'pull_request'", block)
         self.assertIn("tools/ci/pr_head_affected_tests.py", block)
         self.assertIn("--budget-secs 600", block)
