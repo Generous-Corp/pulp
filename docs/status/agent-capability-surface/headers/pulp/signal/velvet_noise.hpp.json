@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/velvet_noise.hpp",
+  "fingerprint": "sha256:22c73b19189ad33fe12be75c3e8d20f6c7b098810756e31c6bd2dc3f02b75973",
+  "include": "pulp/signal/velvet_noise.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.stochastic-sources"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

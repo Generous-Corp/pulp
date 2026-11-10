@@ -85,6 +85,9 @@ class CapabilityContractGateWiring(unittest.TestCase):
             "tools/scripts/agent_capability_manifest.py",
             "tools/agent-capabilities/legacy-unreviewed-baseline.json",
             "docs/status/agent-capability-surface.json",
+            "docs/status/agent-capability-surface/headers/pulp/midi/strum.hpp.json",
+            "tools/agent-capabilities/history/" + "0" * 64 + ".json",
+            "tools/agent-capabilities/fingerprints/pulp/midi/strum.hpp.json",
             "docs/status/agent-capabilities.json",
         ]
         for path in covered:

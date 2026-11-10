@@ -1,0 +1,11 @@
+{
+  "domain": "music",
+  "source": "core/music/include/pulp/music/rhythm_relationship.hpp",
+  "fingerprint": "sha256:bcb234becb7b912a516ebf4d33152fcbf4e326b59251a5977b4c1a2e653de433",
+  "include": "pulp/music/rhythm_relationship.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "music.rhythm-relationship"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

@@ -1,0 +1,12 @@
+{
+  "domain": "music",
+  "source": "core/music/include/pulp/music/detail/random_range.hpp",
+  "fingerprint": "sha256:dd46f6f6f589aafdb08cc00c896cd87fc5465d5e1bd88c8266cf7e45808e5faf",
+  "include": "pulp/music/detail/random_range.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "music.markov-transition",
+    "music.pattern-generation"
+  ],
+  "rationale": "Portable bit-exact bounded reduction supports caller-random Markov and pattern draws but is an implementation detail rather than a musical operation."
+}

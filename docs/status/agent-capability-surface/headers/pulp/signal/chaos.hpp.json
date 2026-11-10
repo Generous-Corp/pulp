@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/chaos.hpp",
+  "fingerprint": "sha256:35668d317c30a5d7d6ea7a333a7f4c4c7705b77d4c7a58965d0e03a51a0f78ff",
+  "include": "pulp/signal/chaos.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

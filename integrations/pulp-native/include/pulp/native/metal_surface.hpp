@@ -31,6 +31,7 @@
 /// teardown longer than that.
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -290,6 +291,10 @@ class MetalSurface {
     /// The Objective-C class of the surface's view. Its name is unique to the
     /// binary that contains this library.
     static std::string view_class_name();
+
+    /// Surfaces alive in this process (each owns one CAMetalLayer), for leak
+    /// checks and diagnostics.
+    static std::size_t live_surfaces() noexcept;
 
     struct Impl;
 

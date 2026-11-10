@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/svf.hpp",
+  "fingerprint": "sha256:30e4e76d67700ee5e97934e2d5f1f8879ca82306b443990e3baae1c5d2e4c494",
+  "include": "pulp/signal/svf.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Trapezoidal state-variable filter with lowpass/highpass/bandpass/notch modes, a pure design() for its coefficients, and a register-resident block path. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+}

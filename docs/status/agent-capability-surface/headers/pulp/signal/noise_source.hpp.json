@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/noise_source.hpp",
+  "fingerprint": "sha256:b7063bb65d854600d97f95c3957406fe8d625cc4e99e3c6677aeaa9a3329ae8c",
+  "include": "pulp/signal/noise_source.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/generated_event_source.hpp",
+  "fingerprint": "sha256:6253ce3419ffa5a655f0f941ef9995d6980e6175efdd9fe32685bdfc95f7d57b",
+  "include": "pulp/playback/generated_event_source.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Bounded single-producer/single-consumer handoff for event batches produced ahead of the playhead. A missing batch advances as event silence and requests an active-note flush so a lost note-off cannot become a stuck note. It is a realtime handoff primitive for a host-supplied producer rather than an advertised capability."
+}

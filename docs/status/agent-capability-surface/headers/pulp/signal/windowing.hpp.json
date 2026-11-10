@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/windowing.hpp",
+  "fingerprint": "sha256:672043aa1a9a0d0a0cd28a82cd7b7d81e57de035b963e0226c23b85b42ce1f7f",
+  "include": "pulp/signal/windowing.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.window-functions"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

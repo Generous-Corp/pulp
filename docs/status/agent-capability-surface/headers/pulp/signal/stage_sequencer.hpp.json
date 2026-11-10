@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/stage_sequencer.hpp",
+  "fingerprint": "sha256:8d46ce25ebfced8a91ddad3581c9767556ed0832eec42202f2cd51f945ce0064",
+  "include": "pulp/signal/stage_sequencer.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

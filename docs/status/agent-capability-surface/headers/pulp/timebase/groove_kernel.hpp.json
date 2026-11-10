@@ -1,0 +1,11 @@
+{
+  "domain": "timebase",
+  "source": "core/timebase/include/pulp/timebase/groove_kernel.hpp",
+  "fingerprint": "sha256:169e0104d2ea6164d6924de224ac636eaf11d617f5b844b4a2facaf0cbaa0286",
+  "include": "pulp/timebase/groove_kernel.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "timebase.groove-kernel"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

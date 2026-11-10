@@ -17,6 +17,7 @@
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/processor.hpp>
 #include "../examples/pulp-gain/pulp_gain.hpp"
+#include "support/generated_range_processor.hpp"
 
 #include <pluginterfaces/base/ustring.h>
 #include <pluginterfaces/vst/ivsthostapplication.h>
@@ -359,4 +360,63 @@ TEST_CASE("VST3 registers declared hidden and read-only parameters with matching
         }
     }
     REQUIRE(found == 4);
+}
+
+// PARAM-2: a range, default and texts generated in code are what the host sees.
+namespace {
+struct ScopedWiden {
+    explicit ScopedWiden(bool v) {
+        pulp::test::GeneratedRangeProcessor::widen = v;
+    }
+    ~ScopedWiden() {
+        pulp::test::GeneratedRangeProcessor::widen = true;
+    }
+};
+} // namespace
+
+TEST_CASE("VST3 reports a generated range, default and value texts", "[vst3][params][generated]") {
+    ScopedWiden widen(true);
+    HostApp host;
+    pulp::format::vst3::PulpVst3Processor processor(pulp::test::make_generated_range_processor);
+    REQUIRE(processor.initialize(&host) == Steinberg::kResultOk);
+    const auto id = static_cast<Steinberg::Vst::ParamID>(pulp::test::kGeneratedPitchId);
+
+    REQUIRE_THAT(processor.normalizedParamToPlain(id, 1.0), WithinAbs(2400.0, 1e-3));
+    REQUIRE_THAT(processor.normalizedParamToPlain(id, 0.5), WithinAbs(1200.0, 1e-3));
+    REQUIRE_THAT(processor.plainParamToNormalized(id, 1200.0), WithinAbs(0.5, 1e-6));
+
+    Steinberg::Vst::String128 out{};
+    REQUIRE(processor.getParamStringByValue(id, 0.5, out) == Steinberg::kResultTrue);
+    REQUIRE(to_ascii(out) == "12.0 st");
+    Steinberg::Vst::ParamValue normalized = 0.0;
+    Steinberg::Vst::TChar text[128] = {};
+    Steinberg::UString(text, 128).fromAscii("12.0 st");
+    REQUIRE(processor.getParamValueByString(id, text, normalized) == Steinberg::kResultTrue);
+    REQUIRE_THAT(normalized, WithinAbs(0.5, 1e-6));
+
+    bool found = false;
+    for (Steinberg::int32 i = 0; i < processor.getParameterCount(); ++i) {
+        Steinberg::Vst::ParameterInfo info{};
+        REQUIRE(processor.getParameterInfo(i, info) == Steinberg::kResultOk);
+        if (info.id != id)
+            continue;
+        found = true;
+        REQUIRE_THAT(info.defaultNormalizedValue, WithinAbs(0.5, 1e-6));
+    }
+    REQUIRE(found);
+    processor.terminate();
+}
+
+TEST_CASE("VST3 generated-range control: the unwidened base range reads differently",
+          "[vst3][params][generated]") {
+    ScopedWiden widen(false);
+    HostApp host;
+    pulp::format::vst3::PulpVst3Processor processor(pulp::test::make_generated_range_processor);
+    REQUIRE(processor.initialize(&host) == Steinberg::kResultOk);
+    const auto id = static_cast<Steinberg::Vst::ParamID>(pulp::test::kGeneratedPitchId);
+    REQUIRE_THAT(processor.normalizedParamToPlain(id, 1.0), WithinAbs(127.0, 1e-3));
+    Steinberg::Vst::String128 out{};
+    REQUIRE(processor.getParamStringByValue(id, 0.5, out) == Steinberg::kResultTrue);
+    REQUIRE(to_ascii(out) == "0.6 st");
+    processor.terminate();
 }

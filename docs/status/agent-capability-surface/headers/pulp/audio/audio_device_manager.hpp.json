@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/audio_device_manager.hpp",
+  "fingerprint": "sha256:f6a0109662da123a56a199f8581b5a3d8160b1c44701a283ecb4665c5eabdb6b",
+  "include": "pulp/audio/audio_device_manager.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Application-level audio and MIDI device manager: persistence, enabled-input reconnection and hotplug policy used by hosts; not a generator-facing capability."
+}
