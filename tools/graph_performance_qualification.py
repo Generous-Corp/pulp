@@ -374,6 +374,9 @@ def validate_receipt(receipt_path: Path, source_root: Path | None = None) -> Non
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ReceiptError(f"cannot read receipt: {receipt_path}") from exc
+    if receipt.get("schema") == ACTIVATION_SCHEMA:
+        validate_activation_receipt(receipt_path, receipt, source_root)
+        return
     _require(receipt.get("schema") == SCHEMA, "unexpected receipt schema")
     _require(receipt.get("fixture") == FIXTURE_VERSION, "unexpected fixture version")
     _require(receipt.get("status") == "PARTIAL", "R2 receipt must remain PARTIAL")
@@ -487,7 +490,10 @@ def _copy_receipt_directory(receipt_path: Path, destination: Path) -> Path:
     return destination / receipt_path.name
 
 
-def run_controls(receipt_path: Path) -> None:
+def run_controls(receipt_path: Path, source_root: Path | None = None) -> None:
+    if json.loads(receipt_path.read_text()).get("schema") == ACTIVATION_SCHEMA:
+        run_activation_controls(receipt_path, source_root)
+        return
     validate_receipt(receipt_path)
     original = json.loads(receipt_path.read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory(prefix="pulp-g12-r2-controls-") as temporary:
@@ -686,6 +692,328 @@ def record(args: argparse.Namespace) -> int:
     return completed.returncode
 
 
+
+# The paced publication lane has its own type and dimensions. The offline v2
+# receipt above continues to require its original 40 cells and batch semantics.
+ACTIVATION_SCHEMA = "pulp.graph_paced_activation_receipt.v1"
+ACTIVATION_FIXTURE = "g12_paced_activation_v1"
+ACTIVATION_SOURCE = Path("test/fixtures/g5_graph_event_rt_cases.inc")
+ACTIVATION_RATES = (44100, 48000, 96000)
+ACTIVATION_BLOCKS = (32, 64, 128, 256)
+ACTIVATION_BACKENDS = ("direct", "routed")
+ACTIVATION_KEYS = frozenset((rate, frames, backend) for rate in ACTIVATION_RATES
+                            for frames in ACTIVATION_BLOCKS for backend in ACTIVATION_BACKENDS)
+ACTIVATION_CONTRACT = {
+    "publication": "public prepared gain edit; prepare precedes callbacks; commit on separate thread",
+    "activation": "request to first entirely changed output; output may change before commit returns",
+    "audio": "mono float32 input 0.5; gain 0.5 then 1; every sample retained as lossless hex RLE",
+    "schedule": "fixed original origin; late callback never resets the schedule",
+    "timing": "nearest-rank p99 callback duration <70% block; p99 absolute wake <0.1 sample; zero deadline misses",
+    "resources": "prepared buffer components and retained harness payload; excludes stack/allocator/RSS",
+    "safety": "timing runs use no scoped probes; RTSan is separate source/binary-bound evidence",
+    "scope": "three nodes/two edges, zero voices/grains/PDC; not WCET or full G12 qualification",
+}
+ACTIVATION_META = frozenset("rate frames backend callbacks prepare_start_ns prepare_end_ns request_ns return_ns "
+    "committed first_new first_new_sample latency_samples snapshot_latency snapshot_nodes snapshot_edges "
+    "node_latencies edge_delays nodes edges voices grains probes node_audio_bytes automation_bytes delay_bytes "
+    "spectral_bytes prepared_bytes row_stride row_bytes audio_bytes io_bytes harness_payload_bytes misses".split())
+
+
+def activation_percentile(values: list[int]) -> int:
+    _require(bool(values), "empty callback sample set")
+    return sorted(values)[math.ceil(len(values) * .99) - 1]
+
+
+def activation_thresholds(metrics: dict[str, Any], rate: int, frames: int) -> bool:
+    # Cross multiplication preserves strict bounds without float rounding at a gate.
+    return (metrics["p99_duration_ns"] * rate * 10 < 7 * frames * 1_000_000_000 and
+            metrics["p99_absolute_wake_ns"] * rate * 10 < 1_000_000_000 and
+            metrics["deadline_misses"] == 0)
+
+
+def parse_activation_output(stdout: str) -> dict[str, Any]:
+    header = False
+    meta: dict[str, Any] | None = None
+    rows: list[dict[str, Any]] = []
+    for line in stdout.splitlines():
+        if line == ACTIVATION_FIXTURE:
+            _require(not header, "duplicate activation header")
+            header = True
+        elif line.startswith("G12_CELL "):
+            _require(meta is None, "duplicate activation cell")
+            fields = _tokens(line)
+            _require(set(fields) == ACTIVATION_META, "activation metadata fields mismatch")
+            try:
+                meta = {key: value if key == "backend" else [int(v) for v in value.split(",")]
+                        if key in ("node_latencies", "edge_delays") else int(value)
+                        for key, value in fields.items()}
+            except ValueError as exc:
+                raise ReceiptError("malformed activation metadata") from exc
+        elif line.startswith("G12_ROW "):
+            fields = _tokens(line)
+            _require(set(fields) == {"index", "sample", "target_ns", "start_ns", "end_ns", "audio_class", "bits"},
+                     "activation callback fields mismatch")
+            try:
+                row = {key: int(value) for key, value in fields.items() if key != "bits"}
+                row["bits"] = [[int(bits, 16), int(count)] for bits, count in
+                               (item.split(":") for item in fields["bits"].split(","))]
+            except ValueError as exc:
+                raise ReceiptError("malformed callback audio") from exc
+            rows.append(row)
+    _require(header and meta is not None, "activation header or metadata missing")
+    cell = {"metadata": meta, "callbacks": rows}
+    cell["metrics"] = validate_activation_cell(cell)
+    return cell
+
+
+def validate_activation_cell(cell: dict[str, Any]) -> dict[str, Any]:
+    meta, rows = cell["metadata"], cell["callbacks"]
+    _require(set(meta) == ACTIVATION_META, "activation metadata fields mismatch")
+    for key in ACTIVATION_META - {"backend", "node_latencies", "edge_delays"}:
+        _require(type(meta[key]) is int and meta[key] >= 0, f"invalid activation integer {key}")
+    rate, frames, backend = meta["rate"], meta["frames"], meta["backend"]
+    _require((rate, frames, backend) in ACTIVATION_KEYS, "unexpected activation matrix cell")
+    count = meta["callbacks"]
+    _require(16 <= count <= 100000 and len(rows) == count, "callback count mismatch")
+    first = meta["first_new"]
+    _require(meta["committed"] == 1 and 8 <= first < count, "missing commit or audio activation")
+    _require(meta["first_new_sample"] == first * frames, "activation absolute sample mismatch")
+    _require(meta["prepare_start_ns"] <= meta["prepare_end_ns"] < meta["request_ns"] <= meta["return_ns"],
+             "prepare/commit timestamps inconsistent")
+    _require(meta["prepare_end_ns"] < rows[0]["target_ns"], "prepare overlaps callback interval")
+    _require(rows[7]["end_ns"] <= meta["request_ns"] <= rows[first]["end_ns"],
+             "request/activation timing inconsistent")
+    _require(meta["latency_samples"] == meta["snapshot_latency"] == 0 and
+             meta["snapshot_nodes"] == meta["nodes"] == 3 and
+             meta["snapshot_edges"] == meta["edges"] == 2 and
+             meta["node_latencies"] == [0, 0, 0] and meta["edge_delays"] == [0, 0],
+             "zero-PDC snapshot contract mismatch")
+    _require(meta["voices"] == meta["grains"] == meta["probes"] == 0,
+             "activation fixture resource scope mismatch")
+    # This scalar graph retains input/output audio per node plus no automation,
+    # delay or spectral payload. This arithmetic is independent of the C++ stats.
+    _require(meta["node_audio_bytes"] == frames * 6 * 4 and
+             meta["automation_bytes"] == meta["delay_bytes"] == meta["spectral_bytes"] == 0 and
+             meta["prepared_bytes"] == frames * 6 * 4, "prepared buffer components mismatch")
+    _require(meta["row_stride"] == 72 and meta["row_bytes"] == count * meta["row_stride"] and
+             meta["audio_bytes"] == count * frames * 4 and meta["io_bytes"] == 2 * frames * 4 and
+             meta["harness_payload_bytes"] == meta["row_bytes"] + meta["audio_bytes"] + meta["io_bytes"],
+             "harness retained payload mismatch")
+    durations, wake = [], []
+    misses = 0
+    origin = rows[0]["target_ns"]
+    for i, row in enumerate(rows):
+        _require(set(row) == {"index", "sample", "target_ns", "start_ns", "end_ns", "audio_class", "bits"},
+                 "callback fields mismatch")
+        _require(all(type(row[key]) is int and row[key] >= 0 for key in row if key != "bits"),
+                 "invalid callback integer")
+        _require(row["index"] == i and row["sample"] == i * frames, "callback index/sample mismatch")
+        # chrono duration_cast truncates floating seconds to nanoseconds. Allow
+        # only its one-nanosecond representation difference from exact arithmetic.
+        _require(abs(row["target_ns"] - origin - frames * i * 1_000_000_000 // rate) <= 1,
+                 "callback schedule drifted from fixed origin")
+        _require(row["target_ns"] <= row["start_ns"] <= row["end_ns"], "callback timestamps inconsistent")
+        if i:
+            _require(rows[i - 1]["end_ns"] <= row["start_ns"], "callbacks overlap")
+        expected_bits = 0x3e800000 if i < first else 0x3f000000
+        _require(row["audio_class"] == (0 if i < first else 1), "stale/mixed/silent audio class")
+        _require(isinstance(row["bits"], list) and bool(row["bits"]), "callback audio missing")
+        samples = 0
+        for run in row["bits"]:
+            _require(isinstance(run, list) and len(run) == 2 and
+                     all(type(v) is int for v in run) and run[1] > 0 and run[0] == expected_bits,
+                     "independent every-sample gain oracle failed")
+            samples += run[1]
+        _require(samples == frames, "callback audio sample count mismatch")
+        durations.append(row["end_ns"] - row["start_ns"])
+        wake.append(abs(row["start_ns"] - row["target_ns"]))
+        misses += (row["end_ns"] - row["target_ns"]) * rate > frames * 1_000_000_000
+    _require(meta["misses"] == misses, "raw deadline miss count mismatch")
+    metrics = {"p99_duration_ns": activation_percentile(durations),
+               "max_duration_ns": max(durations), "p99_absolute_wake_ns": activation_percentile(wake),
+               "max_absolute_wake_ns": max(wake), "deadline_misses": misses,
+               "prepare_duration_ns": meta["prepare_end_ns"] - meta["prepare_start_ns"],
+               "commit_duration_ns": meta["return_ns"] - meta["request_ns"],
+               "request_to_changed_output_ns": rows[first]["end_ns"] - meta["request_ns"]}
+    metrics["thresholds_met"] = activation_thresholds(metrics, rate, frames)
+    return metrics
+
+
+def _activation_artifact(receipt_path: Path, artifact: dict[str, str]) -> Path:
+    _require(isinstance(artifact, dict) and set(artifact) == {"path", "sha256"}, "malformed activation artifact")
+    name = artifact["path"]
+    _require(isinstance(name, str) and Path(name).name == name and name not in ("", ".", ".."),
+             "activation artifact escapes receipt directory")
+    path = receipt_path.parent / name
+    _require(path.resolve().parent == receipt_path.parent.resolve() and path.is_file(),
+             "activation artifact missing or outside directory")
+    _require(artifact["sha256"] == sha256_file(path), "activation artifact digest mismatch")
+    return path
+
+
+def validate_activation_receipt(path: Path, receipt: dict[str, Any], source_root: Path | None) -> None:
+    _require(receipt.get("receipt_sha256") == receipt_digest(receipt), "receipt digest mismatch")
+    _require(receipt.get("fixture") == ACTIVATION_FIXTURE and receipt.get("status") == "PARTIAL" and
+             receipt.get("measurement_contract") == ACTIVATION_CONTRACT, "activation type/contract mismatch")
+    _require(receipt.get("mode") in ("pilot", "qualification"), "unknown activation mode")
+    qualifying = receipt["mode"] == "qualification"
+    _require(receipt.get("timing_qualified") is qualifying, "pilot cannot claim timing qualification")
+    count = receipt.get("callback_count")
+    _require(type(count) is int and (count == 100000 if qualifying else 16 <= count <= 128),
+             "activation callback count does not match lane")
+    _require(isinstance(receipt.get("source_sha"), str) and re.fullmatch(r"[0-9a-f]{40}", receipt["source_sha"]),
+             "activation source commit invalid")
+    _require(receipt.get("build_profile", {}).get("CMAKE_BUILD_TYPE") == "Release" and
+             not receipt["build_profile"].get("PULP_SANITIZER"), "activation timing requires ordinary Release")
+    _require(receipt.get("matrix") == {"rates": list(ACTIVATION_RATES), "frames": list(ACTIVATION_BLOCKS),
+             "backends": list(ACTIVATION_BACKENDS), "expected_cell_count": 24}, "activation matrix dimensions mismatch")
+    artifacts = receipt["artifacts"]
+    source = _activation_artifact(path, artifacts["source_fixture"])
+    executable = _activation_artifact(path, artifacts["executable"])
+    _require(receipt.get("source_fixture") == {"path": ACTIVATION_SOURCE.as_posix(), "sha256": sha256_file(source)},
+             "activation source fixture binding mismatch")
+    _require(receipt.get("executable_sha256") == sha256_file(executable), "activation executable binding mismatch")
+    source_root = source_root or Path(__file__).resolve().parents[1]
+    if source_root is not None:
+        committed = subprocess.run(["git", "-C", str(source_root), "show",
+                                   f"{receipt['source_sha']}:{ACTIVATION_SOURCE.as_posix()}"],
+                                  check=True, capture_output=True).stdout
+        _require(hashlib.sha256(committed).hexdigest() == sha256_file(source), "activation source commit mismatch")
+    cells = receipt.get("cells")
+    _require(isinstance(cells, list) and len(cells) == 24, "activation matrix cell count mismatch")
+    seen = set()
+    for cell in cells:
+        _require(isinstance(cell, dict) and set(cell) == {"metadata", "metrics", "returncode", "raw_stdout", "raw_stderr"},
+                 "activation cell fields mismatch")
+        meta = cell["metadata"]
+        key = (meta["rate"], meta["frames"], meta["backend"])
+        _require(key in ACTIVATION_KEYS and key not in seen, "duplicate/unexpected activation cell")
+        seen.add(key)
+        _require(meta["callbacks"] == count and cell.get("returncode") == 0, "shortened or failed activation run")
+        raw = _activation_artifact(path, cell["raw_stdout"])
+        stderr = _activation_artifact(path, cell["raw_stderr"])
+        _require(not stderr.read_bytes(), "activation run wrote stderr")
+        parsed = parse_activation_output(raw.read_text(encoding="utf-8"))
+        metrics = parsed["metrics"]
+        _require(cell["metrics"] == metrics, "activation raw percentile/miss/transition summary mismatch")
+        _require(all(cell[field] == parsed[field] for field in ("metadata", "metrics")),
+                 "activation receipt differs from raw callbacks/audio")
+        _require(not qualifying or metrics["thresholds_met"], "paced activation timing thresholds failed")
+    _require(seen == ACTIVATION_KEYS, "activation matrix incomplete")
+
+
+
+def run_activation_controls(path: Path, source_root: Path | None = None) -> None:
+    validate_receipt(path, source_root)
+    original_text = path.read_text(encoding="utf-8")
+    original = json.loads(original_text)
+    # Each mutation is re-signed; restoration is checked after each rejection.
+    mutations = (
+        ("missing_cell", lambda r: r["cells"].pop()),
+        ("duplicate_cell", lambda r: r["cells"].__setitem__(1, r["cells"][0])),
+        ("short_count", lambda r: r.__setitem__("callback_count", r["callback_count"] - 1)),
+        ("false_percentile", lambda r: r["cells"][0]["metrics"].__setitem__("p99_duration_ns", 0)),
+        ("false_misses", lambda r: r["cells"][0]["metrics"].__setitem__("deadline_misses", -1)),
+        ("false_pdc", lambda r: r["cells"][0]["metadata"].__setitem__("latency_samples", 1)),
+        ("false_memory", lambda r: r["cells"][0]["metadata"].__setitem__("prepared_bytes", 0)),
+        ("false_source", lambda r: r["source_fixture"].__setitem__("sha256", "0" * 64)),
+        ("false_binary", lambda r: r.__setitem__("executable_sha256", "0" * 64)),
+    )
+    for name, mutate in mutations:
+        changed = json.loads(original_text)
+        mutate(changed)
+        changed["receipt_sha256"] = receipt_digest(changed)
+        try:
+            path.write_text(json.dumps(changed, indent=2, sort_keys=True) + "\n")
+            try:
+                validate_receipt(path, source_root)
+            except ReceiptError:
+                print(f"activation_control={name} rejected=semantic restored=pending")
+            else:
+                raise ReceiptError(f"planted activation negative passed: {name}")
+        finally:
+            path.write_text(original_text)
+        validate_receipt(path, source_root)
+    # Also re-sign a raw every-sample audio lie. This is distinct from an
+    # unbound receipt summary and does not rely on stale file hashes.
+    raw = path.parent / original["cells"][0]["raw_stdout"]["path"]
+    saved = raw.read_bytes()
+    try:
+        _require(b"bits=3f000000:" in saved, "raw positive has no new audio")
+        raw.write_bytes(saved.replace(b"bits=3f000000:", b"bits=3ec00000:", 1))
+        changed = json.loads(original_text)
+        changed["cells"][0]["raw_stdout"]["sha256"] = sha256_file(raw)
+        changed["receipt_sha256"] = receipt_digest(changed)
+        path.write_text(json.dumps(changed, indent=2, sort_keys=True) + "\n")
+        try:
+            validate_receipt(path, source_root)
+        except ReceiptError:
+            print("activation_control=resigned_raw_audio rejected=semantic restored=pending")
+        else:
+            raise ReceiptError("planted raw audio negative passed")
+    finally:
+        raw.write_bytes(saved)
+        path.write_text(original_text)
+    validate_receipt(path, source_root)
+    print("activation_controls=pass positive=pass broken=10_rejected restored=pass")
+
+
+def record_activation(args: argparse.Namespace) -> int:
+    root, build = Path(args.source_root).resolve(), Path(args.build_dir).resolve()
+    executable, output = Path(args.executable).resolve(), Path(args.output_dir).resolve()
+    values = _cache_values(build)
+    _require(values.get("CMAKE_HOME_DIRECTORY") == str(root) and executable.is_relative_to(build),
+             "activation build/source provenance mismatch")
+    _require(values.get("CMAKE_BUILD_TYPE") == "Release" and not values.get("PULP_SANITIZER"),
+             "activation timing requires ordinary Release")
+    _require(args.mode != "qualification" or args.callbacks == 100000, "qualification requires 100000 callbacks")
+    _require(args.mode != "pilot" or 16 <= args.callbacks <= 128, "pilot requires 16..128 callbacks")
+    _require(subprocess.run(["git", "-C", str(root), "diff", "--quiet", "HEAD", "--"]).returncode == 0,
+             "commit tracked source changes before recording")
+    sha = _source_sha(root)
+    source = root / ACTIVATION_SOURCE
+    committed = subprocess.run(["git", "-C", str(root), "show", f"{sha}:{ACTIVATION_SOURCE.as_posix()}"],
+                               check=True, capture_output=True).stdout
+    _require(hashlib.sha256(committed).hexdigest() == sha256_file(source), "commit activation fixture before recording")
+    output.mkdir(parents=True, exist_ok=True)
+    binary_copy, source_copy = output / "activation-executable", output / "source-fixture.inc"
+    shutil.copy2(executable, binary_copy)
+    shutil.copy2(source, source_copy)
+    def artifact(p: Path) -> dict[str, str]:
+        return {"path": p.name, "sha256": sha256_file(p)}
+    receipt = {"schema": ACTIVATION_SCHEMA, "fixture": ACTIVATION_FIXTURE, "status": "PARTIAL",
+               "mode": args.mode, "timing_qualified": args.mode == "qualification",
+               "measurement_contract": ACTIVATION_CONTRACT, "callback_count": args.callbacks,
+               "source_sha": sha, "source_fixture": {"path": ACTIVATION_SOURCE.as_posix(), "sha256": sha256_file(source)},
+               "executable_sha256": sha256_file(binary_copy),
+               "build_profile": {key: values.get(key, "") for key in ("CMAKE_BUILD_TYPE", "PULP_SANITIZER")},
+               "matrix": {"rates": list(ACTIVATION_RATES), "frames": list(ACTIVATION_BLOCKS),
+                          "backends": list(ACTIVATION_BACKENDS), "expected_cell_count": 24},
+               "artifacts": {"source_fixture": artifact(source_copy), "executable": artifact(binary_copy)}, "cells": []}
+    for rate, frames, backend in sorted(ACTIVATION_KEYS):
+        env = dict(os.environ)
+        for key in tuple(env):
+            if key.startswith(("G12_ACTIVATION_", "G12_RTSAN_")):
+                env.pop(key)
+        env.update(G12_ACTIVATION_RATE=str(rate), G12_ACTIVATION_FRAMES=str(frames),
+                   G12_ACTIVATION_CALLBACKS=str(args.callbacks), G12_ACTIVATION_BACKEND=backend)
+        stem = f"{rate}-{frames}-{backend}"
+        stdout_path, stderr_path = output / (stem + ".txt"), output / (stem + ".stderr")
+        with stdout_path.open("w") as out, stderr_path.open("w") as err:
+            result = subprocess.run([str(binary_copy), "G12 paced activation receipt cell"], env=env,
+                                    stdout=out, stderr=err, timeout=args.timeout_seconds)
+        cell = parse_activation_output(stdout_path.read_text(encoding="utf-8"))
+        cell.pop("callbacks")
+        cell.update(returncode=result.returncode, raw_stdout=artifact(stdout_path), raw_stderr=artifact(stderr_path))
+        receipt["cells"].append(cell)
+    receipt["receipt_sha256"] = receipt_digest(receipt)
+    path = output / "receipt.json"
+    path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    validate_receipt(path, root)
+    print(f"activation_receipt={path} mode={args.mode} timing_qualified={receipt['timing_qualified']}")
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     sub = root.add_subparsers(dest="command", required=True)
@@ -695,26 +1023,37 @@ def parser() -> argparse.ArgumentParser:
     record_parser.add_argument("--executable", required=True)
     record_parser.add_argument("--output-dir", required=True)
     record_parser.add_argument("--timeout-seconds", type=float, default=300.0)
+    activation_parser = sub.add_parser("record-activation", help="record the typed paced activation lane")
+    activation_parser.add_argument("--source-root", default=".")
+    activation_parser.add_argument("--build-dir", default="build")
+    activation_parser.add_argument("--executable", required=True)
+    activation_parser.add_argument("--output-dir", required=True)
+    activation_parser.add_argument("--mode", choices=("pilot", "qualification"), default="pilot")
+    activation_parser.add_argument("--callbacks", type=int, default=64)
+    activation_parser.add_argument("--timeout-seconds", type=float, default=660.0)
     validate_parser = sub.add_parser("validate", help="validate a receipt and its artifacts")
     validate_parser.add_argument("receipt", type=Path)
     validate_parser.add_argument("--source-root", type=Path, help="also verify fixture bytes in the recorded Git commit")
     controls_parser = sub.add_parser("controls", help="run positive and planted-negative controls")
     controls_parser.add_argument("receipt", type=Path)
+    controls_parser.add_argument("--source-root", type=Path)
     return root
 
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = parser().parse_args(list(argv) if argv is not None else None)
     try:
+        if args.command == "record-activation":
+            return record_activation(args)
         if args.command == "record":
             return record(args)
         if args.command == "validate":
             validate_receipt(args.receipt, args.source_root)
             print("r2_receipt=pass")
             return 0
-        run_controls(args.receipt)
+        run_controls(args.receipt, args.source_root)
         return 0
-    except (ReceiptError, OSError, subprocess.SubprocessError) as exc:
+    except (ReceiptError, OSError, subprocess.SubprocessError, KeyError, TypeError, ValueError) as exc:
         print(f"r2_receipt_error={exc}", file=sys.stderr)
         return 1
 
