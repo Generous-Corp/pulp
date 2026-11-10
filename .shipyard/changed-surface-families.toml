@@ -2509,6 +2509,41 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-02e24b8199b8"
+paths = ["tools/scripts/test_clap_preset_library_gate.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clap-preset-library-gate",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-3e78419f70b0"
 paths = ["tools/scripts/test_clean_build_cov.py"]
 tests = [
@@ -8079,6 +8114,7 @@ paths = [
   "tools/scripts/test_checkout_preflight.py",
   "tools/scripts/test_ci_diff_base.py",
   "tools/scripts/test_ci_routing_digest.py",
+  "tools/scripts/test_clap_preset_library_gate.py",
   "tools/scripts/test_clean_build_cov.py",
   "tools/scripts/test_clean_worktree_builds.py",
   "tools/scripts/test_clean_worktree_planning.py",
@@ -8684,6 +8720,7 @@ paths = [
   "tools/scripts/test_checkout_preflight.py",
   "tools/scripts/test_ci_diff_base.py",
   "tools/scripts/test_ci_routing_digest.py",
+  "tools/scripts/test_clap_preset_library_gate.py",
   "tools/scripts/test_clean_build_cov.py",
   "tools/scripts/test_clean_worktree_builds.py",
   "tools/scripts/test_clean_worktree_planning.py",

@@ -17,12 +17,8 @@
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/modulation_lane.hpp>
 #include <pulp/format/preset_program_router.hpp>
-// WebCLAP (wasi) has no preset filesystem and compiles a PresetManager stub, so
-// the preset library and Program Change selection are not built there.
-#if defined(__wasi__)
-#define PULP_CLAP_PRESET_LIBRARY 0
-#else
-#define PULP_CLAP_PRESET_LIBRARY 1
+#include <pulp/format/detail/clap_preset_library_gate.hpp>
+#if PULP_CLAP_PRESET_LIBRARY
 #include <pulp/state/preset_library.hpp>
 #endif
 #include <pulp/state/preset_manager.hpp>
