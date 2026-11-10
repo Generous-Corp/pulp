@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/note_renderer.hpp",
+  "fingerprint": "sha256:b4abb63c3c555e5478ce5153e9f967e7fb074d744211c6fa6366720e04cbed15",
+  "include": "pulp/playback/note_renderer.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Note emission for one render block, including the detail-namespace offset- in-range helper and NoteRenderCode. It is the internal note half of the renderer shell rather than an advertised consumer capability."
+}

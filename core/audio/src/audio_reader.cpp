@@ -3,9 +3,8 @@
 #include "aiff_parser.hpp"
 #include "decode_limits_detail.hpp"
 
-#include <choc/audio/choc_AudioFileFormat_WAV.h>
-#include <choc/audio/choc_SampleBuffers.h>
-#include "pcm_float_scaling.hpp"
+#include "byte_source_cursor.hpp"
+#include "wav_frame_reader.hpp"
 
 #include <dr_flac.h>
 #include <dr_mp3.h>
@@ -117,8 +116,8 @@ class FileByteSource final : public AudioByteSource {
     std::uint64_t position_ = 0;
 };
 
-// Buffered, seekable std::streambuf over an AudioByteSource, for the WAV and
-// AIFF parsers, which read through std::istream.
+// Buffered, seekable std::streambuf over an AudioByteSource, for the AIFF
+// parser, which reads through std::istream.
 class SourceStreamBuf final : public std::streambuf {
   public:
     explicit SourceStreamBuf(AudioByteSource& source) : source_(source) {
@@ -234,6 +233,19 @@ Container container_from_extension(std::string_view hint) {
     return Container::Unknown;
 }
 
+// An MPEG audio frame header (ISO/IEC 11172-3 and 13818-3) that names Layer
+// III with a usable bitrate and sample rate: an 11-bit sync, a version other
+// than the reserved one (MPEG 2.5 included), layer bits 01, a bitrate index
+// other than 15 and a sample-rate index other than 3.
+bool is_layer3_frame_header(const std::uint8_t* h) {
+    const bool sync = h[0] == 0xFF && (h[1] & 0xE0) == 0xE0;
+    const bool version_ok = ((h[1] >> 3) & 0x03) != 0x01;
+    const bool layer3 = (h[1] & 0x06) == 0x02;
+    const bool bitrate_ok = (h[2] >> 4) != 0x0F;
+    const bool sample_rate_ok = ((h[2] >> 2) & 0x03) != 0x03;
+    return sync && version_ok && layer3 && bitrate_ok && sample_rate_ok;
+}
+
 Container sniff_container(AudioByteSource& source) {
     std::array<std::uint8_t, 12> head{};
     const bool rewound = source.seek(0);
@@ -254,7 +266,12 @@ Container sniff_container(AudioByteSource& source) {
     // An ID3v2 tag also prefixes some FLAC files. Such a FLAC with no
     // extension sniffs as MP3, fails to open, and the caller falls back to
     // the registry reader; a ".flac" hint avoids the detour.
-    if (starts_with(0, "ID3") || (got >= 2 && head[0] == 0xFF && (head[1] & 0xE0) == 0xE0))
+    if (starts_with(0, "ID3"))
+        return Container::Mp3;
+    // Without a tag, only a valid Layer III header counts. 16-bit PCM is
+    // full of FF Ex byte pairs, and many of them read as Layer I or II
+    // headers, so a bare frame sync is not evidence of MP3 on its own.
+    if (got >= 4 && is_layer3_frame_header(head.data()))
         return Container::Mp3;
     return Container::Unknown;
 }
@@ -539,101 +556,23 @@ struct VorbisDecoder final : StreamingDecoder {
     }
 };
 
-struct WavDataChunk {
-    std::uint64_t payload_offset = 0;
-    std::uint64_t declared_size = 0; // the 32-bit size field as written
-};
-
-// A RIFF/RF64 file's "data" chunk payload offset and declared size, or
-// nullopt. Leaves the source position unspecified.
-std::optional<WavDataChunk> wav_data_chunk(AudioByteSource& source) {
-    std::uint8_t header[12];
-    if (!source.seek(0) || source.read(header, sizeof(header)) != sizeof(header))
-        return std::nullopt;
-    std::uint64_t position = sizeof(header);
-    for (int chunk = 0; chunk < 64; ++chunk) {
-        std::uint8_t chunk_header[8];
-        if (!source.seek(position) ||
-            source.read(chunk_header, sizeof(chunk_header)) != sizeof(chunk_header))
-            return std::nullopt;
-        const std::uint64_t size = static_cast<std::uint64_t>(chunk_header[4]) |
-                                   (static_cast<std::uint64_t>(chunk_header[5]) << 8) |
-                                   (static_cast<std::uint64_t>(chunk_header[6]) << 16) |
-                                   (static_cast<std::uint64_t>(chunk_header[7]) << 24);
-        if (std::memcmp(chunk_header, "data", 4) == 0)
-            return WavDataChunk{position + sizeof(chunk_header), size};
-        position += sizeof(chunk_header) + size + (size & 1u);
-    }
-    return std::nullopt;
-}
-
 struct WavDecoder final : Decoder {
     bool open(std::unique_ptr<AudioByteSource> byte_source) {
-        source = std::move(byte_source);
-        // An RF64 header's ds64 length is not clamped to the bytes present,
-        // and choc reads past the end without reporting it. Bound the frame
-        // count by the bytes that follow the data chunk header.
-        const auto data_chunk = wav_data_chunk(*source);
-        if (!data_chunk || !source->seek(0))
+        if (!wav.open(std::move(byte_source)) || !reader.open(wav.cursor, wav.probe))
             return false;
-        const auto data_offset = data_chunk->payload_offset;
-        buffer = std::make_unique<SourceStreamBuf>(*source);
-        stream = std::make_shared<std::istream>(buffer.get());
-        choc::audio::WAVAudioFileFormat<false> format;
-        reader = format.createReader(stream);
-        if (!reader)
-            return false;
-        const auto props = reader->getProperties();
-        if (!(props.sampleRate > 0) || props.numChannels == 0)
-            return false;
-        info.sample_rate = static_cast<std::uint32_t>(props.sampleRate);
-        info.num_channels = props.numChannels;
-        const std::uint64_t frame_bytes =
-            static_cast<std::uint64_t>(choc::audio::getBytesPerSample(props.bitDepth)) *
-            props.numChannels;
-        const std::uint64_t present =
-            data_offset < source->size() ? source->size() - data_offset : 0;
-        info.num_frames =
-            frame_bytes == 0 ? 0 : std::min<std::uint64_t>(props.numFrames, present / frame_bytes);
-        // Zero frames is a valid empty file only when the data chunk declares
-        // zero bytes; a claim the file does not hold at all is refused, as
-        // the registry's whole-file reader refuses it.
-        if (info.num_frames == 0 && data_chunk->declared_size != 0)
-            return false;
-        info.bits_per_sample = choc::audio::getBytesPerSample(props.bitDepth) * 8;
-        bit_depth = props.bitDepth;
-        finish_info(info, props.formatName);
+        info = detail::wav_file_info(wav.probe);
         return true;
     }
 
     std::uint64_t decode(std::uint64_t frame_offset, float* const* out,
                          std::uint64_t frames) override {
-        constexpr std::uint64_t kMaxViewFrames = 1u << 20;
-        pointers.resize(info.num_channels);
-        std::uint64_t produced = 0;
-        while (produced < frames) {
-            const auto count = std::min(frames - produced, kMaxViewFrames);
-            for (std::uint32_t ch = 0; ch < info.num_channels; ++ch)
-                pointers[ch] = out[ch] + produced;
-            // Pulp's integer scaling (pcm_float_scaling.hpp), shared with the
-            // registry's whole-file decode so both WAV paths agree bit for bit.
-            if (!detail::read_pulp_float(*reader, bit_depth, frame_offset + produced,
-                                         pointers.data(), info.num_channels,
-                                         static_cast<std::uint32_t>(count)))
-                break;
-            produced += count;
-        }
-        return produced;
+        return reader.read_planar(frame_offset, frames, out);
     }
 
     // Declared in dependency order so the reader is destroyed before the
-    // stream it reads and the source under it.
-    std::unique_ptr<AudioByteSource> source;
-    std::unique_ptr<SourceStreamBuf> buffer;
-    std::shared_ptr<std::istream> stream;
-    std::unique_ptr<choc::audio::AudioFileReader> reader;
-    choc::audio::BitDepth bit_depth = choc::audio::BitDepth::unknown;
-    std::vector<float*> pointers;
+    // source its cursor reads.
+    detail::WavSource wav;
+    detail::WavFrameReader reader;
 };
 
 struct AiffDecoder final : Decoder {

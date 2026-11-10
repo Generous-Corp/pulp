@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/spectrum_trace.hpp",
+  "fingerprint": "sha256:2db177e808a86cbe881d3a8c636eb33716db1a0ed556fbf1049a5d23583c5bee"
+}

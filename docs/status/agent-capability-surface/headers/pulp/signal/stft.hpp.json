@@ -1,0 +1,12 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/stft.hpp",
+  "fingerprint": "sha256:1e8bf8737a90a4fc8b7330af7c4b1c9d39f5db95ad24803544369801ccc181ad",
+  "include": "pulp/signal/stft.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.bounded-sample-history",
+    "signal.window-functions"
+  ],
+  "rationale": "STFT consumes both reusable primitives while retaining its existing analysis API; it is not a newly claimed capability in this slice."
+}

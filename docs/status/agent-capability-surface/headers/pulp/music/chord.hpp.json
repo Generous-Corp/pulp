@@ -1,0 +1,13 @@
+{
+  "domain": "music",
+  "source": "core/music/include/pulp/music/chord.hpp",
+  "fingerprint": "sha256:2715a6ef063ec9815edd4955a23906bc38182b7c5e99db0a75073f14f9ce8323",
+  "include": "pulp/music/chord.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "music.chord-recognition",
+    "music.chord-spelling",
+    "music.chord-voicing"
+  ],
+  "rationale": "Shared fixed-capacity chord values and named-quality formulas support the curated spelling, recognition, and voicing operations."
+}

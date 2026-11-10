@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/loop_point_analyzer.hpp",
+  "fingerprint": "sha256:54cc729b3681c1600a74f911c5857ab6a847f0083ad96aff356deb50d5a41d94",
+  "include": "pulp/audio/loop_point_analyzer.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

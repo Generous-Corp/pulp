@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/sample_memory_governor.hpp",
+  "fingerprint": "sha256:f4dc0bd180a59d54107b20dcb5465b4525dc643b6f33548c3567ed9d08e21124",
+  "include": "pulp/audio/sample_memory_governor.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

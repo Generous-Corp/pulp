@@ -1,0 +1,11 @@
+{
+ "name": "confirm-failure-driver-link-selftest",
+ "record": {
+  "entry": "tools/scripts/test_confirm_failure_driver_link.py",
+  "inputs": [
+   "tools/scripts/confirm_failure_driver_link.py",
+   "tools/scripts/test_confirm_failure_driver_link.py"
+  ],
+  "kind": "python"
+ }
+}

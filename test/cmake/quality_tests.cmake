@@ -308,6 +308,15 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(agent-capability-manifest-selftest PROPERTIES
         PROCESSORS 8
         TIMEOUT 300)
+    # The capability records' one-file-per-entry layout: lossless against the
+    # single files it replaced, canonical, and conflict-free for two branches
+    # that add different capability headers (git merge-tree, with the
+    # single-file layout as the negative control).
+    add_test(NAME agent-capability-store-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_store.py")
+    set_tests_properties(agent-capability-store-selftest PROPERTIES
+        LABELS "pr" TIMEOUT 120)
     add_test(NAME agent-capability-rederive-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_rederive.py")
@@ -319,12 +328,14 @@ if(Python3_Interpreter_FOUND)
         PROCESSORS 8
         TIMEOUT 300)
     # The rederive self-test deliberately rewrites the manifest script's two
-    # generated counters before restoring them. Keep readers from observing
-    # that temporary state while retaining parallelism for unrelated tests.
+    # generated counters and a surface record before restoring them. Keep
+    # readers from observing that temporary state while retaining parallelism
+    # for unrelated tests.
     set_tests_properties(
         agent-capability-manifest-check
         agent-capability-manifest-selftest
         agent-capability-rederive-selftest
+        agent-capability-store-selftest
         PROPERTIES RESOURCE_LOCK agent-capability-manifest-source)
     add_test(NAME agent-capability-sdk-handoff-selftest
         COMMAND ${Python3_EXECUTABLE}
@@ -421,6 +432,8 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME dependency-request-recorder-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_dependency_request_check.py")
     if(UNIX)
+        add_test(NAME apt-install-retry-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_apt_install_retry.py")
         add_test(NAME ci-cause-notices-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_ci_cause_notices.py")
     endif()
@@ -893,6 +906,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME pr-head-affected-tests-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_pr_head_affected_tests.py")
         set_tests_properties(pr-head-affected-tests-selftest PROPERTIES TIMEOUT 120)
+        # An approved head's deferred affected tests run on the head before
+        # the merge queue: the re-run decision and both workflows' wiring.
+        add_test(NAME deferred-admission-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_deferred_admission.py")
+        set_tests_properties(deferred-admission-selftest PROPERTIES TIMEOUT 60)
         # The diff-scoped drift checks must carry PULP_DIFF_SCOPED in this
         # configure's inventory, or their base re-run is believed again.
         add_test(NAME pr-head-diff-scoped-registrations COMMAND ${Python3_EXECUTABLE}
@@ -906,6 +924,15 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME flake-exoneration-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_flake_exoneration_shadow.py")
         set_tests_properties(flake-exoneration-shadow-selftest PROPERTIES TIMEOUT 120)
+        # The merge-group flake-exoneration verdict (excuses a failed run only
+        # when every failing test is a corroborated, untouched, non-build flake)
+        # and the quarantine of tests it keeps excusing.
+        add_test(NAME flake-exoneration-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_flake_exoneration.py")
+        set_tests_properties(flake-exoneration-selftest PROPERTIES TIMEOUT 120)
+        add_test(NAME flake-quarantine-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_flake_quarantine.py")
+        set_tests_properties(flake-quarantine-selftest PROPERTIES TIMEOUT 120)
         # Advance notice on the gate before the A2T history-window guard fails.
         add_test(NAME a2t-headroom-annotation-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_a2t_headroom_annotation.py")
@@ -1816,6 +1843,12 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(clean-worktree-builds-selftest PROPERTIES TIMEOUT 600)
         # Stages live processes and worktrees on the host it runs on.
         set_property(TEST clean-worktree-builds-selftest APPEND PROPERTY LABELS environment-bound)
+        # The driver-link parsers over captured ninja and CMake output; the
+        # cases that need a real generator are in confirm-failure-harness.
+        add_test(NAME confirm-failure-driver-link-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_confirm_failure_driver_link
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(confirm-failure-driver-link-selftest PROPERTIES TIMEOUT 60)
         add_test(NAME clean-worktree-planning-selftest
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_planning
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")

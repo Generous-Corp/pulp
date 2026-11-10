@@ -1529,6 +1529,41 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-c1c36d58e20a"
+paths = ["tools/scripts/test_agent_capability_store.py"]
+tests = [
+  "agent-capability-store-selftest",
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-17fa75ff6dd1"
 paths = ["tools/scripts/test_agent_hook_paths.py"]
 tests = [
@@ -7799,6 +7834,7 @@ tests = [
   "control-product-b-rust-cli-absence",
   "decisions-contract-selftest",
   "decisions-contract-validate",
+  "deferred-admission-selftest",
   "diff-cover-targets-selftest",
   "example-validation-paths",
   "executable-keys-selftest",
@@ -7988,6 +8024,7 @@ paths = [
   "tools/scripts/test_add_component.py",
   "tools/scripts/test_advisory_macos_runner_policy.py",
   "tools/scripts/test_affected_targets.py",
+  "tools/scripts/test_agent_capability_store.py",
   "tools/scripts/test_agent_hook_paths.py",
   "tools/scripts/test_android_premerge_probe.py",
   "tools/scripts/test_android_surface_runtime_contract.py",
@@ -8592,6 +8629,7 @@ paths = [
   "tools/scripts/test_add_component.py",
   "tools/scripts/test_advisory_macos_runner_policy.py",
   "tools/scripts/test_affected_targets.py",
+  "tools/scripts/test_agent_capability_store.py",
   "tools/scripts/test_agent_hook_paths.py",
   "tools/scripts/test_android_premerge_probe.py",
   "tools/scripts/test_android_surface_runtime_contract.py",
@@ -8984,6 +9022,7 @@ tests = [
   "agent-capability-manifest-check",
   "agent-capability-manifest-selftest",
   "agent-capability-rederive-selftest",
+  "agent-capability-store-selftest",
   "agent-panel-clipped-is-rejected",
   "agent-panel-native-invariants",
   "clean-worktree-builds-selftest",

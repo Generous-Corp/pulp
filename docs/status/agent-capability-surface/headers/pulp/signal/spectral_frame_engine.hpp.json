@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/spectral_frame_engine.hpp",
+  "fingerprint": "sha256:652c2aa1bf00f6b2935bbb6b27bdfe3a5466668a596ab6b1d15fa315d0721d91",
+  "include": "pulp/signal/spectral_frame_engine.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "The shared STFT analysis and weighted overlap-add engine under the spectral mask, delay-matrix and pitch/time processors. It is plumbing those capabilities compose, not a behavior an agent selects on its own: its frame grid, full-overlap stream start and fixed fft_size + hop latency are promises the capabilities built on it inherit."
+}

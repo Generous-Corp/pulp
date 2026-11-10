@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/true_peak_limiter.hpp",
+  "fingerprint": "sha256:027278e6f446a6eb769576cea18e0007648d7d5bcd25231023f1d09a844a84ca"
+}

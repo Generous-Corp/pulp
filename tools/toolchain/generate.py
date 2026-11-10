@@ -46,9 +46,15 @@ EXPECTED = "tools/toolchain/expected.json"
 # so this file, not a host's default toolchain, decides which rustc a build
 # uses; generating it from the manifest is what keeps every host on one Rust.
 RUST_TOOLCHAIN = "experimental/pulp-rs/rust-toolchain.toml"
-# The tools check_env reports, by [toolchain] key. Xcode and tart are absent:
-# Xcode is recorded by the golden receipt, and tart is a host tool tartci owns.
-CHECKED = ("python", "cmake", "ninja", "node", "rust", "clang_format")
+# The tools check_env reports, by [toolchain] key. tart is absent: it is a host
+# tool tartci owns. Xcode is checked too, from its own "xcode" entry, because a
+# host or guest on another Xcode builds with another compiler and can never
+# share the gate's ccache (compiler_check=content hashes the compiler).
+CHECKED = ("python", "cmake", "ninja", "node", "rust", "clang_format", "ccache", "git_lfs")
+# Every exact x.y.z pin, and the subset [mise.tools] may install.
+PINNED = ("cmake", "ninja", "python", "node", "rust", "tart", "clang_format", "ccache", "git_lfs")
+# An OCI image reference pinned by digest: a tag such as :latest moves.
+DIGEST_IMAGE = re.compile(r"^[a-z0-9.-]+(/[a-z0-9._-]+)+@sha256:[0-9a-f]{64}$")
 # Shipyard's pin. tools/shipyard.toml keeps its prose and the two keys Shipyard
 # reads (version, repo), which generate.py owns; the asset digests go into a
 # checksum file tools/install-shipyard.sh reads without a TOML parser.
@@ -60,7 +66,7 @@ SHIPYARD_INSTALLER = "install.sh"
 SHIPYARD_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 
 TARGETS = {
-    "macos": {"keys": ("xcode", "xcode_build", "cmake", "ninja", "python", "node", "rust", "rust_targets", "tart", "clang_format"), "manager": "brew"},
+    "macos": {"keys": ("xcode", "xcode_build", "macos", "macos_build", "cmake", "ninja", "python", "node", "rust", "rust_targets", "tart", "clang_format"), "manager": "brew"},
     "intel": {"keys": ("rust", "rust_targets"), "manager": None},
     "linux": {"keys": ("cmake", "python", "node"), "manager": "apt"},
     "windows": {"keys": ("cmake", "python", "node"), "manager": "choco"},
@@ -78,7 +84,7 @@ def load(path: Path = SOURCE) -> tuple[dict, str]:
         raise ValueError(f"cannot read toolchain authority: {exc}") from exc
     if data.get("schema") != 1 or not isinstance(data.get("toolchain"), dict):
         raise ValueError("toolchain authority must have schema=1 and [toolchain]")
-    required = ("xcode", "cmake", "ninja", "python", "node", "rust", "tart", "clang_format")
+    required = ("xcode", "xcode_build", "macos", "macos_build", "macos_base") + PINNED
     missing = [key for key in required if key not in data["toolchain"]]
     if missing:
         raise ValueError("toolchain authority missing: " + ", ".join(missing))
@@ -123,7 +129,7 @@ def _require_exact(data: dict) -> None:
     mise = data.get("mise")
     if not isinstance(mise, dict) or not isinstance(mise.get("tools"), dict) or not mise["tools"]:
         raise ValueError("toolchain authority must have [mise] with [mise.tools.*] tables")
-    pinned = [key for key in ("cmake", "ninja", "python", "node", "rust", "tart", "clang_format")]
+    pinned = list(PINNED)
     floating = [
         f"{key} = {tc.get(key)!r}"
         for key in pinned
@@ -133,6 +139,12 @@ def _require_exact(data: dict) -> None:
         floating.append(f"xcode = {tc.get('xcode')!r}")
     if not isinstance(tc.get("xcode_build"), str) or not re.match(r"^[0-9]{2}[A-Z][0-9]+[a-z]?$", tc["xcode_build"]):
         floating.append(f"xcode_build = {tc.get('xcode_build')!r}")
+    if not isinstance(tc.get("macos"), str) or not EXACT_XCODE.match(tc["macos"]):
+        floating.append(f"macos = {tc.get('macos')!r}")
+    if not isinstance(tc.get("macos_build"), str) or not re.match(r"^[0-9]{2}[A-Z][0-9]+[a-z]?$", tc["macos_build"]):
+        floating.append(f"macos_build = {tc.get('macos_build')!r}")
+    if not isinstance(tc.get("macos_base"), str) or not DIGEST_IMAGE.match(tc["macos_base"]):
+        floating.append(f"macos_base = {tc.get('macos_base')!r} (must be pinned by @sha256 digest)")
     if not isinstance(mise.get("version"), str) or not re.match(r"^[0-9]{4}\.[0-9]+\.[0-9]+$", mise["version"]):
         floating.append(f"mise.version = {mise.get('version')!r}")
     if not isinstance(mise.get("source_commit"), str) or not re.match(r"^[0-9a-f]{40}$", mise["source_commit"]):
@@ -245,6 +257,16 @@ def _set_owned_keys(lines: list[str], section: str, values: dict[str, object], k
             end += 1
 
 
+def _set_top_level_key(lines: list[str], key: str, value: str) -> None:
+    """Rewrite `key = ...` above the first [section]; the key must already exist."""
+    first = next((i for i, line in enumerate(lines) if line.startswith("[")), len(lines))
+    for i in range(first):
+        if re.match(rf"^{re.escape(key)}\s*=", lines[i]):
+            lines[i] = f"{key} = {toml_value(value)}\n"
+            return
+    raise ValueError(f"missing top-level {key} = ... before the first section")
+
+
 def _set_packages(lines: list[str], manager: str, packages: list[str]) -> None:
     begin, end = _section_bounds(lines, manager)
     start = next((i for i in range(begin + 1, end) if re.match(r"^packages\s*=\s*\[", lines[i])), None)
@@ -271,6 +293,8 @@ def update_file(path: Path, data: dict, digest: str, platform: str, check: bool)
     common = data["toolchain"]
     values = {key: target.get(key, common.get(key)) for key in TARGETS[platform]["keys"]}
     _set_owned_keys(lines, "toolchain", values, TARGETS[platform]["keys"])
+    if platform == "macos":
+        _set_top_level_key(lines, "base", common["macos_base"])
     manager = TARGETS[platform]["manager"]
     if manager:
         packages = data.get("packages", {}).get(manager)
@@ -398,6 +422,7 @@ def render_expected(data: dict, digest: str) -> str:
         "source_sha256": digest,
         "enforcement": mise["enforcement"],
         "tools": {key: data["toolchain"][key] for key in CHECKED},
+        "xcode": {"version": data["toolchain"]["xcode"], "build": data["toolchain"]["xcode_build"]},
         "platform_overrides": overrides,
         "mise": {
             "version": mise["version"],

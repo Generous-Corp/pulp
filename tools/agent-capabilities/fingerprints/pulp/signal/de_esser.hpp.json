@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/de_esser.hpp",
+  "fingerprint": "sha256:fd61c1c4680c790d8617ec55164367d535cc079878e2bcb9780077c59bbf040d"
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/unison.hpp",
+  "fingerprint": "sha256:0a3a14899d57ff5040b47823bb98c36ed055bf98b6946d2a8892c44a95a686a5",
+  "include": "pulp/signal/unison.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.unison-voice-primitives"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

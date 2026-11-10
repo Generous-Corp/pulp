@@ -23,11 +23,13 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -221,6 +223,75 @@ class DigestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(cd.CodemodelError):
                 cd.digest_targets(Path(tmp), Path(tmp), [])
+
+
+class RealpathMemoTests(unittest.TestCase):
+    """`cd.realpath` must answer exactly what `os.path.realpath` answers, for
+    every spelling, and resolve each spelling once. The digest and the
+    affected-test graph call it millions of times over a finished build tree;
+    a cached answer that differs (a key that conflates spellings, a cheaper
+    normalisation standing in for resolution) would silently change every
+    digest, and a cache that stopped caching would put the minutes back on the
+    gate."""
+
+    def setUp(self) -> None:
+        cd.realpath_cache_clear()
+        self.addCleanup(cd.realpath_cache_clear)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        # real/a/x.h and real/b/x.h share a basename; link_a -> real/a,
+        # link_b -> real/b; chain -> link_a; file_link -> real/b/x.h.
+        for d in ("a", "b"):
+            (self.root / "real" / d).mkdir(parents=True)
+            (self.root / "real" / d / "x.h").write_text(d, encoding="utf-8")
+        (self.root / "link_a").symlink_to(self.root / "real" / "a")
+        (self.root / "link_b").symlink_to(self.root / "real" / "b")
+        (self.root / "chain").symlink_to("link_a")
+        (self.root / "file_link").symlink_to(self.root / "real" / "b" / "x.h")
+
+    def spellings(self) -> list[str]:
+        r = str(self.root)
+        return [f"{r}/link_a/x.h", f"{r}/link_b/x.h", f"{r}/chain/x.h", f"{r}/file_link",
+                f"{r}/link_a/../link_b/x.h", f"{r}/link_a/missing/y.h", f"{r}/real/a/./x.h",
+                f"{r}/chain/../real/b/x.h", r, f"{r}/link_b"]
+
+    def test_every_spelling_resolves_as_os_path_realpath(self) -> None:
+        for _ in range(2):  # the second pass is served from the cache
+            for s in self.spellings():
+                self.assertEqual(cd.realpath(s), os.path.realpath(s), s)
+                self.assertEqual(cd.realpath(Path(s)), os.path.realpath(s), s)
+
+    def test_same_basename_through_different_links_stays_distinct(self) -> None:
+        r = str(self.root)
+        a, b = cd.realpath(f"{r}/link_a/x.h"), cd.realpath(f"{r}/link_b/x.h")
+        self.assertNotEqual(a, b)
+        self.assertEqual(Path(a).read_text(encoding="utf-8"), "a")
+        self.assertEqual(Path(b).read_text(encoding="utf-8"), "b")
+
+    def test_a_retargeted_link_follows_after_clear(self) -> None:
+        r = str(self.root)
+        before = cd.realpath(f"{r}/chain/x.h")
+        (self.root / "chain").unlink()
+        (self.root / "chain").symlink_to("link_b")
+        cd.realpath_cache_clear()
+        after = cd.realpath(f"{r}/chain/x.h")
+        self.assertNotEqual(before, after)
+        self.assertEqual(after, os.path.realpath(f"{r}/chain/x.h"))
+
+    def test_each_spelling_is_resolved_once(self) -> None:
+        calls: list[str] = []
+        real = os.path.realpath
+
+        def counting(path, *args, **kwargs):
+            calls.append(os.fspath(path))
+            return real(path, *args, **kwargs)
+
+        with mock.patch.object(cd.os.path, "realpath", counting):
+            for _ in range(50):
+                for s in self.spellings():
+                    cd.realpath(s)
+        self.assertEqual(sorted(calls), sorted(set(self.spellings())))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,11 @@
+{
+  "domain": "music",
+  "source": "core/music/include/pulp/music/voicing.hpp",
+  "fingerprint": "sha256:2e9c5c02b29c3cba699b5f4c6cf89207626aa3fd19cbe4b46bfaf2642925d95d",
+  "include": "pulp/music/voicing.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "music.chord-voicing"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

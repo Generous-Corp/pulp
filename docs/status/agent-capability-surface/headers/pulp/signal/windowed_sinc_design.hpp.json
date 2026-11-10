@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/windowed_sinc_design.hpp",
+  "fingerprint": "sha256:e546ef4f5996229a119abcb77a037ff53f5d9ba4ed4d1679f7fb437bcc2b666d",
+  "include": "pulp/signal/windowed_sinc_design.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}
