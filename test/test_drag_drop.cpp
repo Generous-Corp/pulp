@@ -637,7 +637,8 @@ TEST_CASE("start_file_drag reaches the platform drag recorder on macOS", "[view]
     // recorder no test or automation could start one. With
     // platform::set_file_drag_recorder() installed, View::start_file_drag
     // records the drag instead: only the files that exist, offered as a copy,
-    // from the request's origin, with no pointer event or window.
+    // from the request's origin, with no pointer event or window. (The host's
+    // handle is a sentinel, so the test never reaches a real system drag.)
     const auto file = std::filesystem::temp_directory_path() / "pulp-test-file-drag.wav";
     std::ofstream(file) << "riff";
     struct RecorderReset {
@@ -653,9 +654,6 @@ TEST_CASE("start_file_drag reaches the platform drag recorder on macOS", "[view]
     req.file_paths = {file.string(), "/nonexistent-pulp-test-dir/missing.wav"};
     req.root_position = {12.0f, 34.0f};
 
-    // The control: without a recorder there is no mouse event to anchor to.
-    REQUIRE_FALSE(v.start_file_drag(req));
-
     std::vector<pulp::platform::FileDragRequest> recorded;
     pulp::platform::set_file_drag_recorder([&](const pulp::platform::FileDragRequest& r) {
         recorded.push_back(r);
@@ -667,6 +665,12 @@ TEST_CASE("start_file_drag reaches the platform drag recorder on macOS", "[view]
     CHECK(recorded[0].allowed == pulp::platform::drag_copy);
     CHECK(recorded[0].origin_x == 12.0f);
     CHECK(recorded[0].origin_y == 34.0f);
+
+    // Only missing files: nothing to drag, and the recorder is not called.
+    FileDragRequest missing;
+    missing.file_paths = {"/nonexistent-pulp-test-dir/missing.wav"};
+    CHECK_FALSE(v.start_file_drag(missing));
+    CHECK(recorded.size() == 1);
     std::filesystem::remove(file);
 }
 #endif
