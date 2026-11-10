@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261110-g9-retained-process-custody-20261110",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-10T16:07:43Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/platform/include/pulp/platform/child_process.hpp",
+    "core/platform/platform/posix/child_process_posix.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Add opt-in retained child and process-group custody with bounded cleanup to the Pulp-owned platform launcher. The next Vellum re-export should inherit this reusable safety primitive; existing launch behavior and source ownership boundaries remain unchanged."
+}
