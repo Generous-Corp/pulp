@@ -119,14 +119,20 @@ void MidiLearnOverlay::paint(canvas::Canvas& canvas) {
 
     const Rect b = local_bounds();
     const auto accent = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
-    const auto text_c = resolve_color("text.on_accent", canvas::Color::rgba8(255, 255, 255));
+    const auto chip_bg = resolve_color("bg.elevated", canvas::Color::rgba8(45, 45, 60));
+    const auto text_c = resolve_color("text.primary", canvas::Color::rgba8(220, 220, 230));
 
-    const auto chip = [&](const std::string& text, canvas::Color fill) {
+    // An elevated chip with an accent border reads on any theme; text sits on
+    // the elevated surface, so it needs no on-accent colour.
+    const auto chip = [&](const std::string& text, canvas::Color border) {
         canvas.set_font("sans-serif", 10.0f);
         const float w = canvas.measure_text(text) + 10.0f;
         const float h = 14.0f;
-        canvas.set_fill_color(fill);
+        canvas.set_fill_color(chip_bg);
         canvas.fill_rounded_rect(b.x, b.y - h - 2.0f, w, h, 3.0f);
+        canvas.set_stroke_color(border);
+        canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(b.x, b.y - h - 2.0f, w, h, 3.0f);
         canvas.set_fill_color(text_c);
         canvas.fill_text(text, b.x + 5.0f, b.y - 5.0f);
     };

@@ -308,9 +308,12 @@ exports `PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO`,
 They do not establish runtime availability or change a plugin's default engine.
 The release provenance binds these facts to the installed config and GPU-audio
 archive; older SDKs may not contain these facts. Traced/probe builds remain
-outside the official release contract. On macOS the shared-I/O provider
-bootstraps Dawn's proc table through gpu-runtime's coordinator, the same one the
-render device uses, so a plug-in has one proc-table owner. The legacy
+outside the official release contract. On macOS arm64 and universal builds the
+shared-I/O provider bootstraps Dawn's proc table through gpu-runtime's
+coordinator, the same one the render device uses, so a plug-in has one
+proc-table owner. gpu-runtime's renderer lock covers `macos-arm64` only, so an
+x86_64-only build (the Intel `darwin-x64` CLI) keeps Pulp's own device layer
+and its own proc-table installer. The legacy
 `release-cli-local.sh` helper does not produce this qualified capability receipt;
 its archive is not a substitute for the official release artifact.
 
