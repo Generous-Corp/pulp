@@ -15,6 +15,24 @@ inline constexpr std::string_view kControlIndexInputTypeId = "pulp.control.index
 inline constexpr int kControlIndexInputVersion = 1;
 inline constexpr std::size_t kControlIndexMaxFrames = 4096;
 
+struct ControlIndexBlock {
+    std::uint64_t epoch = 0;
+    std::uint64_t absolute_start = 0;
+    std::span<const float> indices;
+};
+
+enum class ControlProcessResult : std::uint8_t {
+    Accepted,
+    Unbound,
+    OutOfRange,
+    StaleEpoch,
+    WrongStart,
+    ClockExhausted,
+    Busy,
+    UnsupportedMode,
+    RenderFailed,
+};
+
 /// Registered graph-owned source for an external per-sample table index.
 CustomNodeType make_control_index_input_type();
 

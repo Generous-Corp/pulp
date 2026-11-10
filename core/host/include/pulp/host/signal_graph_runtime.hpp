@@ -21,6 +21,7 @@
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/host/anticipation_lane.hpp>
+#include <pulp/host/control_index_nodes.hpp>
 #include <pulp/host/custom_node_diagnostics.hpp>
 #include <pulp/host/custom_node_type.hpp>
 #include <pulp/host/graph_types.hpp>
@@ -59,24 +60,6 @@ class ProcessorNodeInstance;
 } // namespace pulp::format
 
 namespace pulp::host {
-
-struct ControlIndexBlock {
-    std::uint64_t epoch = 0;
-    std::uint64_t absolute_start = 0;
-    std::span<const float> indices;
-};
-
-enum class ControlProcessResult : std::uint8_t {
-    Accepted,
-    Unbound,
-    OutOfRange,
-    StaleEpoch,
-    WrongStart,
-    ClockExhausted,
-    Busy,
-    UnsupportedMode,
-    RenderFailed,
-};
 
 namespace detail {
 
