@@ -826,6 +826,7 @@
    "external/miniz/miniz_zip.c",
    "external/pugixml/pugixml.cpp",
    "external/tweetnacl/tweetnacl.c",
+   "inspect/src",
    "test/cmake/pr_fast_tests.cmake",
    "test/ctest_script_inputs",
    "test/fixtures",

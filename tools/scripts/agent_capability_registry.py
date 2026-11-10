@@ -225,7 +225,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/graph_event_contract.hpp',
-        'fingerprint': 'sha256:50630f728b4317ff7ef904564705c6d6b6e9ebb79e29d5dd0826985c0a7a75fb',
+        'fingerprint': 'sha256:1364609e77aee4e39fa3c1692e36c715ec9385856515dc3076d1de7ef0b0350a',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded host and graph-authored event lane used by SignalGraph Custom-node callbacks; it is an infrastructure contract, not an independently advertised generator capability.',
@@ -265,7 +265,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         'capability_keys': [],
         'rationale': 'Existing executor lowering infrastructure with graph-owned opaque spectral resolver; no public native spectral-stage registration or notation capability.',
     },
-    {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:7184acce0063ba69aab4c271f79a4e65ca3e04fc01e68de2f27f84aa173b3e7a', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
+    {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:406622267d96cad1fbc3777793c56031a601acafa2a852e3af68a0069109ec26', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
 
     {'include': 'pulp/midi/synthesiser.hpp', 'fingerprint': 'sha256:2611124e14f31cf1481b9605e99d6bdff7c46fe751073ff1922b01e73e97522c', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Polyphonic voice allocator used by instrument processors; reviewed when panic() was added. Not a generator-facing capability.'},
     {'include': 'pulp/midi/panic.hpp', 'fingerprint': 'sha256:5de1b463081d7a2bb4c01c83886bc2b341d54b492c43259dace4a944b67e5495', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Pure MIDI 1.0 panic message generation and held-note offs used by processors and adapters; not a generator-facing capability.'},
@@ -750,7 +750,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     ],
     {
         "include": "pulp/signal/fft.hpp",
-        "fingerprint": "sha256:d83eda9b7cf1281260c902d4e69ebc79cfc4424f6e06da743fb86c494382971a",
+        "fingerprint": "sha256:57e78a39081ec72cb53cbf6518f7e95180be864621fd1f2cf4382d0d368a323d",
         "disposition": "capability_support",
         "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
         "rationale": (

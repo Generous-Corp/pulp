@@ -3085,6 +3085,17 @@ processor-provider mutation must refuse in spectral mode even when the legacy
 Keep graph persistence and arbitrary stage registration refused; PARTIAL status
 does not establish notation coverage or realtime timing qualification.
 
+For the finite two-asset source, use `add_spectral_asset_morph_v1` and a direct
+host `AudioInput` connection to its named `morph` input. A persistent 64-sample
+mean is part of stream history: never substitute a callback mean or reset it at
+host partition boundaries. Finite extent propagates at preparation through
+existing stages and synthesis; four zero frames contribute normalization, then
+rendering stops at the returned exclusive `render_frames` cutoff. EOF must not
+look like missing frames. Reset restarts assets independently of host playhead
+position. Keep codec decode/copy/hash and shared ownership operations off the
+callback, and test through the installed public consumer's independent DFT
+oracle as well as the callback allocation probe.
+
 ## Bounded typed trigger runtime
 
 Use `prepare_trigger_plan()` and `try_install_prepared_trigger_plan()` for the
