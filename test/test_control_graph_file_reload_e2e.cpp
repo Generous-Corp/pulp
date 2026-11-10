@@ -449,85 +449,141 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
 #endif
 }
 
-TEST_CASE("Dev and loop signals join their child without killing an unrelated sleeper",
-          "[inspect][control][graph-file-reload][signal-cleanup]") {
+static void require_watch_signal_cleanup(bool during_shellout) {
 #ifdef __APPLE__
     Root root;
     const auto cli = self().parent_path() / "pulp";
     const auto project = self().parent_path() / "watch-projects" / root.path.filename();
     REQUIRE(std::filesystem::create_directories(project / "build"));
+    const auto build_dir = project / "build";
+    const auto block = build_dir / "block";
+    const auto build_ready = build_dir / "build-ready";
+    const auto child_ready = build_dir / "child-ready";
+    const auto script = build_dir / "same_sleeper.py";
+    const auto build_script = build_dir / "build_step.py";
     std::ofstream(project / "pulp.toml") << "[plugin]\nname = \"watch-signal-proof\"\n";
     std::ofstream(project / "CMakeLists.txt")
         << "cmake_minimum_required(VERSION 3.24)\nproject(WatchSignal NONE)\n"
-           "add_custom_target(proof)\n";
+        << "add_custom_target(proof COMMAND /usr/bin/python3 \"" << build_script.string() << "\" \""
+        << block.string() << "\" \"" << build_ready.string() << "\")\n";
+    std::ofstream(script) << "import os, sys, time\nwith open(sys.argv[1], 'w') as f:\n"
+                             " f.write(f'{os.getpid()} {os.getppid()} {os.getpgrp()}')\n"
+                             "time.sleep(900)\n";
+    std::ofstream(build_script)
+        << "import os, sys, time\n"
+           "assert os.environ.get('PULP_WATCH_ENV_PROOF') == 'inherited'\n"
+           "if os.path.exists(sys.argv[1]):\n"
+           " sys.stdout.buffer.write(b'watch-shellout-out\\x00tail'); sys.stdout.flush()\n"
+           " sys.stderr.write('watch-shellout-err\\n'); sys.stderr.flush()\n"
+           " with open(sys.argv[2], 'w') as f:\n"
+           "  f.write(f'{os.getpid()} {os.getppid()} {os.getpgrp()}')\n"
+           " time.sleep(900)\n";
+    const auto source = project / "change.cpp";
+    std::ofstream(source) << "// initial source\n";
     pulp::platform::ProcessOptions configure;
     configure.capture_stdout = true;
     configure.capture_stderr = true;
     configure.timeout_ms = 10000;
     const auto configured = pulp::platform::ChildProcess::run(
         "cmake",
-        {"-S", project.string(), "-B", (project / "build").string(), "-G", "Ninja",
+        {"-S", project.string(), "-B", build_dir.string(), "-G", "Ninja",
          "-DCMAKE_BUILD_TYPE=Release", "-DPULP_DEV_SHARED_UI=OFF"},
         configure);
     INFO(configured.stderr_output);
     REQUIRE(configured.exit_code == 0);
-    const auto script = project / "build" / "same_sleeper.py";
-    std::ofstream(script)
-        << "import os, time\nprint('watch-child-ready', os.getpid(), os.getppid(), flush=True)\n"
-           "time.sleep(900)\n";
-    // Same executable and script, but a different owned group. Name-based
-    // cleanup would kill this positive control as well as the watch's child.
+    // Same executable and script, different owned group. Name-based cleanup
+    // would kill this positive control as well as the watch's child.
     pulp::platform::ChildProcess unrelated;
-    pulp::platform::ProcessOptions unrelated_options;
-    unrelated_options.capture_stdout = true;
-    REQUIRE(unrelated.start("/usr/bin/python3", {script.string()}, unrelated_options));
+    REQUIRE(
+        unrelated.start("/usr/bin/python3", {script.string(), (build_dir / "unrelated").string()}));
     REQUIRE(unrelated.is_running());
-
     for (const auto* command : {"dev", "loop"}) {
         for (const int stop_signal : {SIGINT, SIGTERM}) {
-            INFO(command << " signal=" << stop_signal);
+            INFO(command << " signal=" << stop_signal << " shellout=" << during_shellout);
+            std::filesystem::remove(block);
+            std::filesystem::remove(build_ready);
+            std::filesystem::remove(child_ready);
             pulp::platform::ChildProcess watch;
-            int child_pid = -1;
+            int child_pid = -1, build_pid = -1, build_group = -1;
             bool child_alive = false, parent_matches = false, signalled = false;
+            bool shellout_alive = false;
             std::chrono::steady_clock::time_point signalled_at;
-            // Also clean a planted missing-handler failure: the watch's child
-            // has its own group and cannot be reclaimed by cancelling watch.
             struct SleeperCleanup {
-                int& pid;
+                int& child;
+                int& build;
+                int& group;
                 ~SleeperCleanup() {
-                    if (pid > 0 && ::getpgid(pid) == pid)
-                        (void)::kill(-pid, SIGKILL);
+                    if (child > 0 && ::getpgid(child) == child)
+                        (void)::kill(-child, SIGKILL);
+                    if (build > 0 && group > 0 && group != ::getpgrp() && ::getpgid(build) == group)
+                        (void)::kill(-group, SIGKILL);
                 }
-            } cleanup{child_pid};
+            } cleanup{child_pid, build_pid, build_group};
             pulp::platform::ProcessOptions options;
             options.capture_stdout = true;
             options.capture_stderr = true;
             options.working_directory = project.string();
             options.timeout_ms = 150000;
-            options.on_stdout_line = [&](std::string_view line) {
-                if (!line.starts_with("watch-child-ready ") || signalled)
-                    return;
-                std::istringstream values{std::string(line)};
-                std::string marker;
-                int parent = -1;
-                values >> marker >> child_pid >> parent;
-                parent_matches = parent == watch.process_id();
-                child_alive = child_pid > 0 && ::kill(child_pid, 0) == 0;
-                if (parent_matches && child_alive) {
-                    signalled_at = std::chrono::steady_clock::now();
-                    signalled = ::kill(watch.process_id(), stop_signal) == 0;
-                }
-            };
             REQUIRE(watch.start("/usr/bin/env",
-                                {"PULP_BUILD_JOBS=2", "TMPDIR=" + root.runtime.string(),
+                                {"PULP_BUILD_JOBS=2", "PULP_WATCH_ENV_PROOF=inherited",
+                                 "TMPDIR=" + root.runtime.string(),
                                  "PULP_HOME=" + (project / "pulp-home").string(), cli.string(),
                                  command, "--target", "proof", "--no-dev-shared", "--run",
-                                 "/usr/bin/python3", "--", script.string()},
+                                 "/usr/bin/python3", "--", script.string(), child_ready.string()},
                                 options));
+            const int watch_pid = watch.process_id();
+            // Readiness comes from files: the existing launch path discards
+            // child stdout. Capture the watch PID before wait() owns its lock.
+            std::atomic<bool> finished{false};
+            std::thread observer([&] {
+                const auto deadline = std::chrono::steady_clock::now() + 145s;
+                bool changed = false;
+                while (!finished.load(std::memory_order_relaxed) &&
+                       std::chrono::steady_clock::now() < deadline) {
+                    if (child_pid <= 0) {
+                        int pid = -1, parent = -1, group = -1;
+                        std::ifstream ready(child_ready);
+                        if (ready >> pid >> parent >> group && pid > 0 && parent == watch_pid &&
+                            group == pid && ::getpgid(pid) == group) {
+                            child_pid = pid;
+                            parent_matches = true;
+                            child_alive = ::kill(child_pid, 0) == 0;
+                        }
+                    }
+                    if (child_alive && during_shellout && !changed) {
+                        std::ofstream(block) << "block the next build\n";
+                        const auto before = std::filesystem::last_write_time(source);
+                        std::ofstream(source) << "// rebuild\n";
+                        std::filesystem::last_write_time(source, before + 2s);
+                        changed = true;
+                    }
+                    if (child_alive && during_shellout) {
+                        int parent = -1;
+                        std::ifstream ready(build_ready);
+                        if (ready >> build_pid >> parent >> build_group && build_pid > 0 &&
+                            build_group > 0 && build_group != ::getpgrp() &&
+                            ::getpgid(build_pid) == build_group)
+                            shellout_alive = ::kill(build_pid, 0) == 0;
+                    }
+                    if (child_alive && (!during_shellout || shellout_alive)) {
+                        signalled_at = std::chrono::steady_clock::now();
+                        signalled = ::kill(watch_pid, stop_signal) == 0;
+                        break;
+                    }
+                    std::this_thread::sleep_for(20ms);
+                }
+            });
             const auto result = watch.wait();
             const auto returned_at = std::chrono::steady_clock::now();
-            const bool child_terminated =
-                child_pid > 0 && ::kill(child_pid, 0) != 0 && errno == ESRCH;
+            finished.store(true, std::memory_order_relaxed);
+            observer.join();
+            const auto absent = [](int pid) {
+                return pid > 0 && ::kill(pid, 0) != 0 && errno == ESRCH;
+            };
+            const auto reap_deadline = std::chrono::steady_clock::now() + 2s;
+            while (during_shellout && !absent(build_pid) &&
+                   std::chrono::steady_clock::now() < reap_deadline)
+                std::this_thread::sleep_for(20ms);
             INFO(result.stdout_output);
             INFO(result.stderr_output);
             REQUIRE(parent_matches);
@@ -535,14 +591,32 @@ TEST_CASE("Dev and loop signals join their child without killing an unrelated sl
             REQUIRE(signalled);
             REQUIRE_FALSE(result.timed_out);
             REQUIRE(result.exit_code == 128 + stop_signal);
-            REQUIRE(returned_at - signalled_at < std::chrono::seconds(10));
-            REQUIRE(child_terminated);
+            REQUIRE(returned_at - signalled_at < 10s);
+            REQUIRE(absent(child_pid));
             REQUIRE(unrelated.is_running());
+            if (during_shellout) {
+                REQUIRE(shellout_alive);
+                REQUIRE(absent(build_pid));
+                REQUIRE(result.stdout_output.find(std::string("watch-shellout-out\0tail", 23)) !=
+                        std::string::npos);
+                REQUIRE(result.stderr_output.find("watch-shellout-err\n") != std::string::npos);
+            }
         }
     }
     unrelated.cancel();
     (void)unrelated.wait();
 #else
+    (void)during_shellout;
     SKIP("Product CLI watch signal proof runs with the macOS control fixture");
 #endif
+}
+
+TEST_CASE("Dev and loop signals join their child without killing an unrelated sleeper",
+          "[inspect][control][graph-file-reload][signal-cleanup]") {
+    require_watch_signal_cleanup(false);
+}
+
+TEST_CASE("Dev and loop signals cancel an active rebuild and join both child groups",
+          "[inspect][control][graph-file-reload][signal-cleanup][shellout-signal]") {
+    require_watch_signal_cleanup(true);
 }

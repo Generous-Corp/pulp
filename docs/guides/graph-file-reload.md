@@ -35,6 +35,10 @@ build/test/relaunch path; graph file changes use the control request path.
 SIGINT and SIGTERM request normal watch shutdown: the watch joins its owned
 child group and returns 128 plus the signal number. Signal handlers only set a
 stop flag; process cleanup runs outside the handler.
+Watch rebuild, test and validation shellouts use the existing `ChildProcess`
+ownership and cancellation path, so an active shellout is joined before watch
+shutdown finishes. Their output streams and environment remain available to the
+invoked commands.
 
 The operation `dev.pulp.graph/file.reload@1` uses the shared strict notation or
 saved-graph parser, validates every original edge, checks the catalog's state

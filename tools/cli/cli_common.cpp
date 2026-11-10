@@ -35,6 +35,7 @@
 #endif
 
 #include <pulp/runtime/system.hpp>
+#include <pulp/runtime/temporary_file.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <choc/text/choc_StringUtilities.h>
 #include <choc/text/choc_Files.h>
@@ -1018,6 +1019,104 @@ class WatchSignalScope {
     Handler previous_interrupt_;
     Handler previous_terminate_;
 };
+
+// std::system temporarily ignores SIGINT process-wide. Keep watch shellouts
+// cancellable without changing the CLI's general-purpose command runner.
+int run_watch_command(const std::string& command, const std::string& label = {}) {
+    if (const auto signal = requested_watch_stop())
+        return 128 + signal;
+    const bool spinner = !label.empty() && is_tty() && !g_no_color;
+    if (!label.empty() && !spinner)
+        std::cout << label << "...\n" << std::flush;
+    pulp::runtime::TemporaryFile output_file(".watch-out"), error_file(".watch-err");
+    if (output_file.path().empty() || error_file.path().empty())
+        return 127;
+    const auto redirected = "(" + command + ") >" + shell_quote(output_file.path_string()) +
+                            (spinner ? " 2>&1" : " 2>" + shell_quote(error_file.path_string()));
+    pulp::platform::ChildProcess child;
+    pulp::platform::ProcessOptions options;
+    options.capture_stdout = false;
+    options.capture_stderr = false;
+#ifdef _WIN32
+    const auto shell = pulp::runtime::get_env("COMSPEC").value_or("cmd.exe");
+    if (!child.start(shell, {"/C", redirected}, options))
+        return 127;
+#else
+    if (!child.start("/bin/sh", {"-c", redirected}, options))
+        return 127;
+#endif
+    std::ifstream output(output_file.path(), std::ios::binary);
+    std::ifstream error(error_file.path(), std::ios::binary);
+    if (!output.is_open() || !error.is_open())
+        return 127;
+    auto forward = [](std::ifstream& input, std::ostream& destination) {
+        input.clear();
+        std::array<char, 4096> bytes;
+        for (int chunk = 0; chunk < 64; ++chunk) {
+            input.read(bytes.data(), bytes.size());
+            const auto count = input.gcount();
+            if (count)
+                destination.write(bytes.data(), count);
+            if (count < static_cast<std::streamsize>(bytes.size()))
+                break;
+        }
+        destination.flush();
+        return !input;
+    };
+    const char* frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+    unsigned frame = 0;
+    const auto started = std::chrono::steady_clock::now();
+    while (child.is_running()) {
+        if (requested_watch_stop()) {
+            child.cancel();
+            break;
+        }
+        if (spinner) {
+            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                                     std::chrono::steady_clock::now() - started)
+                                     .count();
+            std::cout << "\r  " << color::cyan() << frames[frame++ % 10] << color::reset() << " "
+                      << label << color::dim() << " (" << seconds << "s)" << color::reset() << "  "
+                      << std::flush;
+        } else {
+            forward(output, std::cout);
+            forward(error, std::cerr);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    }
+    const auto result = child.wait();
+    const auto signal = requested_watch_stop();
+    const int exit_code = signal ? 128 + signal : result.exit_code;
+    if (!spinner) {
+        while (!forward(output, std::cout)) {
+        }
+        while (!forward(error, std::cerr)) {
+        }
+    } else {
+        std::cout << "\r\033[K";
+        const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                                 std::chrono::steady_clock::now() - started)
+                                 .count();
+        const auto status =
+            label + color::dim() + " (" + std::to_string(seconds) + "s)" + color::reset();
+        if (!exit_code)
+            print_ok(status);
+        else {
+            print_fail(status);
+            std::vector<std::string> tail;
+            std::string line;
+            while (std::getline(output, line)) {
+                if (tail.size() == 20)
+                    tail.erase(tail.begin());
+                tail.push_back(std::move(line));
+            }
+            for (const auto& value : tail)
+                std::cout << value << '\n';
+        }
+    }
+    return exit_code;
+}
+
 } // namespace
 
 int watch_loop(const WatchOptions& opts) {
@@ -1125,8 +1224,10 @@ int watch_loop(const WatchOptions& opts) {
         for (auto& arg : capped_build.args) build_cmd += " " + arg;
         build_cmd = apply_agent_build_qos(focused_build_command(build_cmd, selection), build_qos, opts.build_qos.empty() && loop_lease.floor());
         build_cmd = apply_agent_build_watchdog(build_cmd, build_jobs, opts.build_watchdog || loop_lease.active());
-        int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
-            apply_build_dir_lock(build_cmd, opts.root, opts.build_dir), "Rebuilding");
+        int rc = focused_nothing_to_build(selection)
+                     ? 0
+                     : run_watch_command(apply_build_dir_lock(build_cmd, opts.root, opts.build_dir),
+                                         "Rebuilding");
         if (const auto signal = requested_watch_stop())
             return 128 + signal;
 
@@ -1141,7 +1242,7 @@ int watch_loop(const WatchOptions& opts) {
         if (opts.run_tests) {
             std::string test_cmd = "ctest --test-dir " + opts.build_dir.string() + " --output-on-failure";
             const bool run_ctest = focused_test_selection(test_cmd, opts.test_filter, selection, "  ");
-            int trc = run_ctest ? run_with_spinner(test_cmd, "Testing") : 0;
+            int trc = run_ctest ? run_watch_command(test_cmd, "Testing") : 0;
             if (trc != 0) {
                 std::cout << color::red() << "Tests failed." << color::reset()
                           << " Watching for more changes...\n";
@@ -1159,7 +1260,8 @@ int watch_loop(const WatchOptions& opts) {
                     auto name = entry.path().stem().string();
                     std::string dltest = "ctest --test-dir " + opts.build_dir.string()
                                        + " -R dlopen-" + name + " --output-on-failure 2>/dev/null";
-                    if (run(dltest) == 0) print_ok(std::string(dir_name) + ": " + name + " loads OK");
+                    if (run_watch_command(dltest) == 0)
+                        print_ok(std::string(dir_name) + ": " + name + " loads OK");
                     else print_fail(std::string(dir_name) + ": " + name + " failed to load");
                 }
             }
