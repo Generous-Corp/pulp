@@ -20,6 +20,7 @@
    "tools/ci/test_flake_exoneration.py",
    "tools/motion/visual/requirements.lock",
    "tools/motion/visual/requirements.txt",
+   "tools/scripts",
    "tools/scripts/consumption_census.py",
    "tools/scripts/consumption_census_contract.py",
    "tools/scripts/gate_suite_executed.py",
