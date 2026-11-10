@@ -64,8 +64,10 @@ cmake -DPULP_BUILD_DIR=/absolute/root/build \
   -P examples/g11-live-retune-consumer/installed_gate.cmake
 ```
 
-The root CTest registration is `g11-live-retune-installed-sdk`. A normal
-configured root with tests enabled discovers it; the standalone SDK driver
+The root CTest registration is `g11-live-retune-installed-sdk`. A Release
+configured root with tests enabled discovers it; Debug does not register this
+Release-SDK evidence lane. Ninja and Ninja Multi-Config positive/negative
+registration controls are retained in `registration-controls.log`. The standalone SDK driver
 installs, configures, uses the governed build wrapper and runs all five cases.
 The retained SHA256 manifest covers the files in this packet. Final publication
 handoff additionally binds the final local/remote/API head to a fresh clean
