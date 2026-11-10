@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/nway_crossfade.hpp",
+  "fingerprint": "sha256:b1d33521a93b3cefd167f9441b6523b83fdffe1b873a20fb50caedac790ce9be",
+  "include": "pulp/signal/nway_crossfade.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.routing-primitives"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "music",
+  "source": "core/music/include/pulp/music/music.hpp",
+  "fingerprint": "sha256:4c95583dd9992f762edb2a00191ecd785ba3fac600d5528adf24167ad13a389e",
+  "include": "pulp/music/music.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Convenience umbrella include only; consumers use the operation-owning headers named by each typed capability binding."
+}

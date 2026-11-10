@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/spectral_feature_frontends.hpp",
+  "fingerprint": "sha256:2c125023b757d1343adb961acd4581cd015bcee94c5eb1333921c5cce78d7273",
+  "include": "pulp/signal/spectral_feature_frontends.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.spectral-feature-frontends"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

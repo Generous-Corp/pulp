@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/dynamic_eq.hpp",
+  "fingerprint": "sha256:eb6ed3b73030b8046706e6dfb8bfe9a143134b7dea59c289ce142fdcbb12254b",
+  "include": "pulp/signal/dynamic_eq.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.dynamic-eq"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

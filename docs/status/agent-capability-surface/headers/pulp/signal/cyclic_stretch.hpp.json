@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/cyclic_stretch.hpp",
+  "fingerprint": "sha256:b7e959409956e526204cc16112d467d650709a6c3f5f1f759b3f94f5ce73f990",
+  "include": "pulp/signal/cyclic_stretch.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

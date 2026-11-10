@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/particle_percussion_voice.hpp",
+  "fingerprint": "sha256:a9fbfb370bbb6d2b47f880d6a2687075b943ae6f4ba69213abb2a7279e5027a4",
+  "include": "pulp/signal/particle_percussion_voice.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.particle-percussion"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

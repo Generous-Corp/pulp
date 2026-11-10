@@ -140,6 +140,46 @@ class GuardTests(unittest.TestCase):
             repo.write(guard.REGISTRY.as_posix(), json.dumps({"schema": "nope"}))
             self.assertEqual(repo.run("--base", "base-ref").returncode, 2)
 
+    def test_adding_a_catalog_fingerprint_literal_is_refused(self) -> None:
+        """A literal-pattern hotspot refuses the added line, not the file."""
+        catalog = "tools/scripts/agent_capability_catalog_signal.py"
+        row = 'binding(include="pulp/signal/x.hpp",\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = repo_with_aggregate(tmp)
+            repo.write(catalog, row + '        header_fingerprint="sha256:' + "0" * 64 + '",\n)\n')
+            repo.commit("old layout", catalog)
+            repo.git("branch", "-f", "base-ref", "HEAD")
+            # Deleting the literal (the migration) and unrelated catalog edits pass.
+            repo.write(catalog, row + ")\n# another row\n")
+            repo.commit("migrate", catalog)
+            proc = repo.run("--base", "base-ref")
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            repo.git("branch", "-f", "base-ref", "HEAD")
+            # Re-adding one, committed or not, is refused and names the fragments.
+            repo.write(catalog, row + '        header_fingerprint="sha256:' + "1" * 64 + '",\n)\n')
+            proc = repo.run("--base", "base-ref")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn(f"file={catalog}; cause_class=HOTSPOT_LITERAL_EDIT", proc.stdout)
+            self.assertIn("tools/agent-capabilities/fingerprints/", proc.stdout)
+            repo.commit("re-add", catalog)
+            self.assertEqual(repo.run("--base", "base-ref").returncode, 1)
+            # The same line in a file the glob does not match is not this hotspot.
+            other = "tools/scripts/agent_capability_registry_types.py"
+            repo.write(other, "    header_fingerprint: str | None = None,\n")
+            repo.commit("unrelated", other)
+            repo.git("branch", "-f", "base-ref", "HEAD~1")
+            proc = repo.run("--base", "base-ref")
+            self.assertNotIn(other, proc.stdout)
+
+    def test_a_bad_added_line_pattern_is_a_registry_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = repo_with_aggregate(tmp)
+            repo.write(guard.REGISTRY.as_posix(), json.dumps({
+                "schema": guard.SCHEMA,
+                "hotspots": [{"path": "a/*.py", "fragments": "f/", "writer": "w",
+                              "added_line_pattern": "("}]}))
+            self.assertEqual(repo.run("--base", "base-ref").returncode, 2)
+
     def test_the_checked_in_registry_is_valid_and_its_fragments_exist(self) -> None:
         root = HERE.parents[1]
         for spot in guard.load_registry(root):

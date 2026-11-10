@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/vocoder.hpp",
+  "fingerprint": "sha256:800e0249e437493b89d89765ae124f9981418a3319af6c647ef92210684aafad",
+  "include": "pulp/signal/vocoder.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

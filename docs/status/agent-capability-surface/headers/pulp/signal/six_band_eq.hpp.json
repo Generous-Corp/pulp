@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/six_band_eq.hpp",
+  "fingerprint": "sha256:25699c04e11bdd358bbde25071f8528ec81bfddd3a5defda58f1afc3556def09",
+  "include": "pulp/signal/six_band_eq.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.six-band-eq"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

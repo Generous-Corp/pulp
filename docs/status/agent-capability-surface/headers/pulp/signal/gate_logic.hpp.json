@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/gate_logic.hpp",
+  "fingerprint": "sha256:1354a44fcc7efba7a59b173f85aa1183699ade63b5471e03c5f4b1f018decaf4",
+  "include": "pulp/signal/gate_logic.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

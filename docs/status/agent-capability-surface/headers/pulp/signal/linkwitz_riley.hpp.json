@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/linkwitz_riley.hpp",
+  "fingerprint": "sha256:8aae04787676825f9eae118a9d52df318e8c67af2c8c7138572be8da61bc0545",
+  "include": "pulp/signal/linkwitz_riley.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.linkwitz-riley-crossover"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

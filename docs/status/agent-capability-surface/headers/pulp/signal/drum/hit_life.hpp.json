@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/drum/hit_life.hpp",
+  "fingerprint": "sha256:213f8be04b4efc0dd7a1567c4a316ffd7a159e54dc4adbec39b8e1e6c83c84a7",
+  "include": "pulp/signal/drum/hit_life.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

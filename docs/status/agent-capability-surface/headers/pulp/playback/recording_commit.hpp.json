@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/recording_commit.hpp",
+  "fingerprint": "sha256:87f362d0519e153abdcced725703cfc23bc0e5af87000d47433ec4669fd0581f",
+  "include": "pulp/playback/recording_commit.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "RecordingTakeCommitRequest, SealedRecordingTake and RecordingCommitError: the sealed handoff from a finished capture to the document commands and media asset that land it. It is the internal commit step of the recording path rather than an advertised capability surface."
+}

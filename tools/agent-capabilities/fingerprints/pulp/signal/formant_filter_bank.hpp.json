@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/formant_filter_bank.hpp",
+  "fingerprint": "sha256:3fe22c92f7793b10a219c1270d0b43d143cc025b7d9769566a98c29dd4fe62f5"
+}

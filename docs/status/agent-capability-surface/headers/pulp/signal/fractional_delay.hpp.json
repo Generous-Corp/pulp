@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fractional_delay.hpp",
+  "fingerprint": "sha256:375d2e2acd389ad5a7194d5c362eac77a03e0a6c4e2c89bf38b09e10d86ed5e7",
+  "include": "pulp/signal/fractional_delay.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.fractional-delay"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

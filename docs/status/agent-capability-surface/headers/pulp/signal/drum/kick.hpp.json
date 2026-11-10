@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/drum/kick.hpp",
+  "fingerprint": "sha256:006b062a40cc5a0299bef09acafcb141912347a0cd7c8e12952fb97ccb054df3",
+  "include": "pulp/signal/drum/kick.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

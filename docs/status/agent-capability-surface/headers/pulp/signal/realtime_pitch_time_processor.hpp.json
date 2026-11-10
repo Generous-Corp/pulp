@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/realtime_pitch_time_processor.hpp",
+  "fingerprint": "sha256:519987d3e9742d2be9fcab3289808ed58b8f1fe5e245e92885c900726ad15809",
+  "include": "pulp/signal/realtime_pitch_time_processor.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.source-filter-analysis"
+  ],
+  "rationale": "Existing pitch-time or formant-warping surface composes the transactional cepstral analyzer and retained-storage admission contract."
+}

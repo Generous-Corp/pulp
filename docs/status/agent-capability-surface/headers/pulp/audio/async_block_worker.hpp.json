@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/async_block_worker.hpp",
+  "fingerprint": "sha256:33f3ba40c7c017a7859242307bb29d51dc50e56f7827e3e262f1ea68795251d2",
+  "include": "pulp/audio/async_block_worker.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Fixed-latency playout of worker-rendered audio and timed events for variable host blocks; threading infrastructure a processor drives from process(), not a generator-facing DSP capability."
+}

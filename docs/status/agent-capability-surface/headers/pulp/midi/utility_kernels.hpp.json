@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/utility_kernels.hpp",
+  "fingerprint": "sha256:d768529f97202108cc87903ac71ccfc727adeade6ecd50c66db8c3e394d98865",
+  "include": "pulp/midi/utility_kernels.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Convenience umbrella include only; each utility family is bound directly."
+}
