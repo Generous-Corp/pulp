@@ -838,10 +838,15 @@ GraphPatchResult load_graph_patch_json(std::string_view json, const GraphPatchCa
             refuse(Code::UnsupportedContract, "graph contains unresolved node/state contracts",
                    "register exact types and restore all state before validating");
         std::map<std::int64_t, NodeId> ids;
-        for (const auto& n : graph->nodes())
+        for (const auto& n : graph->nodes()) {
+            if (n.type == NodeType::Custom && n.custom_state_pending)
+                refuse(Code::UnsupportedContract,
+                       "custom state validation is deferred until prepare",
+                       "use GraphSerializer and the owning custom-state API", n.name);
             for (const auto& [old, name] : old_ids)
                 if (n.name == name)
                     ids.emplace(old, n.id);
+        }
         if (ids.size() != old_ids.size())
             refuse(Code::UnsupportedContract, "loader did not retain every node",
                    "use supported exact node contracts");

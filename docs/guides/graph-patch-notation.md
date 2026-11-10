@@ -123,8 +123,10 @@ and sparse ranges that cannot be expressed exactly as a depth. Symbolic enum
 values and duplicate port-name suffixes are not implemented in this profile;
 use exact unique runtime names and numeric values. A type not constructible in
 the supplied catalog is unsupported. Saved graphs with supported registered
-opaque state may validate through the existing restore contract, but formatting
-refuses to discard it. Preserve richer state with `GraphSerializer` and its
+Processor opaque state may validate through the existing registry restore contract,
+but formatting refuses to discard it. Strict validation refuses custom-node state
+whose restoration is deferred until `prepare()`, rather than certifying an
+unapplied payload. Preserve richer state with `GraphSerializer` and its
 owning typed APIs. This bounded profile is not full G2 completion.
 
 ## Installed consumer and evidence

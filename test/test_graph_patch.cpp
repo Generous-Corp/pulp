@@ -240,7 +240,8 @@ TEST_CASE("MIDI notation edge changes the independently calculated render",
     for (std::size_t i = 0; i < 128; ++i)
         REQUIRE(audio.audio.channel(0)[i] == (i < 64 ? 0.375f : 0.25f));
 }
-TEST_CASE("Opaque and unsupported state contracts are explicit refusals", "[host][patch][strict]") {
+TEST_CASE("Opaque and unsupported state contracts are explicit refusals",
+          "[host][patch][strict][opaque-strict]") {
     GraphPatchCatalog catalog;
     CustomNodeType type;
     type.type_id = "test.opaque";
@@ -249,15 +250,27 @@ TEST_CASE("Opaque and unsupported state contracts are explicit refusals", "[host
     type.destroy = [](void* p) { delete static_cast<int*>(p); };
     type.process_instance = [](void*, auto&, const auto&, int) {};
     type.save_state = [](void*) { return std::vector<uint8_t>{1}; };
-    type.load_state = [](void*, const auto&) { return true; };
+    type.load_state = [](void*, const auto&) { return false; };
     REQUIRE(catalog.register_custom(type));
     auto patch = parse_graph_patch("# flow 1\nx : \"test.opaque\"\n", catalog);
     REQUIRE_FALSE(patch);
     REQUIRE(patch.diagnostic.code == Code::UnsupportedContract);
     REQUIRE(patch.diagnostic.message().find("opaque") != std::string::npos);
     auto g = catalog.make_graph();
-    REQUIRE(g->add_custom_node(type.type_id, 1, "x"));
+    const auto opaque = g->add_custom_node(type.type_id, 1, "x");
+    REQUIRE(opaque);
+    REQUIRE(g->set_custom_node_state(opaque, {42}));
     REQUIRE_FALSE(format_graph_patch(*g, catalog));
+    const auto serialized = GraphSerializer::to_json(*g);
+    SignalGraph legacy;
+    REQUIRE(legacy.register_custom_node_type(type));
+    REQUIRE(GraphSerializer::from_json(legacy, serialized).ok);
+    REQUIRE(legacy.nodes().front().custom_state_pending);
+    REQUIRE(legacy.custom_node_state(legacy.nodes().front().id) == g->custom_node_state(opaque));
+    const auto strict = load_graph_patch_json(serialized, catalog);
+    REQUIRE_FALSE(strict);
+    REQUIRE(strict.diagnostic.code == Code::UnsupportedContract);
+    REQUIRE(strict.diagnostic.message().find("deferred") != std::string::npos);
     SignalGraph feedback;
     auto a = feedback.add_gain_node("a");
     auto b = feedback.add_gain_node("b");
