@@ -1255,6 +1255,7 @@
       "pulp/state/midi_mapping.hpp",
       "pulp/state/midi_parameter_map.hpp",
       "pulp/state/midi_source.hpp",
+      "pulp/state/midi_source_reservation.hpp",
       "pulp/state/modulation_lane.hpp",
       "pulp/state/param_cursor.hpp",
       "pulp/state/param_json.hpp",
