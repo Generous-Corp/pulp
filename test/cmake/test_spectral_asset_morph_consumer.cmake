@@ -2,7 +2,10 @@ cmake_minimum_required(VERSION 3.24)
 if(NOT DEFINED PULP_BUILD_DIR OR NOT DEFINED PULP_SOURCE_DIR)
     message(FATAL_ERROR "PULP_BUILD_DIR and PULP_SOURCE_DIR are required")
 endif()
-set(_root "${PULP_BUILD_DIR}/asset-morph-consumer-smoke")
+# Source-install markers are immutable. Give each producer identity its own
+# prefix so rerunning this gate after a new source head cannot reuse old bytes.
+file(SHA256 "${PULP_BUILD_DIR}/PulpStampSourceInstall.cmake" _producer_identity)
+set(_root "${PULP_BUILD_DIR}/asset-morph-consumer-smoke/${_producer_identity}")
 set(_prefix "${_root}/prefix")
 set(_build "${_root}/build")
 if(NOT PULP_PARENT_BUILD_TYPE)

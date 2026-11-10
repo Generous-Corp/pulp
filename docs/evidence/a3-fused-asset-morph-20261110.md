@@ -33,7 +33,7 @@ calibrated to 1e-11 before candidate comparison.
 | Installed CMake consumer gate | PASS 1/1; nested public consumers PASS 2/2 |
 | Neighbor controls | PASS; trigger-runtime public consumer and DSPX-04 fail-closed processor binding |
 | Production mutations | All five CONFIRMED; compiled oracle test exits 0/42/0, driver exits 0 |
-| Source gates | Exposure path corrected; protected-base metadata repaired by clean merge of main f2664397c643807f01a4a885687ef6ebd4d30efa, preserving narrow projections without regeneration. Final head rerun required; host-refused suites remain NOT CHECKED |
+| Source gates | Exposure path corrected; protected-base metadata repaired by clean merge of main f2664397c643807f01a4a885687ef6ebd4d30efa, preserving narrow projections without regeneration. Consumer TU fan-out declarations added; final head rerun required. Host-refused suites remain NOT CHECKED |
 | Local diff coverage | NOT CHECKED, exit 4; dedicated-builder policy refusal |
 | Capability projections / docs | PASS on implementation head; narrow delegated projections only |
 | Script inventory | Correct-profile generation retained all off-profile records; only unrelated UI fixture advisory drift produced and excluded |
@@ -67,7 +67,11 @@ build/asset-morph-consumer-smoke/build/asset-morph-consumer build/a3-evidence/co
 tools/scripts/gates.sh origin/main
 ```
 
-The installed consumer gate stages the complete SDK, configures the external
+The installed consumer gate keys its staging prefix by the producer install
+identity, preserving immutable source-install provenance across reruns. A prior
+fixed-prefix rerun correctly refused to replace an older marker; that harness
+state failure did not enter the audio oracle. The gate stages the complete SDK,
+configures the external
 example with `find_package(Pulp COMPONENTS host)`, governs its Release build and
 runs both public consumers. Input/output blobs are little-endian float32/float64
 on this arm64 macOS host. SHA-256 receipts at the implementation source:
