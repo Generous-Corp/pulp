@@ -185,3 +185,23 @@ the flag is unchanged: no library, no scan, no callback request.
 The adapter also answers `clap.preset-load` at the plug-in location
 (`CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN`) with a library key as the load key,
 for example `factory:Pads/Warm`. Other formats do not use the flag yet.
+
+## Preset browser: library mode
+
+`PresetBrowser::set_library(&library)` switches the browser to the library's
+query results; `set_library(nullptr)` restores the plain list. In library mode
+each row shows a favourite star, the display name (a rename never touches the
+file), the tags and the MIDI program number when a program map is enabled.
+
+- Click the star column or press `F` to toggle the favourite of the selected
+  row; Cmd/Ctrl+F is left alone. The selected row stays selected across edits.
+- The search text uses the library grammar: every word must match the name,
+  folder, tags, author or description. `set_favourites_only` and
+  `set_tag_filter` narrow it further.
+- `rename_selected`, `add_tag_to_selected` and `remove_tag_from_selected` are
+  for a host dialog or a script; the browser has no text-entry field of its own.
+- Preset callbacks still receive a `PresetInfo` carrying the file's own name, so
+  loading is unchanged. `selected_summary()` returns the library's view of the
+  row (key, display name, tags, favourite, program).
+
+Without a library the browser is unchanged.
