@@ -12,7 +12,8 @@
     "core/host/src/signal_graph_live_swap_catalog.cpp",
     "docs/status/sequencer-exposure/rows/g10-routed-spectral-runtime.json",
     "core/host/src/spectral_asset_morph_internal.hpp",
-    "core/host/src/spectral_graph.cpp"
+    "core/host/src/spectral_graph.cpp",
+    "core/host/src/graph_rt_report.cpp"
   ],
   "evidence": [
     {
