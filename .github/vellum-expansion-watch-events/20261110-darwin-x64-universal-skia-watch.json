@@ -6,12 +6,14 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
+    "design-output-and-packaging",
     "render-assets-and-backends",
     "visual-proof-harness"
   ],
-  "rationale": "Repoints the mac-x86_64 Skia release-asset selector at the already-pinned universal skia-build archive (the asset mac-arm64 and mac-universal already use, and the one gpu-runtime's renderer lock pins), updates the matching VERSION.md digest rows and min_os.json source notes, and makes audit.py --strict require every mac-* asset to carry the lock's digest. No new asset, milestone, Dawn build or renderer is introduced; the x86_64 objects linked are byte-identical to the thin archive's. No design-import, Chromium, rendering, or packaging authority moves.",
+  "rationale": "Repoints the mac-x86_64 Skia release-asset selector at the already-pinned universal skia-build archive (the asset mac-arm64 and mac-universal already use, and the one gpu-runtime's renderer lock pins), updates the matching VERSION.md digest rows and min_os.json source notes, and makes audit.py --strict require every mac-* asset to carry the lock's digest. With every macOS selector on that archive, PulpGpuRuntime.cmake drops its architecture opt-out, so x86_64 and universal builds forward the device layer to gpu-runtime exactly as arm64 builds already do (gpu-runtime-apple-targets replaces gpu-runtime-covers-target). No new asset, milestone, Dawn build or renderer is introduced; the x86_64 objects linked are byte-identical to the thin archive's. No design-import, Chromium, rendering, or packaging authority moves.",
   "tests": [
     "python3 tools/deps/test_audit_vellum_drift.py",
+    "cmake -DRUNTIME_MODULE=tools/cmake/PulpGpuRuntime.cmake -DWORK_DIR=<dir> -P test/cmake/check_gpu_runtime_apple_targets.cmake",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
   ],
