@@ -82,12 +82,14 @@ TEST_CASE("Notation refuses wrong ports kinds cycles and parameter ranges", "[ho
         Bad{"midi.audio >> voice.midi", "midi.audio >> voice.audio", Code::KindMismatch, "same kind"},
         Bad{"voice.level = 0.75", "voice.level = 3", Code::ParameterOutOfRange, "[0, 2]"},
         Bad{"voice.level = 0.75", "voice.audio >> voice.audio", Code::IllegalCycle, "feedback delay"}}) {
+        DYNAMIC_SECTION(graph_patch_code_name(bad.code)) {
         const auto result = parse_graph_patch(replaced(hello(), bad.before, bad.after), c);
         INFO(result.diagnostic.message());
         REQUIRE_FALSE(result); REQUIRE_FALSE(result.graph);
         REQUIRE(result.diagnostic.code == bad.code);
         REQUIRE(result.diagnostic.line > 0);
         REQUIRE(result.diagnostic.message().find(bad.fix) != std::string::npos);
+        }
     }
 }
 TEST_CASE("Strict JSON never certifies connections the legacy loader drops", "[host][patch][strict]") {
@@ -186,4 +188,19 @@ TEST_CASE("Opaque and unsupported state contracts are explicit refusals", "[host
     SignalGraph feedback; auto a = feedback.add_gain_node("a"); auto b = feedback.add_gain_node("b");
     REQUIRE(feedback.connect_feedback(a, 0, b, 0));
     REQUIRE(format_graph_patch(feedback).diagnostic.code == Code::UnsupportedContract);
+}
+
+TEST_CASE("Formatting refuses unrepresentable node scalars and shapes", "[host][patch][strict]") {
+    GraphPatchCatalog c; register_patch_gain(c); auto g = c.make_graph();
+    const auto id = c.instantiate(*g, "com.example.PatchGain", 1, "voice");
+    REQUIRE(id != 0); g->set_node_gain(id, 0.5f);
+    REQUIRE(format_graph_patch(*g, c).diagnostic.code == Code::UnsupportedContract);
+    SignalGraph boundary; boundary.add_input_node(1, "in");
+    REQUIRE(format_graph_patch(boundary).diagnostic.code == Code::UnsupportedContract);
+    REQUIRE(parse_graph_patch("# flow 1\nx :\n").diagnostic.code == Code::SyntaxError);
+    SignalGraph gain; gain.add_gain_node("gain");
+    auto json = choc::json::parse(GraphSerializer::to_json(gain));
+    auto node = choc::value::Value(json["nodes"][0]); node.setMember("gain", "not-a-number");
+    auto nodes = choc::value::createEmptyArray(); nodes.addArrayElement(node); json.setMember("nodes", nodes);
+    REQUIRE_FALSE(load_graph_patch_json(choc::json::toString(json)));
 }
