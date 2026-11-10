@@ -362,3 +362,35 @@ TEST_CASE("Graph file executor shares typed refusal and numeric publication with
         audio_is(*graph, 0.375f);
     }
 }
+
+TEST_CASE("Baseline alias defenses preserve lifecycle across both preparation modes",
+          "[host][graph-file-reload][alias-defense]") {
+    LifecycleCounts baseline, fresh;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2), output = graph.add_output_node(2);
+    auto instance = pulp::format::ProcessorNodeInstance::create(
+        std::make_unique<ReloadLifecycleGain>(baseline));
+    const auto processor = graph.add_processor_node(instance);
+    REQUIRE(graph.connect(input, 0, processor, 0));
+    REQUIRE(graph.connect(processor, 0, output, 0));
+    REQUIRE(graph.prepare(48000, 64));
+    const auto before = GraphSerializer::to_json(graph);
+    {
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->remove_node(processor));
+        REQUIRE(edit->add_processor_node(std::make_unique<ReloadLifecycleGain>(fresh)));
+        const auto alias = edit->add_processor_node(instance);
+        auto result = SignalGraph::PreparedTopologyEdit::Result::NotPrepared;
+        SECTION("live preparation") { result = edit->prepare(48000, 64); }
+        SECTION("quiesced preparation") { result = edit->prepare_quiesced(48000, 64); }
+        REQUIRE(result == (alias == 0 ? SignalGraph::PreparedTopologyEdit::Result::InvalidMutation
+                                      : SignalGraph::PreparedTopologyEdit::Result::ExternalPluginReprepareRequired));
+        REQUIRE(fresh.prepares == 0);
+        REQUIRE(baseline.prepares == 1);
+        REQUIRE(baseline.releases == 0);
+    }
+    REQUIRE(baseline.prepares == 1);
+    REQUIRE(baseline.releases == 0);
+    REQUIRE(GraphSerializer::to_json(graph) == before);
+    audio_is(graph, 0.125f);
+}
