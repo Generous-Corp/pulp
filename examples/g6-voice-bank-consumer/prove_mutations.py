@@ -75,8 +75,8 @@ MUTATIONS = {
         "cc123-dispatches-release",
     ),
     "widen_member_panic": (
-        "if (!scope.manager) return scope.channel == channel;",
-        "if (!scope.manager) return true;",
+        "if (!scope.manager)\n            return scope.channel == channel;",
+        "if (!scope.manager)\n            return true;",
         "member-panic-preserves-other",
     ),
 }
@@ -102,6 +102,8 @@ def main() -> None:
     scratch.mkdir(parents=True, exist_ok=True)
     assert (prefix / "lib/cmake/Pulp/PulpConfig.cmake").is_file()
     original = PRODUCTION.read_text()
+    subprocess.run(["python3", str(FIXTURE / "verify_a1_reference.py")], check=True)
+    subprocess.run(["python3", str(FIXTURE / "generate_a1_vectors.py"), "--check"], check=True)
     provenance = json.loads((prefix / "sdk-provenance.json").read_text())
     cases = [("positive", None), *MUTATIONS.items(), ("restored", None)]
     results = {}
@@ -110,6 +112,7 @@ def main() -> None:
         source.mkdir(exist_ok=True)
         shutil.copyfile(FIXTURE / "main.cpp", source / "main.cpp")
         shutil.copyfile(FIXTURE / "fixture.hpp", source / "fixture.hpp")
+        shutil.copyfile(FIXTURE / "a1_reference_vectors.hpp", source / "a1_reference_vectors.hpp")
         code = original
         if mutation:
             before, after, _ = mutation

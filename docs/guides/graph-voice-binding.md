@@ -31,11 +31,19 @@ graph consumer could verify it until a binding existed. The lead authorized
 implementing the binding and its independent audio oracle together. This
 changes the work order, not the acceptance requirements.
 
-This slice is **PARTIAL**. Host ingress currently accepts the bounded note and
-per-note expression subset; CC64/120/121/123 sustain and scoped panic are
-explicit refusals. Saved bank activation, compatible edit, undo/redo,
-and the full A1 realtime matrix remain completion requirements. The installed
-consumer test exercises the bounded audio path; the production-source mutation
-script plants independent interval-input, tail-input, alias, binding-path,
-stale-epoch, steal-policy, and release faults and requires positive, broken,
-and restored outcomes. These checks do not prove paced callback bounds.
+This slice is **PARTIAL**. In its bounded MIDI 1.0 MPE profile, host ingress
+accepts member and manager CC64 sustain, scoped CC120 all-sound-off, CC121
+reset, and CC123 all-notes-off. Member pitch, pressure, and CC74 reach the
+current note generation and change graph audio. Manager pitch, pressure, and
+CC74 remain typed refusals because their zone expression composition is not
+defined. The public consumer covers audible pedal/tail and expression traces
+across multiple block partitions; its frozen A1 fixture covers seven stereo
+sum, release, and steal cases against an independent scalar reference and ten
+planted negatives. The production-source mutation script requires positive,
+broken, and restored outcomes for ingress, identity, pedal, and release
+faults.
+
+Saved bank activation, compatible edit, undo/redo, arbitrary graph shape,
+hosted plugin formats, Linux/Windows execution, and the paced callback
+allocation/lock/deadline matrix remain unqualified. Offline in-process audio
+and an installed SDK consumer do not prove those runtime or platform lanes.

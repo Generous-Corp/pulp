@@ -21,9 +21,24 @@ compiles independent mutations of the production binding source against the
 installed SDK. It requires a positive, each planted failure, and restored
 positive result, with per-case logs and a JSON receipt under the scratch path.
 
-The consumer covers the bounded note/audio path. Focused source tests cover
-pedal and channel-mode behavior; installed pedal traces, state/edit/undo, and
-paced realtime proof remain separate G6 requirements.
+`a1_reference_vectors.json` freezes seven stereo cases for eight-slot gain,
+sum order, sparse slots, bounded release, and hard steal. The separate
+`verify_a1_reference.py` recomputes every expected sample with scalar f32
+arithmetic and requires ten planted policy, routing, timing, gain, and tail
+errors to fail. `generate_a1_vectors.py --check` binds the installed C++
+consumer to the frozen JSON hash; the installed-SDK CTest runs both Python
+checks before compiling the public consumer. The C++ consumer compares both
+channels of every case at block sizes 1, 32, 64, 127, and 256.
+
+The public consumer also renders an absolute-sample sustain trace at block
+sizes 1, 2, 3, 7, and 16. It checks an audible held voice, release after the
+last member/manager pedal rise, a four-frame tail, CC123 and CC121 audio
+equivalence, and CC120 silence. A separate trace checks per-note expression
+audio across those partitions. These are offline, in-process MIDI 1.0 and
+Processor/SignalGraph checks on the tested macOS architecture. They do not
+prove a DAW format adapter, AU/CLAP/VST3 hosted behavior, Linux/Windows
+execution, callback deadlines, allocation/lock freedom under a paced host,
+state/edit/undo, or arbitrary graph/polyphony configurations.
 
 For this MIDI 1.0 profile, physical NoteOff removes a generation from the
 tracker. Its sustain-held voice keeps the last member expression; later member

@@ -306,6 +306,91 @@ VoiceBankBindingCode step(VoiceBankBinding& bank, std::uint64_t sample,
     return bank.render(view, sample, 1);
 }
 
+Stereo render_event_trace(std::size_t partition,
+                          const std::vector<std::pair<std::uint64_t, midi::MidiEvent>>& events,
+                          std::size_t total_frames) {
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    check(static_cast<bool>(bank), "trace-prepare");
+    Stereo output;
+    std::uint64_t sequence = 1;
+    for (std::size_t start = 0; start < total_frames; start += partition) {
+        const auto frames = std::min(partition, total_frames - start);
+        check(bank->begin_block(start, frames) == HostEventResult::Accepted, "trace-begin");
+        for (const auto& [sample, message] : events)
+            if (start <= sample && sample < start + frames)
+                check(bank->publish(event(bank->epoch(), sample, sequence++, message)) ==
+                          HostEventResult::Accepted,
+                      "trace-publish");
+        audio::Buffer<float> buffer(2, frames);
+        auto view = buffer.view();
+        check(bank->render(view, start, frames) == VoiceBankBindingCode::Ok, "trace-render");
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            output.left.push_back(view.channel(0)[frame]);
+            output.right.push_back(view.channel(1)[frame]);
+        }
+    }
+    return output;
+}
+
+void check_trace_matches(const Stereo& actual, const Stereo& expected, const char* rule) {
+    check(actual.left.size() == expected.left.size() &&
+              actual.right.size() == expected.right.size(),
+          rule);
+    for (std::size_t frame = 0; frame < expected.left.size(); ++frame)
+        check(near(actual.left[frame], expected.left[frame]) &&
+                  near(actual.right[frame], expected.right[frame]),
+              rule);
+}
+
+void check_pedal_expression_audio_partitions() {
+    const auto pedal_events = [](bool channel_mode, bool manager_reset, bool sustain) {
+        std::vector<std::pair<std::uint64_t, midi::MidiEvent>> events{
+            {0, midi::MidiEvent::note_on(1, 69, 127)},
+        };
+        if (sustain) {
+            events.emplace_back(1, midi::MidiEvent::cc(1, 64, 127));
+            events.emplace_back(2, midi::MidiEvent::cc(0, 64, 127));
+        }
+        events.emplace_back(3, channel_mode ? midi::MidiEvent::cc(1, 123, 0)
+                                            : midi::MidiEvent::note_off(1, 69));
+        events.emplace_back(4, midi::MidiEvent::cc(1, 64, 0));
+        events.emplace_back(5, midi::MidiEvent::cc(0, manager_reset ? 121 : 64, 0));
+        events.emplace_back(10, midi::MidiEvent::note_on(1, 72, 127));
+        events.emplace_back(11, midi::MidiEvent::cc(0, 120, 0));
+        return events;
+    };
+    const auto held = render_event_trace(1, pedal_events(false, false, true), 12);
+    const auto no_pedal = render_event_trace(1, pedal_events(false, false, false), 12);
+    check(std::abs(held.left[7]) > 1e-4f && near(no_pedal.left[7], 0.0f),
+          "pedal-defers-audible-tail");
+    check(near(held.left[9], 0.0f) && near(held.right[9], 0.0f), "pedal-release-tail-bounded");
+    check(std::abs(held.left[10]) > 1e-4f && near(held.left[11], 0.0f) &&
+              near(held.right[11], 0.0f),
+          "manager-panic-silences-audio");
+    for (const auto partition : {2u, 3u, 7u, 16u}) {
+        check_trace_matches(render_event_trace(partition, pedal_events(false, false, true), 12),
+                            held, "pedal-partition-invariant");
+        check_trace_matches(render_event_trace(partition, pedal_events(true, true, true), 12), held,
+                            "channel-mode-audio-equivalent");
+    }
+
+    const midi::MidiEvent pressure{choc::midi::ShortMessage(0xd1, 127, 0), 0, 0.0};
+    const std::vector<std::pair<std::uint64_t, midi::MidiEvent>> expression_events{
+        {0, midi::MidiEvent::note_on(1, 69, 127)},
+        {2, midi::MidiEvent::pitch_bend(1, 16383)},
+        {3, pressure},
+        {4, midi::MidiEvent::cc(1, 74, 127)},
+        {6, midi::MidiEvent::note_off(1, 69)},
+    };
+    const auto expression = render_event_trace(1, expression_events, 12);
+    check(near(expression.left[10], 0.0f) && near(expression.right[10], 0.0f),
+          "expression-release-tail-bounded");
+    for (const auto partition : {2u, 3u, 7u, 16u})
+        check_trace_matches(render_event_trace(partition, expression_events, 12), expression,
+                            "expression-partition-invariant");
+}
+
 void check_pedals_and_modes() {
     VoiceBankBindingResult status;
     auto boundary = make_bank(schema(), status);
@@ -369,6 +454,94 @@ void check_pedals_and_modes() {
     check(step(*scoped, 7, {midi::MidiEvent::pitch_bend(15, 12288)}) ==
               VoiceBankBindingCode::UnsupportedExpression,
           "manager-expression-typed-refusal");
+}
+
+void check_frozen_a1_vectors() {
+    for (const auto& fixture : a1::kCases) {
+        for (const auto partition : {1u, 32u, 64u, 127u, 256u}) {
+            VoiceBankBindingResult status;
+            auto bank = make_a1_bank(fixture, status);
+            check(static_cast<bool>(bank), "a1-prepare");
+            for (std::uint32_t slot = 0; slot < 8; ++slot)
+                check(bank->set_slot_parameter(slot, "level", fixture.gain[slot]),
+                      "a1-authored-gain");
+            std::vector<float> left;
+            std::vector<float> right;
+            const auto total_frames = fixture.capture_start + fixture.frames;
+            for (std::size_t start = 0; start < total_frames; start += partition) {
+                const auto frames = std::min<std::size_t>(partition, total_frames - start);
+                check(bank->begin_block(start, frames) == HostEventResult::Accepted, "a1-begin");
+                if (start == 0) {
+                    std::uint64_t sequence = 1;
+                    for (std::uint8_t slot = 0; slot < 8; ++slot) {
+                        if (!fixture.active[slot] && fixture.capture_start == 0 &&
+                            fixture.kind != a1::Kind::Steal)
+                            continue;
+                        const auto note = fixture.kind == a1::Kind::Steal && slot == 0
+                                              ? 69
+                                              : static_cast<int>(60 + slot);
+                        check(bank->publish(event(bank->epoch(), 0, sequence++,
+                                                  midi::MidiEvent::note_on(slot + 1, note, 127))) ==
+                                  HostEventResult::Accepted,
+                              "a1-start");
+                    }
+                    if (fixture.capture_start != 0) {
+                        for (std::uint8_t slot = 0; slot < 8; ++slot)
+                            if (!fixture.active[slot])
+                                check(bank->publish(
+                                          event(bank->epoch(), 0, sequence++,
+                                                midi::MidiEvent::note_off(slot + 1, 60 + slot))) ==
+                                          HostEventResult::Accepted,
+                                      "a1-sparse-retire");
+                    }
+                }
+                if (fixture.kind == a1::Kind::Release && start <= fixture.note_off_sample &&
+                    fixture.note_off_sample < start + frames)
+                    check(bank->publish(event(bank->epoch(), fixture.note_off_sample, 9,
+                                              midi::MidiEvent::note_off(1, 60))) ==
+                              HostEventResult::Accepted,
+                          "a1-release");
+                if (fixture.kind == a1::Kind::Steal && start <= fixture.steal_sample &&
+                    fixture.steal_sample < start + frames)
+                    check(bank->publish(event(bank->epoch(), fixture.steal_sample, 9,
+                                              midi::MidiEvent::note_on(9, 70, 127))) ==
+                              HostEventResult::Accepted,
+                          "a1-steal");
+                audio::Buffer<float> buffer(2, frames);
+                auto view = buffer.view();
+                check(bank->render(view, start, frames) == VoiceBankBindingCode::Ok, "a1-render");
+                for (std::size_t frame = 0; frame < frames; ++frame)
+                    if (start + frame >= fixture.capture_start) {
+                        left.push_back(view.channel(0)[frame]);
+                        right.push_back(view.channel(1)[frame]);
+                    }
+            }
+            check(left.size() == fixture.frames && right.size() == fixture.frames,
+                  "a1-vector-length");
+            for (std::size_t frame = 0; frame < fixture.frames; ++frame) {
+                if (!near(left[frame], fixture.expected_left[frame]))
+                    throw std::runtime_error(
+                        std::string(fixture.id) + " left frame " + std::to_string(frame) +
+                        " actual=" + std::to_string(left[frame]) +
+                        " expected=" + std::to_string(fixture.expected_left[frame]));
+                if (!near(right[frame], fixture.expected_right[frame]))
+                    throw std::runtime_error(
+                        std::string(fixture.id) + " right frame " + std::to_string(frame) +
+                        " actual=" + std::to_string(right[frame]) +
+                        " expected=" + std::to_string(fixture.expected_right[frame]));
+            }
+            if (fixture.kind == a1::Kind::Release)
+                check(static_cast<const MpeVoiceBankOwner<A1ScriptedVoice>&>(bank->owner())
+                              .allocator()
+                              .active_count() == 0,
+                      "a1-bounded-tail");
+            if (fixture.kind == a1::Kind::Steal)
+                check(static_cast<const MpeVoiceBankOwner<A1ScriptedVoice>&>(bank->owner())
+                              .allocator()
+                              .steal_count() == 1,
+                      "a1-hard-steal");
+        }
+    }
 }
 
 class AliasedOwner final : public VoiceBankOwner {
@@ -449,6 +622,8 @@ int main() {
         check_eight_voice_sum();
         check_expression_audio();
         check_pedals_and_modes();
+        check_pedal_expression_audio_partitions();
+        check_frozen_a1_vectors();
         VoiceBankBindingResult status;
         auto malformed = schema();
         malformed.bindings[0].target = "unbound-note-port";
