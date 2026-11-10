@@ -38,7 +38,7 @@ The same graph uses these public C++ authoring calls after the example's
 Processor registration (14 lines):
 
 ```cpp
-GraphPatchCatalog catalog;
+pulp::host::GraphPatchCatalog catalog;
 register_patch_gain(catalog);
 auto graph = catalog.make_graph();
 auto input = graph->add_input_node(2, "input");
@@ -50,7 +50,7 @@ graph->connect(graph->node(input)->out("audio"), graph->node(voice)->in("audio")
 graph->connect(graph->node(voice)->out("audio"), graph->node(out)->in("audio"));
 auto instance = graph->processor_node_instance(voice);
 const auto& level = instance->parameter_catalog().front();
-graph->connect_automation(input, 0, voice, level.id, level.range.min, 1.0f);
+graph->connect_automation(input, 0, voice, level.id, level.range.min, std::lerp(level.range.min, level.range.max, 0.5f));
 instance->state_store().set_value(level.id, 0.75f);
 ```
 
@@ -142,7 +142,9 @@ The focused C++ suite covers API named MIDI, stale/foreign handles, audio and
 MIDI sharing a node pair, deterministic roundtrip, unsupported contracts,
 negative diagnostics and several render block partitions. The installed CMake
 fixture stages a fresh SDK, checks the public header digest, copies this
-consumer outside the source tree and runs it. Its tool parity phase compares
+consumer outside the source tree and runs it. It also extracts the exact
+14-line C++ block above, compiles it against the installed SDK and compares
+its canonical graph with the ten-line notation. Its tool parity phase compares
 all failure fields across C++/CLI/MCP and checks notation/save roundtrip.
 
 ## Required graph-file reload successor

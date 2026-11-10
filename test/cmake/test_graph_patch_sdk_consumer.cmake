@@ -48,6 +48,43 @@ foreach(_file CMakeLists.txt main.cpp hello.hpp hello.pat)
         "${_source}/${_file}" COPYONLY)
 endforeach()
 
+# Compile the documented public authoring calls verbatim, independently of the
+# 100-line consumer. A changed guide must still construct the same saved graph.
+file(READ "${PULP_SOURCE_DIR}/docs/guides/graph-patch-notation.md" _guide)
+string(REGEX MATCH "```cpp\n([^`]+)```" _cpp_block "${_guide}")
+set(_cpp_hello "${CMAKE_MATCH_1}")
+string(STRIP "${_cpp_hello}" _cpp_trimmed)
+string(REGEX REPLACE "[^\n]" "" _cpp_newlines "${_cpp_trimmed}")
+string(LENGTH "${_cpp_newlines}" _cpp_line_count)
+math(EXPR _cpp_line_count "${_cpp_line_count} + 1")
+if(NOT _cpp_hello OR _cpp_line_count GREATER 15)
+    message(FATAL_ERROR "Documented C++ graph hello must contain 1..15 lines")
+endif()
+file(WRITE "${_source}/cpp_hello.cpp" [=[
+#include "hello.hpp"
+#include <cmath>
+int main(int argc, char** argv) {
+if (argc != 2) return 1;
+]=])
+file(APPEND "${_source}/cpp_hello.cpp" "${_cpp_hello}")
+file(APPEND "${_source}/cpp_hello.cpp" [=[
+auto expected = pulp::host::load_graph_patch_file(argv[1], catalog);
+auto actual = pulp::host::format_graph_patch(*graph, catalog);
+if (!expected || !actual || graph->connections().size() != 4) return 2;
+auto canonical = pulp::host::format_graph_patch(*expected.graph, catalog);
+return canonical && canonical.text == actual.text ? 0 : 3;
+}
+]=])
+file(APPEND "${_source}/CMakeLists.txt" [=[
+add_executable(graph-patch-cpp-hello cpp_hello.cpp)
+target_link_libraries(graph-patch-cpp-hello PRIVATE Pulp::host)
+target_compile_features(graph-patch-cpp-hello PRIVATE cxx_std_20)
+add_test(NAME graph-patch-documented-cpp-hello
+    COMMAND graph-patch-cpp-hello "${CMAKE_CURRENT_SOURCE_DIR}/hello.pat")
+set_tests_properties(graph-patch-documented-cpp-hello PROPERTIES TIMEOUT 30)
+]=])
+file(APPEND "${_receipt}" "Documented C++ authoring lines: ${_cpp_line_count}\n")
+
 set(_args -S "${_source}" -B "${_build}" -G Ninja
     "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
     "-DCMAKE_PREFIX_PATH=${_prefix}"
