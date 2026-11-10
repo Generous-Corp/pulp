@@ -8,6 +8,7 @@
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/platform/main_thread.hpp>
 #include <pulp/platform/native_handle.hpp>
+#include <pulp/platform/popup_menu.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -26,6 +27,9 @@ struct DialogSessionState {
     // Closes what is showing so it finishes with its dismissed result.
     // Main thread only.
     std::function<void()> close;
+    // Whatever the platform backend must keep alive while the dialog is up.
+    // Released once the dialog has finished or its scope is gone.
+    std::shared_ptr<void> resources;
     std::uint64_t teardown_id = 0;
 };
 
@@ -72,6 +76,7 @@ std::function<void(Result)> make_finisher(MainThreadScope& scope,
             state->teardown_id = 0;
             state->open = false;
             state->close = nullptr;
+            state->resources = nullptr;
             if (done)
                 done(std::move(*box));
         };
@@ -94,6 +99,7 @@ inline void bind_to_scope(MainThreadScope& scope,
                 s->close = nullptr;
                 close();
             }
+            s->resources = nullptr;
         }
     });
 }
@@ -115,6 +121,13 @@ std::function<void()>
 present_native_save(NativeViewHandle parent, const FileDialog::SaveRequest& request,
                     std::optional<std::string> copy_source,
                     std::function<void(std::optional<std::string>, std::string)> respond);
+
+// Opens the menu on a later run-loop pass from a timer bound to `scope`.
+// `resources` receives what must stay alive until the menu has finished.
+std::function<void()> present_native_menu(MainThreadScope& scope, const MenuAnchor& anchor,
+                                          MenuModel model, MenuPlacement placement,
+                                          std::function<void(std::optional<int>)> respond,
+                                          std::shared_ptr<void>& resources);
 
 bool native_open_url(const std::string& url);
 

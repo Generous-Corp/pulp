@@ -245,6 +245,70 @@ TEST_CASE("with text focus keys go to the client first, and unconsumed ones beco
     REQUIRE(f.keys.size() == 3);
 }
 
+TEST_CASE("holding the keyboard for keys hands every key the client declines back to the host",
+          "[native-surface][input][surface]") {
+    Fixture f;
+    REQUIRE_READY(f);
+    REQUIRE(f.surface->set_keyboard_focus(KeyboardFocus::keys));
+    REQUIRE(f.window.firstResponder == f.view);
+    REQUIRE(f.surface->keyboard_focus() == KeyboardFocus::keys);
+    REQUIRE_FALSE(f.surface->text_focus());
+
+    // A key the client consumes stays with the client.
+    [f.view keyDown:f.key(NSEventTypeKeyDown, kVK_ANSI_K, @"k")];
+    REQUIRE(f.keys.size() == 1);
+    REQUIRE(f.host.keyDowns == 0);
+
+    // A key it declines goes on to the next responder, the host: Space still
+    // reaches the DAW's transport, and nothing becomes text.
+    f.consume_keys = false;
+    [f.view keyDown:f.key(NSEventTypeKeyDown, kVK_Space, @" ")];
+    [f.view keyUp:f.key(NSEventTypeKeyUp, kVK_Space, @" ")];
+    REQUIRE(f.keys.size() == 3);
+    REQUIRE(f.keys[1].key == Key::space);
+    REQUIRE(f.host.keyDowns == 1);
+    REQUIRE(f.host.keyUps == 1);
+    REQUIRE(f.texts.empty());
+    REQUIRE(f.marked.empty());
+
+    // So does a declined Command chord.
+    REQUIRE_FALSE([f.view performKeyEquivalent:f.key(NSEventTypeKeyDown, kVK_ANSI_S, @"s",
+                                                     NSEventModifierFlagCommand)]);
+    REQUIRE(f.keys.size() == 4);
+}
+
+TEST_CASE("text entry keeps declined keys from the host until the client switches to keys",
+          "[native-surface][input][surface]") {
+    Fixture f;
+    REQUIRE_READY(f);
+    f.consume_keys = false;
+    REQUIRE(f.surface->set_keyboard_focus(KeyboardFocus::text));
+    REQUIRE(f.surface->text_focus());
+    [f.view keyDown:f.key(NSEventTypeKeyDown, kVK_Space, @" ")];
+    REQUIRE(f.host.keyDowns == 0);
+
+    // An unfinished composition does not survive leaving text entry.
+    id<NSTextInputClient> client = (id<NSTextInputClient>)f.view;
+    [client setMarkedText:@"ka"
+            selectedRange:NSMakeRange(2, 0)
+         replacementRange:NSMakeRange(NSNotFound, 0)];
+    REQUIRE(f.marked == std::vector<std::string>{"ka"});
+
+    REQUIRE(f.surface->set_keyboard_focus(KeyboardFocus::keys));
+    REQUIRE(f.window.firstResponder == f.view);
+    REQUIRE_FALSE(f.surface->text_focus());
+    REQUIRE_FALSE([client hasMarkedText]);
+    REQUIRE(f.marked == std::vector<std::string>{"ka", ""});
+    [f.view keyDown:f.key(NSEventTypeKeyDown, kVK_Space, @" ")];
+    REQUIRE(f.host.keyDowns == 1);
+
+    // Giving the keyboard back ends either hold and restores the host.
+    REQUIRE(f.surface->set_text_focus(false));
+    REQUIRE(f.surface->keyboard_focus() == KeyboardFocus::none);
+    REQUIRE(f.window.firstResponder == f.host);
+    REQUIRE_FALSE([f.view acceptsFirstResponder]);
+}
+
 TEST_CASE("committed and marked text arrive separately from key identity",
           "[native-surface][input][surface]") {
     Fixture f;

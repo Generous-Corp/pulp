@@ -111,7 +111,7 @@ void imp_update_tracking_areas(id self, SEL sel) {
 BOOL imp_accepts_first_responder(id self, SEL) {
     auto* input = surface_input_of(self);
     // Hold the host's keyboard only while the client asked for it.
-    return input && input->text_focus;
+    return input && input->focus != KeyboardFocus::none;
 }
 
 BOOL imp_accepts_first_mouse(id, SEL, NSEvent*) {
@@ -134,7 +134,7 @@ BOOL imp_resign_first_responder(id self, SEL sel) {
         if (auto* input = surface_input_of(self)) {
             // The host took the keyboard: the hold ends, so the view does not
             // take it back on the next event.
-            input->text_focus = false;
+            input->focus = KeyboardFocus::none;
             if (!input->marked.empty()) {
                 input->marked.clear();
                 if (input->handler.marked_text)
@@ -158,26 +158,26 @@ bool offer_key(SurfaceInput& input, const KeyEvent& e) {
 void imp_key_down(id self, SEL sel, NSEvent* event) {
     auto* input = surface_input_of(self);
     auto e = translate_key((__bridge void*)event);
-    if (!input || !e || route_key(*e, input->text_focus) == KeyRoute::host) {
+    if (!input || !e || route_key(*e, input->focus) == KeyRoute::host) {
         super_event(self, sel, event);
         return;
     }
     if (offer_key(*input, *e))
         return;
-    if (input->text_focus) {
+    if (input->focus == KeyboardFocus::text) {
         // Turns the key into committed or marked text through the
         // NSTextInputClient methods below.
         [(NSView*)self interpretKeyEvents:@[ event ]];
         return;
     }
+    // Keys without text entry: what the client declined is the host's.
     super_event(self, sel, event);
 }
 
 void imp_key_up(id self, SEL sel, NSEvent* event) {
     auto* input = surface_input_of(self);
     auto e = translate_key((__bridge void*)event);
-    if (!input || !e || route_key(*e, input->text_focus) == KeyRoute::host ||
-        !offer_key(*input, *e))
+    if (!input || !e || route_key(*e, input->focus) == KeyRoute::host || !offer_key(*input, *e))
         super_event(self, sel, event);
 }
 
@@ -192,7 +192,7 @@ void imp_flags_changed(id self, SEL sel, NSEvent* event) {
 BOOL imp_perform_key_equivalent(id self, SEL sel, NSEvent* event) {
     auto* input = surface_input_of(self);
     auto e = translate_key((__bridge void*)event);
-    if (input && e && route_key(*e, input->text_focus) == KeyRoute::client_first &&
+    if (input && e && route_key(*e, input->focus) == KeyRoute::client_first &&
         offer_key(*input, *e))
         return YES;
     auto fn = super_fn<BOOL (*)(id, SEL, NSEvent*)>(sel);
