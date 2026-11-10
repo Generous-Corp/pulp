@@ -104,8 +104,8 @@ bool CustomNodeType::is_valid_registration() const noexcept {
     if (consumes_events() && has_transport_callback)
         return false;
 
-    // Bake-layer obligations live here too, so that every registrar — the
-    // direct one, the transactional edit, and the node-adding leaf — applies
+    // Bake-layer obligations live here too, so that every registrar (the
+    // direct one, the transactional edit, and the node-adding leaf) applies
     // ONE rule. A descriptor that passes shape but declares an incoherent
     // bake surface would otherwise stay `lowerable`, be accepted by baking,
     // and silently degrade to passthrough.
