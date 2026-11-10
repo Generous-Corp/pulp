@@ -1,7 +1,7 @@
+#include <pulp/format/process_context.hpp>
 #include <pulp/host/graph_event_contract.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/trigger_graph.hpp>
-#include <pulp/format/process_context.hpp>
 
 #include <array>
 #include <cstdint>
@@ -363,14 +363,15 @@ AuthoredGraphObservation render_authored_graph(bool routed) {
             check(events.graph_writer->emit_at(3, 55) == GraphEventResult::Accepted,
                   "runtime-boundary-accept");
             state->observation.future_refused =
-                events.graph_writer->emit_at(2 + GraphAuthoredEventLane<>::kPendingCapacity,
-                                             77) == GraphEventResult::Future;
+                events.graph_writer->emit_at(2 + GraphAuthoredEventLane<>::kPendingCapacity, 77) ==
+                GraphEventResult::Future;
             check(state->observation.future_refused, "runtime-future-refusal");
         }
         if (events.graph_reader != nullptr) {
             for (const auto& event : events.graph_reader->events()) {
                 check(event.sample >= state->consumer_cursor &&
-                          event.sample - state->consumer_cursor < static_cast<std::uint64_t>(frames),
+                          event.sample - state->consumer_cursor <
+                              static_cast<std::uint64_t>(frames),
                       "runtime-event-window");
                 state->observation.events.push_back(event);
                 out.channel_ptr(0)[event.sample - state->consumer_cursor] =
@@ -437,7 +438,7 @@ void graph_authored_reset_controls() {
     type.type_id = "g5.public.graph-authored-reset";
     type.num_input_ports = type.num_output_ports = 1;
     type.process_events = [calls, delivered](auto& out, const auto& in, int frames,
-                                              const CustomNodeEventBlock& events) {
+                                             const CustomNodeEventBlock& events) {
         for (int i = 0; i < frames; ++i)
             out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
         if (events.graph_writer != nullptr && (*calls)++ == 0)

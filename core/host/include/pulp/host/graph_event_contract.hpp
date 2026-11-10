@@ -9,10 +9,10 @@
 /// epoch/sample/sequence rules as the admitted trigger runtime, while keeping
 /// the producer and consumer phases explicit for future graph bindings.
 
+#include <pulp/host/graph_types.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
-#include <pulp/host/graph_types.hpp>
 
 #include <algorithm>
 #include <array>
@@ -608,8 +608,8 @@ class GraphAuthoredEventLane final {
             const auto sequence = sequence_++;
             counters_.sequence = sequence;
             const auto block_end = block_start_ + block_frames_;
-            const auto result = target_sample >= block_end ? GraphEventResult::Future
-                                                            : GraphEventResult::Late;
+            const auto result =
+                target_sample >= block_end ? GraphEventResult::Future : GraphEventResult::Late;
             increment_(result == GraphEventResult::Future ? counters_.future : counters_.late);
             increment_(counters_.diagnostic_refusals);
             return result;
