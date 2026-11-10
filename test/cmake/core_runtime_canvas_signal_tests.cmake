@@ -528,6 +528,25 @@ if(TARGET pulp-signal-mufft)
     target_compile_definitions(pulp-test-fft-backend-accuracy-mufft PRIVATE
         PULP_FFT_FORCE_PORTABLE PULP_FFT_HAS_MUFFT=1)
 endif()
+# FftT conventions (sign, scaling, layout, exactness, determinism), once per
+# backend like the accuracy suite above.
+pulp_add_test_suite(pulp-test-fft-scaling-contract
+    SOURCES test_fft_scaling_contract.cpp
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-fft-scaling-contract-builtin
+    SOURCES test_fft_scaling_contract.cpp
+    LIBRARIES pulp::signal
+    TEST_PREFIX "builtin: ")
+target_compile_definitions(pulp-test-fft-scaling-contract-builtin PRIVATE
+    PULP_FFT_FORCE_PORTABLE PULP_FFT_FORCE_BUILTIN)
+if(TARGET pulp-signal-mufft)
+    pulp_add_test_suite(pulp-test-fft-scaling-contract-mufft
+        SOURCES test_fft_scaling_contract.cpp
+        LIBRARIES pulp::signal pulp::signal-mufft
+        TEST_PREFIX "mufft: ")
+    target_compile_definitions(pulp-test-fft-scaling-contract-mufft PRIVATE
+        PULP_FFT_FORCE_PORTABLE PULP_FFT_HAS_MUFFT=1)
+endif()
 # Window coefficient, spectral-shape, STFT-consumer, and RT apply contracts.
 pulp_add_test_suite(pulp-test-windowing
     SOURCES test_windowing.cpp harness/rt_allocation_probe.cpp
