@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/sample_slot_materializer.hpp",
+  "fingerprint": "sha256:ed04de4807576ba9436a5b3a7d9545766af4edbc2bdc105fd1248f0c059a2366",
+  "include": "pulp/audio/sample_slot_materializer.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

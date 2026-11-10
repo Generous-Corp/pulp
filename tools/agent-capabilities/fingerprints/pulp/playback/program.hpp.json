@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/playback/program.hpp",
+  "fingerprint": "sha256:8475c93fcc8b219d1f1ec4774f1739e9ab08ffb51051f7a2bac680dc21036c42"
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "timebase",
+  "source": "core/timebase/include/pulp/timebase/quantize.hpp",
+  "fingerprint": "sha256:ca242cb57d4963cf48ce6bb41a4b9d90d0959b7a6aff28cdbdb76013ba39ac84",
+  "include": "pulp/timebase/quantize.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "timebase.swing"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

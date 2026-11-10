@@ -1,0 +1,11 @@
+{
+  "domain": "music",
+  "source": "core/music/include/pulp/music/harmony.hpp",
+  "fingerprint": "sha256:8e5ce059f95c6817e05a9b6cf6bf94599d54fdf82da7fe7e9a12ffe27b0b9e60",
+  "include": "pulp/music/harmony.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "music.chord-recognition"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

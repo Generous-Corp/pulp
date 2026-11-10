@@ -61,6 +61,7 @@ target_sources(pulp-view-core PRIVATE
     src/text_editor_paint.cpp
     src/ui_components.cpp
     src/context_menu.cpp
+    src/midi_learn_menu.cpp
     src/scroll_bar.cpp
     src/view_pool.cpp
     src/virtual_list.cpp

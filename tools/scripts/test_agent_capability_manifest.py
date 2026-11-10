@@ -15,6 +15,7 @@ from typing import Any
 
 import agent_capability_manifest as manifest
 import agent_capability_history as capability_history
+import agent_capability_store as capability_store
 import agent_capability_surface as surface
 import agent_capability_transaction as transaction
 import json_schema_lite
@@ -1047,7 +1048,7 @@ def exercise_evolution(canonical: dict) -> int:
     history = capability_history.history_document([
         capability_history.history_entry(
             canonical,
-            json.loads((ROOT / surface.SURFACE_SNAPSHOT).read_text()),
+            capability_store.load_surface(ROOT),
         )
     ])
     bypass = copy.deepcopy(canonical)
@@ -1057,7 +1058,7 @@ def exercise_evolution(canonical: dict) -> int:
         manifest.history_problems(
             history,
             bypass,
-            json.loads((ROOT / surface.SURFACE_SNAPSHOT).read_text()),
+            capability_store.load_surface(ROOT),
         ),
         "changed without a contract_version increase",
     )
@@ -1597,13 +1598,10 @@ def exercise_counters_assigned_at_land(canonical: dict) -> int:
     checks += 1
 
     # The release guard and the status report read the same rule.
-    with tempfile.TemporaryDirectory(prefix="pulp-agent-counters-") as temp:
-        path = pathlib.Path(temp) / "history.json"
-        path.write_text(json.dumps(history), encoding="utf-8")
-        flags = argparse.Namespace(status=False, require_assigned=True, assign_pending=False)
-        assert manifest.counter_status(ROOT, changed, surface_doc, path, flags) == 1
-        assert manifest.counter_status(ROOT, assigned, surface_doc, path, flags) == 0
-        assert manifest.counter_status(ROOT, published, surface_doc, path, flags) == 0
+    flags = argparse.Namespace(status=False, require_assigned=True, assign_pending=False)
+    assert manifest.counter_status(ROOT, changed, surface_doc, history, flags) == 1
+    assert manifest.counter_status(ROOT, assigned, surface_doc, history, flags) == 0
+    assert manifest.counter_status(ROOT, published, surface_doc, history, flags) == 0
     result = run("--status")
     assert result.returncode == 0, result.stderr
     status = json.loads(result.stdout)
@@ -2013,9 +2011,8 @@ def exercise_history_storage() -> int:
     inline layout, refusal of hand edits, and the size guard that keeps the
     file far below GitHub's 100 MB push limit."""
     checks = 0
-    history_path = ROOT / capability_history.HISTORY_FILE
-    text = history_path.read_text(encoding="utf-8")
-    stored = json.loads(text)
+    stored = capability_store.load_history(ROOT)
+    text = capability_history.rendered_history(stored)
     assert stored["schema"] == capability_history.HISTORY_SCHEMA, stored["schema"]
 
     # The checked-in file is the exact rendering of the exact encoding of its
@@ -2186,22 +2183,26 @@ def exercise_history_storage() -> int:
                    "is not valid JSON: bad")
     checks += 1
 
-    # --check compares the file text with its rendering, which catches an edit
-    # that parses back to the honest document (a duplicated object line).
+    # --check compares every entry file's text with its rendering, which
+    # catches an edit that parses back to the honest document (a duplicated
+    # object line).
     with tempfile.TemporaryDirectory(prefix="pulp-agent-history-text-") as temp:
-        copy_path = pathlib.Path(temp) / "contract-history.json"
-        copy_path.write_text(text, encoding="utf-8")
-        assert manifest.history_text_problems(copy_path, stored) == []
-        lines = text.splitlines(keepends=True)
+        copy_root = pathlib.Path(temp)
+        capability_store.replace_directory(
+            copy_root, capability_store.HISTORY_DIR, capability_store.split_history(stored))
+        assert capability_store.load_history(copy_root) == stored
+        assert capability_store.layout_problems(copy_root, None, stored, None) == []
+        entry_path = sorted((copy_root / capability_store.HISTORY_DIR).iterdir())[0]
+        lines = entry_path.read_text(encoding="utf-8").splitlines(keepends=True)
         index = next(i for i, line in enumerate(lines)
                      if line.startswith('    "sha256:') and '": ' in line
                      and line.endswith(",\n"))
         duplicated = lines[:index + 1] + [lines[index]] + lines[index + 1:]
-        copy_path.write_text("".join(duplicated), encoding="utf-8")
-        assert json.loads(copy_path.read_text(encoding="utf-8")) == stored
+        entry_path.write_text("".join(duplicated), encoding="utf-8")
+        assert capability_store.load_history(copy_root) == stored
         assert not [problem for problem in problems(stored)
                     if "canonical" in problem or "object" in problem]
-        expect_problem(manifest.history_text_problems(copy_path, stored),
+        expect_problem(capability_store.layout_problems(copy_root, None, stored, None),
                        "is not in its rendered form")
     checks += 1
 

@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/built_in_transient_classifier.hpp",
+  "fingerprint": "sha256:3da5ae7fc962b1808da88083dc90f3b0b5a3a5d46b78b66b96e66966a62c612c",
+  "include": "pulp/audio/built_in_transient_classifier.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

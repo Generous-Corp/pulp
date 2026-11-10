@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/modulation_curve.hpp",
+  "fingerprint": "sha256:da89147c18e3c0479bf02294273bc7ec8ff76bc83cc7e198e645b14fe100a298",
+  "include": "pulp/signal/modulation_curve.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.modulation-primitives"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

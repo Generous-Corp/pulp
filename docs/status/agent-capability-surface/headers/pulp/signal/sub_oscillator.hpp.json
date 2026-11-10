@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/sub_oscillator.hpp",
+  "fingerprint": "sha256:e9d65a675da14e222b4bd49127e3277dd810d669dec0517c2878fb25232d5879",
+  "include": "pulp/signal/sub_oscillator.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.sub-oscillator"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/rt_safety_contract.hpp",
+  "fingerprint": "sha256:7c6420b43b8a6cfeb7e9cf6940a3fd38406d81c3f36b0e244f7b1e9694301c99",
+  "include": "pulp/audio/rt_safety_contract.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

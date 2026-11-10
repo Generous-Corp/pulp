@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/spectral_delay_matrix.hpp",
+  "fingerprint": "sha256:53ed4a5125e74d86fc8e4f8980a6309cbf00796d85f8f5b7cb9f1a06acbe0034",
+  "include": "pulp/signal/spectral_delay_matrix.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.spectral-delay-matrix"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

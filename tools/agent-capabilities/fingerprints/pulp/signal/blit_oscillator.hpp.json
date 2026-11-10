@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/blit_oscillator.hpp",
+  "fingerprint": "sha256:8bf6a4bbbc04b30ff2c8e1a63c84c549c90a16813fed0e4409ae7c146f0f75d0"
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/drum/cymbal.hpp",
+  "fingerprint": "sha256:99a8c81b3359f87fa8e65201576d62fb78e652090d08e08b085fb0efefba0c30",
+  "include": "pulp/signal/drum/cymbal.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/mock_midi_system.hpp",
+  "fingerprint": "sha256:45e2079efb6edb3f45f592dfd85b59e8b41c3499dfaf29d00135ffda83ef297c",
+  "include": "pulp/midi/mock_midi_system.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Scriptable in-memory MIDI backend for headless tests and hosts; not a generator-facing capability."
+}

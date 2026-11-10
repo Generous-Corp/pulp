@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/processing_switch_crossfade.hpp",
+  "fingerprint": "sha256:d24a6d343cd8b18da0fc1bcb71c9d090dbdf4ac17f31c6a33714583a32595fde",
+  "include": "pulp/signal/processing_switch_crossfade.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "The sample schedule for switching a processor between two realisations of differing latency (warm the incoming one unheard, then a TransitionMixer EqualPower fade). It is plumbing a processor composes around the realisations it owns, not a behavior an agent selects on its own."
+}

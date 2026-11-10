@@ -3430,6 +3430,79 @@ two disagree (and the detector judges all six on main's tip). `[governance]` is 
 `shipyard governance apply` pushes exactly that list to branch protection.
 Removing it again is the reverse `required_status_checks` edit.
 
+## `release-configure`: every release leg's configure, before merge
+
+`release-cli.yml` runs only on a version-tag push, and its `release` job needs
+every build leg, so a change that breaks one leg's CMake configure is first
+seen after it merges and is tagged; from then on no tag publishes. From
+2026-11-07 to 2026-11-10 that stopped v1.81.0 through v1.96.0: a gpu-runtime
+forward made the `darwin-x64` leg (cross-configured for x86_64 on Apple
+Silicon) stop with `gpu-runtime: libdawn_combined.a does not match the lock`.
+The required gate never configures the release matrix, the weekly dry-run's
+Intel leg is advisory, and `release-path-pr-gate.yml` builds only `linux-x64`
+and `darwin-arm64`.
+
+`.github/workflows/release-configure.yml` closes that gap without building:
+
+- **Legs.** One per active release platform
+  (`tools/scripts/release_product_matrix.json` via `release_build_matrix.py`),
+  on the GitHub-hosted image the release leg uses: `macos-15` for both Darwin
+  legs (`darwin-x64` cross-configures there, as in the release),
+  `ubuntu-24.04`, `ubuntu-24.04-arm`, `windows-latest`, `windows-11-arm`. No
+  gate VM is used. If the hosted macOS pool starves (the merge queue gives a
+  required check 120 minutes), set `PULP_RELEASE_CONFIGURE_MACOS_RUNS_ON_JSON`
+  (a label or a JSON label array) to route both Darwin legs elsewhere; it is
+  read for same-repository events only, so a fork always gets `macos-15`.
+- **No copied flags.** `tools/ci/release_configure_matrix.py` reads
+  `release-cli.yml`'s `build-cli` job and replays its steps by name, from the
+  dependency bootstrap and Skia fetch through every `cmake -S`, with the build
+  command inside the SDK configure steps replaced by an echo. Steps run as
+  GitHub runs `shell: bash` (`bash -eo pipefail`), and `GITHUB_ENV` /
+  `GITHUB_PATH` carry between them. Every `build-cli` step must be classified
+  as replayed, mirrored or skipped (with a reason); a new or renamed step fails
+  the gate's self-test, which runs in the gate's scope job and in
+  `workflow-lint.yml`.
+- **Known gap.** The release builds `linux-x64` in an `ubuntu:22.04`
+  container (GCC 13, glibc floor). Replaying that toolchain install costs about
+  20 minutes, so the gate configures `linux-x64` on the bare image.
+- **Scope.** The trigger is unfiltered (it will become a required check, and a
+  required check must always report).
+  The scope job reads the change through the compare API (both the new and, for
+  a rename, the old path) and runs the legs only when it touches a configure
+  input:
+  - any `CMakeLists.txt` or `*.cmake` outside `test/` and `examples/` (the
+    release profile turns both off), `tools/cmake/`, `tools/deps/`,
+    `external/`, `setup.sh`, the toolchain pins, the release workflow and matrix
+    scripts;
+  - every file a configure-reachable CMake file names through
+    `${CMAKE_SOURCE_DIR}/`, `${PROJECT_SOURCE_DIR}/` and the other source-dir
+    variables (scripts it `execute_process`es, data it `file(READ)`s,
+    `configure_file` templates), found by scanning the checkout, so a new one
+    needs no list edit. A named source file counts only when it is deleted or
+    renamed.
+
+  A root `CMakeLists.txt` change to the project `VERSION` line alone is out of
+  scope. An unreadable diff, or 300+ changed files, runs every leg.
+- **Cost.** About four minutes per leg (bootstrap, Skia fetch, one or two
+  configures), in parallel; out-of-scope changes finish in under a minute.
+- **On failure.** The leg prints the CMake error as an annotation titled
+  `Release <platform> configure fails`, writes it to the step summary, and
+  names the local reproduction:
+  `python3 tools/ci/release_configure_matrix.py run --platform <platform>`
+  (a matching host: macOS for the Darwin legs).
+
+**It is not required yet** (decision 33 in `.agents/contract.toml`). The gate
+lands first and is judged from `main`; a later pull request adds
+`release-configure` to `.github/rulesets/main-protection.json`, `[governance]`
+and `[landability]` in `.shipyard/config.toml`, and the required-check maps
+(`required_check_machinery.py`, `merge_stall_watchdog.py`, the base-poison
+detector), and only once every leg is green on `main`. Until then the check
+reports but does not block. The aggregate job `release-configure` already runs
+under `if: always()` and fails unless the scope job succeeded and, when in
+scope, every leg did, so registering it changes no workflow. After it is
+registered, push to or re-run any open pull request that should land, because a
+pull request's checks only start on a push.
+
 ## Every failed run names its cause: the advisory `ci-cause` job
 
 When any job in a `build.yml` run fails, the `ci-cause (advisory)` job runs
