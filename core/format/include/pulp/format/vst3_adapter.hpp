@@ -22,6 +22,7 @@
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/vst/ivstevents.h>
 #include <pluginterfaces/vst/ivstmidicontrollers.h>
+#include <pluginterfaces/vst/ivstmidilearn.h>
 #include <pluginterfaces/vst/ivstnoteexpression.h>
 #include <pluginterfaces/vst/ivstunits.h>
 #include <pluginterfaces/base/ibstream.h>
@@ -137,8 +138,9 @@ inline constexpr Steinberg::uint32 kProcessContextRequirements =
 class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
                           public Steinberg::Vst::IMidiMapping,
                           public Steinberg::Vst::INoteExpressionController,
+                          public Steinberg::Vst::IMidiLearn,
                           public Steinberg::Vst::IKeyswitchController {
-public:
+  public:
     PulpVst3Processor(ProcessorFactory factory);
     ~PulpVst3Processor() override;
 
@@ -164,6 +166,14 @@ public:
         Steinberg::int32 busIndex, Steinberg::int16 channel,
         Steinberg::Vst::CtrlNumber midiControllerNumber,
         Steinberg::Vst::ParamID& id) override;
+
+    // IMidiLearn — the host reports which controller the user just moved so the
+    // plug-in can bind it to the parameter being learned. Exposed only when the
+    // processor registered a state::MidiLearnEngine (Processor::set_midi_learn_engine);
+    // returns kResultTrue when a learn was listening and took the report.
+    Steinberg::tresult PLUGIN_API
+    onLiveMIDIControllerInput(Steinberg::int32 busIndex, Steinberg::int16 channel,
+                              Steinberg::Vst::CtrlNumber midiControllerNumber) override;
 
     // INoteExpressionController — declare the per-note expression types the
     // plug-in accepts and convert between normalized values and strings.

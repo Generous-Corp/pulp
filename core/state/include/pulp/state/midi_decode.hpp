@@ -33,6 +33,8 @@ struct RawMidi {
     constexpr uint8_t channel() const {
         return status & 0x0F;
     }
+
+    friend constexpr bool operator==(const RawMidi&, const RawMidi&) = default;
 };
 
 /// A decoded controller value. `kind == step` carries a signed increment
