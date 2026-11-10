@@ -34,6 +34,10 @@ _ERRORISH = re.compile(
     re.IGNORECASE,
 )
 _ERROR_LINE_LIMIT = 300
+# Color codes the runner leaves on echoed shell lines (`ESC[36;1m ... ESC[0m`).
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# The trace of a step that prints a workflow error: `echo "::error::..."`.
+_ECHOED_ERROR = re.compile(r"\becho\b.*::error")
 
 # fetch_skia_for_release.py prints these when a pinned archive's bytes do not
 # hash to the pin. The url line is printed on stdout and can land after the
@@ -84,7 +88,7 @@ PROVENANCE_EXCEPTIONS: dict[tuple[str, str, str, str], str] = {
 
 
 def strip_timestamp(line: str) -> str:
-    return _TIMESTAMP.sub("", line.rstrip("\r\n"))
+    return _ANSI.sub("", _TIMESTAMP.sub("", line.rstrip("\r\n")))
 
 
 def _scan_errors(lines: list[str]) -> tuple[str, str]:
@@ -94,7 +98,9 @@ def _scan_errors(lines: list[str]) -> tuple[str, str]:
         if not line or not _ERRORISH.search(line):
             continue
         # `echo "::error::..."` in a shell trace is a command, not an error.
-        if line.startswith(("echo ", "+ echo")):
+        # The runner echoes the script source before running it, so the same
+        # message appears once as the command and once as the real `##[error]`.
+        if line.startswith(("echo ", "+ echo")) or _ECHOED_ERROR.search(line):
             continue
         if any(p.match(line) for p in _GENERIC_ERRORS):
             fallback = fallback or line
