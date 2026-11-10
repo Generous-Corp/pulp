@@ -56,7 +56,7 @@ tart list   # should show pulp-build-runner:latest
 # (optional, for local re-bake capability: also copy the macos-build-base/apple-xcode/pulp-build-base :latest tiers)
 ```
 
-**B — bake from scratch** (needs the pinned Xcode at `/Applications/Xcode.app` on the host, or `xcodes`; the base image, macOS build and Xcode build come from `.shipyard/vm-image.toml`, generated from `tools/toolchain/manifest.toml`, and each tier refuses a mismatch). From `~/Code/pulp`:
+**B: bake from scratch** (needs the pinned Xcode at `/Applications/Xcode.app` on the host, or `xcodes`; the base image, macOS build and Xcode build come from `.shipyard/vm-image.toml`, generated from `tools/toolchain/manifest.toml`, and each tier refuses a mismatch). From `~/Code/pulp`:
 ```bash
 PULP_HOST_XCODE_APP=/Applications/Xcode.app bash tools/ci/tart-provision.sh verify   # preflight
 bash tools/ci/tart-provision.sh base        && bash tools/ci/tart-provision.sh tag macos-build-base  macos-build-base

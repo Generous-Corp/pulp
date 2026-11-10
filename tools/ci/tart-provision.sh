@@ -38,7 +38,7 @@ SSH_KEY_PRIV="${SSH_KEY_PUB%.pub}"
 # The pins, read from the generated image manifest with sed rather than a TOML
 # parser: list/tag/resize must still run on a host whose python3 is 3.9.
 IMAGE_PINS="${PULP_IMAGE_PINS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.shipyard/vm-image.toml}"
-image_pin(){ # $1=key — the first `key = "value"` in the image manifest
+image_pin(){ # $1=key: the first `key = "value"` in the image manifest
   # Top level and [toolchain] only, so a key in another table cannot shadow a pin.
   [ -f "$IMAGE_PINS" ] || return 0
   awk -v k="$1" '/^\[/{s=$0; next} (s=="" || s=="[toolchain]") && $0 ~ "^"k" *= *\"" {sub("^"k" *= *\"",""); sub("\".*$",""); print; exit}' "$IMAGE_PINS"
@@ -121,7 +121,7 @@ stop_vm(){ # graceful stop, fall back to killing the run pid
   sleep 3
 }
 
-app_build(){ # $1=Xcode.app — its ProductBuildVersion, or nothing
+app_build(){ # $1=Xcode.app: its ProductBuildVersion, or nothing
   /usr/libexec/PlistBuddy -c "Print :ProductBuildVersion" "$1/Contents/version.plist" 2>/dev/null || true
 }
 require_pins(){
@@ -413,7 +413,7 @@ cmd_verify(){
   note "pins: base=$BASE_MACOS_IMAGE macOS build $MACOS_BUILD, Xcode $XCODE_VERSION ($XCODE_BUILD)"
   local app="${HOST_XCODE_APP:-$GUEST_XCODE_APP}"
   if [ "$(app_build "$app")" = "$XCODE_BUILD" ]; then note "host Xcode to copy: $app ($XCODE_BUILD)"
-  else warn "$app is build '$(app_build "$app")', not $XCODE_BUILD — Tier 1 refuses it; without a matching host Xcode it falls back to xcodes (interactive 2FA)"; fi
+  else warn "$app is build '$(app_build "$app")', not $XCODE_BUILD; Tier 1 refuses it; without a matching host Xcode it falls back to xcodes (interactive 2FA)"; fi
   note "base image: $BASE_MACOS_IMAGE  (pull check below)"
   tart pull "$BASE_MACOS_IMAGE" --concurrency 4 >/dev/null 2>&1 && note "base image pullable/cached" || warn "could not pull $BASE_MACOS_IMAGE — check name/network"
   note "verify complete"

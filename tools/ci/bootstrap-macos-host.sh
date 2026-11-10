@@ -73,7 +73,7 @@ check_xcode() {
   if [ "$v" = "$PINNED_XCODE_VERSION" ] && [ "$b" = "$PINNED_XCODE_BUILD" ]; then
     ok "Xcode $v ($b) (matches pin)"
   else
-    warn "Xcode $v ($b) installed; tools/toolchain/manifest.toml pins $PINNED_XCODE_VERSION ($PINNED_XCODE_BUILD) — install the pinned Xcode as /Applications/Xcode.app"
+    warn "Xcode $v ($b) installed; tools/toolchain/manifest.toml pins $PINNED_XCODE_VERSION ($PINNED_XCODE_BUILD); install the pinned Xcode as /Applications/Xcode.app"
   fi
   note "developer dir: $(xcode-select -p 2>/dev/null || echo '?')"
   if xcodebuild -license check >/dev/null 2>&1; then
