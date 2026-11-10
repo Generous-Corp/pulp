@@ -17,9 +17,8 @@
     "  - Vellum freeze         : .github/workflows/vellum-freeze-check.yml",
     "  - Vellum trusted freeze : status posted by .github/workflows/vellum-trusted-gate.yml",
     "  - drift-fast            : .github/workflows/drift-fast.yml (hosted, configure-only)",
-    "  - release-configure     : .github/workflows/release-configure.yml (hosted, configures every release leg)",
     "",
-    "These seven mirror LIVE enforcement, which is read from",
+    "These six mirror LIVE enforcement, which is read from",
     "`/repos/{owner}/{repo}/branches/main/protection` — NOT from",
     "`/repos/{owner}/{repo}/rulesets`. This repo's only branch ruleset",
     "(`main-merge-queue`) carries a `merge_queue` rule and no",
@@ -108,10 +107,6 @@
           },
           {
             "context": "drift-fast",
-            "integration_id": null
-          },
-          {
-            "context": "release-configure",
             "integration_id": null
           }
         ]

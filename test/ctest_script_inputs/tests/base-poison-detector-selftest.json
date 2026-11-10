@@ -8,7 +8,6 @@
    ".github/workflows/build.yml",
    ".github/workflows/drift-fast.yml",
    ".github/workflows/main-health-detector.yml",
-   ".github/workflows/release-configure.yml",
    ".github/workflows/vellum-freeze-check.yml",
    ".github/workflows/vellum-trusted-gate.yml",
    ".github/workflows/version-skill-check.yml",

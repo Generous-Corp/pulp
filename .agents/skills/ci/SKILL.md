@@ -104,8 +104,8 @@ on a real PR. Do them in order.
 
    As of 2026-10-02: `macos`, `Enforce version & skill sync`, `Vellum freeze`,
    `Vellum trusted freeze`, `Build + prove + (owner-gated) deploy`,
-   `drift-fast`, plus `release-configure` once branch protection carries it
-   (decision 33). Everything else (Workflow lint, CodeQL, Linux, Windows,
+   `drift-fast`. `release-configure` reports on every pull request but is
+   not required until a follow-up registers it (decision 33). Everything else (Workflow lint, CodeQL, Linux, Windows,
    coverage) is advisory — red there does not stop auto-merge.
 
    **A red `release-configure` means a tag cut from this change would publish

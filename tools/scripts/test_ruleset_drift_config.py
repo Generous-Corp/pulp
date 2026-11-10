@@ -31,7 +31,6 @@ EXPECTED_REQUIRED_CONTEXTS = {
     "Vellum freeze",
     "Vellum trusted freeze",
     "drift-fast",
-    "release-configure",
 }
 
 EXPECTED_ADVISORY_CONTEXTS = {

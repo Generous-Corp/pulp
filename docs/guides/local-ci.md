@@ -3426,7 +3426,7 @@ required check equally; see the `contrib-intake` skill.
 Live enforcement is classic branch protection, not a ruleset; the checked-in
 `.github/rulesets/main-protection.json` and `.shipyard/config.toml`
 `[governance]` mirror it, and `base-poison-detector-selftest` fails when those
-two disagree (and the detector judges all seven on main's tip). `[governance]` is the full seven-context contract, because
+two disagree (and the detector judges all six on main's tip). `[governance]` is the full six-context contract, because
 `shipyard governance apply` pushes exactly that list to branch protection.
 Removing it again is the reverse `required_status_checks` edit.
 
@@ -3465,7 +3465,8 @@ and `darwin-arm64`.
 - **Known gap.** The release builds `linux-x64` in an `ubuntu:22.04`
   container (GCC 13, glibc floor). Replaying that toolchain install costs about
   20 minutes, so the gate configures `linux-x64` on the bare image.
-- **Scope.** The trigger is unfiltered (a required check must always report).
+- **Scope.** The trigger is unfiltered (it will become a required check, and a
+  required check must always report).
   The scope job reads the change through the compare API (both the new and, for
   a rename, the old path) and runs the legs only when it touches a configure
   input:
@@ -3490,13 +3491,17 @@ and `darwin-arm64`.
   `python3 tools/ci/release_configure_matrix.py run --platform <platform>`
   (a matching host: macOS for the Darwin legs).
 
-**It is required** (decision 33 in `.agents/contract.toml`). The aggregate job
-`release-configure` runs under `if: always()` and fails unless the scope job
-succeeded and, when in scope, every leg did. Live enforcement is branch
-protection, which `shipyard governance apply` sets from `[governance]`; until
-that is applied the check reports but does not block. Apply it only after the
-workflow is on `main`, then push to or re-run any open pull request that should
-land, because a pull request's checks only start on a push.
+**It is not required yet** (decision 33 in `.agents/contract.toml`). The gate
+lands first and is judged from `main`; a later pull request adds
+`release-configure` to `.github/rulesets/main-protection.json`, `[governance]`
+and `[landability]` in `.shipyard/config.toml`, and the required-check maps
+(`required_check_machinery.py`, `merge_stall_watchdog.py`, the base-poison
+detector), and only once every leg is green on `main`. Until then the check
+reports but does not block. The aggregate job `release-configure` already runs
+under `if: always()` and fails unless the scope job succeeded and, when in
+scope, every leg did, so registering it changes no workflow. After it is
+registered, push to or re-run any open pull request that should land, because a
+pull request's checks only start on a push.
 
 ## Every failed run names its cause: the advisory `ci-cause` job
 
@@ -5984,8 +5989,7 @@ hours with 34 PRs open and nothing merging while every check was green.)
    is read from branch protection at runtime, not hardcoded; if the token cannot
    read protection rules it falls back to the complete documented `main` set:
    `macos`, `Enforce version & skill sync`, `Build + prove + (owner-gated)
-   deploy`, `Vellum trusted freeze`, `Vellum freeze`, `drift-fast`, and
-   `release-configure`.
+   deploy`, `Vellum trusted freeze`, `Vellum freeze`, and `drift-fast`.
 2. **`mergeStateStatus` in `{CLEAN, BEHIND}`** — GitHub's own merge verdict.
    `DIRTY` (conflicts), `BLOCKED` (a required check red/missing/review pending),
    and `UNSTABLE` (a non-required check still moving) are excluded — those wait
@@ -8435,7 +8439,7 @@ plus a local `git show` of the workflow file.
 #### `[landability] workflows` in `.shipyard/config.toml`
 
 The check can only resolve a required context to a lane if it has read the
-workflow that produces it. Branch protection on `main` requires **seven**
+workflow that produces it. Branch protection on `main` requires **six**
 contexts, and the tool's built-in default reads only `build.yml` — which left
 the others `no_producer`: not checked, and reported as a warning that reads
 identically to a clean result. `.shipyard/config.toml` therefore names all six
@@ -8449,9 +8453,8 @@ producers explicitly:
 | `Vellum freeze` | `vellum-freeze-check.yml` |
 | `Vellum trusted freeze` | `vellum-trusted-gate.yml` |
 | `drift-fast` | `drift-fast.yml` |
-| `release-configure` | `release-configure.yml` |
 
-None of the seven is path-filtered under `pull_request` — `wclap-cloudflare.yml`
+None of the six is path-filtered under `pull_request` — `wclap-cloudflare.yml`
 keeps its `paths:` under `push` on purpose, because a path-filtered **required**
 check leaves unrelated pull requests stuck on "Expected — Waiting for status"
 forever. Add a row here whenever a workflow starts producing a required context,

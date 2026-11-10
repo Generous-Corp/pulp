@@ -1,6 +1,7 @@
 name: Release configure
 
-# Required, hosted pre-merge check that every release leg still CONFIGURES.
+# Hosted pre-merge check that every release leg still CONFIGURES (advisory
+# until a follow-up registers it as required; see below).
 #
 # release-cli.yml runs only when a version tag is pushed, and its `release`
 # job needs every leg. A change that breaks one leg's CMake configure is
@@ -18,11 +19,13 @@ name: Release configure
 # own build-cli steps by name, from the dependency bootstrap through every
 # `cmake -S`, with their build commands stubbed out. Each leg takes minutes.
 #
-# REQUIRED: `release-configure` is a required status check on `main` (mirrored
-# in .github/rulesets/main-protection.json, decision 33 in .agents/contract.toml).
-# A required check that never reports holds a pull request on "Expected"
-# forever, so the triggers carry no `paths:` filter and the aggregate job runs
-# under `if: always()`. The scope job decides whether the change can affect a
+# TO BE REQUIRED: decision 33 in .agents/contract.toml. This workflow lands
+# first and is judged from `main`; a later pull request adds `release-configure`
+# to .github/rulesets/main-protection.json, .shipyard/config.toml and the
+# required-check maps, once every leg is green on `main`. A required check that
+# never reports holds a pull request on "Expected" forever, so the triggers
+# already carry no `paths:` filter and the aggregate job runs under
+# `if: always()`; registering it needs no edit here. The scope job decides whether the change can affect a
 # release configure; when it cannot, the legs are skipped and the aggregate
 # passes. tools/ci/test_release_configure_matrix.py holds this file to that.
 

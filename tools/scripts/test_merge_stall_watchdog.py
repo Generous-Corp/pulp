@@ -602,7 +602,6 @@ class TestMainCli(unittest.TestCase):
                 "Vellum trusted freeze",
                 "Vellum freeze",
                 "drift-fast",
-                "release-configure",
             },
         )
 

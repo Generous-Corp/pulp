@@ -539,15 +539,18 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertEqual(next(s for s in gate_steps if s.get("name") == deps)[key],
                              step({"steps": release_steps}, deps)[key])
 
-    def test_ruleset_and_contract_require_the_check(self):
+    def test_gate_lands_before_its_registration(self):
+        # Decision 33: the gate lands and is judged from main first; a later
+        # change registers it as required, once every leg is green on main.
         ruleset = json.loads(RULESET.read_text(encoding="utf-8"))
         required = [c["context"]
                     for rule in ruleset["rules"] if rule["type"] == "required_status_checks"
                     for c in rule["parameters"]["required_status_checks"]]
-        self.assertIn("release-configure", required)
+        self.assertNotIn("release-configure", required)
+        shipyard = (REPO / ".shipyard" / "config.toml").read_text(encoding="utf-8")
+        self.assertNotIn("release-configure", shipyard)
         contract = CONTRACT.read_text(encoding="utf-8")
         self.assertIn(".github/workflows/release-configure.yml", contract)
-
 
 if __name__ == "__main__":
     unittest.main()
