@@ -1,0 +1,15 @@
+{
+ "name": "deferred-admission-selftest",
+ "record": {
+  "entry": "tools/ci/test_deferred_admission.py",
+  "inputs": [
+   ".github/rulesets/main-protection.json",
+   ".github/workflows/build.yml",
+   ".github/workflows/deferred-tests-admission.yml",
+   "tools/ci/deferred_admission.py",
+   "tools/ci/pr_head_affected_tests.py",
+   "tools/ci/test_deferred_admission.py"
+  ],
+  "kind": "python"
+ }
+}
