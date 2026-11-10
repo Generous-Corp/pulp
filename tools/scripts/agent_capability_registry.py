@@ -376,7 +376,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/audio/audio_file.hpp",
-        "fingerprint": "sha256:6a97b20f7bb9a869f33f6cc52367cc2f9629660a9cb1341b284bfdf3479ee990",
+        "fingerprint": "sha256:1f005f182469f7ba674a9c5998e58667429624f6653029b4cf9e88ebb9df27bd",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
