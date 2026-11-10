@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plant one real callback escape for confirm_failure.sh; never run outside it."""
+"""Plant a callback escape or bypass event reset for a compiled negative control."""
 from pathlib import Path
 import sys
 
@@ -14,10 +14,15 @@ plants = {
     (void)::write(1, "x", 1);
 #endif''',
 }
-if len(sys.argv) != 3 or sys.argv[1] not in plants:
-    raise SystemExit('usage: g5_rt_escape_mutator.py allocation|mutex|write FILE')
+if len(sys.argv) != 3 or sys.argv[1] not in (*plants, 'reset'):
+    raise SystemExit('usage: g5_rt_escape_mutator.py allocation|mutex|write|reset FILE')
+if sys.argv[1] == 'reset':
+    needle = '        if (transport && transport->should_reset_stream_history()) {'
+    replacement = '        if (false && transport && transport->should_reset_stream_history()) {'
+else:
+    replacement = plants[sys.argv[1]]
 source = Path(sys.argv[2])
 text = source.read_text(encoding="utf-8")
 if text.count(needle) != 1:
-    raise SystemExit('expected exactly one callback escape marker')
-source.write_text(text.replace(needle, plants[sys.argv[1]], 1), encoding="utf-8")
+    raise SystemExit('expected exactly one mutation target')
+source.write_text(text.replace(needle, replacement, 1), encoding="utf-8")

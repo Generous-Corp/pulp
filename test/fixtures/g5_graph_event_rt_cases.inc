@@ -298,71 +298,84 @@ TEST_CASE("G5 graph event callbacks keep fixed storage across both serial backen
 TEST_CASE("G5 callback reset retires a queued graph event without allocating",
           "[host][graph][g5][events][rt]") {
     for (const bool routed : {false, true}) {
-        struct ResetState {
-            std::size_t producer_calls = 0;
-            std::size_t delivered = 0;
-            std::size_t emit_failures = 0;
-        } state;
-        SignalGraph graph;
-        CustomNodeType type;
-        type.type_id = "test.g5.graph-event.rt-reset";
-        type.num_input_ports = type.num_output_ports = 1;
-        type.process_events = [&state](auto& out, const auto& in, int frames,
-                                       const CustomNodeEventBlock& event_block) {
-            for (int i = 0; i < frames; ++i)
-                out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
-            if (event_block.graph_writer != nullptr && state.producer_calls++ == 0) {
-                escape_control();
-                if (event_block.graph_writer->emit_at(2, 17) != GraphEventResult::Accepted)
-                    ++state.emit_failures;
+        for (const bool reset_requested : {false, true}) {
+            struct ResetState {
+                std::size_t producer_calls = 0;
+                std::size_t delivered = 0;
+                std::size_t emit_failures = 0;
+                std::size_t bad_events = 0;
+            } state;
+            SignalGraph graph;
+            CustomNodeType type;
+            type.type_id = "test.g5.graph-event.rt-reset";
+            type.num_input_ports = type.num_output_ports = 1;
+            type.process_events = [&state](auto& out, const auto& in, int frames,
+                                           const CustomNodeEventBlock& event_block) {
+                for (int i = 0; i < frames; ++i)
+                    out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+                if (event_block.graph_writer != nullptr && state.producer_calls++ == 0) {
+                    escape_control();
+                    if (event_block.graph_writer->emit_at(2, 17) != GraphEventResult::Accepted)
+                        ++state.emit_failures;
+                }
+                if (event_block.graph_reader != nullptr) {
+                    for (const auto& event : event_block.graph_reader->events()) {
+                        ++state.delivered;
+                        if (event.sample != 2 || event.payload != 17)
+                            ++state.bad_events;
+                        out.channel_ptr(0)[0] = static_cast<float>(event.payload);
+                    }
+                }
+            };
+            REQUIRE(graph.register_custom_node_type(type));
+            const auto input = graph.add_input_node(1);
+            const auto output = graph.add_output_node(1);
+            const auto producer = graph.add_custom_node(type.type_id);
+            const auto consumer = graph.add_custom_node(type.type_id);
+            REQUIRE(graph.connect(input, 0, producer, 0));
+            REQUIRE(graph.connect(producer, 0, consumer, 0));
+            REQUIRE(graph.connect(consumer, 0, output, 0));
+            REQUIRE(graph.connect_graph_event({producer, consumer}) ==
+                    GraphEventBindingResult::Accepted);
+            graph.set_canonical_executor_routing_enabled(routed);
+            REQUIRE(graph.prepare(48000.0, 2));
+            std::array<float, 2> source{}, destination{};
+            const float* source_ptr = source.data();
+            float* destination_ptr = destination.data();
+            pulp::audio::BufferView<const float> in(&source_ptr, 1, 1);
+            pulp::audio::BufferView<float> out(&destination_ptr, 1, 1);
+            pulp::format::ProcessContext transport;
+            transport.reset_requested = reset_requested;
+            transport.position_samples = 0;
+            // Both paths reach sample 2: reset covers [0,1), [0,1), [1,2), [2,3);
+            // no reset covers [0,1), [1,2), [2,3), [3,4). Only the first call emits.
+            for (std::size_t callback = 0; callback < 4; ++callback) {
+                std::size_t allocations = 0, bytes = 0, locks = 0, blocking = 0;
+                {
+                    pulp::test::RtAllocationProbe allocation_probe;
+                    pulp::test::RtContractProbe contract_probe;
+                    if (callback == 1)
+                        graph.process(out, in, 1, transport);
+                    else
+                        graph.process(out, in, 1);
+                    allocations = allocation_probe.allocation_count();
+                    bytes = allocation_probe.allocated_bytes();
+                    locks = contract_probe.lock_events();
+                    blocking = contract_probe.blocking_events();
+                }
+                INFO("routed=" << routed << " reset_requested=" << reset_requested
+                               << " callback=" << callback);
+                CHECK(allocations == 0);
+                CHECK(bytes == 0);
+                CHECK(locks == 0);
+                CHECK(blocking == 0);
+                CHECK(state.emit_failures == 0);
+                CHECK(state.bad_events == 0);
+                CHECK(state.producer_calls == callback + 1);
+                CHECK(state.delivered == ((!reset_requested && callback >= 2) ? 1 : 0));
+                CHECK(destination[0] == ((!reset_requested && callback == 2) ? 17.0f : 0.0f));
             }
-            if (event_block.graph_reader != nullptr)
-                state.delivered += event_block.graph_reader->events().size();
-        };
-        REQUIRE(graph.register_custom_node_type(type));
-        const auto input = graph.add_input_node(1);
-        const auto output = graph.add_output_node(1);
-        const auto producer = graph.add_custom_node(type.type_id);
-        const auto consumer = graph.add_custom_node(type.type_id);
-        REQUIRE(graph.connect(input, 0, producer, 0));
-        REQUIRE(graph.connect(producer, 0, consumer, 0));
-        REQUIRE(graph.connect(consumer, 0, output, 0));
-        REQUIRE(graph.connect_graph_event({producer, consumer}) ==
-                GraphEventBindingResult::Accepted);
-        graph.set_canonical_executor_routing_enabled(routed);
-        REQUIRE(graph.prepare(48000.0, 2));
-        std::array<float, 2> source{}, destination{};
-        const float* source_ptr = source.data();
-        float* destination_ptr = destination.data();
-        pulp::audio::BufferView<const float> in(&source_ptr, 1, 1);
-        pulp::audio::BufferView<float> out(&destination_ptr, 1, 1);
-        std::size_t allocations = 0, locks = 0, blocking = 0;
-        {
-            pulp::test::RtAllocationProbe allocation_probe;
-            pulp::test::RtContractProbe contract_probe;
-            graph.process(out, in, 1);
-            allocations += allocation_probe.allocation_count();
-            locks += contract_probe.lock_events();
-            blocking += contract_probe.blocking_events();
         }
-        pulp::format::ProcessContext reset;
-        reset.reset_requested = true;
-        reset.position_samples = 0;
-        {
-            pulp::test::RtAllocationProbe allocation_probe;
-            pulp::test::RtContractProbe contract_probe;
-            graph.process(out, in, 1, reset);
-            allocations += allocation_probe.allocation_count();
-            locks += contract_probe.lock_events();
-            blocking += contract_probe.blocking_events();
-        }
-        INFO("routed=" << routed);
-        CHECK(allocations == 0);
-        CHECK(locks == 0);
-        CHECK(blocking == 0);
-        CHECK(state.emit_failures == 0);
-        CHECK(state.delivered == 0);
-        CHECK(destination[0] == 0.0f);
     }
 }
 
