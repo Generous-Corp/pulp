@@ -428,6 +428,8 @@ class TrustedGateWorkflowTests(unittest.TestCase):
             gate.parent.mkdir(parents=True)
             (root / "tools/scripts").mkdir()
             (root / "tools/scripts/keep.txt").write_text("x\n", encoding="utf-8")
+            (root / ".shipyard").mkdir()
+            (root / ".shipyard/config.toml").write_text("", encoding="utf-8")
             marker = Path(tmp) / "ran"
 
             def stub(label: str, code: int) -> str:
@@ -456,6 +458,39 @@ class TrustedGateWorkflowTests(unittest.TestCase):
                                  capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(out.returncode, 0, out.stderr)
             return out.stdout.strip().splitlines()[-1], marker.read_text(encoding="utf-8") if marker.exists() else ""
+
+    def test_extracted_gate_judges_main_on_every_required_context(self) -> None:
+        # The gate reads main's required contexts from .shipyard/config.toml
+        # beside tools/; an extraction without it silently falls back to
+        # `macos` alone and loosens the passing-main evidence.
+        import shutil
+        import subprocess
+        bash, git = shutil.which("bash"), shutil.which("git")
+        if not bash or not git or sys.platform == "win32":
+            self.skipTest("needs bash and git")
+        repo = HERE.parents[1]
+        start = self.snippet.index("git archive ")
+        archive = self.snippet[start:self.snippet.index("\n", start)].rstrip(" \\")
+        archive = archive.replace("&& ", "").replace(" | tar -x -C \"$trusted_gate\"", "")
+        paths = archive.split('"$TRUSTED_BASE_SHA"', 1)[1].split()
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            for rel in paths:
+                src = repo / rel
+                target = dest / rel
+                if src.is_dir():
+                    shutil.copytree(src, target, ignore=shutil.ignore_patterns("__pycache__"))
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, target)
+            probe = ("import sys; sys.path.insert(0, sys.argv[1]); import base_poison_detector as b; "
+                     "print(sorted(b.required_contexts()))")
+            extracted = subprocess.run([sys.executable, "-c", probe, str(dest / "tools/ci")],
+                                       capture_output=True, text=True, encoding="utf-8", check=True)
+            in_tree = subprocess.run([sys.executable, "-c", probe, str(repo / "tools/ci")],
+                                     capture_output=True, text=True, encoding="utf-8", check=True)
+        self.assertEqual(extracted.stdout, in_tree.stdout)
+        self.assertGreater(in_tree.stdout.count(","), 1, "control: the tree requires several contexts")
 
     def test_gate_runs_from_the_base_commit(self) -> None:
         self.assertEqual(self._run(), ("exit=0", "base"))

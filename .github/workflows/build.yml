@@ -3478,9 +3478,10 @@ jobs:
           #
           # The gate runs from the queue base, never from the group's tree: a
           # queued pull request must not be able to loosen the rule that judges
-          # its own merge group. The base's tools/ci and tools/scripts are
-          # extracted into a separate directory, so the gate's code and the
-          # lists it reads beside itself are the base's; the test sources it
+          # its own merge group. The base's tools/ci, tools/scripts and
+          # .shipyard/config.toml (the required contexts main's tip is judged
+          # on) are extracted into a separate directory, so the gate's code
+          # and the lists it reads beside itself are the base's; the test sources it
           # inspects stay the group's (--source-root). A base that is
           # unreadable or does not carry the gate excuses nothing.
           if [ "$ctest_exit" -ne 0 ] && [ "$GITHUB_EVENT_NAME" = merge_group ] \
@@ -3491,7 +3492,7 @@ jobs:
             { [ -n "${TRUSTED_BASE_SHA:-}" ] \
               && { git cat-file -e "$TRUSTED_BASE_SHA^{commit}" 2>/dev/null \
                    || git fetch --no-tags --depth=1 origin "$TRUSTED_BASE_SHA" >/dev/null 2>&1; } \
-              && git archive "$TRUSTED_BASE_SHA" tools/ci tools/scripts | tar -x -C "$trusted_gate" \
+              && git archive "$TRUSTED_BASE_SHA" tools/ci tools/scripts .shipyard/config.toml | tar -x -C "$trusted_gate" \
               && [ -f "$trusted_gate/tools/ci/flake_exoneration.py" ] \
               && gate_exit=0 \
               && { python3 "$trusted_gate"/tools/ci/flake_exoneration.py gate \

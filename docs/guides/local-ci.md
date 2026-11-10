@@ -3575,6 +3575,13 @@ any trigger and runs on `pull_request`, `merge_group` and pushes to `main`:
 
 Out-of-scope changes finish in well under a minute on a hosted runner.
 
+The scope list and script run from the change's own tree, as the workflow file
+itself does, so a pull request that edits `workflow_lint_paths.txt` or the
+scope script can narrow its own scope; that edit is itself in scope and is a
+review concern. A workflow file GitHub cannot parse produces no run at all, so
+once `workflow-lint` is required such a change waits on "Expected" rather than
+failing; the pull request's own run of the linters is what names it.
+
 **It is not required yet.** As with `release-configure` (decision 33), the
 workflow lands and is judged from `main` first; registering `workflow-lint`
 means adding it to `.github/rulesets/main-protection.json`, `[governance]` and
@@ -3584,10 +3591,11 @@ means adding it to `.github/rulesets/main-protection.json`, `[governance]` and
 ### The merge-group flake gate runs from the queue base
 
 A failed merge-group `macos` run is judged by `tools/ci/flake_exoneration.py
-gate` (decision 34). The Test step extracts `tools/ci` and `tools/scripts` from
-`github.event.merge_group.base_sha` into `$RUNNER_TEMP` and runs the gate from
-there, so the gate's code and the lists it reads beside itself
-(`drift_fast.json`, `gate_suite_executed.py`) are the base's, not those of the
+gate` (decision 34). The Test step extracts `tools/ci`, `tools/scripts` and
+`.shipyard/config.toml` from `github.event.merge_group.base_sha` into
+`$RUNNER_TEMP` and runs the gate from there, so the gate's code and the files
+it reads beside itself (`drift_fast.json`, `gate_suite_executed.py`, and the
+required contexts main's tip is judged on) are the base's, not those of the
 pull requests it is judging; the test sources it inspects are still the
 group's. A base that cannot be read, or that does not carry the gate, excuses
 nothing and keeps ctest's exit. The step text itself is still the group's

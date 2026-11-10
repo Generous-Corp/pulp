@@ -965,10 +965,14 @@ combined tree that failed it on 2026-11-10) and could not be made required. The
   and pass its result as a `--job name=result` to `workflow_lint_scope.py
   verdict`. `tools/ci/test_workflow_lint_scope.py` fails otherwise.
 - **The merge-group flake gate runs from the queue base.** build.yml extracts
-  `tools/ci` and `tools/scripts` from `merge_group.base_sha` and runs
+  `tools/ci`, `tools/scripts` and `.shipyard/config.toml` from
+  `merge_group.base_sha` and runs
   `flake_exoneration.py gate` from that copy, so a queued PR cannot loosen the
-  rule that judges its own group. The step text itself still comes from the
-  group's build.yml, which review has to catch.
+  rule that judges its own group. Anything the gate reads relative to its own
+  file must be in that pathspec: without `.shipyard/config.toml`,
+  `base_poison_detector.required_contexts()` silently falls back to `macos`
+  alone. The step text itself still comes from the group's build.yml, which
+  review has to catch.
 
 ## A cancelled `workflow-lint` job: read the step timings before raising the timeout
 
