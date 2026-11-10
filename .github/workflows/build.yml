@@ -3325,6 +3325,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PULP_FLAKE_EXONERATION_MODE: ${{ vars.PULP_FLAKE_EXONERATION_MODE }}
           MATRIX_KEY: ${{ matrix.key }}
+          # The queue base: the flake gate's modules are read from it.
+          TRUSTED_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
           # Both event-dependent ctest decisions come from one tested module so
@@ -3473,17 +3475,35 @@ jobs:
           # tests --stop-on-failure skipped. Anything else keeps ctest's exit.
           # The exit-code evidence above stays ctest's own, so no receipt ever
           # claims an excused run passed.
+          #
+          # The gate runs from the queue base, never from the group's tree: a
+          # queued pull request must not be able to loosen the rule that judges
+          # its own merge group. The base's tools/ci and tools/scripts are
+          # extracted into a separate directory, so the gate's code and the
+          # lists it reads beside itself are the base's; the test sources it
+          # inspects stay the group's (--source-root). A base that is
+          # unreadable or does not carry the gate excuses nothing.
           if [ "$ctest_exit" -ne 0 ] && [ "$GITHUB_EVENT_NAME" = merge_group ] \
             && [ "${RUNNER_OS}" = "macOS" ] && [ "${MATRIX_KEY:-}" = macos ]; then
-            gate_exit=0
-            python3 tools/ci/flake_exoneration.py gate \
-              --repo "$GITHUB_REPOSITORY" --merge-sha "$GITHUB_SHA" --ctest-exit "$ctest_exit" \
-              --build-dir "$PULP_BUILD_DIR" --source-root "$GITHUB_WORKSPACE" \
-              --junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
-              --selected-json "$evidence_dir/selected.json" \
-              --label-exclude "$label_exclude" --exclude-regex "$exclude" --jobs "$ctest_jobs" \
-              --work-dir "$RUNNER_TEMP/flake-exoneration" \
-              --record-out "$RUNNER_TEMP/flake-exoneration/record/flake-excusal.json" || gate_exit=$?
+            gate_exit="$ctest_exit"
+            trusted_gate="$RUNNER_TEMP/flake-exoneration-trusted"
+            rm -rf "$trusted_gate" && mkdir -p "$trusted_gate"
+            { [ -n "${TRUSTED_BASE_SHA:-}" ] \
+              && { git cat-file -e "$TRUSTED_BASE_SHA^{commit}" 2>/dev/null \
+                   || git fetch --no-tags --depth=1 origin "$TRUSTED_BASE_SHA" >/dev/null 2>&1; } \
+              && git archive "$TRUSTED_BASE_SHA" tools/ci tools/scripts | tar -x -C "$trusted_gate" \
+              && [ -f "$trusted_gate/tools/ci/flake_exoneration.py" ] \
+              && gate_exit=0 \
+              && { python3 "$trusted_gate"/tools/ci/flake_exoneration.py gate \
+                     --repo "$GITHUB_REPOSITORY" --merge-sha "$GITHUB_SHA" --ctest-exit "$ctest_exit" \
+                     --build-dir "$PULP_BUILD_DIR" --source-root "$GITHUB_WORKSPACE" \
+                     --junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
+                     --selected-json "$evidence_dir/selected.json" \
+                     --label-exclude "$label_exclude" --exclude-regex "$exclude" --jobs "$ctest_jobs" \
+                     --work-dir "$RUNNER_TEMP/flake-exoneration" \
+                     --record-out "$RUNNER_TEMP/flake-exoneration/record/flake-excusal.json" \
+                   || gate_exit=$?; }; } \
+              || echo "::warning title=flake-exoneration::queue base or its gate is unavailable; no exoneration applied"
             ctest_exit="$gate_exit"
           fi
           # Ordinary pull requests use the fast tier; armed pull requests set

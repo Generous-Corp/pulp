@@ -318,8 +318,13 @@ published v0.951.0 as the negative control.
 
 **File:** `.github/workflows/workflow-lint.yml`
 
-Runs on any PR that touches workflows/actions or a release-policy input covered
-by its regression suite. In particular, changes to
+Runs on every pull request, merge-queue batch and push to `main`. A `scope` job
+matches the change against `tools/ci/workflow_lint_paths.txt` (workflows,
+actions, and the release- and CI-policy inputs its regression suites cover) and
+the suites run only when it matches; the `workflow-lint` aggregate job reports
+on every run, so it can be a required check. The merge-group run is the one
+that sees two queued pull requests' workflow changes together. In particular,
+changes to
 any `CMakeLists.txt` or `tools/cmake/**` run the SDK archive/matrix parity test,
 so a new installed library—or a target changing between interface-only and
 archive-bearing—cannot survive until the multi-platform release build before
@@ -333,8 +338,8 @@ being rejected as unexpected. Executes three checks:
 3. **`actionlint`** via the `raven-actions/actionlint` reusable action.
    Catches GitHub Actions-specific issues: unknown `uses:` refs,
    deprecated action versions, shell escaping bugs, etc. Custom self-hosted
-   runner labels are declared in `.github/actionlint.yaml`; changing that file
-   also triggers this workflow so the declaration cannot drift silently.
+   runner labels are declared in `.github/actionlint.yaml`; that file is in
+   scope too, so the declaration cannot drift silently.
 
 The workflow-lint contract suites run in the same job, except the version-bump
 fast-path suite (`test_generated_version_bump_check.py`), which takes 6-8

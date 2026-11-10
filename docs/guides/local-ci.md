@@ -3553,6 +3553,48 @@ scope, every leg did, so registering it changes no workflow. After it is
 registered, push to or re-run any open pull request that should land, because a
 pull request's checks only start on a push.
 
+## `workflow-lint` in the merge queue
+
+`.github/workflows/workflow-lint.yml` runs the workflow linters (yamllint,
+structural parse, actionlint) and the CI-policy contract suites. A queue batch
+is the only run that sees several pull requests' workflow changes together, and
+two that each pass on their own head can land a combined tree that fails. A
+`paths:` filter never applies to `merge_group`, so the workflow carries none on
+any trigger and runs on `pull_request`, `merge_group` and pushes to `main`:
+
+- **`scope`** reads the change through the compare API (both sides of a
+  rename) and matches it against `tools/ci/workflow_lint_paths.txt`, the one
+  list for every event. An unreadable diff, a new branch, or 300+ changed files
+  runs every suite.
+- **`lint`** and **`generated-version-bump-contract`** run only in scope.
+- **`workflow-lint`** (the aggregate, `if: always()`) passes when the scope job
+  succeeded and either nothing was in scope or every suite passed. It reports
+  on every run, so it can be required without holding a pull request on
+  "Expected". `tools/ci/test_workflow_lint_scope.py` holds that shape and its
+  verdict table, with negative controls.
+
+Out-of-scope changes finish in well under a minute on a hosted runner.
+
+**It is not required yet.** As with `release-configure` (decision 33), the
+workflow lands and is judged from `main` first; registering `workflow-lint`
+means adding it to `.github/rulesets/main-protection.json`, `[governance]` and
+`[landability]` in `.shipyard/config.toml` and the required-check maps, then
+`shipyard governance apply`.
+
+### The merge-group flake gate runs from the queue base
+
+A failed merge-group `macos` run is judged by `tools/ci/flake_exoneration.py
+gate` (decision 34). The Test step extracts `tools/ci` and `tools/scripts` from
+`github.event.merge_group.base_sha` into `$RUNNER_TEMP` and runs the gate from
+there, so the gate's code and the lists it reads beside itself
+(`drift_fast.json`, `gate_suite_executed.py`) are the base's, not those of the
+pull requests it is judging; the test sources it inspects are still the
+group's. A base that cannot be read, or that does not carry the gate, excuses
+nothing and keeps ctest's exit. The step text itself is still the group's
+`build.yml`, so a change to that step is a review concern.
+`tools/ci/test_flake_exoneration.py` runs the extracted snippet against a
+scratch repository whose base and tree carry different stub gates.
+
 ## Every failed run names its cause: the advisory `ci-cause` job
 
 When any job in a `build.yml` run fails, the `ci-cause (advisory)` job runs

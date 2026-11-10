@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -390,6 +391,80 @@ class GateTests(unittest.TestCase):
             "--junit", str(self.root / "missing.xml"), "--selected-json", str(self.selected),
             "--label-exclude", "slow", "--record-out", str(self.root / "r.json")]]
         self.assertEqual(fx.main(argv), 8)
+
+
+class TrustedGateWorkflowTests(unittest.TestCase):
+    """build.yml runs the merge-group gate from the queue base, not the group.
+
+    The snippet is cut from the workflow and run in a scratch repository whose
+    base commit and working tree carry different stub gates, so the test shows
+    which copy judged the run rather than grepping for it.
+    """
+
+    START = 'if [ "$ctest_exit" -ne 0 ] && [ "$GITHUB_EVENT_NAME" = merge_group ]'
+    END = '            ctest_exit="$gate_exit"\n          fi\n'
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        workflow = (HERE.parents[1] / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        start = workflow.index(cls.START)
+        cls.snippet = workflow[start:workflow.index(cls.END, start) + len(cls.END)]
+        step = workflow[workflow.rindex("- name:", 0, start):start]
+        cls.step_env = step
+
+    def test_base_sha_is_the_queue_base(self) -> None:
+        self.assertIn("TRUSTED_BASE_SHA: ${{ github.event.merge_group.base_sha }}", self.step_env)
+        self.assertNotIn("python3 tools/ci/flake_exoneration.py gate", self.snippet)
+
+    def _run(self, base_has_gate: bool = True, base_sha: str | None = None) -> tuple[str, str]:
+        import shutil
+        import subprocess
+        bash, git = shutil.which("bash"), shutil.which("git")
+        if not bash or not git or sys.platform == "win32":
+            self.skipTest("needs bash and git")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            gate = root / "tools/ci/flake_exoneration.py"
+            gate.parent.mkdir(parents=True)
+            (root / "tools/scripts").mkdir()
+            (root / "tools/scripts/keep.txt").write_text("x\n", encoding="utf-8")
+            marker = Path(tmp) / "ran"
+
+            def stub(label: str, code: int) -> str:
+                return (f"import pathlib, sys\npathlib.Path({str(marker)!r}).write_text({label!r})\n"
+                        f"sys.exit({code})\n")
+
+            run = lambda *a: subprocess.run([git, "-C", str(root), *a], check=True,  # noqa: E731
+                                            capture_output=True, text=True)
+            run("init", "-q")
+            run("config", "user.email", "t@example.invalid")
+            run("config", "user.name", "t")
+            if base_has_gate:
+                gate.write_text(stub("base", 0), encoding="utf-8")
+            run("add", "-A")
+            run("commit", "-q", "-m", "base")
+            base = run("rev-parse", "HEAD").stdout.strip()
+            # The group's tree carries a gate that would fail the run.
+            gate.write_text(stub("group", 5), encoding="utf-8")
+            env = dict(os.environ, GITHUB_EVENT_NAME="merge_group", RUNNER_OS="macOS",
+                       MATRIX_KEY="macos", RUNNER_TEMP=tmp, GITHUB_REPOSITORY="o/r",
+                       GITHUB_SHA=base, GITHUB_WORKSPACE=str(root), PULP_BUILD_DIR="build",
+                       TRUSTED_BASE_SHA=base if base_sha is None else base_sha)
+            script = ("set -euo pipefail\nctest_exit=8\nevidence_dir=e\nlabel_exclude=x\n"
+                      "exclude=x\nctest_jobs=1\n" + self.snippet + 'echo "exit=$ctest_exit"\n')
+            out = subprocess.run([bash, "-c", script], cwd=root, env=env,
+                                 capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            return out.stdout.strip().splitlines()[-1], marker.read_text() if marker.exists() else ""
+
+    def test_gate_runs_from_the_base_commit(self) -> None:
+        self.assertEqual(self._run(), ("exit=0", "base"))
+
+    def test_negative_control_no_base_excuses_nothing(self) -> None:
+        self.assertEqual(self._run(base_sha=""), ("exit=8", ""))
+
+    def test_negative_control_base_without_the_gate_excuses_nothing(self) -> None:
+        self.assertEqual(self._run(base_has_gate=False), ("exit=8", ""))
 
 
 if __name__ == "__main__":
