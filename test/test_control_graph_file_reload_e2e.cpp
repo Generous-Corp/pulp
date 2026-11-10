@@ -22,7 +22,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     const auto cli = bin / "pulp";
     const auto mcp = bin / "pulp-mcp";
     const auto broker = bin / "pulp-control-broker";
-    const auto built_host = std::filesystem::path{PULP_GRAPH_FILE_RELOAD_GRAPH_PRODUCT_FIXTURE};
+    const auto built_host = bin / "pulp-control-graph_file_reload-graph-product-fixture";
     REQUIRE(std::filesystem::exists(cli));
     REQUIRE(std::filesystem::exists(mcp));
     REQUIRE(std::filesystem::exists(broker));
@@ -161,7 +161,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     INFO(cli_failure_diagnostics(lease, daemon.state_directory() / "operations"));
     REQUIRE(lease.exit_code == 0);
 
-    const auto project = std::filesystem::path{PULP_GRAPH_FILE_RELOAD_PROJECT_ROOT} / root.path.filename();
+    const auto project = bin / "watch-projects" / root.path.filename();
     REQUIRE(std::filesystem::create_directories(project / "build"));
     { std::ofstream file(project / "pulp.toml"); file << "[plugin]\nname = \"graph-reload-proof\"\n"; }
     { std::ofstream file(project / "CMakeLists.txt");

@@ -31,7 +31,7 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
     target_link_libraries(pulp-test-control-graph_file_reload-graph-product-e2e PRIVATE
         pulp::inspect-client pulp::audio Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-control-graph_file_reload-graph-product-e2e PRIVATE
-        PULP_GRAPH_FILE_RELOAD_GRAPH_PRODUCT_FIXTURE="$<TARGET_FILE:pulp-control-graph_file_reload-graph-product-fixture>" PULP_GRAPH_FILE_RELOAD_PROJECT_ROOT="${CMAKE_BINARY_DIR}/test/graph-file-reload-project" PULP_SAMPLE_REGION_EDITABLE_STANDALONE="" PULP_SAMPLE_REGION_FROZEN_STANDALONE="")
+        PULP_SAMPLE_REGION_EDITABLE_STANDALONE="" PULP_SAMPLE_REGION_FROZEN_STANDALONE="")
     pulp_test_spawns(pulp-test-control-graph_file_reload-graph-product-e2e
         pulp-cli pulp-mcp pulp-control-graph_file_reload-graph-product-fixture)
     add_dependencies(pulp-test-control-graph_file_reload-graph-product-e2e
@@ -45,6 +45,10 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
                 "$<TARGET_FILE_DIR:pulp-test-control-graph_file_reload-graph-product-e2e>/pulp"
         COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-mcp>"
                 "$<TARGET_FILE_DIR:pulp-test-control-graph_file_reload-graph-product-e2e>/pulp-mcp"
+        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-control-graph_file_reload-graph-product-fixture>"
+                "$<TARGET_FILE_DIR:pulp-test-control-graph_file_reload-graph-product-e2e>/pulp-control-graph_file_reload-graph-product-fixture"
+        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-control-graph_file_reload-graph-product-fixture>.inspector-capabilities.json"
+                "$<TARGET_FILE_DIR:pulp-test-control-graph_file_reload-graph-product-e2e>/pulp-control-graph_file_reload-graph-product-fixture.inspector-capabilities.json"
         COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-test-control-graph_file_reload-graph-product-e2e>"
                 "$<TARGET_FILE_DIR:pulp-test-control-graph_file_reload-graph-product-e2e>/pulp-control-broker"
         # The broker trusts a client copy beside itself. It must sit inside this
