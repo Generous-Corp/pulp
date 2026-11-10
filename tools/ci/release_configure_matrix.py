@@ -200,7 +200,8 @@ SOURCE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
                    ".m", ".mm", ".swift", ".metal", ".inl", ".ipp")
 CMAKE_PATH_REF = re.compile(
     r"\$\{(CMAKE_SOURCE_DIR|PROJECT_SOURCE_DIR|CMAKE_CURRENT_SOURCE_DIR|"
-    r"CMAKE_CURRENT_LIST_DIR|CMAKE_CURRENT_FUNCTION_LIST_DIR|PULP_SOURCE_DIR)\}/"
+    r"CMAKE_CURRENT_LIST_DIR|CMAKE_CURRENT_FUNCTION_LIST_DIR|PULP_SOURCE_DIR|"
+    r"PULP_ROOT_DIR|PULP_ROOT)\}/"
     r"([A-Za-z0-9_.@+/-]+)")
 
 
@@ -215,15 +216,34 @@ def _excluded(path: str) -> bool:
     return any(glob_regex(g).match(path) for g in SCOPE_EXCLUDES)
 
 
+def _tracked_cmake_files(root: Path) -> list[Path]:
+    """Tracked CMake files; untracked trees (nested worktrees, build dirs) are not
+    part of the change and only slow the scan."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--", "*CMakeLists.txt", "*.cmake",
+             "*.cmake.in"],
+            check=True, capture_output=True, text=True, encoding="utf-8").stdout
+        return [root / name for name in out.split("\0") if name]
+    except (OSError, subprocess.CalledProcessError):
+        return [p for p in root.rglob("*")
+                if p.is_file() and (p.name == "CMakeLists.txt" or p.suffix == ".cmake"
+                                    or p.name.endswith(".cmake.in"))]
+
+
 def configure_inputs(root: Path = REPO) -> set[str]:
-    """Repo paths that configure-reachable CMake files name explicitly."""
+    """Repo paths that configure-reachable CMake files name explicitly.
+
+    A path is kept whether or not it exists: the scope job reads the tree after
+    the change, where a deleted or renamed input is already gone, and that is
+    exactly the change that stops a configure. Only paths that are directories
+    in this tree are dropped (include and install roots).
+    """
     found: set[str] = set()
-    cmake_files = [p for p in root.rglob("*")
-                   if p.is_file() and (p.name == "CMakeLists.txt" or p.suffix == ".cmake"
-                                       or p.name.endswith(".cmake.in"))]
-    for cmake in cmake_files:
+    resolved_root = root.resolve()
+    for cmake in _tracked_cmake_files(root):
         rel = cmake.relative_to(root).as_posix()
-        if _excluded(rel) or rel.startswith(("external/", "build", ".git/")) or "/_deps/" in rel:
+        if _excluded(rel) or rel.startswith("external/") or "/_deps/" in rel:
             continue
         try:
             text = cmake.read_text(encoding="utf-8", errors="replace")
@@ -231,18 +251,25 @@ def configure_inputs(root: Path = REPO) -> set[str]:
             continue
         for var, tail in CMAKE_PATH_REF.findall(text):
             tail = tail.rstrip("/.")
+            if not tail:
+                continue
             # CMAKE_CURRENT_SOURCE_DIR inside an include()d module names the
-            # including directory, so try the root and the file's own directory.
-            for base in (root, cmake.parent):
+            # including directory, and a missing file cannot say which base it
+            # had, so both readings are kept.
+            bases = [root] if var not in ("CMAKE_CURRENT_SOURCE_DIR", "CMAKE_CURRENT_LIST_DIR",
+                                          "CMAKE_CURRENT_FUNCTION_LIST_DIR") \
+                else [root, cmake.parent]
+            for base in bases:
                 candidate = (base / tail).resolve()
                 try:
-                    inside = candidate.relative_to(root.resolve()).as_posix()
+                    inside = candidate.relative_to(resolved_root).as_posix()
                 except ValueError:
                     continue
-                # Files only: a directory named here is an include or install
-                # root, and prefix-matching it would scope in most of the tree.
-                if candidate.is_file() and not _excluded(inside):
-                    found.add(inside)
+                # A directory named here is an include or install root, and
+                # prefix-matching it would scope in most of the tree.
+                if candidate.is_dir() or _excluded(inside):
+                    continue
+                found.add(inside)
     return found
 
 

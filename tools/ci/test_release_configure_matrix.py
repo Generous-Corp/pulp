@@ -319,6 +319,26 @@ class ScopeTests(unittest.TestCase):
         self.assertFalse(rcm.decide(self.files("docs/guides/local-ci.md"), inputs)[0])
         self.assertFalse(any(p.startswith(("test/", "examples/")) for p in inputs))
 
+    def test_deleted_configure_input_is_in_scope_on_the_post_change_tree(self):
+        # The scope job reads the tree AFTER the change, so a deleted input is
+        # absent there; the CMake reference alone must still scope it in.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tools/cmake").mkdir(parents=True)
+            (root / "tools/cmake/PulpForgeCatalogInstall.cmake").write_text(
+                'set(_catalog "${PROJECT_SOURCE_DIR}/docs/status/forge-catalog.json")\n'
+                'include("${PULP_ROOT_DIR}/docs/contracts/x.schema.json")\n'
+                'include_directories("${CMAKE_SOURCE_DIR}/tools")\n', encoding="utf-8")
+            inputs = rcm.configure_inputs(root)
+            self.assertIn("docs/status/forge-catalog.json", inputs)
+            self.assertIn("docs/contracts/x.schema.json", inputs)
+            self.assertNotIn("tools", inputs)  # an existing directory is not an input
+            gone = [{"filename": "docs/status/forge-catalog.json", "status": "removed"}]
+            self.assertEqual(rcm.decide(gone, inputs)[0], True)
+            moved = [{"filename": "docs/attic/forge-catalog.json", "status": "renamed",
+                      "previous_filename": "docs/status/forge-catalog.json"}]
+            self.assertEqual(rcm.decide(moved, inputs)[0], True)
+
     def test_source_files_count_only_when_removed_or_renamed(self):
         inputs = rcm.configure_inputs()
         source = next(p for p in sorted(inputs) if p.endswith(".cpp"))
