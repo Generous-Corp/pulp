@@ -283,9 +283,9 @@ namespace {
 std::atomic<std::int64_t> g_pull_clock_ns{0};
 
 PullRateDetector::Clock::time_point manual_pull_clock() noexcept {
-    return PullRateDetector::Clock::time_point(std::chrono::duration_cast<
-                                               PullRateDetector::Clock::duration>(
-        std::chrono::nanoseconds(g_pull_clock_ns.load(std::memory_order_relaxed))));
+    return PullRateDetector::Clock::time_point(
+        std::chrono::duration_cast<PullRateDetector::Clock::duration>(
+            std::chrono::nanoseconds(g_pull_clock_ns.load(std::memory_order_relaxed))));
 }
 
 } // namespace
