@@ -716,7 +716,8 @@ ACTIVATION_CONTRACT = {
 ACTIVATION_META = frozenset("rate frames backend callbacks prepare_start_ns prepare_end_ns request_ns return_ns "
     "committed first_new first_new_sample latency_samples snapshot_latency snapshot_nodes snapshot_edges "
     "node_latencies edge_delays nodes edges voices grains probes node_audio_bytes automation_bytes delay_bytes "
-    "spectral_bytes prepared_bytes row_stride row_bytes audio_bytes io_bytes harness_payload_bytes misses".split())
+    "spectral_bytes prepared_bytes row_stride row_bytes audio_bytes io_bytes harness_payload_bytes misses "
+    "executor_blocks parallel_levels parallel_enabled walk_fallbacks execution_failures".split())
 
 
 def activation_percentile(values: list[int]) -> int:
@@ -774,6 +775,9 @@ def validate_activation_cell(cell: dict[str, Any]) -> dict[str, Any]:
     rate, frames, backend = meta["rate"], meta["frames"], meta["backend"]
     _require((rate, frames, backend) in ACTIVATION_KEYS, "unexpected activation matrix cell")
     count = meta["callbacks"]
+    _require(meta["executor_blocks"] == (count if backend == "routed" else 0) and
+             meta["parallel_levels"] == meta["parallel_enabled"] == meta["walk_fallbacks"] == meta["execution_failures"] == 0,
+             "actual serial backend dispatch mismatch")
     _require(16 <= count <= 100000 and len(rows) == count, "callback count mismatch")
     first = meta["first_new"]
     _require(meta["committed"] == 1 and 8 <= first < count, "missing commit or audio activation")

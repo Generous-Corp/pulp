@@ -236,6 +236,7 @@ def fake_activation_receipt(directory: Path) -> Path:
                         f"committed=1 first_new=8 first_new_sample={8 * frames} "
                         "latency_samples=0 snapshot_latency=0 snapshot_nodes=3 snapshot_edges=2 "
                         "node_latencies=0,0,0 edge_delays=0,0 nodes=3 edges=2 voices=0 grains=0 probes=0 "
+                        f"executor_blocks={16 if backend == 'routed' else 0} parallel_levels=0 parallel_enabled=0 walk_fallbacks=0 execution_failures=0 "
                         f"node_audio_bytes={24 * frames} automation_bytes=0 delay_bytes=0 spectral_bytes=0 "
                         f"prepared_bytes={24 * frames} row_stride=72 row_bytes=1152 audio_bytes={64 * frames} "
                         f"io_bytes={8 * frames} harness_payload_bytes={1152 + 72 * frames} misses=0")
@@ -318,6 +319,7 @@ class PacedActivationQualification(unittest.TestCase):
                 ("omitted commit", "committed=1", "committed=0"),
                 ("wrong transition", "first_new=8 ", "first_new=9 "),
                 ("PDC", "node_latencies=0,0,0", "node_latencies=0,1,0"),
+                ("actual backend", "executor_blocks=0", "executor_blocks=16"),
                 ("memory", "node_audio_bytes=768", "node_audio_bytes=769"),
                 ("harness", "audio_bytes=2048", "audio_bytes=2049"),
                 ("schedule", "target_ns=1000000000", "target_ns=999999900"),
