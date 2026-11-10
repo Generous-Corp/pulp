@@ -1,16 +1,17 @@
-#include <pulp/host/graph_file_reload.hpp>
 #include <pulp/format/processor_node_adapter.hpp>
+#include <pulp/host/graph_file_reload.hpp>
 
+#include <fstream>
 #include <unordered_map>
 #include <unordered_set>
-#include <fstream>
 
 namespace pulp::host {
 GraphFileChange GraphFileWatch::poll() {
     using Code = GraphFileChange::Code;
     auto error = [&](Code code) {
         pending_.reset();
-        if (previous_error_ == code) return GraphFileChange{};
+        if (previous_error_ == code)
+            return GraphFileChange{};
         previous_error_ = code;
         return GraphFileChange{.code = code};
     };
@@ -18,13 +19,16 @@ GraphFileChange GraphFileWatch::poll() {
     if (extension != ".pat" && extension != ".pulpgraph")
         return error(Code::UnsupportedFormat);
     std::ifstream file(path_, std::ios::binary);
-    if (!file) return error(Code::Unreadable);
+    if (!file)
+        return error(Code::Unreadable);
     constexpr std::size_t limit = 1024 * 1024;
     std::string text(limit + 1, '\0');
     file.read(text.data(), static_cast<std::streamsize>(text.size()));
     const auto bytes = file.gcount();
-    if (file.bad()) return error(Code::Unreadable);
-    if (bytes > static_cast<std::streamsize>(limit)) return error(Code::TooLarge);
+    if (file.bad())
+        return error(Code::Unreadable);
+    if (bytes > static_cast<std::streamsize>(limit))
+        return error(Code::TooLarge);
     text.resize(static_cast<std::size_t>(bytes));
     previous_error_ = Code::Unchanged;
     if (observed_ && text == *observed_) {
@@ -44,21 +48,31 @@ GraphFileChange GraphFileWatch::poll() {
 
 const char* graph_file_reload_code_name(GraphFileReloadCode code) noexcept {
     switch (code) {
-    case GraphFileReloadCode::Prepared: return "prepared";
-    case GraphFileReloadCode::Committed: return "committed";
-    case GraphFileReloadCode::InvalidDocument: return "invalid-document";
-    case GraphFileReloadCode::UnsupportedContract: return "unsupported-contract";
-    case GraphFileReloadCode::InvalidMutation: return "invalid-mutation";
-    case GraphFileReloadCode::PrepareFailed: return "prepare-failed";
-    case GraphFileReloadCode::StaleBase: return "stale-base";
-    case GraphFileReloadCode::CommitFailed: return "commit-failed";
+    case GraphFileReloadCode::Prepared:
+        return "prepared";
+    case GraphFileReloadCode::Committed:
+        return "committed";
+    case GraphFileReloadCode::InvalidDocument:
+        return "invalid-document";
+    case GraphFileReloadCode::UnsupportedContract:
+        return "unsupported-contract";
+    case GraphFileReloadCode::InvalidMutation:
+        return "invalid-mutation";
+    case GraphFileReloadCode::PrepareFailed:
+        return "prepare-failed";
+    case GraphFileReloadCode::StaleBase:
+        return "stale-base";
+    case GraphFileReloadCode::CommitFailed:
+        return "commit-failed";
     }
     return "invalid-document";
 }
 
-GraphFileReloadResult GraphFileReloadTransaction::prepare(
-    std::string_view text, GraphFileFormat format, const GraphPatchCatalog& catalog,
-    double sample_rate, int maximum_block_size) {
+GraphFileReloadResult GraphFileReloadTransaction::prepare(std::string_view text,
+                                                          GraphFileFormat format,
+                                                          const GraphPatchCatalog& catalog,
+                                                          double sample_rate,
+                                                          int maximum_block_size) {
     using Code = GraphFileReloadCode;
     using Topology = SignalGraph::PreparedTopologyEdit::Result;
     if (attempted_)
@@ -94,15 +108,23 @@ GraphFileReloadResult GraphFileReloadTransaction::prepare(
         for (const auto& node : nodes) {
             NodeId id = 0;
             switch (node.type) {
-            case NodeType::AudioInput: id = edit_->add_input_node(node.num_output_ports, node.name); break;
-            case NodeType::AudioOutput: id = edit_->add_output_node(node.num_input_ports, node.name); break;
+            case NodeType::AudioInput:
+                id = edit_->add_input_node(node.num_output_ports, node.name);
+                break;
+            case NodeType::AudioOutput:
+                id = edit_->add_output_node(node.num_input_ports, node.name);
+                break;
             case NodeType::Gain:
                 id = edit_->add_gain_node(node.name);
                 if (id && !edit_->set_node_gain(id, node.gain))
                     return {.code = Code::InvalidMutation};
                 break;
-            case NodeType::MidiInput: id = edit_->add_midi_input_node(node.name); break;
-            case NodeType::MidiOutput: id = edit_->add_midi_output_node(node.name); break;
+            case NodeType::MidiInput:
+                id = edit_->add_midi_input_node(node.name);
+                break;
+            case NodeType::MidiOutput:
+                id = edit_->add_midi_output_node(node.name);
+                break;
             case NodeType::Plugin: {
                 auto instance = parsed.graph->processor_node_instance(node.id);
                 if (!instance)
@@ -115,22 +137,26 @@ GraphFileReloadResult GraphFileReloadTransaction::prepare(
                 break;
             }
             case NodeType::Custom: {
-                const auto* type = parsed.graph->custom_node_type(node.custom_type_id,
-                                                                  node.custom_type_version);
+                const auto* type =
+                    parsed.graph->custom_node_type(node.custom_type_id, node.custom_type_version);
                 if (!type)
                     return {.code = Code::UnsupportedContract};
                 const auto key = type->type_id + "@" + std::to_string(type->version);
                 if (registered.insert(key).second &&
                     !edit_->reuse_or_register_custom_node_type_(*type))
-                    return {.code = Code::UnsupportedContract,
-                            .diagnostic = {.code = GraphPatchDiagnostic::Code::UnsupportedContract,
-                                .node = node.name,
-                                .rule = "Custom registration differs or callback identity is opaque",
-                                .suggested_fix = "use the same raw callbacks or a new type/version"}};
-                id = edit_->add_custom_node(node.custom_type_id, node.custom_type_version, node.name);
+                    return {
+                        .code = Code::UnsupportedContract,
+                        .diagnostic = {
+                            .code = GraphPatchDiagnostic::Code::UnsupportedContract,
+                            .node = node.name,
+                            .rule = "Custom registration differs or callback identity is opaque",
+                            .suggested_fix = "use the same raw callbacks or a new type/version"}};
+                id = edit_->add_custom_node(node.custom_type_id, node.custom_type_version,
+                                            node.name);
                 break;
             }
-            default: return {.code = Code::UnsupportedContract};
+            default:
+                return {.code = Code::UnsupportedContract};
             }
             if (!id)
                 return {.code = Code::InvalidMutation};
@@ -139,10 +165,14 @@ GraphFileReloadResult GraphFileReloadTransaction::prepare(
         parsed.graph.reset();
         for (const auto& edge : edges) {
             const auto source = ids.at(edge.source_node), destination = ids.at(edge.dest_node);
-            const bool ok = edge.midi ? edit_->connect_midi(source, destination)
-                : edge.automation ? edit_->connect_automation(source, edge.source_port, destination,
-                    edge.automation_param_id, edge.automation_range_lo, edge.automation_range_hi, edge.automation_smoothing_ms, edge.automation_mix)
-                : edit_->connect(source, edge.source_port, destination, edge.dest_port);
+            const bool ok =
+                edge.midi ? edit_->connect_midi(source, destination)
+                : edge.automation
+                    ? edit_->connect_automation(source, edge.source_port, destination,
+                                                edge.automation_param_id, edge.automation_range_lo,
+                                                edge.automation_range_hi,
+                                                edge.automation_smoothing_ms, edge.automation_mix)
+                    : edit_->connect(source, edge.source_port, destination, edge.dest_port);
             if (!ok)
                 return {.code = Code::InvalidMutation};
         }
@@ -166,7 +196,7 @@ GraphFileReloadResult GraphFileReloadTransaction::commit() {
         return {.code = GraphFileReloadCode::CommitFailed};
     ready_ = false;
     const auto result = edit_->commit();
-    return {.code = result == Topology::Committed ? GraphFileReloadCode::Committed
+    return {.code = result == Topology::Committed   ? GraphFileReloadCode::Committed
                     : result == Topology::StaleBase ? GraphFileReloadCode::StaleBase
                                                     : GraphFileReloadCode::CommitFailed,
             .topology_result = result};

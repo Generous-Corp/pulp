@@ -1000,8 +1000,9 @@ int watch_loop(const WatchOptions& opts) {
     if (opts.run_tests) mode_label += " + test";
     if (opts.run_validate) mode_label += " + validate";
 
-    std::cout << color::cyan() << "Dev loop active" << color::reset()
-              << " (build" << mode_label << ") — Ctrl-C to stop\n" << std::flush;
+    std::cout << color::cyan() << "Dev loop active" << color::reset() << " (build" << mode_label
+              << ") — Ctrl-C to stop\n"
+              << std::flush;
 
     auto previous = snapshot_timestamps(opts.root);
 

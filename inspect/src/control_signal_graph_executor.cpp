@@ -23,7 +23,8 @@ make_control_signal_graph_executor(ControlSignalGraphAuthorityResolver resolve) 
                const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                const ControlExecutionContext& context) -> ControlExecutionOutcome {
         const bool graph_file = request.operation_id == "dev.pulp.graph/file.reload@1";
-        if (!resolve || (!graph_file && request.operation_id != "dev.pulp.graph/modulation-route.edit@1") ||
+        if (!resolve ||
+            (!graph_file && request.operation_id != "dev.pulp.graph/modulation-route.edit@1") ||
             request.operation_version != 1 || !context.checkpoint)
             return fail(ControlResultCode::InvalidRequest,
                         "modulation route executor request binding is invalid");
@@ -35,36 +36,46 @@ make_control_signal_graph_executor(ControlSignalGraphAuthorityResolver resolve) 
                         "the graph modulation authority is unavailable");
         if (graph_file) {
             if (request.params_json.size() > kControlMaximumRequestPayloadBytes)
-                return fail(ControlResultCode::InvalidRequest, "graph file request exceeds 512 KiB");
+                return fail(ControlResultCode::InvalidRequest,
+                            "graph file request exceeds 512 KiB");
             try {
                 const auto params = choc::json::parse(request.params_json);
                 if (!params.isObject() || !params["text"].isString() ||
                     !params["format"].isString() || !params["expected_generation"].isInt() ||
                     params["expected_generation"].getInt64() < 0)
-                    return fail(ControlResultCode::InvalidRequest, "graph file request is malformed");
+                    return fail(ControlResultCode::InvalidRequest,
+                                "graph file request is malformed");
                 const auto text = params["text"].getString();
                 const auto format = params["format"].getString();
                 if (text.size() > 1024 * 1024 || (format != "notation" && format != "pulpgraph"))
-                    return fail(ControlResultCode::InvalidRequest, "graph file format or bound is invalid");
-                const auto result = authority->reload_graph_file(text,
-                    format == "notation" ? host::GraphFileFormat::Notation : host::GraphFileFormat::Pulpgraph,
+                    return fail(ControlResultCode::InvalidRequest,
+                                "graph file format or bound is invalid");
+                const auto result = authority->reload_graph_file(
+                    text,
+                    format == "notation" ? host::GraphFileFormat::Notation
+                                         : host::GraphFileFormat::Pulpgraph,
                     static_cast<std::uint64_t>(params["expected_generation"].getInt64()),
-                    [&context] { return context.checkpoint() == ControlExecutionCheckpoint::Continue; });
+                    [&context] {
+                        return context.checkpoint() == ControlExecutionCheckpoint::Continue;
+                    });
                 auto detail = choc::value::createObject("");
                 detail.addMember("receipt_id", plan.receipt_id.value);
                 detail.addMember("code", host::graph_file_reload_code_name(result.code));
                 detail.addMember("generation", static_cast<std::int64_t>(authority->generation()));
-                detail.addMember("diagnostic", choc::json::parse(host::graph_patch_diagnostic_json(result.diagnostic)));
+                detail.addMember("diagnostic", choc::json::parse(host::graph_patch_diagnostic_json(
+                                                   result.diagnostic)));
                 detail.addMember("topology_result", static_cast<int>(result.topology_result));
                 if (!result)
-                    return {.terminal_state = ControlReceiptState::Failed,
-                            .result = {.result_code = ControlResultCode::InvalidRequest,
-                                       .explanation = "graph file reload refused; live graph retained",
-                                       .detail_json = choc::json::toString(detail, false)}};
+                    return {
+                        .terminal_state = ControlReceiptState::Failed,
+                        .result = {.result_code = ControlResultCode::InvalidRequest,
+                                   .explanation = "graph file reload refused; live graph retained",
+                                   .detail_json = choc::json::toString(detail, false)}};
                 return {.terminal_state = ControlReceiptState::Completed,
                         .result = {.detail_json = choc::json::toString(detail, false)}};
             } catch (...) {
-                return fail(ControlResultCode::InvalidRequest, "graph file request cannot be decoded");
+                return fail(ControlResultCode::InvalidRequest,
+                            "graph file request cannot be decoded");
             }
         }
         std::vector<host::SignalGraphRouteCommand> commands;

@@ -5,9 +5,14 @@
   "detected_sources": [],
   "inputs": [],
   "kind": "compiled",
+  "runtime_targets": [],
   "sources": [
    "test/test_graph_file_reload.cpp"
   ],
+  "spawning_sources": [
+   "test/test_graph_file_reload.cpp"
+  ],
+  "spawns": "none",
   "undeclared_sources": []
  },
  "scanned": true

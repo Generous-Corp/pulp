@@ -102,17 +102,18 @@ void SignalGraphControlAuthority::reset() noexcept {
     ++generation_;
 }
 
-GraphFileReloadResult SignalGraphControlAuthority::reload_graph_file(
-    std::string_view text, GraphFileFormat format, std::uint64_t expected_generation,
-    const std::function<bool()>& can_commit) {
+GraphFileReloadResult
+SignalGraphControlAuthority::reload_graph_file(std::string_view text, GraphFileFormat format,
+                                               std::uint64_t expected_generation,
+                                               const std::function<bool()>& can_commit) {
     if (expected_generation != generation_)
         return {.code = GraphFileReloadCode::StaleBase,
                 .topology_result = SignalGraph::PreparedTopologyEdit::Result::StaleBase};
     const GraphPatchCatalog defaults;
     GraphFileReloadTransaction transaction(graph_);
-    auto result = transaction.prepare(text, format,
-                                     graph_file_catalog_ ? *graph_file_catalog_ : defaults,
-                                     sample_rate_, maximum_block_size_);
+    auto result =
+        transaction.prepare(text, format, graph_file_catalog_ ? *graph_file_catalog_ : defaults,
+                            sample_rate_, maximum_block_size_);
     if (!result)
         return result;
     if (can_commit && !can_commit())

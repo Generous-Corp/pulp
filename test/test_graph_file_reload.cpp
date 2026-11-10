@@ -1,26 +1,27 @@
 #include "../examples/graph-patch-consumer/hello.hpp"
 #include "support/unique_temp_dir.hpp"
+#include <algorithm>
+#include <barrier>
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
+#include <chrono>
+#include <fstream>
+#include <functional>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/graph_file_reload.hpp>
 #include <pulp/host/signal_graph_control.hpp>
 #include <pulp/inspect/control_signal_graph_executor.hpp>
-#include <choc/text/choc_JSON.h>
-#include <fstream>
-#include <utility>
-#include <thread>
-#include <algorithm>
-#include <barrier>
 #include <semaphore>
-#include <functional>
-#include <chrono>
+#include <thread>
+#include <utility>
 
 using namespace pulp::host;
 namespace {
 std::string patch(float value) {
     return "# flow 1\ninput : pulp/audio_in\nvoice : \"com.example.PatchGain\"\n"
            "out : pulp/audio_out\ninput.audio >> voice.audio\nvoice.audio >> out.audio\n"
-           "voice.level = " + std::to_string(value) + "\n";
+           "voice.level = " +
+           std::to_string(value) + "\n";
 }
 void write(const std::filesystem::path& path, const std::string& text) {
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
@@ -30,11 +31,14 @@ void write(const std::filesystem::path& path, const std::string& text) {
 template <typename Graph> void audio_is(Graph& graph, float expected) {
     pulp::audio::Buffer<float> input(2, 64), output(2, 64);
     for (std::size_t ch = 0; ch != 2; ++ch)
-        for (auto& value : input.channel(ch)) value = 0.5f;
+        for (auto& value : input.channel(ch))
+            value = 0.5f;
     auto destination = output.view();
     graph.process(destination, std::as_const(input).view(), 64);
-    for (const auto sample : output.channel(0)) REQUIRE(sample == expected);
-    for (const auto sample : output.channel(1)) REQUIRE(sample == 0.0f);
+    for (const auto sample : output.channel(0))
+        REQUIRE(sample == expected);
+    for (const auto sample : output.channel(1))
+        REQUIRE(sample == 0.0f);
 }
 std::unique_ptr<SignalGraph> live(GraphPatchCatalog& catalog) {
     register_patch_gain(catalog);
@@ -44,7 +48,7 @@ std::unique_ptr<SignalGraph> live(GraphPatchCatalog& catalog) {
     audio_is(*initial.graph, 0.125f);
     return std::move(initial.graph);
 }
-}
+} // namespace
 
 TEST_CASE("Graph file change prepares off-side and publishes the next audio boundary",
           "[host][graph-file-reload]") {
@@ -97,8 +101,12 @@ TEST_CASE("Graph reload malformed unsupported and failed prepare preserve live s
     const auto generation = graph->prepared_stats().snapshot_generation;
     std::string text;
     GraphFileFormat format = GraphFileFormat::Notation;
-    SECTION("malformed edge") { text = patch(0.75f) + "input.nope >> out.audio\n"; }
-    SECTION("unsupported node") { text = patch(0.75f) + "other : unknown/module\n"; }
+    SECTION("malformed edge") {
+        text = patch(0.75f) + "input.nope >> out.audio\n";
+    }
+    SECTION("unsupported node") {
+        text = patch(0.75f) + "other : unknown/module\n";
+    }
     SECTION("compile preflight rejects candidate node count") {
         text = patch(0.75f) + "extra : pulp/gain\n";
     }
@@ -122,7 +130,8 @@ TEST_CASE("Graph reload stale prepared edit cannot overwrite a competing publica
     GraphPatchCatalog catalog;
     auto graph = live(catalog);
     GraphFileReloadTransaction reload(*graph);
-    const auto prepared = reload.prepare(patch(0.75f), GraphFileFormat::Notation, catalog, 48000, 64);
+    const auto prepared =
+        reload.prepare(patch(0.75f), GraphFileFormat::Notation, catalog, 48000, 64);
     INFO(graph_file_reload_code_name(prepared.code));
     INFO(static_cast<int>(prepared.topology_result));
     REQUIRE(prepared);
@@ -167,7 +176,8 @@ TEST_CASE("Public graph file reload bounds both formats before staging",
         auto replacement = parse_graph_patch(patch(0.75f), catalog);
         REQUIRE(replacement);
         auto document = format == GraphFileFormat::Notation
-                            ? patch(0.75f) : GraphSerializer::to_json(*replacement.graph);
+                            ? patch(0.75f)
+                            : GraphSerializer::to_json(*replacement.graph);
         constexpr std::size_t limit = 1024 * 1024;
         REQUIRE(document.size() < limit);
         document.resize(limit, '\n');
@@ -206,23 +216,26 @@ class ReloadLifecycleGain final : public pulp::format::Processor {
     void define_parameters(pulp::state::StateStore& store) override {
         store.add_parameter({.id = 7, .name = "level", .range = {0, 2, 0.25f}});
     }
-    void prepare(const pulp::format::PrepareContext&) override { ++counts_.prepares; }
+    void prepare(const pulp::format::PrepareContext&) override {
+        ++counts_.prepares;
+    }
     void release() override {
         ++counts_.releases;
         counts_.release_thread = std::this_thread::get_id();
-        if (counts_.on_release) counts_.on_release();
+        if (counts_.on_release)
+            counts_.on_release();
     }
     void process(pulp::audio::BufferView<float>& output,
-                 const pulp::audio::BufferView<const float>& input,
-                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {
+                 const pulp::audio::BufferView<const float>& input, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
         for (std::size_t frame = 0; frame < output.num_samples(); ++frame)
             output.channel(0)[frame] = input.channel(0)[frame] * state().get_value(7);
     }
+
   private:
     LifecycleCounts& counts_;
 };
-}
+} // namespace
 
 TEST_CASE("Prepared replacement refuses removed processor aliases before any preparation",
           "[host][graph-file-reload][lifecycle]") {
@@ -259,8 +272,7 @@ TEST_CASE("Prepared replacement refuses removed processor aliases before any pre
             REQUIRE(competing->add_gain_node("competing change"));
             REQUIRE(competing->prepare(48000, 64) ==
                     SignalGraph::PreparedTopologyEdit::Result::Prepared);
-            REQUIRE(competing->commit() ==
-                    SignalGraph::PreparedTopologyEdit::Result::Committed);
+            REQUIRE(competing->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
             REQUIRE(edit->prepare(48000, 64) ==
                     SignalGraph::PreparedTopologyEdit::Result::InvalidMutation);
         }
@@ -347,7 +359,8 @@ TEST_CASE("Replacement retains old processor audio until last snapshot retires o
     bool pinned_audio = false;
     std::thread reader([&] {
         pulp::audio::Buffer<float> input(2, 64), output(2, 64);
-        for (auto& sample : input.channel(0)) sample = 0.5f;
+        for (auto& sample : input.channel(0))
+            sample = 0.5f;
         auto destination = output.view();
         retained.process(destination, std::as_const(input).view(), 64);
         pinned_audio = std::all_of(output.channel(0).begin(), output.channel(0).end(),
@@ -389,16 +402,23 @@ TEST_CASE("Replacement retains old processor audio until last snapshot retires o
 TEST_CASE("Processor lifecycle reservation spans graphs and release completion",
           "[host][graph-file-reload][ownership]") {
     LifecycleCounts counts;
-    auto instance = pulp::format::ProcessorNodeInstance::create(
-        std::make_unique<ReloadLifecycleGain>(counts));
+    auto instance =
+        pulp::format::ProcessorNodeInstance::create(std::make_unique<ReloadLifecycleGain>(counts));
     SECTION("simultaneous graph claims have exactly one winner") {
         SignalGraph graphs[2];
         NodeId ids[2]{};
         std::barrier start(3);
-        std::thread first([&] { start.arrive_and_wait(); ids[0] = graphs[0].add_processor_node(instance); });
-        std::thread second([&] { start.arrive_and_wait(); ids[1] = graphs[1].add_processor_node(instance); });
+        std::thread first([&] {
+            start.arrive_and_wait();
+            ids[0] = graphs[0].add_processor_node(instance);
+        });
+        std::thread second([&] {
+            start.arrive_and_wait();
+            ids[1] = graphs[1].add_processor_node(instance);
+        });
         start.arrive_and_wait();
-        first.join(); second.join();
+        first.join();
+        second.join();
         REQUIRE((ids[0] != 0) != (ids[1] != 0));
         REQUIRE(counts.prepares == 0);
         REQUIRE(counts.releases == 0);
@@ -408,8 +428,14 @@ TEST_CASE("Processor lifecycle reservation spans graphs and release completion",
         REQUIRE(owner.add_processor_node(instance));
         REQUIRE(owner.prepare(48000, 64));
         std::binary_semaphore entered(0), finish(0);
-        counts.on_release = [&] { entered.release(); finish.acquire(); };
-        std::thread retiring([&] { owner.clear(); owner.release(); });
+        counts.on_release = [&] {
+            entered.release();
+            finish.acquire();
+        };
+        std::thread retiring([&] {
+            owner.clear();
+            owner.release();
+        });
         const bool release_entered = entered.try_acquire_for(std::chrono::seconds(5));
         const auto during_release = other.add_processor_node(instance);
         finish.release();
@@ -422,7 +448,8 @@ TEST_CASE("Processor lifecycle reservation spans graphs and release completion",
         REQUIRE(other.add_processor_node(instance));
         REQUIRE(other.prepare(48000, 64));
         REQUIRE(counts.prepares == 2);
-        other.clear(); other.release();
+        other.clear();
+        other.release();
         REQUIRE(counts.releases == 2);
     }
 }
@@ -430,13 +457,15 @@ TEST_CASE("Processor lifecycle reservation spans graphs and release completion",
 namespace {
 void reload_custom_gain(pulp::audio::BufferView<float>& output,
                         const pulp::audio::BufferView<const float>& input, int frames) {
-    for (int i = 0; i < frames; ++i) output.channel(0)[i] = input.channel(0)[i] * 0.25f;
+    for (int i = 0; i < frames; ++i)
+        output.channel(0)[i] = input.channel(0)[i] * 0.25f;
 }
 void reload_custom_other(pulp::audio::BufferView<float>& output,
                          const pulp::audio::BufferView<const float>& input, int frames) {
-    for (int i = 0; i < frames; ++i) output.channel(0)[i] = input.channel(0)[i] * 0.75f;
+    for (int i = 0; i < frames; ++i)
+        output.channel(0)[i] = input.channel(0)[i] * 0.75f;
 }
-}
+} // namespace
 TEST_CASE("Graph reload reuses proven Custom callbacks and refuses ambiguous replacements",
           "[host][graph-file-reload][custom]") {
     CustomNodeType type;
@@ -445,8 +474,9 @@ TEST_CASE("Graph reload reuses proven Custom callbacks and refuses ambiguous rep
     type.process = &reload_custom_gain;
     GraphPatchCatalog initial;
     REQUIRE(initial.register_custom(type));
-    const std::string document = "# flow 1\nin : pulp/audio_in\nx : \"test.reload.gain\"\n"
-                                 "out : pulp/audio_out\nin.audio >> x.audio\nx.audio >> out.audio\n";
+    const std::string document =
+        "# flow 1\nin : pulp/audio_in\nx : \"test.reload.gain\"\n"
+        "out : pulp/audio_out\nin.audio >> x.audio\nx.audio >> out.audio\n";
     auto parsed = parse_graph_patch(document, initial);
     REQUIRE(parsed);
     REQUIRE(parsed.graph->prepare(48000, 64));
@@ -460,21 +490,37 @@ TEST_CASE("Graph reload reuses proven Custom callbacks and refuses ambiguous rep
         audio_is(*parsed.graph, 0.125f);
     }
     SECTION("incompatible or opaque registrations explicitly refuse") {
-        SECTION("changed process") { type.process = &reload_custom_other; }
-        SECTION("changed create") { type.create = +[]() -> void* { return nullptr; }; }
-        SECTION("changed release") { type.release = +[](void*) {}; }
-        SECTION("changed shape") { type.num_output_ports = 2; }
-        SECTION("changed intentional delay") { type.intentional_delay_samples = +[](double) { return 1; }; }
-        SECTION("changed output latency") { type.output_port_latency_samples = +[](double, int) { return 1; }; }
-        SECTION("changed realtime declaration") { type.rt_contract.declared = true; }
+        SECTION("changed process") {
+            type.process = &reload_custom_other;
+        }
+        SECTION("changed create") {
+            type.create = +[]() -> void* { return nullptr; };
+        }
+        SECTION("changed release") {
+            type.release = +[](void*) {};
+        }
+        SECTION("changed shape") {
+            type.num_output_ports = 2;
+        }
+        SECTION("changed intentional delay") {
+            type.intentional_delay_samples = +[](double) { return 1; };
+        }
+        SECTION("changed output latency") {
+            type.output_port_latency_samples = +[](double, int) { return 1; };
+        }
+        SECTION("changed realtime declaration") {
+            type.rt_contract.declared = true;
+        }
         SECTION("changed realtime work callback") {
-            type.rt_contract.worst_case_work = +[](int) { return pulp::signal::rt::RtWorkCounts{}; };
+            type.rt_contract.worst_case_work =
+                +[](int) { return pulp::signal::rt::RtWorkCounts{}; };
         }
         SECTION("same callable type different captures") {
             const auto callback = [](float gain) {
                 return [gain](pulp::audio::BufferView<float>& out,
                               const pulp::audio::BufferView<const float>& in, int frames) {
-                    for (int i = 0; i < frames; ++i) out.channel(0)[i] = in.channel(0)[i] * gain;
+                    for (int i = 0; i < frames; ++i)
+                        out.channel(0)[i] = in.channel(0)[i] * gain;
                 };
             };
             type.process = callback(0.25f);
@@ -488,7 +534,8 @@ TEST_CASE("Graph reload reuses proven Custom callbacks and refuses ambiguous rep
         GraphPatchCatalog incompatible;
         REQUIRE(incompatible.register_custom(type));
         GraphFileReloadTransaction reload(*parsed.graph);
-        const auto result = reload.prepare(document, GraphFileFormat::Notation, incompatible, 48000, 64);
+        const auto result =
+            reload.prepare(document, GraphFileFormat::Notation, incompatible, 48000, 64);
         REQUIRE_FALSE(result);
         REQUIRE(result.diagnostic.code == GraphPatchDiagnostic::Code::UnsupportedContract);
         REQUIRE_FALSE(reload.commit());
@@ -529,7 +576,8 @@ TEST_CASE("Graph file executor shares typed refusal and numeric publication with
     const auto refused_detail = choc::json::parse(refused.result.detail_json);
     const auto diagnostic = refused_detail["diagnostic"];
     REQUIRE(choc::json::toString(diagnostic, false) ==
-            choc::json::toString(choc::json::parse(graph_patch_diagnostic_json(api.diagnostic)), false));
+            choc::json::toString(choc::json::parse(graph_patch_diagnostic_json(api.diagnostic)),
+                                 false));
     REQUIRE(GraphSerializer::to_json(*graph) == before);
     audio_is(*graph, 0.125f);
     SECTION("cancel before commit") {
@@ -547,10 +595,13 @@ TEST_CASE("Graph file executor shares typed refusal and numeric publication with
     SECTION("deadline and revocation before publication preserve numeric state") {
         auto refusal = pulp::inspect::ControlExecutionCheckpoint::DeadlineExceeded;
         SECTION("deadline") {}
-        SECTION("revoked") { refusal = pulp::inspect::ControlExecutionCheckpoint::AuthorityRevoked; }
+        SECTION("revoked") {
+            refusal = pulp::inspect::ControlExecutionCheckpoint::AuthorityRevoked;
+        }
         int checkpoints = 0;
         context.checkpoint = [&] {
-            return ++checkpoints == 1 ? pulp::inspect::ControlExecutionCheckpoint::Continue : refusal;
+            return ++checkpoints == 1 ? pulp::inspect::ControlExecutionCheckpoint::Continue
+                                      : refusal;
         };
         REQUIRE(executor(plan, request(patch(0.75f), 0), context).terminal_state ==
                 pulp::inspect::ControlReceiptState::Failed);
@@ -597,10 +648,16 @@ TEST_CASE("Baseline alias defenses preserve lifecycle across both preparation mo
         REQUIRE(edit->add_processor_node(std::make_unique<ReloadLifecycleGain>(fresh)));
         const auto alias = edit->add_processor_node(instance);
         auto result = SignalGraph::PreparedTopologyEdit::Result::NotPrepared;
-        SECTION("live preparation") { result = edit->prepare(48000, 64); }
-        SECTION("quiesced preparation") { result = edit->prepare_quiesced(48000, 64); }
-        REQUIRE(result == (alias == 0 ? SignalGraph::PreparedTopologyEdit::Result::InvalidMutation
-                                      : SignalGraph::PreparedTopologyEdit::Result::ExternalPluginReprepareRequired));
+        SECTION("live preparation") {
+            result = edit->prepare(48000, 64);
+        }
+        SECTION("quiesced preparation") {
+            result = edit->prepare_quiesced(48000, 64);
+        }
+        REQUIRE(result ==
+                (alias == 0
+                     ? SignalGraph::PreparedTopologyEdit::Result::InvalidMutation
+                     : SignalGraph::PreparedTopologyEdit::Result::ExternalPluginReprepareRequired));
         REQUIRE(fresh.prepares == 0);
         REQUIRE(baseline.prepares == 1);
         REQUIRE(baseline.releases == 0);

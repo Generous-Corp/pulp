@@ -148,7 +148,10 @@ int cmd_loop(const std::vector<std::string>& args) {
         }
 
         if (parse_graph_reload_option(args, i, graph_reload, graph_error)) {
-            if (!graph_error.empty()) { std::cerr << graph_error << '\n'; return 2; }
+            if (!graph_error.empty()) {
+                std::cerr << graph_error << '\n';
+                return 2;
+            }
             continue;
         }
         if (a == "--off") {
@@ -328,7 +331,8 @@ int cmd_loop(const std::vector<std::string>& args) {
     auto build_dir = project_root / "build";
 
     if (!validate_graph_reload_options(graph_reload, graph_error)) {
-        std::cerr << graph_error << '\n'; return 2;
+        std::cerr << graph_error << '\n';
+        return 2;
     }
     BuildPlan plan({project_root, build_dir, standalone_mode, examples, build_all, build_args,
                     "pulp loop", dev_shared_ui_default(no_dev_shared, standalone_mode)});
@@ -345,8 +349,8 @@ int cmd_loop(const std::vector<std::string>& args) {
         std::cerr << "Initial build failed. Watch loop will retry on changes.\n";
     }
 
-    auto watch = plan.watch_options(run_tests, test_filter, run_validate, launch_target,
-                                         launch_args, false);
+    auto watch =
+        plan.watch_options(run_tests, test_filter, run_validate, launch_target, launch_args, false);
     watch.graph_reload = graph_reload;
     std::optional<GraphReloadWatch> reload_watch;
     if (!graph_reload.file.empty()) {

@@ -1,10 +1,10 @@
 #pragma once
 
-#include <pulp/host/graph_patch.hpp>
-#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <pulp/host/graph_patch.hpp>
+#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -25,13 +25,22 @@ class GraphFileWatch final {
   public:
     explicit GraphFileWatch(std::filesystem::path path) : path_(std::move(path)) {}
     GraphFileChange poll();
+
   private:
     std::filesystem::path path_;
     std::optional<std::string> pending_, observed_;
     GraphFileChange::Code previous_error_ = GraphFileChange::Code::Unchanged;
 };
-enum class GraphFileReloadCode { Prepared, Committed, InvalidDocument, UnsupportedContract,
-                                 InvalidMutation, PrepareFailed, StaleBase, CommitFailed };
+enum class GraphFileReloadCode {
+    Prepared,
+    Committed,
+    InvalidDocument,
+    UnsupportedContract,
+    InvalidMutation,
+    PrepareFailed,
+    StaleBase,
+    CommitFailed
+};
 const char* graph_file_reload_code_name(GraphFileReloadCode code) noexcept;
 
 struct GraphFileReloadResult {

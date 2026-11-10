@@ -8,10 +8,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <fstream>
-#include <pulp/host/graph_serializer.hpp>
 #include <choc/text/choc_JSON.h>
+#include <fstream>
 #include <memory>
+#include <pulp/host/graph_serializer.hpp>
 
 extern "C" const volatile char pulp_control_standalone_host_markers_v1[];
 
@@ -103,7 +103,7 @@ class GraphProductProcessor final : public pulp::format::Processor {
         auto evidence = choc::value::createObject("");
         evidence.addMember("sample", last_sample_.load(std::memory_order_relaxed));
         evidence.addMember("process_count", static_cast<std::int64_t>(
-            process_count_.load(std::memory_order_relaxed)));
+                                                process_count_.load(std::memory_order_relaxed)));
         evidence.addMember("state", pulp::host::GraphSerializer::to_json(graph_));
         // Resolver callbacks run on the control thread. No I/O or graph
         // serialization enters the product's audio callback.

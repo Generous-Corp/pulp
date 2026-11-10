@@ -180,8 +180,8 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
-    {'include': 'pulp/host/signal_graph_control.hpp', 'fingerprint': 'sha256:0627710156baec552e79fd4b3ac8d374938201ea6959444a76c12b9e6372b708', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Product graph authority over existing typed edits and strict graph-file reload; no independent executor or DSP capability.'},
-    {'include': 'pulp/host/graph_file_reload.hpp', 'fingerprint': 'sha256:36db07b3da36b4c0c0ce70a7491b979dc5b7ab4d0b8ec0479aad3455cbc90d37', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Strict catalog-derived graph-file preparation and existing transactional publication; bounded profile with explicit refusals, no alternate executor.'},
+    {'include': 'pulp/host/signal_graph_control.hpp', 'fingerprint': 'sha256:45c5b0de0676eef4c16c9c6da7d0e539c25e23466b4424c0dd15e72f7041a8df', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Product graph authority over existing typed edits and strict graph-file reload; no independent executor or DSP capability.'},
+    {'include': 'pulp/host/graph_file_reload.hpp', 'fingerprint': 'sha256:c43b1a9e09a9d527e4a4a83bf2727ffa3031054c27db3dc0d5a1128bfd8b48f2', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Strict catalog-derived graph-file preparation and existing transactional publication; bounded profile with explicit refusals, no alternate executor.'},
     {'include': 'pulp/host/graph_patch.hpp', 'fingerprint': 'sha256:017cd6e433918b371a9d37b48698bf392fc3d8879fff19eff7f0572bff82f368', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Control-thread catalog-derived graph notation and strict diagnostics transport over existing SignalGraph and restore contracts; bounded profile, not a DSP algorithm or full G2 completion.'},
     {
         "include": "pulp/signal/spectrum_analyzer.hpp",

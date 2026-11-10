@@ -1390,9 +1390,9 @@ SignalGraph::PreparedTopologyEdit::baseline_removal_rejection_locked_() const {
             // Processor lifetimes ride the compiled snapshots. An old pinned
             // generation keeps its instance until control-thread retirement;
             // external or unowned slots still require the stopped lifecycle.
-            const bool graph_owned_processor =
-                !baseline.plugin && processor != owner_->processor_nodes_.end() &&
-                processor->second && processor->second->instance;
+            const bool graph_owned_processor = !baseline.plugin &&
+                                               processor != owner_->processor_nodes_.end() &&
+                                               processor->second && processor->second->instance;
             if (!graph_owned_processor &&
                 dynamic_cast<const PreparedOwnedBuiltInSlot*>(baseline.plugin.get()) == nullptr)
                 return Result::BaselinePluginRemovalRequiresRelease;

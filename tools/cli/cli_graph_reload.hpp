@@ -1,6 +1,8 @@
 #pragma once
 #include <memory>
-namespace pulp::host { class GraphFileWatch; }
+namespace pulp::host {
+class GraphFileWatch;
+}
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -23,6 +25,7 @@ class GraphReloadWatch {
     explicit GraphReloadWatch(GraphReloadOptions options);
     ~GraphReloadWatch();
     void poll();
+
   private:
     unsigned polls_ = 0;
     bool lease_ready_ = false;

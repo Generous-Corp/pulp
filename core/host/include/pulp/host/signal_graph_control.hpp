@@ -72,8 +72,8 @@ class SignalGraphControlAuthority final {
         graph_file_catalog_ = &catalog;
     }
     GraphFileReloadResult reload_graph_file(std::string_view text, GraphFileFormat format,
-                                           std::uint64_t expected_generation,
-                                           const std::function<bool()>& can_commit = {});
+                                            std::uint64_t expected_generation,
+                                            const std::function<bool()>& can_commit = {});
     void reset() noexcept;
     std::uint64_t generation() const noexcept {
         return generation_;

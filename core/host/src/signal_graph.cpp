@@ -547,9 +547,11 @@ bool SignalGraph::PreparedTopologyEdit::reuse_or_register_custom_node_type_(
     GraphMutationLock lock(*candidate_);
     const auto* existing = candidate_->custom_node_type(type.type_id, type.version);
     if (existing) {
-        const bool compatible = custom_types_equal_for_idempotency(*existing, type) &&
+        const bool compatible =
+            custom_types_equal_for_idempotency(*existing, type) &&
             same_function(existing->intentional_delay_samples, type.intentional_delay_samples) &&
-            same_function(existing->output_port_latency_samples, type.output_port_latency_samples) &&
+            same_function(existing->output_port_latency_samples,
+                          type.output_port_latency_samples) &&
             existing->rt_contract.declared == type.rt_contract.declared &&
             existing->rt_contract.safety_class == type.rt_contract.safety_class &&
             existing->rt_contract.allocation_free == type.rt_contract.allocation_free &&

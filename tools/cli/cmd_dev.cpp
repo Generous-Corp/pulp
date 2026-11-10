@@ -40,7 +40,8 @@ int cmd_dev(const std::vector<std::string>& args) {
             std::cout
                 << "Optionally runs tests, validates plugins, and manages a launched app.\n\n";
             std::cout << "Options:\n";
-            std::cout << "  --graph-file FILE      Reload .pat/.pulpgraph through an enrolled live instance\n"
+            std::cout << "  --graph-file FILE      Reload .pat/.pulpgraph through an enrolled live "
+                         "instance\n"
                          "  --graph-instance ID --graph-grant ID --graph-generation N\n"
                          "  --graph-watch-polls N   Stop after 1..120 polls (500 ms each)\n";
             std::cout << "  --test, -t             Run tests after each successful build\n";
@@ -93,7 +94,10 @@ int cmd_dev(const std::vector<std::string>& args) {
         }
 
         if (parse_graph_reload_option(args, i, graph_reload, graph_error)) {
-            if (!graph_error.empty()) { std::cerr << graph_error << '\n'; return 2; }
+            if (!graph_error.empty()) {
+                std::cerr << graph_error << '\n';
+                return 2;
+            }
             continue;
         }
         if (args[i] == "--test" || args[i] == "-t") {
@@ -168,7 +172,8 @@ int cmd_dev(const std::vector<std::string>& args) {
     }
 
     if (!validate_graph_reload_options(graph_reload, graph_error)) {
-        std::cerr << graph_error << '\n'; return 2;
+        std::cerr << graph_error << '\n';
+        return 2;
     }
     BuildPlan plan({project_root, build_dir, standalone_mode, examples, build_all, build_args,
                     "pulp dev", dev_shared_ui_default(no_dev_shared, standalone_mode)});
@@ -188,7 +193,7 @@ int cmd_dev(const std::vector<std::string>& args) {
 
     // Enter the watch loop
     auto watch = plan.watch_options(run_tests, test_filter, run_validate, launch_target,
-                                         launch_args, hot_dsp);
+                                    launch_args, hot_dsp);
     watch.graph_reload = graph_reload;
     std::optional<GraphReloadWatch> reload_watch;
     if (!graph_reload.file.empty()) {
