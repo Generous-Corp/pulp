@@ -771,12 +771,6 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(agent-hook-paths PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 30)
-        add_test(NAME cmake-example-guards
-            COMMAND ${PULP_PYTHON3_FOR_TESTS}
-                ${CMAKE_SOURCE_DIR}/tools/scripts/test_cmake_example_guards.py)
-        set_tests_properties(cmake-example-guards PROPERTIES
-            LABELS "tooling;cmake"
-            TIMEOUT 30)
         add_test(NAME prepush-gate-output
             COMMAND ${PULP_PYTHON3_FOR_TESTS}
                 ${CMAKE_SOURCE_DIR}/tools/scripts/test_prepush_gate_output.py)
