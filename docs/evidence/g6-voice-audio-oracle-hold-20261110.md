@@ -3,7 +3,7 @@
 ## Disposition
 
 **HOLD / NO-CHANGE.** This audit starts from `origin/main` at
-`448057ec9ea569c6b75809251dbd356074c0201a` in a fresh classified worktree.
+`b8a8278c9b3c876370fe921ddbbf7434030335ae` in a fresh classified worktree.
 It adds no graph, Processor, scheduler, allocator, or audio runtime code. The
 existing public surfaces do not yet provide the reviewed binding needed to
 connect the G-4 authored voice identity to a prepared Processor voice
