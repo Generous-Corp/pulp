@@ -44,7 +44,7 @@ The real risk of a local copy is a FALSE red, so the constraints are:
     stale branch against a moved `origin/main` manufactures `watch events are
     append-only`;
   * "no verdict" (no checker, no acceptance, no git range, any internal
-    error) never blocks: only a positive "event owed" verdict does.
+    error) never blocks: only an explicit failing checker verdict does.
 
 Exit codes:
   0   nothing owed, or the range's affected families are already covered
@@ -54,9 +54,9 @@ Exit codes:
       disposition) is stale; the regenerate command is printed
   12  the change-event check (`vellum_freeze_check.py`) fails the range — most
       often a touched transferred-slice path with no change event
-  14  an exported path (Vellum's pinned export receipt) was edited, added or
-      deleted without a `vellum_inherits` decision: the real receipt-mode
-      checker's verdict, plus the export-event skeleton, or `--fix` to write it
+  14  the real receipt-mode checker refuses the range (including inheritance
+      after transfer); missing decisions include an export-event skeleton,
+      or `--fix` to write it
   15  a `PULP_*_UNIT_HEADERS` list is wrong (a public header under core/runtime,
       canvas, events, platform or simd that is not listed, or a listed one that
       is gone); the exact line to add or remove is printed. CI finds this in the
@@ -1009,8 +1009,8 @@ def run_unit_and_export(root: pathlib.Path, base: str, head: str, stream, *,
     if done is None or (done.returncode == 0 and not missing):
         return code
     if not missing:
-        message = (done.stderr or "").strip()
-        if message and (report.get("frozen") or report.get("conflicting")):
+        if report.get("status") == "fail":
+            message = (done.stderr or "").strip() or "Receipt-mode checker reported status: fail."
             _emit(["  ✗ vellum export receipt (BLOCKING):",
                    "     " + message.replace("\n", "\n     ")], stream)
             return EXPORT_OWED
