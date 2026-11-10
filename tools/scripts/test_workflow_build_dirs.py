@@ -430,6 +430,8 @@ class WorkflowBuildDirTests(unittest.TestCase):
                           "affected_tests_shadow", "flake_exoneration_shadow",
                           "test_receipts", "test-receipts"):
                 self.assertNotIn(token, body)
+            if name == "Build":
+                self.assertNotIn("flake_exoneration", body)
 
     def test_flake_exoneration_gate_is_scoped_to_merge_group_macos(self) -> None:
         """Only a failed merge-group run of the required macos leg may consult
