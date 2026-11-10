@@ -1,0 +1,5 @@
+0000000000001000 T _clap_entry
+0000000000002000 T __ZNKSt3__110__function12__value_funcIFvPKN4pulp4view17ScriptedUiSessionEEEclB8ne190102EOS6_
+0000000000003000 T __ZNSt3__110__function6__funcIZN4pulp6format3fooEvE3$_0NS_9allocatorIS4_EEFvPN4pulp4view17ScriptedUiSessionEEED1Ev
+0000000000004000 S __ZTVNSt3__110__function6__funcIZN4pulp6format3fooEvE3$_0NS_9allocatorIS4_EEFvPN4pulp4view17ScriptedUiSessionEEEE
+                 U __ZN4pulp4view4View5paintERNS_6canvas6CanvasE
